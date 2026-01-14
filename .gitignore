@@ -18,3 +18,4 @@ wheels/
 /scan.py
 /test/rsa.py
 /chroma_data
+/.idea
