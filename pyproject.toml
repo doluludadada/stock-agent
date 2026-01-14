@@ -1,0 +1,46 @@
+[project]
+name = "stock-agent"
+version = "0.1.0"
+description = "A friendly AI chat assistant for WhatsApp and Line"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "chromadb>=1.3.5",
+    "fastapi>=0.121.0",
+    "google-generativeai>=0.8.5",
+    "flet[all]>=0.28.3",
+    "httpx>=0.28.1",
+    "loguru>=0.7.3",
+    "openai>=2.7.1",
+    "psutil>=7.1.3",
+    "pydantic>=2.12.3",
+    "pydantic-settings>=2.11.0",
+    "pyyaml>=6.0.3",
+    "uvicorn>=0.38.0",
+    "pandas>=2.3.3",
+    "numpy>=2.2.6",
+    "shioaji>=1.3.1",
+    "sqlalchemy>=2.0.45",
+    "pandas-ta>=0.4.71b0",
+]
+
+[dependency-groups]
+dev = [
+    "pathspec>=0.12.1",
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+    "rich>=14.2.0",
+    "ruff>=0.14.3",
+    "ufmt>=2.9.0",
+]
+
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+
+[tool.ufmt]
+formatter = "black"
+
+[tool.black]
+line-length = 120

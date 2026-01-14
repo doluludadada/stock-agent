@@ -1,0 +1,20 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+/.env
+/useful.py
+/project_code_dump.txt
+/gpt_logs
+/.last_conversation.json
+/.uv_cache
+/config/appsetting.dev.yaml
+/scan.py
+/test/rsa.py
+/chroma_data
