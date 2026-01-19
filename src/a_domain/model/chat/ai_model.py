@@ -1,7 +1,7 @@
 # ***********************************************************************
 #  Author:        Shiou
 #  Created:       2025-11-13
-#  Location:      src\a_domain\model\ai_provider.py
+#  Location:      src\a_domain\model\ai_model.py
 # ***********************************************************************
 from dataclasses import dataclass
 

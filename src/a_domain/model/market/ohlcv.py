@@ -4,6 +4,10 @@ from sqlmodel import SQLModel, Field
 
 
 class Ohlcv(SQLModel):
+    """
+    Represents a single candlestick (K-Bar).
+    """
+
     ts: datetime = Field(description="Timestamp of the candle")
     open_price: Decimal = Field(default=0, decimal_places=2)
     high_price: Decimal = Field(default=0, decimal_places=2)
@@ -11,5 +15,5 @@ class Ohlcv(SQLModel):
     close_price: Decimal = Field(default=0, decimal_places=2)
     volume: int = Field(default=0)
 
-    # Adjusted close is crucial for historical analysis
+    # Optional: Adjusted close for backtesting accuracy
     adj_close: Decimal | None = Field(default=None, decimal_places=2)

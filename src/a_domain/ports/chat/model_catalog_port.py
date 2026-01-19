@@ -1,6 +1,6 @@
 from typing import Protocol
 
-from src.a_domain.model.ai_provider import AIModel
+from src.a_domain.model.chat.ai_model import AIModel
 
 
 class ModelCatalogPort(Protocol):

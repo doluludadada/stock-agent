@@ -3,6 +3,10 @@ from sqlmodel import SQLModel, Field
 
 
 class News(SQLModel):
+    """
+    Represents a news article or forum post.
+    """
+
     symbol: str = Field(index=True)
     title: str
     url: str

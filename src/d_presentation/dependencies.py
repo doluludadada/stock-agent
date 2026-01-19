@@ -3,12 +3,12 @@ from functools import lru_cache
 from fastapi import Depends
 from src.a_domain.ports.bussiness.ai_port import AiPort
 from src.a_domain.ports.bussiness.chat_styler_port import IChatStylerPort
-from src.a_domain.ports.bussiness.platform_port import PlatformPort
+from src.a_domain.ports.system.platform_port import PlatformPort
 from src.a_domain.ports.bussiness.repository_port import RepositoryPort
 from src.a_domain.ports.bussiness.web_search_port import WebSearchPort
 
 # Ports
-from src.a_domain.ports.notification.logging_port import ILoggingPort
+from src.a_domain.ports.system.logging_port import ILoggingPort
 
 # Configurations
 from src.a_domain.types.enums import DatabaseProvider

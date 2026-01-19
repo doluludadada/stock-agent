@@ -36,3 +36,26 @@ class SignalSource(StrEnum):
     TECHNICAL = "TECHNICAL"
     FUNDAMENTAL = "FUNDAMENTAL"
     HYBRID = "HYBRID"
+
+class OrderType(StrEnum):
+    MARKET = "MARKET"
+    LIMIT = "LIMIT"
+
+
+class OrderAction(StrEnum):
+    BUY = "BUY"
+    SELL = "SELL"
+
+
+class OrderStatus(StrEnum):
+    PENDING = "PENDING"  # Created in system, not sent to broker
+    SUBMITTED = "SUBMITTED"  # Sent to broker
+    FILLED = "FILLED"
+    CANCELLED = "CANCELLED"
+    FAILED = "FAILED"
+
+
+class TimeInForce(StrEnum):
+    ROD = "ROD"  # Rest of Day
+    IOC = "IOC"  # Immediate or Cancel
+    FOK = "FOK"  # Fill or Kill

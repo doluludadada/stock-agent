@@ -1,6 +1,6 @@
-from src.a_domain.model.message import Message
-from src.a_domain.ports.bussiness.platform_port import PlatformPort
-from src.a_domain.ports.notification.logging_port import ILoggingPort
+from src.a_domain.model.chat.message import Message
+from src.a_domain.ports.system.platform_port import PlatformPort
+from src.a_domain.ports.system.logging_port import ILoggingPort
 
 
 class Dispatcher:

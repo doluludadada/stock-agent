@@ -4,7 +4,11 @@ from sqlmodel import SQLModel, Field
 from src.a_domain.types.enums import SignalAction, SignalSource
 
 
-class TradeSignalBase(SQLModel):
+class TradeSignal(SQLModel):
+    """
+    The output of the funnel analysis.
+    """
+
     symbol: str
     action: SignalAction
     price_at_signal: Decimal

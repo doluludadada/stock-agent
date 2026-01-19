@@ -1,8 +1,8 @@
-from src.a_domain.model.conversation import Conversation
-from src.a_domain.model.message import Message
+from src.a_domain.model.chat.conversation import Conversation
+from src.a_domain.model.chat.message import Message
 from src.a_domain.ports.bussiness.ai_port import AiPort
 from src.a_domain.ports.bussiness.chat_styler_port import IChatStylerPort
-from src.a_domain.ports.notification.logging_port import ILoggingPort
+from src.a_domain.ports.system.logging_port import ILoggingPort
 
 
 class AiProcessor:

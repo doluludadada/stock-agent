@@ -15,9 +15,9 @@ from openai.types.chat import (
     ChatCompletionUserMessageParam,
 )
 
-from src.a_domain.model.message import Message, MessageRole
+from src.a_domain.model.chat.message import Message, MessageRole
 from src.a_domain.ports.bussiness.web_search_port import WebSearchPort
-from src.a_domain.ports.notification.logging_port import ILoggingPort
+from src.a_domain.ports.system.logging_port import ILoggingPort
 from src.c_infrastructure.ai_models.base import BaseAIAdapter
 from src.b_application.configuration.schemas import AppConfig
 

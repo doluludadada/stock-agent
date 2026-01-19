@@ -1,6 +1,6 @@
 from typing import Protocol
 
-from src.a_domain.model.message import Message
+from src.a_domain.model.chat.message import Message
 
 
 class PlatformPort(Protocol):

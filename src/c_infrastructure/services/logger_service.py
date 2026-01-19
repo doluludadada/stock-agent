@@ -1,7 +1,7 @@
 import sys
 
 from loguru import logger
-from src.a_domain.ports.notification.logging_port import ILoggingPort
+from src.a_domain.ports.system.logging_port import ILoggingPort
 
 
 class LoggerService(ILoggingPort):

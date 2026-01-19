@@ -2,7 +2,7 @@ import base64
 import hashlib
 import hmac
 
-from src.a_domain.ports.notification.logging_port import ILoggingPort
+from src.a_domain.ports.system.logging_port import ILoggingPort
 
 
 class LineSecurityService:

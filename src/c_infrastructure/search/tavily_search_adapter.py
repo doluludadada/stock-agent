@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import httpx
 
-from src.a_domain.model.web_search_result import WebSearchResult
+from src.a_domain.model.analysis.web_search_result import WebSearchResult
 from src.a_domain.ports.bussiness.web_search_port import WebSearchPort
-from src.a_domain.ports.notification.logging_port import ILoggingPort
+from src.a_domain.ports.system.logging_port import ILoggingPort
 from src.b_application.configuration.schemas import AppConfig
 
 

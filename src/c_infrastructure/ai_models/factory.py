@@ -1,6 +1,6 @@
 from src.a_domain.ports.bussiness.ai_port import AiPort
 from src.a_domain.ports.bussiness.web_search_port import WebSearchPort
-from src.a_domain.ports.notification.logging_port import ILoggingPort
+from src.a_domain.ports.system.logging_port import ILoggingPort
 from src.a_domain.types.enums import AiProvider
 from src.b_application.configuration.schemas import AppConfig
 from src.c_infrastructure.ai_models.ai_adapter.grok_adapter import GrokAdapter

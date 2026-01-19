@@ -1,4 +1,4 @@
-from src.a_domain.model.message import Message, MessageRole
+from src.a_domain.model.chat.message import Message, MessageRole
 from src.b_application.configuration.schemas import AppConfig
 from src.b_application.use_cases.collect.context_loader import ContextLoader
 from src.b_application.use_cases.process.ai_processor import AiProcessor

@@ -5,9 +5,9 @@
 #  Location:      src\c_infrastructure\platforms\line\line_adapter.py
 # ***********************************************************************
 import httpx
-from src.a_domain.model.message import Message
-from src.a_domain.ports.bussiness.platform_port import PlatformPort
-from src.a_domain.ports.notification.logging_port import ILoggingPort
+from src.a_domain.model.chat.message import Message
+from src.a_domain.ports.system.platform_port import PlatformPort
+from src.a_domain.ports.system.logging_port import ILoggingPort
 from src.b_application.configuration.schemas import AppConfig
 from src.c_infrastructure.platforms.line.line_constants import PUSH_MESSAGE_URL
 

@@ -1,6 +1,6 @@
 import re
 
-from src.a_domain.model.message import Message, MessageRole
+from src.a_domain.model.chat.message import Message, MessageRole
 from src.a_domain.ports.bussiness.chat_styler_port import IChatStylerPort
 
 
