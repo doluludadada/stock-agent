@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import computed_field, Field, model_validator
+from pydantic import Field, computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
 from src.a_domain.types.enums import AiProvider, DatabaseProvider
 
 
@@ -27,41 +28,24 @@ class AppConfig(BaseSettings):
         default_factory=dict,
         description="Mapping of AI provider to concrete model name/id.",
     )
-    openai_api_key: str | None = Field(
-        default=None, description="API key for OpenAI models."
-    )
-    grok_api_key: str | None = Field(
-        default=None, description="API key for Grok models."
-    )
-    gemini_api_key: str | None = Field(
-        default=None, description="API key for Gemini models."
-    )
-    groq_api_key: str | None = Field(
-        default=None, description="API Key for Groq models."
-    )
-    ai_model_connection_timeout: int = Field(
-        default=60, description="Timeout in seconds for AI model connections."
-    )
-    ai_system_prompt: str | None = Field(
-        default=None, description="The system prompt defining the AI personality."
-    )
+    openai_api_key: str | None = Field(default=None, description="API key for OpenAI models.")
+    grok_api_key: str | None = Field(default=None, description="API key for Grok models.")
+    gemini_api_key: str | None = Field(default=None, description="API key for Gemini models.")
+    groq_api_key: str | None = Field(default=None, description="API Key for Groq models.")
+    ai_model_connection_timeout: int = Field(default=60, description="Timeout in seconds for AI model connections.")
+    ai_system_prompt: str | None = Field(default=None, description="The system prompt defining the AI personality.")
     ai_rag_injection_prompt: str | None = Field(
         default=None,
         description="System prompt template for injecting web search context (supports {search_results}).",
     )
 
-
     # --------------------- Messaging Platform Configuration --------------------- #
 
-    line_channel_id: str | None = Field(
-        default=None, description="Access token for the LINE Messaging API."
-    )
+    line_channel_id: str | None = Field(default=None, description="Access token for the LINE Messaging API.")
     line_channel_secret: str | None = Field(
         default=None, description="Secret for LINE Messaging API webhook validation."
     )
-    line_channel_access_token: str | None = Field(
-        default=None, description="Access token for the LINE Messaging API."
-    )
+    line_channel_access_token: str | None = Field(default=None, description="Access token for the LINE Messaging API.")
 
     # --------------------------- Application Behavior --------------------------- #
 
@@ -69,18 +53,10 @@ class AppConfig(BaseSettings):
         default="INFO",
         description="Logging level for the application (e.g., 'DEBUG', 10).",
     )
-    enable_web_search: bool = Field(
-        default=False, description="Enable native web search for supported models."
-    )
-    enable_x_search: bool = Field(
-        default=False, description="Enable X (Twitter) search. Only for Grok."
-    )
-    enable_inline_citations: bool = Field(
-        default=True, description="Request inline citations (e.g. [1]) in responses."
-    )
-    web_search_max_results: int = Field(
-        default=2, ge=1, le=5, description="Max sources to retrieve per search."
-    )
+    enable_web_search: bool = Field(default=False, description="Enable native web search for supported models.")
+    enable_x_search: bool = Field(default=False, description="Enable X (Twitter) search. Only for Grok.")
+    enable_inline_citations: bool = Field(default=True, description="Request inline citations (e.g. [1]) in responses.")
+    web_search_max_results: int = Field(default=2, ge=1, le=5, description="Max sources to retrieve per search.")
     web_search_allowed_domains: set[str] | None = Field(default=None)
     web_search_excluded_domains: set[str] | None = Field(default=None)
     x_search_allowed_handles: set[str] | None = Field(default=None)
@@ -92,9 +68,7 @@ class AppConfig(BaseSettings):
     database_provider: DatabaseProvider = Field(
         default=DatabaseProvider.MEMORY, description="The persistence layer to use."
     )
-    chroma_persist_path: str = Field(
-        default="chroma_db", description="Path to store ChromaDB data locally."
-    )
+    chroma_persist_path: str = Field(default="chroma_db", description="Path to store ChromaDB data locally.")
 
     reset_commands: set[str] = Field(
         default={"clear"},
@@ -129,8 +103,60 @@ class AppConfig(BaseSettings):
         default=None,
         description="Tavily API key for web search.",
     )
-    
+
     tavily_search_depth: str = Field(
         default="basic",
         description="Tavily search depth: 'basic' or 'advanced'.",
+    )
+
+    # ---------------------------------------------------------------------------- #
+    #                           Analysis Pipeline Config                           #
+    # ---------------------------------------------------------------------------- #
+
+    analysis_lookback_days: int = Field(
+        default=120,
+        ge=30,
+        description="Days of historical data to fetch for analysis.",
+    )
+    technical_weight: float = Field(
+        default=0.6,
+        ge=0.0,
+        le=1.0,
+        description="Weight for technical score in combined calculation (0-1).",
+    )
+    sentiment_weight: float = Field(
+        default=0.4,
+        ge=0.0,
+        le=1.0,
+        description="Weight for sentiment score in combined calculation (0-1).",
+    )
+    min_combined_score_buy: int = Field(
+        default=70,
+        ge=0,
+        le=100,
+        description="Minimum combined score to generate BUY signal.",
+    )
+    max_combined_score_sell: int = Field(
+        default=30,
+        ge=0,
+        le=100,
+        description="Maximum combined score to generate SELL signal.",
+    )
+    article_fetch_limit: int = Field(
+        default=20,
+        ge=1,
+        le=100,
+        description="Max articles to fetch per symbol for sentiment analysis.",
+    )
+    enable_notifications: bool = Field(
+        default=False,
+        description="Enable trade signal notifications.",
+    )
+    notification_recipients: list[str] = Field(
+        default_factory=list,
+        description="User IDs to receive signal notifications.",
+    )
+    ai_sentiment_prompt: str | None = Field(
+        default=None,
+        description="Custom prompt template for sentiment analysis (supports {symbol} and {articles_text}).",
     )

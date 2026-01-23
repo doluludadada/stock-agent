@@ -1,9 +1,10 @@
 from typing import Protocol
-from src.a_domain.model.market.ohlcv import Ohlcv
+
 from src.a_domain.model.analysis.technical_indicators import TechnicalIndicators
+from src.a_domain.model.market.ohlcv import Ohlcv
 
 
-class TechnicalAnalysisPort(Protocol):
+class ITechnicalAnalysisPort(Protocol):
     """
     Interface for the 'Left Brain' Calculation Engine.
     Responsibility: Pure Math.

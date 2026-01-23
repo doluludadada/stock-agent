@@ -37,6 +37,7 @@ class SignalSource(StrEnum):
     FUNDAMENTAL = "FUNDAMENTAL"
     HYBRID = "HYBRID"
 
+
 class OrderType(StrEnum):
     MARKET = "MARKET"
     LIMIT = "LIMIT"
@@ -59,3 +60,28 @@ class TimeInForce(StrEnum):
     ROD = "ROD"  # Rest of Day
     IOC = "IOC"  # Immediate or Cancel
     FOK = "FOK"  # Fill or Kill
+
+
+class InformationSource(StrEnum):
+    """Where the data comes from."""
+
+    TWSE_MOPS = "TWSE_MOPS"  # Official Filings
+    NEWS_MEDIA = "NEWS_MEDIA"  # Yahoo, Anue, etc.
+    PTT_STOCK = "PTT_STOCK"  # Social: Professional Board
+    PTT_GOSSIPING = "PTT_GOSSIPING"  # Social: General Board
+    REUNION = "REUNION"  # CMoney / Stock Dog
+
+
+class ContentType(StrEnum):
+    """The nature of the content for AI weighting."""
+
+    FACT = "FACT"  # High weight: Official data
+    REPORT = "REPORT"  # Medium weight: News reporting
+    ANALYSIS = "ANALYSIS"  # High/Med weight: Deep user analysis (Long form)
+    DISCUSSION = "DISCUSSION"  # Low weight: Short comments
+    NOISE = "NOISE"  # Ignore
+
+class SentimentType(StrEnum):
+    BULLISH = "BULLISH"
+    BEARISH = "BEARISH"
+    NEUTRAL = "NEUTRAL"

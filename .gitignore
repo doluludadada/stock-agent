@@ -19,3 +19,8 @@ wheels/
 /test/rsa.py
 /chroma_data
 /.idea
+/.agent
+/CLAUDE.md
+/nul
+.claude/settings.local.json
+/.claude

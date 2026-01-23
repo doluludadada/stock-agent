@@ -1,9 +1,10 @@
 from typing import Protocol
+
 from src.a_domain.model.trading.order import Order
 from src.a_domain.model.trading.position import Position
 
 
-class BrokerPort(Protocol):
+class IBrokerPort(Protocol):
     """
     Interface for executing trades and retrieving account status.
     """

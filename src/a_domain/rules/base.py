@@ -1,5 +1,6 @@
-from typing import Protocol
 from decimal import Decimal
+from typing import Protocol
+
 from src.a_domain.model.analysis.technical_indicators import TechnicalIndicators
 
 

@@ -1,12 +1,14 @@
+# TODO: 未來功能 - 系統監控統計 (目前未使用)
 from datetime import date, datetime
 from uuid import UUID, uuid4
-from sqlmodel import SQLModel, Field
+
+from sqlmodel import Field, SQLModel
 
 
 class SystemStats(SQLModel):
     """
     A comprehensive daily report card for the trading system.
-    Stored in DB to analyze system performance over time.
+    Stored in DB to analyse system performance over time.
     """
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
@@ -19,9 +21,7 @@ class SystemStats(SQLModel):
 
     # -------------------------------- AI Metrics -------------------------------- #
     ai_analysis_count: int = Field(default=0, description="Stocks sent to LLM")
-    avg_confidence_score: float | None = Field(
-        default=None, description="Market sentiment proxy"
-    )
+    avg_confidence_score: float | None = Field(default=None, description="Market sentiment proxy")
 
     # ------------------------------ Action Metrics ------------------------------ #
     buy_signals_generated: int = Field(default=0)

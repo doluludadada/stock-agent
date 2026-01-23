@@ -5,7 +5,7 @@ from decimal import Decimal
 @dataclass(frozen=True)
 class TechnicalIndicators:
     """
-    Standardized container for technical values calculated by Infrastructure.
+    Standardised container for technical values calculated by Infrastructure.
     """
 
     rsi_14: float | None

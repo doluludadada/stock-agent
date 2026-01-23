@@ -1,12 +1,14 @@
 import chromadb
-from src.a_domain.model.chat.conversation import Conversation
-from src.a_domain.ports.bussiness.repository_port import RepositoryPort
-from src.a_domain.ports.system.logging_port import ILoggingPort
-from src.b_application.configuration.schemas import AppConfig
-from src.c_infrastructure.persistence.chroma.schema import ChromaCollection, ChromaResultKey
-from src.c_infrastructure.persistence.chroma.mapper import ConversationMapper
 
-class ChromaRepositoryAdapter(RepositoryPort):
+from src.a_domain.model.chat.conversation import Conversation
+from src.a_domain.ports.system.logging_port import ILoggingPort
+from src.a_domain.ports.system.repository_port import IRepositoryPort
+from src.b_application.configuration.schemas import AppConfig
+from src.c_infrastructure.persistence.chroma.mapper import ConversationMapper
+from src.c_infrastructure.persistence.chroma.schema import ChromaCollection, ChromaResultKey
+
+
+class ChromaRepositoryAdapter(IRepositoryPort):
     
     def __init__(self, config: AppConfig, logger: ILoggingPort) -> None:
         self._logger = logger

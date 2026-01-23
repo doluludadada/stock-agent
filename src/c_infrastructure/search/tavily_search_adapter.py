@@ -3,12 +3,12 @@ from __future__ import annotations
 import httpx
 
 from src.a_domain.model.analysis.web_search_result import WebSearchResult
-from src.a_domain.ports.bussiness.web_search_port import WebSearchPort
+from src.a_domain.ports.chat.web_search_port import IWebSearchPort
 from src.a_domain.ports.system.logging_port import ILoggingPort
 from src.b_application.configuration.schemas import AppConfig
 
 
-class TavilySearchAdapter(WebSearchPort):
+class TavilySearchAdapter(IWebSearchPort):
     """
     Tavily web search adapter.
     """
@@ -33,7 +33,7 @@ class TavilySearchAdapter(WebSearchPort):
             "include_raw_content": False,
         }
 
-        # 可沿用你原本的 domain allow/exclude 設定（你專案已經有 web_search_allowed_domains/excluded_domains 的概念）
+        # TODO: Remove getattr
         allowed = getattr(self._config, "web_search_allowed_domains", None)
         excluded = getattr(self._config, "web_search_excluded_domains", None)
 

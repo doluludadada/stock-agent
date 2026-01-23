@@ -1,7 +1,7 @@
 import re
 
 from src.a_domain.model.chat.message import Message, MessageRole
-from src.a_domain.ports.bussiness.chat_styler_port import IChatStylerPort
+from src.a_domain.ports.chat.chat_styler_port import IChatStylerPort
 
 
 class ChatStylerService(IChatStylerPort):
@@ -34,7 +34,6 @@ class ChatStylerService(IChatStylerPort):
         text = re.sub(r"^#+\s*", "", text, flags=re.MULTILINE)
         text = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
         return text.strip()
-
 
     def _force_split_long_text(self, text: str) -> list[Message]:
         parts = []

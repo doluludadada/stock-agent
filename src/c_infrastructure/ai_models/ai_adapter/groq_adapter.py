@@ -4,10 +4,11 @@ Groq AI adapter implementation.
 Infrastructure layer adapter that calls GroqCloud via OpenAI-compatible API.
 """
 from __future__ import annotations
+
 import asyncio
 from functools import cached_property
-import httpx
 
+import httpx
 from openai import AsyncOpenAI, OpenAIError
 from openai.types.chat import (
     ChatCompletionAssistantMessageParam,
@@ -16,11 +17,10 @@ from openai.types.chat import (
 )
 
 from src.a_domain.model.chat.message import Message, MessageRole
-from src.a_domain.ports.bussiness.web_search_port import WebSearchPort
+from src.a_domain.ports.chat.web_search_port import IWebSearchPort
 from src.a_domain.ports.system.logging_port import ILoggingPort
-from src.c_infrastructure.ai_models.base import BaseAIAdapter
 from src.b_application.configuration.schemas import AppConfig
-
+from src.c_infrastructure.ai_models.base import BaseAIAdapter
 
 
 class GroqAIAdapter(BaseAIAdapter):
@@ -35,7 +35,7 @@ class GroqAIAdapter(BaseAIAdapter):
         config: AppConfig,
         logger: ILoggingPort,
         model_name: str = "openai/gpt-oss-20b",
-        web_search: WebSearchPort | None = None,
+        web_search: IWebSearchPort | None = None,
     ):
         super().__init__(config, logger, model_name)
 

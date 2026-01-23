@@ -1,13 +1,14 @@
 import json
 from dataclasses import asdict
 from datetime import datetime
-from uuid import UUID
 from typing import Any
+from uuid import UUID
 
 from src.a_domain.model.chat.conversation import Conversation
 from src.a_domain.model.chat.message import Message
 from src.a_domain.types.enums import MessageRole
 from src.c_infrastructure.persistence.chroma.schema import ChromaMetadataKey
+
 
 class ConversationMapper:
     

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import yaml
+
 from src.b_application.configuration.schemas import AppConfig
 
 

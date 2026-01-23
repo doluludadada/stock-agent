@@ -1,14 +1,14 @@
-from sqlmodel import SQLModel, Field
+from sqlmodel import Field, SQLModel
+
 from src.a_domain.types.enums import MarketType
 
 
 class Stock(SQLModel):
     """
-    Represents a basic stock entity (Symbol/Ticker).
+    Represents a basic stock entity.
     """
 
-    symbol: str = Field(min_length=1, max_length=10, index=True)
+    stock_id: str = Field(min_length=1, max_length=10, primary_key=True)
     market: MarketType
     name: str | None = None
     industry: str | None = None
-    currency: str = Field(default="TWD")

@@ -1,9 +1,9 @@
 from src.a_domain.model.chat.message import Message, MessageRole
 from src.b_application.configuration.schemas import AppConfig
-from src.b_application.use_cases.collect.context_loader import ContextLoader
-from src.b_application.use_cases.process.ai_processor import AiProcessor
-from src.b_application.use_cases.ship.dispatcher import Dispatcher
-from src.b_application.use_cases.ship.state_manager import StateManager
+from src.b_application.use_cases.chat.ai_processor import AiProcessor
+from src.b_application.use_cases.chat.context_loader import ContextLoader
+from src.b_application.use_cases.chat.dispatcher import Dispatcher
+from src.b_application.use_cases.chat.state_manager import StateManager
 
 
 class Pipeline:

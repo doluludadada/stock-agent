@@ -1,9 +1,12 @@
 from __future__ import annotations
+
 import asyncio
 from functools import cached_property
 from typing import Any
+
 import google.generativeai as genai  # type: ignore[import-untyped]
 from google.api_core.client_options import ClientOptions
+
 from src.a_domain.model.chat.message import Message, MessageRole
 from src.a_domain.ports.system.logging_port import ILoggingPort
 from src.b_application.configuration.schemas import AppConfig

@@ -1,15 +1,17 @@
 import asyncio
-import httpx
+
 import google.generativeai as genai  # type: ignore[import-untyped]
+import httpx
 from openai import AsyncOpenAI, OpenAIError
+
 from src.a_domain.model.chat.ai_model import AIModel
-from src.a_domain.ports.bussiness.model_catalog_port import ModelCatalogPort
+from src.a_domain.ports.chat.model_catalog_port import IModelCatalogPort
 from src.a_domain.ports.system.logging_port import ILoggingPort
 from src.a_domain.types.enums import AiProvider
 from src.b_application.configuration.schemas import AppConfig
 
 
-class ModelsCatalog(ModelCatalogPort):
+class ModelsCatalog(IModelCatalogPort):
     def __init__(self, config: AppConfig, logger: ILoggingPort):
         self._config = config
         self._logger = logger

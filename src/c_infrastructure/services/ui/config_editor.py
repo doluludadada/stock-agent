@@ -1,6 +1,8 @@
-import yaml
 from pathlib import Path
 from typing import Any, Dict
+
+import yaml
+
 
 class ConfigEditorService:
     def __init__(self, project_root: Path):

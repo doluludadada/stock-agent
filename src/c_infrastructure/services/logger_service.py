@@ -1,6 +1,7 @@
 import sys
 
 from loguru import logger
+
 from src.a_domain.ports.system.logging_port import ILoggingPort
 
 

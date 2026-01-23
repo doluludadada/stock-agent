@@ -1,4 +1,5 @@
 import flet as ft
+
 from src.a_domain.types.enums import AiProvider, DatabaseProvider
 from src.d_presentation.desktop.view_models.ui_vm import AdminViewModel
 

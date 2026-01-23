@@ -1,8 +1,10 @@
 import subprocess
 import sys
-import psutil
 from pathlib import Path
 from typing import Optional
+
+import psutil
+
 
 class ProcessManager:
     def __init__(self):

@@ -1,8 +1,9 @@
 from typing import Protocol
+
 from src.a_domain.model.chat.conversation import Conversation
 
 
-class RepositoryPort(Protocol):
+class IRepositoryPort(Protocol):
     async def get_conversation_by_user_id(
         self, user_id: str
     ) -> Conversation | None: ...

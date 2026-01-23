@@ -1,6 +1,7 @@
 # src/d_presentation/web/endpoints/line_webhook.py
 
 from fastapi import APIRouter, Depends, Header, Request
+
 from src.c_infrastructure.platforms.line.line_handler import LineWebhookHandler
 from src.d_presentation.dependencies import get_line_handler
 

@@ -1,12 +1,12 @@
 from abc import ABC, abstractmethod
 
 from src.a_domain.model.chat.message import Message, MessageRole
-from src.a_domain.ports.bussiness.ai_port import AiPort
+from src.a_domain.ports.system.ai_port import IAiPort
 from src.a_domain.ports.system.logging_port import ILoggingPort
 from src.b_application.configuration.schemas import AppConfig
 
 
-class BaseAIAdapter(AiPort, ABC):
+class BaseAIAdapter(IAiPort, ABC):
     """
     An abstract base class for AI model adapters.
     """

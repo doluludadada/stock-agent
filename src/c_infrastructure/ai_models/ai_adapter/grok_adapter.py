@@ -1,7 +1,9 @@
 from functools import cached_property
 from typing import Any
+
 import httpx
 from openai import AsyncOpenAI, OpenAIError
+
 from src.a_domain.model.chat.message import Message, MessageRole
 from src.a_domain.ports.system.logging_port import ILoggingPort
 from src.b_application.configuration.schemas import AppConfig

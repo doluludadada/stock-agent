@@ -1,6 +1,8 @@
-from decimal import Decimal
+# TODO: 未來功能 - 投資組合追蹤 (目前未使用)
 from datetime import datetime
-from sqlmodel import SQLModel, Field
+from decimal import Decimal
+
+from sqlmodel import Field, SQLModel
 
 
 class Position(SQLModel):
@@ -8,7 +10,7 @@ class Position(SQLModel):
     Represents the current holding of a specific stock.
     """
 
-    symbol: str = Field(primary_key=True)
+    stock_id: str = Field(primary_key=True)
     quantity: int = Field(description="Total shares held")
     average_cost: Decimal = Field(decimal_places=2)
     current_price: Decimal | None = Field(default=None, decimal_places=2)

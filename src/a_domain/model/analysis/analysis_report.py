@@ -1,6 +1,7 @@
 from datetime import datetime
 from uuid import UUID, uuid4
-from sqlmodel import SQLModel, Field
+
+from sqlmodel import Field, SQLModel
 
 
 class AnalysisReport(SQLModel):
@@ -10,7 +11,7 @@ class AnalysisReport(SQLModel):
     """
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
-    symbol: str = Field(index=True)
+    stock_id: str = Field(index=True)
     analysis_date: datetime = Field(default_factory=datetime.now)
 
     # Quantitative Summary from AI

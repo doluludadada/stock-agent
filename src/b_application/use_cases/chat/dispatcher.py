@@ -1,10 +1,10 @@
 from src.a_domain.model.chat.message import Message
-from src.a_domain.ports.system.platform_port import PlatformPort
 from src.a_domain.ports.system.logging_port import ILoggingPort
+from src.a_domain.ports.system.platform_port import IPlatformPort
 
 
 class Dispatcher:
-    def __init__(self, platform: PlatformPort, logger: ILoggingPort):
+    def __init__(self, platform: IPlatformPort, logger: ILoggingPort):
         self._platform = platform
         self._logger = logger
 

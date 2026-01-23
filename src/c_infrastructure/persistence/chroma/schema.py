@@ -1,5 +1,6 @@
 from enum import StrEnum
 
+
 class ChromaCollection(StrEnum):
     CHAT_HISTORY = "chat_history"
 

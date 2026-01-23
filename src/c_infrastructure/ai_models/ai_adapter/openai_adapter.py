@@ -7,6 +7,7 @@ from openai.types.chat import (
     ChatCompletionSystemMessageParam,
     ChatCompletionUserMessageParam,
 )
+
 from src.a_domain.model.chat.message import Message, MessageRole
 from src.a_domain.ports.system.logging_port import ILoggingPort
 from src.b_application.configuration.schemas import AppConfig

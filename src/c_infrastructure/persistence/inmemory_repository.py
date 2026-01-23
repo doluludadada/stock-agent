@@ -1,10 +1,10 @@
 # TODO: This file will be replaced later
 from src.a_domain.model.chat.conversation import Conversation
-from src.a_domain.ports.bussiness.repository_port import RepositoryPort
 from src.a_domain.ports.system.logging_port import ILoggingPort
+from src.a_domain.ports.system.repository_port import IRepositoryPort
 
 
-class InMemoryRepositoryAdapter(RepositoryPort):
+class InMemoryRepositoryAdapter(IRepositoryPort):
 
     _store: dict[str, Conversation] = {}
 

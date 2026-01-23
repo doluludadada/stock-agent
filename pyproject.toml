@@ -39,9 +39,17 @@ dev = [
 [tool.ruff.lint.mccabe]
 max-complexity = 10
 
-
-[tool.ufmt]
-formatter = "black"
-
-[tool.black]
+[tool.ruff]
 line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+fixable = ["ALL"]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"

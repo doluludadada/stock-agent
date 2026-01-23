@@ -1,7 +1,10 @@
+# TODO: 未來功能 - 自動交易 (目前未使用)
 from datetime import datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
-from sqlmodel import SQLModel, Field
+
+from sqlmodel import Field, SQLModel
+
 from src.a_domain.types.enums import OrderAction, OrderStatus, OrderType, TimeInForce
 
 
@@ -11,7 +14,7 @@ class Order(SQLModel):
     """
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
-    symbol: str = Field(index=True)
+    stock_id: str = Field(index=True)
     action: OrderAction
     order_type: OrderType = Field(default=OrderType.LIMIT)
     price: Decimal | None = Field(default=None, description="Required for LIMIT orders")
