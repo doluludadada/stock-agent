@@ -2,13 +2,13 @@ import base64
 import hashlib
 import hmac
 
-from src.a_domain.ports.system.logging_port import ILoggingPort
+from src.a_domain.ports.system.logging_provider import ILoggingProvider
 
 
 class LineSecurityService:
     """Handles LINE webhook signature validation."""
 
-    def __init__(self, channel_secret: str | None, logger: ILoggingPort):
+    def __init__(self, channel_secret: str | None, logger: ILoggingProvider):
         if not channel_secret:
             raise ValueError("LINE channel secret is required for security validation.")
         self._channel_secret_bytes = channel_secret.encode("utf-8")

@@ -1,17 +1,17 @@
 from abc import ABC, abstractmethod
 
 from src.a_domain.model.chat.message import Message, MessageRole
-from src.a_domain.ports.system.ai_port import IAiPort
-from src.a_domain.ports.system.logging_port import ILoggingPort
+from src.a_domain.ports.system.ai_provider import IAiProvider
+from src.a_domain.ports.system.logging_provider import ILoggingProvider
 from src.b_application.configuration.schemas import AppConfig
 
 
-class BaseAIAdapter(IAiPort, ABC):
+class BaseAIAdapter(IAiProvider, ABC):
     """
     An abstract base class for AI model adapters.
     """
 
-    def __init__(self, config: AppConfig, logger: ILoggingPort, model_name: str):
+    def __init__(self, config: AppConfig, logger: ILoggingProvider, model_name: str):
         self._config = config
         self._logger = logger
         self._model_name = model_name

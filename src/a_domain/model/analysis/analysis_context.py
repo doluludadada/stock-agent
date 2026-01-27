@@ -1,32 +1,47 @@
 from dataclasses import dataclass, field
 from decimal import Decimal
 
-from src.a_domain.model.analysis.analysis_report import AnalysisReport
-from src.a_domain.model.analysis.screening_result import ScreeningResult
-from src.a_domain.model.analysis.technical_indicators import TechnicalIndicators
+from src.a_domain.model.analysis.ai_sentiment import AiSentiment
+from src.a_domain.model.indicators.macd import Macd
+from src.a_domain.model.indicators.moving_averages import MovingAverages
+from src.a_domain.model.indicators.rsi import Rsi
 from src.a_domain.model.market.article import Article
 from src.a_domain.model.market.ohlcv import Ohlcv
 from src.a_domain.model.market.stock import Stock
+from src.a_domain.types.enums import CandidateSource
 
 
 @dataclass
 class AnalysisContext:
     """
-    Container for all data collected and computed for a single stock.
-    Passed between pipeline stages. Mutable to allow progressive enrichment.
+    The 'Case File' that travels through the pipeline.
     """
 
+    # --- Identity ---
     stock: Stock
+    source: CandidateSource
+    trigger_reason: str
+
+    # --- Data (Collected) ---
+    current_price: Decimal | None = None
     ohlcv_data: list[Ohlcv] = field(default_factory=list)
     articles: list[Article] = field(default_factory=list)
-    current_price: Decimal | None = None
 
-    # Process stage results
-    indicators: TechnicalIndicators | None = None
-    screening_result: ScreeningResult | None = None
-    sentiment_report: AnalysisReport | None = None
+    # --- Technical State ---
+    rsi: Rsi | None = None
+    macd: Macd | None = None
+    ma: MovingAverages | None = None
 
-    # Combined scores (0-100)
-    technical_score: int | None = None
-    sentiment_score: int | None = None
-    combined_score: int | None = None
+    # --- Analysis Result ---
+    technical_failures: list[str] = field(default_factory=list)
+    
+    technical_score: int = 0
+    sentiment_score: int = 0
+    sentiment_report: AiSentiment | None = None
+    combined_score: int = 0
+    
+
+    @property
+    def is_passed(self) -> bool:
+        """Helper property to check validity without storing state."""
+        return len(self.technical_failures) == 0

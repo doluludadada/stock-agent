@@ -1,12 +1,12 @@
 from src.a_domain.model.chat.conversation import Conversation
 from src.a_domain.model.chat.message import Message
-from src.a_domain.ports.chat.chat_styler_port import IChatStylerPort
-from src.a_domain.ports.system.ai_port import IAiPort
-from src.a_domain.ports.system.logging_port import ILoggingPort
+from src.a_domain.ports.chat.chat_styler_provider import IChatStylerProvider
+from src.a_domain.ports.system.ai_provider import IAiProvider
+from src.a_domain.ports.system.logging_provider import ILoggingProvider
 
 
 class AiProcessor:
-    def __init__(self, ai_port: IAiPort, styler_port: IChatStylerPort, logger: ILoggingPort):
+    def __init__(self, ai_port: IAiProvider, styler_port: IChatStylerProvider, logger: ILoggingProvider):
         self._ai_port = ai_port
         self._styler_port = styler_port
         self._logger = logger

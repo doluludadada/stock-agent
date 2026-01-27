@@ -5,13 +5,13 @@ import httpx
 from openai import AsyncOpenAI, OpenAIError
 
 from src.a_domain.model.chat.message import Message, MessageRole
-from src.a_domain.ports.system.logging_port import ILoggingPort
+from src.a_domain.ports.system.logging_provider import ILoggingProvider
 from src.b_application.configuration.schemas import AppConfig
 from src.c_infrastructure.ai_models.base import BaseAIAdapter
 
 
 class GrokAdapter(BaseAIAdapter):
-    def __init__(self, config: AppConfig, logger: ILoggingPort, model_name: str):
+    def __init__(self, config: AppConfig, logger: ILoggingProvider, model_name: str):
         super().__init__(config, logger, model_name)
         if not self._config.grok_api_key:
             raise ValueError("Missing grok_api_key in configuration.")

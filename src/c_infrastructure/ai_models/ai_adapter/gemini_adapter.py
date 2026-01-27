@@ -8,14 +8,14 @@ import google.generativeai as genai  # type: ignore[import-untyped]
 from google.api_core.client_options import ClientOptions
 
 from src.a_domain.model.chat.message import Message, MessageRole
-from src.a_domain.ports.system.logging_port import ILoggingPort
+from src.a_domain.ports.system.logging_provider import ILoggingProvider
 from src.b_application.configuration.schemas import AppConfig
 from src.c_infrastructure.ai_models.base import BaseAIAdapter
 
 
 class GeminiAIAdapter(BaseAIAdapter):
     def __init__(
-        self, config: AppConfig, logger: ILoggingPort, model_name: str
+        self, config: AppConfig, logger: ILoggingProvider, model_name: str
     ) -> None:
         super().__init__(config, logger, model_name)
         if not self._config.gemini_api_key:

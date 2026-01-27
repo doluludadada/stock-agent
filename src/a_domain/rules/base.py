@@ -1,7 +1,6 @@
-from decimal import Decimal
 from typing import Protocol
 
-from src.a_domain.model.analysis.technical_indicators import TechnicalIndicators
+from src.a_domain.model.analysis.analysis_context import AnalysisContext
 
 
 class TradingRule(Protocol):
@@ -14,10 +13,8 @@ class TradingRule(Protocol):
         """Name of the rule for logging/reasoning."""
         ...
 
-    def is_satisfied(
-        self, indicators: TechnicalIndicators, current_price: Decimal
-    ) -> bool:
+    def is_satisfied(self, context: "AnalysisContext") -> bool:
         """
-        Evaluates the rule against the provided technical context.
+        Evaluates the rule against the provided analysis context.
         """
         ...

@@ -1,6 +1,6 @@
 from src.a_domain.model.analysis.analysis_context import AnalysisContext
-from src.a_domain.ports.system.logging_port import ILoggingPort
-from src.a_domain.rules.process.composite_scoring import CompositeScoreRule
+from src.a_domain.ports.system.logging_provider import ILoggingProvider
+from src.a_domain.rules.process.scoring.composite import CompositeScoreRule
 
 
 class ScoreCombiner:
@@ -11,7 +11,7 @@ class ScoreCombiner:
     def __init__(
         self,
         composite_rule: CompositeScoreRule,
-        logger: ILoggingPort,
+        logger: ILoggingProvider,
     ):
         self._composite_rule = composite_rule
         self._logger = logger

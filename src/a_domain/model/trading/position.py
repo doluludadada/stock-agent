@@ -1,4 +1,3 @@
-# TODO: 未來功能 - 投資組合追蹤 (目前未使用)
 from datetime import datetime
 from decimal import Decimal
 
@@ -7,15 +6,21 @@ from sqlmodel import Field, SQLModel
 
 class Position(SQLModel):
     """
-    Represents the current holding of a specific stock.
+    Represents a stock currently held in the portfolio.
     """
 
     stock_id: str = Field(primary_key=True)
-    quantity: int = Field(description="Total shares held")
+    quantity: int = Field(gt=0)
     average_cost: Decimal = Field(decimal_places=2)
-    current_price: Decimal | None = Field(default=None, decimal_places=2)
 
-    # PnL Calculation (Unrealized)
-    unrealized_profit: Decimal | None = Field(default=None)
+    # Updated by Market Data
+    current_price: Decimal = Field(default=0, decimal_places=2)
+    market_value: Decimal = Field(default=0, decimal_places=2)
 
     last_updated: datetime = Field(default_factory=datetime.now)
+
+    @property
+    def unrealized_pnl(self) -> Decimal:
+        if self.quantity == 0:
+            return Decimal(0)
+        return (self.current_price - self.average_cost) * self.quantity

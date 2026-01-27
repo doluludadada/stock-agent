@@ -1,12 +1,12 @@
 from src.a_domain.model.chat.conversation import Conversation
 from src.a_domain.model.chat.message import Message, MessageRole
-from src.a_domain.ports.system.logging_port import ILoggingPort
-from src.a_domain.ports.system.repository_port import IRepositoryPort
+from src.a_domain.ports.system.logging_provider import ILoggingProvider
+from src.a_domain.ports.system.repository_provider import IRepositoryProvider
 from src.b_application.configuration.schemas import AppConfig
 
 
 class ContextLoader:
-    def __init__(self, repository: IRepositoryPort, config: AppConfig, logger: ILoggingPort):
+    def __init__(self, repository: IRepositoryProvider, config: AppConfig, logger: ILoggingProvider):
         self._repository = repository
         self._config = config
         self._logger = logger

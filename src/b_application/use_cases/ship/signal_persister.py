@@ -1,6 +1,6 @@
-from src.a_domain.model.analysis.signal import TradeSignal
-from src.a_domain.ports.analysis.signal_repository_port import ISignalRepositoryPort
-from src.a_domain.ports.system.logging_port import ILoggingPort
+from src.a_domain.model.trading.signal import TradeSignal
+from src.a_domain.ports.analysis.signal_repository import ISignalRepository
+from src.a_domain.ports.system.logging_provider import ILoggingProvider
 
 
 class SignalPersister:
@@ -14,8 +14,8 @@ class SignalPersister:
 
     def __init__(
         self,
-        signal_repo: ISignalRepositoryPort,
-        logger: ILoggingPort,
+        signal_repo: ISignalRepository,
+        logger: ILoggingProvider,
     ):
         self._signal_repo = signal_repo
         self._logger = logger

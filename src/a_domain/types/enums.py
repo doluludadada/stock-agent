@@ -81,7 +81,19 @@ class ContentType(StrEnum):
     DISCUSSION = "DISCUSSION"  # Low weight: Short comments
     NOISE = "NOISE"  # Ignore
 
+
 class SentimentType(StrEnum):
     BULLISH = "BULLISH"
     BEARISH = "BEARISH"
     NEUTRAL = "NEUTRAL"
+
+
+class CandidateSource(StrEnum):
+    """
+    Identifies how a stock entered the analysis pipeline.
+    """
+
+    TECHNICAL_WATCHLIST = "TECHNICAL_WATCHLIST"  # From nightly technical screening (Cold)
+    SOCIAL_BUZZ = "SOCIAL_BUZZ"  # From real-time social listening (Hot)
+    MANUAL_INPUT = "MANUAL_INPUT"  # Manually specified by user
+

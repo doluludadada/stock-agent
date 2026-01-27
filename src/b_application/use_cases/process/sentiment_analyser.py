@@ -1,9 +1,9 @@
 from src.a_domain.model.analysis.analysis_context import AnalysisContext
 from src.a_domain.model.chat.message import Message, MessageRole
-from src.a_domain.ports.system.ai_port import IAiPort
-from src.a_domain.ports.system.logging_port import ILoggingPort
-from src.a_domain.rules.process.sentiment_parser import SentimentResponseParser
-from src.a_domain.rules.process.sentiment_prompt import SentimentPromptBuilder
+from src.a_domain.ports.system.ai_provider import IAiProvider
+from src.a_domain.ports.system.logging_provider import ILoggingProvider
+from src.a_domain.rules.process.ai.parser import SentimentResponseParser
+from src.a_domain.rules.process.ai.prompt import SentimentPromptBuilder
 
 
 class SentimentAnalyser:
@@ -14,10 +14,10 @@ class SentimentAnalyser:
 
     def __init__(
         self,
-        ai_port: IAiPort,
+        ai_port: IAiProvider,
         prompt_builder: SentimentPromptBuilder,
         response_parser: SentimentResponseParser,
-        logger: ILoggingPort,
+        logger: ILoggingProvider,
     ):
         self._ai_port = ai_port
         self._prompt_builder = prompt_builder
@@ -39,7 +39,7 @@ class SentimentAnalyser:
             try:
                 # 1. Build Prompt (Domain Rule)
                 prompt_content = self._prompt_builder.build(
-                    ctx.stock.stock_id, ctx.articles
+                    ctx.stock.stock_id, ctx.source, ctx.articles
                 )
                 messages = (Message(role=MessageRole.USER, content=prompt_content),)
 
@@ -53,7 +53,7 @@ class SentimentAnalyser:
 
                 # 4. Update Context
                 ctx.sentiment_report = report
-                ctx.sentiment_score = report.confidence_score
+                ctx.sentiment_score = report.score 
                 analyzed_count += 1
 
             except Exception as e:

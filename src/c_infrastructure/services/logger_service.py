@@ -2,10 +2,10 @@ import sys
 
 from loguru import logger
 
-from src.a_domain.ports.system.logging_port import ILoggingPort
+from src.a_domain.ports.system.logging_provider import ILoggingProvider
 
 
-class LoggerService(ILoggingPort):
+class LoggerService(ILoggingProvider):
     def __init__(self, level: str | int = "INFO"):
         logger.remove()
         logger.add(

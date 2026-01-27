@@ -1,20 +1,23 @@
 from src.a_domain.model.analysis.analysis_context import AnalysisContext
-from src.a_domain.model.analysis.signal import TradeSignal
-from src.a_domain.ports.system.logging_port import ILoggingPort
-from src.a_domain.rules.ship.signal_decision import SignalDecisionRule
+from src.a_domain.model.trading.signal import TradeSignal
+from src.a_domain.ports.system.logging_provider import ILoggingProvider
+from src.a_domain.rules.trading.decision import DecisionRule
+from src.b_application.schemas.config import AppConfig
 
 
 class SignalGenerator:
     """
-    Use Case: Convert Contexts into Signals using Decision Rules.
+    Use Case: Convert Contexts into Signals.
     """
 
     def __init__(
         self,
-        decision_rule: SignalDecisionRule,
-        logger: ILoggingPort,
+        decision_rule: DecisionRule,
+        config: AppConfig,
+        logger: ILoggingProvider,
     ):
         self._decision_rule = decision_rule
+        self._config = config
         self._logger = logger
 
     def execute(self, contexts: list[AnalysisContext]) -> list[TradeSignal]:
@@ -23,11 +26,10 @@ class SignalGenerator:
         signals: list[TradeSignal] = []
 
         for ctx in contexts:
-            # Delegate decision logic to Domain Rule
             signal = self._decision_rule.decide(ctx)
 
             if signal:
                 signals.append(signal)
+                self._logger.debug(f"Signal generated: {signal.stock_id} {signal.action} Score:{signal.score}")
 
-        self._logger.success(f"Generated {len(signals)} signals.")
         return signals

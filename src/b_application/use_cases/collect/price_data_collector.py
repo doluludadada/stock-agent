@@ -1,81 +1,82 @@
 from datetime import datetime, timedelta
-from decimal import Decimal
 
 from src.a_domain.model.analysis.analysis_context import AnalysisContext
-from src.a_domain.model.market.ohlcv import Ohlcv
-from src.a_domain.model.market.stock import Stock
-from src.a_domain.ports.market.market_data_port import IMarketDataPort
-from src.a_domain.ports.system.logging_port import ILoggingPort
-from src.b_application.configuration.schemas import AppConfig
+from src.a_domain.ports.market.market_data_provider import IMarketDataProvider
+from src.a_domain.ports.system.logging_provider import ILoggingProvider
+from src.b_application.schemas.config import AppConfig
+from src.b_application.schemas.stock_candidate import StockCandidate
 
 
 class PriceDataCollector:
     """
-    Use Case: Fetch OHLCV price history for stocks.
-
-    Responsibility:
-    - Fetch historical price data for each stock
-    - Extract current price from latest candle
-    - Populate AnalysisContext with price data
+    Use Case: Orchestrates the collection of market data.
+    Combines Real-time bars (Hot) with Historical bars (Cold) to form a complete context.
     """
 
     def __init__(
         self,
-        market_data: IMarketDataPort,
+        market_data_provider: IMarketDataProvider,
         config: AppConfig,
-        logger: ILoggingPort,
+        logger: ILoggingProvider,
     ):
-        self._market_data = market_data
+        self._market_data_provider = market_data_provider
         self._config = config
         self._logger = logger
 
-    async def execute(self, stocks: list[Stock]) -> list[AnalysisContext]:
-        """
-        Collect price data for all provided stocks.
+    async def execute(self, candidates: list[StockCandidate]) -> list[AnalysisContext]:
+        if not candidates:
+            return []
 
-        Args:
-            stocks: List of Stock entities to fetch price data for.
+        self._logger.info(f"Collecting price data for {len(candidates)} candidates...")
 
-        Returns:
-            List of AnalysisContext with ohlcv_data and current_price populated.
-            Stocks with failed data fetch are excluded.
-        """
-        self._logger.info(f"Collecting price data for {len(stocks)} stocks")
-
+        # 1. Prepare Date Range for History (Application Logic)
         end_date = datetime.now()
         start_date = end_date - timedelta(days=self._config.analysis_lookback_days)
 
+        # 2. Batch Fetch Real-time Bars (Intraday Data)
+        stock_ids = [c.stock.stock_id for c in candidates]
+        try:
+            realtime_bars = await self._market_data_provider.fetch_realtime_bars(stock_ids)
+        except Exception as e:
+            self._logger.error(f"Failed to fetch realtime bars: {e}")
+            return []
+
         contexts: list[AnalysisContext] = []
 
-        for stock in stocks:
-            try:
-                ohlcv_data = await self._market_data.get_price_history(
-                    stock_id=stock.stock_id,
-                    start_date=start_date,
-                    end_date=end_date,
-                )
+        for candidate in candidates:
+            stock_id = candidate.stock.stock_id
+            current_bar = realtime_bars.get(stock_id)
 
-                if not ohlcv_data:
-                    self._logger.warning(f"No price data for {stock.stock_id}, skipping")
-                    continue
-
-                current_price = self._extract_current_price(ohlcv_data)
-
-                context = AnalysisContext(
-                    stock=stock,
-                    ohlcv_data=ohlcv_data,
-                    current_price=current_price,
-                )
-                contexts.append(context)
-
-            except Exception as e:
-                self._logger.error(f"Failed to fetch price data for {stock.stock_id}: {e}")
+            # If we can't get the current price, we can't make a decision NOW.
+            if not current_bar:
+                self._logger.debug(f"Missing realtime data for {stock_id}. Skipping.")
                 continue
 
-        self._logger.success(f"Price data collected for {len(contexts)}/{len(stocks)} stocks")
-        return contexts
+            try:
+                # 3. Fetch History (Historical Data)
+                history = await self._market_data_provider.fetch_history(
+                    stock_id=stock_id, start_date=start_date, end_date=end_date
+                )
 
-    def _extract_current_price(self, ohlcv_data: list[Ohlcv]) -> Decimal:
-        """Extract current price from the most recent candle."""
-        sorted_data = sorted(ohlcv_data, key=lambda x: x.ts, reverse=True)
-        return sorted_data[0].close_price
+                # 4. Merge Data (Stitching)
+                if history and history[-1].ts.date() == current_bar.ts.date():
+                    # Replace the last bar (which might be incomplete in history) with the latest realtime bar
+                    full_ohlcv = history[:-1] + [current_bar]
+                else:
+                    full_ohlcv = history + [current_bar]
+
+                # 5. Initialize Context
+                ctx = AnalysisContext(
+                    stock=candidate.stock,
+                    source=candidate.source,
+                    trigger_reason=candidate.trigger_reason,
+                    current_price=current_bar.close_price,
+                    ohlcv_data=full_ohlcv,
+                )
+                contexts.append(ctx)
+
+            except Exception as e:
+                self._logger.error(f"Error processing {stock_id}: {e}")
+
+        self._logger.success(f"Initialized {len(contexts)} analysis contexts.")
+        return contexts

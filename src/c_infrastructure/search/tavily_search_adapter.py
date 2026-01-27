@@ -3,17 +3,17 @@ from __future__ import annotations
 import httpx
 
 from src.a_domain.model.analysis.web_search_result import WebSearchResult
-from src.a_domain.ports.chat.web_search_port import IWebSearchPort
-from src.a_domain.ports.system.logging_port import ILoggingPort
-from src.b_application.configuration.schemas import AppConfig
+from src.a_domain.ports.chat.web_search_provider import IWebSearchProvider
+from src.a_domain.ports.system.logging_provider import ILoggingProvider
+from src.b_application.schemas.config import AppConfig
 
 
-class TavilySearchAdapter(IWebSearchPort):
+class TavilySearchAdapter(IWebSearchProvider):
     """
     Tavily web search adapter.
     """
 
-    def __init__(self, config: AppConfig, logger: ILoggingPort) -> None:
+    def __init__(self, config: AppConfig, logger: ILoggingProvider) -> None:
         self._config = config
         self._logger = logger
 

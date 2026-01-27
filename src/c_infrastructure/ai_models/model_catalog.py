@@ -5,14 +5,14 @@ import httpx
 from openai import AsyncOpenAI, OpenAIError
 
 from src.a_domain.model.chat.ai_model import AIModel
-from src.a_domain.ports.chat.model_catalog_port import IModelCatalogPort
-from src.a_domain.ports.system.logging_port import ILoggingPort
+from src.a_domain.ports.chat.model_catalog_repository import IModelCatalogRepository
+from src.a_domain.ports.system.logging_provider import ILoggingProvider
 from src.a_domain.types.enums import AiProvider
 from src.b_application.configuration.schemas import AppConfig
 
 
-class ModelsCatalog(IModelCatalogPort):
-    def __init__(self, config: AppConfig, logger: ILoggingPort):
+class ModelsCatalog(IModelCatalogRepository):
+    def __init__(self, config: AppConfig, logger: ILoggingProvider):
         self._config = config
         self._logger = logger
         self._timeout = httpx.Timeout(self._config.ai_model_connection_timeout)

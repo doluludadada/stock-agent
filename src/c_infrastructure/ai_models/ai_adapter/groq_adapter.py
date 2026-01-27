@@ -17,8 +17,8 @@ from openai.types.chat import (
 )
 
 from src.a_domain.model.chat.message import Message, MessageRole
-from src.a_domain.ports.chat.web_search_port import IWebSearchPort
-from src.a_domain.ports.system.logging_port import ILoggingPort
+from src.a_domain.ports.chat.web_search_provider import IWebSearchProvider
+from src.a_domain.ports.system.logging_provider import ILoggingProvider
 from src.b_application.configuration.schemas import AppConfig
 from src.c_infrastructure.ai_models.base import BaseAIAdapter
 
@@ -33,9 +33,9 @@ class GroqAIAdapter(BaseAIAdapter):
     def __init__(
         self,
         config: AppConfig,
-        logger: ILoggingPort,
+        logger: ILoggingProvider,
         model_name: str = "openai/gpt-oss-20b",
-        web_search: IWebSearchPort | None = None,
+        web_search: IWebSearchProvider | None = None,
     ):
         super().__init__(config, logger, model_name)
 

@@ -1,8 +1,8 @@
-from src.a_domain.model.analysis.signal import TradeSignal
-from src.a_domain.ports.system.logging_port import ILoggingPort
-from src.a_domain.ports.system.notification_port import INotificationPort
+from src.a_domain.model.trading.signal import TradeSignal
+from src.a_domain.ports.system.logging_provider import ILoggingProvider
+from src.a_domain.ports.system.notification_provider import INotificationProvider
 from src.a_domain.types.enums import SignalAction
-from src.b_application.configuration.schemas import AppConfig
+from src.b_application.schemas.config import AppConfig
 
 
 class NotificationDispatcher:
@@ -16,9 +16,9 @@ class NotificationDispatcher:
 
     def __init__(
         self,
-        notification_port: INotificationPort | None,
+        notification_port: INotificationProvider | None,
         config: AppConfig,
-        logger: ILoggingPort,
+        logger: ILoggingProvider,
     ):
         self._notification_port = notification_port
         self._config = config

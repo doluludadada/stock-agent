@@ -2,18 +2,19 @@ from functools import lru_cache
 
 from fastapi import Depends
 
-from src.a_domain.ports.analysis.quality_filter_port import IQualityFilterPort
-from src.a_domain.ports.chat.chat_styler_port import IChatStylerPort
-from src.a_domain.ports.system.logging_port import ILoggingPort
-from src.a_domain.ports.system.platform_port import IPlatformPort
-from src.a_domain.ports.system.repository_port import IRepositoryPort
-from src.a_domain.rules.collect.quality_filter import ArticleQualityFilter
-from src.a_domain.rules.process.ma_rule import PriceAboveMovingAverageRule
-from src.a_domain.rules.process.macd_rule import BullishMacdCrossoverRule
-from src.a_domain.rules.process.rsi_rule import RsiHealthyRule
-from src.a_domain.rules.process.technical_screening import TechnicalScreeningPolicy
+from src.a_domain.ports.analysis.quality_filter_provider import IQualityFilterProvider
+from src.a_domain.ports.chat.chat_styler_provider import IChatStylerProvider
+from src.a_domain.ports.system.logging_provider import ILoggingProvider
+from src.a_domain.ports.system.platform_provider import IPlatformProvider
+from src.a_domain.ports.system.repository_provider import IRepositoryProvider
+from src.a_domain.rules.collect.content import ContentRelevanceRule
+from src.a_domain.rules.process.indicators.ma_rule import PriceAboveMovingAverageRule
+from src.a_domain.rules.process.indicators.macd_rule import BullishMacdCrossoverRule
+from src.a_domain.rules.process.indicators.rsi_rule import RsiHealthyRule
+from src.a_domain.rules.process.policies.technical_screening import TechnicalScreeningPolicy
+from src.a_domain.types.constants import FINANCIAL_KEYWORDS_TW
 from src.a_domain.types.enums import DatabaseProvider
-from src.b_application.configuration.schemas import AppConfig
+from src.b_application.schemas.config import AppConfig
 from src.b_application.use_cases.chat.context_loader import ContextLoader
 from src.b_application.use_cases.chat.dispatcher import Dispatcher
 from src.b_application.use_cases.chat.state_manager import StateManager
@@ -36,14 +37,13 @@ def get_settings() -> AppConfig:
 
 
 @lru_cache
-def get_logger() -> ILoggingPort:
+def get_logger() -> ILoggingProvider:
     settings = get_settings()
     return LoggerService(level=settings.log_level)
 
 
 @lru_cache
-def get_repository() -> IRepositoryPort:
-    # Call dependencies directly inside to keep signature clean for lru_cache
+def get_repository() -> IRepositoryProvider:
     settings = get_settings()
     logger = get_logger()
 
@@ -57,12 +57,12 @@ def get_repository() -> IRepositoryPort:
 
 
 @lru_cache
-def get_styler() -> IChatStylerPort:
+def get_styler() -> IChatStylerProvider:
     return ChatStylerService()
 
 
 @lru_cache
-def get_platform_adapter() -> IPlatformPort:
+def get_platform_adapter() -> IPlatformProvider:
     settings = get_settings()
     logger = get_logger()
     return LinePlatformAdapter(config=settings, logger=logger)
@@ -72,23 +72,23 @@ def get_platform_adapter() -> IPlatformPort:
 
 
 def get_context_loader(
-    repo: IRepositoryPort = Depends(get_repository),
+    repo: IRepositoryProvider = Depends(get_repository),
     config: AppConfig = Depends(get_settings),
-    logger: ILoggingPort = Depends(get_logger),
+    logger: ILoggingProvider = Depends(get_logger),
 ) -> ContextLoader:
     return ContextLoader(repository=repo, config=config, logger=logger)
 
 
 def get_state_manager(
-    repo: IRepositoryPort = Depends(get_repository),
-    logger: ILoggingPort = Depends(get_logger),
+    repo: IRepositoryProvider = Depends(get_repository),
+    logger: ILoggingProvider = Depends(get_logger),
 ) -> StateManager:
     return StateManager(repository=repo, logger=logger)
 
 
 def get_dispatcher(
-    platform: IPlatformPort = Depends(get_platform_adapter),
-    logger: ILoggingPort = Depends(get_logger),
+    platform: IPlatformProvider = Depends(get_platform_adapter),
+    logger: ILoggingProvider = Depends(get_logger),
 ) -> Dispatcher:
     return Dispatcher(platform=platform, logger=logger)
 
@@ -98,7 +98,7 @@ def get_dispatcher(
 
 def get_line_security(
     settings: AppConfig = Depends(get_settings),
-    logger: ILoggingPort = Depends(get_logger),
+    logger: ILoggingProvider = Depends(get_logger),
 ) -> LineSecurityService:
     return LineSecurityService(channel_secret=settings.line_channel_secret, logger=logger)
 
@@ -108,24 +108,27 @@ def get_line_security(
 # ---------------------------------------------------------------------------- #
 
 
-@lru_cache
-def get_quality_filter() -> IQualityFilterPort:
-    """Factory for IQualityFilterPort using ArticleQualityFilter."""
-    return ArticleQualityFilter()
+def get_quality_filter(
+    config: AppConfig = Depends(get_settings),
+) -> IQualityFilterProvider:
+    """Factory for IQualityFilterProvider using ContentRelevanceRule."""
+    return ContentRelevanceRule(
+        spam_keywords=config.collect_spam_keywords,
+        financial_keywords=FINANCIAL_KEYWORDS_TW,
+    )
 
 
-@lru_cache
 def get_screening_policy() -> TechnicalScreeningPolicy:
     """Factory for TechnicalScreeningPolicy with standard rules."""
-    rules = [
+    standard_rules = [
         PriceAboveMovingAverageRule(),
         BullishMacdCrossoverRule(),
         RsiHealthyRule(),
     ]
-    return TechnicalScreeningPolicy(rules)
-
-
-# --- Analysis Use Case Factories ---
-
-
-# --- Analysis Pipeline Assembly ---
+    momentum_safety_rules = [
+        RsiHealthyRule(),
+    ]
+    return TechnicalScreeningPolicy(
+        standard_rules=standard_rules,
+        momentum_safety_rules=momentum_safety_rules,
+    )

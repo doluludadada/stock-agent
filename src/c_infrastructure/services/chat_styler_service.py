@@ -1,10 +1,10 @@
 import re
 
 from src.a_domain.model.chat.message import Message, MessageRole
-from src.a_domain.ports.chat.chat_styler_port import IChatStylerPort
+from src.a_domain.ports.chat.chat_styler_provider import IChatStylerProvider
 
 
-class ChatStylerService(IChatStylerPort):
+class ChatStylerService(IChatStylerProvider):
     _MAX_MESSAGE_LENGTH = 400
     _SPLIT_DELIMITERS = r"\n\n+"
 
