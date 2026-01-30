@@ -1,14 +1,14 @@
 from fastapi import HTTPException, Request, status
 from pydantic import ValidationError
 
-from src.b_application.use_cases.chat.chat_pipeline import Pipeline
+from src.b_application.use_cases.chat.chat_pipeline import ChatPipeline
 from src.c_infrastructure.platforms.line.dto.line_dto import LineWebhookPayload
 from src.c_infrastructure.platforms.line.line_constants import EVENT_TYPE_MESSAGE, MESSAGE_TYPE_TEXT
 from src.c_infrastructure.platforms.line.line_security import LineSecurityService
 
 
 class LineWebhookHandler:
-    def __init__(self, security_service: LineSecurityService, pipeline: Pipeline):
+    def __init__(self, security_service: LineSecurityService, pipeline: ChatPipeline):
         self._security_service = security_service
         self._pipeline = pipeline
 

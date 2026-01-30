@@ -1,12 +1,12 @@
 from src.a_domain.model.chat.message import Message, MessageRole
-from src.b_application.configuration.schemas import AppConfig
+from src.b_application.schemas.config import AppConfig
 from src.b_application.use_cases.chat.ai_processor import AiProcessor
 from src.b_application.use_cases.chat.context_loader import ContextLoader
 from src.b_application.use_cases.chat.dispatcher import Dispatcher
 from src.b_application.use_cases.chat.state_manager import StateManager
 
 
-class Pipeline:
+class ChatPipeline:
     def __init__(
         self,
         loader: ContextLoader,

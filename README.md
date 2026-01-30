@@ -22,6 +22,7 @@ graph TD
     end
 ```
 
+```
 Layer Boundaries
 ┌─────────────────────────────────────────────────────────────────┐
 │ Layer A (Domain)                                                │
@@ -47,3 +48,4 @@ Layer Boundaries
 │   ✗ No framework dependencies                                   │
 │   ✗ Business logic belongs in Domain Rules                      │
 └─────────────────────────────────────────────────────────────────┘
+```

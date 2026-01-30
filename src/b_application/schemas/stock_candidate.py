@@ -7,5 +7,5 @@ from src.a_domain.types.enums import CandidateSource
 @dataclass
 class StockCandidate:
     stock: Stock
-    source: CandidateSource
-    trigger_reason: str
+    source: CandidateSource  # Enum: For Logic (Strict/Loose)
+    trigger_note: str  # String: For Humans (e.g., "PTT爆文")

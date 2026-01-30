@@ -2,7 +2,7 @@ from src.a_domain.model.chat.conversation import Conversation
 from src.a_domain.model.chat.message import Message, MessageRole
 from src.a_domain.ports.system.logging_provider import ILoggingProvider
 from src.a_domain.ports.system.repository_provider import IRepositoryProvider
-from src.b_application.configuration.schemas import AppConfig
+from src.b_application.schemas.config import AppConfig
 
 
 class ContextLoader:

@@ -97,3 +97,15 @@ class CandidateSource(StrEnum):
     SOCIAL_BUZZ = "SOCIAL_BUZZ"  # From real-time social listening (Hot)
     MANUAL_INPUT = "MANUAL_INPUT"  # Manually specified by user
 
+
+class AnalysisStage(StrEnum):
+    """Tracks the lifecycle of an analysis context in the pipeline."""
+
+    PENDING = "PENDING"
+    DATA_COLLECTED = "DATA_COLLECTED"
+    FILTERED_PASS = "FILTERED_PASS"  # Survived Technical Filter
+    FILTERED_FAIL = "FILTERED_FAIL"  # Dropped
+    ENRICHED = "ENRICHED"  # Articles collected
+    ANALYZED = "ANALYZED"  # AI Scored
+    DECIDED = "DECIDED"  # Signal Generated
+

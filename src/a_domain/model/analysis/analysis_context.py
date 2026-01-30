@@ -8,7 +8,7 @@ from src.a_domain.model.indicators.rsi import Rsi
 from src.a_domain.model.market.article import Article
 from src.a_domain.model.market.ohlcv import Ohlcv
 from src.a_domain.model.market.stock import Stock
-from src.a_domain.types.enums import CandidateSource
+from src.a_domain.types.enums import AnalysisStage, CandidateSource
 
 
 @dataclass
@@ -21,6 +21,7 @@ class AnalysisContext:
     stock: Stock
     source: CandidateSource
     trigger_reason: str
+    stage: AnalysisStage = AnalysisStage.PENDING
 
     # --- Data (Collected) ---
     current_price: Decimal | None = None
@@ -34,14 +35,8 @@ class AnalysisContext:
 
     # --- Analysis Result ---
     technical_failures: list[str] = field(default_factory=list)
-    
+
     technical_score: int = 0
     sentiment_score: int = 0
     sentiment_report: AiSentiment | None = None
     combined_score: int = 0
-    
-
-    @property
-    def is_passed(self) -> bool:
-        """Helper property to check validity without storing state."""
-        return len(self.technical_failures) == 0
