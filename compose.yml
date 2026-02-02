@@ -2,7 +2,7 @@ services:
   backend:
     container_name: stock-agent-backend
     build:
-      context: .
+      context: ./backend
       dockerfile: Dockerfile
 
     # Map host port 8800 to container port 8800
