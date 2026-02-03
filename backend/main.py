@@ -1,6 +1,6 @@
 import os
 import uvicorn
-from src.d_presentation.web.app import create_app
+from backend.src.d_presentation.web.app import create_app
 
 app = create_app()
 
@@ -23,3 +23,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+

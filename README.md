@@ -133,7 +133,7 @@ This package provides a comprehensive set of technical analysis rules based on e
 ### Conservative (High Win Rate)
 
 ```python
-from src.a_domain.rules.process.policies.policy_factory import create_conservative_policy
+from backend.src.a_domain.rules.process.policies.policy_factory import create_conservative_policy
 
 policy = create_conservative_policy()
 # Win rate: 60-70%, Trades/week: 2-5
@@ -142,7 +142,7 @@ policy = create_conservative_policy()
 ### Moderate (Balanced)
 
 ```python
-from src.a_domain.rules.process.policies.policy_factory import create_moderate_policy
+from backend.src.a_domain.rules.process.policies.policy_factory import create_moderate_policy
 
 policy = create_moderate_policy()
 # Win rate: 50-60%, Trades/week: 5-10
@@ -151,7 +151,7 @@ policy = create_moderate_policy()
 ### Aggressive (More Trades)
 
 ```python
-from src.a_domain.rules.process.policies.policy_factory import create_aggressive_policy
+from backend.src.a_domain.rules.process.policies.policy_factory import create_aggressive_policy
 
 policy = create_aggressive_policy()
 # Win rate: 40-50%, Trades/week: 10-20
@@ -160,7 +160,7 @@ policy = create_aggressive_policy()
 ### Buzz Stock (Social Media Plays)
 
 ```python
-from src.a_domain.rules.process.policies.policy_factory import create_buzz_stock_policy
+from backend.src.a_domain.rules.process.policies.policy_factory import create_buzz_stock_policy
 
 policy = create_buzz_stock_policy()
 # For PTT/Twitter trending stocks
