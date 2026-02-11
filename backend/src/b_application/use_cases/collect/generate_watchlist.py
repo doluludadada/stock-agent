@@ -1,9 +1,15 @@
+"""
+Use Case: Generate the nightly technical watchlist.
+
+Phase 1: Scans market history -> Saves to Technical Watchlist (DB).
+"""
+
 from datetime import datetime, timedelta
 
-from backend.src.a_domain.model.analysis.analysis_context import AnalysisContext
-from backend.src.a_domain.model.market.stock import Stock
+from backend.src.a_domain.model.analysis.stock_candidate import StockCandidate
 from backend.src.a_domain.model.system.stats import SystemStats
 from backend.src.a_domain.ports.analysis.technical_analysis_provider import ITechnicalAnalysisProvider
+from backend.src.a_domain.ports.input.stock_list_provider import IStockListProvider
 from backend.src.a_domain.ports.input.watchlist_repository import IWatchlistRepository
 from backend.src.a_domain.ports.market.market_data_provider import IMarketDataProvider
 from backend.src.a_domain.ports.system.logging_provider import ILoggingProvider
@@ -13,12 +19,11 @@ from backend.src.a_domain.types.enums import CandidateSource
 
 
 class GenerateWatchlist:
-    """
-    Phase 1: Scans market history -> Saves to Technical Watchlist (DB).
-    """
+    """Phase 1: Scans market history -> Saves to Technical Watchlist (DB)."""
 
     def __init__(
         self,
+        stock_list_provider: IStockListProvider,
         market_provider: IMarketDataProvider,
         watchlist_repo: IWatchlistRepository,
         tech_provider: ITechnicalAnalysisProvider,
@@ -26,6 +31,7 @@ class GenerateWatchlist:
         logger: ILoggingProvider,
         lookback_days: int = 120,
     ):
+        self._stock_list = stock_list_provider
         self._market = market_provider
         self._watchlist = watchlist_repo
         self._tech_calc = tech_provider
@@ -33,12 +39,14 @@ class GenerateWatchlist:
         self._logger = logger
         self._lookback_days = lookback_days
 
-    async def execute(self, universe: list[Stock]) -> SystemStats:
+    async def execute(self) -> SystemStats:
         stats = SystemStats()
+
+        universe = await self._stock_list.get_all()
         stats.total_candidates = len(universe)
         self._logger.info(f"Generating technical watchlist from {len(universe)} symbols...")
 
-        passed_stocks: list[Stock] = []
+        passed_stocks = []
         end_date = datetime.now()
         start_date = end_date - timedelta(days=self._lookback_days)
 
@@ -48,29 +56,27 @@ class GenerateWatchlist:
                 if not history:
                     continue
 
-                # 1. Update calculation call
                 indicators = self._tech_calc.calculate_indicators(history)
 
-                ctx = AnalysisContext(
+                candidate = StockCandidate(
                     stock=stock,
                     source=CandidateSource.TECHNICAL_WATCHLIST,
                     trigger_reason=REASON_NIGHTLY_SCREEN,
                     ohlcv_data=history,
-                    current_price=history[-1].close_price if history else None,
-                    indicators=indicators,  # 2. Pass aggregate
+                    indicators=indicators,
                 )
 
-                if not self._policy.evaluate(ctx):
+                # Nightly: is_intraday=False skips entry timing rules
+                self._policy.evaluate(candidate, is_intraday=False)
+
+                if not candidate.is_eliminated:
                     passed_stocks.append(stock)
 
             except Exception as e:
                 self._logger.error(f"Scan error {stock.stock_id}: {e}")
 
-        # Save to Technical Bucket
         await self._watchlist.save_technical_watchlist(passed_stocks)
 
         stats.passed_technical = len(passed_stocks)
-        self._logger.success(f"Saved {len(passed_stocks)} stocks to Technical Watchlist.")
+        self._logger.info(f"Saved {len(passed_stocks)} stocks to Technical Watchlist.")
         return stats
-
-

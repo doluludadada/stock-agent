@@ -1,105 +1,76 @@
 """
 Process Rules.
 
-This package contains all rules for the "Process" phase of the pipeline:
-1. Technical Screening (Filter candidates)
-2. Scoring (Calculate technical/sentiment scores)
-3. AI Analysis (Sentiment prompts and parsing)
-
-Sub-packages:
+Contains all rules for the "Process" phase of the pipeline:
 - indicators/: Technical analysis rules (trend, momentum, volume, etc.)
 - policies/: Screening policies that orchestrate rules
 - scoring/: Score calculation rules
 - ai/: AI prompt building and response parsing
 """
-# Indicators (all technical rules)
 from backend.src.a_domain.rules.process.indicators import (
+    AdxDirectionRule,
     AdxTrendStrengthRule,
-    BollingerNotOverboughtRule,
+    AtrRangeRule,
+    BollingerPositionRule,
+    BollingerSqueezeRule,
+    BollingerThresholdRule,
     ConsecutiveUpDaysRule,
+    DailyRangeRule,
+    GapRule,
     GoldenCrossRule,
     IntradayMomentumRule,
-    IntradayRangePositionRule,
+    IntradayRangeRule,
     LiquidityRule,
-    MaBullishAlignmentRule,
-    MacdBullishRule,
+    MaAlignmentRule,
+    MacdCrossRule,
+    MacdHistogramRule,
     MacdPositiveRule,
+    MfiThresholdRule,
     MinimumPriceRule,
-    NotCrashingRule,
-    NotGappedUpExcessivelyRule,
-    PriceAboveMa20Rule,
-    PriceAboveMa60Rule,
-    RsiBullishMomentumRule,
-    RsiHealthyRule,
-    RsiNotOverboughtRule,
-    StochasticNotOverboughtRule,
-    VolatilityNotExtremeRule,
-    VolumeAboveAverageRule,
+    ObvTrendRule,
+    PriceAboveMaRule,
+    PriceDropRule,
+    RsiRangeRule,
+    StochasticCrossRule,
+    StochasticThresholdRule,
     VolumeConfirmationRule,
-    VolumeNotDryRule,
+    VolumeRatioRule,
 )
-
-# Policies
-from backend.src.a_domain.rules.process.policies import (
-    AGGRESSIVE,
-    BUZZ_STOCK,
-    CONSERVATIVE,
-    MODERATE,
-    NIGHTLY,
-    TechnicalScreeningPolicy,
-    create_aggressive_policy,
-    create_buzz_stock_policy,
-    create_conservative_policy,
-    create_moderate_policy,
-    create_nightly_screening_policy,
-)
+from backend.src.a_domain.rules.process.policies import TechnicalScreeningPolicy
 
 __all__ = [
-    # === Trend Rules ===
-    "PriceAboveMa20Rule",
-    "PriceAboveMa60Rule",
-    "MaBullishAlignmentRule",
+    # Trend
+    "PriceAboveMaRule",
+    "MaAlignmentRule",
     "GoldenCrossRule",
     "AdxTrendStrengthRule",
-    
-    # === Momentum Rules ===
-    "RsiHealthyRule",
-    "RsiNotOverboughtRule",
-    "RsiBullishMomentumRule",
-    "MacdBullishRule",
+    "AdxDirectionRule",
+    # Momentum
+    "RsiRangeRule",
+    "MacdCrossRule",
     "MacdPositiveRule",
-    "StochasticNotOverboughtRule",
-    
-    # === Volume Rules ===
-    "VolumeAboveAverageRule",
-    "VolumeNotDryRule",
+    "MacdHistogramRule",
+    "StochasticThresholdRule",
+    "StochasticCrossRule",
+    "MfiThresholdRule",
+    # Volume
+    "VolumeRatioRule",
+    "ObvTrendRule",
     "LiquidityRule",
     "MinimumPriceRule",
-    
-    # === Volatility Rules ===
-    "BollingerNotOverboughtRule",
-    "VolatilityNotExtremeRule",
-    
-    # === Entry Timing Rules ===
-    "NotCrashingRule",
+    # Volatility
+    "BollingerThresholdRule",
+    "BollingerPositionRule",
+    "BollingerSqueezeRule",
+    "AtrRangeRule",
+    "DailyRangeRule",
+    # Entry Timing
+    "PriceDropRule",
     "IntradayMomentumRule",
     "VolumeConfirmationRule",
-    "NotGappedUpExcessivelyRule",
-    "IntradayRangePositionRule",
+    "GapRule",
+    "IntradayRangeRule",
     "ConsecutiveUpDaysRule",
-    
-    # === Policies ===
+    # Policy
     "TechnicalScreeningPolicy",
-    "create_conservative_policy",
-    "create_moderate_policy",
-    "create_aggressive_policy",
-    "create_buzz_stock_policy",
-    "create_nightly_screening_policy",
-    "CONSERVATIVE",
-    "MODERATE",
-    "AGGRESSIVE",
-    "BUZZ_STOCK",
-    "NIGHTLY",
 ]
-
-

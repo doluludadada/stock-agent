@@ -1,24 +1,15 @@
-"""
-Trend Following Rules.
-
-Reference: Murphy, J. (1999). Technical Analysis of the Financial Markets.
-"""
 from backend.src.a_domain.rules.process.indicators.trend.trend_rules import (
-    AdxBullishDirectionRule,
+    AdxDirectionRule,
     AdxTrendStrengthRule,
     GoldenCrossRule,
-    MaBullishAlignmentRule,
-    PriceAboveMa20Rule,
-    PriceAboveMa60Rule,
+    MaAlignmentRule,
+    PriceAboveMaRule,
 )
 
 __all__ = [
-    "PriceAboveMa20Rule",
-    "PriceAboveMa60Rule",
-    "MaBullishAlignmentRule",
+    "PriceAboveMaRule",
+    "MaAlignmentRule",
     "GoldenCrossRule",
     "AdxTrendStrengthRule",
-    "AdxBullishDirectionRule",
+    "AdxDirectionRule",
 ]
-
-

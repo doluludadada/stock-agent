@@ -1,0 +1,75 @@
+# Strategy threshold configurations for screening policies.
+# Each strategy defines threshold values that are passed to rule constructors.
+# Default values (from StrategyThresholds model) are used for any omitted fields.
+
+strategies:
+  conservative:
+    # More restrictive thresholds for higher win rate
+    rsi_healthy_min: 50
+    rsi_healthy_max: 65
+    rsi_overbought: 75.0
+    stoch_overbought: 80.0
+    bollinger_max_pct_b: 0.85
+    max_daily_volatility: 0.05
+    min_liquidity: 1000
+    min_price: 20.0
+    volume_dry_ratio: 0.7
+    volume_above_avg_ratio: 1.0
+    volume_breakout_ratio: 1.5
+    adx_min: 20.0
+    adx_max: 50.0
+    bollinger_squeeze_bandwidth: 0.1
+    atr_min_pct: 0.01
+    atr_max_pct: 0.05
+    mfi_overbought: 80.0
+    golden_cross_margin: 0.03
+    max_drop_pct: 0.02
+    min_volume_confirmation: 0.7
+    max_gap_pct: 0.02
+    max_intraday_range_position: 0.7
+    max_consecutive_up_days: 3
+
+  moderate:
+    # Balanced approach — uses many defaults
+    rsi_healthy_min: 50
+    rsi_healthy_max: 70
+    rsi_overbought: 80.0
+    max_daily_volatility: 0.07
+    min_liquidity: 500
+    min_price: 15.0
+    volume_dry_ratio: 0.5
+    volume_above_avg_ratio: 0.8
+    max_drop_pct: 0.03
+    min_volume_confirmation: 0.5
+    max_consecutive_up_days: 4
+
+  aggressive:
+    # Fewer safety gates, more trades
+    rsi_overbought: 85.0
+    max_daily_volatility: 0.07
+    min_liquidity: 300
+    min_price: 10.0
+    volume_dry_ratio: 0.5
+    volume_above_avg_ratio: 0.8
+    max_drop_pct: 0.05
+    min_volume_confirmation: 0.3
+
+  buzz:
+    # Social media trending stocks — higher risk
+    rsi_overbought: 80.0
+    max_daily_volatility: 0.10
+    min_liquidity: 500
+    min_price: 10.0
+    volume_above_avg_ratio: 1.0
+    max_drop_pct: 0.03
+    min_volume_confirmation: 1.0
+
+  nightly:
+    # After-hours watchlist generation — no entry timing
+    rsi_healthy_min: 50
+    rsi_healthy_max: 70
+    rsi_overbought: 75.0
+    min_liquidity: 500
+    min_price: 15.0
+    volume_above_avg_ratio: 0.8
+    volume_dry_ratio: 0.5

@@ -1,31 +1,17 @@
-"""
-Entry Timing Rules.
-
-These rules are used ONLY during intraday trading.
-
-Reference:
-- Elder, A. (1993). Trading for a Living.
-- Schwartz, M. (1998). Pit Bull.
-- Connors, L. & Raschke, L. (1995). Street Smarts.
-"""
 from backend.src.a_domain.rules.process.indicators.entry_timing.entry_timing_rules import (
     ConsecutiveUpDaysRule,
+    GapRule,
     IntradayMomentumRule,
-    IntradayRangePositionRule,
-    NotCrashingRule,
-    NotGappedUpExcessivelyRule,
-    TradingHoursRule,
+    IntradayRangeRule,
+    PriceDropRule,
     VolumeConfirmationRule,
 )
 
 __all__ = [
-    "NotCrashingRule",
+    "PriceDropRule",
     "IntradayMomentumRule",
     "VolumeConfirmationRule",
-    "NotGappedUpExcessivelyRule",
-    "IntradayRangePositionRule",
-    "TradingHoursRule",
+    "GapRule",
+    "IntradayRangeRule",
     "ConsecutiveUpDaysRule",
 ]
-
-

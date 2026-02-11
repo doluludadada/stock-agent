@@ -1,6 +1,6 @@
 from typing import Protocol
 
-from backend.src.a_domain.model.analysis.web_search_result import WebSearchResult
+from a_domain.model.chat.web_search_result import WebSearchResult
 
 
 class IWebSearchProvider(Protocol):

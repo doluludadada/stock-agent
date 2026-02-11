@@ -1,11 +1,8 @@
-# src\a_domain\rules\trading\action.py
 from backend.src.a_domain.types.enums import SignalAction
 
 
 class ActionRule:
-    """
-    Rule: Maps a Score (0-100) to an Action (BUY/SELL/HOLD).
-    """
+    """Maps a Score (0-100) to an Action (BUY/SELL/HOLD)."""
 
     def __init__(self, buy_threshold: int = 70, sell_threshold: int = 30):
         self.buy_threshold = buy_threshold
@@ -18,5 +15,3 @@ class ActionRule:
             return SignalAction.SELL
         else:
             return SignalAction.HOLD
-
-

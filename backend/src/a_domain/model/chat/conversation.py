@@ -1,9 +1,7 @@
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
-
 from backend.src.a_domain.model.chat.message import Message
-
 
 @dataclass(frozen=True)
 class Conversation:
@@ -15,19 +13,12 @@ class Conversation:
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def add_message(self, message: Message):
-        """ """
         new_messages = self.messages + (message,)
         return replace(self, messages=new_messages, updated_at=datetime.now(timezone.utc))
 
     def add_messages(self, messages: list[Message] | tuple[Message, ...]):
-        """ """
         new_messages = self.messages + tuple(messages)
         return replace(self, messages=new_messages, updated_at=datetime.now(timezone.utc))
 
     def clear_history(self):
-        """
-        clean message history, but keep user's conversation stage.
-        """
         return replace(self, messages=tuple(), updated_at=datetime.now(timezone.utc))
-
-

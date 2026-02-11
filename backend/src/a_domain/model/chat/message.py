@@ -11,5 +11,3 @@ class Message:
     role: MessageRole
     content: str
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-
-

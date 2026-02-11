@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import httpx
 
-from backend.src.a_domain.model.analysis.web_search_result import WebSearchResult
+from a_domain.model.chat.web_search_result import WebSearchResult
 from backend.src.a_domain.ports.chat.web_search_provider import IWebSearchProvider
 from backend.src.a_domain.ports.system.logging_provider import ILoggingProvider
 from backend.src.b_application.schemas.config import AppConfig

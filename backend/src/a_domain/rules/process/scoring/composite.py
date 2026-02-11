@@ -1,7 +1,5 @@
 class CompositeScoreRule:
-    """
-    Rule: Combines Technical and Sentiment scores into a final weighted score.
-    """
+    """Combines Technical and Sentiment scores into a final weighted score."""
 
     def __init__(self, technical_weight: float = 0.6, sentiment_weight: float = 0.4):
         total_weight = technical_weight + sentiment_weight
@@ -21,5 +19,3 @@ class CompositeScoreRule:
         )
 
         return int(max(0, min(100, combined_score)))
-
-

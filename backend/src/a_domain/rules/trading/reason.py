@@ -1,29 +1,25 @@
-# src\a_domain\rules\trading\reason.py
-from backend.src.a_domain.model.analysis.analysis_context import AnalysisContext
+from backend.src.a_domain.model.analysis.stock_candidate import StockCandidate
 
 
 class ReasonRule:
-    """
-    Rule: Builds a human-readable reason string for the trade signal.
-    """
+    """Builds a human-readable reason string for the trade signal."""
 
-    def build(self, context: AnalysisContext) -> str:
-        reason_parts: list[str] = []
+    def build(self, candidate: StockCandidate) -> str:
+        parts: list[str] = []
 
-        # Technical Status
-        if context.is_passed:
-            reason_parts.append("Tech: PASS")
+        if candidate.is_eliminated:
+            failed_str = ", ".join(candidate.hard_failures)
+            parts.append(f"Tech: FAIL[{failed_str}]")
         else:
-            failed_str = ",".join(context.technical_failures)
-            reason_parts.append(f"Tech: FAIL[{failed_str}]")
+            parts.append("Tech: PASS")
+            if candidate.soft_failures:
+                soft_str = ", ".join(candidate.soft_failures[:3])
+                parts.append(f"Soft: [{soft_str}]")
 
-        # Sentiment Status
-        if context.sentiment_report:
-            if context.sentiment_report.bullish_factors:
-                reason_parts.append(f"Bull: {context.sentiment_report.bullish_factors[:3]}")
+        if candidate.sentiment_report:
+            if candidate.sentiment_report.bullish_factors:
+                parts.append(f"Bull: {candidate.sentiment_report.bullish_factors[:3]}")
 
-        reason_parts.append(f"Score: {context.combined_score}")
+        parts.append(f"Score: {candidate.combined_score}")
 
-        return " | ".join(reason_parts)
-
-
+        return " | ".join(parts)

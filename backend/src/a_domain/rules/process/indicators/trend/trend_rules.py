@@ -1,165 +1,120 @@
 """
 Trend Following Rules.
 
-These rules identify whether a stock is in an uptrend suitable for buying.
-
 Reference:
 - Murphy, J. (1999). Technical Analysis of the Financial Markets, Chapter 9.
-  "The trend is your friend" - Trade in the direction of the trend.
-  
 - Elder, A. (1993). Trading for a Living, Chapter 5.
-  "Use moving averages to identify the trend, then use oscillators to find entry points."
 """
+
 from decimal import Decimal
-from typing import TYPE_CHECKING
 
+from backend.src.a_domain.model.analysis.stock_candidate import StockCandidate
+from backend.src.a_domain.model.indicators.technical_indicators import MovingAverages
 from backend.src.a_domain.rules.base import TradingRule
-
-if TYPE_CHECKING:
-    from backend.src.a_domain.model.analysis.analysis_context import AnalysisContext
+from backend.src.a_domain.types.enums import MaPeriod
 
 
-class PriceAboveMa20Rule(TradingRule):
-    """
-    Rule: Price must be above the 20-period Moving Average.
-    
-    Rationale:
-    The 20-day MA represents the average price over the past month.
-    Price above MA20 indicates short-term bullish momentum.
-    
-    Reference:
-    - Murphy, J. (1999). "The 20-day moving average is widely watched 
-      by short-term traders as a measure of the intermediate trend."
-    """
+class PriceAboveMaRule(TradingRule):
+    """Price must be above the specified Moving Average."""
+
+    def __init__(self, ma_period: MaPeriod):
+        self._ma_period = ma_period
 
     @property
     def name(self) -> str:
-        return "Price > MA20"
+        return f"Price Above {self._ma_period.value}"
 
-    def is_satisfied(self, context: "AnalysisContext") -> bool:
-        if context.ma is None or context.ma.ma_20 is None:
+    def _get_ma_value(self, ma: MovingAverages) -> Decimal | None:
+        match self._ma_period:
+            case MaPeriod.MA_5:
+                return ma.ma_5
+            case MaPeriod.MA_10:
+                return ma.ma_10
+            case MaPeriod.MA_20:
+                return ma.ma_20
+            case MaPeriod.MA_60:
+                return ma.ma_60
+            case MaPeriod.MA_120:
+                return ma.ma_120
+            case _:
+                return None
+
+    def is_satisfied(self, candidate: "StockCandidate") -> bool:
+        if candidate.indicators is None or candidate.indicators.ma is None:
             return False
-        if context.current_price is None:
+        ma_value = self._get_ma_value(candidate.indicators.ma)
+        if ma_value is None or candidate.current_price is None:
             return False
-        return context.current_price > context.ma.ma_20
+        return candidate.current_price > ma_value
 
 
-class PriceAboveMa60Rule(TradingRule):
-    """
-    Rule: Price must be above the 60-period Moving Average.
-    
-    Rationale:
-    The 60-day (quarterly) MA represents the medium-term trend.
-    Price above MA60 confirms the stock is in a sustained uptrend.
-    
-    Reference:
-    - Murphy, J. (1999). "The 50-60 day moving average is considered
-      the dividing line between the short and long-term trend."
-    """
+class MaAlignmentRule(TradingRule):
+    """Fast MA must be above slow MA (bullish alignment)."""
+
+    def __init__(self, fast: MaPeriod = MaPeriod.MA_20, slow: MaPeriod = MaPeriod.MA_60):
+        self._fast = fast
+        self._slow = slow
 
     @property
     def name(self) -> str:
-        return "Price > MA60"
+        return f"{self._fast.value} > {self._slow.value} Alignment"
 
-    def is_satisfied(self, context: "AnalysisContext") -> bool:
-        if context.ma is None or context.ma.ma_60 is None:
+    def _get_ma_value(self, ma: MovingAverages, period: MaPeriod) -> Decimal | None:
+        match period:
+            case MaPeriod.MA_5:
+                return ma.ma_5
+            case MaPeriod.MA_10:
+                return ma.ma_10
+            case MaPeriod.MA_20:
+                return ma.ma_20
+            case MaPeriod.MA_60:
+                return ma.ma_60
+            case MaPeriod.MA_120:
+                return ma.ma_120
+            case _:
+                return None
+
+    def is_satisfied(self, candidate: "StockCandidate") -> bool:
+        if candidate.indicators is None or candidate.indicators.ma is None:
             return False
-        if context.current_price is None:
+        ma = candidate.indicators.ma
+        fast_val = self._get_ma_value(ma, self._fast)
+        slow_val = self._get_ma_value(ma, self._slow)
+        if fast_val is None or slow_val is None:
             return False
-        return context.current_price > context.ma.ma_60
-
-
-class MaBullishAlignmentRule(TradingRule):
-    """
-    Rule: Moving averages must be in bullish alignment (MA20 > MA60).
-    
-    Rationale:
-    When shorter-term MA is above longer-term MA, it indicates
-    recent buying pressure is stronger than historical average.
-    This is a classic trend-following signal.
-    
-    Reference:
-    - Murphy, J. (1999). "When shorter-term averages cross above
-      longer-term averages, it's bullish. When they cross below, it's bearish."
-    """
-
-    @property
-    def name(self) -> str:
-        return "MA20 > MA60 (Bullish Alignment)"
-
-    def is_satisfied(self, context: "AnalysisContext") -> bool:
-        if context.ma is None:
-            return False
-        if context.ma.ma_20 is None or context.ma.ma_60 is None:
-            return False
-        return context.ma.ma_20 > context.ma.ma_60
+        return fast_val > slow_val
 
 
 class GoldenCrossRule(TradingRule):
-    """
-    Rule: MA20 recently crossed above MA60 (within lookback period).
-    
-    Rationale:
-    The "Golden Cross" is one of the most reliable bullish signals.
-    It indicates a shift from bearish to bullish momentum.
-    
-    Reference:
-    - Murphy, J. (1999). "The golden cross occurs when a shorter-term
-      moving average crosses above a longer-term moving average."
-    - Bulkowski, T. (2005). Encyclopedia of Chart Patterns.
-      "Golden crosses have a 70% success rate in bull markets."
-    
-    Note: This rule requires OHLCV history to detect the crossover.
-    """
+    """MA20 recently crossed above MA60 (within margin)."""
 
-    def __init__(self, lookback_days: int = 5):
-        """
-        Args:
-            lookback_days: Number of days to look back for the crossover.
-        """
-        self._lookback = lookback_days
+    def __init__(self, max_cross_margin: float = 0.03):
+        self._max_cross_margin = max_cross_margin
 
     @property
     def name(self) -> str:
-        return f"Golden Cross (within {self._lookback} days)"
+        return "Golden Cross"
 
-    def is_satisfied(self, context: "AnalysisContext") -> bool:
-        # This requires historical MA data which isn't in current model
-        # For now, check if MA20 just crossed above MA60 (MA20 > MA60 and close)
-        if context.ma is None:
+    def is_satisfied(self, candidate: "StockCandidate") -> bool:
+        if candidate.indicators is None or candidate.indicators.ma is None:
             return False
-        if context.ma.ma_20 is None or context.ma.ma_60 is None:
+
+        ma = candidate.indicators.ma
+        if ma.ma_20 is None or ma.ma_60 is None:
             return False
-        
-        ma_20 = float(context.ma.ma_20)
-        ma_60 = float(context.ma.ma_60)
-        
-        # Check if MA20 is above MA60 but only by a small margin (recent cross)
+
+        ma_20 = float(ma.ma_20)
+        ma_60 = float(ma.ma_60)
+
         if ma_20 <= ma_60:
             return False
-        
-        # Recent cross: MA20 is above MA60 but by less than 3%
+
         cross_margin = (ma_20 - ma_60) / ma_60
-        return 0 < cross_margin < 0.03
+        return 0 < cross_margin < self._max_cross_margin
 
 
 class AdxTrendStrengthRule(TradingRule):
-    """
-    Rule: ADX must indicate a trending market (not range-bound).
-    
-    Rationale:
-    ADX measures trend strength regardless of direction.
-    Only trade when there's a clear trend to follow.
-    
-    Interpretation:
-    - ADX < 20: No trend (avoid trading)
-    - ADX 20-40: Developing trend (good entry)
-    - ADX > 40: Strong trend (may be late entry)
-    
-    Reference:
-    - Wilder, J.W. (1978). New Concepts in Technical Trading Systems.
-      "ADX is the ultimate trend strength indicator."
-    """
+    """ADX must indicate a trending market (not range-bound, not exhausted)."""
 
     def __init__(self, min_adx: float = 20.0, max_adx: float = 50.0):
         self._min_adx = min_adx
@@ -167,39 +122,27 @@ class AdxTrendStrengthRule(TradingRule):
 
     @property
     def name(self) -> str:
-        return f"ADX Trend ({self._min_adx}-{self._max_adx})"
+        return "ADX Trend Strength"
 
-    def is_satisfied(self, context: "AnalysisContext") -> bool:
-        if not hasattr(context, 'adx') or context.adx is None:
-            # If ADX not available, pass the rule (don't block)
+    def is_satisfied(self, candidate: "StockCandidate") -> bool:
+        if candidate.indicators is None or candidate.indicators.adx is None:
             return True
-        if context.adx.adx is None:
+        if candidate.indicators.adx.adx is None:
             return True
-        return self._min_adx <= context.adx.adx <= self._max_adx
+        return self._min_adx <= candidate.indicators.adx.adx <= self._max_adx
 
 
-class AdxBullishDirectionRule(TradingRule):
-    """
-    Rule: +DI must be greater than -DI (bullish direction).
-    
-    Rationale:
-    +DI measures upward movement strength.
-    -DI measures downward movement strength.
-    For bullish trades, +DI should dominate.
-    
-    Reference:
-    - Wilder, J.W. (1978). "When +DI is above -DI, bulls are in control."
-    """
+class AdxDirectionRule(TradingRule):
+    """+DI must be greater than -DI (bullish direction)."""
 
     @property
     def name(self) -> str:
-        return "+DI > -DI (Bullish Direction)"
+        return "ADX Bullish Direction"
 
-    def is_satisfied(self, context: "AnalysisContext") -> bool:
-        if not hasattr(context, 'adx') or context.adx is None:
+    def is_satisfied(self, candidate: "StockCandidate") -> bool:
+        if candidate.indicators is None or candidate.indicators.adx is None:
             return True
-        if context.adx.plus_di is None or context.adx.minus_di is None:
+        adx = candidate.indicators.adx
+        if adx.plus_di is None or adx.minus_di is None:
             return True
-        return context.adx.plus_di > context.adx.minus_di
-
-
+        return adx.plus_di > adx.minus_di

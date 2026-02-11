@@ -1,9 +1,9 @@
 """
 Use Case: Filter candidates through technical analysis.
 
-The funnel gatekeeper - only survivors pass to the next stage.
+The funnel gatekeeper — only survivors pass to the next stage.
 """
-from backend.src.a_domain.model.analysis.analysis_context import AnalysisContext
+from backend.src.a_domain.model.analysis.stock_candidate import StockCandidate
 from backend.src.a_domain.ports.analysis.technical_analysis_provider import ITechnicalAnalysisProvider
 from backend.src.a_domain.ports.system.logging_provider import ILoggingProvider
 from backend.src.a_domain.rules.process.policies.technical_screening import TechnicalScreeningPolicy
@@ -14,9 +14,9 @@ from backend.src.a_domain.types.enums import AnalysisStage
 class FilterCandidates:
     """
     The Funnel Gatekeeper.
-    
+
     Applies technical analysis and only allows qualified stocks to proceed.
-    This prevents wasting AI API calls on stocks that don't pass basic criteria.
+    Prevents wasting AI API calls on stocks that don't pass basic criteria.
     """
 
     def __init__(
@@ -33,41 +33,40 @@ class FilterCandidates:
 
     def execute(
         self,
-        contexts: list[AnalysisContext],
+        candidates: list[StockCandidate],
         is_intraday: bool = True,
-    ) -> list[AnalysisContext]:
-        self._logger.info(f"Filtering {len(contexts)} candidates (intraday={is_intraday})...")
-        survivors: list[AnalysisContext] = []
+    ) -> list[StockCandidate]:
+        self._logger.info(f"Filtering {len(candidates)} candidates (intraday={is_intraday})...")
+        survivors: list[StockCandidate] = []
 
-        for ctx in contexts:
-            # Data integrity check
-            if not ctx.ohlcv_data or ctx.current_price is None:
-                ctx.stage = AnalysisStage.FILTERED_FAIL
+        for candidate in candidates:
+            if not candidate.ohlcv_data or candidate.current_price is None:
+                candidate.stage = AnalysisStage.FILTERED_FAIL
                 continue
 
             try:
-                # 1. Calculate technical indicators (One call)
-                ctx.indicators = self._tech_provider.calculate_indicators(ctx.ohlcv_data)
+                # 1. Calculate technical indicators
+                candidate.indicators = self._tech_provider.calculate_indicators(candidate.ohlcv_data)
 
-                # 2. Evaluate rules
-                failed_rules = self._policy.evaluate(ctx, is_intraday=is_intraday)
-                ctx.technical_failures = failed_rules
+                # 2. Evaluate rules (writes to candidate.hard/soft_failures/observations)
+                self._policy.evaluate(candidate, is_intraday=is_intraday)
 
                 # 3. Calculate technical score
-                ctx.technical_score = self._calculator.calculate(ctx)
+                candidate.technical_score = self._calculator.calculate(candidate)
 
-                # 4. Funnel decision (Logic moved here from Context)
-                if not failed_rules:
-                    ctx.stage = AnalysisStage.FILTERED_PASS
-                    survivors.append(ctx)
+                # 4. Funnel decision
+                if not candidate.is_eliminated:
+                    candidate.stage = AnalysisStage.FILTERED_PASS
+                    survivors.append(candidate)
                 else:
-                    ctx.stage = AnalysisStage.FILTERED_FAIL
-                    self._logger.debug(f"Drop {ctx.stock.stock_id}: Failed {failed_rules}")
+                    candidate.stage = AnalysisStage.FILTERED_FAIL
+                    self._logger.debug(
+                        f"Drop {candidate.stock.stock_id}: Failed {candidate.hard_failures}"
+                    )
 
             except Exception as e:
-                self._logger.error(f"Error filtering {ctx.stock.stock_id}: {e}")
-                ctx.stage = AnalysisStage.FILTERED_FAIL
+                self._logger.error(f"Error filtering {candidate.stock.stock_id}: {e}")
+                candidate.stage = AnalysisStage.FILTERED_FAIL
 
+        self._logger.info(f"Survivors: {len(survivors)}/{len(candidates)}")
         return survivors
-
-

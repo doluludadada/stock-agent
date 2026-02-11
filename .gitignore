@@ -27,3 +27,4 @@ wheels/
 /refactor_imports.py
 /design_report.md
 /.ruff_cache
+/.vscode

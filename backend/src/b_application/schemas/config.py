@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import Field, computed_field, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
-
 from backend.src.a_domain.types.enums import AiProvider, DatabaseProvider
+from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class AppConfig(BaseSettings):
@@ -142,6 +141,27 @@ class AppConfig(BaseSettings):
         le=100,
         description="Maximum combined score to generate SELL signal.",
     )
+
+    # --- Technical Analysis Config ---
+    rsi_bullish_threshold: float = Field(
+        default=50.0,
+        ge=0.0,
+        le=100.0,
+        description="RSI threshold to consider momentum bullish (default 50).",
+    )
+    stoch_overbought_threshold: float = Field(
+        default=80.0,
+        ge=0.0,
+        le=100.0,
+        description="Stochastic %K threshold to consider overbought (default 80).",
+    )
+    mfi_overbought_threshold: float = Field(
+        default=80.0,
+        ge=0.0,
+        le=100.0,
+        description="MFI threshold to consider overbought (default 80).",
+    )
+
     risk_per_trade_pct: float = Field(
         default=0.02,
         ge=0.01,
@@ -220,3 +240,48 @@ class AppConfig(BaseSettings):
     )
 
 
+class StrategyThresholds(BaseModel):
+    """Threshold values for one screening strategy, loaded from YAML."""
+
+    model_config = ConfigDict(frozen=True)
+
+    # Trend
+    rsi_healthy_min: float = 50.0
+    rsi_healthy_max: float = 70.0
+    rsi_overbought: float = 80.0
+
+    # Safety
+    stoch_overbought: float = 80.0
+    bollinger_max_pct_b: float = 0.9
+    max_daily_volatility: float = 0.07
+    min_liquidity: int = 500
+    min_price: float = 15.0
+    volume_dry_ratio: float = 0.5
+
+    # Volume
+    volume_above_avg_ratio: float = 1.0
+    volume_breakout_ratio: float = 1.5
+
+    # ADX
+    adx_min: float = 20.0
+    adx_max: float = 50.0
+
+    # Bollinger
+    bollinger_squeeze_bandwidth: float = 0.1
+
+    # ATR
+    atr_min_pct: float = 0.01
+    atr_max_pct: float = 0.05
+
+    # MFI
+    mfi_overbought: float = 80.0
+
+    # Golden Cross
+    golden_cross_margin: float = 0.03
+
+    # Entry Timing
+    max_drop_pct: float = 0.03
+    min_volume_confirmation: float = 0.5
+    max_gap_pct: float = 0.03
+    max_intraday_range_position: float = 0.8
+    max_consecutive_up_days: int = 4

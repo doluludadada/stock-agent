@@ -20,10 +20,18 @@ class DatabaseProvider(StrEnum):
 
 
 class MarketType(StrEnum):
-    TWSE = "TWSE"  # Taiwan Stock Exchange
-    TPEX = "TPEX"  # Taipei Exchange (OTC)
+    TWSE = "TWSE"
+    TPEX = "TPEX"
     NASDAQ = "NASDAQ"
     NYSE = "NYSE"
+
+
+class MaPeriod(StrEnum):
+    MA_5 = "MA_5"
+    MA_10 = "MA_10"
+    MA_20 = "MA_20"
+    MA_60 = "MA_60"
+    MA_120 = "MA_120"
 
 
 class SignalAction(StrEnum):
@@ -49,37 +57,33 @@ class OrderAction(StrEnum):
 
 
 class OrderStatus(StrEnum):
-    PENDING = "PENDING"  # Created in system, not sent to broker
-    SUBMITTED = "SUBMITTED"  # Sent to broker
+    PENDING = "PENDING"
+    SUBMITTED = "SUBMITTED"
     FILLED = "FILLED"
     CANCELLED = "CANCELLED"
     FAILED = "FAILED"
 
 
 class TimeInForce(StrEnum):
-    ROD = "ROD"  # Rest of Day
-    IOC = "IOC"  # Immediate or Cancel
-    FOK = "FOK"  # Fill or Kill
+    ROD = "ROD"
+    IOC = "IOC"
+    FOK = "FOK"
 
 
 class InformationSource(StrEnum):
-    """Where the data comes from."""
-
-    TWSE_MOPS = "TWSE_MOPS"  # Official Filings
-    NEWS_MEDIA = "NEWS_MEDIA"  # Yahoo, Anue, etc.
-    PTT_STOCK = "PTT_STOCK"  # Social: Professional Board
-    PTT_GOSSIPING = "PTT_GOSSIPING"  # Social: General Board
-    REUNION = "REUNION"  # CMoney / Stock Dog
+    TWSE_MOPS = "TWSE_MOPS"
+    NEWS_MEDIA = "NEWS_MEDIA"
+    PTT_STOCK = "PTT_STOCK"
+    PTT_GOSSIPING = "PTT_GOSSIPING"
+    REUNION = "REUNION"
 
 
 class ContentType(StrEnum):
-    """The nature of the content for AI weighting."""
-
-    FACT = "FACT"  # High weight: Official data
-    REPORT = "REPORT"  # Medium weight: News reporting
-    ANALYSIS = "ANALYSIS"  # High/Med weight: Deep user analysis (Long form)
-    DISCUSSION = "DISCUSSION"  # Low weight: Short comments
-    NOISE = "NOISE"  # Ignore
+    FACT = "FACT"
+    REPORT = "REPORT"
+    ANALYSIS = "ANALYSIS"
+    DISCUSSION = "DISCUSSION"
+    NOISE = "NOISE"
 
 
 class SentimentType(StrEnum):
@@ -89,25 +93,16 @@ class SentimentType(StrEnum):
 
 
 class CandidateSource(StrEnum):
-    """
-    Identifies how a stock entered the analysis pipeline.
-    """
-
-    TECHNICAL_WATCHLIST = "TECHNICAL_WATCHLIST"  # From nightly technical screening (Cold)
-    SOCIAL_BUZZ = "SOCIAL_BUZZ"  # From real-time social listening (Hot)
-    MANUAL_INPUT = "MANUAL_INPUT"  # Manually specified by user
+    TECHNICAL_WATCHLIST = "TECHNICAL_WATCHLIST"
+    SOCIAL_BUZZ = "SOCIAL_BUZZ"
+    MANUAL_INPUT = "MANUAL_INPUT"
 
 
 class AnalysisStage(StrEnum):
-    """Tracks the lifecycle of an analysis context in the pipeline."""
-
     PENDING = "PENDING"
     DATA_COLLECTED = "DATA_COLLECTED"
-    FILTERED_PASS = "FILTERED_PASS"  # Survived Technical Filter
-    FILTERED_FAIL = "FILTERED_FAIL"  # Dropped
-    ENRICHED = "ENRICHED"  # Articles collected
-    ANALYZED = "ANALYZED"  # AI Scored
-    DECIDED = "DECIDED"  # Signal Generated
-
-
-
+    FILTERED_PASS = "FILTERED_PASS"
+    FILTERED_FAIL = "FILTERED_FAIL"
+    ENRICHED = "ENRICHED"
+    ANALYZED = "ANALYZED"
+    DECIDED = "DECIDED"

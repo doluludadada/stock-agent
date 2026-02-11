@@ -5,7 +5,7 @@ from dataclasses import dataclass
 class AiSentiment:
     """
     Represents the structured output from the LLM.
-    This is a Value Object inside AnalysisContext.
+    This is a Value Object inside StockCandidate.
     """
 
     score: int  # 0-100
@@ -13,5 +13,3 @@ class AiSentiment:
     bearish_factors: list[str]
     summary: str
     raw_response: str
-
-
