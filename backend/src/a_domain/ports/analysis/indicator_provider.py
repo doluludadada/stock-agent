@@ -4,5 +4,5 @@ from backend.src.a_domain.model.indicators.technical_indicators import Technical
 from backend.src.a_domain.model.market.ohlcv import Ohlcv
 
 
-class ITechnicalAnalysisProvider(Protocol):
+class IIndicatorProvider(Protocol):
     def calculate_indicators(self, data: list[Ohlcv]) -> TechnicalIndicators: ...

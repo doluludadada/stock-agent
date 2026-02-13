@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validat
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+#TODO: Rewrite this file.
 class AppConfig(BaseSettings):
     """
     Defines the configuration schema required by the application.

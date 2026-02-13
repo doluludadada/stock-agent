@@ -1,6 +1,8 @@
 from typing import Protocol
+
 from backend.src.a_domain.model.market.article import Article
 
-class IArticleRepository(Protocol):
+
+class INewsRepository(Protocol):
     async def get_by_stock_id(self, stock_id: str, limit: int = 10) -> list[Article]: ...
     async def save(self, articles: list[Article]) -> None: ...

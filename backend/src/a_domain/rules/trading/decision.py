@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from backend.src.a_domain.model.analysis.stock_candidate import StockCandidate
+from backend.src.a_domain.model.market.stock import Stock
 from backend.src.a_domain.model.trading.signal import TradeSignal
 from backend.src.a_domain.rules.trading.action import ActionRule
 from backend.src.a_domain.rules.trading.reason import ReasonRule
@@ -26,7 +26,7 @@ class DecisionRule:
         self._capital = total_capital
         self._risk_pct = risk_pct
 
-    def decide(self, candidate: StockCandidate) -> TradeSignal | None:
+    def decide(self, candidate: Stock) -> TradeSignal | None:
         if candidate.current_price is None:
             return None
 
@@ -42,7 +42,7 @@ class DecisionRule:
             )
 
         return TradeSignal(
-            stock_id=candidate.stock.stock_id,
+            stock_id=candidate.stock_id,
             action=action,
             price_at_signal=candidate.current_price,
             source=SignalSource.HYBRID,

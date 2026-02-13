@@ -1,4 +1,4 @@
-from backend.src.a_domain.model.analysis.stock_candidate import StockCandidate
+from backend.src.a_domain.model.market.stock import Stock
 from backend.src.a_domain.types.enums import CandidateSource
 
 
@@ -11,7 +11,7 @@ class SentimentPromptBuilder:
         self._fundamental_template = fundamental_template
         self._momentum_template = momentum_template
 
-    def build(self, candidate: StockCandidate) -> str:
+    def build(self, candidate: Stock) -> str:
         selected = candidate.articles[: self._MAX_ARTICLES]
         entries = []
         for i, article in enumerate(selected, 1):
@@ -23,5 +23,5 @@ class SentimentPromptBuilder:
             joined += f"\n\n[Past Analysis]\n{candidate.historical_context}"
 
         if candidate.source == CandidateSource.SOCIAL_BUZZ:
-            return self._momentum_template.format(stock_id=candidate.stock.stock_id, articles_text=joined)
-        return self._fundamental_template.format(stock_id=candidate.stock.stock_id, articles_text=joined)
+            return self._momentum_template.format(stock_id=candidate.stock_id, articles_text=joined)
+        return self._fundamental_template.format(stock_id=candidate.stock_id, articles_text=joined)

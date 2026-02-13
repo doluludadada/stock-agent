@@ -12,8 +12,8 @@ Each phase can be invoked independently or as a full sequence.
 from backend.src.a_domain.model.system.stats import SystemStats
 from backend.src.a_domain.ports.system.logging_provider import ILoggingProvider
 from backend.src.b_application.pipeline import Pipeline
-from backend.src.b_application.use_cases.collect.generate_watchlist import GenerateWatchlist
-from backend.src.b_application.use_cases.collect.scan_trending_stocks import ScanTrendingStocks
+from backend.src.b_application.use_cases.collect.market_scan import MarketScan
+from backend.src.b_application.use_cases.collect.watchlist import Watchlist
 
 
 class WorkflowOrchestrator:
@@ -29,13 +29,13 @@ class WorkflowOrchestrator:
 
     def __init__(
         self,
-        generate_watchlist: GenerateWatchlist,
-        scan_trending: ScanTrendingStocks,
+        watchlist: Watchlist,
+        market_scan: MarketScan,
         intraday_pipeline: Pipeline,
         logger: ILoggingProvider,
     ):
-        self._watchlist = generate_watchlist
-        self._trending = scan_trending
+        self._watchlist = watchlist
+        self._market_scan = market_scan
         self._pipeline = intraday_pipeline
         self._logger = logger
 
@@ -58,7 +58,7 @@ class WorkflowOrchestrator:
         """Phase 2: Scan social media for trending stocks."""
         self._logger.info("=== Phase 2: Social Buzz Scan ===")
         try:
-            stats = await self._trending.execute()
+            stats = await self._market_scan.execute()
             self._logger.info(f"Buzz scan done. Found: {stats.total_candidates}")
         except Exception as e:
             self._logger.exception(f"Phase 2 failed: {e}")

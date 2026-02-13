@@ -4,7 +4,7 @@ from backend.src.a_domain.ports.input.watchlist_repository import IWatchlistRepo
 from backend.src.a_domain.ports.system.logging_provider import ILoggingProvider
 
 
-class ScanTrendingStocks:
+class MarketScan:
     """
     Phase 2: Fetches from Provider (Web) -> Saves to Buzz Watchlist (DB).
     """
@@ -14,6 +14,7 @@ class ScanTrendingStocks:
         social_provider: ISocialMediaProvider,
         watchlist_repo: IWatchlistRepository,
         logger: ILoggingProvider,
+        # TODO: It should be set in config.yaml
         limit: int = 10,
     ):
         self._social = social_provider

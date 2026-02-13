@@ -6,32 +6,32 @@ Phase 1: Scans market history -> Saves to Technical Watchlist (DB).
 
 from datetime import datetime, timedelta
 
-from backend.src.a_domain.model.analysis.stock_candidate import StockCandidate
+from backend.src.a_domain.model.market.stock import Stock
 from backend.src.a_domain.model.system.stats import SystemStats
-from backend.src.a_domain.ports.analysis.technical_analysis_provider import ITechnicalAnalysisProvider
-from backend.src.a_domain.ports.input.stock_list_provider import IStockListProvider
+from backend.src.a_domain.ports.analysis.indicator_provider import IIndicatorProvider
+from backend.src.a_domain.ports.input.stock_provider import IStockProvider
 from backend.src.a_domain.ports.input.watchlist_repository import IWatchlistRepository
-from backend.src.a_domain.ports.market.market_data_provider import IMarketDataProvider
+from backend.src.a_domain.ports.market.market_provider import IMarketProvider
 from backend.src.a_domain.ports.system.logging_provider import ILoggingProvider
 from backend.src.a_domain.rules.process.policies.technical_screening import TechnicalScreeningPolicy
 from backend.src.a_domain.types.constants import REASON_NIGHTLY_SCREEN
 from backend.src.a_domain.types.enums import CandidateSource
 
 
-class GenerateWatchlist:
+class Watchlist:
     """Phase 1: Scans market history -> Saves to Technical Watchlist (DB)."""
 
     def __init__(
         self,
-        stock_list_provider: IStockListProvider,
-        market_provider: IMarketDataProvider,
+        stock_provider: IStockProvider,
+        market_provider: IMarketProvider,
         watchlist_repo: IWatchlistRepository,
-        tech_provider: ITechnicalAnalysisProvider,
+        tech_provider: IIndicatorProvider,
         screening_policy: TechnicalScreeningPolicy,
         logger: ILoggingProvider,
         lookback_days: int = 120,
     ):
-        self._stock_list = stock_list_provider
+        self._stock_list = stock_provider
         self._market = market_provider
         self._watchlist = watchlist_repo
         self._tech_calc = tech_provider
@@ -58,8 +58,11 @@ class GenerateWatchlist:
 
                 indicators = self._tech_calc.calculate_indicators(history)
 
-                candidate = StockCandidate(
-                    stock=stock,
+                candidate = Stock(
+                    stock_id=stock.stock_id,
+                    market=stock.market,
+                    name=stock.name,
+                    industry=stock.industry,
                     source=CandidateSource.TECHNICAL_WATCHLIST,
                     trigger_reason=REASON_NIGHTLY_SCREEN,
                     ohlcv_data=history,

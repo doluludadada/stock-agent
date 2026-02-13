@@ -1,5 +1,5 @@
-from backend.src.a_domain.model.analysis.stock_candidate import StockCandidate
 from backend.src.a_domain.model.chat.message import Message, MessageRole
+from backend.src.a_domain.model.market.stock import Stock
 from backend.src.a_domain.ports.chat.knowledge_repository import IKnowledgeRepository
 from backend.src.a_domain.ports.system.ai_provider import IAiProvider
 from backend.src.a_domain.ports.system.logging_provider import ILoggingProvider
@@ -7,7 +7,7 @@ from backend.src.a_domain.rules.process.ai.parser import SentimentResponseParser
 from backend.src.a_domain.rules.process.ai.prompt import SentimentPromptBuilder
 
 
-class AnalyzeSentiment:
+class Valuation:
     def __init__(
         self,
         ai_provider: IAiProvider,
@@ -20,26 +20,26 @@ class AnalyzeSentiment:
         self._ai = ai_provider
         self._prompt_builder = prompt_builder
         self._response_parser = response_parser
-        self._knowledge = knowledge_repo 
+        self._knowledge = knowledge_repo
         self._logger = logger
         self._neutral_score = neutral_score
 
-    async def execute(self, candidates: list[StockCandidate]) -> list[StockCandidate]:
+    async def execute(self, candidates: list[Stock]) -> list[Stock]:
         self._logger.info(f"Analyzing sentiment for {len(candidates)} stocks...")
         analyzed_count = 0
 
         for candidate in candidates:
-            if not candidate.articles:
-                self._logger.debug(f"No articles for {candidate.stock.stock_id}, using neutral score")
+            if not candidate.has_articles:
+                self._logger.debug(f"No articles for {candidate.stock_id}, using neutral score")
                 candidate.sentiment_score = self._neutral_score
                 continue
 
             try:
                 # 1. Enrich with RAG context
                 try:
-                    candidate.historical_context = await self._knowledge.search(candidate.stock.stock_id)
+                    candidate.historical_context = await self._knowledge.search(candidate.stock_id)
                 except Exception as e:
-                    self._logger.error(f"RAG read failed for {candidate.stock.stock_id}: {e}")
+                    self._logger.error(f"RAG read failed for {candidate.stock_id}: {e}")
 
                 # 2. Build prompt
                 prompt = self._prompt_builder.build(candidate)
@@ -49,7 +49,7 @@ class AnalyzeSentiment:
                 response = await self._ai.generate_reply(messages)
 
                 # 4. Parse response
-                report = self._response_parser.parse(candidate.stock.stock_id, response.content)
+                report = self._response_parser.parse(candidate.stock_id, response.content)
 
                 # 5. Update candidate
                 candidate.sentiment_report = report
@@ -57,7 +57,7 @@ class AnalyzeSentiment:
                 analyzed_count += 1
 
             except Exception as e:
-                self._logger.error(f"Sentiment analysis failed for {candidate.stock.stock_id}: {e}")
+                self._logger.error(f"Sentiment analysis failed for {candidate.stock_id}: {e}")
                 candidate.sentiment_score = self._neutral_score
 
         self._logger.info(f"Sentiment analysis complete: {analyzed_count} stocks analyzed")

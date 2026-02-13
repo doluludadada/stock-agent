@@ -1,4 +1,4 @@
-from backend.src.a_domain.model.analysis.stock_candidate import StockCandidate
+from backend.src.a_domain.model.market.stock import Stock
 
 
 class TechnicalScoreCalculator:
@@ -38,7 +38,7 @@ class TechnicalScoreCalculator:
         self._macd_bullish_bonus = macd_bullish_bonus
         self._ma_present_bonus = ma_present_bonus
 
-    def calculate(self, candidate: StockCandidate) -> int:
+    def calculate(self, candidate: Stock) -> int:
         score = self._base_score
 
         if candidate.is_eliminated:

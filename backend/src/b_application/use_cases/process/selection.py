@@ -3,15 +3,15 @@ Use Case: Filter candidates through technical analysis.
 
 The funnel gatekeeper — only survivors pass to the next stage.
 """
-from backend.src.a_domain.model.analysis.stock_candidate import StockCandidate
-from backend.src.a_domain.ports.analysis.technical_analysis_provider import ITechnicalAnalysisProvider
+from backend.src.a_domain.model.market.stock import Stock
+from backend.src.a_domain.ports.analysis.indicator_provider import IIndicatorProvider
 from backend.src.a_domain.ports.system.logging_provider import ILoggingProvider
 from backend.src.a_domain.rules.process.policies.technical_screening import TechnicalScreeningPolicy
 from backend.src.a_domain.rules.process.scoring.technical import TechnicalScoreCalculator
 from backend.src.a_domain.types.enums import AnalysisStage
 
 
-class FilterCandidates:
+class Selection:
     """
     The Funnel Gatekeeper.
 
@@ -21,7 +21,7 @@ class FilterCandidates:
 
     def __init__(
         self,
-        tech_provider: ITechnicalAnalysisProvider,
+        tech_provider: IIndicatorProvider,
         screening_policy: TechnicalScreeningPolicy,
         score_calculator: TechnicalScoreCalculator,
         logger: ILoggingProvider,
@@ -33,14 +33,14 @@ class FilterCandidates:
 
     def execute(
         self,
-        candidates: list[StockCandidate],
+        candidates: list[Stock],
         is_intraday: bool = True,
-    ) -> list[StockCandidate]:
+    ) -> list[Stock]:
         self._logger.info(f"Filtering {len(candidates)} candidates (intraday={is_intraday})...")
-        survivors: list[StockCandidate] = []
+        survivors: list[Stock] = []
 
         for candidate in candidates:
-            if not candidate.ohlcv_data or candidate.current_price is None:
+            if not candidate.has_price_data or candidate.current_price is None:
                 candidate.stage = AnalysisStage.FILTERED_FAIL
                 continue
 
@@ -48,7 +48,7 @@ class FilterCandidates:
                 # 1. Calculate technical indicators
                 candidate.indicators = self._tech_provider.calculate_indicators(candidate.ohlcv_data)
 
-                # 2. Evaluate rules (writes to candidate.hard/soft_failures/observations)
+                # 2. Evaluate rules
                 self._policy.evaluate(candidate, is_intraday=is_intraday)
 
                 # 3. Calculate technical score
@@ -61,11 +61,11 @@ class FilterCandidates:
                 else:
                     candidate.stage = AnalysisStage.FILTERED_FAIL
                     self._logger.debug(
-                        f"Drop {candidate.stock.stock_id}: Failed {candidate.hard_failures}"
+                        f"Drop {candidate.stock_id}: Failed {candidate.hard_failures}"
                     )
 
             except Exception as e:
-                self._logger.error(f"Error filtering {candidate.stock.stock_id}: {e}")
+                self._logger.error(f"Error filtering {candidate.stock_id}: {e}")
                 candidate.stage = AnalysisStage.FILTERED_FAIL
 
         self._logger.info(f"Survivors: {len(survivors)}/{len(candidates)}")

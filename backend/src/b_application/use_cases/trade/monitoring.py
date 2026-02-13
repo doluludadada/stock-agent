@@ -1,5 +1,5 @@
 from backend.src.a_domain.model.trading.signal import TradeSignal
-from backend.src.a_domain.ports.market.market_data_provider import IMarketDataProvider
+from backend.src.a_domain.ports.market.market_provider import IMarketProvider
 from backend.src.a_domain.ports.system.logging_provider import ILoggingProvider
 from backend.src.a_domain.ports.trading.broker_provider import IBrokerProvider
 from backend.src.a_domain.rules.trading.exit import ExitRule
@@ -7,7 +7,7 @@ from backend.src.a_domain.types.constants import REASON_STOP_LOSS
 from backend.src.a_domain.types.enums import SignalAction, SignalSource
 
 
-class CheckPortfolioExits:
+class Monitoring:
     """
     Trade: Checks current portfolio for exit signals (Stop Loss/Take Profit).
     """
@@ -15,12 +15,12 @@ class CheckPortfolioExits:
     def __init__(
         self,
         broker_provider: IBrokerProvider,
-        market_data_provider: IMarketDataProvider,
+        market_provider: IMarketProvider,
         logger: ILoggingProvider,
         stop_loss_pct: float = 0.10,
     ):
         self._broker = broker_provider
-        self._market = market_data_provider
+        self._market = market_provider
         self._logger = logger
         self._stop_loss_pct = stop_loss_pct
 

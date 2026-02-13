@@ -5,33 +5,28 @@ Fetches real-time bars and historical data, then merges them.
 """
 from datetime import datetime, timedelta
 
-from backend.src.a_domain.model.analysis.stock_candidate import StockCandidate
-from backend.src.a_domain.ports.market.market_data_provider import IMarketDataProvider
+from backend.src.a_domain.model.market.stock import Stock
+from backend.src.a_domain.ports.market.market_provider import IMarketProvider
 from backend.src.a_domain.ports.system.logging_provider import ILoggingProvider
 from backend.src.b_application.schemas.config import AppConfig
 
 
-class CollectPrices:
+class MarketData:
     """
-    Enriches StockCandidate with price data (realtime + historical).
-
-    Flow:
-    1. Batch fetch realtime bars for all candidates
-    2. For each candidate, fetch historical data
-    3. Merge realtime + history into complete OHLCV series
+    Enriches Stock with price data (realtime + historical).
     """
 
     def __init__(
         self,
-        market_data_provider: IMarketDataProvider,
+        market_provider: IMarketProvider,
         config: AppConfig,
         logger: ILoggingProvider,
     ):
-        self._market = market_data_provider
+        self._market = market_provider
         self._config = config
         self._logger = logger
 
-    async def execute(self, candidates: list[StockCandidate]) -> list[StockCandidate]:
+    async def execute(self, candidates: list[Stock]) -> list[Stock]:
         if not candidates:
             return []
 
@@ -40,31 +35,29 @@ class CollectPrices:
         end_date = datetime.now()
         start_date = end_date - timedelta(days=self._config.analysis_lookback_days)
 
-        stock_ids = [candidate.stock.stock_id for candidate in candidates]
+        stock_ids = [c.stock_id for c in candidates]
         try:
             realtime_bars = await self._market.fetch_realtime_bars(stock_ids)
         except Exception as e:
             self._logger.error(f"Failed to fetch realtime bars: {e}")
             return []
 
-        enriched: list[StockCandidate] = []
+        enriched: list[Stock] = []
 
         for candidate in candidates:
-            stock_id = candidate.stock.stock_id
-            current_bar = realtime_bars.get(stock_id)
+            current_bar = realtime_bars.get(candidate.stock_id)
 
             if not current_bar:
-                self._logger.debug(f"Missing realtime data for {stock_id}, skipping")
+                self._logger.debug(f"Missing realtime data for {candidate.stock_id}, skipping")
                 continue
 
             try:
                 history = await self._market.fetch_history(
-                    stock_id=stock_id,
+                    stock_id=candidate.stock_id,
                     start_date=start_date,
                     end_date=end_date,
                 )
 
-                # Merge: replace last bar if same date, otherwise append
                 if history and history[-1].ts.date() == current_bar.ts.date():
                     full_ohlcv = history[:-1] + [current_bar]
                 else:
@@ -74,7 +67,7 @@ class CollectPrices:
                 enriched.append(candidate)
 
             except Exception as e:
-                self._logger.error(f"Error collecting prices for {stock_id}: {e}")
+                self._logger.error(f"Error collecting prices for {candidate.stock_id}: {e}")
 
         self._logger.info(f"Collected prices for {len(enriched)} candidates")
         return enriched

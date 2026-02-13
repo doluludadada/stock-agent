@@ -1,6 +1,6 @@
 from typing import Protocol
 
-from backend.src.a_domain.model.analysis.stock_candidate import StockCandidate
+from backend.src.a_domain.model.market.stock import Stock
 
 
 class IKnowledgeRepository(Protocol):
@@ -12,11 +12,9 @@ class IKnowledgeRepository(Protocol):
         """Retrieves context for Chatbot."""
         ...
 
-    async def save_analysis(self, context: StockCandidate) -> None:
+    async def save_analysis(self, context: Stock) -> None:
         """
         Saves the result of the Stock Agent's analysis into the Brain.
         This makes the AI 'remember' why it liked/disliked a stock.
         """
         ...
-
-

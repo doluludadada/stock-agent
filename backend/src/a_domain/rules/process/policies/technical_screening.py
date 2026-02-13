@@ -9,7 +9,7 @@ Orchestrates all trading rules in a three-tier system:
 Reference Architecture:
 - Elder, A. (1993). Triple Screen Trading System.
 """
-from backend.src.a_domain.model.analysis.stock_candidate import StockCandidate
+from backend.src.a_domain.model.market.stock import Stock
 from backend.src.a_domain.rules.base import TradingRule
 from backend.src.a_domain.types.enums import CandidateSource
 
@@ -26,9 +26,6 @@ class TechnicalScreeningPolicy:
     │ SOCIAL_BUZZ         │ ✅ Safety  │ ✅ All      │ ✅ All     │
     │ MANUAL_INPUT        │ ✅ Safety  │ ✅ All      │ ✅ All     │
     └─────────────────────┴────────────┴─────────────┴────────────┘
-
-    Buzz/Manual stocks skip setup must_pass rules (they have social proof),
-    but still run safety must_pass and all soft/info rules.
     """
 
     def __init__(
@@ -39,21 +36,13 @@ class TechnicalScreeningPolicy:
         info_only: list[TradingRule],
         entry_timing_must_pass: list[TradingRule] | None = None,
     ):
-        """
-        Args:
-            setup_must_pass: Trend/momentum gates (skipped for buzz/manual stocks).
-            safety_must_pass: Risk management gates (always applied).
-            should_pass: Soft signals that reduce score but don't eliminate.
-            info_only: Observation rules for audit logging.
-            entry_timing_must_pass: Intraday-only hard gates.
-        """
         self._setup_must_pass = setup_must_pass
         self._safety_must_pass = safety_must_pass
         self._should_pass = should_pass
         self._info_only = info_only
         self._entry_timing_must_pass = entry_timing_must_pass or []
 
-    def evaluate(self, candidate: StockCandidate, is_intraday: bool = True) -> None:
+    def evaluate(self, candidate: Stock, is_intraday: bool = True) -> None:
         """
         Evaluate all rules and write results directly to candidate.
 
@@ -62,7 +51,6 @@ class TechnicalScreeningPolicy:
             candidate.soft_failures
             candidate.observations
         """
-        # Clear previous results (safe for re-evaluation)
         candidate.hard_failures.clear()
         candidate.soft_failures.clear()
         candidate.observations.clear()

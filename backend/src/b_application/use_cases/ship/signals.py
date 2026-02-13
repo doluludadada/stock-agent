@@ -3,7 +3,7 @@ Use Case: Generate and persist trade signals.
 
 Converts analyzed candidates into actionable signals.
 """
-from backend.src.a_domain.model.analysis.stock_candidate import StockCandidate
+from backend.src.a_domain.model.market.stock import Stock
 from backend.src.a_domain.model.trading.signal import TradeSignal
 from backend.src.a_domain.ports.analysis.signal_repository import ISignalRepository
 from backend.src.a_domain.ports.chat.knowledge_repository import IKnowledgeRepository
@@ -13,7 +13,7 @@ from backend.src.a_domain.rules.trading.decision import DecisionRule
 from backend.src.a_domain.types.enums import AnalysisStage
 
 
-class GenerateSignals:
+class Signals:
     def __init__(
         self,
         composite_rule: CompositeScoreRule,
@@ -28,7 +28,7 @@ class GenerateSignals:
         self._knowledge = knowledge_repo
         self._logger = logger
 
-    async def execute(self, candidates: list[StockCandidate]) -> list[TradeSignal]:
+    async def execute(self, candidates: list[Stock]) -> list[TradeSignal]:
         self._logger.info(f"Generating signals for {len(candidates)} analyzed stocks...")
         signals: list[TradeSignal] = []
 
@@ -60,6 +60,6 @@ class GenerateSignals:
             try:
                 await self._knowledge.save_analysis(candidate)
             except Exception as e:
-                self._logger.error(f"RAG write failed for {candidate.stock.stock_id}: {e}")
+                self._logger.error(f"RAG write failed for {candidate.stock_id}: {e}")
 
         return signals

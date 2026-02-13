@@ -2,7 +2,7 @@
 Technical Indicators Domain Models.
 
 These are value objects that hold calculated indicator values.
-The calculation logic lives in the Infrastructure layer (ITechnicalAnalysisProvider).
+    The calculation logic lives in the Infrastructure layer (IIndicatorProvider).
 """
 from dataclasses import dataclass
 from decimal import Decimal

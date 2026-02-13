@@ -1,7 +1,9 @@
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
+
 from backend.src.a_domain.model.chat.message import Message
+
 
 @dataclass(frozen=True)
 class Conversation:

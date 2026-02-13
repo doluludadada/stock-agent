@@ -5,7 +5,7 @@ from backend.src.a_domain.types.enums import InformationSource
 
 
 @dataclass
-class ContentRelevanceRule:
+class QualityRule:
     """
     Rule: Determines if an article is worth processing.
     Values are injected from Config, not hardcoded.

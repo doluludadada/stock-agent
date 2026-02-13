@@ -5,7 +5,7 @@ from backend.src.a_domain.types.enums import SignalAction
 from backend.src.b_application.schemas.config import AppConfig
 
 
-class SendNotifications:
+class Reporting:
     def __init__(
         self, notification_provider: INotificationProvider | None, config: AppConfig, logger: ILoggingProvider
     ):

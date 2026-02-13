@@ -1,10 +1,10 @@
-from backend.src.a_domain.model.analysis.stock_candidate import StockCandidate
+from backend.src.a_domain.model.market.stock import Stock
 
 
 class ReasonRule:
     """Builds a human-readable reason string for the trade signal."""
 
-    def build(self, candidate: StockCandidate) -> str:
+    def build(self, candidate: Stock) -> str:
         parts: list[str] = []
 
         if candidate.is_eliminated:
