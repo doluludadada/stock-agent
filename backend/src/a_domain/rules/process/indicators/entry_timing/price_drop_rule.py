@@ -1,10 +1,7 @@
 from decimal import Decimal
-from typing import TYPE_CHECKING
 
+from backend.src.a_domain.model.market.stock import Stock
 from backend.src.a_domain.rules.base import TradingRule
-
-if TYPE_CHECKING:
-    from backend.src.a_domain.model.market.stock import Stock
 
 
 class PriceDropRule(TradingRule):
@@ -17,7 +14,10 @@ class PriceDropRule(TradingRule):
     def name(self) -> str:
         return "Price Drop Check"
 
-    def is_satisfied(self, candidate: "Stock") -> bool:
-        if candidate.price_change_pct is None:
+    def apply(self, stock: Stock) -> bool:
+        if stock.today is None or stock.yesterday is None:
             return False
-        return candidate.price_change_pct > -self._max_drop
+        if stock.yesterday.close == 0:
+            return False
+        change = (stock.today.close - stock.yesterday.close) / stock.yesterday.close
+        return change > -self._max_drop

@@ -1,9 +1,5 @@
-from typing import TYPE_CHECKING
-
+from backend.src.a_domain.model.market.stock import Stock
 from backend.src.a_domain.rules.base import TradingRule
-
-if TYPE_CHECKING:
-    from backend.src.a_domain.model.market.stock import Stock
 
 
 class MinimumPriceRule(TradingRule):
@@ -16,7 +12,7 @@ class MinimumPriceRule(TradingRule):
     def name(self) -> str:
         return "Minimum Price Check"
 
-    def is_satisfied(self, candidate: "Stock") -> bool:
-        if candidate.current_price is None:
+    def apply(self, stock: Stock) -> bool:
+        if stock.current_price is None:
             return False
-        return float(candidate.current_price) >= self._min_price
+        return float(stock.current_price) >= self._min_price

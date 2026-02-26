@@ -1,9 +1,5 @@
-from typing import TYPE_CHECKING
-
+from backend.src.a_domain.model.market.stock import Stock
 from backend.src.a_domain.rules.base import TradingRule
-
-if TYPE_CHECKING:
-    from backend.src.a_domain.model.market.stock import Stock
 
 
 class IntradayMomentumRule(TradingRule):
@@ -13,9 +9,9 @@ class IntradayMomentumRule(TradingRule):
     def name(self) -> str:
         return "Intraday Momentum"
 
-    def is_satisfied(self, candidate: "Stock") -> bool:
-        if candidate.current_price is None or candidate.today_open is None:
+    def apply(self, stock: Stock) -> bool:
+        if stock.today is None:
             return False
-        if candidate.today_open <= 0:
+        if stock.today.open <= 0:
             return False
-        return candidate.current_price > candidate.today_open
+        return stock.today.close > stock.today.open

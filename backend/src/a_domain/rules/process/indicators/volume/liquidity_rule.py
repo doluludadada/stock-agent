@@ -1,9 +1,5 @@
-from typing import TYPE_CHECKING
-
+from backend.src.a_domain.model.market.stock import Stock
 from backend.src.a_domain.rules.base import TradingRule
-
-if TYPE_CHECKING:
-    from backend.src.a_domain.model.market.stock import Stock
 
 
 class LiquidityRule(TradingRule):
@@ -16,10 +12,10 @@ class LiquidityRule(TradingRule):
     def name(self) -> str:
         return "Liquidity Check"
 
-    def is_satisfied(self, candidate: "Stock") -> bool:
-        if not candidate.ohlcv_data:
+    def apply(self, stock: Stock) -> bool:
+        if not stock.ohlcv:
             return False
-        recent_volumes = [bar.volume for bar in candidate.ohlcv_data[-5:]]
+        recent_volumes = [bar.volume for bar in stock.ohlcv[-5:]]
         if not recent_volumes:
             return False
         avg_volume = sum(recent_volumes) / len(recent_volumes)

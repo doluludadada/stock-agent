@@ -1,9 +1,5 @@
-from typing import TYPE_CHECKING
-
+from backend.src.a_domain.model.market.stock import Stock
 from backend.src.a_domain.rules.base import TradingRule
-
-if TYPE_CHECKING:
-    from backend.src.a_domain.model.market.stock import Stock
 
 
 class ConsecutiveUpDaysRule(TradingRule):
@@ -16,7 +12,16 @@ class ConsecutiveUpDaysRule(TradingRule):
     def name(self) -> str:
         return "Consecutive Up Days Check"
 
-    def is_satisfied(self, candidate: "Stock") -> bool:
-        if not candidate.has_enough_bars(self._max_up + 1):
+    def apply(self, stock: Stock) -> bool:
+        bars = stock.ohlcv
+        if len(bars) < self._max_up + 1:
             return True
-        return candidate.consecutive_up_days < self._max_up
+
+        count = 0
+        for i in range(len(bars) - 1, 0, -1):
+            if bars[i].close > bars[i - 1].close:
+                count += 1
+            else:
+                break
+
+        return count < self._max_up

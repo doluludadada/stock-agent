@@ -1,5 +1,6 @@
 from typing import Protocol
 
+
 class ILoggingProvider(Protocol):
     def info(self, message: str): ...
     def warning(self, message: str): ...

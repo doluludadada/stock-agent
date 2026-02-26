@@ -65,7 +65,7 @@ class Watchlist:
                     industry=stock.industry,
                     source=CandidateSource.TECHNICAL_WATCHLIST,
                     trigger_reason=REASON_NIGHTLY_SCREEN,
-                    ohlcv_data=history,
+                    ohlcv=history,
                     indicators=indicators,
                 )
 

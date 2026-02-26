@@ -1,9 +1,5 @@
-from typing import TYPE_CHECKING
-
+from backend.src.a_domain.model.market.stock import Stock
 from backend.src.a_domain.rules.base import TradingRule
-
-if TYPE_CHECKING:
-    from backend.src.a_domain.model.market.stock import Stock
 
 
 class GapRule(TradingRule):
@@ -16,7 +12,12 @@ class GapRule(TradingRule):
     def name(self) -> str:
         return "Gap Check"
 
-    def is_satisfied(self, candidate: "Stock") -> bool:
-        if candidate.gap_pct is None:
+    def apply(self, stock: Stock) -> bool:
+        if stock.today is None or stock.yesterday is None:
             return True
-        return candidate.gap_pct < self._max_gap
+        if stock.yesterday.close == 0:
+            return True
+        gap = float(
+            (stock.today.open - stock.yesterday.close) / stock.yesterday.close
+        )
+        return gap < self._max_gap

@@ -1,9 +1,5 @@
-from typing import TYPE_CHECKING
-
+from backend.src.a_domain.model.market.stock import Stock
 from backend.src.a_domain.rules.base import TradingRule
-
-if TYPE_CHECKING:
-    from backend.src.a_domain.model.market.stock import Stock
 
 
 class BollingerThresholdRule(TradingRule):
@@ -16,9 +12,9 @@ class BollingerThresholdRule(TradingRule):
     def name(self) -> str:
         return "Bollinger Threshold Check"
 
-    def is_satisfied(self, candidate: "Stock") -> bool:
-        if candidate.indicators is None or candidate.indicators.bollinger is None:
+    def apply(self, stock: Stock) -> bool:
+        if stock.indicators is None or stock.indicators.bollinger is None:
             return True
-        if candidate.indicators.bollinger.percent_b is None:
+        if stock.indicators.bollinger.percent_b is None:
             return True
-        return candidate.indicators.bollinger.percent_b < self._max_percent_b
+        return stock.indicators.bollinger.percent_b < self._max_percent_b

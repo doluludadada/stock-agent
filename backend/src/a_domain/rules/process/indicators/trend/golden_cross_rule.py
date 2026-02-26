@@ -12,11 +12,11 @@ class GoldenCrossRule(TradingRule):
     def name(self) -> str:
         return "Golden Cross"
 
-    def is_satisfied(self, candidate: "Stock") -> bool:
-        if candidate.indicators is None or candidate.indicators.ma is None:
+    def apply(self, stock: Stock) -> bool:
+        if stock.indicators is None or stock.indicators.ma is None:
             return False
 
-        ma = candidate.indicators.ma
+        ma = stock.indicators.ma
         if ma.ma_20 is None or ma.ma_60 is None:
             return False
 

@@ -1,9 +1,5 @@
-from typing import TYPE_CHECKING
-
+from backend.src.a_domain.model.market.stock import Stock
 from backend.src.a_domain.rules.base import TradingRule
-
-if TYPE_CHECKING:
-    from backend.src.a_domain.model.market.stock import Stock
 
 
 class AtrRangeRule(TradingRule):
@@ -17,9 +13,9 @@ class AtrRangeRule(TradingRule):
     def name(self) -> str:
         return "ATR Position Sizing"
 
-    def is_satisfied(self, candidate: "Stock") -> bool:
-        if candidate.indicators is None or candidate.indicators.atr is None:
+    def apply(self, stock: Stock) -> bool:
+        if stock.indicators is None or stock.indicators.atr is None:
             return True
-        if candidate.indicators.atr.atr_percent is None:
+        if stock.indicators.atr.atr_percent is None:
             return True
-        return self._min_atr_pct <= candidate.indicators.atr.atr_percent <= self._max_atr_pct
+        return self._min_atr_pct <= stock.indicators.atr.atr_percent <= self._max_atr_pct

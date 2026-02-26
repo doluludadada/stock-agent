@@ -13,9 +13,9 @@ class AdxTrendStrengthRule(TradingRule):
     def name(self) -> str:
         return "ADX Trend Strength"
 
-    def is_satisfied(self, candidate: "Stock") -> bool:
-        if candidate.indicators is None or candidate.indicators.adx is None:
+    def apply(self, stock: Stock) -> bool:
+        if stock.indicators is None or stock.indicators.adx is None:
             return True
-        if candidate.indicators.adx.adx is None:
+        if stock.indicators.adx.adx is None:
             return True
-        return self._min_adx <= candidate.indicators.adx.adx <= self._max_adx
+        return self._min_adx <= stock.indicators.adx.adx <= self._max_adx

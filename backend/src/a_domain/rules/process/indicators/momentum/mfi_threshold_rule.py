@@ -1,9 +1,5 @@
-from typing import TYPE_CHECKING
-
+from backend.src.a_domain.model.market.stock import Stock
 from backend.src.a_domain.rules.base import TradingRule
-
-if TYPE_CHECKING:
-    from backend.src.a_domain.model.market.stock import Stock
 
 
 class MfiThresholdRule(TradingRule):
@@ -16,9 +12,9 @@ class MfiThresholdRule(TradingRule):
     def name(self) -> str:
         return "MFI Not Overbought"
 
-    def is_satisfied(self, candidate: "Stock") -> bool:
-        if candidate.indicators is None or candidate.indicators.mfi is None:
+    def apply(self, stock: Stock) -> bool:
+        if stock.indicators is None or stock.indicators.mfi is None:
             return True
-        if candidate.indicators.mfi.mfi_14 is None:
+        if stock.indicators.mfi.mfi_14 is None:
             return True
-        return candidate.indicators.mfi.mfi_14 < self._threshold
+        return stock.indicators.mfi.mfi_14 < self._threshold

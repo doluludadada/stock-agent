@@ -1,9 +1,5 @@
-from typing import TYPE_CHECKING
-
+from backend.src.a_domain.model.market.stock import Stock
 from backend.src.a_domain.rules.base import TradingRule
-
-if TYPE_CHECKING:
-    from backend.src.a_domain.model.market.stock import Stock
 
 
 class ObvTrendRule(TradingRule):
@@ -13,10 +9,10 @@ class ObvTrendRule(TradingRule):
     def name(self) -> str:
         return "OBV Trend"
 
-    def is_satisfied(self, candidate: "Stock") -> bool:
-        if candidate.indicators is None or candidate.indicators.obv is None:
+    def apply(self, stock: Stock) -> bool:
+        if stock.indicators is None or stock.indicators.obv is None:
             return True
-        obv = candidate.indicators.obv
+        obv = stock.indicators.obv
         if obv.obv is None or obv.obv_ma_20 is None:
             return True
         return obv.obv > obv.obv_ma_20

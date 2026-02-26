@@ -38,35 +38,35 @@ class TechnicalScoreCalculator:
         self._macd_bullish_bonus = macd_bullish_bonus
         self._ma_present_bonus = ma_present_bonus
 
-    def calculate(self, candidate: Stock) -> int:
+    def calculate(self, stock: Stock) -> int:
         score = self._base_score
 
-        if candidate.is_eliminated:
+        if stock.is_eliminated:
             hard_penalty = min(
-                len(candidate.hard_failures) * self._hard_failure_penalty,
+                len(stock.hard_failures) * self._hard_failure_penalty,
                 self._max_hard_penalty,
             )
             score -= hard_penalty
         else:
             score += self._pass_bonus
             soft_penalty = min(
-                len(candidate.soft_failures) * self._soft_failure_penalty,
+                len(stock.soft_failures) * self._soft_failure_penalty,
                 self._max_soft_penalty,
             )
             score -= soft_penalty
 
-        if candidate.indicators:
-            rsi = candidate.indicators.rsi
+        if stock.indicators:
+            rsi = stock.indicators.rsi
             if rsi and rsi.val_14 is not None:
                 if self._rsi_sweet_spot_min <= rsi.val_14 <= self._rsi_sweet_spot_max:
                     score += self._rsi_sweet_spot_bonus
 
-            macd = candidate.indicators.macd
+            macd = stock.indicators.macd
             if macd and macd.line is not None and macd.signal is not None:
                 if macd.line > macd.signal:
                     score += self._macd_bullish_bonus
 
-            ma = candidate.indicators.ma
+            ma = stock.indicators.ma
             if ma and ma.ma_20 is not None:
                 score += self._ma_present_bonus
 

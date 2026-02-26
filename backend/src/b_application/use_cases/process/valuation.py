@@ -3,7 +3,7 @@ from backend.src.a_domain.model.market.stock import Stock
 from backend.src.a_domain.ports.chat.knowledge_repository import IKnowledgeRepository
 from backend.src.a_domain.ports.system.ai_provider import IAiProvider
 from backend.src.a_domain.ports.system.logging_provider import ILoggingProvider
-from backend.src.a_domain.rules.process.ai.parser import SentimentResponseParser
+from backend.src.a_domain.rules.process.ai.parser import SentimentParser
 from backend.src.a_domain.rules.process.ai.prompt import SentimentPromptBuilder
 
 
@@ -12,7 +12,7 @@ class Valuation:
         self,
         ai_provider: IAiProvider,
         prompt_builder: SentimentPromptBuilder,
-        response_parser: SentimentResponseParser,
+        response_parser: SentimentParser,
         knowledge_repo: IKnowledgeRepository,
         logger: ILoggingProvider,
         neutral_score: int = 50,
@@ -29,7 +29,7 @@ class Valuation:
         analyzed_count = 0
 
         for candidate in candidates:
-            if not candidate.has_articles:
+            if not candidate.articles:
                 self._logger.debug(f"No articles for {candidate.stock_id}, using neutral score")
                 candidate.sentiment_score = self._neutral_score
                 continue

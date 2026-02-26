@@ -1,9 +1,5 @@
-from typing import TYPE_CHECKING
-
+from backend.src.a_domain.model.market.stock import Stock
 from backend.src.a_domain.rules.base import TradingRule
-
-if TYPE_CHECKING:
-    from backend.src.a_domain.model.market.stock import Stock
 
 
 class StochasticThresholdRule(TradingRule):
@@ -16,9 +12,9 @@ class StochasticThresholdRule(TradingRule):
     def name(self) -> str:
         return "Stochastic Not Overbought"
 
-    def is_satisfied(self, candidate: "Stock") -> bool:
-        if candidate.indicators is None or candidate.indicators.stochastic is None:
+    def apply(self, stock: Stock) -> bool:
+        if stock.indicators is None or stock.indicators.stochastic is None:
             return True
-        if candidate.indicators.stochastic.k is None:
+        if stock.indicators.stochastic.k is None:
             return True
-        return candidate.indicators.stochastic.k < self._threshold
+        return stock.indicators.stochastic.k < self._threshold

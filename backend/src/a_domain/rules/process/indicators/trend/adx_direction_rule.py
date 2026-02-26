@@ -9,10 +9,10 @@ class AdxDirectionRule(TradingRule):
     def name(self) -> str:
         return "ADX Bullish Direction"
 
-    def is_satisfied(self, candidate: "Stock") -> bool:
-        if candidate.indicators is None or candidate.indicators.adx is None:
+    def apply(self, stock: Stock) -> bool:
+        if stock.indicators is None or stock.indicators.adx is None:
             return True
-        adx = candidate.indicators.adx
+        adx = stock.indicators.adx
         if adx.plus_di is None or adx.minus_di is None:
             return True
         return adx.plus_di > adx.minus_di

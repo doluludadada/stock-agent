@@ -26,7 +26,7 @@ class Stock(SQLModel):
     stage: AnalysisStage = Field(default=AnalysisStage.PENDING, schema_extra={"ignore": True})
 
     # ----------------------------------- Data ----------------------------------- #
-    ohlcv_data: list[Ohlcv] = Field(default_factory=list)
+    ohlcv: list[Ohlcv] = Field(default_factory=list)
     articles: list[Article] = Field(default_factory=list)
 
     # -------------------------------- Analysis ---------------------------------- #
@@ -49,15 +49,15 @@ class Stock(SQLModel):
     # -------------------------------- Shortcuts --------------------------------- #
     @property
     def today(self) -> Ohlcv | None:
-        return self.ohlcv_data[-1] if self.ohlcv_data else None
+        return self.ohlcv[-1] if self.ohlcv else None
 
     @property
     def yesterday(self) -> Ohlcv | None:
-        return self.ohlcv_data[-2] if len(self.ohlcv_data) >= 2 else None
+        return self.ohlcv[-2] if len(self.ohlcv) >= 2 else None
 
     @property
     def current_price(self) -> Decimal | None:
-        return self.today.close_price if self.today else None
+        return self.today.close if self.today else None
 
     @property
     def current_volume(self) -> int | None:

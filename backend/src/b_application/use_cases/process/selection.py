@@ -40,13 +40,13 @@ class Selection:
         survivors: list[Stock] = []
 
         for candidate in candidates:
-            if not candidate.has_price_data or candidate.current_price is None:
+            if not candidate.ohlcv or candidate.current_price is None:
                 candidate.stage = AnalysisStage.FILTERED_FAIL
                 continue
 
             try:
                 # 1. Calculate technical indicators
-                candidate.indicators = self._tech_provider.calculate_indicators(candidate.ohlcv_data)
+                candidate.indicators = self._tech_provider.calculate_indicators(candidate.ohlcv)
 
                 # 2. Evaluate rules
                 self._policy.evaluate(candidate, is_intraday=is_intraday)

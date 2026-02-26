@@ -26,27 +26,27 @@ class DecisionRule:
         self._capital = total_capital
         self._risk_pct = risk_pct
 
-    def decide(self, candidate: Stock) -> TradeSignal | None:
-        if candidate.current_price is None:
+    def decide(self, stock: Stock) -> TradeSignal | None:
+        if stock.current_price is None:
             return None
 
-        action = self._action_rule.resolve(candidate.combined_score)
-        reason = self._reason_rule.build(candidate)
+        action = self._action_rule.resolve(stock.combined_score)
+        reason = self._reason_rule.build(stock)
 
         quantity = 0
         if action == SignalAction.BUY:
             quantity = self._sizing_rule.calculate_quantity(
                 capital=self._capital,
-                price=candidate.current_price,
+                price=stock.current_price,
                 risk_per_trade_pct=self._risk_pct,
             )
 
         return TradeSignal(
-            stock_id=candidate.stock_id,
+            stock_id=stock.stock_id,
             action=action,
-            price_at_signal=candidate.current_price,
+            price_at_signal=stock.current_price,
             source=SignalSource.HYBRID,
-            score=candidate.combined_score,
+            score=stock.combined_score,
             reason=reason,
             quantity=quantity,
             generated_at=datetime.now(),

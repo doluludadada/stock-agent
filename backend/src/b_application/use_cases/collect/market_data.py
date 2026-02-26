@@ -43,7 +43,7 @@ class MarketData:
             return []
 
         enriched: list[Stock] = []
-
+        # RENAME TO STOCK?
         for candidate in candidates:
             current_bar = realtime_bars.get(candidate.stock_id)
 
@@ -63,7 +63,7 @@ class MarketData:
                 else:
                     full_ohlcv = history + [current_bar]
 
-                candidate.ohlcv_data = full_ohlcv
+                candidate.ohlcv = full_ohlcv
                 enriched.append(candidate)
 
             except Exception as e:

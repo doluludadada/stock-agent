@@ -1,9 +1,5 @@
-from typing import TYPE_CHECKING
-
+from backend.src.a_domain.model.market.stock import Stock
 from backend.src.a_domain.rules.base import TradingRule
-
-if TYPE_CHECKING:
-    from backend.src.a_domain.model.market.stock import Stock
 
 
 class MacdHistogramRule(TradingRule):
@@ -13,9 +9,9 @@ class MacdHistogramRule(TradingRule):
     def name(self) -> str:
         return "MACD Histogram Rising"
 
-    def is_satisfied(self, candidate: "Stock") -> bool:
-        if candidate.indicators is None or candidate.indicators.macd is None:
+    def apply(self, stock: Stock) -> bool:
+        if stock.indicators is None or stock.indicators.macd is None:
             return True
-        if candidate.indicators.macd.histogram is None:
+        if stock.indicators.macd.histogram is None:
             return True
-        return candidate.indicators.macd.histogram > 0
+        return stock.indicators.macd.histogram > 0

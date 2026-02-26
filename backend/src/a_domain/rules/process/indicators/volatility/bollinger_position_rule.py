@@ -1,9 +1,5 @@
-from typing import TYPE_CHECKING
-
+from backend.src.a_domain.model.market.stock import Stock
 from backend.src.a_domain.rules.base import TradingRule
-
-if TYPE_CHECKING:
-    from backend.src.a_domain.model.market.stock import Stock
 
 
 class BollingerPositionRule(TradingRule):
@@ -13,10 +9,10 @@ class BollingerPositionRule(TradingRule):
     def name(self) -> str:
         return "Bollinger Above Middle"
 
-    def is_satisfied(self, candidate: "Stock") -> bool:
-        if candidate.indicators is None or candidate.indicators.bollinger is None:
+    def apply(self, stock: Stock) -> bool:
+        if stock.indicators is None or stock.indicators.bollinger is None:
             return True
-        bb = candidate.indicators.bollinger
-        if bb.middle is None or candidate.current_price is None:
+        bb = stock.indicators.bollinger
+        if bb.middle is None or stock.current_price is None:
             return True
-        return candidate.current_price > bb.middle
+        return stock.current_price > bb.middle

@@ -16,7 +16,7 @@ from backend.src.a_domain.types.enums import CandidateSource
 
 class TechnicalScreeningPolicy:
     """
-    Master Policy: Evaluates all technical rules against a candidate.
+    Master Policy: Evaluates all technical rules against a stock.
 
     Rule Application by Source:
     ┌─────────────────────┬────────────┬─────────────┬────────────┐
@@ -42,45 +42,45 @@ class TechnicalScreeningPolicy:
         self._info_only = info_only
         self._entry_timing_must_pass = entry_timing_must_pass or []
 
-    def evaluate(self, candidate: Stock, is_intraday: bool = True) -> None:
+    def evaluate(self, stock: Stock, is_intraday: bool = True) -> None:
         """
-        Evaluate all rules and write results directly to candidate.
+        Evaluate all rules and write results directly to stock.
 
         Populates:
-            candidate.hard_failures
-            candidate.soft_failures
-            candidate.observations
+            stock.hard_failures
+            stock.soft_failures
+            stock.observations
         """
-        candidate.hard_failures.clear()
-        candidate.soft_failures.clear()
-        candidate.observations.clear()
+        stock.hard_failures.clear()
+        stock.soft_failures.clear()
+        stock.observations.clear()
 
         # 1. Setup must_pass (only for TECHNICAL_WATCHLIST)
-        if candidate.source == CandidateSource.TECHNICAL_WATCHLIST:
+        if stock.source == CandidateSource.TECHNICAL_WATCHLIST:
             for rule in self._setup_must_pass:
-                if not rule.is_satisfied(candidate):
-                    candidate.hard_failures.append(rule.name)
+                if not rule.apply(stock):
+                    stock.hard_failures.append(rule.name)
 
         # 2. Safety must_pass (always)
         for rule in self._safety_must_pass:
-            if not rule.is_satisfied(candidate):
-                candidate.hard_failures.append(rule.name)
+            if not rule.apply(stock):
+                stock.hard_failures.append(rule.name)
 
         # 3. Entry timing must_pass (only intraday)
         if is_intraday:
             for rule in self._entry_timing_must_pass:
-                if not rule.is_satisfied(candidate):
-                    candidate.hard_failures.append(rule.name)
+                if not rule.apply(stock):
+                    stock.hard_failures.append(rule.name)
 
         # 4. Should-pass (always, soft penalty)
         for rule in self._should_pass:
-            if not rule.is_satisfied(candidate):
-                candidate.soft_failures.append(rule.name)
+            if not rule.apply(stock):
+                stock.soft_failures.append(rule.name)
 
         # 5. Info-only (always, observation)
         for rule in self._info_only:
-            if not rule.is_satisfied(candidate):
-                candidate.observations.append(rule.name)
+            if not rule.apply(stock):
+                stock.observations.append(rule.name)
 
     def get_rule_summary(self) -> dict[str, list[str]]:
         return {

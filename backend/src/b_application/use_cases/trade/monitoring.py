@@ -42,12 +42,12 @@ class Monitoring:
 
             # Check Stop Loss
             if ExitRule.should_stop_loss(
-                current_price=bar.close_price, entry_price=pos.average_cost, threshold_pct=self._stop_loss_pct
+                current_price=bar.close, entry_price=pos.average_cost, threshold_pct=self._stop_loss_pct
             ):
                 signal = TradeSignal(
                     stock_id=pos.stock_id,
                     action=SignalAction.SELL,
-                    price_at_signal=bar.close_price,
+                    price_at_signal=bar.close,
                     source=SignalSource.TECHNICAL,
                     score=0,
                     reason=REASON_STOP_LOSS,  # Using Constant

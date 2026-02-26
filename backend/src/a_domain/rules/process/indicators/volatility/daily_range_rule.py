@@ -1,9 +1,5 @@
-from typing import TYPE_CHECKING
-
+from backend.src.a_domain.model.market.stock import Stock
 from backend.src.a_domain.rules.base import TradingRule
-
-if TYPE_CHECKING:
-    from backend.src.a_domain.model.market.stock import Stock
 
 
 class DailyRangeRule(TradingRule):
@@ -16,7 +12,10 @@ class DailyRangeRule(TradingRule):
     def name(self) -> str:
         return "Daily Range Check"
 
-    def is_satisfied(self, candidate: "Stock") -> bool:
-        if candidate.daily_range_pct is None:
+    def apply(self, stock: Stock) -> bool:
+        if stock.today is None:
             return False
-        return candidate.daily_range_pct < self._max_range
+        if stock.today.low <= 0:
+            return False
+        daily_range = float((stock.today.high - stock.today.low) / stock.today.low)
+        return daily_range < self._max_range

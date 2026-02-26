@@ -2,9 +2,8 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
-from sqlmodel import Field, SQLModel
-
 from backend.src.a_domain.types.enums import OrderAction, OrderStatus, OrderType
+from sqlmodel import Field, SQLModel
 
 
 class Order(SQLModel):

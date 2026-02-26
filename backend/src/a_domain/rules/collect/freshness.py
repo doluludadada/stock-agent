@@ -1,3 +1,4 @@
+# TODO: Not wired yet — planned for data freshness validation
 # src/a_domain/rules/collect/freshness.py
 from datetime import datetime, timedelta
 

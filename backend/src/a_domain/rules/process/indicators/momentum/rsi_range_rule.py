@@ -1,9 +1,5 @@
-from typing import TYPE_CHECKING
-
+from backend.src.a_domain.model.market.stock import Stock
 from backend.src.a_domain.rules.base import TradingRule
-
-if TYPE_CHECKING:
-    from backend.src.a_domain.model.market.stock import Stock
 
 
 class RsiRangeRule(TradingRule):
@@ -17,9 +13,9 @@ class RsiRangeRule(TradingRule):
     def name(self) -> str:
         return "RSI Range Check"
 
-    def is_satisfied(self, candidate: "Stock") -> bool:
-        if candidate.indicators is None or candidate.indicators.rsi is None:
+    def apply(self, stock: Stock) -> bool:
+        if stock.indicators is None or stock.indicators.rsi is None:
             return False
-        if candidate.indicators.rsi.val_14 is None:
+        if stock.indicators.rsi.val_14 is None:
             return False
-        return self._min_rsi <= candidate.indicators.rsi.val_14 <= self._max_rsi
+        return self._min_rsi <= stock.indicators.rsi.val_14 <= self._max_rsi

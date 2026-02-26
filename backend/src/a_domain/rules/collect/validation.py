@@ -1,3 +1,4 @@
+# TODO: Not wired yet — planned for collect-phase data validation
 from backend.src.a_domain.model.market.stock import Stock
 from backend.src.a_domain.rules.base import TradingRule
 
@@ -9,8 +10,8 @@ class HasPriceDataRule(TradingRule):
     def name(self) -> str:
         return "Data Existence Check"
 
-    def is_satisfied(self, candidate: Stock) -> bool:
-        return bool(candidate.ohlcv_data)
+    def apply(self, stock: Stock) -> bool:
+        return bool(stock.ohlcv)
 
 
 class HasArticlesRule(TradingRule):
@@ -20,5 +21,5 @@ class HasArticlesRule(TradingRule):
     def name(self) -> str:
         return "Article Existence Check"
 
-    def is_satisfied(self, candidate: Stock) -> bool:
-        return bool(candidate.articles)
+    def apply(self, stock: Stock) -> bool:
+        return bool(stock.articles)

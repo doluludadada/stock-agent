@@ -1,9 +1,8 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlmodel import Field, SQLModel
-
 from backend.src.a_domain.types.enums import SignalAction, SignalSource
+from sqlmodel import Field, SQLModel
 
 
 class TradeSignal(SQLModel):

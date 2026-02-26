@@ -1,7 +1,7 @@
 from decimal import Decimal
 
-from backend.src.a_domain.model.market.stock import Stock
 from backend.src.a_domain.model.indicators.technical_indicators import MovingAverages
+from backend.src.a_domain.model.market.stock import Stock
 from backend.src.a_domain.rules.base import TradingRule
 from backend.src.a_domain.types.enums import MaPeriod
 
@@ -32,10 +32,10 @@ class MaAlignmentRule(TradingRule):
             case _:
                 return None
 
-    def is_satisfied(self, candidate: "Stock") -> bool:
-        if candidate.indicators is None or candidate.indicators.ma is None:
+    def apply(self, stock: Stock) -> bool:
+        if stock.indicators is None or stock.indicators.ma is None:
             return False
-        ma = candidate.indicators.ma
+        ma = stock.indicators.ma
         fast_val = self._get_ma_value(ma, self._fast)
         slow_val = self._get_ma_value(ma, self._slow)
         if fast_val is None or slow_val is None:
