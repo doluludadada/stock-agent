@@ -1,50 +1,51 @@
-from decimal import Decimal
+from pydantic import BaseModel, Field
 
-from backend.src.a_domain.model.analysis.ai_sentiment import AiSentiment
-from backend.src.a_domain.model.indicators.technical_indicators import TechnicalIndicators
-from backend.src.a_domain.model.market.article import Article
-from backend.src.a_domain.model.market.ohlcv import Ohlcv
-from backend.src.a_domain.types.enums import AnalysisStage, CandidateSource, MarketType
-from sqlmodel import Field, SQLModel
+from a_domain.model.indicators.technical_indicators import TechnicalIndicators
+from a_domain.model.market.article import Article
+from a_domain.model.market.ohlcv import Ohlcv
+from a_domain.types.enums import AnalysisStage, CandidateSource, MarketType
+from a_domain.model.analysis.ai_analysis_report import AiAnalysisReport
 
-
-class Stock(SQLModel):
+class Stock(BaseModel):
     """
     Stock Domain Model.
-    Pure data container with minimal shortcut properties.
+
+    Serves as both entity identity and mutable pipeline context.
+    During pipeline execution, fields are progressively populated
+    (ohlcv → indicators → scores → signal).
     """
 
     # --------------------------------- Identity --------------------------------- #
-    stock_id: str = Field(primary_key=True, index=True)
+    stock_id: str
     market: MarketType = Field(default=MarketType.TWSE)
     name: str | None = None
     industry: str | None = None
 
     # --------------------------------- Pipeline --------------------------------- #
-    source: CandidateSource | None = Field(default=None, schema_extra={"ignore": True})
-    trigger_reason: str = Field(default="", schema_extra={"ignore": True})
-    stage: AnalysisStage = Field(default=AnalysisStage.PENDING, schema_extra={"ignore": True})
+    source: CandidateSource | None = None
+    trigger_reason: str = ""
+    stage: AnalysisStage = AnalysisStage.PENDING
 
     # ----------------------------------- Data ----------------------------------- #
     ohlcv: list[Ohlcv] = Field(default_factory=list)
     articles: list[Article] = Field(default_factory=list)
 
     # -------------------------------- Analysis ---------------------------------- #
-    indicators: TechnicalIndicators | None = Field(default=None, schema_extra={"ignore": True})
+    indicators: TechnicalIndicators | None = None
 
-    hard_failures: list[str] = Field(default_factory=list, schema_extra={"ignore": True})
-    soft_failures: list[str] = Field(default_factory=list, schema_extra={"ignore": True})
-    observations: list[str] = Field(default_factory=list, schema_extra={"ignore": True})
+    hard_failures: list[str] = Field(default_factory=list)
+    soft_failures: list[str] = Field(default_factory=list)
+    observations: list[str] = Field(default_factory=list)
 
-    technical_score: int | None = Field(default=None, schema_extra={"ignore": True})
+    technical_score: int | None = None
 
     # -------------------------------- Sentiment --------------------------------- #
-    historical_context: str = Field(default="", schema_extra={"ignore": True})
-    sentiment_report: AiSentiment | None = Field(default=None, schema_extra={"ignore": True})
-    sentiment_score: int | None = Field(default=None, schema_extra={"ignore": True})
+    historical_context: str = "" # It should be saved in RAG database.
+    analysis_report: AiAnalysisReport | None = None
+    ai_score: int | None = None
 
     # -------------------------------- Decision ---------------------------------- #
-    combined_score: int = Field(default=50, schema_extra={"ignore": True})
+    combined_score: int = 50
 
     # -------------------------------- Shortcuts --------------------------------- #
     @property
@@ -56,7 +57,7 @@ class Stock(SQLModel):
         return self.ohlcv[-2] if len(self.ohlcv) >= 2 else None
 
     @property
-    def current_price(self) -> Decimal | None:
+    def current_price(self) -> float | None:
         return self.today.close if self.today else None
 
     @property

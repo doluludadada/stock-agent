@@ -1,17 +1,17 @@
 from datetime import datetime
-from decimal import Decimal
 
-from backend.src.a_domain.types.enums import SignalAction, SignalSource
-from sqlmodel import Field, SQLModel
+from pydantic import BaseModel, Field
+
+from a_domain.types.enums import SignalAction, SignalSource
 
 
-class TradeSignal(SQLModel):
+class TradeSignal(BaseModel):
     stock_id: str
     action: SignalAction
-    price_at_signal: Decimal
+    price_at_signal: float
     source: SignalSource
     score: int
     reason: str
     quantity: int = Field(default=0)
-    stop_loss_price: Decimal | None = Field(default=None)
+    stop_loss_price: float | None = Field(default=None)
     generated_at: datetime = Field(default_factory=datetime.now)

@@ -21,7 +21,7 @@ rag_injection_prompt: |
   INSTRUCTION:
   Synthesize the above news with technical indicators to form a market trend assessment.
 
-ai_sentiment_prompt_fundamental: |
+ai_analysis_report_prompt_fundamental: |
   You are a conservative financial analyst.
   Target Stock: {stock_id}
 
@@ -40,7 +40,7 @@ ai_sentiment_prompt_fundamental: |
   }}
 
 # Template for Buzz/Momentum Stocks
-ai_sentiment_prompt_momentum: |
+ai_analysis_report_prompt_momentum: |
   You are a momentum trader and risk manager.
   Target Stock: {stock_id}
 

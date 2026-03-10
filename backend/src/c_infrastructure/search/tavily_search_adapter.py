@@ -3,9 +3,9 @@ from __future__ import annotations
 import httpx
 
 from a_domain.model.chat.web_search_result import WebSearchResult
-from backend.src.a_domain.ports.chat.web_search_provider import IWebSearchProvider
-from backend.src.a_domain.ports.system.logging_provider import ILoggingProvider
-from backend.src.b_application.schemas.config import AppConfig
+from a_domain.ports.chat.web_search_provider import IWebSearchProvider
+from a_domain.ports.system.logging_provider import ILoggingProvider
+from b_application.schemas.config import AppConfig
 
 
 class TavilySearchAdapter(IWebSearchProvider):
@@ -33,9 +33,8 @@ class TavilySearchAdapter(IWebSearchProvider):
             "include_raw_content": False,
         }
 
-        # TODO: Remove getattr
-        allowed = getattr(self._config, "web_search_allowed_domains", None)
-        excluded = getattr(self._config, "web_search_excluded_domains", None)
+        allowed = self._config.web_search_allowed_domains
+        excluded = self._config.web_search_excluded_domains
 
         if allowed:
             payload["include_domains"] = list(allowed)

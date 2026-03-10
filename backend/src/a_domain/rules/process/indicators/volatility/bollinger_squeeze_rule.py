@@ -1,10 +1,8 @@
-from backend.src.a_domain.model.market.stock import Stock
-from backend.src.a_domain.rules.base import TradingRule
+from a_domain.model.market.stock import Stock
+from a_domain.rules.base import TradingRule
 
 
 class BollingerSqueezeRule(TradingRule):
-    """Bollinger Bands should show squeeze (low volatility, breakout expected)."""
-
     def __init__(self, max_bandwidth: float = 0.1):
         self._max_bandwidth = max_bandwidth
 

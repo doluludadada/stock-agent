@@ -1,10 +1,8 @@
-from backend.src.a_domain.model.market.stock import Stock
-from backend.src.a_domain.rules.base import TradingRule
+from a_domain.model.market.stock import Stock
+from a_domain.rules.base import TradingRule
 
 
 class ObvTrendRule(TradingRule):
-    """On-Balance Volume (OBV) should be above its 20-day MA (rising trend)."""
-
     @property
     def name(self) -> str:
         return "OBV Trend"

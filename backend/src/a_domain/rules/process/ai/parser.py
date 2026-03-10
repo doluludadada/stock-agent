@@ -1,16 +1,13 @@
 import json
 
-from backend.src.a_domain.model.analysis.ai_sentiment import AiSentiment
+from a_domain.model.analysis.ai_analysis_report import AiAnalysisReport
 
 
-class SentimentParser:
-    def parse(self, stock_id: str, raw_response: str) -> AiSentiment:
-        fallback = AiSentiment(
-            score=50,
-            bullish_factors=[],
-            bearish_factors=[],
-            summary="Parse Error or Neutral",
-            raw_response=raw_response,
+class AiReportParser:
+    def parse(self, stock_id: str, raw_response: str) -> AiAnalysisReport:
+        fallback = AiAnalysisReport(
+            score=50, bullish_factors=[], bearish_factors=[],
+            summary="Parse Error or Neutral", raw_response=raw_response,
         )
         try:
             json_start = raw_response.find("{")
@@ -26,7 +23,7 @@ class SentimentParser:
                     return [x.strip() for x in val.split(",") if x.strip()]
                 return []
 
-            return AiSentiment(
+            return AiAnalysisReport(
                 score=int(parsed.get("confidence_score", 50)),
                 bullish_factors=to_list(parsed.get("bullish_factors", "")),
                 bearish_factors=to_list(parsed.get("bearish_factors", "")),

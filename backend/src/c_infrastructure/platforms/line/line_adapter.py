@@ -6,11 +6,11 @@
 # ***********************************************************************
 import httpx
 
-from backend.src.a_domain.model.chat.message import Message
-from backend.src.a_domain.ports.system.logging_provider import ILoggingProvider
-from backend.src.a_domain.ports.system.platform_provider import IPlatformProvider
-from backend.src.b_application.schemas.config import AppConfig
-from backend.src.c_infrastructure.platforms.line.line_constants import PUSH_MESSAGE_URL
+from a_domain.model.chat.message import Message
+from a_domain.ports.system.logging_provider import ILoggingProvider
+from a_domain.ports.system.platform_provider import IPlatformProvider
+from b_application.schemas.config import AppConfig
+from c_infrastructure.platforms.line.line_constants import PUSH_MESSAGE_URL
 
 
 class LinePlatformAdapter(IPlatformProvider):

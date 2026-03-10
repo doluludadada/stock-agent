@@ -1,11 +1,11 @@
 import chromadb
 
-from backend.src.a_domain.model.chat.conversation import Conversation
-from backend.src.a_domain.ports.system.logging_provider import ILoggingProvider
-from backend.src.a_domain.ports.system.repository_provider import IRepositoryProvider
-from backend.src.b_application.schemas.config import AppConfig
-from backend.src.c_infrastructure.persistence.chroma.mapper import ConversationMapper
-from backend.src.c_infrastructure.persistence.chroma.schema import ChromaCollection, ChromaResultKey
+from a_domain.model.chat.conversation import Conversation
+from a_domain.ports.system.logging_provider import ILoggingProvider
+from a_domain.ports.system.repository_provider import IRepositoryProvider
+from b_application.schemas.config import AppConfig
+from c_infrastructure.persistence.chroma.mapper import ConversationMapper
+from c_infrastructure.persistence.chroma.schema import ChromaCollection, ChromaResultKey
 
 
 class ChromaRepositoryAdapter(IRepositoryProvider):

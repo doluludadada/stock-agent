@@ -1,12 +1,9 @@
-# TODO: Not wired yet — planned for social buzz trending detection
 from dataclasses import dataclass
 
 
 @dataclass
 class SocialBuzzCriteria:
-    """
-    Rule: Defines trending thresholds.
-    """
+    """Defines trending thresholds for social media buzz detection."""
 
     min_mentions: int
     min_push_count: int

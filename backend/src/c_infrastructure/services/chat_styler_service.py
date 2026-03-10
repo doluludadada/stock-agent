@@ -1,7 +1,7 @@
 import re
 
-from backend.src.a_domain.model.chat.message import Message, MessageRole
-from backend.src.a_domain.ports.chat.chat_styler_provider import IChatStylerProvider
+from a_domain.model.chat.message import Message, MessageRole
+from a_domain.ports.chat.chat_styler_provider import IChatStylerProvider
 
 
 class ChatStylerService(IChatStylerProvider):

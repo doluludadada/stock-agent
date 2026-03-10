@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from backend.src.d_presentation.web.routers import webhook_router
+from d_presentation.web.routers import webhook_router
 
 router = APIRouter(prefix="/v1")
 

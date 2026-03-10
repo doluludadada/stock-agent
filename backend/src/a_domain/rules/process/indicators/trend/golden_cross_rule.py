@@ -1,5 +1,5 @@
-from backend.src.a_domain.model.market.stock import Stock
-from backend.src.a_domain.rules.base import TradingRule
+from a_domain.model.market.stock import Stock
+from a_domain.rules.base import TradingRule
 
 
 class GoldenCrossRule(TradingRule):
@@ -15,16 +15,10 @@ class GoldenCrossRule(TradingRule):
     def apply(self, stock: Stock) -> bool:
         if stock.indicators is None or stock.indicators.ma is None:
             return False
-
         ma = stock.indicators.ma
         if ma.ma_20 is None or ma.ma_60 is None:
             return False
-
-        ma_20 = float(ma.ma_20)
-        ma_60 = float(ma.ma_60)
-
-        if ma_20 <= ma_60:
+        if ma.ma_20 <= ma.ma_60:
             return False
-
-        cross_margin = (ma_20 - ma_60) / ma_60
+        cross_margin = (ma.ma_20 - ma.ma_60) / ma.ma_60
         return 0 < cross_margin < self._max_cross_margin

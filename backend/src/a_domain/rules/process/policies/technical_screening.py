@@ -1,31 +1,28 @@
 """
 Technical Screening Policy.
 
-Orchestrates all trading rules in a three-tier system:
-1. must_pass:   Hard gate — failure means elimination
-2. should_pass: Soft signal — failure reduces score but doesn't eliminate
-3. info_only:   Observation — recorded for audit/debug, no impact on outcome
+Three-tier rule system:
+1. must_pass:   Hard gate - failure means elimination
+2. should_pass: Soft signal - failure reduces score
+3. info_only:   Observation - recorded for audit
 
-Reference Architecture:
-- Elder, A. (1993). Triple Screen Trading System.
+Reference: Elder, A. (1993). Triple Screen Trading System.
 """
-from backend.src.a_domain.model.market.stock import Stock
-from backend.src.a_domain.rules.base import TradingRule
-from backend.src.a_domain.types.enums import CandidateSource
+from a_domain.model.market.stock import Stock
+from a_domain.rules.base import TradingRule
+from a_domain.types.enums import CandidateSource
 
 
 class TechnicalScreeningPolicy:
     """
-    Master Policy: Evaluates all technical rules against a stock.
-
     Rule Application by Source:
-    ┌─────────────────────┬────────────┬─────────────┬────────────┐
-    │ Source              │ must_pass  │ should_pass │ info_only  │
-    ├─────────────────────┼────────────┼─────────────┼────────────┤
-    │ TECHNICAL_WATCHLIST │ ✅ All     │ ✅ All      │ ✅ All     │
-    │ SOCIAL_BUZZ         │ ✅ Safety  │ ✅ All      │ ✅ All     │
-    │ MANUAL_INPUT        │ ✅ Safety  │ ✅ All      │ ✅ All     │
-    └─────────────────────┴────────────┴─────────────┴────────────┘
+    +---------------------+------------+-------------+------------+
+    | Source              | must_pass  | should_pass | info_only  |
+    +---------------------+------------+-------------+------------+
+    | TECHNICAL_WATCHLIST | All        | All         | All        |
+    | SOCIAL_BUZZ         | Safety     | All         | All        |
+    | MANUAL_INPUT        | Safety     | All         | All        |
+    +---------------------+------------+-------------+------------+
     """
 
     def __init__(
@@ -43,14 +40,6 @@ class TechnicalScreeningPolicy:
         self._entry_timing_must_pass = entry_timing_must_pass or []
 
     def evaluate(self, stock: Stock, is_intraday: bool = True) -> None:
-        """
-        Evaluate all rules and write results directly to stock.
-
-        Populates:
-            stock.hard_failures
-            stock.soft_failures
-            stock.observations
-        """
         stock.hard_failures.clear()
         stock.soft_failures.clear()
         stock.observations.clear()
@@ -72,12 +61,12 @@ class TechnicalScreeningPolicy:
                 if not rule.apply(stock):
                     stock.hard_failures.append(rule.name)
 
-        # 4. Should-pass (always, soft penalty)
+        # 4. Should-pass (soft penalty)
         for rule in self._should_pass:
             if not rule.apply(stock):
                 stock.soft_failures.append(rule.name)
 
-        # 5. Info-only (always, observation)
+        # 5. Info-only (observation)
         for rule in self._info_only:
             if not rule.apply(stock):
                 stock.observations.append(rule.name)

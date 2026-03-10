@@ -1,10 +1,8 @@
-from backend.src.a_domain.model.market.stock import Stock
-from backend.src.a_domain.rules.base import TradingRule
+from a_domain.model.market.stock import Stock
+from a_domain.rules.base import TradingRule
 
 
 class VolumeRatioRule(TradingRule):
-    """Current volume must meet the minimum ratio vs average volume."""
-
     def __init__(self, min_ratio: float = 1.0):
         self._min_ratio = min_ratio
 

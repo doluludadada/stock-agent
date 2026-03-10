@@ -1,6 +1,6 @@
 from typing import Protocol
 
-from backend.src.a_domain.model.market.article import Article
+from a_domain.model.market.article import Article
 
 
 class INewsRepository(Protocol):

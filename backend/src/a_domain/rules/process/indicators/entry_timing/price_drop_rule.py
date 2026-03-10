@@ -1,14 +1,12 @@
-from decimal import Decimal
-
-from backend.src.a_domain.model.market.stock import Stock
-from backend.src.a_domain.rules.base import TradingRule
+from a_domain.model.market.stock import Stock
+from a_domain.rules.base import TradingRule
 
 
 class PriceDropRule(TradingRule):
     """Stock should not be crashing today."""
 
     def __init__(self, max_drop_pct: float = 0.03):
-        self._max_drop = Decimal(str(max_drop_pct))
+        self._max_drop = max_drop_pct
 
     @property
     def name(self) -> str:

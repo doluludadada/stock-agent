@@ -2,7 +2,7 @@ from pathlib import Path
 
 import yaml
 
-from backend.src.b_application.schemas.config import AppConfig
+from b_application.schemas.config import AppConfig
 
 
 def load_settings(config_path: Path | None = None, instruction_path: Path | None = None) -> AppConfig:

@@ -1,9 +1,9 @@
 from abc import ABC, abstractmethod
 
-from backend.src.a_domain.model.chat.message import Message, MessageRole
-from backend.src.a_domain.ports.system.ai_provider import IAiProvider
-from backend.src.a_domain.ports.system.logging_provider import ILoggingProvider
-from backend.src.b_application.schemas.config import AppConfig
+from a_domain.model.chat.message import Message, MessageRole
+from a_domain.ports.system.ai_provider import IAiProvider
+from a_domain.ports.system.logging_provider import ILoggingProvider
+from b_application.schemas.config import AppConfig
 
 
 class BaseAIAdapter(IAiProvider, ABC):

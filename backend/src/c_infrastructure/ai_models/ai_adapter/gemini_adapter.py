@@ -4,13 +4,13 @@ import asyncio
 from functools import cached_property
 from typing import Any
 
-import google.generativeai as genai  # type: ignore[import-untyped]
+import google.generativeai as genai
 from google.api_core.client_options import ClientOptions
 
-from backend.src.a_domain.model.chat.message import Message, MessageRole
-from backend.src.a_domain.ports.system.logging_provider import ILoggingProvider
-from backend.src.b_application.schemas.config import AppConfig
-from backend.src.c_infrastructure.ai_models.base import BaseAIAdapter
+from a_domain.model.chat.message import Message, MessageRole
+from a_domain.ports.system.logging_provider import ILoggingProvider
+from b_application.schemas.config import AppConfig
+from c_infrastructure.ai_models.base import BaseAIAdapter
 
 
 class GeminiAIAdapter(BaseAIAdapter):
@@ -30,7 +30,7 @@ class GeminiAIAdapter(BaseAIAdapter):
                     genai.configure(client_options={"api_endpoint": endpoint})  # type: ignore[attr-defined]
                 except Exception:
                     self._logger.debug(
-                        "[GeminiAIAdapter] genai.configure with custom endpoint not supported by installed library version"
+                        "genai.configure with custom endpoint not supported by installed library version"
                     )
 
     @cached_property

@@ -1,10 +1,8 @@
-from backend.src.a_domain.model.market.stock import Stock
-from backend.src.a_domain.rules.base import TradingRule
+from a_domain.model.market.stock import Stock
+from a_domain.rules.base import TradingRule
 
 
 class IntradayRangeRule(TradingRule):
-    """Price should not be at intraday high (buy near support)."""
-
     def __init__(self, max_range_position: float = 0.8):
         self._max_position = max_range_position
 
@@ -18,5 +16,5 @@ class IntradayRangeRule(TradingRule):
         spread = stock.today.high - stock.today.low
         if spread <= 0:
             return True
-        position = float((stock.today.close - stock.today.low) / spread)
+        position = (stock.today.close - stock.today.low) / spread
         return position < self._max_position

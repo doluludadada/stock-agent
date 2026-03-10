@@ -1,9 +1,15 @@
 import os
+import sys
 import uvicorn
-from backend.src.d_presentation.web.app import create_app
+from pathlib import Path
+
+src_path = str(Path(__file__).parent / "src")
+if src_path not in sys.path:
+    sys.path.insert(0, src_path)
+
+from d_presentation.web.app import create_app
 
 app = create_app()
-
 
 def main():
     """

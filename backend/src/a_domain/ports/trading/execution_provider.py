@@ -1,0 +1,13 @@
+from typing import Protocol
+
+from a_domain.model.trading.order import Order
+from a_domain.model.trading.position import Position
+
+
+class IExecutionProvider(Protocol):
+    """Interface for executing trades and retrieving account status."""
+
+    async def place_order(self, order: Order) -> str: ...
+    async def cancel_order(self, order_id: str) -> bool: ...
+    async def get_positions(self) -> list[Position]: ...
+    async def get_cash_balance(self) -> float: ...

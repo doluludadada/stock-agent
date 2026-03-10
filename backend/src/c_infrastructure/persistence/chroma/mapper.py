@@ -4,10 +4,10 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from backend.src.a_domain.model.chat.conversation import Conversation
-from backend.src.a_domain.model.chat.message import Message
-from backend.src.a_domain.types.enums import MessageRole
-from backend.src.c_infrastructure.persistence.chroma.schema import ChromaMetadataKey
+from a_domain.model.chat.conversation import Conversation
+from a_domain.model.chat.message import Message
+from a_domain.types.enums import MessageRole
+from c_infrastructure.persistence.chroma.schema import ChromaMetadataKey
 
 
 class ConversationMapper:

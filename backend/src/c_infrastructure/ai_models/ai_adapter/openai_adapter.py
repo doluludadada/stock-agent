@@ -8,10 +8,10 @@ from openai.types.chat import (
     ChatCompletionUserMessageParam,
 )
 
-from backend.src.a_domain.model.chat.message import Message, MessageRole
-from backend.src.a_domain.ports.system.logging_provider import ILoggingProvider
-from backend.src.b_application.schemas.config import AppConfig
-from backend.src.c_infrastructure.ai_models.base import BaseAIAdapter
+from a_domain.model.chat.message import Message, MessageRole
+from a_domain.ports.system.logging_provider import ILoggingProvider
+from b_application.schemas.config import AppConfig
+from c_infrastructure.ai_models.base import BaseAIAdapter
 
 
 class OpenAIAdapter(BaseAIAdapter):

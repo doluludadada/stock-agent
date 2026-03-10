@@ -1,11 +1,11 @@
 """
 Technical Indicators Domain Models.
 
-These are value objects that hold calculated indicator values.
-    The calculation logic lives in the Infrastructure layer (IIndicatorProvider).
+Value objects holding calculated indicator values.
+Calculation logic lives in the Infrastructure layer (IIndicatorProvider).
+All values use float for consistency (these are calculated values, not currency).
 """
 from dataclasses import dataclass
-from decimal import Decimal
 
 
 @dataclass(frozen=True)
@@ -23,22 +23,22 @@ class Macd:
 
 @dataclass(frozen=True)
 class MovingAverages:
-    ma_5: Decimal | None = None
-    ma_10: Decimal | None = None
-    ma_20: Decimal | None = None
-    ma_60: Decimal | None = None
-    ma_120: Decimal | None = None
-    ema_12: Decimal | None = None
-    ema_26: Decimal | None = None
+    ma_5: float | None = None
+    ma_10: float | None = None
+    ma_20: float | None = None
+    ma_60: float | None = None
+    ma_120: float | None = None
+    ema_12: float | None = None
+    ema_26: float | None = None
     volume_ma_5: float | None = None
     volume_ma_20: float | None = None
 
 
 @dataclass(frozen=True)
 class BollingerBands:
-    upper: Decimal | None
-    middle: Decimal | None
-    lower: Decimal | None
+    upper: float | None
+    middle: float | None
+    lower: float | None
     bandwidth: float | None = None
     percent_b: float | None = None
 

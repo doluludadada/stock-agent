@@ -2,10 +2,10 @@ from dataclasses import dataclass
 
 
 @dataclass
-class AiSentiment:
+class AiAnalysisReport:
     """
-    Represents the structured output from the LLM.
-    This is a Value Object inside StockCandidate.
+    Structured output from the LLM.
+    Value Object inside Stock.
     """
 
     score: int  # 0-100

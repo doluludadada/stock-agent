@@ -1,10 +1,8 @@
-from backend.src.a_domain.model.market.stock import Stock
-from backend.src.a_domain.rules.base import TradingRule
+from a_domain.model.market.stock import Stock
+from a_domain.rules.base import TradingRule
 
 
 class AtrRangeRule(TradingRule):
-    """ATR must be within acceptable range for risk management."""
-
     def __init__(self, min_atr_pct: float = 0.01, max_atr_pct: float = 0.05):
         self._min_atr_pct = min_atr_pct
         self._max_atr_pct = max_atr_pct

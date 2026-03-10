@@ -28,3 +28,5 @@ wheels/
 /design_report.md
 /.ruff_cache
 /.vscode
+/backend/.ruff_cache
+/.pytest_cache

@@ -15,9 +15,3 @@ FINANCIAL_KEYWORDS_TW: Final[frozenset[str]] = frozenset(
         "目標價",
     }
 )
-
-# TODO: Maybe move to enums? it looks weird.
-REASON_NIGHTLY_SCREEN: Final[str] = "Nightly Technical Scan"
-REASON_SOCIAL_BUZZ: Final[str] = "Social Media Buzz"
-REASON_MANUAL_REQ: Final[str] = "User Manual Request"
-REASON_STOP_LOSS: Final[str] = "Stop Loss Triggered"

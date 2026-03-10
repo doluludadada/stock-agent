@@ -6,7 +6,7 @@ Each rule answers ONE specific question about a Stock.
 """
 from typing import Protocol
 
-from backend.src.a_domain.model.market.stock import Stock
+from a_domain.model.market.stock import Stock
 
 
 class TradingRule(Protocol):

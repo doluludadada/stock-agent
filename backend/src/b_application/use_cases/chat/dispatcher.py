@@ -1,6 +1,6 @@
-from backend.src.a_domain.model.chat.message import Message
-from backend.src.a_domain.ports.system.logging_provider import ILoggingProvider
-from backend.src.a_domain.ports.system.platform_provider import IPlatformProvider
+from a_domain.model.chat.message import Message
+from a_domain.ports.chat.platform_provider import IPlatformProvider
+from a_domain.ports.system.logging_provider import ILoggingProvider
 
 
 class Dispatcher:

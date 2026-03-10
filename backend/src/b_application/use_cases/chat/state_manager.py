@@ -1,10 +1,10 @@
 from dataclasses import replace
 from datetime import datetime, timezone
 
-from backend.src.a_domain.model.chat.conversation import Conversation
-from backend.src.a_domain.model.chat.message import Message
-from backend.src.a_domain.ports.system.logging_provider import ILoggingProvider
-from backend.src.a_domain.ports.system.repository_provider import IRepositoryProvider
+from a_domain.model.chat.conversation import Conversation
+from a_domain.model.chat.message import Message
+from a_domain.ports.system.logging_provider import ILoggingProvider
+from a_domain.ports.system.repository_provider import IRepositoryProvider
 
 
 class StateManager:

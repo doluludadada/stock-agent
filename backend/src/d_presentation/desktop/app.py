@@ -1,7 +1,7 @@
 import flet as ft
 
-from backend.src.a_domain.types.enums import AiProvider, DatabaseProvider
-from backend.src.d_presentation.desktop.view_models.ui_vm import AdminViewModel
+from a_domain.types.enums import AiProvider, DatabaseProvider
+from d_presentation.desktop.view_models.ui_vm import AdminViewModel
 
 
 def main(page: ft.Page):

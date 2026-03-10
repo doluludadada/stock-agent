@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
-from backend.src.a_domain.types.enums import MessageRole
+from a_domain.types.enums import MessageRole
 
 
 @dataclass(frozen=True, kw_only=True)

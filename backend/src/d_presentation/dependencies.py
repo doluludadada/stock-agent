@@ -1,24 +1,24 @@
 from functools import lru_cache
 
-from backend.src.a_domain.ports.chat.chat_styler_provider import IChatStylerProvider
-from backend.src.a_domain.ports.system.logging_provider import ILoggingProvider
-from backend.src.a_domain.ports.system.platform_provider import IPlatformProvider
-from backend.src.a_domain.ports.system.repository_provider import IRepositoryProvider
-from backend.src.b_application.schemas.config import AppConfig
-from backend.src.b_application.use_cases.chat.context_loader import ContextLoader
-from backend.src.b_application.use_cases.chat.dispatcher import Dispatcher
-from backend.src.b_application.use_cases.chat.state_manager import StateManager
-from backend.src.c_infrastructure.config.loader import load_settings
-from backend.src.c_infrastructure.persistence.chroma.chroma_repository import (
+from a_domain.ports.chat.chat_styler_provider import IChatStylerProvider
+from a_domain.ports.system.logging_provider import ILoggingProvider
+from a_domain.ports.system.platform_provider import IPlatformProvider
+from a_domain.ports.system.repository_provider import IRepositoryProvider
+from b_application.schemas.config import AppConfig
+from b_application.use_cases.chat.context_loader import ContextLoader
+from b_application.use_cases.chat.dispatcher import Dispatcher
+from b_application.use_cases.chat.state_manager import StateManager
+from c_infrastructure.services.config_loader import load_settings
+from c_infrastructure.persistence.chroma.chroma_repository import (
     ChromaRepositoryAdapter,
 )
-from backend.src.c_infrastructure.persistence.inmemory_repository import (
+from c_infrastructure.persistence.inmemory_repository import (
     InMemoryRepositoryAdapter,
 )
-from backend.src.c_infrastructure.platforms.line.line_adapter import LinePlatformAdapter
-from backend.src.c_infrastructure.platforms.line.line_security import LineSecurityService
-from backend.src.c_infrastructure.services.chat_styler_service import ChatStylerService
-from backend.src.c_infrastructure.services.logger_service import LoggerService
+from c_infrastructure.platforms.line.line_adapter import LinePlatformAdapter
+from c_infrastructure.platforms.line.line_security import LineSecurityService
+from c_infrastructure.services.chat_styler_service import ChatStylerService
+from c_infrastructure.services.logger_service import LoggerService
 from fastapi import Depends
 
 

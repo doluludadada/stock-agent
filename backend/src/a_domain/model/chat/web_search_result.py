@@ -6,5 +6,3 @@ class WebSearchResult:
     title: str
     url: str
     content: str
-
-

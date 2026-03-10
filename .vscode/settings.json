@@ -3,6 +3,4 @@
         "./backend",
         "./backend/src"
     ],
-    "python.defaultInterpreterPath": "./backend/.venv/Scripts/python.exe",
-    "terminal.integrated.cwd": "${workspaceFolder}/backend"
 }

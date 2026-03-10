@@ -1,28 +1,22 @@
 from datetime import datetime
-from decimal import Decimal
 
-from sqlmodel import Field, SQLModel
+from pydantic import BaseModel, Field
 
 
-class Position(SQLModel):
-    """
-    Represents a stock currently held in the portfolio.
-    """
+class Position(BaseModel):
+    """Represents a stock currently held in the portfolio."""
 
-    stock_id: str = Field(primary_key=True)
+    stock_id: str
     quantity: int = Field(gt=0)
-    average_cost: Decimal = Field(decimal_places=2)
+    average_cost: float
 
-    # Updated by Market Data
-    current_price: Decimal = Field(default=0, decimal_places=2)
-    market_value: Decimal = Field(default=0, decimal_places=2)
+    current_price: float = 0
+    market_value: float = 0
 
     last_updated: datetime = Field(default_factory=datetime.now)
 
     @property
-    def unrealized_pnl(self) -> Decimal:
+    def unrealized_pnl(self) -> float:
         if self.quantity == 0:
-            return Decimal(0)
+            return 0.0
         return (self.current_price - self.average_cost) * self.quantity
-
-

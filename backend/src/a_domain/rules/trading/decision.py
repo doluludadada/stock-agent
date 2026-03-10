@@ -1,12 +1,11 @@
 from datetime import datetime
-from decimal import Decimal
 
-from backend.src.a_domain.model.market.stock import Stock
-from backend.src.a_domain.model.trading.signal import TradeSignal
-from backend.src.a_domain.rules.trading.action import ActionRule
-from backend.src.a_domain.rules.trading.reason import ReasonRule
-from backend.src.a_domain.rules.trading.sizing import SizingRule
-from backend.src.a_domain.types.enums import SignalAction, SignalSource
+from a_domain.model.market.stock import Stock
+from a_domain.model.trading.signal import TradeSignal
+from a_domain.rules.trading.action import ActionRule
+from a_domain.rules.trading.reason import ReasonRule
+from a_domain.rules.trading.sizing import SizingRule
+from a_domain.types.enums import SignalAction, SignalSource
 
 
 class DecisionRule:
@@ -17,7 +16,7 @@ class DecisionRule:
         action_rule: ActionRule,
         reason_rule: ReasonRule,
         sizing_rule: SizingRule,
-        total_capital: Decimal,
+        total_capital: float,
         risk_pct: float,
     ):
         self._action_rule = action_rule
@@ -36,18 +35,11 @@ class DecisionRule:
         quantity = 0
         if action == SignalAction.BUY:
             quantity = self._sizing_rule.calculate_quantity(
-                capital=self._capital,
-                price=stock.current_price,
-                risk_per_trade_pct=self._risk_pct,
+                capital=self._capital, price=stock.current_price, risk_per_trade_pct=self._risk_pct,
             )
 
         return TradeSignal(
-            stock_id=stock.stock_id,
-            action=action,
-            price_at_signal=stock.current_price,
-            source=SignalSource.HYBRID,
-            score=stock.combined_score,
-            reason=reason,
-            quantity=quantity,
-            generated_at=datetime.now(),
+            stock_id=stock.stock_id, action=action, price_at_signal=stock.current_price,
+            source=SignalSource.HYBRID, score=stock.combined_score, reason=reason,
+            quantity=quantity, generated_at=datetime.now(),
         )

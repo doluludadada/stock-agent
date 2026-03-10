@@ -1,4 +1,4 @@
-from backend.src.a_domain.types.enums import SignalAction
+from a_domain.types.enums import SignalAction
 
 
 class ActionRule:

@@ -4,11 +4,11 @@ import google.generativeai as genai  # type: ignore[import-untyped]
 import httpx
 from openai import AsyncOpenAI, OpenAIError
 
-from backend.src.a_domain.model.chat.ai_model import AIModel
-from backend.src.a_domain.ports.chat.model_catalog_repository import IModelCatalogRepository
-from backend.src.a_domain.ports.system.logging_provider import ILoggingProvider
-from backend.src.a_domain.types.enums import AiProvider
-from backend.src.b_application.schemas.config import AppConfig
+from a_domain.model.chat.ai_model import AIModel
+from a_domain.ports.chat.model_catalog_repository import IModelCatalogRepository
+from a_domain.ports.system.logging_provider import ILoggingProvider
+from a_domain.types.enums import AiProvider
+from b_application.schemas.config import AppConfig
 
 
 class ModelsCatalog(IModelCatalogRepository):

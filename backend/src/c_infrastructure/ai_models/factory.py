@@ -1,12 +1,12 @@
-from backend.src.a_domain.ports.chat.web_search_provider import IWebSearchProvider
-from backend.src.a_domain.ports.system.ai_provider import IAiProvider
-from backend.src.a_domain.ports.system.logging_provider import ILoggingProvider
-from backend.src.a_domain.types.enums import AiProvider
-from backend.src.b_application.schemas.config import AppConfig
-from backend.src.c_infrastructure.ai_models.ai_adapter.gemini_adapter import GeminiAIAdapter
-from backend.src.c_infrastructure.ai_models.ai_adapter.grok_adapter import GrokAdapter
-from backend.src.c_infrastructure.ai_models.ai_adapter.groq_adapter import GroqAIAdapter
-from backend.src.c_infrastructure.ai_models.ai_adapter.openai_adapter import OpenAIAdapter
+from a_domain.ports.chat.web_search_provider import IWebSearchProvider
+from a_domain.ports.system.ai_provider import IAiProvider
+from a_domain.ports.system.logging_provider import ILoggingProvider
+from a_domain.types.enums import AiProvider
+from b_application.schemas.config import AppConfig
+from c_infrastructure.ai_models.ai_adapter.gemini_adapter import GeminiAIAdapter
+from c_infrastructure.ai_models.ai_adapter.grok_adapter import GrokAdapter
+from c_infrastructure.ai_models.ai_adapter.groq_adapter import GroqAIAdapter
+from c_infrastructure.ai_models.ai_adapter.openai_adapter import OpenAIAdapter
 
 
 class AiAdapterFactory:

@@ -106,3 +106,15 @@ class AnalysisStage(StrEnum):
     ENRICHED = "ENRICHED"
     ANALYZED = "ANALYZED"
     DECIDED = "DECIDED"
+
+class SystemEnvironment(StrEnum):
+    DEV = "dev"   # Logs only, mock returns
+    TEST = "test" # Paper trading (SQLite)
+    LIVE = "live" # Real execution (Shioaji)
+
+
+class SignalReason(StrEnum):
+    NIGHTLY_SCREEN = "Nightly Technical Scan"
+    SOCIAL_BUZZ    = "Social Media Buzz"
+    MANUAL_REQ     = "User Manual Request"
+    STOP_LOSS      = "Stop Loss Triggered"

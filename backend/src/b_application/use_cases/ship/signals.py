@@ -1,16 +1,14 @@
 """
 Use Case: Generate and persist trade signals.
-
-Converts analyzed candidates into actionable signals.
 """
-from backend.src.a_domain.model.market.stock import Stock
-from backend.src.a_domain.model.trading.signal import TradeSignal
-from backend.src.a_domain.ports.analysis.signal_repository import ISignalRepository
-from backend.src.a_domain.ports.chat.knowledge_repository import IKnowledgeRepository
-from backend.src.a_domain.ports.system.logging_provider import ILoggingProvider
-from backend.src.a_domain.rules.process.scoring.composite import CompositeScoreRule
-from backend.src.a_domain.rules.trading.decision import DecisionRule
-from backend.src.a_domain.types.enums import AnalysisStage
+from a_domain.model.market.stock import Stock
+from a_domain.model.trading.signal import TradeSignal
+from a_domain.ports.ai.knowledge_repository import IKnowledgeRepository
+from a_domain.ports.system.logging_provider import ILoggingProvider
+from a_domain.ports.trading.signal_repository import ISignalRepository
+from a_domain.rules.process.scoring.composite import CompositeScoreRule
+from a_domain.rules.trading.decision import DecisionRule
+from a_domain.types.enums import AnalysisStage
 
 
 class Signals:
@@ -28,38 +26,33 @@ class Signals:
         self._knowledge = knowledge_repo
         self._logger = logger
 
-    async def execute(self, candidates: list[Stock]) -> list[TradeSignal]:
-        self._logger.info(f"Generating signals for {len(candidates)} analyzed stocks...")
+    async def execute(self, stocks: list[Stock]) -> list[TradeSignal]:
+        self._logger.info(f"Generating signals for {len(stocks)} analyzed stocks...")
         signals: list[TradeSignal] = []
 
-        for candidate in candidates:
-            candidate.combined_score = self._composite_rule.calculate(
-                technical_score=candidate.technical_score,
-                sentiment_score=candidate.sentiment_score,
+        for stock in stocks:
+            stock.combined_score = self._composite_rule.calculate(
+                technical_score=stock.technical_score, sentiment_score=stock.ai_score,
             )
-            candidate.stage = AnalysisStage.DECIDED
+            stock.stage = AnalysisStage.DECIDED
 
-            signal = self._decision_rule.decide(candidate)
-
+            signal = self._decision_rule.decide(stock)
             if signal:
                 signals.append(signal)
                 self._logger.info(
                     f"Signal: {signal.action} {signal.stock_id} (Score: {signal.score}, Qty: {signal.quantity})"
                 )
 
-        # Persist signals
         if signals:
             try:
                 await self._signal_repo.save_batch(signals)
-                self._logger.info(f"Persisted {len(signals)} signals")
             except Exception as e:
                 self._logger.error(f"Failed to persist signals: {e}")
 
-        # Save to RAG brain
-        for candidate in candidates:
+        for stock in stocks:
             try:
-                await self._knowledge.save_analysis(candidate)
+                await self._knowledge.save_analysis(stock)
             except Exception as e:
-                self._logger.error(f"RAG write failed for {candidate.stock_id}: {e}")
+                self._logger.error(f"RAG write failed for {stock.stock_id}: {e}")
 
         return signals

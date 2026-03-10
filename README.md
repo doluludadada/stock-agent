@@ -268,3 +268,9 @@ src/a_domain/rules/process/
     ├── technical_screening.py  # Master policy
     └── policy_factory.py       # Strategy configurations
 ```
+
+
+
+## Roadmap
+
+Create a IFundamentalProvider to read its fianceal report.

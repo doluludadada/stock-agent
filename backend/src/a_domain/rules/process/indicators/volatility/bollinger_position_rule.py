@@ -1,10 +1,8 @@
-from backend.src.a_domain.model.market.stock import Stock
-from backend.src.a_domain.rules.base import TradingRule
+from a_domain.model.market.stock import Stock
+from a_domain.rules.base import TradingRule
 
 
 class BollingerPositionRule(TradingRule):
-    """Price should be above the middle Bollinger Band."""
-
     @property
     def name(self) -> str:
         return "Bollinger Above Middle"

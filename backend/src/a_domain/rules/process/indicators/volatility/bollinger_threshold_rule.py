@@ -1,10 +1,8 @@
-from backend.src.a_domain.model.market.stock import Stock
-from backend.src.a_domain.rules.base import TradingRule
+from a_domain.model.market.stock import Stock
+from a_domain.rules.base import TradingRule
 
 
 class BollingerThresholdRule(TradingRule):
-    """Price must not be at the upper Bollinger Band."""
-
     def __init__(self, max_percent_b: float = 0.9):
         self._max_percent_b = max_percent_b
 

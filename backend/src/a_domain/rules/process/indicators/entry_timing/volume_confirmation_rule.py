@@ -1,17 +1,15 @@
-from backend.src.a_domain.model.market.stock import Stock
-from backend.src.a_domain.rules.base import TradingRule
+from a_domain.model.market.stock import Stock
+from a_domain.rules.base import TradingRule
 
 
 class VolumeConfirmationRule(TradingRule):
-    """Today's volume should confirm buying interest."""
-
     def __init__(self, min_volume_ratio: float = 0.5):
         self._min_ratio = min_volume_ratio
 
     @property
     def name(self) -> str:
         return "Volume Confirmation"
-    # TODO?
+
     def apply(self, stock: Stock) -> bool:
         if stock.indicators is None or stock.indicators.ma is None:
             return True

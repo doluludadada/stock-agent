@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from backend.src.d_presentation.web.endpoints import line_webhook
+from d_presentation.web.endpoints import line_webhook
 
 router = APIRouter()
 

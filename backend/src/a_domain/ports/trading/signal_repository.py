@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Protocol
 
-from backend.src.a_domain.model.trading.signal import TradeSignal
+from a_domain.model.trading.signal import TradeSignal
 
 
 class ISignalRepository(Protocol):

@@ -3,8 +3,6 @@ Groq AI adapter implementation.
 
 Infrastructure layer adapter that calls GroqCloud via OpenAI-compatible API.
 """
-from __future__ import annotations
-
 import asyncio
 from functools import cached_property
 
@@ -16,11 +14,11 @@ from openai.types.chat import (
     ChatCompletionUserMessageParam,
 )
 
-from backend.src.a_domain.model.chat.message import Message, MessageRole
-from backend.src.a_domain.ports.chat.web_search_provider import IWebSearchProvider
-from backend.src.a_domain.ports.system.logging_provider import ILoggingProvider
-from backend.src.b_application.schemas.config import AppConfig
-from backend.src.c_infrastructure.ai_models.base import BaseAIAdapter
+from a_domain.model.chat.message import Message, MessageRole
+from a_domain.ports.chat.web_search_provider import IWebSearchProvider
+from a_domain.ports.system.logging_provider import ILoggingProvider
+from b_application.schemas.config import AppConfig
+from c_infrastructure.ai_models.base import BaseAIAdapter
 
 
 class GroqAIAdapter(BaseAIAdapter):
@@ -60,7 +58,6 @@ class GroqAIAdapter(BaseAIAdapter):
         try:
             api_messages = self._convert_to_api_format(messages)
 
-            # 先進行搜尋
             if self._should_search(messages):
                 search_results = await self._enrich_with_search(messages)
                 if search_results:
@@ -70,18 +67,12 @@ class GroqAIAdapter(BaseAIAdapter):
                     rag_instruction = {
                         "role": "system",
                         "content": template.format(search_results=search_results), # type: ignore
-                        # Todo: Might needa check this file ag, lots of error
                     }
-                    
-                    # 調整訊息順序
-                    # 如果最後一則訊息是 User，我們把 Context 插在它前面，效果通常最好
+
                     if api_messages and api_messages[-1]['role'] == 'user':
                         api_messages.insert(-1, rag_instruction) # type: ignore
-                        # Todo: Might needa check this file ag, lots of error
-
                     else:
                         api_messages.append(rag_instruction) # type: ignore
-                        # Todo: Might needa check this file ag, lots of error
 
 
             self._logger.info("執行查詢流程結束")
@@ -107,7 +98,7 @@ class GroqAIAdapter(BaseAIAdapter):
             raise
         except (OpenAIError, httpx.HTTPError) as e:
             self._logger.error(f"GROQ API error for model {self._model_name}: {e}")
-            return f"GROQ API error for model {self._model_name}: {e}" + "I'm sorry, I'm having trouble connecting to GROQ right now. Please try again in a moment."
+            return f"GROQ API error for model {self._model_name}: {e}" + "I'm sorry, I'm having trouble connecting to GROQ right now. Please try again in a moment."  # noqa: E501
         except Exception as e:
             self._logger.error(f"Unexpected error calling GROQ ({self._model_name}): {e}")
             return "I'm sorry, something went wrong. Please try again."
@@ -131,8 +122,8 @@ class GroqAIAdapter(BaseAIAdapter):
             self._logger.debug(f"Performing web search for: {user_query}")
             self._logger.info(f"Performing web search for: {user_query}")
             results = await self._web_search.search(
-                user_query, 
-                limit=getattr(self._config, "web_search_max_results", 3)
+                user_query,
+                limit=self._config.web_search_max_results
             )
             self._logger.info(f"查詢結果: {results}")
             if not results:
@@ -152,7 +143,7 @@ class GroqAIAdapter(BaseAIAdapter):
 
     def _should_search(self, messages: tuple[Message, ...]) -> bool:
         """Determine if web search should be triggered."""
-        if not getattr(self._config, "enable_web_search", False) or not self._web_search:
+        if not self._config.enable_web_search or not self._web_search:
             return False
         
         # Get the latest user message

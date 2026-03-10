@@ -2,9 +2,9 @@ import threading
 import time
 from typing import Callable
 
-from backend.src.c_infrastructure.config.loader import get_project_root
-from backend.src.c_infrastructure.services.ui.config_editor import ConfigEditorService
-from backend.src.c_infrastructure.services.ui.process_manager import ProcessManager
+from c_infrastructure.services.config_loader import get_project_root
+from c_infrastructure.services.ui.config_editor import ConfigEditorService
+from c_infrastructure.services.ui.process_manager import ProcessManager
 
 
 class AdminViewModel:

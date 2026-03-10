@@ -1,4 +1,4 @@
-from backend.src.a_domain.model.market.stock import Stock
+from a_domain.model.market.stock import Stock
 
 
 class ReasonRule:
@@ -6,20 +6,13 @@ class ReasonRule:
 
     def build(self, stock: Stock) -> str:
         parts: list[str] = []
-
         if stock.is_eliminated:
-            failed_str = ", ".join(stock.hard_failures)
-            parts.append(f"Tech: FAIL[{failed_str}]")
+            parts.append(f"Tech: FAIL[{', '.join(stock.hard_failures)}]")
         else:
             parts.append("Tech: PASS")
             if stock.soft_failures:
-                soft_str = ", ".join(stock.soft_failures[:3])
-                parts.append(f"Soft: [{soft_str}]")
-
-        if stock.sentiment_report:
-            if stock.sentiment_report.bullish_factors:
-                parts.append(f"Bull: {stock.sentiment_report.bullish_factors[:3]}")
-
+                parts.append(f"Soft: [{', '.join(stock.soft_failures[:3])}]")
+        if stock.analysis_report and stock.analysis_report.bullish_factors:
+            parts.append(f"Bull: {stock.analysis_report.bullish_factors[:3]}")
         parts.append(f"Score: {stock.combined_score}")
-
         return " | ".join(parts)

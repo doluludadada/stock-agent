@@ -1,6 +1,6 @@
 from typing import Protocol
 
-from backend.src.a_domain.model.chat.message import Message
+from a_domain.model.chat.message import Message
 
 
 class IAiProvider(Protocol):

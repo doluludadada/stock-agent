@@ -1,13 +1,14 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from backend.src.a_domain.types.enums import ContentType, InformationSource
-from sqlmodel import Field, SQLModel
+from pydantic import BaseModel, Field
+
+from a_domain.types.enums import ContentType, InformationSource
 
 
-class Article(SQLModel):
-    id: UUID = Field(default_factory=uuid4, primary_key=True)
-    stock_id: str = Field(index=True)
+class Article(BaseModel):
+    id: UUID = Field(default_factory=uuid4)
+    stock_id: str
     source: InformationSource
     title: str
     content: str
