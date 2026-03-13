@@ -15,19 +15,19 @@ class ModelsCatalog(IModelCatalogRepository):
     def __init__(self, config: AppConfig, logger: ILoggingProvider):
         self._config = config
         self._logger = logger
-        self._timeout = httpx.Timeout(self._config.ai_model_connection_timeout)
+        self._timeout = httpx.Timeout(self._config.ai.connection_timeout)
         self._openai_client = (
-            AsyncOpenAI(api_key=self._config.openai_api_key, timeout=self._timeout)
-            if self._config.openai_api_key
+            AsyncOpenAI(api_key=self._config.ai.openai_api_key, timeout=self._timeout)
+            if self._config.ai.openai_api_key
             else None
         )
         self._xai_client = (
             AsyncOpenAI(
-                api_key=self._config.grok_api_key,
+                api_key=self._config.ai.grok_api_key,
                 base_url="https://api.x.ai/v1",
                 timeout=self._timeout,
             )
-            if self._config.grok_api_key
+            if self._config.ai.grok_api_key
             else None
         )
 
@@ -79,7 +79,7 @@ class ModelsCatalog(IModelCatalogRepository):
             return tuple()
         self._logger.debug("Fetching models from Gemini...")
         try:
-            genai.configure(api_key=self._config.gemini_api_key)  # type: ignore[attr-defined]
+            genai.configure(api_key=self._config.ai.gemini_api_key)  # type: ignore[attr-defined]
             resp = await asyncio.to_thread(
                 lambda: getattr(genai, "list_models", lambda: [])()
             )

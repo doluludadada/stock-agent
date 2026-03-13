@@ -1,10 +1,10 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field
+from sqlmodel import Field, SQLModel
 
 
-class SystemStats(BaseModel):
+class SystemStats(SQLModel):
     id: UUID = Field(default_factory=uuid4)
     start_time: datetime = Field(default_factory=datetime.now)
     end_time: datetime | None = None
@@ -12,7 +12,7 @@ class SystemStats(BaseModel):
     total_skipped: int = 0
     total_filtered: int = 0
     passed_technical: int = 0
-    ai_analyzed: int = 0
+    ai_analysed: int = 0
     signals_generated: int = 0
     orders_submitted: int = 0
     errors: list[str] = Field(default_factory=list)

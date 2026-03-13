@@ -34,7 +34,7 @@ class MaPeriod(StrEnum):
     MA_120 = "MA_120"
 
 
-class SignalAction(StrEnum):
+class TradeAction(StrEnum):
     BUY = "BUY"
     SELL = "SELL"
     HOLD = "HOLD"
@@ -49,11 +49,6 @@ class SignalSource(StrEnum):
 class OrderType(StrEnum):
     MARKET = "MARKET"
     LIMIT = "LIMIT"
-
-
-class OrderAction(StrEnum):
-    BUY = "BUY"
-    SELL = "SELL"
 
 
 class OrderStatus(StrEnum):
@@ -78,18 +73,13 @@ class InformationSource(StrEnum):
     REUNION = "REUNION"
 
 
+# TODO: Consider adding NEWS as a content type for raw news articles vs analysis reports
 class ContentType(StrEnum):
     FACT = "FACT"
     REPORT = "REPORT"
     ANALYSIS = "ANALYSIS"
     DISCUSSION = "DISCUSSION"
     NOISE = "NOISE"
-
-
-class SentimentType(StrEnum):
-    BULLISH = "BULLISH"
-    BEARISH = "BEARISH"
-    NEUTRAL = "NEUTRAL"
 
 
 class CandidateSource(StrEnum):
@@ -107,14 +97,15 @@ class AnalysisStage(StrEnum):
     ANALYZED = "ANALYZED"
     DECIDED = "DECIDED"
 
+
 class SystemEnvironment(StrEnum):
-    DEV = "dev"   # Logs only, mock returns
-    TEST = "test" # Paper trading (SQLite)
-    LIVE = "live" # Real execution (Shioaji)
+    DEV = "dev"  # Logs only, mock returns
+    TEST = "test"  # Paper trading (SQLite)
+    LIVE = "live"  # Real execution (Shioaji)
 
 
 class SignalReason(StrEnum):
     NIGHTLY_SCREEN = "Nightly Technical Scan"
-    SOCIAL_BUZZ    = "Social Media Buzz"
-    MANUAL_REQ     = "User Manual Request"
-    STOP_LOSS      = "Stop Loss Triggered"
+    SOCIAL_BUZZ = "Social Media Buzz"
+    MANUAL_REQ = "User Manual Request"
+    STOP_LOSS = "Stop Loss Triggered"

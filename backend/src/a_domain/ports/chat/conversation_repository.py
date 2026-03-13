@@ -1,6 +1,6 @@
 from typing import Protocol
 
 
-class IRepositoryProvider(Protocol):
+class IConversationRepository(Protocol):
     async def get_conversation_by_user_id(self, user_id: str): ...
     async def save(self, conversation) -> bool: ...

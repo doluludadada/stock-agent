@@ -1,5 +1,6 @@
 from a_domain.model.chat.message import Message, MessageRole
 from b_application.schemas.config import AppConfig
+from b_application.use_cases.chat.ai_processor import AiProcessor
 from b_application.use_cases.chat.context_loader import ContextLoader
 from b_application.use_cases.chat.dispatcher import Dispatcher
 from b_application.use_cases.chat.state_manager import StateManager
@@ -23,7 +24,7 @@ class ChatPipeline:
     async def execute(self, user_id: str, incoming_content: str) -> None:
         conversation = await self._loader.execute(user_id)
 
-        if incoming_content.strip() in self._config.reset_commands:
+        if incoming_content.strip() in self._config.db.reset_commands:
             await self._manager.reset_conversation(conversation)
             system_reply = Message(role=MessageRole.ASSISTANT, content="✨ 記憶已清除！我們重新開始吧。")
             await self._dispatcher.execute(user_id, (system_reply,))

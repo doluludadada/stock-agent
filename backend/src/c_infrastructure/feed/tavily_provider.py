@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import httpx
 
 from a_domain.model.chat.web_search_result import WebSearchResult
@@ -17,7 +15,7 @@ class TavilySearchAdapter(IWebSearchProvider):
         self._config = config
         self._logger = logger
 
-        if not self._config.tavily_api_key:
+        if not self._config.tavily.api_key:
             raise ValueError("Missing tavily_api_key in configuration.")
 
         timeout = getattr(self._config, "ai_model_connection_timeout", 30)
@@ -25,16 +23,16 @@ class TavilySearchAdapter(IWebSearchProvider):
 
     async def search(self, query: str, limit: int = 3) -> list[WebSearchResult]:
         payload: dict = {
-            "api_key": self._config.tavily_api_key,
+            "api_key": self._config.tavily.api_key,
             "query": query,
             "max_results": limit,
-            "search_depth": self._config.tavily_search_depth,  # "basic" | "advanced"
+            "search_depth": self._config.tavily.search_depth,  # "basic" | "advanced"
             "include_answer": False,
             "include_raw_content": False,
         }
 
-        allowed = self._config.web_search_allowed_domains
-        excluded = self._config.web_search_excluded_domains
+        allowed = self._config.behavior.web_search_allowed_domains
+        excluded = self._config.behavior.web_search_excluded_domains
 
         if allowed:
             payload["include_domains"] = list(allowed)

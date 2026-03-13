@@ -1,20 +1,16 @@
-"""
-Use Case: Filter stocks through technical analysis.
-The funnel gatekeeper — only survivors pass to the next stage.
-"""
 from a_domain.model.market.stock import Stock
 from a_domain.ports.analysis.indicator_provider import IIndicatorProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.rules.process.policies.technical_screening import TechnicalScreeningPolicy
 from a_domain.rules.process.scoring.technical import TechnicalScoreCalculator
 from a_domain.types.enums import AnalysisStage
+from b_application.schemas.pipeline_context import PipelineContext
 
 
 class TechnicalFilter:
     """
-    The Funnel Gatekeeper.
-    Applies technical analysis and only allows qualified stocks to proceed.
-    """
+    Use Case: Filter stocks through technical analysis.
+    The funnel gatekeeper — only survivors pass to the next stage."""
 
     def __init__(
         self,
@@ -28,8 +24,9 @@ class TechnicalFilter:
         self._calculator = score_calculator
         self._logger = logger
 
-    def execute(self, stocks: list[Stock], is_intraday: bool = True) -> list[Stock]:
-        self._logger.info(f"Filtering {len(stocks)} stocks (intraday={is_intraday})...")
+    def execute(self, ctx: PipelineContext) -> None:
+        stocks = ctx.priced
+        self._logger.info(f"Filtering {len(stocks)} stocks...")
         survivors: list[Stock] = []
 
         for stock in stocks:
@@ -39,7 +36,9 @@ class TechnicalFilter:
 
             try:
                 stock.indicators = self._tech_provider.calculate_indicators(stock.ohlcv)
-                self._policy.evaluate(stock, is_intraday=is_intraday)
+
+                self._policy.evaluate(stock)
+
                 stock.technical_score = self._calculator.calculate(stock)
 
                 if not stock.is_eliminated:
@@ -52,5 +51,6 @@ class TechnicalFilter:
                 self._logger.error(f"Error filtering {stock.stock_id}: {e}")
                 stock.stage = AnalysisStage.FILTERED_FAIL
 
+        ctx.survivors = survivors
+        ctx.stats.passed_technical += len(survivors)
         self._logger.info(f"Survivors: {len(survivors)}/{len(stocks)}")
-        return survivors

@@ -1,18 +1,19 @@
-"""
-Use Case: Collect price data for stocks.
-Fetches real-time bars and historical data, then merges them.
-"""
 from datetime import datetime, timedelta
 
 from a_domain.model.market.stock import Stock
-from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.market.price_provider import IPriceProvider
+from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.rules.collect.freshness import DataFreshnessRule
 from b_application.schemas.config import AppConfig
+from b_application.schemas.pipeline_context import PipelineContext
 
 
 class MarketData:
-    """Enriches Stock with price data (realtime + historical)."""
+    """
+    Use Case: Collect price data for stocks.
+    Fetches real-time bars and historical data, then merges them.
+    Enriches Stock with price data (realtime + historical).
+    """
 
     def __init__(
         self,
@@ -26,21 +27,19 @@ class MarketData:
         self._config = config
         self._logger = logger
 
-    async def execute(self, stocks: list[Stock]) -> list[Stock]:
-        if not stocks:
-            return []
-
+    async def execute(self, ctx: PipelineContext) -> None:
+        stocks = ctx.candidates
         self._logger.info(f"Collecting prices for {len(stocks)} stocks...")
 
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=self._config.analysis_lookback_days)
+        start_date = end_date - timedelta(days=self._config.analysis.lookback_days)
 
         stock_ids = [s.stock_id for s in stocks]
         try:
             realtime_bars = await self._market.fetch_realtime_bars(stock_ids)
         except Exception as e:
             self._logger.error(f"Failed to fetch realtime bars: {e}")
-            return []
+            return
 
         enriched: list[Stock] = []
         for stock in stocks:
@@ -49,24 +48,28 @@ class MarketData:
                 self._logger.debug(f"Missing realtime data for {stock.stock_id}, skipping")
                 continue
 
-            # Data freshness check (WIRED)
             if not self._freshness.is_fresh(current_bar.ts):
                 self._logger.debug(f"Stale data for {stock.stock_id}, skipping")
                 continue
 
             try:
                 history = await self._market.fetch_history(
-                    stock_id=stock.stock_id, start_date=start_date, end_date=end_date,
+                    stock_id=stock.stock_id,
+                    start_date=start_date,
+                    end_date=end_date,
                 )
-                if history and history[-1].ts.date() == current_bar.ts.date():
-                    full_ohlcv = history[:-1] + [current_bar]
-                else:
-                    full_ohlcv = history + [current_bar]
 
-                stock.ohlcv = full_ohlcv
+                if history:
+                    latest_historical_bar = history[-1]
+                    if latest_historical_bar.ts.date() == current_bar.ts.date():
+                        history.pop()
+
+                history.append(current_bar)
+                stock.ohlcv = history
                 enriched.append(stock)
+
             except Exception as e:
                 self._logger.error(f"Error collecting prices for {stock.stock_id}: {e}")
 
+        ctx.priced = enriched
         self._logger.info(f"Collected prices for {len(enriched)} stocks")
-        return enriched

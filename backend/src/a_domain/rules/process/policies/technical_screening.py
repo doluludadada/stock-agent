@@ -39,7 +39,7 @@ class TechnicalScreeningPolicy:
         self._info_only = info_only
         self._entry_timing_must_pass = entry_timing_must_pass or []
 
-    def evaluate(self, stock: Stock, is_intraday: bool = True) -> None:
+    def evaluate(self, stock: Stock) -> None:
         stock.hard_failures.clear()
         stock.soft_failures.clear()
         stock.observations.clear()
@@ -55,11 +55,10 @@ class TechnicalScreeningPolicy:
             if not rule.apply(stock):
                 stock.hard_failures.append(rule.name)
 
-        # 3. Entry timing must_pass (only intraday)
-        if is_intraday:
-            for rule in self._entry_timing_must_pass:
-                if not rule.apply(stock):
-                    stock.hard_failures.append(rule.name)
+        # 3. Entry timing must_pass (always)
+        for rule in self._entry_timing_must_pass:
+            if not rule.apply(stock):
+                stock.hard_failures.append(rule.name)
 
         # 4. Should-pass (soft penalty)
         for rule in self._should_pass:
@@ -70,12 +69,3 @@ class TechnicalScreeningPolicy:
         for rule in self._info_only:
             if not rule.apply(stock):
                 stock.observations.append(rule.name)
-
-    def get_rule_summary(self) -> dict[str, list[str]]:
-        return {
-            "setup_must_pass": [r.name for r in self._setup_must_pass],
-            "safety_must_pass": [r.name for r in self._safety_must_pass],
-            "entry_timing_must_pass": [r.name for r in self._entry_timing_must_pass],
-            "should_pass": [r.name for r in self._should_pass],
-            "info_only": [r.name for r in self._info_only],
-        }

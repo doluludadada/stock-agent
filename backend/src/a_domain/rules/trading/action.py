@@ -1,4 +1,4 @@
-from a_domain.types.enums import SignalAction
+from a_domain.types.enums import TradeAction
 
 
 class ActionRule:
@@ -8,10 +8,10 @@ class ActionRule:
         self.buy_threshold = buy_threshold
         self.sell_threshold = sell_threshold
 
-    def resolve(self, score: int) -> SignalAction:
+    def resolve(self, score: int) -> TradeAction:
         if score >= self.buy_threshold:
-            return SignalAction.BUY
+            return TradeAction.BUY
         elif score <= self.sell_threshold:
-            return SignalAction.SELL
+            return TradeAction.SELL
         else:
-            return SignalAction.HOLD
+            return TradeAction.HOLD

@@ -5,7 +5,7 @@ from a_domain.model.trading.signal import TradeSignal
 from a_domain.rules.trading.action import ActionRule
 from a_domain.rules.trading.reason import ReasonRule
 from a_domain.rules.trading.sizing import SizingRule
-from a_domain.types.enums import SignalAction, SignalSource
+from a_domain.types.enums import SignalSource, TradeAction
 
 
 class DecisionRule:
@@ -33,13 +33,20 @@ class DecisionRule:
         reason = self._reason_rule.build(stock)
 
         quantity = 0
-        if action == SignalAction.BUY:
+        if action == TradeAction.BUY:
             quantity = self._sizing_rule.calculate_quantity(
-                capital=self._capital, price=stock.current_price, risk_per_trade_pct=self._risk_pct,
+                capital=self._capital,
+                price=stock.current_price,
+                risk_per_trade_pct=self._risk_pct,
             )
 
         return TradeSignal(
-            stock_id=stock.stock_id, action=action, price_at_signal=stock.current_price,
-            source=SignalSource.HYBRID, score=stock.combined_score, reason=reason,
-            quantity=quantity, generated_at=datetime.now(),
+            stock_id=stock.stock_id,
+            action=action,
+            price_at_signal=stock.current_price,
+            source=SignalSource.HYBRID,
+            score=stock.combined_score,
+            reason=reason,
+            quantity=quantity,
+            generated_at=datetime.now(),
         )

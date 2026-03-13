@@ -1,13 +1,13 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from sqlmodel import Field, SQLModel
 
-from a_domain.types.enums import SignalAction, SignalSource
+from a_domain.types.enums import SignalSource, TradeAction
 
 
-class TradeSignal(BaseModel):
+class TradeSignal(SQLModel):
     stock_id: str
-    action: SignalAction
+    action: TradeAction
     price_at_signal: float
     source: SignalSource
     score: int

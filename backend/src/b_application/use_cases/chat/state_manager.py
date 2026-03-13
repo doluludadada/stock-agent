@@ -3,12 +3,12 @@ from datetime import datetime, timezone
 
 from a_domain.model.chat.conversation import Conversation
 from a_domain.model.chat.message import Message
+from a_domain.ports.chat.conversation_repository import IConversationRepository
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from a_domain.ports.system.repository_provider import IRepositoryProvider
 
 
 class StateManager:
-    def __init__(self, repository: IRepositoryProvider, logger: ILoggingProvider):
+    def __init__(self, repository: IConversationRepository, logger: ILoggingProvider):
         self._repository = repository
         self._logger = logger
 

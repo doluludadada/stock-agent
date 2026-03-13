@@ -1,5 +1,5 @@
 from a_domain.ports.chat.web_search_provider import IWebSearchProvider
-from a_domain.ports.system.ai_provider import IAiProvider
+from a_domain.ports.ai.ai_provider import IAiProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.types.enums import AiProvider
 from b_application.schemas.config import AppConfig
@@ -18,13 +18,13 @@ class AiAdapterFactory:
         self._config = config
         self._logger = logger
         self._web_search = web_search
-        self._logger.trace(f"AI Adapter Factory initialised. Active model provider: {self._config.active_model.value}")
+        self._logger.trace(f"AI Adapter Factory initialised. Active model provider: {self._config.ai.active_model.value}")
 
     def create_adapter(
         self, *, override_provider: AiProvider | None = None, override_model_name: str | None = None
     ) -> IAiProvider:
-        provider = override_provider or self._config.active_model
-        model_name = override_model_name or self._config.available_models.get(provider)
+        provider = override_provider or self._config.ai.active_model
+        model_name = override_model_name or self._config.ai.available_models.get(provider)
 
         if model_name is None:
             raise ValueError(

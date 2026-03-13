@@ -15,11 +15,11 @@ from c_infrastructure.platforms.line.line_constants import PUSH_MESSAGE_URL
 
 class LinePlatformAdapter(IPlatformProvider):
     def __init__(self, config: AppConfig, logger: ILoggingProvider):
-        if not config.line_channel_access_token:
+        if not config.line.channel_access_token:
             raise ValueError("Missing line_channel_access_token in configuration. Cannot send messages.")
 
-        self._channel_access_token = config.line_channel_access_token
-        self._timeout = config.ai_model_connection_timeout
+        self._channel_access_token = config.line.channel_access_token
+        self._timeout = config.ai.connection_timeout
         self._logger = logger
         self._base_url = PUSH_MESSAGE_URL
 

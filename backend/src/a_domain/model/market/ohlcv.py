@@ -1,9 +1,9 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from sqlmodel import Field, SQLModel
 
 
-class Ohlcv(BaseModel):
+class Ohlcv(SQLModel):
     ts: datetime = Field(description="Timestamp of the candle")
     open: float = Field(default=0)
     high: float = Field(default=0)

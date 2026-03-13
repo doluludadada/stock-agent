@@ -1,18 +1,17 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field
+from sqlmodel import Field, SQLModel
 
-from a_domain.types.enums import OrderAction, OrderStatus, OrderType
+from a_domain.types.enums import OrderStatus, OrderType, TradeAction
 
 
-# I think order, position and singal can be combined or something.
-class Order(BaseModel):
+class Order(SQLModel):
     """Represents an instruction to the broker."""
 
     id: UUID = Field(default_factory=uuid4)
     stock_id: str
-    action: OrderAction
+    action: TradeAction
     order_type: OrderType
     price: float | None = None
     quantity: int

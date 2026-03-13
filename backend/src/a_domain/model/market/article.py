@@ -1,12 +1,12 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field
+from sqlmodel import Field, SQLModel
 
 from a_domain.types.enums import ContentType, InformationSource
 
 
-class Article(BaseModel):
+class Article(SQLModel):
     id: UUID = Field(default_factory=uuid4)
     stock_id: str
     source: InformationSource

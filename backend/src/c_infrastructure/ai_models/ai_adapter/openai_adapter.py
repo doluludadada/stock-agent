@@ -17,15 +17,15 @@ from c_infrastructure.ai_models.base import BaseAIAdapter
 class OpenAIAdapter(BaseAIAdapter):
     def __init__(self, config: AppConfig, logger: ILoggingProvider, model_name: str):
         super().__init__(config, logger, model_name)
-        if not self._config.openai_api_key:
+        if not self._config.ai.openai_api_key:
             raise ValueError("Missing openai_api_key in configuration.")
 
     @cached_property
     def _client(self) -> AsyncOpenAI:
         self._logger.debug("Initialising AsyncOpenAI client...")
         return AsyncOpenAI(
-            api_key=self._config.openai_api_key,
-            timeout=httpx.Timeout(self._config.ai_model_connection_timeout),
+            api_key=self._config.ai.openai_api_key,
+            timeout=httpx.Timeout(self._config.ai.connection_timeout),
         )
 
     async def _call_api(self, messages: tuple[Message, ...]):

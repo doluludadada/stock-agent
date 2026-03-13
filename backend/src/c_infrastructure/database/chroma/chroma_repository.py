@@ -2,18 +2,18 @@ import chromadb
 
 from a_domain.model.chat.conversation import Conversation
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from a_domain.ports.system.repository_provider import IRepositoryProvider
+from a_domain.ports.chat.conversation_repository import IConversationRepository
 from b_application.schemas.config import AppConfig
 from c_infrastructure.persistence.chroma.mapper import ConversationMapper
 from c_infrastructure.persistence.chroma.schema import ChromaCollection, ChromaResultKey
 
 
-class ChromaRepositoryAdapter(IRepositoryProvider):
+class ChromaRepositoryAdapter(IConversationRepository):
     def __init__(self, config: AppConfig, logger: ILoggingProvider) -> None:
         self._logger = logger
-        self._logger.info(f"Initializing ChromaDB at: {config.chroma_persist_path}")
+        self._logger.info(f"Initializing ChromaDB at: {config.db.chroma_persist_path}")
 
-        self._client = chromadb.PersistentClient(path=config.chroma_persist_path)
+        self._client = chromadb.PersistentClient(path=config.db.chroma_persist_path)
 
         self._collection = self._client.get_or_create_collection(name=ChromaCollection.CHAT_HISTORY)
 

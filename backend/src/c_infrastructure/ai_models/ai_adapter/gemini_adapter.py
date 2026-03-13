@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 from functools import cached_property
 from typing import Any
@@ -18,9 +16,10 @@ class GeminiAIAdapter(BaseAIAdapter):
         self, config: AppConfig, logger: ILoggingProvider, model_name: str
     ) -> None:
         super().__init__(config, logger, model_name)
-        if not self._config.gemini_api_key:
+        if not self._config.ai.gemini_api_key:
             raise ValueError("Missing gemini_api_key in configuration.")
-        genai.configure(api_key=self._config.gemini_api_key)  # type: ignore[attr-defined]
+        genai.configure(api_key=self._config.ai.gemini_api_key)  # type: ignore[attr-defined]
+        # TODO : no getattr!
         endpoint = getattr(self._config, "gemini_endpoint", None)
         if endpoint:
             try:

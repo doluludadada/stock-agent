@@ -1,11 +1,11 @@
 from a_domain.model.chat.message import Message, MessageRole
-from a_domain.model.market.stock import Stock
 from a_domain.ports.ai.ai_provider import IAiProvider
 from a_domain.ports.ai.knowledge_repository import IKnowledgeRepository
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.rules.process.ai.parser import AiReportParser
 from a_domain.rules.process.ai.prompt import AiReportPromptBuilder
 from b_application.schemas.config import AppConfig
+from b_application.schemas.pipeline_context import PipelineContext
 
 
 class AiAnalyser:
@@ -25,13 +25,15 @@ class AiAnalyser:
         self._config = config
         self._logger = logger
 
-    async def execute(self, stocks: list[Stock]) -> list[Stock]:
-        self._logger.info(f"Analyzing AI context for {len(stocks)} stocks...")
-        analyzed_count = 0
+    async def execute(self, ctx: PipelineContext) -> None:
+        stocks = ctx.survivors
+        self._logger.info(f"Analysing AI context for {len(stocks)} stocks...")
+        analysed_count = 0
 
         for stock in stocks:
             if not stock.articles:
-                stock.ai_score = self._config.ai_neutral_score
+                stock.analysis_report = self._response_parser.parse(stock.stock_id, "")
+                stock.ai_score = stock.analysis_report.score
                 continue
 
             try:
@@ -47,10 +49,13 @@ class AiAnalyser:
                 report = self._response_parser.parse(stock.stock_id, response.content)
                 stock.analysis_report = report
                 stock.ai_score = report.score
-                analyzed_count += 1
+                analysed_count += 1
+
             except Exception as e:
                 self._logger.error(f"AI analysis failed for {stock.stock_id}: {e}")
-                stock.ai_score = self._config.ai_neutral_score
+                stock.analysis_report = self._response_parser.parse(stock.stock_id, "")
+                stock.ai_score = stock.analysis_report.score
 
-        self._logger.info(f"AI analysis complete: {analyzed_count} stocks analyzed")
-        return stocks
+        ctx.analysed = stocks
+        ctx.stats.ai_analysed += analysed_count
+        self._logger.info(f"AI analysis complete: {analysed_count} stocks analyzed")

@@ -15,6 +15,7 @@ class QualityRule:
     min_chars_news: int
     min_chars_gossip: int
 
+    # TODO: I think it needs to think more carefully.
     def is_high_quality(self, article: Article) -> bool:
         return self.is_relevant(article)
 

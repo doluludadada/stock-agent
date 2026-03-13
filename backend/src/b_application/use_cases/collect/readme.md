@@ -4,3 +4,4 @@ src/b_application/use_cases/collect/
 ├── candidates.py <-- Phase 3 Entry (Reads from Repo)
 ├── market_data.py <-- Phase 3 Step
 └── news_feed.py <-- Phase 3 Step
+<!-- TODO: Remove them! -->

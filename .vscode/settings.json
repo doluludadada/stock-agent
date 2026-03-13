@@ -3,4 +3,20 @@
         "./backend",
         "./backend/src"
     ],
+    "editor.fontFamily": "'Victor Mono', 'JetBrains Mono', monospace",
+    // "editor.tokenColorCustomizations": {
+    //     "textMateRules": [
+    //         {
+    //             "scope": [
+    //                 "comment",
+    //                 "keyword",
+    //                 "storage.modifier",
+    //                 "storage.type"
+    //             ],
+    //             "settings": {
+    //                 "fontStyle": "italic"
+    //             }
+    //         }
+    //     ]
+    // }
 }

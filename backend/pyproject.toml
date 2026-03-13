@@ -23,6 +23,11 @@ dependencies = [
     "sqlalchemy>=2.0.45",
     "pandas-ta>=0.4.71b0",
     "sqlmodel>=0.0.31",
+    "aiosqlite>=0.22.1",
+    "asyncpg>=0.31.0",
+    "yfinance>=1.2.0",
+    "beautifulsoup4>=4.14.3",
+    "lxml>=6.0.2",
 ]
 
 [dependency-groups]

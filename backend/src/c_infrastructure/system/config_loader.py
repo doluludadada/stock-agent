@@ -12,29 +12,33 @@ def load_settings(config_path: Path | None = None, instruction_path: Path | None
         config_path = project_root / "config" / "appsetting.yaml"
     if instruction_path is None:
         instruction_path = project_root / "config" / "instructions.yaml"
-    config_from_yaml = {}
+        
+    config_dict = {}
     try:
         if config_path.exists():
             with open(config_path, "r", encoding="utf-8") as f:
-                config_from_yaml = yaml.safe_load(f) or {}
+                config_dict = yaml.safe_load(f) or {}
     except Exception as e:
         print(f"Warning: Could not load YAML config from {config_path}. Error: {e}")
-        pass
-    instruction_data = {}
+
     try:
         if instruction_path.exists():
             with open(instruction_path, "r", encoding="utf-8") as f:
                 instruction_data = yaml.safe_load(f) or {}
+                
+                # Elegantly merge properties from instructions.yaml directly into the nested ai configuration
+                if instruction_data:
+                    ai_config = config_dict.setdefault("ai", {})
+                    if "system_prompt" in instruction_data:
+                        ai_config["system_prompt"] = instruction_data["system_prompt"]
+                    if "rag_injection_prompt" in instruction_data:
+                        ai_config["rag_injection_prompt"] = instruction_data["rag_injection_prompt"]
+                        
     except Exception as e:
         print(f"Warning: Could not load instruction YAML from {instruction_path}. Error: {e}")
-        pass
-    final_config_data = {**config_from_yaml, **instruction_data}
 
-    if "system_prompt" in final_config_data:
-        final_config_data["ai_system_prompt"] = final_config_data.pop("system_prompt")
-    if "rag_injection_prompt" in final_config_data:
-        final_config_data["ai_rag_injection_prompt"] = final_config_data.pop("rag_injection_prompt")
-    return AppConfig(project_root=project_root, **final_config_data)
+    # Pydantic will elegantly instantiate the nested child classes automatically using the dictionary structure!
+    return AppConfig(project_root=project_root, **config_dict)
 
 
 def get_project_root() -> Path:
@@ -54,5 +58,3 @@ def get_project_root() -> Path:
         if (parent / "pyproject.toml").exists():
             return parent
     raise FileNotFoundError("Could not find project root. Make sure 'pyproject.toml' exists in the root directory.")
-
-

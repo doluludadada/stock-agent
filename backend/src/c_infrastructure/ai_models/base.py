@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
 from a_domain.model.chat.message import Message, MessageRole
-from a_domain.ports.system.ai_provider import IAiProvider
+from a_domain.ports.ai.ai_provider import IAiProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from b_application.schemas.config import AppConfig
 

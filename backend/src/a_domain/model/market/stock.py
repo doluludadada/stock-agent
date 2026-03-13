@@ -1,12 +1,13 @@
-from pydantic import BaseModel, Field
+from sqlmodel import Field, SQLModel
 
+from a_domain.model.analysis.ai_analysis_report import AiAnalysisReport
 from a_domain.model.indicators.technical_indicators import TechnicalIndicators
 from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.types.enums import AnalysisStage, CandidateSource, MarketType
-from a_domain.model.analysis.ai_analysis_report import AiAnalysisReport
 
-class Stock(BaseModel):
+
+class Stock(SQLModel):
     """
     Stock Domain Model.
 
@@ -40,7 +41,7 @@ class Stock(BaseModel):
     technical_score: int | None = None
 
     # -------------------------------- Sentiment --------------------------------- #
-    historical_context: str = "" # It should be saved in RAG database.
+    historical_context: str = ""  # It should be saved in RAG database.
     analysis_report: AiAnalysisReport | None = None
     ai_score: int | None = None
 

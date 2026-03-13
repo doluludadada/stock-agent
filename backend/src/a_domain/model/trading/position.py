@@ -1,9 +1,9 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from sqlmodel import Field, SQLModel
 
 
-class Position(BaseModel):
+class Position(SQLModel):
     """Represents a stock currently held in the portfolio."""
 
     stock_id: str

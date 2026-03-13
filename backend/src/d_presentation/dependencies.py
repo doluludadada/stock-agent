@@ -1,25 +1,7 @@
 from functools import lru_cache
 
-from a_domain.ports.chat.chat_styler_provider import IChatStylerProvider
-from a_domain.ports.system.logging_provider import ILoggingProvider
-from a_domain.ports.system.platform_provider import IPlatformProvider
-from a_domain.ports.system.repository_provider import IRepositoryProvider
 from b_application.schemas.config import AppConfig
-from b_application.use_cases.chat.context_loader import ContextLoader
-from b_application.use_cases.chat.dispatcher import Dispatcher
-from b_application.use_cases.chat.state_manager import StateManager
-from c_infrastructure.services.config_loader import load_settings
-from c_infrastructure.persistence.chroma.chroma_repository import (
-    ChromaRepositoryAdapter,
-)
-from c_infrastructure.persistence.inmemory_repository import (
-    InMemoryRepositoryAdapter,
-)
-from c_infrastructure.platforms.line.line_adapter import LinePlatformAdapter
-from c_infrastructure.platforms.line.line_security import LineSecurityService
-from c_infrastructure.services.chat_styler_service import ChatStylerService
-from c_infrastructure.services.logger_service import LoggerService
-from fastapi import Depends
+from c_infrastructure.system.config_loader import load_settings
 
 
 @lru_cache
@@ -30,11 +12,11 @@ def get_settings() -> AppConfig:
 # @lru_cache
 # def get_logger() -> ILoggingProvider:
 #     settings = get_settings()
-#     return LoggerService(level=settings.log_level)
+#     return LoggerService(level=settings.behavior.log_level)
 
 
 # # @lru_cache
-# # def get_repository() -> IRepositoryProvider:
+# # def get_repository() -> IConversationRepository:
 # # settings = get_settings()
 # # logger = get_logger()
 
@@ -55,7 +37,7 @@ def get_settings() -> AppConfig:
 
 
 # def get_context_loader(
-#     repo: IRepositoryProvider = Depends(get_repository),
+#     repo: IConversationRepository = Depends(get_repository),
 #     config: AppConfig = Depends(get_settings),
 #     logger: ILoggingProvider = Depends(get_logger),
 # ) -> ContextLoader:
@@ -63,7 +45,7 @@ def get_settings() -> AppConfig:
 
 
 # def get_state_manager(
-#     repo: IRepositoryProvider = Depends(get_repository),
+#     repo: IConversationRepository = Depends(get_repository),
 #     logger: ILoggingProvider = Depends(get_logger),
 # ) -> StateManager:
 #     return StateManager(repository=repo, logger=logger)
@@ -83,7 +65,7 @@ def get_settings() -> AppConfig:
 #     settings: AppConfig = Depends(get_settings),
 #     logger: ILoggingProvider = Depends(get_logger),
 # ) -> LineSecurityService:
-#     return LineSecurityService(channel_secret=settings.line_channel_secret, logger=logger)
+#     return LineSecurityService(channel_secret=settings.line.channel_secret, logger=logger)
 
 
 # ---------------------------------------------------------------------------- #

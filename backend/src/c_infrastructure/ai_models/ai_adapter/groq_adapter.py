@@ -37,7 +37,7 @@ class GroqAIAdapter(BaseAIAdapter):
     ):
         super().__init__(config, logger, model_name)
 
-        if not self._config.groq_api_key:
+        if not self._config.ai.groq_api_key:
             raise ValueError("Missing groq_api_key in configuration. ")
 
         self._web_search = web_search
@@ -46,9 +46,9 @@ class GroqAIAdapter(BaseAIAdapter):
     def _client(self) -> AsyncOpenAI:
         self._logger.debug("Initialising AsyncOpenAI client...")
         return AsyncOpenAI(
-            api_key=self._config.groq_api_key,
+            api_key=self._config.ai.groq_api_key,
             base_url=self.groq_base_url,
-            timeout=httpx.Timeout(self._config.ai_model_connection_timeout),
+            timeout=httpx.Timeout(self._config.ai.connection_timeout),
         )
 
     async def _call_api(self, messages: tuple[Message, ...]) -> str:
@@ -62,7 +62,7 @@ class GroqAIAdapter(BaseAIAdapter):
                 search_results = await self._enrich_with_search(messages)
                 if search_results:
                     template = (
-                        self._config.ai_rag_injection_prompt
+                        self._config.ai.rag_injection_prompt
                     )
                     rag_instruction = {
                         "role": "system",
@@ -123,7 +123,7 @@ class GroqAIAdapter(BaseAIAdapter):
             self._logger.info(f"Performing web search for: {user_query}")
             results = await self._web_search.search(
                 user_query,
-                limit=self._config.web_search_max_results
+                limit=self._config.behavior.web_search_max_results
             )
             self._logger.info(f"查詢結果: {results}")
             if not results:
@@ -143,7 +143,7 @@ class GroqAIAdapter(BaseAIAdapter):
 
     def _should_search(self, messages: tuple[Message, ...]) -> bool:
         """Determine if web search should be triggered."""
-        if not self._config.enable_web_search or not self._web_search:
+        if not self._config.behavior.enable_web_search or not self._web_search:
             return False
         
         # Get the latest user message
