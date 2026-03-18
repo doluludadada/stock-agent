@@ -1,14 +1,16 @@
 import chromadb
 
 from a_domain.model.chat.conversation import Conversation
-from a_domain.ports.system.logging_provider import ILoggingProvider
+from a_domain.model.market.stock import Stock
 from a_domain.ports.chat.conversation_repository import IConversationRepository
+from a_domain.ports.ai.knowledge_repository import IKnowledgeRepository
+from a_domain.ports.system.logging_provider import ILoggingProvider
 from b_application.schemas.config import AppConfig
-from c_infrastructure.persistence.chroma.mapper import ConversationMapper
-from c_infrastructure.persistence.chroma.schema import ChromaCollection, ChromaResultKey
+from c_infrastructure.database.chroma.mapper import ConversationMapper
+from c_infrastructure.database.chroma.schema import ChromaCollection, ChromaResultKey
 
 
-class ChromaRepositoryAdapter(IConversationRepository):
+class ChromaRepositoryAdapter(IConversationRepository, IKnowledgeRepository):
     def __init__(self, config: AppConfig, logger: ILoggingProvider) -> None:
         self._logger = logger
         self._logger.info(f"Initializing ChromaDB at: {config.db.chroma_persist_path}")
@@ -49,4 +51,12 @@ class ChromaRepositoryAdapter(IConversationRepository):
             self._logger.critical(f"Error saving conversation to Chroma: {e}")
             return False
 
+    async def search(self, query: str, limit: int = 3) -> str:
+        """Retrieves context for Chatbot or Pipeline."""
+        self._logger.debug(f"Stub: RAG Search for '{query}' (limit: {limit})")
+        return ""
 
+    async def save_analysis(self, context: Stock) -> None:
+        """Saves analysis result into the knowledge base (RAG memory)."""
+        self._logger.debug(f"Stub: RAG Save Analysis for stock '{context.stock_id}'")
+        pass

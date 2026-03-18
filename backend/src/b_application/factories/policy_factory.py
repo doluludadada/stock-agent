@@ -4,6 +4,7 @@ Screening Policy Factory.
 Application layer: decides WHICH rules go in WHICH tier.
 All threshold values injected via StrategyThresholds.
 """
+
 from pathlib import Path
 
 import yaml
@@ -46,16 +47,19 @@ from a_domain.rules.process.indicators.volume import (
     VolumeRatioRule,
 )
 from a_domain.rules.process.policies import TechnicalScreeningPolicy
-from a_domain.types.enums import MaPeriod
+from a_domain.types.enums import MaPeriod, StrategyName
 from b_application.schemas.config import StrategyThresholds
 
 
+# TODO: I might needa check this file later.
 def create_conservative_policy(cfg: StrategyThresholds) -> TechnicalScreeningPolicy:
     return TechnicalScreeningPolicy(
         setup_must_pass=[
-            PriceAboveMaRule(MaPeriod.MA_20), PriceAboveMaRule(MaPeriod.MA_60),
+            PriceAboveMaRule(MaPeriod.MA_20),
+            PriceAboveMaRule(MaPeriod.MA_60),
             MaAlignmentRule(MaPeriod.MA_20, MaPeriod.MA_60),
-            MacdCrossRule(), MacdPositiveRule(),
+            MacdCrossRule(),
+            MacdPositiveRule(),
             RsiRangeRule(min_rsi=cfg.rsi_healthy_min, max_rsi=cfg.rsi_healthy_max),
         ],
         safety_must_pass=[
@@ -69,18 +73,23 @@ def create_conservative_policy(cfg: StrategyThresholds) -> TechnicalScreeningPol
         ],
         should_pass=[
             AdxTrendStrengthRule(min_adx=cfg.adx_min, max_adx=cfg.adx_max),
-            AdxDirectionRule(), VolumeRatioRule(min_ratio=cfg.volume_above_avg_ratio),
-            BollingerPositionRule(), MacdHistogramRule(),
-            MfiThresholdRule(threshold=cfg.mfi_overbought), StochasticCrossRule(),
+            AdxDirectionRule(),
+            VolumeRatioRule(min_ratio=cfg.volume_above_avg_ratio),
+            BollingerPositionRule(),
+            MacdHistogramRule(),
+            MfiThresholdRule(threshold=cfg.mfi_overbought),
+            StochasticCrossRule(),
             AtrRangeRule(min_atr_pct=cfg.atr_min_pct, max_atr_pct=cfg.atr_max_pct),
         ],
         info_only=[
             GoldenCrossRule(max_cross_margin=cfg.golden_cross_margin),
             BollingerSqueezeRule(max_bandwidth=cfg.bollinger_squeeze_bandwidth),
-            VolumeRatioRule(min_ratio=cfg.volume_breakout_ratio), ObvTrendRule(),
+            VolumeRatioRule(min_ratio=cfg.volume_breakout_ratio),
+            ObvTrendRule(),
         ],
         entry_timing_must_pass=[
-            PriceDropRule(max_drop_pct=cfg.max_drop_pct), IntradayMomentumRule(),
+            PriceDropRule(max_drop_pct=cfg.max_drop_pct),
+            IntradayMomentumRule(),
             VolumeConfirmationRule(min_volume_ratio=cfg.min_volume_confirmation),
             GapRule(max_gap_pct=cfg.max_gap_pct),
             IntradayRangeRule(max_range_position=cfg.max_intraday_range_position),
@@ -94,7 +103,8 @@ def create_moderate_policy(cfg: StrategyThresholds) -> TechnicalScreeningPolicy:
         setup_must_pass=[
             PriceAboveMaRule(MaPeriod.MA_20),
             MaAlignmentRule(MaPeriod.MA_20, MaPeriod.MA_60),
-            MacdCrossRule(), RsiRangeRule(min_rsi=cfg.rsi_healthy_min),
+            MacdCrossRule(),
+            RsiRangeRule(min_rsi=cfg.rsi_healthy_min),
         ],
         safety_must_pass=[
             RsiRangeRule(max_rsi=cfg.rsi_overbought),
@@ -104,12 +114,16 @@ def create_moderate_policy(cfg: StrategyThresholds) -> TechnicalScreeningPolicy:
             VolumeRatioRule(min_ratio=cfg.volume_dry_ratio),
         ],
         should_pass=[
-            PriceAboveMaRule(MaPeriod.MA_60), MacdPositiveRule(),
+            PriceAboveMaRule(MaPeriod.MA_60),
+            MacdPositiveRule(),
             AdxTrendStrengthRule(min_adx=cfg.adx_min, max_adx=cfg.adx_max),
-            AdxDirectionRule(), StochasticThresholdRule(threshold=cfg.stoch_overbought),
+            AdxDirectionRule(),
+            StochasticThresholdRule(threshold=cfg.stoch_overbought),
             BollingerThresholdRule(max_percent_b=cfg.bollinger_max_pct_b),
-            BollingerPositionRule(), VolumeRatioRule(min_ratio=cfg.volume_above_avg_ratio),
-            MacdHistogramRule(), MfiThresholdRule(threshold=cfg.mfi_overbought),
+            BollingerPositionRule(),
+            VolumeRatioRule(min_ratio=cfg.volume_above_avg_ratio),
+            MacdHistogramRule(),
+            MfiThresholdRule(threshold=cfg.mfi_overbought),
             StochasticCrossRule(),
             AtrRangeRule(min_atr_pct=cfg.atr_min_pct, max_atr_pct=cfg.atr_max_pct),
         ],
@@ -117,10 +131,12 @@ def create_moderate_policy(cfg: StrategyThresholds) -> TechnicalScreeningPolicy:
             RsiRangeRule(min_rsi=cfg.rsi_healthy_min, max_rsi=cfg.rsi_healthy_max),
             GoldenCrossRule(max_cross_margin=cfg.golden_cross_margin),
             BollingerSqueezeRule(max_bandwidth=cfg.bollinger_squeeze_bandwidth),
-            VolumeRatioRule(min_ratio=cfg.volume_breakout_ratio), ObvTrendRule(),
+            VolumeRatioRule(min_ratio=cfg.volume_breakout_ratio),
+            ObvTrendRule(),
         ],
         entry_timing_must_pass=[
-            PriceDropRule(max_drop_pct=cfg.max_drop_pct), IntradayMomentumRule(),
+            PriceDropRule(max_drop_pct=cfg.max_drop_pct),
+            IntradayMomentumRule(),
             VolumeConfirmationRule(min_volume_ratio=cfg.min_volume_confirmation),
             ConsecutiveUpDaysRule(max_consecutive_up=cfg.max_consecutive_up_days),
         ],
@@ -133,7 +149,8 @@ def create_nightly_screening_policy(cfg: StrategyThresholds) -> TechnicalScreeni
         setup_must_pass=[
             PriceAboveMaRule(MaPeriod.MA_20),
             MaAlignmentRule(MaPeriod.MA_20, MaPeriod.MA_60),
-            MacdCrossRule(), RsiRangeRule(min_rsi=cfg.rsi_healthy_min),
+            MacdCrossRule(),
+            RsiRangeRule(min_rsi=cfg.rsi_healthy_min),
         ],
         safety_must_pass=[
             RsiRangeRule(max_rsi=cfg.rsi_overbought),
@@ -142,12 +159,16 @@ def create_nightly_screening_policy(cfg: StrategyThresholds) -> TechnicalScreeni
             VolumeRatioRule(min_ratio=cfg.volume_above_avg_ratio),
         ],
         should_pass=[
-            PriceAboveMaRule(MaPeriod.MA_60), MacdPositiveRule(),
+            PriceAboveMaRule(MaPeriod.MA_60),
+            MacdPositiveRule(),
             AdxTrendStrengthRule(min_adx=cfg.adx_min, max_adx=cfg.adx_max),
-            AdxDirectionRule(), StochasticThresholdRule(threshold=cfg.stoch_overbought),
+            AdxDirectionRule(),
+            StochasticThresholdRule(threshold=cfg.stoch_overbought),
             BollingerThresholdRule(max_percent_b=cfg.bollinger_max_pct_b),
-            BollingerPositionRule(), VolumeRatioRule(min_ratio=cfg.volume_dry_ratio),
-            MacdHistogramRule(), MfiThresholdRule(threshold=cfg.mfi_overbought),
+            BollingerPositionRule(),
+            VolumeRatioRule(min_ratio=cfg.volume_dry_ratio),
+            MacdHistogramRule(),
+            MfiThresholdRule(threshold=cfg.mfi_overbought),
             StochasticCrossRule(),
             AtrRangeRule(min_atr_pct=cfg.atr_min_pct, max_atr_pct=cfg.atr_max_pct),
         ],
@@ -155,13 +176,32 @@ def create_nightly_screening_policy(cfg: StrategyThresholds) -> TechnicalScreeni
             RsiRangeRule(min_rsi=cfg.rsi_healthy_min, max_rsi=cfg.rsi_healthy_max),
             GoldenCrossRule(max_cross_margin=cfg.golden_cross_margin),
             BollingerSqueezeRule(max_bandwidth=cfg.bollinger_squeeze_bandwidth),
-            VolumeRatioRule(min_ratio=cfg.volume_breakout_ratio), ObvTrendRule(),
+            VolumeRatioRule(min_ratio=cfg.volume_breakout_ratio),
+            ObvTrendRule(),
         ],
         entry_timing_must_pass=[],
     )
 
 
-def load_strategy_thresholds(strategies_path: Path, strategy_name: str) -> StrategyThresholds:
+def create_policy_from_config(strategy_name: StrategyName, cfg: StrategyThresholds) -> TechnicalScreeningPolicy:
+    """
+    Dynamically routes to the correct policy builder based on the active strategy name.
+    This allows hot-swapping strategies strictly through YAML config.
+    """
+    registry = {
+        StrategyName.CONSERVATIVE: create_conservative_policy,
+        StrategyName.MODERATE: create_moderate_policy,
+        StrategyName.NIGHTLY: create_nightly_screening_policy,
+        StrategyName.AGGRESSIVE: create_moderate_policy,
+        StrategyName.BUZZ: create_moderate_policy,
+    }
+
+    builder = registry.get(strategy_name, create_moderate_policy)
+    return builder(cfg)
+
+
+def load_strategy_thresholds(strategies_path: Path, strategy_name: StrategyName) -> StrategyThresholds:
     raw = yaml.safe_load(strategies_path.read_text(encoding="utf-8"))
-    strategy_data = raw["strategies"].get(strategy_name, {})
+    # Use .value to safely access the string key from the YAML dictionary
+    strategy_data = raw.get("strategies", {}).get(strategy_name.value, {})
     return StrategyThresholds.model_validate(strategy_data)

@@ -1,5 +1,6 @@
 from typing import Final
 
+# TODO: Move to enums. 
 FINANCIAL_KEYWORDS_TW: Final[frozenset[str]] = frozenset(
     {
         "EPS",

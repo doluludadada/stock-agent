@@ -55,6 +55,6 @@ def get_project_root() -> Path:
     """
     current_path = Path(__file__).resolve()
     for parent in current_path.parents:
-        if (parent / "pyproject.toml").exists():
+        if (parent / "justfile").exists() or (parent / ".git").exists():
             return parent
-    raise FileNotFoundError("Could not find project root. Make sure 'pyproject.toml' exists in the root directory.")
+    raise FileNotFoundError("Could not find project root. Make sure 'justfile' or '.git' exists in the root directory.")

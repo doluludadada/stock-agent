@@ -7,7 +7,7 @@ from uuid import UUID
 from a_domain.model.chat.conversation import Conversation
 from a_domain.model.chat.message import Message
 from a_domain.types.enums import MessageRole
-from c_infrastructure.persistence.chroma.schema import ChromaMetadataKey
+from c_infrastructure.database.chroma.schema import ChromaMetadataKey
 
 
 class ConversationMapper:

@@ -28,3 +28,7 @@ db:
 
 tavily:
   search_depth: "basic"  # "basic" or "advanced"
+
+collect_rules:
+  ptt_required_tags:
+    - "[標的]"

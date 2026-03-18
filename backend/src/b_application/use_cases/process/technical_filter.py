@@ -24,8 +24,8 @@ class TechnicalFilter:
         self._calculator = score_calculator
         self._logger = logger
 
-    def execute(self, ctx: PipelineContext) -> None:
-        stocks = ctx.priced
+    def execute(self, workflow_state: PipelineContext) -> None:
+        stocks = workflow_state.priced
         self._logger.info(f"Filtering {len(stocks)} stocks...")
         survivors: list[Stock] = []
 
@@ -36,9 +36,7 @@ class TechnicalFilter:
 
             try:
                 stock.indicators = self._tech_provider.calculate_indicators(stock.ohlcv)
-
                 self._policy.evaluate(stock)
-
                 stock.technical_score = self._calculator.calculate(stock)
 
                 if not stock.is_eliminated:
@@ -51,6 +49,6 @@ class TechnicalFilter:
                 self._logger.error(f"Error filtering {stock.stock_id}: {e}")
                 stock.stage = AnalysisStage.FILTERED_FAIL
 
-        ctx.survivors = survivors
-        ctx.stats.passed_technical += len(survivors)
+        workflow_state.survivors = survivors
+        workflow_state.stats.passed_technical += len(survivors)
         self._logger.info(f"Survivors: {len(survivors)}/{len(stocks)}")

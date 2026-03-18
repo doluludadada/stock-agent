@@ -27,16 +27,16 @@ class MarketData:
         self._config = config
         self._logger = logger
 
-    async def execute(self, ctx: PipelineContext) -> None:
-        stocks = ctx.candidates
+    async def execute(self, workflow_state: PipelineContext) -> None:
+        stocks = workflow_state.candidates
         self._logger.info(f"Collecting prices for {len(stocks)} stocks...")
 
         end_date = datetime.now()
         start_date = end_date - timedelta(days=self._config.analysis.lookback_days)
 
-        stock_ids = [s.stock_id for s in stocks]
         try:
-            realtime_bars = await self._market.fetch_realtime_bars(stock_ids)
+            # Passed the full stock object list for MarketType routing
+            realtime_bars = await self._market.fetch_realtime_bars(stocks)
         except Exception as e:
             self._logger.error(f"Failed to fetch realtime bars: {e}")
             return
@@ -54,7 +54,7 @@ class MarketData:
 
             try:
                 history = await self._market.fetch_history(
-                    stock_id=stock.stock_id,
+                    stock=stock,  # Passed full stock object
                     start_date=start_date,
                     end_date=end_date,
                 )
@@ -71,5 +71,5 @@ class MarketData:
             except Exception as e:
                 self._logger.error(f"Error collecting prices for {stock.stock_id}: {e}")
 
-        ctx.priced = enriched
+        workflow_state.priced = enriched
         self._logger.info(f"Collected prices for {len(enriched)} stocks")

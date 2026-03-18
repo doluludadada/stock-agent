@@ -25,8 +25,8 @@ class AiAnalyser:
         self._config = config
         self._logger = logger
 
-    async def execute(self, ctx: PipelineContext) -> None:
-        stocks = ctx.survivors
+    async def execute(self, workflow_state: PipelineContext) -> None:
+        stocks = workflow_state.survivors
         self._logger.info(f"Analysing AI context for {len(stocks)} stocks...")
         analysed_count = 0
 
@@ -56,6 +56,6 @@ class AiAnalyser:
                 stock.analysis_report = self._response_parser.parse(stock.stock_id, "")
                 stock.ai_score = stock.analysis_report.score
 
-        ctx.analysed = stocks
-        ctx.stats.ai_analysed += analysed_count
-        self._logger.info(f"AI analysis complete: {analysed_count} stocks analyzed")
+        workflow_state.analysed = stocks
+        workflow_state.stats.ai_analysed += analysed_count
+        self._logger.info(f"AI analysis complete: {analysed_count} stocks analysed")

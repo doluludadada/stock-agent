@@ -14,13 +14,11 @@ class YahooTwNewsProvider:
         self._logger = logger
         self._headers = {
             "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             )
         }
 
-    async def fetch_news(self, stock_id: str, limit: int = 5) -> list[Article]:
+    async def fetch_news(self, stock_id: str, limit: int) -> list[Article]:
         # TODO: Delete this limit?
         # I need to think about whole of limitation's logic
         self._logger.debug(f"Fetching Yahoo TW News for {stock_id}...")
@@ -72,7 +70,7 @@ class YahooTwNewsProvider:
                         title=title,
                         content=content,
                         url=link,
-                        content_type=ContentType.REPORT,
+                        content_type=ContentType.NEWS,
                         published_at=pub_date,
                         fetched_at=datetime.now(),
                     )
@@ -83,7 +81,7 @@ class YahooTwNewsProvider:
 
             except httpx.RequestError as e:
                 self._logger.error(f"HTTP Error fetching news for {stock_id}: {e}")
-                return []  # [FIX]: Return empty list instead of None
+                return []
             except Exception as e:
                 self._logger.error(f"Unexpected error parsing Yahoo News for {stock_id}: {e}")
-                return []  # [FIX]: Return empty list instead of None
+                return []

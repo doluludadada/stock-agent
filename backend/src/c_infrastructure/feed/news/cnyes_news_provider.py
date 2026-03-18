@@ -8,7 +8,6 @@ from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.types.enums import ContentType, InformationSource
 
 
-# TODO:
 class CnyesNewsProvider:
     """
     Fetches news from Cnyes (鉅亨網) using their internal JSON API.
@@ -19,7 +18,7 @@ class CnyesNewsProvider:
         self._logger = logger
         self._api_url = "https://api.cnyes.com/media/api/v1/newslist/category/tw_stock"
 
-    async def fetch_news(self, stock_id: str, limit: int = 5) -> list[Article]:
+    async def fetch_news(self, stock_id: str, limit: int) -> list[Article]:
         self._logger.debug(f"Fetching Cnyes News for {stock_id} via API...")
 
         params = {"q": stock_id, "limit": limit}
@@ -37,7 +36,6 @@ class CnyesNewsProvider:
 
                 for item in items:
                     # Cnyes gives Unix timestamp (seconds)
-                    # TODO: Why there's so many hard code is it from json?
                     publish_at_ts = item.get("publishAt")
                     if publish_at_ts:
                         pub_date = datetime.fromtimestamp(publish_at_ts, tz=timezone.utc)
@@ -53,7 +51,7 @@ class CnyesNewsProvider:
                         title=item.get("title", "").strip(),
                         content=item.get("summary", "").strip(),
                         url=f"https://news.cnyes.com/news/id/{news_id}",
-                        content_type=ContentType.REPORT,
+                        content_type=ContentType.NEWS,
                         published_at=pub_date,
                         fetched_at=datetime.now(timezone.utc),
                         raw_metadata={"newsId": news_id, "keyword": item.get("keyword")},

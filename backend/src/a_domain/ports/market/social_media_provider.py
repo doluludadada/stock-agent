@@ -1,16 +1,13 @@
 from typing import Protocol
 
-from a_domain.model.market.stock import Stock
+from a_domain.model.market.article import Article
 
 
 class ISocialMediaProvider(Protocol):
     """(Hot Data) Fetches trending stocks from Social Media/News."""
 
-    # TODO: I think it should also return Article not Stock? idk
-    async def get_trending_stocks(self, limit: int) -> list[Stock]:
+    async def get_trending_stocks(self, limit: int) -> list[Article]:
         """
-        Returns a list of Stock entities.
-        The implementation should set `stock.stock_id`, `stock.source = CandidateSource.SOCIAL_BUZZ`,
-        and populate `stock.trigger_reason`.
+        Returns a list of Article entities representing trending topics.
         """
         ...

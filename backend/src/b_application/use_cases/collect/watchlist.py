@@ -1,8 +1,3 @@
-"""
-Use Case: Generate the nightly technical watchlist.
-Phase 1: Scans market history -> Saves to Technical Watchlist (DB).
-"""
-
 from datetime import datetime, timedelta
 
 from a_domain.model.market.stock import Stock
@@ -36,43 +31,36 @@ class Watchlist:
         self._logger = logger
         self._config = config
 
-    async def execute(self, ctx: PipelineContext) -> None:
-        ctx.universe = await self._stock.get_all()
-        ctx.stats.total_scanned += len(ctx.universe)
-        self._logger.info(f"Generating technical watchlist from {len(ctx.universe)} symbols...")
+    async def execute(self, workflow_state: PipelineContext) -> None:
+        workflow_state.universe = await self._stock.get_all()
+        workflow_state.stats.total_scanned += len(workflow_state.universe)
+        self._logger.info(f"Generating technical watchlist from {len(workflow_state.universe)} symbols...")
 
         survivors: list[Stock] = []
         end_date = datetime.now()
         start_date = end_date - timedelta(days=self._config.analysis.lookback_days)
 
-        for stock in ctx.universe:
+        for stock in workflow_state.universe:
             try:
-                history = await self._market.fetch_history(stock.stock_id, start_date, end_date)
+                history = await self._market.fetch_history(stock, start_date, end_date)
                 if not history:
                     continue
 
                 indicators = self._tech_calc.calculate_indicators(history)
+                stock.source = CandidateSource.TECHNICAL_WATCHLIST
+                stock.trigger_reason = SignalReason.NIGHTLY_SCREEN
+                stock.ohlcv = history
+                stock.indicators = indicators
 
-                # TODO: so what's the best way.
-                pipeline_stock = Stock(
-                    stock_id=stock.stock_id,
-                    market=stock.market,
-                    name=stock.name,
-                    industry=stock.industry,
-                    source=CandidateSource.TECHNICAL_WATCHLIST,
-                    trigger_reason=SignalReason.NIGHTLY_SCREEN,
-                    ohlcv=history,
-                    indicators=indicators,
-                )
+                self._policy.evaluate(stock)
 
-                self._policy.evaluate(pipeline_stock)
-
-                if not pipeline_stock.is_eliminated:
+                if not stock.is_eliminated:
                     survivors.append(stock)
+
             except Exception as e:
                 self._logger.error(f"Scan error {stock.stock_id}: {e}")
 
-        ctx.technical_watchlist = survivors
-        ctx.stats.passed_technical += len(survivors)
+        workflow_state.technical_watchlist = survivors
+        workflow_state.stats.passed_technical += len(survivors)
         await self._watchlist.save_technical_watchlist(survivors)
         self._logger.info(f"Saved {len(survivors)} stocks to Technical Watchlist.")

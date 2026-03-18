@@ -1,17 +1,15 @@
-from __future__ import annotations
-
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from a_domain.types.enums import AiProvider, DatabaseProvider, SystemEnvironment
+from a_domain.types.enums import AiProvider, DatabaseProvider, StrategyName, SystemEnvironment
 
 
 class AiConfig(BaseSettings):
     """AI provider and behavior settings."""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore")
 
     active_model: AiProvider = AiProvider.GROQ
     available_models: dict[AiProvider, str] = Field(default_factory=dict)
@@ -29,7 +27,7 @@ class AiConfig(BaseSettings):
 class LineConfig(BaseSettings):
     """LINE Bot credentials."""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore")
 
     channel_id: str | None = Field(default=None, validation_alias="LINE_CHANNEL_ID")
     channel_secret: str | None = Field(default=None, validation_alias="LINE_CHANNEL_SECRET")
@@ -53,7 +51,7 @@ class BehaviorConfig(BaseModel):
 class DbConfig(BaseSettings):
     """Database configuration for RAG and Application data."""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore")
 
     provider: DatabaseProvider = DatabaseProvider.MEMORY
     chroma_persist_path: str = "chroma_db"
@@ -68,7 +66,7 @@ class DbConfig(BaseSettings):
 class TavilyConfig(BaseSettings):
     """Tavily search API settings."""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore")
 
     api_key: str | None = Field(default=None, validation_alias="TAVILY_API_KEY")
     search_depth: str = "basic"
@@ -77,6 +75,7 @@ class TavilyConfig(BaseSettings):
 class AnalysisConfig(BaseModel):
     """Analysis pipeline weighting and risk parameters."""
 
+    active_strategy: StrategyName = Field(default=StrategyName.MODERATE)
     lookback_days: int = Field(default=120, ge=30)
     technical_weight: float = Field(default=0.6, ge=0.0, le=1.0)
     sentiment_weight: float = Field(default=0.4, ge=0.0, le=1.0)
@@ -112,6 +111,7 @@ class CollectRulesConfig(BaseModel):
     buzz_min_push_count: int = 100
     social_trending_limit: int = Field(default=10, ge=1, le=100)
     news_archive_dir: str = "news_archive"
+    ptt_required_tags: set[str] = Field(default={"[標的]"})
 
 
 class ScoringConfig(BaseModel):
@@ -210,7 +210,7 @@ class AppConfig(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(".env", "../.env"),
         env_file_encoding="utf-8",
         extra="ignore",
         frozen=False,

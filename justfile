@@ -2,12 +2,12 @@ set windows-shell := ["powershell", "-Command"]
 
 active_venv:
     .venv\Scripts\Activate.ps1
-    
+
 dev-sync:
     uv sync --all-extras
 
 format:
-	uv run ruff format
+    uv run ruff format
 
 ngrok:
     ngrok http 8800
@@ -23,3 +23,7 @@ build-docker:
 
 run-docker:
     docker run -p 8000:8000 --env-file .env chat-friend
+
+cli:
+    @echo "Starting CLI..."
+    cd backend; uv run python -m src.d_presentation.cli.interactive

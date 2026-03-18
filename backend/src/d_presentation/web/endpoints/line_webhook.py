@@ -3,7 +3,6 @@
 from fastapi import APIRouter, Depends, Header, Request
 
 from c_infrastructure.platforms.line.line_handler import LineWebhookHandler
-from d_presentation.dependencies import get_line_handler
 
 router = APIRouter()
 

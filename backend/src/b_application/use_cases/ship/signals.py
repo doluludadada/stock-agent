@@ -27,8 +27,8 @@ class Signals:
         self._knowledge = knowledge_repo
         self._logger = logger
 
-    async def execute(self, ctx: PipelineContext) -> None:
-        stocks = ctx.analysed
+    async def execute(self, workflow_state: PipelineContext) -> None:
+        stocks = workflow_state.analysed
         self._logger.info(f"Generating signals for {len(stocks)} analyzed stocks...")
         signals: list[TradeSignal] = []
 
@@ -58,5 +58,5 @@ class Signals:
             except Exception as e:
                 self._logger.error(f"RAG write failed for {stock.stock_id}: {e}")
 
-        ctx.buy_signals = signals
-        ctx.stats.signals_generated += len(signals)
+        workflow_state.buy_signals = signals
+        workflow_state.stats.signals_generated += len(signals)

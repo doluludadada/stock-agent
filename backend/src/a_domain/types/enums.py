@@ -73,9 +73,9 @@ class InformationSource(StrEnum):
     REUNION = "REUNION"
 
 
-# TODO: Consider adding NEWS as a content type for raw news articles vs analysis reports
 class ContentType(StrEnum):
     FACT = "FACT"
+    NEWS = "NEWS"
     REPORT = "REPORT"
     ANALYSIS = "ANALYSIS"
     DISCUSSION = "DISCUSSION"
@@ -109,3 +109,11 @@ class SignalReason(StrEnum):
     SOCIAL_BUZZ = "Social Media Buzz"
     MANUAL_REQ = "User Manual Request"
     STOP_LOSS = "Stop Loss Triggered"
+
+
+class StrategyName(StrEnum):
+    CONSERVATIVE = "conservative"
+    MODERATE = "moderate"
+    AGGRESSIVE = "aggressive"
+    BUZZ = "buzz"
+    NIGHTLY = "nightly"

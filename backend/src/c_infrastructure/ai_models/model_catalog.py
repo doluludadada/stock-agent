@@ -1,6 +1,6 @@
 import asyncio
 
-import google.generativeai as genai  # type: ignore[import-untyped]
+import google.generativeai as genai
 import httpx
 from openai import AsyncOpenAI, OpenAIError
 

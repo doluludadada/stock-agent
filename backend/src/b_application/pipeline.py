@@ -36,52 +36,52 @@ class Pipeline:
         self._monitoring = monitoring
         self._logger = logger
 
-    async def execute(self, ctx: PipelineContext) -> None:
+    async def execute(self, workflow_state: PipelineContext):
         self._logger.info(">>> Intraday Pipeline Started")
 
         try:
-            # ------------------------------------------------------------------ #
-            #            Flow A: Sell Flow (Monitor Existing Positions)           #
-            # ------------------------------------------------------------------ #
-            await self._monitoring.execute(ctx)
-            if ctx.exit_signals:
-                ctx.orders_submitted += await self._order_execution.execute(ctx.exit_signals)
-                await self._reporting.execute(ctx.exit_signals)
+            # ---------------------------------------------------------------------------- #
+            #                Flow A: Sell Flow (Monitor Existing Positions)                #
+            # ---------------------------------------------------------------------------- #
+            await self._monitoring.execute(workflow_state)
+            if workflow_state.exit_signals:
+                workflow_state.orders_submitted += await self._order_execution.execute(workflow_state.exit_signals)
+                await self._reporting.execute(workflow_state.exit_signals)
 
-            # ------------------------------------------------------------------ #
-            #                Flow B: Buy Flow (New Candidate Funnel)              #
-            # ------------------------------------------------------------------ #
+            # ---------------------------------------------------------------------------- #
+            #                    Flow B: Buy Flow (New Candidate Funnel)                   #
+            # ---------------------------------------------------------------------------- #
             # 1. Select stocks from watchlists
-            await self._stock_selector.execute(ctx)
-            if not ctx.candidates:
+            await self._stock_selector.execute(workflow_state)
+            if not workflow_state.candidates:
                 self._logger.info("No stocks selected. Terminating Buy Flow.")
                 return
 
             # 2. Collect market prices
-            await self._market_data.execute(ctx)
-            if not ctx.priced:
+            await self._market_data.execute(workflow_state)
+            if not workflow_state.priced:
                 self._logger.info("No price data available. Terminating Buy Flow.")
                 return
 
-            # 3. Technical filter (Quantitative Left Brain)
-            self._technical_filter.execute(ctx)
-            if not ctx.survivors:
+            # 3. Technical filter (Quantitative)
+            self._technical_filter.execute(workflow_state)
+            if not workflow_state.survivors:
                 self._logger.info("No stocks survived the technical filter. Terminating Buy Flow.")
                 return
 
             # 4. Collect articles and run AI Analysis (Qualitative Right Brain)
-            await self._news_feed.execute(ctx)
-            await self._ai_analyser.execute(ctx)
+            await self._news_feed.execute(workflow_state)
+            await self._ai_analyser.execute(workflow_state)
 
             # 5. Generate signals and execute
-            await self._signals.execute(ctx)
-            if ctx.buy_signals:
-                ctx.orders_submitted += await self._order_execution.execute(ctx.buy_signals)
-                await self._reporting.execute(ctx.buy_signals)
+            await self._signals.execute(workflow_state)
+            if workflow_state.buy_signals:
+                workflow_state.orders_submitted += await self._order_execution.execute(workflow_state.buy_signals)
+                await self._reporting.execute(workflow_state.buy_signals)
 
         except Exception as e:
             self._logger.exception(f"Pipeline crashed: {e}")
-            ctx.stats.add_error(str(e))
+            workflow_state.stats.add_error(str(e))
 
         finally:
-            self._logger.info(f"<<< Pipeline Finished. Total Orders Submitted: {ctx.orders_submitted}")
+            self._logger.info(f"<<< Pipeline Finished. Total Orders Submitted: {workflow_state.orders_submitted}")

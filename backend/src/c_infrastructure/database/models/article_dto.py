@@ -20,6 +20,5 @@ class ArticleDTO(Article, table=True):
     id: UUID = Field(default=None, primary_key=True)
     source: str = Field(sa_column=Column("source", String))
 
-    # [FIX]: Added default=ContentType.DISCUSSION back in to satisfy Pylance
     content_type: str = Field(default=ContentType.DISCUSSION, sa_column=Column("content_type", String))
     raw_metadata: dict | None = Field(default=None, sa_column=Column(JSON))

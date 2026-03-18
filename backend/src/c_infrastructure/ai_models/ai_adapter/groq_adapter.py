@@ -3,6 +3,7 @@ Groq AI adapter implementation.
 
 Infrastructure layer adapter that calls GroqCloud via OpenAI-compatible API.
 """
+
 import asyncio
 from functools import cached_property
 
@@ -38,7 +39,7 @@ class GroqAIAdapter(BaseAIAdapter):
         super().__init__(config, logger, model_name)
 
         if not self._config.ai.groq_api_key:
-            raise ValueError("Missing groq_api_key in configuration. ")
+            raise ValueError("Missing groq_api_key in configuration.")
 
         self._web_search = web_search
 
@@ -52,34 +53,25 @@ class GroqAIAdapter(BaseAIAdapter):
         )
 
     async def _call_api(self, messages: tuple[Message, ...]) -> str:
-        """
-        Calls Groq Chat Completions and returns assistant text.
-        """
-        try:
-            api_messages = self._convert_to_api_format(messages)
+        api_messages = self._convert_to_api_format(messages)
 
-            if self._should_search(messages):
+        # Search enrichment — non-fatal, LLM call always proceeds
+        if self._should_search(messages):
+            try:
                 search_results = await self._enrich_with_search(messages)
-                if search_results:
-                    template = (
-                        self._config.ai.rag_injection_prompt
-                    )
+                if search_results and self._config.ai.rag_injection_prompt:
                     rag_instruction = {
                         "role": "system",
-                        "content": template.format(search_results=search_results), # type: ignore
+                        "content": self._config.ai.rag_injection_prompt.format(search_results=search_results),
                     }
-
-                    if api_messages and api_messages[-1]['role'] == 'user':
-                        api_messages.insert(-1, rag_instruction) # type: ignore
+                    if api_messages and api_messages[-1]["role"] == "user":
+                        api_messages.insert(-1, rag_instruction)  # type: ignore
                     else:
-                        api_messages.append(rag_instruction) # type: ignore
+                        api_messages.append(rag_instruction)  # type: ignore
+            except Exception as e:
+                self._logger.error(f"Search enrichment failed, proceeding without: {e}")
 
-
-            self._logger.info("執行查詢流程結束")
-        except Exception as e:
-            self._logger.error(f"Unexpected error calling tailivy : {e}")
-            return "I'm sorry, something went wrong. Please try again."
-
+        # LLM call — always runs regardless of search outcome
         try:
             stream = await self._client.chat.completions.create(
                 model=self._model_name,
@@ -92,13 +84,13 @@ class GroqAIAdapter(BaseAIAdapter):
             async for chunk in stream:
                 content_delta = chunk.choices[0].delta.content or ""
                 full_content += content_delta
-            
+
             return full_content
         except asyncio.CancelledError:
             raise
         except (OpenAIError, httpx.HTTPError) as e:
             self._logger.error(f"GROQ API error for model {self._model_name}: {e}")
-            return f"GROQ API error for model {self._model_name}: {e}" + "I'm sorry, I'm having trouble connecting to GROQ right now. Please try again in a moment."  # noqa: E501
+            return "I'm sorry, I'm having trouble connecting right now. Please try again in a moment."
         except Exception as e:
             self._logger.error(f"Unexpected error calling GROQ ({self._model_name}): {e}")
             return "I'm sorry, something went wrong. Please try again."
@@ -107,58 +99,55 @@ class GroqAIAdapter(BaseAIAdapter):
         """Execute web search and format results."""
         if not self._web_search:
             return ""
-        
-        # Extract the latest user query
+
         user_query = ""
         for msg in reversed(messages):
             if msg.role == MessageRole.USER:
                 user_query = msg.content
                 break
-        
+
         if not user_query:
             return ""
-        
-        try:
-            self._logger.debug(f"Performing web search for: {user_query}")
-            self._logger.info(f"Performing web search for: {user_query}")
-            results = await self._web_search.search(
-                user_query,
-                limit=self._config.behavior.web_search_max_results
-            )
-            self._logger.info(f"查詢結果: {results}")
-            if not results:
-                return ""
-            
-            # Format results
-            formatted = "Recent web search results:\n"
-            for i, result in enumerate(results, 1):
-                formatted += f"\n[{i}] {result.title}\n"
-                formatted += f"URL: {result.url}\n"
-                formatted += f"Content: {result.content}\n"
-            
-            return formatted
-        except Exception as e:
-            self._logger.error(f"Web search failed: {e}")
+
+        self._logger.debug(f"Performing web search for: {user_query}")
+        results = await self._web_search.search(
+            user_query,
+            limit=self._config.behavior.web_search_max_results,
+        )
+
+        if not results:
             return ""
+
+        formatted = "Recent web search results:\n"
+        for i, result in enumerate(results, 1):
+            formatted += f"\n[{i}] {result.title}\nURL: {result.url}\nContent: {result.content}\n"
+
+        return formatted
 
     def _should_search(self, messages: tuple[Message, ...]) -> bool:
         """Determine if web search should be triggered."""
         if not self._config.behavior.enable_web_search or not self._web_search:
             return False
-        
-        # Get the latest user message
+
         for msg in reversed(messages):
             if msg.role == MessageRole.USER:
                 content = msg.content.lower()
-                # Keywords that trigger search
                 search_triggers = {
-                    "latest", "recent", "news", "current", "today",
-                    "stock", "weather", "時事", "今天", "最新", "新聞" ,"查詢"
+                    "latest",
+                    "recent",
+                    "news",
+                    "current",
+                    "today",
+                    "stock",
+                    "weather",
+                    "時事",
+                    "今天",
+                    "最新",
+                    "新聞",
+                    "查詢",
                 }
-                hit = any(t in content for t in search_triggers)
-                self._logger.debug(f"search trigger hit={hit}, content={content}")
-                return hit
-        
+                return any(t in content for t in search_triggers)
+
         return False
 
     def _convert_to_api_format(
@@ -173,4 +162,3 @@ class GroqAIAdapter(BaseAIAdapter):
             elif message.role == MessageRole.ASSISTANT:
                 api_messages.append(ChatCompletionAssistantMessageParam(role="assistant", content=message.content))
         return api_messages
-

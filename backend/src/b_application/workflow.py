@@ -27,38 +27,35 @@ class WorkflowOrchestrator:
         self._logger = logger
 
     async def run_full_cycle(self, manual_symbols: list[str] | None = None) -> PipelineContext:
-        ctx = PipelineContext(manual_symbols=manual_symbols or [])
-        await self.run_nightly(ctx)
-        await self.run_buzz_scan(ctx)
-        await self.run_intraday(ctx)
-        ctx.stats.finish()
-        return ctx
+        workflow_state = PipelineContext(manual_symbols=manual_symbols or [])
+        await self.run_nightly(workflow_state)
+        await self.run_buzz_scan(workflow_state)
+        await self.run_intraday(workflow_state)
+        workflow_state.stats.finish()
+        return workflow_state
 
-    async def run_nightly(self, ctx: PipelineContext) -> None:
-        """Phase 1: Generate technical watchlist from universe scan."""
+    async def run_nightly(self, workflow_state: PipelineContext) -> None:
         self._logger.info("=== Phase 1: Nightly Watchlist Generation ===")
         try:
-            await self._watchlist.execute(ctx)
-            self._logger.info(f"Nightly done. Passed: {len(ctx.technical_watchlist)}/{len(ctx.universe)}")
+            await self._watchlist.execute(workflow_state)
+            self._logger.info(f"Nightly done. Passed: {len(workflow_state.technical_watchlist)}/{len(workflow_state.universe)}")
         except Exception as e:
             self._logger.exception(f"Phase 1 failed: {e}")
-            ctx.stats.add_error(f"Phase 1 failed: {e}")
+            workflow_state.stats.add_error(f"Phase 1 failed: {e}")
 
-    async def run_buzz_scan(self, ctx: PipelineContext) -> None:
-        """Phase 2: Scan social media for trending stocks."""
+    async def run_buzz_scan(self, workflow_state: PipelineContext) -> None:
         self._logger.info("=== Phase 2: Social Buzz Scan ===")
         try:
-            await self._market_scan.execute(ctx)
-            self._logger.info(f"Buzz scan done. Found: {len(ctx.buzz_watchlist)} trending stocks")
+            await self._market_scan.execute(workflow_state)
+            self._logger.info(f"Buzz scan done. Found: {len(workflow_state.buzz_watchlist)} trending stocks")
         except Exception as e:
             self._logger.exception(f"Phase 2 failed: {e}")
-            ctx.stats.add_error(f"Phase 2 failed: {e}")
+            workflow_state.stats.add_error(f"Phase 2 failed: {e}")
 
-    async def run_intraday(self, ctx: PipelineContext) -> None:
-        """Phase 3: Execute intraday analysis and signal generation."""
+    async def run_intraday(self, workflow_state: PipelineContext) -> None:
         self._logger.info("=== Phase 3: Intraday Pipeline ===")
         try:
-            await self._pipeline.execute(ctx)
+            await self._pipeline.execute(workflow_state)
         except Exception as e:
             self._logger.exception(f"Phase 3 failed: {e}")
-            ctx.stats.add_error(f"Intraday pipeline failed: {e}")
+            workflow_state.stats.add_error(f"Intraday pipeline failed: {e}")

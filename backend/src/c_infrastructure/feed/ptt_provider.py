@@ -1,89 +1,107 @@
 import re
-from collections import Counter
+from datetime import datetime
+from uuid import uuid4
 
 import httpx
 from bs4 import BeautifulSoup
 
-from a_domain.model.market.stock import Stock
+from a_domain.model.market.article import Article
 from a_domain.ports.market.social_media_provider import ISocialMediaProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from a_domain.types.enums import CandidateSource
+from a_domain.types.enums import ContentType, InformationSource
+from b_application.schemas.config import AppConfig
 
 
 class PttProvider(ISocialMediaProvider):
-    """
-    Scrapes PTT Stock board to find trending stock tickers using BeautifulSoup4.
-    """
+    """Scrapes PTT Stock board to find trending stock tickers using BeautifulSoup4."""
 
-    # TODO:I believe there's a better way to write it better, also i might need another one.
-    """
-    PTT_STOCK = "PTT_STOCK"
-    PTT_GOSSIPING = "PTT_GOSSIPING"
-    There're two values in enums. In my original plan it should search stock and gossiping.
-    however, i think gossiping one is full of unuseful info
-    which we should avoid.
-    Also i think it should be saved as an artichle?
-    """
+    PTT_BASE_URL = "https://www.ptt.cc"
     PTT_STOCK_URL = "https://www.ptt.cc/bbs/Stock/index.html"
+    MAX_CONTENT_LENGTH = 1000  # ? Remove it later? I guess
 
-    def __init__(self, logger: ILoggingProvider):
+    def __init__(self, config: AppConfig, logger: ILoggingProvider):
+        self._config = config
         self._logger = logger
-        # Bypass the "Over 18" age restriction page on PTT
         self._cookies = {"over18": "1"}
 
-    async def get_trending_stocks(self, limit: int = 5) -> list[Stock]:
-        self._logger.info("Scanning PTT Stock board for trending tickers ...")
+    async def get_trending_stocks(self, limit: int) -> list[Article]:
+        self._logger.info("Scanning PTT Stock board for trending posts...")
+        tags = self._config.collect_rules.ptt_required_tags
 
-        async with httpx.AsyncClient(timeout=10.0, cookies=self._cookies) as client:
+        async with httpx.AsyncClient(timeout=15.0, cookies=self._cookies) as client:
             try:
                 resp = await client.get(self.PTT_STOCK_URL)
                 resp.raise_for_status()
-
-                # TODO: Better way to write? there's a hard-code here.
-                # Parse the HTML safely using BeautifulSoup
                 soup = BeautifulSoup(resp.text, "html.parser")
 
-                # Find all div elements with the class 'title'
-                title_divs = soup.find_all("div", class_="title")
+                articles: list[Article] = []
 
-                mentions = []
-                for div in title_divs:
-                    a_tag = div.find("a")
-                    if not a_tag:
-                        # Skip posts that have been deleted by moderators
+                for div in soup.find_all("div", class_="r-ent"):
+                    if len(articles) >= limit:
+                        break
+
+                    title_a = div.find("a")
+                    if not title_a:
                         continue
 
-                    title_text = a_tag.get_text(strip=True)
+                    title_text = title_a.get_text(strip=True)
 
-                    # TODO: Is it a good logic? to fetch all of useful data?
-                    # Extract 4-digit stock tickers (e.g., "2330", "2603") from the clean title text
+                    if not any(tag in title_text for tag in tags):
+                        continue
+
                     tickers = re.findall(r"\b[1-9]\d{3}\b", title_text)
-                    mentions.extend(tickers)
+                    if not tickers:
+                        continue
 
-                if not mentions:
-                    self._logger.debug("No stock tickers found on the first page of PTT.")
-                    return []
+                    stock_id = tickers[0]
+                    article_url = self.PTT_BASE_URL + str(title_a["href"])
 
-                # Count frequencies of each ticker
-                counter = Counter(mentions)
-                #? what's counter using for? count?
-                top_tickers = counter.most_common(limit)
+                    content = await self._fetch_article_content(client, article_url)
+                    if not content:
+                        continue
 
-                stocks: list[Stock] = []
-                for stock_id, count in top_tickers:
-                    stock = Stock(
-                        stock_id=stock_id,
-                        source=CandidateSource.SOCIAL_BUZZ,
-                        trigger_reason=f"PTT Trending: mentioned {count} times",
+                    articles.append(
+                        Article(
+                            id=uuid4(),
+                            stock_id=stock_id,
+                            source=InformationSource.PTT_STOCK,
+                            title=title_text,
+                            content=content,
+                            url=article_url,
+                            content_type=ContentType.ANALYSIS,
+                            published_at=datetime.now(),
+                            fetched_at=datetime.now(),
+                        )
                     )
-                    stocks.append(stock)
-                    self._logger.debug(f"Found trending stock: {stock_id} ({count} mentions)")
+                    self._logger.debug(f"Successfully scraped PTT content for {stock_id}.")
 
-                return stocks
+                return articles
 
-            except httpx.RequestError as e:
-                self._logger.error(f"HTTP request failed while fetching PTT: {e}")
-                return []
             except Exception as e:
                 self._logger.error(f"Unexpected error parsing PTT: {e}")
                 return []
+
+    async def _fetch_article_content(self, client: httpx.AsyncClient, url: str) -> str | None:
+        """Fetch and clean a single PTT article page."""
+        try:
+            resp = await client.get(url)
+            if resp.status_code != 200:
+                return None
+
+            soup = BeautifulSoup(resp.text, "html.parser")
+            main_content = soup.find("div", id="main-content")
+            if not main_content:
+                return None
+
+            for push in main_content.find_all("div", class_="push"):
+                push.decompose()
+
+            raw_text = main_content.get_text(separator="\n", strip=True)
+
+            if len(raw_text) > self.MAX_CONTENT_LENGTH:
+                return raw_text[: self.MAX_CONTENT_LENGTH] + "..."
+            return raw_text
+
+        except Exception as e:
+            self._logger.debug(f"Failed to fetch article content from {url}: {e}")
+            return None

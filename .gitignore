@@ -31,3 +31,5 @@ wheels/
 /backend/.ruff_cache
 /.pytest_cache
 /backend/.pytest_cache
+/stock_agent.db
+/backend/chroma_data

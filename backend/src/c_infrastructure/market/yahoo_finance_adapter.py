@@ -1,10 +1,12 @@
 import asyncio
 from datetime import datetime
+from typing import Any
 
 import pandas as pd
 import yfinance as yf
 
 from a_domain.model.market.ohlcv import Ohlcv
+from a_domain.model.market.stock import Stock
 from a_domain.ports.market.price_provider import IPriceProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.types.enums import MarketType
@@ -18,14 +20,15 @@ class YahooFinanceProvider(IPriceProvider):
     def __init__(self, logger: ILoggingProvider):
         self._logger = logger
 
-    def _format_ticker(self, stock_id: str) -> str:
-        # 實務上可以透過傳入 MarketType 判斷 .TW 或 .TWO
-        return f"{stock_id}.TW"
+    def _format_ticker(self, stock: Stock) -> str:
+        if stock.market == MarketType.TPEX:
+            return f"{stock.stock_id}.TWO"
+        return f"{stock.stock_id}.TW"
 
-    async def fetch_history(self, stock_id: str, start_date: datetime, end_date: datetime) -> list[Ohlcv]:
-        yf_ticker = self._format_ticker(stock_id)
+    async def fetch_history(self, stock: Stock, start_date: datetime, end_date: datetime) -> list[Ohlcv]:
+        yf_ticker = self._format_ticker(stock)
 
-        def _fetch():
+        def _fetch() -> Any:
             ticker = yf.Ticker(yf_ticker)
             return ticker.history(start=start_date.strftime("%Y-%m-%d"), end=end_date.strftime("%Y-%m-%d"))
 
@@ -33,7 +36,7 @@ class YahooFinanceProvider(IPriceProvider):
             self._logger.debug(f"Fetching history for {yf_ticker} from Yahoo Finance...")
             df = await asyncio.to_thread(_fetch)
 
-            if df.empty:
+            if not isinstance(df, pd.DataFrame) or df.empty:
                 return []
 
             bars = []
@@ -51,38 +54,45 @@ class YahooFinanceProvider(IPriceProvider):
             return bars
 
         except Exception as e:
-            self._logger.error(f"YFinance error fetching history for {stock_id}: {e}")
+            self._logger.error(f"YFinance error fetching history for {stock.stock_id}: {e}")
             return []
 
-    async def fetch_realtime_bars(self, stock_ids: list[str]) -> dict[str, Ohlcv]:
-        if not stock_ids:
+    async def fetch_realtime_bars(self, stocks: list[Stock]) -> dict[str, Ohlcv]:
+        if not stocks:
             return {}
 
-        yf_tickers = " ".join([self._format_ticker(sid) for sid in stock_ids])
+        yf_tickers = " ".join([self._format_ticker(stock) for stock in stocks])
 
-        def _fetch():
+        def _fetch() -> Any:
             return yf.download(yf_tickers, period="1d", progress=False)
 
         try:
-            self._logger.debug(f"Fetching realtime bars for {len(stock_ids)} stocks...")
+            self._logger.debug(f"Fetching realtime bars for {len(stocks)} stocks...")
             df = await asyncio.to_thread(_fetch)
 
+            if not isinstance(df, pd.DataFrame) or df.empty:
+                return {}
+
             result_map = {}
-            for stock_id in stock_ids:
-                ticker = self._format_ticker(stock_id)
+            for stock in stocks:
+                ticker = self._format_ticker(stock)
 
                 try:
-                    if len(stock_ids) == 1:
+                    if len(stocks) == 1:
                         row = df.iloc[-1]
                     else:
-                        row = df.xs(ticker, axis=1, level=1).iloc[-1]
-                except KeyError:
+                        target_data = df.xs(ticker, axis=1, level=1)
+                        if isinstance(target_data, (pd.DataFrame, pd.Series)):
+                            row = target_data.iloc[-1]
+                        else:
+                            continue
+                except (KeyError, AttributeError):
                     continue
 
                 if pd.isna(row["Close"]):
                     continue
 
-                result_map[stock_id] = Ohlcv(
+                result_map[stock.stock_id] = Ohlcv(
                     ts=df.index[-1].to_pydatetime(),  # type: ignore
                     open=float(row["Open"]),
                     high=float(row["High"]),

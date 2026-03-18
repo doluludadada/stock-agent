@@ -19,7 +19,6 @@ class GeminiAIAdapter(BaseAIAdapter):
         if not self._config.ai.gemini_api_key:
             raise ValueError("Missing gemini_api_key in configuration.")
         genai.configure(api_key=self._config.ai.gemini_api_key)  # type: ignore[attr-defined]
-        # TODO : no getattr!
         endpoint = getattr(self._config, "gemini_endpoint", None)
         if endpoint:
             try:
