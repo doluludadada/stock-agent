@@ -61,47 +61,41 @@ class YahooFinanceProvider(IPriceProvider):
         if not stocks:
             return {}
 
-        yf_tickers = " ".join([self._format_ticker(stock) for stock in stocks])
+        result_map = {}
+        self._logger.debug(f"Fetching realtime bars for {len(stocks)} stocks concurrently...")
 
-        def _fetch() -> Any:
-            return yf.download(yf_tickers, period="1d", progress=False)
+        # Create a helper function for a single stock
+        async def _fetch_single(stock: Stock):
+            ticker_symbol = self._format_ticker(stock)
 
-        try:
-            self._logger.debug(f"Fetching realtime bars for {len(stocks)} stocks...")
-            df = await asyncio.to_thread(_fetch)
+            def _get_data():
+                return yf.Ticker(ticker_symbol).history(period="1d")
 
-            if not isinstance(df, pd.DataFrame) or df.empty:
-                return {}
+            try:
+                df = await asyncio.to_thread(_get_data)
+                if not df.empty:
+                    row = df.iloc[-1]
+                    # Check if close is NaN (using pandas isna)
+                    if pd.isna(row.get("Close")):
+                        return None
 
-            result_map = {}
-            for stock in stocks:
-                ticker = self._format_ticker(stock)
+                    return stock.stock_id, Ohlcv(
+                        ts=df.index[-1].to_pydatetime(),  # type: ignore
+                        open=float(row["Open"]),
+                        high=float(row["High"]),
+                        low=float(row["Low"]),
+                        close=float(row["Close"]),
+                        volume=int(row["Volume"]),
+                    )
+            except Exception as e:
+                self._logger.error(f"YFinance error for {stock.stock_id}: {e}")
+            return None
 
-                try:
-                    if len(stocks) == 1:
-                        row = df.iloc[-1]
-                    else:
-                        target_data = df.xs(ticker, axis=1, level=1)
-                        if isinstance(target_data, (pd.DataFrame, pd.Series)):
-                            row = target_data.iloc[-1]
-                        else:
-                            continue
-                except (KeyError, AttributeError):
-                    continue
+        # Run all requests concurrently
+        results = await asyncio.gather(*[_fetch_single(s) for s in stocks])
 
-                if pd.isna(row["Close"]):
-                    continue
+        for res in results:
+            if res:
+                result_map[res[0]] = res[1]
 
-                result_map[stock.stock_id] = Ohlcv(
-                    ts=df.index[-1].to_pydatetime(),  # type: ignore
-                    open=float(row["Open"]),
-                    high=float(row["High"]),
-                    low=float(row["Low"]),
-                    close=float(row["Close"]),
-                    volume=int(row["Volume"]),
-                )
-            return result_map
-
-        except Exception as e:
-            self._logger.error(f"YFinance error fetching realtime bars: {e}")
-            return {}
+        return result_map

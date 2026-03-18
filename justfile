@@ -26,4 +26,4 @@ run-docker:
 
 cli:
     @echo "Starting CLI..."
-    cd backend; uv run python -m src.d_presentation.cli.interactive
+    cd backend; $env:PYTHONPATH="src"; uv run python -m d_presentation.cli.interactive

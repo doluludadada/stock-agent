@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import httpx
@@ -19,12 +19,10 @@ class YahooTwNewsProvider:
         }
 
     async def fetch_news(self, stock_id: str, limit: int) -> list[Article]:
-        # TODO: Delete this limit?
-        # I need to think about whole of limitation's logic
         self._logger.debug(f"Fetching Yahoo TW News for {stock_id}...")
-        url = f"https://tw.stock.yahoo.com/quote/{stock_id}.TW/news"
+        url = f"https://tw.stock.yahoo.com/quote/{stock_id}/news"
 
-        async with httpx.AsyncClient(timeout=15.0, headers=self._headers, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=15.0, headers=self._headers, follow_redirects=True, verify=False) as client:
             try:
                 resp = await client.get(url)
                 resp.raise_for_status()
@@ -32,51 +30,44 @@ class YahooTwNewsProvider:
                 soup = BeautifulSoup(resp.text, "lxml")
                 articles: list[Article] = []
 
-                news_items = soup.find_all("li", class_="js-stream-content")
+                def is_valid_news_link(href: str | None) -> bool:
+                    if not href:
+                        return False
+                    return "/news/" in href and ".html" in href
 
-                for item in news_items:
+                news_links = soup.find_all("a", href=is_valid_news_link)
+
+                seen_urls = set()
+                for link in news_links:
                     if len(articles) >= limit:
                         break
 
-                    title_tag = item.find("a", class_="js-content-viewer")
-                    if not title_tag:
+                    href = link.get("href")
+                    href_str = str(href[0]) if isinstance(href, list) else str(href or "")
+
+                    if href_str in seen_urls:
+                        continue
+                    seen_urls.add(href_str)
+
+                    title = link.get_text(strip=True)
+                    if not title or len(title) < 5:
                         continue
 
-                    title = title_tag.get_text(strip=True)
-
-                    # [FIX]: Type safety for BeautifulSoup attributes
-                    href_val = title_tag.get("href")
-                    link = str(href_val[0]) if isinstance(href_val, list) else str(href_val or "")
-
-                    summary_tag = item.find("p")
-                    content = summary_tag.get_text(strip=True) if summary_tag else title
-
-                    time_tag = item.find("time")
-                    pub_date = datetime.now()
-
-                    if time_tag:
-                        dt_val = time_tag.get("datetime")
-                        pub_date_str = str(dt_val[0]) if isinstance(dt_val, list) else str(dt_val or "")
-                        if pub_date_str:
-                            try:
-                                pub_date = datetime.fromisoformat(pub_date_str.replace("Z", "+00:00"))
-                            except ValueError:
-                                pass
-
-                    article = Article(
-                        id=uuid4(),
-                        stock_id=stock_id,
-                        source=InformationSource.NEWS_MEDIA,
-                        title=title,
-                        content=content,
-                        url=link,
-                        content_type=ContentType.NEWS,
-                        published_at=pub_date,
-                        fetched_at=datetime.now(),
+                    articles.append(
+                        Article(
+                            id=uuid4(),
+                            stock_id=stock_id,
+                            source=InformationSource.NEWS_MEDIA,
+                            title=title,
+                            content=title,
+                            url=href_str if href_str.startswith("http") else f"https://tw.stock.yahoo.com{href_str}",
+                            content_type=ContentType.REPORT,
+                            published_at=datetime.now(timezone.utc),
+                            fetched_at=datetime.now(timezone.utc),
+                        )
                     )
-                    articles.append(article)
 
-                self._logger.info(f"Successfully scraped {len(articles)} articles for {stock_id}.")
+                self._logger.info(f"Successfully scraped {len(articles)} articles for {stock_id} from Yahoo.")
                 return articles
 
             except httpx.RequestError as e:

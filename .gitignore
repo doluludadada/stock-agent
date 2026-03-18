@@ -33,3 +33,4 @@ wheels/
 /backend/.pytest_cache
 /stock_agent.db
 /backend/chroma_data
+/news_archive

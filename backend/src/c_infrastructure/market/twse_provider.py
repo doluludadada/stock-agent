@@ -44,7 +44,7 @@ class TaiwanStockProvider(IStockProvider):
     async def _fetch_from_api(self) -> list[Stock]:
         stocks: list[Stock] = []
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
             try:
                 self._logger.debug("Fetching TWSE (上市) stocks...")
                 twse_resp = await client.get(self.TWSE_URL)

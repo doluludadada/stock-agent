@@ -1,16 +1,9 @@
 import os
-import sys
-from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI
 
 from d_presentation.web.routers.api_v1 import router as api_v1_router
-
-src_path = str(Path(__file__).parent / "src")
-if src_path not in sys.path:
-    sys.path.insert(0, src_path)
-
 
 app = FastAPI(
     title="TW-Stock-Alpha-Agent",

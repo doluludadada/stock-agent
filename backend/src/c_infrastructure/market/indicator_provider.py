@@ -1,6 +1,7 @@
 import math
 
 import pandas as pd
+import pandas_ta  # noqa: F401
 
 from a_domain.model.indicators.technical_indicators import (
     Adx,
