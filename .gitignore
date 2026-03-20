@@ -34,3 +34,5 @@ wheels/
 /stock_agent.db
 /backend/chroma_data
 /news_archive
+/ai_responses
+/buzz_archive

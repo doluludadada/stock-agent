@@ -1,3 +1,4 @@
+from a_domain.ports.market.stock_provider import IStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
 from a_domain.types.enums import CandidateSource, SignalReason
@@ -7,11 +8,11 @@ from b_application.schemas.pipeline_context import PipelineContext
 class StockSelector:
     """
     Use Case: Select stocks from watchlists and manual input.
-    Entry point of the intraday pipeline.
     """
 
-    def __init__(self, watchlist_repo: IWatchlistRepository, logger: ILoggingProvider):
+    def __init__(self, watchlist_repo: IWatchlistRepository, stock_provider: IStockProvider, logger: ILoggingProvider):
         self._repo = watchlist_repo
+        self._stock_provider = stock_provider
         self._logger = logger
 
     async def execute(self, workflow_state: PipelineContext) -> None:
@@ -20,11 +21,15 @@ class StockSelector:
         # 1. Manual Input
         if workflow_state.manual_symbols:
             self._logger.info(f"Processing manual input: {workflow_state.manual_symbols}")
-            stocks = await self._repo.get_stocks_by_ids(workflow_state.manual_symbols)
-            for stock in stocks:
-                stock.source = CandidateSource.MANUAL_INPUT
-                stock.trigger_reason = SignalReason.MANUAL_REQ
-                stock_map[stock.stock_id] = stock
+            for sid in workflow_state.manual_symbols:
+                # Fetch the real stock entity to get the correct MarketType (TWSE vs TPEX)
+                stock = await self._stock_provider.get_by_id(sid)
+                if stock:
+                    stock.source = CandidateSource.MANUAL_INPUT
+                    stock.trigger_reason = SignalReason.MANUAL_REQ
+                    stock_map[stock.stock_id] = stock
+                else:
+                    self._logger.warning(f"Could not find stock {sid} in the market universe.")
 
         # 2. Buzz Watchlist
         buzz_items = await self._repo.get_buzz_watchlist()

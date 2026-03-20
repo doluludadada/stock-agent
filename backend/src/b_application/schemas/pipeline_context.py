@@ -13,8 +13,6 @@ class PipelineContext:
     A mutable data bag that flows through the entire three-phase workflow.
     Each use case reads from upstream fields and writes to its own output fields.
 
-    Pattern reference: ACC eBilling ProcessContext.
-
     Phase 1 (Nightly):   universe → technical_watchlist
     Phase 2 (Morning):   social scan → buzz_watchlist
     Phase 3 (Intraday):  candidates → priced → survivors → analysed → signals → orders

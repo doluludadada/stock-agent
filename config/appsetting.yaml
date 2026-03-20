@@ -1,34 +1,96 @@
+environment: dev
+
 ai:
-  active_model: grok
-  connection_timeout: 600
+  active_model: groq
+  connection_timeout: 60
   available_models:
-    grok: grok-4-1-fast
-    openai: gpt-5-mini
+    openai: gpt-5.4-mini
+    grok: grok-4-1-fast-reasoning
     gemini: gemini-2.5-flash
     groq: openai/gpt-oss-20b
+  article_content_length: 500
+  neutral_score: 50
+  ai_response_dir: "ai_responses"
 
 behavior:
-  log_level: INFO
-  enable_web_search: true
-  enable_x_search: true
+  log_level: DEBUG
+  enable_web_search: false
+  enable_x_search: false
   enable_inline_citations: true
   web_search_max_results: 3
-  web_search_allowed_domains: []
-  x_search_allowed_handles: []
 
 db:
   provider: chroma
-  chroma_persist_path: ./chroma_data
-  reset_commands:
-    - "清除記憶"
-    - "清除對話"
-    - "!reset"
-    - "/reset"
-    - "/clear"
+  chroma_persist_path: "chroma_data"
+  reset_commands: ["clear", "reset"]
 
 tavily:
-  search_depth: "basic"  # "basic" or "advanced"
+  search_depth: basic
+
+analysis:
+  active_strategy: moderate
+  lookback_days: 120
+  technical_weight: 0.6
+  sentiment_weight: 0.4
+  min_combined_score_buy: 70
+  max_combined_score_sell: 30
+  risk_per_trade_pct: 0.02
+  stop_loss_pct: 0.10
+  total_capital: 1000000
+  article_fetch_limit: 10
+
+notifications:
+  enabled: false
+  recipients: []
 
 collect_rules:
-  ptt_required_tags:
-    - "[標的]"
+  spam_keywords: ["廣告", "廣編", "業配", "新聞稿"]
+  filter_min_price: 15.0
+  filter_min_volume: 500
+  buzz_min_mentions: 20
+  buzz_min_push_count: 100
+  social_trending_limit: 10
+  news_archive_dir: "news_archive"
+  ptt_lookback_days: 5
+  ptt_min_push_score: 10
+  ptt_tags: ["[標的]", "[新聞]"]
+
+scoring:
+  base: 50
+  pass_bonus: 20
+  hard_failure_penalty: 15
+  max_hard_penalty: 30
+  soft_failure_penalty: 5
+  max_soft_penalty: 15
+  rsi_sweet_spot_bonus: 10
+  rsi_sweet_spot_min: 40.0
+  rsi_sweet_spot_max: 60.0
+  macd_bullish_bonus: 10
+  ma_present_bonus: 5
+
+quality:
+  min_chars_stock: 100
+  min_chars_news: 200
+  min_chars_gossip: 50
+
+# ---------------------------------------------------------------------------- #
+# TODO: UI / Parameter Tuning
+# These are the default mathematical periods for technical indicators.
+# In future frontend releases, these should be mapped to UI sliders/inputs
+# so users can customize their indicator sensitivities dynamically.
+# ---------------------------------------------------------------------------- #
+indicators:
+  rsi_period: 14
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  ma_short: 5
+  ma_mid: 20
+  ma_long: 60
+  bb_period: 20
+  bb_std: 2.0
+  stoch_k: 9
+  stoch_d: 3
+  adx_period: 14
+  atr_period: 14
+  mfi_period: 14

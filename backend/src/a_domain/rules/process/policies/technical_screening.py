@@ -44,21 +44,30 @@ class TechnicalScreeningPolicy:
         stock.soft_failures.clear()
         stock.observations.clear()
 
+        # TODO: How about change this setting to dev env?
+        is_manual = stock.source == CandidateSource.MANUAL_INPUT
+
         # 1. Setup must_pass (only for TECHNICAL_WATCHLIST)
         if stock.source == CandidateSource.TECHNICAL_WATCHLIST:
             for rule in self._setup_must_pass:
                 if not rule.apply(stock):
                     stock.hard_failures.append(rule.name)
 
-        # 2. Safety must_pass (always)
+        # 2. Safety must_pass
         for rule in self._safety_must_pass:
             if not rule.apply(stock):
-                stock.hard_failures.append(rule.name)
+                if is_manual:
+                    stock.soft_failures.append(f"Safety: {rule.name}")  # Bypass drop for manual testing
+                else:
+                    stock.hard_failures.append(rule.name)
 
-        # 3. Entry timing must_pass (always)
+        # 3. Entry timing must_pass
         for rule in self._entry_timing_must_pass:
             if not rule.apply(stock):
-                stock.hard_failures.append(rule.name)
+                if is_manual:
+                    stock.soft_failures.append(f"Timing: {rule.name}")  # Bypass drop for manual testing
+                else:
+                    stock.hard_failures.append(rule.name)
 
         # 4. Should-pass (soft penalty)
         for rule in self._should_pass:

@@ -21,26 +21,25 @@ class LoggerService(ILoggingProvider):
         self._logger = logger
 
     def info(self, message: str) -> None:
-        self._logger.info(message)
+        logger.opt(depth=1).info(message)
 
     def warning(self, message: str) -> None:
-        self._logger.warning(message)
+        logger.opt(depth=1).warning(message)
 
     def debug(self, message: str) -> None:
-        self._logger.debug(message)
+        logger.opt(depth=1).debug(message)
 
     def critical(self, message: str) -> None:
-        self._logger.critical(message)
+        logger.opt(depth=1).critical(message)
 
     def error(self, message: str) -> None:
-        self._logger.error(message)
+        logger.opt(depth=1).error(message)
+
+    def exception(self, message: str) -> None:
+        logger.opt(depth=1).exception(message)
 
     def success(self, message: str) -> None:
-        self._logger.success(message)
+        logger.opt(depth=1).success(message)
 
     def trace(self, message: str) -> None:
-        self._logger.trace(message)
-    def exception(self, message: str) -> None:
-        self._logger.exception(message)
-
-
+        logger.opt(depth=1).trace(message)

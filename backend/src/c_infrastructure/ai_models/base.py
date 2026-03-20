@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from datetime import datetime
 
 from a_domain.model.chat.message import Message, MessageRole
 from a_domain.ports.ai.ai_provider import IAiProvider
@@ -37,4 +38,20 @@ class BaseAIAdapter(IAiProvider, ABC):
                 content="I've encountered an unexpected error. The technical team has been notified.",
             )
 
+    def save_response(self, stock_id: str, content: str) -> None:
+        """Saves the raw AI response to the filesystem for inspection."""
+        try:
+            base_dir = self._config.project_root / self._config.ai.ai_response_dir
+            stock_dir = base_dir / stock_id
+            stock_dir.mkdir(parents=True, exist_ok=True)
 
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"report_{timestamp}.md"
+            file_path = stock_dir / filename
+
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(content)
+
+            self._logger.debug(f"[{self.__class__.__name__}] Saved AI response for {stock_id} to {file_path}")
+        except Exception as e:
+            self._logger.error(f"[{self.__class__.__name__}] Failed to save AI response for {stock_id}: {e}")

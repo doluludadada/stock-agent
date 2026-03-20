@@ -46,6 +46,9 @@ class AiAnalyser:
                 messages = (Message(role=MessageRole.USER, content=prompt),)
                 response = await self._ai.generate_reply(messages)
 
+                # Persist raw AI response via provider method
+                self._ai.save_response(stock.stock_id, response.content)
+
                 report = self._response_parser.parse(stock.stock_id, response.content)
                 stock.analysis_report = report
                 stock.ai_score = report.score

@@ -24,29 +24,30 @@ class MarketScan:
         self._logger.info("Scanning social media for trending stocks...")
 
         try:
-            trending_articles = await self._social.get_trending_stocks(
-                limit=self._config.collect_rules.social_trending_limit
-            )
+            trending_articles = await self._social.get_trending_stocks(limit=self._config.collect_rules.social_trending_limit)
+            self._social.save_social_media_data(trending_articles)
+
             if not trending_articles:
                 return
 
-            trending_stocks: list[Stock] = []
-            reasons: list[str] = []
-
+            # Group articles by stock_id (avoid duplicate Stock objects)
+            stock_map: dict[str, Stock] = {}
             for article in trending_articles:
-                stock = Stock(
-                    stock_id=article.stock_id,
-                    source=CandidateSource.SOCIAL_BUZZ,
-                    trigger_reason=article.title,
-                )
-                stock.articles.append(article)
-                trending_stocks.append(stock)
-                reasons.append(article.title)
+                if article.stock_id not in stock_map:
+                    stock_map[article.stock_id] = Stock(
+                        stock_id=article.stock_id,
+                        source=CandidateSource.SOCIAL_BUZZ,
+                        trigger_reason=article.title,
+                    )
+                stock_map[article.stock_id].articles.append(article)
+
+            trending_stocks = list(stock_map.values())
+            reasons = [s.trigger_reason for s in trending_stocks]
 
             await self._repo.save_buzz_watchlist(trending_stocks, reasons)
             workflow_state.buzz_watchlist = trending_stocks
             workflow_state.stats.total_scanned += len(trending_stocks)
-            self._logger.success(f"Updated Buzz Watchlist with {len(trending_stocks)} stocks.")
+            self._logger.success(f"Updated Buzz Watchlist: {len(trending_stocks)} stocks from {len(trending_articles)} articles.")
         except Exception as e:
             self._logger.error(f"Trending scan failed: {e}")
             workflow_state.stats.add_error(str(e))

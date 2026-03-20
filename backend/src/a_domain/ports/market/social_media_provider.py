@@ -11,3 +11,7 @@ class ISocialMediaProvider(Protocol):
         Returns a list of Article entities representing trending topics.
         """
         ...
+
+    def save_social_media_data(self, articles: list[Article]) -> None:
+        """Saves fetched trending articles as a Markdown file."""
+        ...

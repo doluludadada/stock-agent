@@ -20,11 +20,19 @@ class WorkflowOrchestrator:
         market_scan: MarketScan,
         intraday_pipeline: Pipeline,
         logger: ILoggingProvider,
+        db=None,
     ):
         self._watchlist = watchlist
         self._market_scan = market_scan
         self._pipeline = intraday_pipeline
         self._logger = logger
+        self._db = db
+
+    async def shutdown(self) -> None:
+        """Cleanup resources on exit."""
+        if self._db:
+            self._logger.info("Shutting down workflow resources...")
+            await self._db.close()
 
     async def run_full_cycle(self, manual_symbols: list[str] | None = None) -> PipelineContext:
         workflow_state = PipelineContext(manual_symbols=manual_symbols or [])

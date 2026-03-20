@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -62,3 +63,14 @@ class DatabaseConnector:
                 raise
             finally:
                 await session.close()
+
+    async def close(self) -> None:
+        """Dispose of the engine and all connections."""
+        if hasattr(self, "_engine"):
+            try:
+                self._logger.debug("Closing database engine...")
+                # We use asyncio.shield to ensure disposal happens even if shutdown task is cancelled
+                await asyncio.shield(self._engine.dispose())
+            except (asyncio.CancelledError, Exception):
+                # Silently ignore errors during shutdown to avoid ugly tracebacks
+                pass

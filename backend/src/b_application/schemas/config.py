@@ -22,6 +22,7 @@ class AiConfig(BaseSettings):
     rag_injection_prompt: str | None = None
     article_content_length: int = Field(default=500, ge=100)
     neutral_score: int = Field(default=50, ge=0, le=100)
+    ai_response_dir: str = "ai_responses"
 
 
 class LineConfig(BaseSettings):
@@ -113,6 +114,11 @@ class CollectRulesConfig(BaseModel):
     news_archive_dir: str = "news_archive"
     ptt_required_tags: set[str] = Field(default={"[標的]"})
 
+    # PTT scraper settings
+    ptt_lookback_days: int = Field(default=5, ge=1, le=30)
+    ptt_min_push_score: int = Field(default=10, ge=0)
+    ptt_tags: list[str] = Field(default=["[標的]", "[新聞]"])
+
 
 class ScoringConfig(BaseModel):
     """Rules and penalties for scoring."""
@@ -139,7 +145,14 @@ class QualityFiltersConfig(BaseModel):
 
 
 class IndicatorConfig(BaseModel):
-    """Configuration for Technical Indicator parameters."""
+    """
+    Configuration for Technical Indicator parameters.
+
+    TODO (Frontend Integration):
+    Currently loaded from appsetting.yaml. In the future, these should be
+    exposed to the user via the UI (e.g., Flet Dashboard) allowing them to
+    tune periods dynamically without touching configuration files.
+    """
 
     rsi_period: int = 14
     macd_fast: int = 12

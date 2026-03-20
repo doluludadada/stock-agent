@@ -27,51 +27,15 @@ class GrokAdapter(BaseAIAdapter):
 
     async def _call_api(self, messages: tuple[Message, ...]) -> str:
         api_messages = self._convert_to_api_format(messages)
-        tools: list[dict[str, Any]] = []
+        tools: list[dict[str, Any]] =[]
 
-        if self._config.behavior.enable_web_search:
-            web_search_tool: dict[str, Any] = {"type": "web_search"}
-            web_search_filters: dict[str, Any] = {}
-
-            if self._config.behavior.web_search_allowed_domains:
-                web_search_filters["allowed_domains"] = list(
-                    self._config.behavior.web_search_allowed_domains
-                )
-            if self._config.behavior.web_search_excluded_domains:
-                web_search_filters["excluded_domains"] = list(
-                    self._config.behavior.web_search_excluded_domains
-                )
-
-            if web_search_filters:
-                web_search_tool["filters"] = web_search_filters
-
-            tools.append(web_search_tool)
-
-        if self._config.behavior.enable_x_search:
-            x_search_tool: dict[str, Any] = {"type": "x_search"}
-            x_search_filters: dict[str, Any] = {}
-
-            if self._config.behavior.x_search_allowed_handles:
-                x_search_filters["allowed_x_handles"] = list(
-                    self._config.behavior.x_search_allowed_handles
-                )
-            if self._config.behavior.x_search_excluded_handles:
-                x_search_filters["excluded_x_handles"] = list(
-                    self._config.behavior.x_search_excluded_handles
-                )
-
-            if x_search_filters:
-                x_search_tool["filters"] = x_search_filters
-
-            tools.append(x_search_tool)
+        if self._config.behavior.enable_web_search or self._config.behavior.enable_x_search:
+            tools.append({"type": "live_search"})
 
         extra_body: dict[str, Any] = {}
 
         if self._config.behavior.enable_inline_citations:
-            extra_body["include"] = ["inline_citations"]
-
-        if tools:
-            extra_body["tools"] = tools
+            extra_body["include"] =["inline_citations"]
 
         try:
             params = {
@@ -80,6 +44,10 @@ class GrokAdapter(BaseAIAdapter):
                 "temperature": 0.7,
                 "stream": True,
             }
+
+            # In the OpenAI SDK, tools are a top-level parameter
+            if tools:
+                params["tools"] = tools
 
             if extra_body:
                 params["extra_body"] = extra_body
