@@ -1,6 +1,7 @@
 # backend/src/d_presentation/cli/interactive.py
 
 import asyncio
+import os
 import sys
 
 from rich.console import Console
@@ -66,7 +67,12 @@ async def interactive_menu():
                 console.print("No actionable signals generated.")
             print("\n" + "=" * 50 + "\n")
     finally:
-        await orchestrator.shutdown()
+        console.print("\n[yellow]Shutting down...[/yellow]")
+        try:
+            await orchestrator.shutdown()
+        except Exception:
+            pass
+        console.print("[bold green]System stopped. Goodbye! 👋[/bold green]")
 
 
 if __name__ == "__main__":
@@ -74,6 +80,7 @@ if __name__ == "__main__":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     try:
         asyncio.run(interactive_menu())
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        # Silence the traceback when exiting via Ctrl+C
-        sys.exit(0)
+    except (KeyboardInterrupt, asyncio.CancelledError, SystemExit):
+        pass
+    finally:
+        os._exit(0)

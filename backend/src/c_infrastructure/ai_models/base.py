@@ -27,9 +27,7 @@ class BaseAIAdapter(IAiProvider, ABC):
 
         try:
             reply_content = await self._call_api(messages)
-            self._logger.success(
-                f"[{self.__class__.__name__}] Successfully received reply from model: {self._model_name}"
-            )
+            self._logger.success(f"[{self.__class__.__name__}] Successfully received reply from model: {self._model_name}")
             return Message(role=MessageRole.ASSISTANT, content=reply_content)
         except Exception as e:
             self._logger.critical(f"[{self.__class__.__name__}] An unexpected critical error occurred: {e}")
@@ -41,7 +39,7 @@ class BaseAIAdapter(IAiProvider, ABC):
     def save_response(self, stock_id: str, content: str) -> None:
         """Saves the raw AI response to the filesystem for inspection."""
         try:
-            base_dir = self._config.project_root / self._config.ai.ai_response_dir
+            base_dir = self._config.project_root / self._config.folder.ai_response_dir
             stock_dir = base_dir / stock_id
             stock_dir.mkdir(parents=True, exist_ok=True)
 

@@ -24,6 +24,15 @@ class ChromaRepositoryAdapter(IConversationRepository, IKnowledgeRepository):
         self._chat_collection = self._client.get_or_create_collection(name=ChromaCollection.CHAT_HISTORY)
         self._knowledge_collection = self._client.get_or_create_collection(name=ChromaCollection.MARKET_KNOWLEDGE)
 
+    async def init(self) -> None:
+        """Force-download the embedding model at startup."""
+        self._logger.info("Warming up ChromaDB embedding model...")
+        try:
+            self._knowledge_collection.peek(limit=1)
+            self._logger.success("ChromaDB embedding model ready.")
+        except Exception as e:
+            self._logger.error(f"ChromaDB warmup failed: {e}")
+
     # ---------------------------------------------------------------------------- #
     #                          IConversationRepository                             #
     # ---------------------------------------------------------------------------- #
@@ -62,15 +71,12 @@ class ChromaRepositoryAdapter(IConversationRepository, IKnowledgeRepository):
         """Retrieves past semantic context for the AI."""
         self._logger.debug(f"RAG Search for '{query}' (limit: {limit})")
         try:
-            results = self._knowledge_collection.query(
-                query_texts=[query],
-                n_results=limit
-            )
-            
+            results = self._knowledge_collection.query(query_texts=[query], n_results=limit)
+
             docs = results.get("documents")
             if not docs or not docs[0]:
                 return ""
-                
+
             return "\n\n---\n\n".join([str(d) for d in docs[0]])
         except Exception as e:
             self._logger.error(f"Error querying Chroma knowledge base: {e}")
@@ -83,10 +89,10 @@ class ChromaRepositoryAdapter(IConversationRepository, IKnowledgeRepository):
 
         try:
             doc_id = f"{context.stock_id}_{datetime.now().strftime('%Y%m%d')}"
-            
+
             bull_factors = ", ".join(context.analysis_report.bullish_factors)
             bear_factors = ", ".join(context.analysis_report.bearish_factors)
-            
+
             document = (
                 f"Stock: {context.stock_id}\n"
                 f"Date: {datetime.now().strftime('%Y-%m-%d')}\n"
@@ -95,16 +101,10 @@ class ChromaRepositoryAdapter(IConversationRepository, IKnowledgeRepository):
                 f"Bullish Factors: {bull_factors}\n"
                 f"Bearish Factors: {bear_factors}\n"
             )
-            
-            metadata = {
-                "stock_id": context.stock_id,
-                "score": context.ai_score or 50,
-                "timestamp": datetime.now().isoformat()
-            }
-            
-            self._knowledge_collection.upsert(
-                ids=[doc_id], documents=[document], metadatas=[metadata]
-            )
+
+            metadata = {"stock_id": context.stock_id, "score": context.ai_score or 50, "timestamp": datetime.now().isoformat()}
+
+            self._knowledge_collection.upsert(ids=[doc_id], documents=[document], metadatas=[metadata])
             self._logger.debug(f"Saved RAG Analysis to Chroma for '{context.stock_id}'")
         except Exception as e:
             self._logger.error(f"Error saving analysis to Chroma for {context.stock_id}: {e}")

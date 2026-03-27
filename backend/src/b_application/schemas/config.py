@@ -22,7 +22,6 @@ class AiConfig(BaseSettings):
     rag_injection_prompt: str | None = None
     article_content_length: int = Field(default=500, ge=100)
     neutral_score: int = Field(default=50, ge=0, le=100)
-    ai_response_dir: str = "ai_responses"
 
 
 class LineConfig(BaseSettings):
@@ -62,6 +61,12 @@ class DbConfig(BaseSettings):
     host: str | None = Field(default=None, validation_alias="DB_HOST")
     port: int = Field(default=5432, validation_alias="DB_PORT")
     name: str | None = Field(default=None, validation_alias="DB_NAME")
+
+
+class FolderConfig(BaseModel):
+    news_archive_dir: str = "news_archive"
+    buzz_archive_dir: str = "buzz_archive"
+    ai_response_dir: str = "ai_responses"
 
 
 class TavilyConfig(BaseSettings):
@@ -111,7 +116,6 @@ class CollectRulesConfig(BaseModel):
     buzz_min_mentions: int = 20
     buzz_min_push_count: int = 100
     social_trending_limit: int = Field(default=10, ge=1, le=100)
-    news_archive_dir: str = "news_archive"
     ptt_required_tags: set[str] = Field(default={"[標的]"})
 
     # PTT scraper settings
@@ -236,6 +240,7 @@ class AppConfig(BaseSettings):
     line: LineConfig = Field(default_factory=LineConfig)
     behavior: BehaviorConfig = Field(default_factory=BehaviorConfig)
     db: DbConfig = Field(default_factory=DbConfig)
+    folder: FolderConfig = Field(default_factory=FolderConfig)
     tavily: TavilyConfig = Field(default_factory=TavilyConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     notifications: NotificationConfig = Field(default_factory=NotificationConfig)

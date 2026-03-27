@@ -57,7 +57,7 @@ class MockExecutionProvider(IExecutionProvider):
         return []
 
     async def get_cash_balance(self) -> float:
-        return 1000000.0
+        return 1000.0
 
 
 async def build_cli_orchestrator() -> WorkflowOrchestrator:
@@ -73,7 +73,8 @@ async def build_cli_orchestrator() -> WorkflowOrchestrator:
 
     watchlist_repo = WatchlistRepository(db, logger)
     signal_repo = SignalRepository(db, logger)
-    knowledge_repo = ChromaRepositoryAdapter(config, logger)
+    knowledge_db = ChromaRepositoryAdapter(config, logger)
+    await knowledge_db.init()
 
     # 3. External Providers
     stock_provider = TaiwanStockProvider(logger)
@@ -95,7 +96,6 @@ async def build_cli_orchestrator() -> WorkflowOrchestrator:
 
     freshness_rule = DataFreshnessRule(max_lag_minutes=2880)
 
-    # [FIX] Cast standard sets to frozenset
     quality_rule = QualityRule(
         spam_keywords=frozenset(config.collect_rules.spam_keywords),
         financial_keywords=frozenset(),
@@ -144,12 +144,12 @@ async def build_cli_orchestrator() -> WorkflowOrchestrator:
     uc_data = MarketData(price_provider, freshness_rule, config, logger)
     uc_tech = TechnicalFilter(indicator_provider, intraday_policy, tech_calculator, logger)
     uc_news = NewsFeed(news_provider, quality_rule, config, logger)
-    uc_ai = AiAnalyser(ai_provider, prompt_builder, AiReportParser(), knowledge_repo, config, logger)
+    uc_ai = AiAnalyser(ai_provider, prompt_builder, AiReportParser(), knowledge_db, config, logger)
     uc_signals = Signals(
         CompositeScoreRule(config.analysis.technical_weight, config.analysis.sentiment_weight),
         decision_rule,
         signal_repo,
-        knowledge_repo,
+        knowledge_db,
         logger,
     )
     uc_exec = OrderExecution(broker, config, logger)

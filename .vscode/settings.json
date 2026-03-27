@@ -19,4 +19,11 @@
     //         }
     //     ]
     // }
+    "files.exclude": {
+        "**/.vscode/extensions/**": true,
+        "**/AppData/Roaming/Code/User/globalStorage/github.copilot-chat/**": true
+    },
+    "files.watcherExclude": {
+        "**/AppData/Roaming/Code/User/globalStorage/github.copilot-chat/**": true
+    }
 }

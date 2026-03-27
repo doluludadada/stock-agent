@@ -42,7 +42,7 @@ class NewsProvider(INewsProvider):
         if not articles:
             return
 
-        archive_dir_name = self._config.collect_rules.news_archive_dir
+        archive_dir_name = self._config.folder.news_archive_dir
         archive_dir = self._config.project_root / archive_dir_name / datetime.now().strftime("%Y-%m-%d")
         archive_dir.mkdir(parents=True, exist_ok=True)
 

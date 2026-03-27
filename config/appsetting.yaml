@@ -1,7 +1,7 @@
 environment: dev
 
 ai:
-  active_model: groq
+  active_model: grok
   connection_timeout: 60
   available_models:
     openai: gpt-5.4-mini
@@ -10,7 +10,6 @@ ai:
     groq: openai/gpt-oss-20b
   article_content_length: 500
   neutral_score: 50
-  ai_response_dir: "ai_responses"
 
 behavior:
   log_level: DEBUG
@@ -23,6 +22,9 @@ db:
   provider: chroma
   chroma_persist_path: "chroma_data"
   reset_commands: ["clear", "reset"]
+
+folder:
+  ai_response_dir: "ai_responses"
 
 tavily:
   search_depth: basic
@@ -51,7 +53,7 @@ collect_rules:
   buzz_min_push_count: 100
   social_trending_limit: 10
   news_archive_dir: "news_archive"
-  ptt_lookback_days: 5
+  ptt_lookback_days: 14
   ptt_min_push_score: 10
   ptt_tags: ["[標的]", "[新聞]"]
 
