@@ -6,7 +6,18 @@ class CompositeScoreRule:
         self._sentiment_weight = sentiment_weight
 
     def calculate(self, technical_score: int | None, sentiment_score: int | None) -> int:
+        # TODO: Maybe more cleaner. it cannot be None.
         tech = technical_score if technical_score is not None else 50
         sent = sentiment_score if sentiment_score is not None else 50
         combined = (tech * self._technical_weight) + (sent * self._sentiment_weight)
-        return int(max(0, min(100, combined)))
+
+        final_score = int(max(0, min(100, combined)))
+
+        # --- The AI Veto Gate ---
+        # If the math says BUY (>= 70) but the AI hates the fundamentals (< 50)
+        # We strictly downgrade the score to 69 (Highest possible HOLD)
+        # TODO: Remove hard code?
+        if final_score >= 70 and sent < 50:
+            return 69
+
+        return final_score

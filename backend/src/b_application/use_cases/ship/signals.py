@@ -42,9 +42,7 @@ class Signals:
             signal = self._decision_rule.decide(stock)
             if signal:
                 signals.append(signal)
-                self._logger.info(
-                    f"Signal: {signal.action} {signal.stock_id} (Score: {signal.score}, Qty: {signal.quantity})"
-                )
+                self._logger.info(f"Signal: {signal.action.value} {signal.stock_id} (Qty: {signal.quantity}) | {signal.reason}")
 
         if signals:
             try:

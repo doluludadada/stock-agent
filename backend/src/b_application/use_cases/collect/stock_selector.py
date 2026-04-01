@@ -15,13 +15,13 @@ class StockSelector:
         self._stock_provider = stock_provider
         self._logger = logger
 
-    async def execute(self, workflow_state: PipelineContext) -> None:
+    async def execute(self, context: PipelineContext) -> None:
         stock_map = {}
 
         # 1. Manual Input
-        if workflow_state.manual_symbols:
-            self._logger.info(f"Processing manual input: {workflow_state.manual_symbols}")
-            for sid in workflow_state.manual_symbols:
+        if context.manual_symbols:
+            self._logger.info(f"Processing manual input: {context.manual_symbols}")
+            for sid in context.manual_symbols:
                 # Fetch the real stock entity to get the correct MarketType (TWSE vs TPEX)
                 stock = await self._stock_provider.get_by_id(sid)
                 if stock:
@@ -40,7 +40,7 @@ class StockSelector:
                 stock_map[stock.stock_id] = stock
 
         # 3. Technical Watchlist (skip if manual input provided)
-        if not workflow_state.manual_symbols:
+        if not context.manual_symbols:
             daily_stocks = await self._repo.get_technical_watchlist()
             for stock in daily_stocks:
                 if stock.stock_id not in stock_map:
@@ -48,6 +48,6 @@ class StockSelector:
                     stock.trigger_reason = SignalReason.NIGHTLY_SCREEN
                     stock_map[stock.stock_id] = stock
 
-        workflow_state.candidates = list(stock_map.values())
-        workflow_state.stats.total_scanned += len(workflow_state.candidates)
-        self._logger.info(f"Selected {len(workflow_state.candidates)} stocks")
+        context.candidates = list(stock_map.values())
+        context.stats.total_scanned += len(context.candidates)
+        self._logger.info(f"Selected {len(context.candidates)} stocks")

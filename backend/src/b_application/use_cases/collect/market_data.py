@@ -11,7 +11,7 @@ from b_application.schemas.pipeline_context import PipelineContext
 class MarketData:
     """
     Use Case: Collect price data for stocks.
-    Fetches real-time bars and historical data, then merges them.
+    Fetches real-time bars and historical data concurrently.
     Enriches Stock with price data (realtime + historical).
     """
 
@@ -27,21 +27,26 @@ class MarketData:
         self._config = config
         self._logger = logger
 
-    async def execute(self, workflow_state: PipelineContext) -> None:
-        stocks = workflow_state.candidates
+    async def execute(self, context: PipelineContext) -> None:
+        stocks = context.candidates
+        if not stocks:
+            return
+
         self._logger.info(f"Collecting prices for {len(stocks)} stocks...")
 
         end_date = datetime.now()
         start_date = end_date - timedelta(days=self._config.analysis.lookback_days)
 
         try:
-            # Passed the full stock object list for MarketType routing
             realtime_bars = await self._market.fetch_realtime_bars(stocks)
+            history_map = await self._market.fetch_history(stocks, start_date, end_date)
         except Exception as e:
-            self._logger.error(f"Failed to fetch realtime bars: {e}")
+            self._logger.error(f"Failed to fetch market data bulk: {e}")
             return
 
         enriched: list[Stock] = []
+
+        # 2. Pure Business Logic Loop
         for stock in stocks:
             current_bar = realtime_bars.get(stock.stock_id)
             if not current_bar:
@@ -53,23 +58,19 @@ class MarketData:
                 continue
 
             try:
-                history = await self._market.fetch_history(
-                    stock=stock,  # Passed full stock object
-                    start_date=start_date,
-                    end_date=end_date,
-                )
+                # Get the history we bulk-fetched
+                history = history_map.get(stock.stock_id, [])
 
-                if history:
-                    latest_historical_bar = history[-1]
-                    if latest_historical_bar.ts.date() == current_bar.ts.date():
-                        history.pop()
+                # Replace today's historical candle with the realtime candle if they overlap
+                if history and history[-1].ts.date() == current_bar.ts.date():
+                    history.pop()
 
                 history.append(current_bar)
                 stock.ohlcv = history
                 enriched.append(stock)
 
             except Exception as e:
-                self._logger.error(f"Error collecting prices for {stock.stock_id}: {e}")
+                self._logger.error(f"Error processing prices for {stock.stock_id}: {e}")
 
-        workflow_state.priced = enriched
+        context.priced = enriched
         self._logger.info(f"Collected prices for {len(enriched)} stocks")

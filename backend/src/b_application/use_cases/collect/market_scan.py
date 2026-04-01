@@ -20,7 +20,7 @@ class MarketScan:
         self._logger = logger
         self._config = config
 
-    async def execute(self, workflow_state: PipelineContext) -> None:
+    async def execute(self, context: PipelineContext) -> None:
         self._logger.info("Scanning social media for trending stocks...")
 
         try:
@@ -45,9 +45,9 @@ class MarketScan:
             reasons = [s.trigger_reason for s in trending_stocks]
 
             await self._repo.save_buzz_watchlist(trending_stocks, reasons)
-            workflow_state.buzz_watchlist = trending_stocks
-            workflow_state.stats.total_scanned += len(trending_stocks)
+            context.buzz_watchlist = trending_stocks
+            context.stats.total_scanned += len(trending_stocks)
             self._logger.success(f"Updated Buzz Watchlist: {len(trending_stocks)} stocks from {len(trending_articles)} articles.")
         except Exception as e:
             self._logger.error(f"Trending scan failed: {e}")
-            workflow_state.stats.add_error(str(e))
+            context.stats.add_error(str(e))

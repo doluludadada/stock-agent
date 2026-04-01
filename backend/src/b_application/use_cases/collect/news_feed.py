@@ -23,8 +23,8 @@ class NewsFeed:
         self._config = config
         self._logger = logger
 
-    async def execute(self, workflow_state: PipelineContext) -> None:
-        stocks = workflow_state.survivors
+    async def execute(self, context: PipelineContext) -> None:
+        stocks = context.survivors
         if not stocks:
             return
 

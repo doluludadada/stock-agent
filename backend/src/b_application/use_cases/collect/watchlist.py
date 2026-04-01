@@ -31,27 +31,27 @@ class Watchlist:
         self._logger = logger
         self._config = config
 
-    async def execute(self, workflow_state: PipelineContext) -> None:
-        workflow_state.universe = await self._stock.get_all()
-        workflow_state.stats.total_scanned += len(workflow_state.universe)
-        self._logger.info(f"Generating technical watchlist from {len(workflow_state.universe)} symbols...")
+    async def execute(self, context: PipelineContext) -> None:
+        context.all_stocks = await self._stock.get_all()
+        context.stats.total_scanned += len(context.all_stocks)
+        self._logger.info(f"Generating technical watchlist from {len(context.all_stocks)} symbols...")
 
         survivors: list[Stock] = []
         end_date = datetime.now()
         start_date = end_date - timedelta(days=self._config.analysis.lookback_days)
 
-        for stock in workflow_state.universe:
-            try:
-                history = await self._market.fetch_history(stock, start_date, end_date)
-                if not history:
-                    continue
+        history_map = await self._market.fetch_history(context.all_stocks, start_date, end_date)
 
-                indicators = self._tech_calc.calculate_indicators(history)
+        for stock in context.all_stocks:
+            history = history_map.get(stock.stock_id, [])  # ? [] what's this?
+            if not history:
+                continue
+
+            try:
                 stock.source = CandidateSource.TECHNICAL_WATCHLIST
                 stock.trigger_reason = SignalReason.NIGHTLY_SCREEN
                 stock.ohlcv = history
-                stock.indicators = indicators
-
+                stock.indicators = self._tech_calc.calculate_indicators(history)
                 self._policy.evaluate(stock)
 
                 if not stock.is_eliminated:
@@ -60,7 +60,7 @@ class Watchlist:
             except Exception as e:
                 self._logger.error(f"Scan error {stock.stock_id}: {e}")
 
-        workflow_state.technical_watchlist = survivors
-        workflow_state.stats.passed_technical += len(survivors)
+        context.technical_watchlist = survivors
+        context.stats.passed_technical += len(survivors)
         await self._watchlist.save_technical_watchlist(survivors)
         self._logger.info(f"Saved {len(survivors)} stocks to Technical Watchlist.")

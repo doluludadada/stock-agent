@@ -38,6 +38,7 @@ from c_infrastructure.feed.ptt_provider import PttProvider
 from c_infrastructure.feed.tavily_provider import TavilySearchAdapter
 from c_infrastructure.market.indicator_provider import IndicatorProvider
 from c_infrastructure.market.twse_provider import TaiwanStockProvider
+from c_infrastructure.market.cached_price_provider import CachedPriceProvider
 from c_infrastructure.market.yahoo_finance_adapter import YahooFinanceProvider
 from c_infrastructure.platforms.line.line_notification_adapter import LineNotificationAdapter
 from c_infrastructure.system.config_loader import load_settings
@@ -78,7 +79,8 @@ async def build_cli_orchestrator() -> WorkflowOrchestrator:
 
     # 3. External Providers
     stock_provider = TaiwanStockProvider(logger)
-    price_provider = YahooFinanceProvider(logger)
+    yahoo_provider = YahooFinanceProvider(logger)
+    price_provider = CachedPriceProvider(yahoo_provider, db, logger)
     indicator_provider = IndicatorProvider(config)
     news_provider = NewsProvider(config, logger)
     social_provider = PttProvider(config, logger, stock_provider)

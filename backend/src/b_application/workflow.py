@@ -46,7 +46,7 @@ class WorkflowOrchestrator:
         self._logger.info("=== Phase 1: Nightly Watchlist Generation ===")
         try:
             await self._watchlist.execute(workflow_state)
-            self._logger.info(f"Nightly done. Passed: {len(workflow_state.technical_watchlist)}/{len(workflow_state.universe)}")
+            self._logger.info(f"Nightly done. Passed: {len(workflow_state.technical_watchlist)}/{len(workflow_state.all_stocks)}")
         except Exception as e:
             self._logger.exception(f"Phase 1 failed: {e}")
             workflow_state.stats.add_error(f"Phase 1 failed: {e}")

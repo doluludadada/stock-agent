@@ -22,7 +22,7 @@ class PipelineContext:
     manual_symbols: list[str] = field(default_factory=list)
 
     # ----------------------------- Phase 1 (Nightly) ---------------------------- #
-    universe: list[Stock] = field(default_factory=list)
+    all_stocks: list[Stock] = field(default_factory=list)
     technical_watchlist: list[Stock] = field(default_factory=list)
 
     # ----------------------------- Phase 2 (Morning) ---------------------------- #

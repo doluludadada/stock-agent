@@ -32,9 +32,9 @@ tavily:
 analysis:
   active_strategy: moderate
   lookback_days: 120
-  technical_weight: 0.6
-  sentiment_weight: 0.4
-  min_combined_score_buy: 70
+  technical_weight: 0.5
+  sentiment_weight: 0.5
+  min_combined_score_buy: 80
   max_combined_score_sell: 30
   risk_per_trade_pct: 0.02
   stop_loss_pct: 0.10
