@@ -1,5 +1,4 @@
-import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from sqlmodel import col, select
 
@@ -12,68 +11,162 @@ from c_infrastructure.database.models.ohlcv_dto import OhlcvDTO
 
 
 class CachedPriceProvider(IPriceProvider):
-    def __init__(self, fallback_provider: IPriceProvider, db: DatabaseConnector, logger: ILoggingProvider):
+    """
+    Cache wrapper for price data.
+
+    Simple behavior:
+    1. Load cache once.
+    2. Find stocks with missing/incomplete cache.
+    3. Fetch missing stocks in one fallback call.
+    4. Save fetched bars.
+    5. Return sorted cached + fresh bars.
+    """
+
+    def __init__(
+        self,
+        fallback_provider: IPriceProvider,
+        db: DatabaseConnector,
+        logger: ILoggingProvider,
+    ):
         self._fallback = fallback_provider
         self._db = db
         self._logger = logger
-        # Throttle DB connections to prevent SQLite pool exhaustion
-        self._db_semaphore = asyncio.Semaphore(20)
 
     async def fetch_realtime_bars(self, stocks: list[Stock]) -> dict[str, Ohlcv]:
+        # Keep this simple.
+        # YahooFinanceProvider already batches the request.
         return await self._fallback.fetch_realtime_bars(stocks)
 
-    async def fetch_history(self, stocks: list[Stock], start_date: datetime, end_date: datetime) -> dict[str, list[Ohlcv]]:
-        result_map = {}
+    async def fetch_history(
+        self,
+        stocks: list[Stock],
+        start_date: datetime,
+        end_date: datetime,
+    ) -> dict[str, list[Ohlcv]]:
+        stocks = self._remove_duplicates(stocks)
 
-        async def _process(stock: Stock):
-            async with self._db_semaphore:
-                # 1. Check DB (Using col() to satisfy Pylance strict typing)
-                async with self._db.get_session() as session:
-                    stmt = select(OhlcvDTO).where(OhlcvDTO.stock_id == stock.stock_id).order_by(col(OhlcvDTO.ts))
-                    result = await session.execute(stmt)
-                    db_records = list(result.scalars().all())
+        if not stocks:
+            return {}
 
-                latest_ts = db_records[-1].ts if db_records else None
+        stock_ids = [stock.stock_id for stock in stocks]
 
-                # 2. Fetch missing delta if necessary
-                if not latest_ts or latest_ts.date() < end_date.date():
-                    fetch_start = latest_ts + timedelta(days=1) if latest_ts else start_date
+        cached_bars: dict[str, list[Ohlcv]] = {}
 
-                    if fetch_start.date() <= end_date.date():
-                        # Pass a list of 1 stock to the fallback provider
-                        new_data_map = await self._fallback.fetch_history([stock], fetch_start, end_date)
-                        new_data = new_data_map.get(stock.stock_id, [])
+        async with self._db.get_session() as session:
+            stmt = (
+                select(OhlcvDTO)
+                .where(col(OhlcvDTO.stock_id).in_(stock_ids))
+                .where(col(OhlcvDTO.ts) >= start_date)
+                .where(col(OhlcvDTO.ts) <= end_date)
+                .order_by(col(OhlcvDTO.stock_id), col(OhlcvDTO.ts))
+            )
 
-                        if new_data:
-                            # 3. Save new data to DB (one session per stock, add_all for atomicity)
-                            try:
-                                async with self._db.get_session() as session:
-                                    for bar in new_data:
-                                        dto = OhlcvDTO(
-                                            stock_id=stock.stock_id,
-                                            ts=bar.ts,
-                                            open=bar.open,
-                                            high=bar.high,
-                                            low=bar.low,
-                                            close=bar.close,
-                                            volume=bar.volume,
-                                            adj_close=bar.adj_close if bar.adj_close is not None else 0.0,
-                                        )
-                                        session.add(dto)
-                                    await session.commit()
-                            except Exception as e:
-                                self._logger.warning(f"Cache write failed for {stock.stock_id}: {e}")
+            result = await session.execute(stmt)
+            records = result.scalars().all()
 
-                            db_records = db_records + new_data
+        for record in records:
+            cached_bars.setdefault(record.stock_id, []).append(
+                Ohlcv(
+                    ts=record.ts,
+                    open=record.open,
+                    high=record.high,
+                    low=record.low,
+                    close=record.close,
+                    volume=record.volume,
+                    adj_close=record.adj_close,
+                )
+            )
 
-                # 4. Filter strictly to requested dates
-                valid_bars = [r for r in db_records if start_date.date() <= r.ts.date() <= end_date.date()]
-                return stock.stock_id, valid_bars
+        missing_stocks = self._find_missing_stocks(stocks, cached_bars, start_date, end_date)
 
-        # Process the caching concurrently
-        results = await asyncio.gather(*[_process(s) for s in stocks])
-        for sid, bars in results:
-            if bars:
-                result_map[sid] = bars
+        if missing_stocks:
+            self._logger.info(f"History cache miss: {len(missing_stocks)}/{len(stocks)} stocks")
 
-        return result_map
+            fresh_bars = await self._fallback.fetch_history(
+                missing_stocks,
+                start_date,
+                end_date,
+            )
+
+            await self._save_bars(fresh_bars)
+
+            for stock_id, bars in fresh_bars.items():
+                cached_bars.setdefault(stock_id, []).extend(bars)
+
+        return self._clean_result(cached_bars)
+
+    def _find_missing_stocks(
+        self,
+        stocks: list[Stock],
+        cached_bars: dict[str, list[Ohlcv]],
+        start_date: datetime,
+        end_date: datetime,
+    ) -> list[Stock]:
+        missing: list[Stock] = []
+
+        for stock in stocks:
+            bars = cached_bars.get(stock.stock_id, [])
+
+            if not bars:
+                missing.append(stock)
+                continue
+
+            first_date = min(bar.ts.date() for bar in bars)
+            last_date = max(bar.ts.date() for bar in bars)
+
+            if first_date > start_date.date() or last_date < end_date.date():
+                missing.append(stock)
+
+        return missing
+
+    async def _save_bars(self, bars_by_stock: dict[str, list[Ohlcv]]) -> None:
+        if not bars_by_stock:
+            return
+
+        saved_count = 0
+
+        async with self._db.get_session() as session:
+            for stock_id, bars in bars_by_stock.items():
+                for bar in bars:
+                    await session.merge(
+                        OhlcvDTO(
+                            stock_id=stock_id,
+                            ts=bar.ts,
+                            open=bar.open,
+                            high=bar.high,
+                            low=bar.low,
+                            close=bar.close,
+                            volume=bar.volume,
+                            adj_close=bar.adj_close,
+                        )
+                    )
+                    saved_count += 1
+
+            await session.commit()
+
+        self._logger.debug(f"Saved {saved_count} OHLCV bars to cache")
+
+    def _clean_result(self, bars_by_stock: dict[str, list[Ohlcv]]) -> dict[str, list[Ohlcv]]:
+        result: dict[str, list[Ohlcv]] = {}
+
+        for stock_id, bars in bars_by_stock.items():
+            unique_bars = {bar.ts: bar for bar in bars}
+            sorted_bars = sorted(unique_bars.values(), key=lambda bar: bar.ts)
+
+            if sorted_bars:
+                result[stock_id] = sorted_bars
+
+        return result
+
+    def _remove_duplicates(self, stocks: list[Stock]) -> list[Stock]:
+        seen: set[str] = set()
+        result: list[Stock] = []
+
+        for stock in stocks:
+            if stock.stock_id in seen:
+                continue
+
+            seen.add(stock.stock_id)
+            result.append(stock)
+
+        return result
