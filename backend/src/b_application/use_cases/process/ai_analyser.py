@@ -55,7 +55,9 @@ class AiAnalyser:
                 analysed_count += 1
 
             except Exception as e:
-                self._logger.error(f"AI analysis failed for {stock.stock_id}: {e}")
+                error_message = f"AI analysis failed for {stock.stock_id}: {e}"
+                self._logger.error(error_message)
+                workflow_state.stats.add_error(error_message)
                 stock.analysis_report = self._response_parser.parse(stock.stock_id, "")
                 stock.ai_score = stock.analysis_report.score
 
