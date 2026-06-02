@@ -7,6 +7,7 @@ from b_application.use_cases.process.ai_analyser import AiAnalyser
 from b_application.use_cases.process.technical_filter import TechnicalFilter
 from b_application.use_cases.ship.reporting import Reporting
 from b_application.use_cases.ship.signals import Signals
+from b_application.use_cases.trade.account_loader import AccountLoader
 from b_application.use_cases.trade.monitoring import Monitoring
 from b_application.use_cases.trade.order_execution import OrderExecution
 
@@ -14,6 +15,7 @@ from b_application.use_cases.trade.order_execution import OrderExecution
 class Pipeline:
     def __init__(
         self,
+        account_loader: AccountLoader,
         stock_selector: StockSelector,
         market_data: MarketData,
         technical_filter: TechnicalFilter,
@@ -25,6 +27,7 @@ class Pipeline:
         monitoring: Monitoring,
         logger: ILoggingProvider,
     ):
+        self._account_loader = account_loader
         self._stock_selector = stock_selector
         self._market_data = market_data
         self._technical_filter = technical_filter
@@ -40,6 +43,7 @@ class Pipeline:
         self._logger.info(">>> Intraday Pipeline Started")
 
         try:
+            await self._account_loader.execute(workflow_state)
             # ---------------------------------------------------------------------------- #
             #                Flow A: Sell Flow (Monitor Existing Positions)                #
             # ---------------------------------------------------------------------------- #

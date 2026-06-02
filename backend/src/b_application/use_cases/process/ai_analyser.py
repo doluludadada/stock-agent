@@ -2,8 +2,8 @@ from a_domain.model.chat.message import Message, MessageRole
 from a_domain.ports.ai.ai_provider import IAiProvider
 from a_domain.ports.ai.knowledge_repository import IKnowledgeRepository
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from a_domain.rules.process.ai.parser import AiReportParser
-from a_domain.rules.process.ai.prompt import AiReportPromptBuilder
+from a_domain.rules.ai.parser import AiReportParser
+from a_domain.rules.ai.prompt import AiReportPromptBuilder
 from b_application.schemas.config import AppConfig
 from b_application.schemas.pipeline_context import PipelineContext
 

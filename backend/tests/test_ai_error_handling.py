@@ -7,8 +7,8 @@ import pytest
 from a_domain.model.market.article import Article
 from a_domain.model.market.stock import Stock
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from a_domain.rules.process.ai.parser import AiReportParser
-from a_domain.rules.process.ai.prompt import AiReportPromptBuilder
+from a_domain.rules.ai.parser import AiReportParser
+from a_domain.rules.ai.prompt import AiReportPromptBuilder
 from a_domain.types.enums import InformationSource
 from b_application.schemas.pipeline_context import PipelineContext
 from b_application.use_cases.process.ai_analyser import AiAnalyser

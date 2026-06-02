@@ -3,8 +3,8 @@ from fastapi import Depends
 from a_domain.rules.base import TradingRule
 from a_domain.rules.collect.freshness import DataFreshnessRule
 from a_domain.rules.collect.quality_rule import QualityRule
-from a_domain.rules.process.ai.parser import AiReportParser
-from a_domain.rules.process.ai.prompt import AiReportPromptBuilder
+from a_domain.rules.ai.parser import AiReportParser
+from a_domain.rules.ai.prompt import AiReportPromptBuilder
 from a_domain.rules.process.indicators.entry_timing.price_drop_rule import PriceDropRule
 from a_domain.rules.process.indicators.entry_timing.volume_confirmation_rule import VolumeConfirmationRule
 from a_domain.rules.process.indicators.momentum.macd_cross_rule import MacdCrossRule
@@ -18,10 +18,11 @@ from a_domain.rules.process.indicators.volatility.daily_range_rule import DailyR
 from a_domain.rules.process.indicators.volume.liquidity_rule import LiquidityRule
 from a_domain.rules.process.indicators.volume.minimum_price_rule import MinimumPriceRule
 from a_domain.rules.process.policies.technical_screening import TechnicalScreeningPolicy
-from a_domain.rules.process.scoring.composite import CompositeScoreRule
-from a_domain.rules.process.scoring.technical import TechnicalScoreCalculator
+from a_domain.rules.scoring.composite import CompositeScoreRule
+from a_domain.rules.scoring.technical import TechnicalScoreCalculator
 from a_domain.rules.trading.action import ActionRule
 from a_domain.rules.trading.decision import DecisionRule
+from a_domain.rules.trading.entry import EntryRule
 from a_domain.rules.trading.exit import ExitRule
 from a_domain.rules.trading.reason import ReasonRule
 from a_domain.rules.trading.sizing import SizingRule
@@ -37,7 +38,7 @@ def get_data_freshness_rule() -> DataFreshnessRule:
 def get_quality_rule(config: AppConfig = Depends(get_settings)) -> QualityRule:
     return QualityRule(
         spam_keywords=frozenset(config.collect_rules.spam_keywords),
-        financial_keywords=frozenset(),  # TODO: Missing from config? 
+        financial_keywords=frozenset(config.collect_rules.financial_keywords),
         min_chars_stock=config.quality.min_chars_stock,
         min_chars_news=config.quality.min_chars_news,
         min_chars_gossip=config.quality.min_chars_gossip,
@@ -109,15 +110,67 @@ def get_composite_score_rule(config: AppConfig = Depends(get_settings)) -> Compo
     )
 
 
-def get_decision_rule(config: AppConfig = Depends(get_settings)) -> DecisionRule:
-    return DecisionRule(
-        action_rule=ActionRule(),
-        reason_rule=ReasonRule(),
-        sizing_rule=SizingRule(),
-        total_capital=config.analysis.total_capital,
-        risk_pct=config.analysis.risk_per_trade_pct,
+def get_action_rule(config: AppConfig = Depends(get_settings)) -> ActionRule:
+    return ActionRule(
+        buy_threshold=config.analysis.min_combined_score_buy,
+        sell_threshold=config.analysis.max_combined_score_sell,
     )
 
 
-def get_exit_rule(config: AppConfig = Depends(get_settings)) -> ExitRule:
-    return ExitRule(stop_loss_pct=config.analysis.stop_loss_pct)
+def get_reason_rule() -> ReasonRule:
+    return ReasonRule()
+
+
+def get_sizing_rule(config: AppConfig = Depends(get_settings)) -> SizingRule:
+    return SizingRule(
+        position_pct=config.analysis.risk_per_trade_pct,
+        lot_size=1,
+    )
+
+
+def get_entry_rule(
+    action_rule: ActionRule = Depends(get_action_rule),
+    sizing_rule: SizingRule = Depends(get_sizing_rule),
+    reason_rule: ReasonRule = Depends(get_reason_rule),
+) -> EntryRule:
+    return EntryRule(
+        action_rule=action_rule,
+        sizing_rule=sizing_rule,
+        reason_rule=reason_rule,
+    )
+
+
+def get_exit_rule(
+    config: AppConfig = Depends(get_settings),
+    action_rule: ActionRule = Depends(get_action_rule),
+    reason_rule: ReasonRule = Depends(get_reason_rule),
+) -> ExitRule:
+    return ExitRule(
+        stop_loss_pct=config.analysis.stop_loss_pct,
+        action_rule=action_rule,
+        reason_rule=reason_rule,
+    )
+
+
+def get_decision_rule(
+    entry_rule: EntryRule = Depends(get_entry_rule),
+    exit_rule: ExitRule = Depends(get_exit_rule),
+) -> DecisionRule:
+    return DecisionRule(
+        entry_rule=entry_rule,
+        exit_rule=exit_rule,
+    )
+
+
+"""
+
+這裡先沿用：
+
+config.analysis.risk_per_trade_pct
+
+但你心裡要知道，它現在語意其實是：
+
+position_pct
+
+也就是「每次最多用多少 cash 建倉」，不是真正 risk sizing。
+"""

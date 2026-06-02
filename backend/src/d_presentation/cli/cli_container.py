@@ -5,12 +5,13 @@ from a_domain.model.trading.position import Position
 from a_domain.ports.trading.execution_provider import IExecutionProvider
 from a_domain.rules.collect.freshness import DataFreshnessRule
 from a_domain.rules.collect.quality_rule import QualityRule
-from a_domain.rules.process.ai.parser import AiReportParser
-from a_domain.rules.process.ai.prompt import AiReportPromptBuilder
-from a_domain.rules.process.scoring.composite import CompositeScoreRule
-from a_domain.rules.process.scoring.technical import TechnicalScoreCalculator
+from a_domain.rules.ai.parser import AiReportParser
+from a_domain.rules.ai.prompt import AiReportPromptBuilder
+from a_domain.rules.scoring.composite import CompositeScoreRule
+from a_domain.rules.scoring.technical import TechnicalScoreCalculator
 from a_domain.rules.trading.action import ActionRule
 from a_domain.rules.trading.decision import DecisionRule
+from a_domain.rules.trading.entry import EntryRule
 from a_domain.rules.trading.exit import ExitRule
 from a_domain.rules.trading.reason import ReasonRule
 from a_domain.rules.trading.sizing import SizingRule
@@ -36,9 +37,9 @@ from c_infrastructure.database.repositories.watchlist_repository import Watchlis
 from c_infrastructure.feed.news_provider import NewsProvider
 from c_infrastructure.feed.ptt_provider import PttProvider
 from c_infrastructure.feed.tavily_provider import TavilySearchAdapter
+from c_infrastructure.market.cached_price_provider import CachedPriceProvider
 from c_infrastructure.market.indicator_provider import IndicatorProvider
 from c_infrastructure.market.twse_provider import TaiwanStockProvider
-from c_infrastructure.market.cached_price_provider import CachedPriceProvider
 from c_infrastructure.market.yahoo_finance_adapter import YahooFinanceProvider
 from c_infrastructure.platforms.line.line_notification_adapter import LineNotificationAdapter
 from c_infrastructure.system.config_loader import load_settings
@@ -100,7 +101,7 @@ async def build_cli_orchestrator() -> WorkflowOrchestrator:
 
     quality_rule = QualityRule(
         spam_keywords=frozenset(config.collect_rules.spam_keywords),
-        financial_keywords=frozenset(),
+        financial_keywords=frozenset(config.collect_rules.financial_keywords),
         min_chars_stock=config.quality.min_chars_stock,
         min_chars_news=config.quality.min_chars_news,
         min_chars_gossip=config.quality.min_chars_gossip,
@@ -127,17 +128,34 @@ async def build_cli_orchestrator() -> WorkflowOrchestrator:
         max_content_length=config.ai.article_content_length,
     )
 
-    decision_rule = DecisionRule(
-        action_rule=ActionRule(
-            buy_threshold=config.analysis.min_combined_score_buy, sell_threshold=config.analysis.max_combined_score_sell
-        ),
-        reason_rule=ReasonRule(),
-        sizing_rule=SizingRule(),
-        total_capital=config.analysis.total_capital,
-        risk_pct=config.analysis.risk_per_trade_pct,
+    action_rule = ActionRule(
+        buy_threshold=config.analysis.min_combined_score_buy,
+        sell_threshold=config.analysis.max_combined_score_sell,
     )
 
-    exit_rule = ExitRule(stop_loss_pct=config.analysis.stop_loss_pct)
+    reason_rule = ReasonRule()
+
+    sizing_rule = SizingRule(
+        position_pct=config.analysis.risk_per_trade_pct,
+        lot_size=1,
+    )
+
+    entry_rule = EntryRule(
+        action_rule=action_rule,
+        sizing_rule=sizing_rule,
+        reason_rule=reason_rule,
+    )
+
+    exit_rule = ExitRule(
+        stop_loss_pct=config.analysis.stop_loss_pct,
+        action_rule=action_rule,
+        reason_rule=reason_rule,
+    )
+
+    decision_rule = DecisionRule(
+        entry_rule=entry_rule,
+        exit_rule=exit_rule,
+    )
 
     # 6. Instantiate Use Cases
     uc_watchlist = Watchlist(stock_provider, price_provider, watchlist_repo, indicator_provider, nightly_policy, logger, config)

@@ -13,11 +13,11 @@ from a_domain.ports.trading.signal_repository import ISignalRepository
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
 from a_domain.rules.collect.freshness import DataFreshnessRule
 from a_domain.rules.collect.quality_rule import QualityRule
-from a_domain.rules.process.ai.parser import AiReportParser
-from a_domain.rules.process.ai.prompt import AiReportPromptBuilder
+from a_domain.rules.ai.parser import AiReportParser
+from a_domain.rules.ai.prompt import AiReportPromptBuilder
 from a_domain.rules.process.policies.technical_screening import TechnicalScreeningPolicy
-from a_domain.rules.process.scoring.composite import CompositeScoreRule
-from a_domain.rules.process.scoring.technical import TechnicalScoreCalculator
+from a_domain.rules.scoring.composite import CompositeScoreRule
+from a_domain.rules.scoring.technical import TechnicalScoreCalculator
 from a_domain.rules.trading.decision import DecisionRule
 from a_domain.rules.trading.exit import ExitRule
 from b_application.pipeline import Pipeline
@@ -29,6 +29,7 @@ from b_application.use_cases.process.ai_analyser import AiAnalyser
 from b_application.use_cases.process.technical_filter import TechnicalFilter
 from b_application.use_cases.ship.reporting import Reporting
 from b_application.use_cases.ship.signals import Signals
+from b_application.use_cases.trade.account_loader import AccountLoader
 from b_application.use_cases.trade.monitoring import Monitoring
 from b_application.use_cases.trade.order_execution import OrderExecution
 from d_presentation.dependencies.core import (
@@ -179,6 +180,15 @@ def get_monitoring_use_case(
         logger=logger,
     )
 
+
+def get_account_loader_use_case(
+    execution_provider: IExecutionProvider = Depends(get_execution_provider),
+    logger: ILoggingProvider = Depends(get_logger),
+) -> AccountLoader:
+    return AccountLoader(
+        execution_provider=execution_provider,
+        logger=logger,
+    )
 
 def get_pipeline(
     stock_selector: StockSelector = Depends(get_stock_selector_use_case),

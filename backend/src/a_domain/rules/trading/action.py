@@ -1,17 +1,31 @@
+from dataclasses import dataclass
+
 from a_domain.types.enums import TradeAction
 
 
+@dataclass(frozen=True)
 class ActionRule:
-    """Maps a Score (0-100) to an Action (BUY/SELL/HOLD)."""
+    """
+    Maps a score into BUY / HOLD / SELL.
+    """
 
-    def __init__(self, buy_threshold: int = 70, sell_threshold: int = 30):
-        self.buy_threshold = buy_threshold
-        self.sell_threshold = sell_threshold
 
+    buy_threshold: int = 70
+    """
+    Default fallback for local tests.
+    - NOTE: Production values should be injected from AppConfig.
+    """
+
+    sell_threshold: int = 30
+    """
+    Default fallback for local tests.
+    - Production values should be injected from AppConfig.
+    """
     def resolve(self, score: int) -> TradeAction:
         if score >= self.buy_threshold:
             return TradeAction.BUY
-        elif score <= self.sell_threshold:
+
+        if score <= self.sell_threshold:
             return TradeAction.SELL
-        else:
-            return TradeAction.HOLD
+
+        return TradeAction.HOLD

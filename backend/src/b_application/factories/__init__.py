@@ -1,4 +1,5 @@
-from b_application.factories.policy_factory import (
+from b_application.factories.technical_policy_factory import (
+    TechnicalPolicyFactory,
     create_conservative_policy,
     create_moderate_policy,
     create_nightly_screening_policy,
@@ -7,6 +8,7 @@ from b_application.factories.policy_factory import (
 )
 
 __all__ = [
+    "TechnicalPolicyFactory",
     "create_conservative_policy",
     "create_moderate_policy",
     "create_nightly_screening_policy",

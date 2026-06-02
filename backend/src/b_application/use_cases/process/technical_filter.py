@@ -2,7 +2,7 @@ from a_domain.model.market.stock import Stock
 from a_domain.ports.analysis.indicator_provider import IIndicatorProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.rules.process.policies.technical_screening import TechnicalScreeningPolicy
-from a_domain.rules.process.scoring.technical import TechnicalScoreCalculator
+from a_domain.rules.scoring.technical import TechnicalScoreCalculator
 from a_domain.types.enums import AnalysisStage
 from b_application.schemas.pipeline_context import PipelineContext
 

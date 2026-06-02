@@ -111,6 +111,13 @@ class CollectRulesConfig(BaseModel):
     """Rules for collecting and filtering data."""
 
     spam_keywords: set[str] = Field(default={"廣告", "廣編", "業配", "新聞稿"})
+    financial_keywords: set[str] = Field(
+        default={
+            "營收", "EPS", "毛利", "純益", "法說", "殖利率", "擴廠", 
+            "減資", "購併", "財報", "股利", "盈餘", "轉盈"
+        }
+    )
+
     filter_min_price: float = 10.0
     filter_min_volume: int = 500
     buzz_min_mentions: int = 20

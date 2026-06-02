@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 
 from a_domain.model.market.stock import Stock
 from a_domain.model.system.stats import SystemStats
+from a_domain.model.trading.account import Account
 from a_domain.model.trading.signal import TradeSignal
 
 
@@ -18,6 +19,7 @@ class PipelineContext:
     Phase 3 (Intraday):  candidates → priced → survivors → analysed → signals → orders
     """
 
+    account: Account = field(default_factory=Account)
     # ---------------------------------- Input ----------------------------------- #
     manual_symbols: list[str] = field(default_factory=list)
 
