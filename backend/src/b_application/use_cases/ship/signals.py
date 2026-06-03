@@ -1,16 +1,19 @@
+# backend/src/b_application/use_cases/ship/signals.py
+
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.ports.ai.knowledge_repository import IKnowledgeRepository
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.trading.signal_repository import ISignalRepository
 from a_domain.rules.scoring.composite import CompositeScoreRule
-from a_domain.rules.trading.decision import DecisionRule
-from a_domain.types.enums import AnalysisStage
+from a_domain.rules.trading import DecisionRule
+from a_domain.types.enums import AnalysisStage, TradeAction
 from b_application.schemas.pipeline_context import PipelineContext
 
 
 class Signals:
     """
-    Use Case: Generate and persist trade signals.
+    Use Case: Generate and persist final trade decisions.
+        - This use case converts analysed stocks into explicit BUY / SELL / HOLD TradeSignal records.
     """
 
     def __init__(
@@ -27,54 +30,60 @@ class Signals:
         self._knowledge = knowledge_repo
         self._logger = logger
 
-    async def execute(self, workflow_state: PipelineContext) -> None:
-        stocks = workflow_state.analysed
-        self._logger.info(f"Generating signals for {len(stocks)} analyzed stocks...")
+    async def execute(self, context: PipelineContext) -> None:
+        # Only analysed stocks should receive final combined score and decision.
+        stocks = context.analysed
+
+        self._logger.info(f"Generating signals for {len(stocks)} analysed stocks.")
+
         signals: list[TradeSignal] = []
 
         for stock in stocks:
-            stock.combined_score = self._composite_rule.calculate(
-                technical_score=stock.technical_score,
-                sentiment_score=stock.ai_score,
-            )
-            stock.stage = AnalysisStage.DECIDED
+            try:
+                stock.combined_score = self._composite_rule.calculate(stock)
+                stock.stage = AnalysisStage.DECIDED
 
+                # Existing position means the decision must use ExitRule.
+                # Missing position means the decision must use EntryRule.
+                position = context.positions_by_stock_id.get(stock.stock_id)
 
-        signal = self._decision_rule.decide(
-            stock=stock,
-            account=workflow_state.account,
-            position=position,
-        )
-        if signal:
+                signal = self._decision_rule.decide(
+                    stock=stock,
+                    account=context.account,
+                    position=position,
+                )
+
                 signals.append(signal)
+
                 self._logger.info(f"Signal: {signal.action.value} {signal.stock_id} (Qty: {signal.quantity}) | {signal.reason}")
+
+            except Exception as e:
+                error_message = f"Signal decision failed for {stock.stock_id}: {e}"
+                self._logger.error(error_message)
+                context.stats.add_error(error_message)
 
         if signals:
             try:
                 await self._signal_repo.save_batch(signals)
             except Exception as e:
                 self._logger.error(f"Failed to persist signals: {e}")
+                context.stats.add_error(f"Failed to persist signals: {e}")
 
         for stock in stocks:
             try:
                 await self._knowledge.save_analysis(stock)
             except Exception as e:
                 self._logger.error(f"RAG write failed for {stock.stock_id}: {e}")
+                context.stats.add_error(f"RAG write failed for {stock.stock_id}: {e}")
 
-        workflow_state.buy_signals = signals
-        workflow_state.stats.signals_generated += len(signals)
+        context.buy_signals = [signal for signal in signals if signal.action == TradeAction.BUY]
+        context.exit_signals = [signal for signal in signals if signal.action == TradeAction.SELL]
+        context.hold_signals = [signal for signal in signals if signal.action == TradeAction.HOLD]
+        context.stats.signals_generated += len(signals)
 
-# TODO: Think a better way. delete this method later
-def _find_position(self, workflow_state: PipelineContext, stock_id: str):
-    for position in workflow_state.account.positions:
-        if position.stock_id == stock_id:
-            return position
-    return None
-
-
-"""
-
-你現在 Signals 是 Buy Flow 的最後一步，workflow_state.analysed 
-主要是新候選股票，不是完整持倉股票。所以這裡即使支援 position，也只能防止
-「持倉股票又被當成 BUY candidate 重複買」。它還不是完整 holding review。
-"""
+        self._logger.info(
+            f"Signals generated: total={len(signals)}, "
+            f"buy={len(context.buy_signals)}, "
+            f"sell={len(context.exit_signals)}, "
+            f"hold={len(context.hold_signals)}"
+        )

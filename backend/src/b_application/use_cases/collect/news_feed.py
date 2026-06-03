@@ -1,6 +1,6 @@
 from a_domain.ports.market.news_provider import INewsProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from a_domain.rules.collect.quality_rule import QualityRule
+from a_domain.rules.collect import ArticleQualityRule
 from b_application.schemas.config import AppConfig
 from b_application.schemas.pipeline_context import PipelineContext
 
@@ -14,7 +14,7 @@ class NewsFeed:
     def __init__(
         self,
         news_provider: INewsProvider,
-        quality_filter: QualityRule,
+        quality_filter: ArticleQualityRule,
         config: AppConfig,
         logger: ILoggingProvider,
     ):
@@ -25,10 +25,11 @@ class NewsFeed:
 
     async def execute(self, context: PipelineContext) -> None:
         stocks = context.survivors
+
         if not stocks:
             return
 
-        self._logger.info(f"Collecting articles for {len(stocks)} survivors...")
+        self._logger.info(f"Collecting articles for {len(stocks)} survivors.")
 
         for stock in stocks:
             try:
@@ -36,12 +37,14 @@ class NewsFeed:
                     stock_id=stock.stock_id,
                     limit=self._config.analysis.article_fetch_limit,
                 )
+
                 if not raw_articles:
                     stock.articles = []
                     continue
 
                 self._news.save_as_md_file(stock.stock_id, raw_articles)
-                stock.articles = [a for a in raw_articles if self._quality.is_high_quality(a)]
+                stock.articles = [article for article in raw_articles if self._quality.is_high_quality(article)]
+
             except Exception as e:
                 self._logger.error(f"Failed to collect articles for {stock.stock_id}: {e}")
                 stock.articles = []

@@ -25,8 +25,8 @@ class AiAnalyser:
         self._config = config
         self._logger = logger
 
-    async def execute(self, workflow_state: PipelineContext) -> None:
-        stocks = workflow_state.survivors
+    async def execute(self, context: PipelineContext) -> None:
+        stocks = context.survivors
         self._logger.info(f"Analysing AI context for {len(stocks)} stocks...")
         analysed_count = 0
 
@@ -57,10 +57,10 @@ class AiAnalyser:
             except Exception as e:
                 error_message = f"AI analysis failed for {stock.stock_id}: {e}"
                 self._logger.error(error_message)
-                workflow_state.stats.add_error(error_message)
+                context.stats.add_error(error_message)
                 stock.analysis_report = self._response_parser.parse(stock.stock_id, "")
                 stock.ai_score = stock.analysis_report.score
 
-        workflow_state.analysed = stocks
-        workflow_state.stats.ai_analysed += analysed_count
+        context.analysed = stocks
+        context.stats.ai_analysed += analysed_count
         self._logger.info(f"AI analysis complete: {analysed_count} stocks analysed")

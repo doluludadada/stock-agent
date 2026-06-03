@@ -24,7 +24,7 @@ from d_presentation.dependencies.providers import get_tavily_search
 def get_ai_provider(
     config: AppConfig = Depends(get_settings),
     logger: ILoggingProvider = Depends(get_logger),
-    web_search: IWebSearchProvider = Depends(get_tavily_search),
+    web_search: IWebSearchProvider | None = Depends(get_tavily_search),
 ) -> IAiProvider:
     factory = AiAdapterFactory(config=config, logger=logger, web_search=web_search)
     return factory.create_adapter()

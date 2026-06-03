@@ -1,34 +1,65 @@
-from a_domain.model.trading.signal import TradeSignal
+# backend/src/b_application/use_cases/ship/reporting.py
+
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.notification_provider import INotificationProvider
 from a_domain.types.enums import TradeAction
 from b_application.schemas.config import AppConfig
+from b_application.schemas.pipeline_context import PipelineContext
 
 
 class Reporting:
+    """
+    Use Case: Send final trade notifications.
+        - Reporting is a notification side effect.
+        - It must not execute orders, change signal decisions, or mutate order counts.
+    """
+
     def __init__(
-        self, notification_provider: INotificationProvider | None, config: AppConfig, logger: ILoggingProvider
+        self,
+        notification_provider: INotificationProvider | None,
+        config: AppConfig,
+        logger: ILoggingProvider,
     ):
         self._notification = notification_provider
         self._config = config
         self._logger = logger
 
-    async def execute(self, signals: list[TradeSignal]) -> None:
-        if (
-            not self._config.notifications.enabled
-            or not self._notification
-            or not self._config.notifications.recipients
-        ):
+    async def execute(self, context: PipelineContext) -> None:
+        if not self._config.notifications.enabled:
+            self._logger.info("Notifications disabled.")
             return
 
-        actionable = [s for s in signals if s.action in (TradeAction.BUY, TradeAction.SELL)]
-        if not actionable:
+        if self._notification is None:
+            self._logger.warning("Notification provider is not configured.")
             return
 
-        for signal in actionable:
+        # LINE user IDs or notification recipients configured for trade alerts.
+        recipients = self._config.notifications.recipients
+
+        if not recipients:
+            self._logger.warning("Notification recipients are empty.")
+            return
+
+        signals = [
+            *context.exit_signals,
+            *context.buy_signals,
+        ]
+        # Only BUY and SELL are pushed to users.
+        # HOLD is persisted but not pushed to avoid noisy alerts.
+
+        for signal in signals:
+            if signal.action == TradeAction.HOLD:
+                continue
+
             try:
-                await self._notification.send_signal_alert(
-                    signal=signal, recipients=self._config.notifications.recipients
-                )
+                sent = await self._notification.send_signal_alert(signal, recipients)
+
+                if sent:
+                    self._logger.info(f"Notification sent: {signal.action.value} {signal.stock_id}")
+                else:
+                    self._logger.warning(f"Notification skipped or failed: {signal.action.value} {signal.stock_id}")
+
             except Exception as e:
-                self._logger.error(f"Failed to notify for {signal.stock_id}: {e}")
+                error_message = f"Notification failed for {signal.stock_id}: {e}"
+                self._logger.error(error_message)
+                context.stats.add_error(error_message)

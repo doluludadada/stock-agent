@@ -1,10 +1,6 @@
+# backend/src/a_domain/types/enums.py
+
 from enum import StrEnum
-
-
-class MessageRole(StrEnum):
-    USER = "user"
-    ASSISTANT = "assistant"
-    SYSTEM = "system"
 
 
 class AiProvider(StrEnum):
@@ -12,6 +8,12 @@ class AiProvider(StrEnum):
     GROK = "grok"
     GEMINI = "gemini"
     GROQ = "groq"
+
+
+class MessageRole(StrEnum):
+    SYSTEM = "system"
+    USER = "user"
+    ASSISTANT = "assistant"
 
 
 class DatabaseProvider(StrEnum):
@@ -25,6 +27,13 @@ class MarketType(StrEnum):
     NASDAQ = "NASDAQ"
     NYSE = "NYSE"
 
+# TODO:
+
+"""
+just use
+@dataclass(frozen=True)
+class MovingAverages:
+"""
 
 class MaPeriod(StrEnum):
     MA_5 = "MA_5"
@@ -86,6 +95,7 @@ class CandidateSource(StrEnum):
     TECHNICAL_WATCHLIST = "TECHNICAL_WATCHLIST"
     SOCIAL_BUZZ = "SOCIAL_BUZZ"
     MANUAL_INPUT = "MANUAL_INPUT"
+    HELD_POSITION = "HELD_POSITION"
 
 
 class AnalysisStage(StrEnum):
@@ -102,13 +112,6 @@ class SystemEnvironment(StrEnum):
     DEV = "dev"  # Logs only, mock returns
     TEST = "test"  # Paper trading (SQLite)
     LIVE = "live"  # Real execution (Shioaji)
-
-
-class SignalReason(StrEnum):
-    NIGHTLY_SCREEN = "Nightly Technical Scan"
-    SOCIAL_BUZZ = "Social Media Buzz"
-    MANUAL_REQ = "User Manual Request"
-    STOP_LOSS = "Stop Loss Triggered"
 
 
 class StrategyName(StrEnum):

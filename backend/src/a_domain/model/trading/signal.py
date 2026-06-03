@@ -5,6 +5,7 @@ from sqlmodel import Field, SQLModel
 from a_domain.types.enums import SignalSource, TradeAction
 
 
+# TODO: Think a better wau to combine with reason rule.
 class TradeSignal(SQLModel):
     stock_id: str
     action: TradeAction

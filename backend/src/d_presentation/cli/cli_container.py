@@ -1,12 +1,13 @@
 # backend/src/d_presentation/cli/cli_container.py
 
+
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.position import Position
 from a_domain.ports.trading.execution_provider import IExecutionProvider
-from a_domain.rules.collect.freshness import DataFreshnessRule
-from a_domain.rules.collect.quality_rule import QualityRule
 from a_domain.rules.ai.parser import AiReportParser
 from a_domain.rules.ai.prompt import AiReportPromptBuilder
+from a_domain.rules.collect.article_quality import ArticleQualityRule
+from a_domain.rules.collect.freshness import DataFreshnessRule
 from a_domain.rules.scoring.composite import CompositeScoreRule
 from a_domain.rules.scoring.technical import TechnicalScoreCalculator
 from a_domain.rules.trading.action import ActionRule
@@ -15,7 +16,7 @@ from a_domain.rules.trading.entry import EntryRule
 from a_domain.rules.trading.exit import ExitRule
 from a_domain.rules.trading.reason import ReasonRule
 from a_domain.rules.trading.sizing import SizingRule
-from b_application.factories.policy_factory import create_conservative_policy, create_nightly_screening_policy
+from b_application.factories import TechnicalPolicyFactory
 from b_application.pipeline import Pipeline
 from b_application.use_cases.collect.market_data import MarketData
 from b_application.use_cases.collect.market_scan import MarketScan
@@ -26,6 +27,7 @@ from b_application.use_cases.process.ai_analyser import AiAnalyser
 from b_application.use_cases.process.technical_filter import TechnicalFilter
 from b_application.use_cases.ship.reporting import Reporting
 from b_application.use_cases.ship.signals import Signals
+from b_application.use_cases.trade.account_loader import AccountLoader
 from b_application.use_cases.trade.monitoring import Monitoring
 from b_application.use_cases.trade.order_execution import OrderExecution
 from b_application.workflow import WorkflowOrchestrator
@@ -94,12 +96,13 @@ async def build_cli_orchestrator() -> WorkflowOrchestrator:
     broker = MockExecutionProvider()
 
     # 5. Domain Rules & Policies
-    nightly_policy = create_nightly_screening_policy(config.strategy)
-    intraday_policy = create_conservative_policy(config.strategy)
+    policy_factory = TechnicalPolicyFactory()
+    nightly_policy = policy_factory.create_nightly(config.strategy)
+    intraday_policy = policy_factory.create_conservative(config.strategy)
 
     freshness_rule = DataFreshnessRule(max_lag_minutes=2880)
 
-    quality_rule = QualityRule(
+    quality_rule = ArticleQualityRule(
         spam_keywords=frozenset(config.collect_rules.spam_keywords),
         financial_keywords=frozenset(config.collect_rules.financial_keywords),
         min_chars_stock=config.quality.min_chars_stock,
@@ -175,8 +178,21 @@ async def build_cli_orchestrator() -> WorkflowOrchestrator:
     uc_exec = OrderExecution(broker, config, logger)
     uc_report = Reporting(notification, config, logger)
     uc_monitor = Monitoring(broker, price_provider, stock_provider, exit_rule, logger)
+    uc_account_loader = AccountLoader(broker, logger)
 
     # 7. Assemble Pipeline & Orchestrator
-    pipeline = Pipeline(uc_selector, uc_data, uc_tech, uc_news, uc_ai, uc_signals, uc_exec, uc_report, uc_monitor, logger)
+    pipeline = Pipeline(
+        account_loader=uc_account_loader,
+        stock_selector=uc_selector,
+        market_data=uc_data,
+        technical_filter=uc_tech,
+        news_feed=uc_news,
+        ai_analyser=uc_ai,
+        signals=uc_signals,
+        order_execution=uc_exec,
+        reporting=uc_report,
+        monitoring=uc_monitor,
+        logger=logger,
+    )
 
     return WorkflowOrchestrator(uc_watchlist, uc_market_scan, pipeline, logger, db=db)

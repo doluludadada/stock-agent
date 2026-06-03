@@ -23,7 +23,13 @@ def get_indicator_provider(config: AppConfig = Depends(get_settings)) -> IIndica
 
 
 @lru_cache
-def get_tavily_search(config: AppConfig = Depends(get_settings), logger: ILoggingProvider = Depends(get_logger)) -> IWebSearchProvider:
+def get_tavily_search(
+    config: AppConfig = Depends(get_settings),
+    logger: ILoggingProvider = Depends(get_logger),
+) -> IWebSearchProvider | None:
+    if not config.tavily.api_key:
+        return None
+
     return TavilySearchAdapter(config=config, logger=logger)
 
 

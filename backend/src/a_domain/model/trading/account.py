@@ -18,14 +18,19 @@ class Account(SQLModel):
     cash: float = Field(default=0, ge=0)  # cash means currently usable cash.
     """
     TODO:
-    可能有：
-    已下單但還沒成交的金額
-    T+2 尚未交割
-    保證金限制
-    手續費
-    稅
-    pending orders
+
+    Future account constraints:
+    - unsettled cash
+    - pending orders
+    - fees
+    - tax
+    - margin limits
+
     """
+
     positions: list[Position] = Field(default_factory=list)
+    """
+    What do I have in this acoount
+    """
 
     updated_at: datetime = Field(default_factory=datetime.now)

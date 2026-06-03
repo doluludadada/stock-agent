@@ -1,3 +1,5 @@
+# backend/src/a_domain/rules/trading/entry.py
+
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -12,28 +14,79 @@ from a_domain.types.enums import SignalSource, TradeAction
 
 @dataclass(frozen=True)
 class EntryRule:
-    """Decides whether a non-held stock should become a BUY signal."""
+    """
+    Decides BUY or HOLD for a non-held stock.
+        - A non-held stock should never return None after analysis.
+        - If it is not buyable, the explicit decision is HOLD.
+    """
 
     action_rule: ActionRule
-    sizing_rule: SizingRule
-    reason_rule: ReasonRule
+    """
+    Converts combined_score into BUY / SELL / HOLD.
+    For entry flow, only BUY becomes an orderable decision.
+    """
 
-    def decide(self, stock: Stock, account: Account) -> TradeSignal | None:
-        if stock.current_price is None:
-            return None
+    sizing_rule: SizingRule
+    """
+    Calculates BUY quantity from current usable cash and current stock price.
+    """
+
+    reason_rule: ReasonRule
+    """
+    Builds human-readable decision reasons for audit, notification, and RAG memory.
+    """
+
+    def decide(self, stock: Stock, account: Account) -> TradeSignal:
+        current_price = stock.current_price
+        """
+        Entry decision needs a valid executable price.
+        Upstream MarketData and TechnicalFilter should guarantee this.
+        """
+
+        if current_price is None:
+            raise ValueError(f"Cannot decide entry without current price: {stock.stock_id}")
 
         action = self.action_rule.resolve(stock.combined_score)
-        if action != TradeAction.BUY:
-            return None
+        """
+        Converts the combined technical + AI score into a trading action.
+        """
 
-        quantity = self.sizing_rule.calculate(account=account, price=stock.current_price)
+        if action != TradeAction.BUY:
+            return TradeSignal(
+                stock_id=stock.stock_id,
+                action=TradeAction.HOLD,
+                price_at_signal=current_price,
+                source=SignalSource.HYBRID,
+                score=stock.combined_score,
+                reason=self.reason_rule.build_entry_hold(
+                    stock=stock,
+                    cause="Score below buy threshold",
+                ),
+                quantity=0,
+                generated_at=datetime.now(),
+            )
+
+        quantity = self.sizing_rule.calculate(account=account, price=current_price)
+
         if quantity <= 0:
-            return None
+            return TradeSignal(
+                stock_id=stock.stock_id,
+                action=TradeAction.HOLD,
+                price_at_signal=current_price,
+                source=SignalSource.HYBRID,
+                score=stock.combined_score,
+                reason=self.reason_rule.build_entry_hold(
+                    stock=stock,
+                    cause="Insufficient cash or position size too small",
+                ),
+                quantity=0,
+                generated_at=datetime.now(),
+            )
 
         return TradeSignal(
             stock_id=stock.stock_id,
             action=TradeAction.BUY,
-            price_at_signal=stock.current_price,
+            price_at_signal=current_price,
             source=SignalSource.HYBRID,
             score=stock.combined_score,
             reason=self.reason_rule.build_entry(stock),

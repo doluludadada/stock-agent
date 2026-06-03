@@ -13,7 +13,7 @@ class DataFreshnessRule:
 
     max_lag_minutes: int = 15
     """
-    # max_lag_minutes (int): Maximum tolerated age of incoming data before flagging it as stale.
+    - max_lag_minutes (int): Maximum tolerated age of incoming data before flagging it as stale.
     """
 
     @property
