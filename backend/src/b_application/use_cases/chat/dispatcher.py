@@ -4,8 +4,8 @@ from a_domain.ports.system.logging_provider import ILoggingProvider
 
 
 class Dispatcher:
-    def __init__(self, platform: IPlatformProvider, logger: ILoggingProvider):
-        self._platform = platform
+    def __init__(self, platform_provider: IPlatformProvider, logger: ILoggingProvider):
+        self._platform_provider = platform_provider
         self._logger = logger
 
     async def execute(self, user_id: str, messages: tuple[Message, ...]) -> None:
@@ -15,10 +15,9 @@ class Dispatcher:
 
         count = 0
         for msg in messages:
-            success = await self._platform.send_message(user_id, msg)
+            success = await self._platform_provider.send_message(user_id, msg)
             if success:
                 count += 1
 
         self._logger.success(f"Dispatched {count}/{len(messages)} messages to user_id: {user_id}")
-
 

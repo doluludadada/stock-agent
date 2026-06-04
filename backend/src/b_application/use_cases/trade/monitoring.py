@@ -1,5 +1,7 @@
 # backend/src/b_application/use_cases/trade/monitoring.py
 
+from warnings import deprecated
+
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.ports.market.price_provider import IPriceProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
@@ -8,6 +10,7 @@ from a_domain.types.enums import TradeAction
 from b_application.schemas.pipeline_context import PipelineContext
 
 
+@deprecated("Not useful anymore")
 class Monitoring:
     """
     Use Case: Fast emergency exit check.
@@ -17,11 +20,11 @@ class Monitoring:
 
     def __init__(
         self,
-        market_provider: IPriceProvider,
+        price_provider: IPriceProvider,
         exit_rule: ExitRule,
         logger: ILoggingProvider,
     ):
-        self._market = market_provider
+        self._price_provider = price_provider
         self._exit_rule = exit_rule
         self._logger = logger
 
@@ -39,7 +42,7 @@ class Monitoring:
             return
 
         # Emergency monitoring uses latest realtime price only.
-        quotes = await self._market.fetch_realtime_bars(stocks)
+        quotes = await self._price_provider.fetch_realtime_bars(stocks)
 
         signals: list[TradeSignal] = []
         # Only emergency SELL signals should be collected here.

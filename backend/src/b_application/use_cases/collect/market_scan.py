@@ -10,12 +10,12 @@ from b_application.schemas.pipeline_context import PipelineContext
 class MarketScan:
     def __init__(
         self,
-        social_provider: ISocialMediaProvider,
+        social_media_provider: ISocialMediaProvider,
         watchlist_repo: IWatchlistRepository,
         logger: ILoggingProvider,
         config: AppConfig,
     ):
-        self._social = social_provider
+        self._social_media_provider = social_media_provider
         self._repo = watchlist_repo
         self._logger = logger
         self._config = config
@@ -24,8 +24,10 @@ class MarketScan:
         self._logger.info("Scanning social media for trending stocks...")
 
         try:
-            trending_articles = await self._social.get_trending_stocks(limit=self._config.collect_rules.social_trending_limit)
-            self._social.save_social_media_data(trending_articles)
+            trending_articles = await self._social_media_provider.get_trending_stocks(
+                limit=self._config.collect_rules.social_trending_limit
+            )
+            self._social_media_provider.save_social_media_data(trending_articles)
 
             if not trending_articles:
                 return

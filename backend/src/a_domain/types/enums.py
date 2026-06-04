@@ -66,6 +66,7 @@ class OrderStatus(StrEnum):
     FILLED = "FILLED"
     CANCELLED = "CANCELLED"
     FAILED = "FAILED"
+    REJECTED = "REJECTED"
 
 
 class TimeInForce(StrEnum):

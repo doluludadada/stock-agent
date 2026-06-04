@@ -18,7 +18,7 @@ class NewsFeed:
         config: AppConfig,
         logger: ILoggingProvider,
     ):
-        self._news = news_provider
+        self._news_provider = news_provider
         self._quality = quality_filter
         self._config = config
         self._logger = logger
@@ -33,7 +33,7 @@ class NewsFeed:
 
         for stock in stocks:
             try:
-                raw_articles = await self._news.fetch_news(
+                raw_articles = await self._news_provider.fetch_news(
                     stock_id=stock.stock_id,
                     limit=self._config.analysis.article_fetch_limit,
                 )
@@ -42,7 +42,7 @@ class NewsFeed:
                     stock.articles = []
                     continue
 
-                self._news.save_as_md_file(stock.stock_id, raw_articles)
+                self._news_provider.save_as_md_file(stock.stock_id, raw_articles)
                 stock.articles = [article for article in raw_articles if self._quality.is_high_quality(article)]
 
             except Exception as e:

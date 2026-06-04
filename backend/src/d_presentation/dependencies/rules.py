@@ -1,7 +1,10 @@
+# backend/src/d_presentation/dependencies/rules.py
+
 from fastapi import Depends
 
 from a_domain.rules.ai.parser import AiReportParser
 from a_domain.rules.ai.prompt import AiReportPromptBuilder
+from a_domain.rules.collect import CandidateSelectionRule
 from a_domain.rules.collect.article_quality import ArticleQualityRule
 from a_domain.rules.collect.freshness import DataFreshnessRule
 from a_domain.rules.scoring.composite import CompositeScoreRule
@@ -18,6 +21,7 @@ from b_application.schemas.config import AppConfig
 from d_presentation.dependencies.core import get_settings
 
 
+# TODO: I think i dont really need it. They will build in usecase class.
 def get_data_freshness_rule() -> DataFreshnessRule:
     return DataFreshnessRule()
 
@@ -32,7 +36,9 @@ def get_quality_rule(config: AppConfig = Depends(get_settings)) -> ArticleQualit
     )
 
 
-def get_technical_score_calculator(config: AppConfig = Depends(get_settings)) -> TechnicalScoreCalculator:
+def get_technical_score_calculator(
+    config: AppConfig = Depends(get_settings),
+) -> TechnicalScoreCalculator:
     return TechnicalScoreCalculator(
         base=config.scoring.base,
         pass_bonus=config.scoring.pass_bonus,
@@ -48,11 +54,18 @@ def get_technical_score_calculator(config: AppConfig = Depends(get_settings)) ->
     )
 
 
-def get_technical_screening_policy(config: AppConfig = Depends(get_settings)) -> TechnicalScreeningPolicy:
-    return TechnicalPolicyFactory().create(config.analysis.active_strategy, config.strategy)
+def get_technical_screening_policy(
+    config: AppConfig = Depends(get_settings),
+) -> TechnicalScreeningPolicy:
+    return TechnicalPolicyFactory().create(
+        config.analysis.active_strategy,
+        config.strategy,
+    )
 
 
-def get_ai_report_prompt_builder(config: AppConfig = Depends(get_settings)) -> AiReportPromptBuilder:
+def get_ai_report_prompt_builder(
+    config: AppConfig = Depends(get_settings),
+) -> AiReportPromptBuilder:
     return AiReportPromptBuilder(
         fundamental_template=config.prompts.analysis_report_fundamental,
         momentum_template=config.prompts.analysis_report_momentum,
@@ -65,7 +78,9 @@ def get_ai_report_parser() -> AiReportParser:
     return AiReportParser()
 
 
-def get_composite_score_rule(config: AppConfig = Depends(get_settings)) -> CompositeScoreRule:
+def get_composite_score_rule(
+    config: AppConfig = Depends(get_settings),
+) -> CompositeScoreRule:
     return CompositeScoreRule(
         technical_weight=config.analysis.technical_weight,
         sentiment_weight=config.analysis.sentiment_weight,
@@ -124,15 +139,5 @@ def get_decision_rule(
     )
 
 
-"""
-
-這裡先沿用：
-
-config.analysis.risk_per_trade_pct
-
-但你心裡要知道，它現在語意其實是：
-
-position_pct
-
-也就是「每次最多用多少 cash 建倉」，不是真正 risk sizing。
-"""
+def get_candidate_selection_rule() -> CandidateSelectionRule:
+    return CandidateSelectionRule()

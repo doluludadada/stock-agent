@@ -1,11 +1,9 @@
 # backend/src/d_presentation/cli/cli_container.py
 
 
-from a_domain.model.trading.order import Order
-from a_domain.model.trading.position import Position
-from a_domain.ports.trading.execution_provider import IExecutionProvider
 from a_domain.rules.ai.parser import AiReportParser
 from a_domain.rules.ai.prompt import AiReportPromptBuilder
+from a_domain.rules.collect import CandidateSelectionRule
 from a_domain.rules.collect.article_quality import ArticleQualityRule
 from a_domain.rules.collect.freshness import DataFreshnessRule
 from a_domain.rules.scoring.composite import CompositeScoreRule
@@ -28,7 +26,7 @@ from b_application.use_cases.process.technical_filter import TechnicalFilter
 from b_application.use_cases.ship.reporting import Reporting
 from b_application.use_cases.ship.signals import Signals
 from b_application.use_cases.trade.account_loader import AccountLoader
-from b_application.use_cases.trade.monitoring import Monitoring
+from b_application.use_cases.trade.account_risk_check import AccountRiskCheck
 from b_application.use_cases.trade.order_execution import OrderExecution
 from b_application.workflow import WorkflowOrchestrator
 from c_infrastructure.ai_models.factory import AiAdapterFactory
@@ -46,22 +44,7 @@ from c_infrastructure.market.yahoo_finance_adapter import YahooFinanceProvider
 from c_infrastructure.platforms.line.line_notification_adapter import LineNotificationAdapter
 from c_infrastructure.system.config_loader import load_settings
 from c_infrastructure.system.logger_service import LoggerService
-
-
-class MockExecutionProvider(IExecutionProvider):
-    """Correctly implements the IExecutionProvider interface for CLI dev runs."""
-
-    async def place_order(self, order: Order) -> str:
-        return "mock_order_123"
-
-    async def cancel_order(self, order_id: str) -> bool:
-        return True
-
-    async def get_positions(self) -> list[Position]:
-        return []
-
-    async def get_cash_balance(self) -> float:
-        return 1000.0
+from c_infrastructure.trading.mock.mock_execution_provider import MockExecutionProvider
 
 
 async def build_cli_orchestrator() -> WorkflowOrchestrator:
@@ -83,24 +66,28 @@ async def build_cli_orchestrator() -> WorkflowOrchestrator:
     # 3. External Providers
     stock_provider = TaiwanStockProvider(logger)
     yahoo_provider = YahooFinanceProvider(logger)
-    price_provider = CachedPriceProvider(yahoo_provider, db, logger)
+    price_provider = CachedPriceProvider(price_provider=yahoo_provider, db=db, logger=logger)
     indicator_provider = IndicatorProvider(config)
     news_provider = NewsProvider(config, logger)
-    social_provider = PttProvider(config, logger, stock_provider)
-    web_search = TavilySearchAdapter(config, logger) if config.tavily.api_key else None
+    social_provider = PttProvider(config=config, logger=logger, stock_provider=stock_provider)
+    web_search_provider = TavilySearchAdapter(config, logger) if config.tavily.api_key else None
 
     # 4. AI & Actions
-    ai_factory = AiAdapterFactory(config, logger, web_search)
+    ai_factory = AiAdapterFactory(config=config, logger=logger, web_search_provider=web_search_provider)
     ai_provider = ai_factory.create_adapter()
     notification = LineNotificationAdapter(config, logger) if config.line.channel_access_token else None
-    broker = MockExecutionProvider()
-
+    broker = MockExecutionProvider(
+        db=db,
+        config=config,
+        logger=logger,
+    )
     # 5. Domain Rules & Policies
     policy_factory = TechnicalPolicyFactory()
     nightly_policy = policy_factory.create_nightly(config.strategy)
     intraday_policy = policy_factory.create_conservative(config.strategy)
 
     freshness_rule = DataFreshnessRule(max_lag_minutes=2880)
+    candidate_selection_rule = CandidateSelectionRule()
 
     quality_rule = ArticleQualityRule(
         spam_keywords=frozenset(config.collect_rules.spam_keywords),
@@ -161,28 +148,84 @@ async def build_cli_orchestrator() -> WorkflowOrchestrator:
     )
 
     # 6. Instantiate Use Cases
-    uc_watchlist = Watchlist(stock_provider, price_provider, watchlist_repo, indicator_provider, nightly_policy, logger, config)
-    uc_market_scan = MarketScan(social_provider, watchlist_repo, logger, config)
-    uc_selector = StockSelector(watchlist_repo, stock_provider, logger)
-    uc_data = MarketData(price_provider, freshness_rule, config, logger)
-    uc_tech = TechnicalFilter(indicator_provider, intraday_policy, tech_calculator, logger)
-    uc_news = NewsFeed(news_provider, quality_rule, config, logger)
-    uc_ai = AiAnalyser(ai_provider, prompt_builder, AiReportParser(), knowledge_db, config, logger)
-    uc_signals = Signals(
-        CompositeScoreRule(config.analysis.technical_weight, config.analysis.sentiment_weight),
-        decision_rule,
-        signal_repo,
-        knowledge_db,
-        logger,
+    uc_watchlist = Watchlist(
+        stock_provider=stock_provider,
+        price_provider=price_provider,
+        watchlist_repo=watchlist_repo,
+        indicator_provider=indicator_provider,
+        screening_policy=nightly_policy,
+        logger=logger,
+        config=config,
     )
-    uc_exec = OrderExecution(broker, config, logger)
-    uc_report = Reporting(notification, config, logger)
-    uc_monitor = Monitoring(broker, price_provider, stock_provider, exit_rule, logger)
-    uc_account_loader = AccountLoader(broker, logger)
+    uc_market_scan = MarketScan(
+        social_media_provider=social_provider,
+        watchlist_repo=watchlist_repo,
+        logger=logger,
+        config=config,
+    )
+    uc_account_loader = AccountLoader(
+        execution_provider=broker,
+        stock_provider=stock_provider,
+        logger=logger,
+    )
+    uc_account_risk_check = AccountRiskCheck(
+        price_provider=price_provider,
+        exit_rule=exit_rule,
+        logger=logger,
+    )
+    uc_selector = StockSelector(
+        watchlist_repo=watchlist_repo,
+        stock_provider=stock_provider,
+        candidate_selection_rule=candidate_selection_rule,
+        logger=logger,
+    )
+    uc_data = MarketData(
+        price=price_provider,
+        freshness_rule=freshness_rule,
+        config=config,
+        logger=logger,
+    )
+    uc_tech = TechnicalFilter(
+        indicator_provider=indicator_provider,
+        screening_policy=intraday_policy,
+        score_calculator=tech_calculator,
+        logger=logger,
+    )
+    uc_news = NewsFeed(
+        news_provider=news_provider,
+        quality_filter=quality_rule,
+        config=config,
+        logger=logger,
+    )
+    uc_ai = AiAnalyser(
+        ai_provider=ai_provider,
+        prompt_builder=prompt_builder,
+        response_parser=AiReportParser(),
+        knowledge_repo=knowledge_db,
+        config=config,
+        logger=logger,
+    )
+    uc_signals = Signals(
+        decision_rule=decision_rule,
+        composite_rule=CompositeScoreRule(config.analysis.technical_weight, config.analysis.sentiment_weight),
+        signal_repository=signal_repo,
+        knowledge_repository=knowledge_db,
+        logger=logger,
+    )
+    uc_exec = OrderExecution(
+        execution_provider=broker,
+        logger=logger,
+    )
+    uc_report = Reporting(
+        notification_provider=notification,
+        config=config,
+        logger=logger,
+    )
 
     # 7. Assemble Pipeline & Orchestrator
     pipeline = Pipeline(
         account_loader=uc_account_loader,
+        account_risk_check=uc_account_risk_check,
         stock_selector=uc_selector,
         market_data=uc_data,
         technical_filter=uc_tech,
@@ -191,7 +234,6 @@ async def build_cli_orchestrator() -> WorkflowOrchestrator:
         signals=uc_signals,
         order_execution=uc_exec,
         reporting=uc_report,
-        monitoring=uc_monitor,
         logger=logger,
     )
 

@@ -24,17 +24,17 @@ class Watchlist:
     def __init__(
         self,
         stock_provider: IStockProvider,
-        market_provider: IPriceProvider,
+        price_provider: IPriceProvider,
         watchlist_repo: IWatchlistRepository,
-        tech_provider: IIndicatorProvider,
+        indicator_provider: IIndicatorProvider,
         screening_policy: TechnicalScreeningPolicy,
         logger: ILoggingProvider,
         config: AppConfig,
     ):
         self._stock = stock_provider
-        self._market = market_provider
+        self._price = price_provider
         self._watchlist = watchlist_repo
-        self._tech_calc = tech_provider
+        self._indicator = indicator_provider
         self._policy = screening_policy
         self._logger = logger
         self._config = config
@@ -61,7 +61,7 @@ class Watchlist:
         """
 
         # Bulk stock_id -> historical OHLCV mapping.
-        history_map = await self._market.fetch_history(
+        history_map = await self._price.fetch_history(
             context.all_stocks,
             start_date,
             end_date,
@@ -79,7 +79,7 @@ class Watchlist:
                 # TODO: Why there's hard code
                 stock.trigger_reason = "Nightly Technical Scan"
                 stock.ohlcv = history
-                stock.indicators = self._tech_calc.calculate_indicators(history)
+                stock.indicators = self._indicator.calculate_indicators(history)
 
                 self._policy.evaluate(stock)
 

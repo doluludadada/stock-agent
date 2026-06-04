@@ -112,10 +112,7 @@ class CollectRulesConfig(BaseModel):
 
     spam_keywords: set[str] = Field(default={"廣告", "廣編", "業配", "新聞稿"})
     financial_keywords: set[str] = Field(
-        default={
-            "營收", "EPS", "毛利", "純益", "法說", "殖利率", "擴廠", 
-            "減資", "購併", "財報", "股利", "盈餘", "轉盈"
-        }
+        default={"營收", "EPS", "毛利", "純益", "法說", "殖利率", "擴廠", "減資", "購併", "財報", "股利", "盈餘", "轉盈"}
     )
 
     filter_min_price: float = 10.0
@@ -226,6 +223,18 @@ class StrategyThresholds(BaseModel):
     max_consecutive_up_days: int = 4
 
 
+class MockTradingConfig(BaseModel):
+    """
+    DEV / TEST fake broker account config.
+
+    The initial cash is only used when mock_cash has no row yet.
+    After seeding, cash must be read from database state.
+    """
+
+    account_id: str = "mock-dev"
+    initial_cash: float = Field(default=1_000_000, gt=0)
+
+
 class AppConfig(BaseSettings):
     """
     Application Configuration.
@@ -257,3 +266,4 @@ class AppConfig(BaseSettings):
     quality: QualityFiltersConfig = Field(default_factory=QualityFiltersConfig)
     indicators: IndicatorConfig = Field(default_factory=IndicatorConfig)
     strategy: StrategyThresholds = Field(default_factory=StrategyThresholds)
+    mock_trading: MockTradingConfig = Field(default_factory=MockTradingConfig)

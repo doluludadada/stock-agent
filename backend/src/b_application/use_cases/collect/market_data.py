@@ -17,12 +17,12 @@ class MarketData:
 
     def __init__(
         self,
-        market_provider: IPriceProvider,
+        price: IPriceProvider,
         freshness_rule: DataFreshnessRule,
         config: AppConfig,
         logger: ILoggingProvider,
     ):
-        self._market = market_provider
+        self._price_provider = price
         self._freshness = freshness_rule
         self._config = config
         self._logger = logger
@@ -38,8 +38,8 @@ class MarketData:
         start_date = end_date - timedelta(days=self._config.analysis.lookback_days)
 
         try:
-            realtime_bars = await self._market.fetch_realtime_bars(stocks)
-            history_map = await self._market.fetch_history(stocks, start_date, end_date)
+            realtime_bars = await self._price_provider.fetch_realtime_bars(stocks)
+            history_map = await self._price_provider.fetch_history(stocks, start_date, end_date)
         except Exception as e:
             self._logger.error(f"Failed to fetch market data bulk: {e}")
             return

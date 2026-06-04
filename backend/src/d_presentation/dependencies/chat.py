@@ -45,10 +45,14 @@ def get_context_loader(
 
 def get_ai_processor(
     ai_provider: IAiProvider = Depends(get_ai_provider),
-    styler: ChatStylerService = Depends(get_chat_styler),
+    chat_styler_provider: ChatStylerService = Depends(get_chat_styler),
     logger: ILoggingProvider = Depends(get_logger),
 ) -> AiProcessor:
-    return AiProcessor(ai_port=ai_provider, styler_port=styler, logger=logger)
+    return AiProcessor(
+        ai_provider=ai_provider,
+        chat_styler_provider=chat_styler_provider,
+        logger=logger,
+    )
 
 
 def get_state_manager(
@@ -59,10 +63,10 @@ def get_state_manager(
 
 
 def get_dispatcher(
-    platform: LinePlatformAdapter = Depends(get_line_platform),
+    platform_provider: LinePlatformAdapter = Depends(get_line_platform),
     logger: ILoggingProvider = Depends(get_logger),
 ) -> Dispatcher:
-    return Dispatcher(platform=platform, logger=logger)
+    return Dispatcher(platform_provider=platform_provider, logger=logger)
 
 
 def get_chat_pipeline(

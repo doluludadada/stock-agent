@@ -24,18 +24,18 @@ class CachedPriceProvider(IPriceProvider):
 
     def __init__(
         self,
-        fallback_provider: IPriceProvider,
+        price_provider: IPriceProvider,
         db: DatabaseConnector,
         logger: ILoggingProvider,
     ):
-        self._fallback = fallback_provider
+        self._price = price_provider
         self._db = db
         self._logger = logger
 
     async def fetch_realtime_bars(self, stocks: list[Stock]) -> dict[str, Ohlcv]:
         # Keep this simple.
         # YahooFinanceProvider already batches the request.
-        return await self._fallback.fetch_realtime_bars(stocks)
+        return await self._price.fetch_realtime_bars(stocks)
 
     async def fetch_history(
         self,
@@ -82,7 +82,7 @@ class CachedPriceProvider(IPriceProvider):
         if missing_stocks:
             self._logger.info(f"History cache miss: {len(missing_stocks)}/{len(stocks)} stocks")
 
-            fresh_bars = await self._fallback.fetch_history(
+            fresh_bars = await self._price.fetch_history(
                 missing_stocks,
                 start_date,
                 end_date,

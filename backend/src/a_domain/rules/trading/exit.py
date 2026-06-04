@@ -1,5 +1,3 @@
-# backend/src/a_domain/rules/trading/exit.py
-
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -11,67 +9,35 @@ from a_domain.rules.trading.reason import ReasonRule
 from a_domain.types.enums import SignalSource, TradeAction
 
 
-# TODO: No hardcode here
+# TODO: No hard code here
 @dataclass(frozen=True)
 class ExitRule:
     """
-    Decides SELL or HOLD for a held position.
-        - Held positions must not disappear from decision output.
-        - If there is no exit trigger, the explicit decision is HOLD.
+    Sell-side rule.
+
+    Responsibilities:
+    - emergency stop-loss SELL
+    - score-based SELL
+    - otherwise HOLD
+
+    AccountRiskCheck should call decide_stop_loss_only().
+    Full DecisionRule should call decide().
     """
 
     stop_loss_pct: float
-    """
-    Maximum tolerated loss from average cost.
-    Example: 0.1 means SELL when price drops 10% below average cost.
-    """
-
     action_rule: ActionRule
-    """
-    Converts combined_score into BUY / SELL / HOLD.
-    For exit flow, SELL becomes an orderable exit decision.
-    """
-
     reason_rule: ReasonRule
-    """
-    Builds readable exit/HOLD reasons for audit, notification, and RAG memory.
-    """
 
     def decide(self, stock: Stock, position: Position) -> TradeSignal:
-        current_price = stock.current_price
-        """
-        Exit decision needs a valid executable price.
-        """
+        stop_loss_signal = self.decide_stop_loss_only(stock=stock, position=position)
 
-        if current_price is None:
-            raise ValueError(f"Cannot decide exit without current price: {stock.stock_id}")
+        if stop_loss_signal.action == TradeAction.SELL:
+            return stop_loss_signal
 
-        if position.quantity <= 0:
-            raise ValueError(f"Cannot decide exit with non-positive position quantity: {stock.stock_id}")
-
-        if self._should_stop_loss(current_price, position.average_cost):
-            stop_loss_price = self._stop_loss_price(position.average_cost)
-
-            return TradeSignal(
-                stock_id=stock.stock_id,
-                action=TradeAction.SELL,
-                price_at_signal=current_price,
-                source=SignalSource.TECHNICAL,
-                score=0,
-                reason=self.reason_rule.build_exit(
-                    stock=stock,
-                    position=position,
-                    cause="STOP_LOSS",
-                ),
-                quantity=position.quantity,
-                stop_loss_price=stop_loss_price,
-                generated_at=datetime.now(),
-            )
+        current_price = self._require_current_price(stock)
+        self._validate_position(stock=stock, position=position)
 
         action = self.action_rule.resolve(stock.combined_score)
-        """
-        Score-based exit uses the same final combined score as entry.
-        """
 
         if action == TradeAction.SELL:
             return TradeSignal(
@@ -104,23 +70,57 @@ class ExitRule:
             generated_at=datetime.now(),
         )
 
-    def _should_stop_loss(self, current_price: float, average_cost: float) -> bool:
-        """
-        Checks whether current price has crossed the configured stop-loss line.
+    def decide_stop_loss_only(self, stock: Stock, position: Position) -> TradeSignal:
+        current_price = self._require_current_price(stock)
+        self._validate_position(stock=stock, position=position)
 
-        Reason:
-        Stop-loss is a hard exit rule and should be evaluated before score-based exit.
-        """
+        stop_loss_price = self.stop_loss_price(position.average_cost)
+
+        if current_price > stop_loss_price:
+            return TradeSignal(
+                stock_id=stock.stock_id,
+                action=TradeAction.HOLD,
+                price_at_signal=current_price,
+                source=SignalSource.TECHNICAL,
+                score=stock.combined_score,
+                reason=self.reason_rule.build_exit_hold(
+                    stock=stock,
+                    position=position,
+                    cause="Stop-loss not triggered",
+                ),
+                quantity=0,
+                stop_loss_price=stop_loss_price,
+                generated_at=datetime.now(),
+            )
+
+        return TradeSignal(
+            stock_id=stock.stock_id,
+            action=TradeAction.SELL,
+            price_at_signal=current_price,
+            source=SignalSource.TECHNICAL,
+            score=0,
+            reason=self.reason_rule.build_exit(
+                stock=stock,
+                position=position,
+                cause="STOP_LOSS",
+            ),
+            quantity=position.quantity,
+            stop_loss_price=stop_loss_price,
+            generated_at=datetime.now(),
+        )
+
+    def stop_loss_price(self, average_cost: float) -> float:
         if average_cost <= 0:
-            return False
+            return 0
 
-        return current_price <= self._stop_loss_price(average_cost)
+        return average_cost * (1 - self.stop_loss_pct)
 
-    def _stop_loss_price(self, average_cost: float) -> float:
-        """
-        Calculates the stop-loss trigger price.
+    def _require_current_price(self, stock: Stock) -> float:
+        if stock.current_price is None:
+            raise ValueError(f"Cannot decide exit without current price: {stock.stock_id}")
 
-        Reason:
-        TradeSignal can store this value for audit and reporting.
-        """
-        return average_cost * (1.0 - self.stop_loss_pct)
+        return stock.current_price
+
+    def _validate_position(self, stock: Stock, position: Position) -> None:
+        if position.quantity <= 0:
+            raise ValueError(f"Cannot decide exit with non-positive position quantity: {stock.stock_id}")

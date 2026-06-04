@@ -37,11 +37,11 @@ class PttProvider(ISocialMediaProvider):
         self,
         config: AppConfig,
         logger: ILoggingProvider,
-        stock: IStockProvider,
+        stock_provider: IStockProvider,
     ):
         self._config = config
         self._log = logger
-        self._stock = stock
+        self._stock = stock_provider
         self._universe: set[str] | None = None
 
     # ── public ────────────────────────────────────────────────────── #

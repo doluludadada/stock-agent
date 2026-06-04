@@ -16,6 +16,7 @@ from c_infrastructure.database.chroma.chroma_repository import ChromaRepositoryA
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.repositories.signal_repository import SignalRepository
 from c_infrastructure.database.repositories.watchlist_repository import WatchlistRepository
+from c_infrastructure.trading.mock.mock_execution_provider import MockExecutionProvider
 from d_presentation.dependencies.core import get_db_connector, get_logger, get_settings
 from d_presentation.dependencies.providers import get_tavily_search
 
@@ -24,9 +25,9 @@ from d_presentation.dependencies.providers import get_tavily_search
 def get_ai_provider(
     config: AppConfig = Depends(get_settings),
     logger: ILoggingProvider = Depends(get_logger),
-    web_search: IWebSearchProvider | None = Depends(get_tavily_search),
+    web_search_provider: IWebSearchProvider | None = Depends(get_tavily_search),
 ) -> IAiProvider:
-    factory = AiAdapterFactory(config=config, logger=logger, web_search=web_search)
+    factory = AiAdapterFactory(config=config, logger=logger, web_search_provider=web_search_provider)
     return factory.create_adapter()
 
 
@@ -61,7 +62,14 @@ def get_watchlist_repository(
     return WatchlistRepository(db=connector, logger=logger)
 
 
-def get_execution_provider() -> IExecutionProvider:
-    # Requires a real broker execution adapter (e.g. Shioaji) Implementation here.
-    # Currently raising NotImplemented as it assumes DEV environment mocking in use calls or another injection.
-    raise NotImplementedError("ExecutionProvider not fully mapped to an adapter.")
+def get_execution_provider(
+    connector: DatabaseConnector = Depends(get_db_connector),
+    config: AppConfig = Depends(get_settings),
+    logger: ILoggingProvider = Depends(get_logger),
+) -> IExecutionProvider:
+    # TODO: Future - switch to ShioajiExecutionProvider when environment is LIVE.
+    return MockExecutionProvider(
+        db=connector,
+        config=config,
+        logger=logger,
+    )

@@ -34,14 +34,14 @@ class GroqAIAdapter(BaseAIAdapter):
         config: AppConfig,
         logger: ILoggingProvider,
         model_name: str = "openai/gpt-oss-20b",
-        web_search: IWebSearchProvider | None = None,
+        web_search_provider: IWebSearchProvider | None = None,
     ):
         super().__init__(config, logger, model_name)
 
         if not self._config.ai.groq_api_key:
             raise ValueError("Missing groq_api_key in configuration.")
 
-        self._web_search = web_search
+        self._web_search_provider = web_search_provider
 
     @cached_property
     def _client(self) -> AsyncOpenAI:
@@ -97,7 +97,7 @@ class GroqAIAdapter(BaseAIAdapter):
 
     async def _enrich_with_search(self, messages: tuple[Message, ...]) -> str:
         """Execute web search and format results."""
-        if not self._web_search:
+        if not self._web_search_provider:
             return ""
 
         user_query = ""
@@ -110,7 +110,7 @@ class GroqAIAdapter(BaseAIAdapter):
             return ""
 
         self._logger.debug(f"Performing web search for: {user_query}")
-        results = await self._web_search.search(
+        results = await self._web_search_provider.search(
             user_query,
             limit=self._config.behavior.web_search_max_results,
         )
@@ -126,7 +126,7 @@ class GroqAIAdapter(BaseAIAdapter):
 
     def _should_search(self, messages: tuple[Message, ...]) -> bool:
         """Determine if web search should be triggered."""
-        if not self._config.behavior.enable_web_search or not self._web_search:
+        if not self._config.behavior.enable_web_search or not self._web_search_provider:
             return False
 
         for msg in reversed(messages):

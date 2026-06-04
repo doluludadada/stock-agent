@@ -14,10 +14,15 @@ class AiAdapterFactory:
     Factory class responsible for creating AI model adapter instances based on configuration.
     """
 
-    def __init__(self, config: AppConfig, logger: ILoggingProvider, web_search: IWebSearchProvider | None = None):
+    def __init__(
+        self,
+        config: AppConfig,
+        logger: ILoggingProvider,
+        web_search_provider: IWebSearchProvider | None = None,
+    ):
         self._config = config
         self._logger = logger
-        self._web_search = web_search
+        self._web_search_provider = web_search_provider
         self._logger.trace(f"AI Adapter Factory initialised. Active model provider: {self._config.ai.active_model.value}")  # noqa: E501
 
     def create_adapter(
@@ -60,8 +65,7 @@ class AiAdapterFactory:
                 config=self._config,
                 logger=self._logger,
                 model_name=model_name,
-                web_search=self._web_search,
+                web_search_provider=self._web_search_provider,
             )
         raise ValueError(f"Unsupported provider: {provider!s}")
-
 

@@ -113,6 +113,9 @@ class PipelineContext:
     - These are persisted for audit/RAG memory but should not become broker orders.
     """
 
+    emergency_exit_signals: list[TradeSignal] = field(default_factory=list)
+    risk_blocked_stock_ids: set[str] = field(default_factory=set)
+
     stats: SystemStats = field(default_factory=SystemStats)
     """
     Runtime counters, errors, execution log, and order submission count.

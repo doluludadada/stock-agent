@@ -19,17 +19,17 @@ class TechnicalFilter:
 
     def __init__(
         self,
-        tech_provider: IIndicatorProvider,
+        indicator_provider: IIndicatorProvider,
         screening_policy: TechnicalScreeningPolicy,
         score_calculator: TechnicalScoreCalculator,
         logger: ILoggingProvider,
     ):
-        self._tech_provider = tech_provider
+        self._indicator = indicator_provider
         self._policy = screening_policy
         self._calculator = score_calculator
         self._logger = logger
 
-    def execute(self, context: PipelineContext) -> None:
+    async def execute(self, context: PipelineContext) -> None:
         stocks = context.priced
         """
         Only stocks with fresh price/history data can be technically evaluated.
@@ -62,7 +62,7 @@ class TechnicalFilter:
                 continue
 
             try:
-                stock.indicators = self._tech_provider.calculate_indicators(stock.ohlcv)
+                stock.indicators = self._indicator.calculate_indicators(stock.ohlcv)
                 self._policy.evaluate(stock)
                 stock.technical_score = self._calculator.calculate(stock)
 

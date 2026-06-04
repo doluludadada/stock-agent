@@ -10,6 +10,7 @@ from b_application.use_cases.process.technical_filter import TechnicalFilter
 from b_application.use_cases.ship.reporting import Reporting
 from b_application.use_cases.ship.signals import Signals
 from b_application.use_cases.trade.account_loader import AccountLoader
+from b_application.use_cases.trade.account_risk_check import AccountRiskCheck
 from b_application.use_cases.trade.order_execution import OrderExecution
 
 
@@ -29,6 +30,7 @@ class Pipeline:
     def __init__(
         self,
         account_loader: AccountLoader,
+        account_risk_check: AccountRiskCheck,
         stock_selector: StockSelector,
         market_data: MarketData,
         technical_filter: TechnicalFilter,
@@ -40,6 +42,7 @@ class Pipeline:
         logger: ILoggingProvider,
     ):
         self._account_loader = account_loader
+        self._account_risk_check = account_risk_check
         self._stock_selector = stock_selector
         self._market_data = market_data
         self._technical_filter = technical_filter
@@ -61,18 +64,21 @@ class Pipeline:
 
         try:
             await self._account_loader.execute(context)
-
+            await self._account_risk_check.execute(context)
             await self._stock_selector.execute(context)
+
             if not context.candidates:
                 self._logger.info("No stocks selected.")
                 return
 
             await self._market_data.execute(context)
+
             if not context.priced:
                 self._logger.info("No price data available.")
                 return
 
-            self._technical_filter.execute(context)
+            await self._technical_filter.execute(context)
+
             if not context.survivors:
                 self._logger.info("No stocks survived the technical filter.")
                 return
@@ -80,9 +86,9 @@ class Pipeline:
             await self._news_feed.execute(context)
             await self._ai_analyser.execute(context)
             await self._signals.execute(context)
-
             await self._order_execution.execute(context)
             await self._reporting.execute(context)
+            context.stats.finish()
 
         except Exception as e:
             self._logger.exception(f"Pipeline crashed: {e}")
