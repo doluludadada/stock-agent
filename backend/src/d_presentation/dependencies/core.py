@@ -1,3 +1,5 @@
+# backend/src/d_presentation/dependencies/core.py
+
 from functools import lru_cache
 from typing import AsyncGenerator
 
@@ -5,12 +7,14 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from a_domain.ports.system.logging_provider import ILoggingProvider
+from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.system.notification_provider import INotificationProvider
 from b_application.schemas.config import AppConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.platforms.line.line_notification_adapter import LineNotificationAdapter
 from c_infrastructure.system.config_loader import load_settings
 from c_infrastructure.system.logger_service import LoggerService
+from c_infrastructure.system.market_clock import TaiwanMarketClock
 
 
 @lru_cache
@@ -24,7 +28,15 @@ def get_logger(config: AppConfig = Depends(get_settings)) -> ILoggingProvider:
 
 
 @lru_cache
-def get_db_connector(config: AppConfig = Depends(get_settings), logger: ILoggingProvider = Depends(get_logger)) -> DatabaseConnector:
+def get_market_clock() -> IMarketClock:
+    return TaiwanMarketClock()
+
+
+@lru_cache
+def get_db_connector(
+    config: AppConfig = Depends(get_settings),
+    logger: ILoggingProvider = Depends(get_logger),
+) -> DatabaseConnector:
     return DatabaseConnector(config=config, logger=logger)
 
 
@@ -37,6 +49,7 @@ async def get_db_session(
 
 @lru_cache
 def get_notification_provider(
-    config: AppConfig = Depends(get_settings), logger: ILoggingProvider = Depends(get_logger)
+    config: AppConfig = Depends(get_settings),
+    logger: ILoggingProvider = Depends(get_logger),
 ) -> INotificationProvider:
     return LineNotificationAdapter(config=config, logger=logger)

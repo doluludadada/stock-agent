@@ -1,8 +1,20 @@
 from dataclasses import dataclass
 
+import icontract
+
 from a_domain.model.market.stock import Stock
 
 
+@icontract.invariant(lambda self: 0 <= self.base <= 100)
+@icontract.invariant(lambda self: self.pass_bonus >= 0)
+@icontract.invariant(lambda self: self.hard_failure_penalty >= 0)
+@icontract.invariant(lambda self: self.max_hard_penalty >= 0)
+@icontract.invariant(lambda self: self.soft_failure_penalty >= 0)
+@icontract.invariant(lambda self: self.max_soft_penalty >= 0)
+@icontract.invariant(lambda self: self.rsi_sweet_spot_bonus >= 0)
+@icontract.invariant(lambda self: 0 <= self.rsi_sweet_spot_min <= self.rsi_sweet_spot_max <= 100)
+@icontract.invariant(lambda self: self.macd_bullish_bonus >= 0)
+@icontract.invariant(lambda self: self.ma_present_bonus >= 0)
 @dataclass(frozen=True)
 class TechnicalScoreCalculator:
     """
@@ -67,6 +79,7 @@ class TechnicalScoreCalculator:
     Bonus points if a valid trend MA reference is present.
     """
 
+    @icontract.ensure(lambda result: 0 <= result <= 100)
     def calculate(self, stock: Stock) -> int:
         """Computes the overall technical score for the stock."""
         score = self.base
@@ -107,7 +120,7 @@ class TechnicalScoreCalculator:
                 bonus += self.macd_bullish_bonus
 
         ma = stock.indicators.ma
-        if ma is not None and ma.ma_20 is not None:
+        if ma is not None and ma.price_ma.get(20) is not None:
             bonus += self.ma_present_bonus
 
         return bonus

@@ -1,4 +1,5 @@
 import httpx
+from icontract import require
 
 from a_domain.model.chat.web_search_result import WebSearchResult
 from a_domain.ports.chat.web_search_provider import IWebSearchProvider
@@ -11,12 +12,10 @@ class TavilySearchAdapter(IWebSearchProvider):
     Tavily web search adapter.
     """
 
+    @require(lambda config: bool(config.tavily.api_key), "Missing tavily_api_key in configuration.")
     def __init__(self, config: AppConfig, logger: ILoggingProvider) -> None:
         self._config = config
         self._logger = logger
-
-        if not self._config.tavily.api_key:
-            raise ValueError("Missing tavily_api_key in configuration.")
 
         timeout = getattr(self._config, "ai_model_connection_timeout", 30)
         self._client = httpx.AsyncClient(timeout=httpx.Timeout(timeout))

@@ -1,8 +1,13 @@
 from dataclasses import dataclass
 
+import icontract
+
 from a_domain.model.market.stock import Stock
 
 
+@icontract.invariant(lambda self: self.technical_weight >= 0)
+@icontract.invariant(lambda self: self.sentiment_weight >= 0)
+@icontract.invariant(lambda self: self.technical_weight + self.sentiment_weight > 0)
 @dataclass(frozen=True)
 class CompositeScoreRule:
     """
@@ -12,15 +17,13 @@ class CompositeScoreRule:
     technical_weight: float
     sentiment_weight: float
 
+    @icontract.ensure(lambda result: 0 <= result <= 100)
     def calculate(self, stock: Stock) -> int:
         # TODO: Shoudn't be None no?
         technical_score = stock.technical_score if stock.technical_score is not None else 50
         ai_score = stock.ai_score if stock.ai_score is not None else 50
 
         total_weight = self.technical_weight + self.sentiment_weight
-
-        if total_weight <= 0:
-            return 50
 
         weighted_score = (technical_score * self.technical_weight + ai_score * self.sentiment_weight) / total_weight
 

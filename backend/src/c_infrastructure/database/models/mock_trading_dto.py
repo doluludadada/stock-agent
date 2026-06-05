@@ -9,7 +9,7 @@ from c_infrastructure.trading.mock.constants import MockTableName
 
 
 class MockCash(SQLModel, table=True):
-    __tablename__: ClassVar[str] = MockTableName.CASH
+    __tablename__: ClassVar[str] = MockTableName.CASH  # pyright: ignore[reportIncompatibleVariableOverride]
 
     account_id: str = Field(primary_key=True)
     current_cash: float = Field(ge=0)
@@ -21,7 +21,7 @@ class MockCash(SQLModel, table=True):
 
 
 class MockPosition(SQLModel, table=True):
-    __tablename__: ClassVar[str] = MockTableName.POSITIONS
+    __tablename__: ClassVar[str] = MockTableName.POSITIONS  # pyright: ignore[reportIncompatibleVariableOverride]
 
     account_id: str = Field(primary_key=True)
     stock_id: str = Field(primary_key=True)
@@ -35,7 +35,7 @@ class MockPosition(SQLModel, table=True):
 
 
 class MockOrder(SQLModel, table=True):
-    __tablename__: ClassVar[str] = MockTableName.ORDERS
+    __tablename__: ClassVar[str] = MockTableName.ORDERS  # pyright: ignore[reportIncompatibleVariableOverride]
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     account_id: str = Field(index=True)

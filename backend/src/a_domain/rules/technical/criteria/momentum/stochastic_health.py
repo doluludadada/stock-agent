@@ -1,8 +1,11 @@
 from dataclasses import dataclass
 
+import icontract
+
 from a_domain.model.market.stock import Stock
 
 
+@icontract.invariant(lambda self: self.max_k is None or 0 <= self.max_k <= 100)
 @dataclass(frozen=True)
 class StochasticHealthCriterion:
     """

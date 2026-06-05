@@ -19,12 +19,11 @@ class StockSelector:
         self,
         watchlist_repo: IWatchlistRepository,
         stock_provider: IStockProvider,
-        candidate_selection_rule: CandidateSelectionRule,
         logger: ILoggingProvider,
     ):
         self._watchlist_repo = watchlist_repo
         self._stock_provider = stock_provider
-        self._candidate_selection_rule = candidate_selection_rule
+        self._candidate_selection_rule = CandidateSelectionRule()
         self._logger = logger
 
     async def execute(self, context: PipelineContext) -> None:

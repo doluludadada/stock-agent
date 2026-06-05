@@ -1,11 +1,14 @@
 from dataclasses import dataclass
 
+import icontract
+
 from a_domain.model.market.stock import Stock
 
 # TODO:
 # ADD Comment
 
 
+@icontract.invariant(lambda self: self.min_daily_volume >= 0)
 @dataclass(frozen=True)
 class LiquidityCriterion:
     min_daily_volume: int = 500
@@ -28,6 +31,7 @@ class LiquidityCriterion:
         return average_volume >= self.min_daily_volume
 
 
+@icontract.invariant(lambda self: self.min_price > 0)
 @dataclass(frozen=True)
 class MinimumPriceCriterion:
     min_price: float = 15.0
@@ -43,25 +47,25 @@ class MinimumPriceCriterion:
         return stock.current_price >= self.min_price
 
 
+@icontract.invariant(lambda self: self.min_ratio > 0)
+@icontract.invariant(lambda self: self.period > 0)
 @dataclass(frozen=True)
 class VolumeExpansionCriterion:
     min_ratio: float = 1.0
+    period: int = 5
 
     @property
     def name(self) -> str:
-        return f"Volume Expansion >= {self.min_ratio}x"
+        return f"Volume Expansion >= {self.min_ratio}x vs MA_{self.period}"
 
     def apply(self, stock: Stock) -> bool:
         if stock.indicators is None or stock.indicators.ma is None:
             return False
 
-        average_volume = stock.indicators.ma.volume_ma_5
+        average_volume = stock.indicators.ma.volume_ma.get(self.period)
 
         if average_volume is None:
             return True
-
-        if average_volume <= 0:
-            return False
 
         if not stock.ohlcv:
             return False

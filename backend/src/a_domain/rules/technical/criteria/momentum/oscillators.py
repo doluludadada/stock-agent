@@ -1,8 +1,11 @@
 from dataclasses import dataclass
 
+import icontract
+
 from a_domain.model.market.stock import Stock
 
 
+@icontract.invariant(lambda self: 0 <= self.min_rsi <= self.max_rsi <= 100)
 @dataclass(frozen=True)
 class RsiRangeCriterion:
     min_rsi: float = 0.0
@@ -25,6 +28,7 @@ class RsiRangeCriterion:
         return self.min_rsi <= rsi_value <= self.max_rsi
 
 
+@icontract.invariant(lambda self: 0 <= self.max_mfi <= 100)
 @dataclass(frozen=True)
 class MfiThresholdCriterion:
     max_mfi: float = 80.0

@@ -2,6 +2,7 @@ from a_domain.ports.market.price_provider import IPriceProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.rules.trading.exit import ExitRule
 from a_domain.types.enums import TradeAction
+from b_application.schemas.config import AppConfig
 from b_application.schemas.pipeline_context import PipelineContext
 
 
@@ -18,11 +19,14 @@ class AccountRiskCheck:
     def __init__(
         self,
         price_provider: IPriceProvider,
-        exit_rule: ExitRule,
+        config: AppConfig,
         logger: ILoggingProvider,
     ):
         self._price_provider = price_provider
-        self._exit_rule = exit_rule
+        self._exit_rule = ExitRule(
+            stop_loss_pct=config.analysis.stop_loss_pct,
+            sell_threshold=config.analysis.max_combined_score_sell,
+        )
         self._logger = logger
 
     async def execute(self, context: PipelineContext) -> None:

@@ -8,6 +8,7 @@ import asyncio
 from functools import cached_property
 
 import httpx
+from icontract import require
 from openai import AsyncOpenAI, OpenAIError
 from openai.types.chat import (
     ChatCompletionAssistantMessageParam,
@@ -29,6 +30,7 @@ class GroqAIAdapter(BaseAIAdapter):
 
     groq_base_url = "https://api.groq.com/openai/v1"
 
+    @require(lambda config: bool(config.ai.groq_api_key), "Missing groq_api_key in configuration.")
     def __init__(
         self,
         config: AppConfig,
@@ -37,9 +39,6 @@ class GroqAIAdapter(BaseAIAdapter):
         web_search_provider: IWebSearchProvider | None = None,
     ):
         super().__init__(config, logger, model_name)
-
-        if not self._config.ai.groq_api_key:
-            raise ValueError("Missing groq_api_key in configuration.")
 
         self._web_search_provider = web_search_provider
 

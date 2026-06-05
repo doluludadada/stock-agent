@@ -1,3 +1,5 @@
+from icontract import require
+
 from a_domain.model.chat.message import Message, MessageRole
 from a_domain.ports.ai.ai_provider import IAiProvider
 from a_domain.ports.ai.knowledge_repository import IKnowledgeRepository
@@ -12,19 +14,23 @@ class AiAnalyser:
     def __init__(
         self,
         ai_provider: IAiProvider,
-        prompt_builder: AiReportPromptBuilder,
-        response_parser: AiReportParser,
         knowledge_repo: IKnowledgeRepository,
         config: AppConfig,
         logger: ILoggingProvider,
     ):
         self._ai = ai_provider
-        self._prompt_builder = prompt_builder
-        self._response_parser = response_parser
         self._knowledge = knowledge_repo
         self._config = config
+        self._prompt_builder = AiReportPromptBuilder(
+            fundamental_template=config.prompts.analysis_report_fundamental,
+            momentum_template=config.prompts.analysis_report_momentum,
+            max_articles=config.analysis.article_fetch_limit,
+            max_content_length=config.ai.article_content_length,
+        )
+        self._response_parser = AiReportParser()
         self._logger = logger
 
+    @require(lambda context: len(context.survivors) > 0, "Pipeline guarantees survivors exist")
     async def execute(self, context: PipelineContext) -> None:
         stocks = context.survivors
         self._logger.info(f"Analysing AI context for {len(stocks)} stocks...")

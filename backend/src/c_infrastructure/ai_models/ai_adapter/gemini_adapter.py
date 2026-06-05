@@ -4,6 +4,7 @@ from typing import Any
 
 import google.generativeai as genai
 from google.api_core.client_options import ClientOptions
+from icontract import require
 
 from a_domain.model.chat.message import Message, MessageRole
 from a_domain.ports.system.logging_provider import ILoggingProvider
@@ -12,12 +13,11 @@ from c_infrastructure.ai_models.base import BaseAIAdapter
 
 
 class GeminiAIAdapter(BaseAIAdapter):
+    @require(lambda config: bool(config.ai.gemini_api_key), "Missing gemini_api_key in configuration.")
     def __init__(
         self, config: AppConfig, logger: ILoggingProvider, model_name: str
     ) -> None:
         super().__init__(config, logger, model_name)
-        if not self._config.ai.gemini_api_key:
-            raise ValueError("Missing gemini_api_key in configuration.")
         genai.configure(api_key=self._config.ai.gemini_api_key)  # type: ignore[attr-defined]
         endpoint = getattr(self._config, "gemini_endpoint", None)
         if endpoint:

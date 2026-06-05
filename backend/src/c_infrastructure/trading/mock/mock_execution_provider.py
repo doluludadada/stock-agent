@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlmodel import col
 
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.position import Position
@@ -18,8 +19,8 @@ class MockExecutionProvider(IExecutionProvider):
     """
     DEV / TEST fake broker with database persistence.
 
-    This replaces the old CLI-only hardcoded mock provider.
     State is persisted in mock_cash, mock_positions, and mock_orders.
+    Includes universal market friction costs (fees and taxes).
     """
 
     def __init__(
@@ -29,6 +30,7 @@ class MockExecutionProvider(IExecutionProvider):
         logger: ILoggingProvider,
     ):
         self._db = db
+        self._config = config
         self._logger = logger
         self._account_id = config.mock_trading.account_id
         self._initial_cash = config.mock_trading.initial_cash
@@ -61,8 +63,8 @@ class MockExecutionProvider(IExecutionProvider):
         async with self._db.get_session() as session:
             result = await session.execute(
                 select(MockOrder).where(
-                    MockOrder.id == parsed_order_id,
-                    MockOrder.account_id == self._account_id,
+                    col(MockOrder.id) == parsed_order_id,
+                    col(MockOrder.account_id) == self._account_id,
                 )
             )
             order = result.scalar_one_or_none()
@@ -83,7 +85,7 @@ class MockExecutionProvider(IExecutionProvider):
         await self._ensure_account()
 
         async with self._db.get_session() as session:
-            result = await session.execute(select(MockPosition).where(MockPosition.account_id == self._account_id))
+            result = await session.execute(select(MockPosition).where(col(MockPosition.account_id) == self._account_id))
             rows = result.scalars().all()
 
             return [
@@ -110,7 +112,12 @@ class MockExecutionProvider(IExecutionProvider):
 
     async def _place_buy_order(self, order: Order) -> str:
         price = self._require_price(order)
-        order_value = price * order.quantity
+        base_value = price * order.quantity
+
+        # Calculate universal friction costs
+        trading_rules = self._config.market
+        fee = max(trading_rules.min_fee, int(base_value * trading_rules.fee_rate))
+        total_cost = base_value + fee
 
         async with self._db.get_session() as session:
             cash = await self._get_cash(session)
@@ -118,7 +125,7 @@ class MockExecutionProvider(IExecutionProvider):
             if cash is None:
                 raise RuntimeError("Mock account was not initialized.")
 
-            if cash.current_cash < order_value:
+            if cash.current_cash < total_cost:
                 return await self._save_rejected_order_in_session(
                     session=session,
                     order=order,
@@ -146,7 +153,7 @@ class MockExecutionProvider(IExecutionProvider):
                 position.quantity += order.quantity
                 position.updated_at = self._now()
 
-            cash.current_cash -= order_value
+            cash.current_cash -= total_cost
             cash.updated_at = self._now()
 
             mock_order = self._create_order_row(
@@ -158,13 +165,22 @@ class MockExecutionProvider(IExecutionProvider):
 
             await session.commit()
 
-            self._logger.success(f"{MockLogMessage.ORDER_FILLED} BUY {order.stock_id} x {order.quantity}")
+            self._logger.success(
+                f"{MockLogMessage.ORDER_FILLED} BUY {order.stock_id} x {order.quantity} "
+                f"(Price: {price}, Fee: {fee}, Total: {total_cost})"
+            )
 
             return str(mock_order.id)
 
     async def _place_sell_order(self, order: Order) -> str:
         price = self._require_price(order)
-        order_value = price * order.quantity
+        base_value = price * order.quantity
+
+        # Calculate universal friction costs (Fees + Tax)
+        market_rules = self._config.market
+        fee = max(market_rules.min_fee, int(base_value * market_rules.fee_rate))
+        tax = int(base_value * market_rules.tax_rate)
+        net_revenue = base_value - fee - tax
 
         async with self._db.get_session() as session:
             cash = await self._get_cash(session)
@@ -195,7 +211,8 @@ class MockExecutionProvider(IExecutionProvider):
                 position.quantity = remaining_quantity
                 position.updated_at = self._now()
 
-            cash.current_cash += order_value
+            # 增加扣除手續費及稅後的淨收入
+            cash.current_cash += net_revenue
             cash.updated_at = self._now()
 
             mock_order = self._create_order_row(
@@ -207,7 +224,10 @@ class MockExecutionProvider(IExecutionProvider):
 
             await session.commit()
 
-            self._logger.success(f"{MockLogMessage.ORDER_FILLED} SELL {order.stock_id} x {order.quantity}")
+            self._logger.success(
+                f"{MockLogMessage.ORDER_FILLED} SELL {order.stock_id} x {order.quantity} "
+                f"(Price: {price}, Fee: {fee}, Tax: {tax}, Net: {net_revenue})"
+            )
 
             return str(mock_order.id)
 
@@ -253,14 +273,14 @@ class MockExecutionProvider(IExecutionProvider):
             self._logger.info(MockLogMessage.ACCOUNT_SEEDED)
 
     async def _get_cash(self, session) -> MockCash | None:
-        result = await session.execute(select(MockCash).where(MockCash.account_id == self._account_id))
+        result = await session.execute(select(MockCash).where(col(MockCash.account_id) == self._account_id))
         return result.scalar_one_or_none()
 
     async def _get_position(self, session, stock_id: str) -> MockPosition | None:
         result = await session.execute(
             select(MockPosition).where(
-                MockPosition.account_id == self._account_id,
-                MockPosition.stock_id == stock_id,
+                col(MockPosition.account_id) == self._account_id,
+                col(MockPosition.stock_id) == stock_id,
             )
         )
         return result.scalar_one_or_none()

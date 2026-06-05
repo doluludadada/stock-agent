@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from a_domain.types.enums import AiProvider, DatabaseProvider, StrategyName, SystemEnvironment
@@ -91,6 +91,13 @@ class AnalysisConfig(BaseModel):
     stop_loss_pct: float = Field(default=0.10, ge=0.01, le=0.5)
     total_capital: int = Field(default=1000000, ge=10000)
     article_fetch_limit: int = Field(default=20, ge=1, le=100)
+
+    @model_validator(mode="after")
+    def _validate_weights(self) -> "AnalysisConfig":
+        total_weight = self.technical_weight + self.sentiment_weight
+        if abs(total_weight - 1.0) > 1e-5:
+            raise ValueError(f"technical_weight and sentiment_weight must sum to 1.0, got {total_weight}")
+        return self
 
 
 class NotificationConfig(BaseModel):
@@ -222,6 +229,13 @@ class StrategyThresholds(BaseModel):
     max_intraday_range_position: float = 0.8
     max_consecutive_up_days: int = 4
 
+class MarketConfig(BaseModel):
+    """Universal market trading rules and friction costs."""
+
+    fee_rate: float = Field(default=0.001425, ge=0)
+    tax_rate: float = Field(default=0.003, ge=0)
+    min_fee: int = Field(default=20, ge=0)
+
 
 class MockTradingConfig(BaseModel):
     """
@@ -233,7 +247,6 @@ class MockTradingConfig(BaseModel):
 
     account_id: str = "mock-dev"
     initial_cash: float = Field(default=1_000_000, gt=0)
-
 
 class AppConfig(BaseSettings):
     """
@@ -266,4 +279,5 @@ class AppConfig(BaseSettings):
     quality: QualityFiltersConfig = Field(default_factory=QualityFiltersConfig)
     indicators: IndicatorConfig = Field(default_factory=IndicatorConfig)
     strategy: StrategyThresholds = Field(default_factory=StrategyThresholds)
+    market: MarketConfig = Field(default_factory=MarketConfig)
     mock_trading: MockTradingConfig = Field(default_factory=MockTradingConfig)

@@ -27,21 +27,6 @@ class MarketType(StrEnum):
     NASDAQ = "NASDAQ"
     NYSE = "NYSE"
 
-# TODO:
-
-"""
-just use
-@dataclass(frozen=True)
-class MovingAverages:
-"""
-
-class MaPeriod(StrEnum):
-    MA_5 = "MA_5"
-    MA_10 = "MA_10"
-    MA_20 = "MA_20"
-    MA_60 = "MA_60"
-    MA_120 = "MA_120"
-
 
 class TradeAction(StrEnum):
     BUY = "BUY"

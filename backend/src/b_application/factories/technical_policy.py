@@ -35,7 +35,7 @@ from a_domain.rules.technical.criteria.volume import (
     VolumeExpansionCriterion,
 )
 from a_domain.rules.technical.policy import TechnicalScreeningPolicy
-from a_domain.types.enums import MaPeriod, StrategyName
+from a_domain.types.enums import StrategyName
 from b_application.schemas.config import StrategyThresholds
 
 
@@ -64,9 +64,9 @@ class TechnicalPolicyFactory:
     def create_conservative(self, cfg: StrategyThresholds) -> TechnicalScreeningPolicy:
         return TechnicalScreeningPolicy(
             setup_must_pass=[
-                PriceAboveMaCriterion(MaPeriod.MA_20),
-                PriceAboveMaCriterion(MaPeriod.MA_60),
-                MaAlignmentCriterion(MaPeriod.MA_20, MaPeriod.MA_60),
+                PriceAboveMaCriterion(20),
+                PriceAboveMaCriterion(60),
+                MaAlignmentCriterion(20, 60),
                 MacdBullishCriterion(
                     require_cross=True,
                     require_positive=True,
@@ -125,8 +125,8 @@ class TechnicalPolicyFactory:
     def create_moderate(self, cfg: StrategyThresholds) -> TechnicalScreeningPolicy:
         return TechnicalScreeningPolicy(
             setup_must_pass=[
-                PriceAboveMaCriterion(MaPeriod.MA_20),
-                MaAlignmentCriterion(MaPeriod.MA_20, MaPeriod.MA_60),
+                PriceAboveMaCriterion(20),
+                MaAlignmentCriterion(20, 60),
                 MacdBullishCriterion(
                     require_cross=True,
                     require_positive=False,
@@ -143,7 +143,7 @@ class TechnicalPolicyFactory:
                 VolumeExpansionCriterion(min_ratio=cfg.volume_dry_ratio),
             ],
             should_pass=[
-                PriceAboveMaCriterion(MaPeriod.MA_60),
+                PriceAboveMaCriterion(60),
                 MacdBullishCriterion(
                     require_cross=False,
                     require_positive=True,
@@ -191,8 +191,8 @@ class TechnicalPolicyFactory:
     def create_nightly(self, cfg: StrategyThresholds) -> TechnicalScreeningPolicy:
         return TechnicalScreeningPolicy(
             setup_must_pass=[
-                PriceAboveMaCriterion(MaPeriod.MA_20),
-                MaAlignmentCriterion(MaPeriod.MA_20, MaPeriod.MA_60),
+                PriceAboveMaCriterion(20),
+                MaAlignmentCriterion(20, 60),
                 MacdBullishCriterion(
                     require_cross=True,
                     require_positive=False,
@@ -208,7 +208,7 @@ class TechnicalPolicyFactory:
                 VolumeExpansionCriterion(min_ratio=cfg.volume_above_avg_ratio),
             ],
             should_pass=[
-                PriceAboveMaCriterion(MaPeriod.MA_60),
+                PriceAboveMaCriterion(60),
                 MacdBullishCriterion(
                     require_cross=False,
                     require_positive=True,
@@ -253,7 +253,7 @@ class TechnicalPolicyFactory:
 
         return TechnicalScreeningPolicy(
             setup_must_pass=[
-                PriceAboveMaCriterion(MaPeriod.MA_20),
+                PriceAboveMaCriterion(20),
                 MacdBullishCriterion(
                     require_cross=True,
                     require_positive=False,

@@ -1,58 +1,38 @@
 from dataclasses import dataclass
 
+from icontract import ensure, require
+
 from a_domain.model.trading.account import Account
 
 
+# TODO: 
 @dataclass(frozen=True)
 class SizingRule:
-    """
-    Calculates BUY quantity.
-
-    In this first version, account.cash means currently usable cash.
-    This is position sizing, not true risk-based sizing.
-    """
-
-    """
-    TODO:
-    
-    你現在不是做真正的 risk sizing。真正的 risk sizing 會需要：
-
-    entry_price
-    stop_loss_price
-    risk_per_share
-    max_loss_amount
-
-    你現在這版比較像：
-    我每次最多用 cash 的幾 % 去買
-    
-    """
-
-    position_pct: float
-    """
-    Fraction of currently usable cash allocated to one new position.
-    - Example: 0.02 means using 2% of account.cash.
-    """
-
+    risk_per_trade_pct: float  # e.g., 0.02 (Risk 2% of total cash per trade)
+    stop_loss_pct: float  # e.g., 0.10 (Stop loss set at 10% below entry)
     lot_size: int = 1
-    """
-    Minimum trading unit.
-    - Use 1 for normal share-based sizing.
-    - Use 1000 if the market requires board-lot trading.
-    """
+
+    @require(lambda self: 0 < self.risk_per_trade_pct <= 1.0)
+    @require(lambda self: 0 < self.stop_loss_pct < 1.0)
+    @require(lambda self: self.lot_size > 0)
+    @require(lambda price: price > 0, "Price must be executable")
+    @ensure(lambda result, self: result % self.lot_size == 0, "Must align with lot size")
+    @ensure(lambda result: result >= 0)
     def calculate(self, account: Account, price: float) -> int:
         if account.cash <= 0:
             return 0
 
-        if price <= 0:
-            return 0
+        # Formula: Risk Budget = Cash * Risk %
+        risk_budget = account.cash * self.risk_per_trade_pct
 
-        if self.position_pct <= 0:
-            return 0
+        # Formula: Potential loss per share = Price * Stop Loss %
+        risk_per_share = price * self.stop_loss_pct
 
-        if self.lot_size <= 0:
-            return 0
+        # Ideal quantity based on risk tolerance
+        ideal_quantity = int(risk_budget // risk_per_share)
 
-        budget = account.cash * self.position_pct
-        quantity = int(budget // price)
+        # Safety Gate: Total order value must never exceed actual available cash
+        max_qty_by_cash = int(account.cash // price)
+        quantity = min(ideal_quantity, max_qty_by_cash)
 
         return (quantity // self.lot_size) * self.lot_size

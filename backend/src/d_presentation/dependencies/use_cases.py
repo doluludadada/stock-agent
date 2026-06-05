@@ -9,25 +9,18 @@ from a_domain.ports.market.news_provider import INewsProvider
 from a_domain.ports.market.price_provider import IPriceProvider
 from a_domain.ports.market.stock_provider import IStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
+from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.system.notification_provider import INotificationProvider
 from a_domain.ports.trading.execution_provider import IExecutionProvider
 from a_domain.ports.trading.signal_repository import ISignalRepository
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
-from a_domain.rules.ai.parser import AiReportParser
-from a_domain.rules.ai.prompt import AiReportPromptBuilder
-from a_domain.rules.collect import CandidateSelectionRule
-from a_domain.rules.collect.article_quality import ArticleQualityRule
-from a_domain.rules.collect.freshness import DataFreshnessRule
-from a_domain.rules.scoring.composite import CompositeScoreRule
-from a_domain.rules.scoring.technical import TechnicalScoreCalculator
-from a_domain.rules.technical.policy import TechnicalScreeningPolicy
-from a_domain.rules.trading.decision import DecisionRule
-from a_domain.rules.trading.exit import ExitRule
 from b_application.pipeline import Pipeline
 from b_application.schemas.config import AppConfig
 from b_application.use_cases.collect.market_data import MarketData
+from b_application.use_cases.collect.market_scan import MarketScan
 from b_application.use_cases.collect.news_feed import NewsFeed
 from b_application.use_cases.collect.stock_selector import StockSelector
+from b_application.use_cases.collect.watchlist import Watchlist
 from b_application.use_cases.process.ai_analyser import AiAnalyser
 from b_application.use_cases.process.technical_filter import TechnicalFilter
 from b_application.use_cases.ship.reporting import Reporting
@@ -37,6 +30,7 @@ from b_application.use_cases.trade.account_risk_check import AccountRiskCheck
 from b_application.use_cases.trade.order_execution import OrderExecution
 from d_presentation.dependencies.core import (
     get_logger,
+    get_market_clock,
     get_notification_provider,
     get_settings,
 )
@@ -53,18 +47,106 @@ from d_presentation.dependencies.repositories import (
     get_signal_repository,
     get_watchlist_repository,
 )
-from d_presentation.dependencies.rules import (
-    get_ai_report_parser,
-    get_ai_report_prompt_builder,
-    get_candidate_selection_rule,
-    get_composite_score_rule,
-    get_data_freshness_rule,
-    get_decision_rule,
-    get_exit_rule,
-    get_quality_rule,
-    get_technical_score_calculator,
-    get_technical_screening_policy,
-)
+
+
+def get_watchlist_use_case(
+    stock_provider: IStockProvider = Depends(get_stock_provider),
+    price_provider: IPriceProvider = Depends(get_price_provider),
+    indicator_provider: IIndicatorProvider = Depends(get_indicator_provider),
+    watchlist_repo: IWatchlistRepository = Depends(get_watchlist_repository),
+    logger: ILoggingProvider = Depends(get_logger),
+    config: AppConfig = Depends(get_settings),
+    market_clock: IMarketClock = Depends(get_market_clock),
+) -> Watchlist:
+    return Watchlist(
+        stock_provider=stock_provider,
+        price_provider=price_provider,
+        indicator_provider=indicator_provider,
+        watchlist_repo=watchlist_repo,
+        logger=logger,
+        config=config,
+        market_clock=market_clock,
+    )
+
+
+def get_market_scan_use_case(
+    social_media_provider,
+    watchlist_repo: IWatchlistRepository = Depends(get_watchlist_repository),
+    stock_provider: IStockProvider = Depends(get_stock_provider),
+    logger: ILoggingProvider = Depends(get_logger),
+    config: AppConfig = Depends(get_settings),
+) -> MarketScan:
+    return MarketScan(
+        social_media_provider=social_media_provider,
+        watchlist_repo=watchlist_repo,
+        stock_provider=stock_provider,
+        logger=logger,
+        config=config,
+    )
+
+
+def get_stock_selector_use_case(
+    watchlist_repo: IWatchlistRepository = Depends(get_watchlist_repository),
+    stock_provider: IStockProvider = Depends(get_stock_provider),
+    logger: ILoggingProvider = Depends(get_logger),
+) -> StockSelector:
+    return StockSelector(
+        watchlist_repo=watchlist_repo,
+        stock_provider=stock_provider,
+        logger=logger,
+    )
+
+
+def get_market_data_use_case(
+    price_provider: IPriceProvider = Depends(get_price_provider),
+    logger: ILoggingProvider = Depends(get_logger),
+    config: AppConfig = Depends(get_settings),
+    market_clock: IMarketClock = Depends(get_market_clock),
+) -> MarketData:
+    return MarketData(
+        price_provider=price_provider,
+        logger=logger,
+        config=config,
+        market_clock=market_clock,
+    )
+
+
+def get_news_feed_use_case(
+    news_provider: INewsProvider = Depends(get_news_provider),
+    logger: ILoggingProvider = Depends(get_logger),
+    config: AppConfig = Depends(get_settings),
+) -> NewsFeed:
+    return NewsFeed(
+        news_provider=news_provider,
+        logger=logger,
+        config=config,
+    )
+
+
+def get_technical_filter_use_case(
+    indicator_provider: IIndicatorProvider = Depends(get_indicator_provider),
+    config: AppConfig = Depends(get_settings),
+    logger: ILoggingProvider = Depends(get_logger),
+) -> TechnicalFilter:
+    return TechnicalFilter(
+        indicator_provider=indicator_provider,
+        config=config,
+        logger=logger,
+    )
+
+
+def get_ai_analyser_use_case(
+    ai_provider: IAiProvider = Depends(get_ai_provider),
+    knowledge_repository: IKnowledgeRepository = Depends(get_knowledge_repository),
+    config: AppConfig = Depends(get_settings),
+    logger: ILoggingProvider = Depends(get_logger),
+) -> AiAnalyser:
+    return AiAnalyser(
+        ai_provider=ai_provider,
+        knowledge_repo=knowledge_repository,
+        config=config,
+        logger=logger,
+    )
 
 
 def get_account_loader_use_case(
@@ -81,109 +163,32 @@ def get_account_loader_use_case(
 
 def get_account_risk_check_use_case(
     price_provider: IPriceProvider = Depends(get_price_provider),
-    exit_rule: ExitRule = Depends(get_exit_rule),
+    config: AppConfig = Depends(get_settings),
     logger: ILoggingProvider = Depends(get_logger),
 ) -> AccountRiskCheck:
     return AccountRiskCheck(
         price_provider=price_provider,
-        exit_rule=exit_rule,
-        logger=logger,
-    )
-
-
-def get_stock_selector_use_case(
-    watchlist_repo: IWatchlistRepository = Depends(get_watchlist_repository),
-    stock_provider: IStockProvider = Depends(get_stock_provider),
-    candidate_selection_rule: CandidateSelectionRule = Depends(get_candidate_selection_rule),
-    logger: ILoggingProvider = Depends(get_logger),
-) -> StockSelector:
-    return StockSelector(
-        watchlist_repo=watchlist_repo,
-        stock_provider=stock_provider,
-        candidate_selection_rule=candidate_selection_rule,
-        logger=logger,
-    )
-
-
-def get_market_data_use_case(
-    price_provider: IPriceProvider = Depends(get_price_provider),
-    freshness_rule: DataFreshnessRule = Depends(get_data_freshness_rule),
-    config: AppConfig = Depends(get_settings),
-    logger: ILoggingProvider = Depends(get_logger),
-) -> MarketData:
-    return MarketData(
-        price=price_provider,
-        freshness_rule=freshness_rule,
-        config=config,
-        logger=logger,
-    )
-
-
-def get_technical_filter_use_case(
-    indicator_provider: IIndicatorProvider = Depends(get_indicator_provider),
-    screening_policy: TechnicalScreeningPolicy = Depends(get_technical_screening_policy),
-    score_calculator: TechnicalScoreCalculator = Depends(get_technical_score_calculator),
-    logger: ILoggingProvider = Depends(get_logger),
-) -> TechnicalFilter:
-    return TechnicalFilter(
-        indicator_provider=indicator_provider,
-        screening_policy=screening_policy,
-        score_calculator=score_calculator,
-        logger=logger,
-    )
-
-
-def get_news_feed_use_case(
-    news_provider: INewsProvider = Depends(get_news_provider),
-    quality_filter: ArticleQualityRule = Depends(get_quality_rule),
-    config: AppConfig = Depends(get_settings),
-    logger: ILoggingProvider = Depends(get_logger),
-) -> NewsFeed:
-    return NewsFeed(
-        news_provider=news_provider,
-        quality_filter=quality_filter,
-        config=config,
-        logger=logger,
-    )
-
-
-def get_ai_analyser_use_case(
-    ai_provider: IAiProvider = Depends(get_ai_provider),
-    prompt_builder: AiReportPromptBuilder = Depends(get_ai_report_prompt_builder),
-    response_parser: AiReportParser = Depends(get_ai_report_parser),
-    knowledge_repo: IKnowledgeRepository = Depends(get_knowledge_repository),
-    config: AppConfig = Depends(get_settings),
-    logger: ILoggingProvider = Depends(get_logger),
-) -> AiAnalyser:
-    return AiAnalyser(
-        ai_provider=ai_provider,
-        prompt_builder=prompt_builder,
-        response_parser=response_parser,
-        knowledge_repo=knowledge_repo,
         config=config,
         logger=logger,
     )
 
 
 def get_signals_use_case(
-    decision_rule: DecisionRule = Depends(get_decision_rule),
-    composite_rule: CompositeScoreRule = Depends(get_composite_score_rule),
     signal_repository: ISignalRepository = Depends(get_signal_repository),
     knowledge_repository: IKnowledgeRepository = Depends(get_knowledge_repository),
+    config: AppConfig = Depends(get_settings),
     logger: ILoggingProvider = Depends(get_logger),
 ) -> Signals:
     return Signals(
-        decision_rule=decision_rule,
-        composite_rule=composite_rule,
         signal_repository=signal_repository,
         knowledge_repository=knowledge_repository,
+        config=config,
         logger=logger,
     )
 
 
 def get_order_execution_use_case(
     execution_provider: IExecutionProvider = Depends(get_execution_provider),
-    config: AppConfig = Depends(get_settings),
     logger: ILoggingProvider = Depends(get_logger),
 ) -> OrderExecution:
     return OrderExecution(

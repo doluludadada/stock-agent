@@ -32,7 +32,10 @@ class IndicatorProvider(IIndicatorProvider):
     def calculate_indicators(self, data: list[Ohlcv]) -> TechnicalIndicators:
         ind = self._config.indicators
 
-        if len(data) < ind.ma_long:
+        price_ma_periods = {ind.ma_short, ind.ma_mid, ind.ma_long}
+        volume_ma_periods = {ind.ma_short}
+
+        if len(data) < max(price_ma_periods | volume_ma_periods):
             return TechnicalIndicators()
 
         df = pd.DataFrame(
@@ -50,10 +53,11 @@ class IndicatorProvider(IIndicatorProvider):
 
         df.ta.rsi(length=ind.rsi_period, append=True)
         df.ta.macd(fast=ind.macd_fast, slow=ind.macd_slow, signal=ind.macd_signal, append=True)
-        df.ta.sma(length=ind.ma_short, append=True)
-        df.ta.sma(length=ind.ma_mid, append=True)
-        df.ta.sma(length=ind.ma_long, append=True)
-        df.ta.sma(close="volume", length=ind.ma_short, prefix="VOL", append=True)
+        for period in price_ma_periods:
+            df.ta.sma(length=period, append=True)
+
+        for period in volume_ma_periods:
+            df.ta.sma(close="volume", length=period, prefix="VOL", append=True)
         df.ta.bbands(length=ind.bb_period, std=ind.bb_std, append=True)
         df.ta.stoch(k=ind.stoch_k, d=ind.stoch_d, append=True)
         df.ta.adx(length=ind.adx_period, append=True)
@@ -68,6 +72,9 @@ class IndicatorProvider(IIndicatorProvider):
                 return None
             return float(val)
 
+        def present(values: dict[int, float | None]) -> dict[int, float]:
+            return {period: value for period, value in values.items() if value is not None and value > 0}
+
         try:
             rsi = Rsi(val_14=safe_float(latest.get(f"RSI_{ind.rsi_period}")))
 
@@ -79,10 +86,12 @@ class IndicatorProvider(IIndicatorProvider):
             )
 
             ma = MovingAverages(
-                ma_5=safe_float(latest.get(f"SMA_{ind.ma_short}")),
-                ma_20=safe_float(latest.get(f"SMA_{ind.ma_mid}")),
-                ma_60=safe_float(latest.get(f"SMA_{ind.ma_long}")),
-                volume_ma_5=safe_float(latest.get(f"VOL_SMA_{ind.ma_short}")),
+                price_ma=present(
+                    {period: safe_float(latest.get(f"SMA_{period}")) for period in price_ma_periods}
+                ),
+                volume_ma=present(
+                    {period: safe_float(latest.get(f"VOL_SMA_{period}")) for period in volume_ma_periods}
+                ),
             )
 
             bb_base = f"{ind.bb_period}_{float(ind.bb_std)}"

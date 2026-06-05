@@ -1,16 +1,18 @@
 from dataclasses import dataclass
 from datetime import datetime
 
+from icontract import ensure, invariant, require
+
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.account import Account
 from a_domain.model.trading.position import Position
 from a_domain.model.trading.signal import TradeSignal
-from a_domain.rules.trading.action import ActionRule
 from a_domain.rules.trading.reason import ReasonRule
 from a_domain.rules.trading.sizing import SizingRule
 from a_domain.types.enums import SignalSource, TradeAction
 
 
+@invariant(lambda self: 0 <= self.buy_threshold <= 100)
 @dataclass(frozen=True)
 class EntryRule:
     """
@@ -22,10 +24,12 @@ class EntryRule:
 
     """
 
-    action_rule: ActionRule
+    buy_threshold: int
     sizing_rule: SizingRule
-    reason_rule: ReasonRule
 
+    @require(lambda stock: stock.current_price is not None, "Entry decision requires a valid current price")
+    @ensure(lambda result: result.quantity >= 0, "BUY signal quantity must be non-negative")
+    @ensure(lambda result: result.action != TradeAction.BUY or result.quantity > 0, "BUY signal must have positive quantity")
     def decide(
         self,
         stock: Stock,
@@ -33,23 +37,15 @@ class EntryRule:
         position: Position | None = None,
     ) -> TradeSignal:
         current_price = stock.current_price
-        # Entry decision needs a valid executable price.
-        # Upstream MarketData and TechnicalFilter should guarantee this.
 
-        if current_price is None:
-            raise ValueError(f"Cannot decide entry without current price: {stock.stock_id}")
-
-        action = self.action_rule.resolve(stock.combined_score)
-        # Converts the combined technical + AI score into a trading action.
-
-        if action != TradeAction.BUY:
+        if stock.combined_score < self.buy_threshold:
             return TradeSignal(
                 stock_id=stock.stock_id,
                 action=TradeAction.HOLD,
                 price_at_signal=current_price,
                 source=SignalSource.HYBRID,
                 score=stock.combined_score,
-                reason=self.reason_rule.build_entry_hold(
+                reason=ReasonRule.build_entry_hold(
                     stock=stock,
                     cause="Score below buy threshold",
                 ),
@@ -66,7 +62,7 @@ class EntryRule:
                 price_at_signal=current_price,
                 source=SignalSource.HYBRID,
                 score=stock.combined_score,
-                reason=self.reason_rule.build_entry_hold(
+                reason=ReasonRule.build_entry_hold(
                     stock=stock,
                     cause="Insufficient cash or position size too small",
                 ),
@@ -74,7 +70,7 @@ class EntryRule:
                 generated_at=datetime.now(),
             )
 
-        reason = self.reason_rule.build_entry(stock)
+        reason = ReasonRule.build_entry(stock)
 
         if position is not None:
             reason = f"ADD_POSITION | CurrentQty={position.quantity} | {reason}"

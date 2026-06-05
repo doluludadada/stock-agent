@@ -1,9 +1,14 @@
 from dataclasses import dataclass
 
+import icontract
+
 from a_domain.model.market.article import Article
 from a_domain.types.enums import InformationSource
 
 
+@icontract.invariant(lambda self: self.min_chars_stock >= 0)
+@icontract.invariant(lambda self: self.min_chars_news >= 0)
+@icontract.invariant(lambda self: self.min_chars_gossip >= 0)
 @dataclass(frozen=True)
 class ArticleQualityRule:
     spam_keywords: frozenset[str]

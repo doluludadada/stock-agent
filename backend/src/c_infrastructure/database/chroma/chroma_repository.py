@@ -1,10 +1,11 @@
 # backend/src/c_infrastructure/database/chroma/chroma_repository.py
-from datetime import datetime
+from datetime import datetime, timezone
 
 import chromadb
 
 from a_domain.model.chat.conversation import Conversation
 from a_domain.model.market.stock import Stock
+from a_domain.model.trading.signal import TradeSignal
 from a_domain.ports.ai.knowledge_repository import IKnowledgeRepository
 from a_domain.ports.chat.conversation_repository import IConversationRepository
 from a_domain.ports.system.logging_provider import ILoggingProvider
@@ -108,3 +109,65 @@ class ChromaRepositoryAdapter(IConversationRepository, IKnowledgeRepository):
             self._logger.debug(f"Saved RAG Analysis to Chroma for '{context.stock_id}'")
         except Exception as e:
             self._logger.error(f"Error saving analysis to Chroma for {context.stock_id}: {e}")
+
+    async def save_decision(self, stock: Stock, signal: TradeSignal) -> None:
+        """
+        Saves final BUY / SELL / HOLD decision memory into ChromaDB.
+
+        This is semantic memory for future AI context.
+        It is not a replacement for SQL audit history.
+        """
+        try:
+            timestamp = datetime.now(timezone.utc)
+            doc_id = f"decision_{stock.stock_id}_{timestamp.strftime('%Y%m%d_%H%M%S_%f')}"
+
+            analysis_summary = ""
+            bullish_factors = ""
+            bearish_factors = ""
+
+            if stock.analysis_report is not None:
+                analysis_summary = stock.analysis_report.summary
+                bullish_factors = ", ".join(stock.analysis_report.bullish_factors)
+                bearish_factors = ", ".join(stock.analysis_report.bearish_factors)
+
+            hard_failures = ", ".join(stock.hard_failures)
+            soft_failures = ", ".join(stock.soft_failures)
+            observations = ", ".join(stock.observations)
+
+            document = (
+                f"Stock: {stock.stock_id}\n"
+                f"Date: {timestamp.date().isoformat()}\n"
+                f"Decision: {signal.action.value}\n"
+                f"Quantity: {signal.quantity}\n"
+                f"Price At Signal: {signal.price_at_signal}\n"
+                f"Technical Score: {stock.technical_score}\n"
+                f"AI Score: {stock.ai_score}\n"
+                f"Combined Score: {stock.combined_score}\n"
+                f"Reason: {signal.reason}\n"
+                f"Hard Failures: {hard_failures}\n"
+                f"Soft Failures: {soft_failures}\n"
+                f"Observations: {observations}\n"
+                f"AI Summary: {analysis_summary}\n"
+                f"Bullish Factors: {bullish_factors}\n"
+                f"Bearish Factors: {bearish_factors}\n"
+            )
+
+            metadata = {
+                "stock_id": stock.stock_id,
+                "decision": signal.action.value,
+                "combined_score": stock.combined_score,
+                "technical_score": stock.technical_score or 0,
+                "ai_score": stock.ai_score or 0,
+                "timestamp": timestamp.isoformat(),
+            }
+
+            self._knowledge_collection.upsert(
+                ids=[doc_id],
+                documents=[document],
+                metadatas=[metadata],
+            )
+
+            self._logger.debug(f"Saved decision memory to ChromaDB: {stock.stock_id} {signal.action.value}")
+
+        except Exception as e:
+            self._logger.error(f"Error saving decision memory to ChromaDB for {stock.stock_id}: {e}")

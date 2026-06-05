@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+import icontract
+
 from a_domain.model.market.stock import Stock
 
 
@@ -22,6 +24,7 @@ class BollingerPositionCriterion:
         return stock.current_price > bollinger.middle
 
 
+@icontract.invariant(lambda self: self.max_percent_b > 0)
 @dataclass(frozen=True)
 class BollingerThresholdCriterion:
     max_percent_b: float = 0.9
@@ -42,6 +45,7 @@ class BollingerThresholdCriterion:
         return percent_b < self.max_percent_b
 
 
+@icontract.invariant(lambda self: self.max_bandwidth > 0)
 @dataclass(frozen=True)
 class BollingerSqueezeCriterion:
     max_bandwidth: float = 0.1

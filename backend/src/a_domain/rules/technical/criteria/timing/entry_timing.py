@@ -1,9 +1,12 @@
 from dataclasses import dataclass
 
+import icontract
+
 from a_domain.model.market.stock import Stock
 
 
 # TODO: Add comment
+@icontract.invariant(lambda self: self.max_drop_pct >= 0)
 @dataclass(frozen=True)
 class PriceDropCriterion:
     max_drop_pct: float = 0.03
@@ -24,6 +27,7 @@ class PriceDropCriterion:
         return change > -self.max_drop_pct
 
 
+@icontract.invariant(lambda self: self.max_gap_pct >= 0)
 @dataclass(frozen=True)
 class GapCriterion:
     max_gap_pct: float = 0.03
@@ -60,6 +64,7 @@ class IntradayMomentumCriterion:
         return stock.today.close > stock.today.open
 
 
+@icontract.invariant(lambda self: 0 <= self.max_range_position <= 1)
 @dataclass(frozen=True)
 class IntradayRangeCriterion:
     max_range_position: float = 0.8
@@ -82,24 +87,24 @@ class IntradayRangeCriterion:
         return position < self.max_range_position
 
 
+@icontract.invariant(lambda self: self.min_volume_ratio >= 0)
+@icontract.invariant(lambda self: self.period > 0)
 @dataclass(frozen=True)
 class IntradayVolumeConfirmationCriterion:
     min_volume_ratio: float = 0.5
+    period: int = 5
 
     @property
     def name(self) -> str:
-        return "Intraday Volume Confirmation"
+        return f"Intraday Volume Confirmation vs MA_{self.period}"
 
     def apply(self, stock: Stock) -> bool:
         if stock.indicators is None or stock.indicators.ma is None:
             return True
 
-        average_volume = stock.indicators.ma.volume_ma_5
+        average_volume = stock.indicators.ma.volume_ma.get(self.period)
 
         if average_volume is None:
-            return True
-
-        if average_volume <= 0:
             return True
 
         if not stock.ohlcv:
@@ -110,6 +115,7 @@ class IntradayVolumeConfirmationCriterion:
         return today_volume >= average_volume * self.min_volume_ratio
 
 
+@icontract.invariant(lambda self: self.max_consecutive_up > 0)
 @dataclass(frozen=True)
 class ConsecutiveUpDaysCriterion:
     max_consecutive_up: int = 4

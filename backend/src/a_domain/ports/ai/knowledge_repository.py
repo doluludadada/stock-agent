@@ -1,6 +1,7 @@
 from typing import Protocol
 
 from a_domain.model.market.stock import Stock
+from a_domain.model.trading.signal import TradeSignal
 
 
 class IKnowledgeRepository(Protocol):
@@ -12,4 +13,8 @@ class IKnowledgeRepository(Protocol):
 
     async def save_analysis(self, context: Stock) -> None:
         """Saves analysis result into the knowledge base (RAG memory)."""
+        ...
+
+    async def save_decision(self, stock: Stock, signal: TradeSignal) -> None:
+        """Saves final BUY / SELL / HOLD decision summary into the knowledge base."""
         ...

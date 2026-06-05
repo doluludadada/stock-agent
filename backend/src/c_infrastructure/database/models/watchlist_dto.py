@@ -6,13 +6,16 @@ from uuid import UUID, uuid4
 from sqlmodel import Field, SQLModel
 
 
+# TODO: why do i need it? it should be StockDto right?
 class WatchlistDTO(SQLModel, table=True):
     """Infrastructure Database Model for tracking Watchlists."""
 
-    __tablename__: ClassVar[str] = "watchlists"
+    __tablename__: ClassVar[str] = "watchlists"  # pyright: ignore[reportIncompatibleVariableOverride]
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     stock_id: str = Field(index=True)
+    market: str = Field(default="TWSE", index=True)
+    name: str | None = Field(default=None)
     list_type: str = Field(index=True)  # "TECHNICAL" or "BUZZ"
     reason: str
     created_at: datetime = Field(default_factory=datetime.now)

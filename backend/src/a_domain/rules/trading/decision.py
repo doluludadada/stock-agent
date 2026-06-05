@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from icontract import ensure
+
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.account import Account
 from a_domain.model.trading.position import Position
@@ -29,14 +31,14 @@ class DecisionRule:
     """
     Handles stocks that already have an open position.
     """
-
+    @ensure(lambda result: len(result.stock_id) > 0, "Signal must have a stock_id")
+    @ensure(lambda result: result.quantity >= 0, "Signal quantity must be non-negative")
     def decide(
         self,
         stock: Stock,
         account: Account,
         position: Position | None = None,
     ) -> TradeSignal:
-    
         if position is None:
             return self.entry_rule.decide(stock=stock, account=account)
 

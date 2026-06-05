@@ -1,3 +1,5 @@
+from icontract import require
+
 from a_domain.ports.market.news_provider import INewsProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.rules.collect import ArticleQualityRule
@@ -14,20 +16,23 @@ class NewsFeed:
     def __init__(
         self,
         news_provider: INewsProvider,
-        quality_filter: ArticleQualityRule,
         config: AppConfig,
         logger: ILoggingProvider,
     ):
         self._news_provider = news_provider
-        self._quality = quality_filter
         self._config = config
+        self._quality = ArticleQualityRule(
+            spam_keywords=frozenset(config.collect_rules.spam_keywords),
+            financial_keywords=frozenset(config.collect_rules.financial_keywords),
+            min_chars_stock=config.quality.min_chars_stock,
+            min_chars_news=config.quality.min_chars_news,
+            min_chars_gossip=config.quality.min_chars_gossip,
+        )
         self._logger = logger
 
+    @require(lambda context: len(context.survivors) > 0, "Pipeline guarantees survivors exist")
     async def execute(self, context: PipelineContext) -> None:
         stocks = context.survivors
-
-        if not stocks:
-            return
 
         self._logger.info(f"Collecting articles for {len(stocks)} survivors.")
 

@@ -1,8 +1,10 @@
-
-
 from dataclasses import dataclass
 
+import icontract
 
+
+@icontract.invariant(lambda self: self.min_mentions >= 0)
+@icontract.invariant(lambda self: self.min_push_count >= 0)
 @dataclass(frozen=True)
 class SocialBuzzCriteria:
     """
@@ -12,16 +14,10 @@ class SocialBuzzCriteria:
     whether a stock qualifies as "Trending".
     """
 
-
     min_mentions: int
     min_push_count: int
-    """
-    Implements a simple stateless criteria for trend classification.
 
-    Attributes:
-        min_mentions (int): The lower boundary of mentions needed within a time block.
-        min_push_count (int): The combined push (upvote) score needed to confirm trend strength.
-    """
+    # TODO: Wire this up for future use
     def is_trending(self, mention_count: int, push_sum: int) -> bool:
         """
         Verifies if social metrics cross either threshold to qualify as buzz.

@@ -1,6 +1,7 @@
 from functools import cached_property
 
 import httpx
+from icontract import require
 from openai import AsyncOpenAI, OpenAIError
 from openai.types.chat import (
     ChatCompletionAssistantMessageParam,
@@ -15,10 +16,9 @@ from c_infrastructure.ai_models.base import BaseAIAdapter
 
 
 class OpenAIAdapter(BaseAIAdapter):
+    @require(lambda config: bool(config.ai.openai_api_key), "Missing openai_api_key in configuration.")
     def __init__(self, config: AppConfig, logger: ILoggingProvider, model_name: str):
         super().__init__(config, logger, model_name)
-        if not self._config.ai.openai_api_key:
-            raise ValueError("Missing openai_api_key in configuration.")
 
     @cached_property
     def _client(self) -> AsyncOpenAI:

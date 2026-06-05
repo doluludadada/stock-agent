@@ -1,15 +1,18 @@
 from dataclasses import dataclass
 from datetime import datetime
 
+from icontract import ensure, invariant, require
+
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.position import Position
 from a_domain.model.trading.signal import TradeSignal
-from a_domain.rules.trading.action import ActionRule
 from a_domain.rules.trading.reason import ReasonRule
 from a_domain.types.enums import SignalSource, TradeAction
 
 
 # TODO: No hard code here
+@invariant(lambda self: 0 < self.stop_loss_pct < 1)
+@invariant(lambda self: 0 <= self.sell_threshold <= 100)
 @dataclass(frozen=True)
 class ExitRule:
     """
@@ -25,28 +28,27 @@ class ExitRule:
     """
 
     stop_loss_pct: float
-    action_rule: ActionRule
-    reason_rule: ReasonRule
+    sell_threshold: int
 
+    @require(lambda stock: stock.current_price is not None, "Exit decision requires a valid current price")
+    @require(lambda position: position.quantity > 0, "Exit decision requires a positive position quantity")
+    @ensure(lambda result: result.action != TradeAction.SELL or result.quantity > 0, "SELL signal must have positive quantity")
     def decide(self, stock: Stock, position: Position) -> TradeSignal:
         stop_loss_signal = self.decide_stop_loss_only(stock=stock, position=position)
 
         if stop_loss_signal.action == TradeAction.SELL:
             return stop_loss_signal
 
-        current_price = self._require_current_price(stock)
-        self._validate_position(stock=stock, position=position)
+        current_price = stock.current_price
 
-        action = self.action_rule.resolve(stock.combined_score)
-
-        if action == TradeAction.SELL:
+        if stock.combined_score <= self.sell_threshold:
             return TradeSignal(
                 stock_id=stock.stock_id,
                 action=TradeAction.SELL,
                 price_at_signal=current_price,
                 source=SignalSource.HYBRID,
                 score=stock.combined_score,
-                reason=self.reason_rule.build_exit(
+                reason=ReasonRule.build_exit(
                     stock=stock,
                     position=position,
                     cause="SCORE_EXIT",
@@ -61,7 +63,7 @@ class ExitRule:
             price_at_signal=current_price,
             source=SignalSource.HYBRID,
             score=stock.combined_score,
-            reason=self.reason_rule.build_exit_hold(
+            reason=ReasonRule.build_exit_hold(
                 stock=stock,
                 position=position,
                 cause="No sell condition met",
@@ -70,9 +72,10 @@ class ExitRule:
             generated_at=datetime.now(),
         )
 
+    @require(lambda stock: stock.current_price is not None, "Exit decision requires a valid current price")
+    @require(lambda position: position.quantity > 0, "Exit decision requires a positive position quantity")
     def decide_stop_loss_only(self, stock: Stock, position: Position) -> TradeSignal:
-        current_price = self._require_current_price(stock)
-        self._validate_position(stock=stock, position=position)
+        current_price = stock.current_price
 
         stop_loss_price = self.stop_loss_price(position.average_cost)
 
@@ -83,7 +86,7 @@ class ExitRule:
                 price_at_signal=current_price,
                 source=SignalSource.TECHNICAL,
                 score=stock.combined_score,
-                reason=self.reason_rule.build_exit_hold(
+                reason=ReasonRule.build_exit_hold(
                     stock=stock,
                     position=position,
                     cause="Stop-loss not triggered",
@@ -99,7 +102,7 @@ class ExitRule:
             price_at_signal=current_price,
             source=SignalSource.TECHNICAL,
             score=0,
-            reason=self.reason_rule.build_exit(
+            reason=ReasonRule.build_exit(
                 stock=stock,
                 position=position,
                 cause="STOP_LOSS",
@@ -109,18 +112,7 @@ class ExitRule:
             generated_at=datetime.now(),
         )
 
+    @require(lambda average_cost: average_cost > 0)
+    @ensure(lambda result: result > 0)
     def stop_loss_price(self, average_cost: float) -> float:
-        if average_cost <= 0:
-            return 0
-
         return average_cost * (1 - self.stop_loss_pct)
-
-    def _require_current_price(self, stock: Stock) -> float:
-        if stock.current_price is None:
-            raise ValueError(f"Cannot decide exit without current price: {stock.stock_id}")
-
-        return stock.current_price
-
-    def _validate_position(self, stock: Stock, position: Position) -> None:
-        if position.quantity <= 0:
-            raise ValueError(f"Cannot decide exit with non-positive position quantity: {stock.stock_id}")

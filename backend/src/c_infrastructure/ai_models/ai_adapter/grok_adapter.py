@@ -4,6 +4,7 @@ from functools import cached_property
 from typing import Any
 
 import httpx
+from icontract import require
 from openai import AsyncOpenAI, OpenAIError
 
 from a_domain.model.chat.message import Message, MessageRole
@@ -13,10 +14,11 @@ from c_infrastructure.ai_models.base import BaseAIAdapter
 
 
 class GrokAdapter(BaseAIAdapter):
-    def __init__(self, config: AppConfig, logger: ILoggingProvider, model_name: str):
+    @require(lambda config: bool(config.ai.grok_api_key), "Missing grok_api_key in configuration.")
+    def __init__(
+        self, config: AppConfig, logger: ILoggingProvider, model_name: str
+    ) -> None:
         super().__init__(config, logger, model_name)
-        if not self._config.ai.grok_api_key:
-            raise ValueError("Missing grok_api_key in configuration.")
 
     @cached_property
     def _client(self) -> AsyncOpenAI:

@@ -1,53 +1,58 @@
 # backend/src/a_domain/rules/trading/reason.py
 
-from dataclasses import dataclass
+from icontract import ensure
 
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.position import Position
 
 
-# NOTE: Might improve in the future
-@dataclass(frozen=True)
 class ReasonRule:
     """
     Builds readable reasons for entry, exit, and hold decisions.
         - TradeSignal.reason is the final human-readable explanation.
         - No separate SignalReason enum is needed for current workflow.
+        - Stateless: all methods are @staticmethod. No instantiation needed.
     """
 
-    def build_entry(self, stock: Stock) -> str:
+    @staticmethod
+    @ensure(lambda result: len(result) > 0, "Reason must not be empty")
+    def build_entry(stock: Stock) -> str:
         """
         Builds BUY reason for non-held stock.
         - Used when EntryRule produces an executable BUY signal.
         """
         parts: list[str] = ["Entry: BUY"]
 
-        parts.append(self._technical_summary(stock))
+        parts.append(ReasonRule._technical_summary(stock))
 
         if stock.analysis_report and stock.analysis_report.bullish_factors:
             parts.append(f"Bull: {stock.analysis_report.bullish_factors[:3]}")
 
-        parts.append(self._score_summary(stock))
+        parts.append(ReasonRule._score_summary(stock))
 
         return " | ".join(parts)
 
-    def build_entry_hold(self, stock: Stock, cause: str) -> str:
+    @staticmethod
+    @ensure(lambda result: len(result) > 0, "Reason must not be empty")
+    def build_entry_hold(stock: Stock, cause: str) -> str:
         """
         Builds HOLD reason for non-held stock.
             - HOLD is a real decision, not None.
         """
         parts: list[str] = [f"Entry: HOLD - {cause}"]
 
-        parts.append(self._technical_summary(stock))
+        parts.append(ReasonRule._technical_summary(stock))
 
         if stock.analysis_report and stock.analysis_report.bearish_factors:
             parts.append(f"Risk: {stock.analysis_report.bearish_factors[:3]}")
 
-        parts.append(self._score_summary(stock))
+        parts.append(ReasonRule._score_summary(stock))
 
         return " | ".join(parts)
 
-    def build_exit(self, stock: Stock, position: Position, cause: str) -> str:
+    @staticmethod
+    @ensure(lambda result: len(result) > 0, "Reason must not be empty")
+    def build_exit(stock: Stock, position: Position, cause: str) -> str:
         """
         Builds SELL reason for held position.
             - Used when ExitRule produces an executable SELL signal.
@@ -60,16 +65,18 @@ class ReasonRule:
             pnl = (stock.current_price - position.average_cost) * position.quantity
             parts.append(f"PnL: {pnl:.2f}")
 
-        parts.append(self._technical_summary(stock))
+        parts.append(ReasonRule._technical_summary(stock))
 
         if stock.analysis_report and stock.analysis_report.bearish_factors:
             parts.append(f"Bear: {stock.analysis_report.bearish_factors[:3]}")
 
-        parts.append(self._score_summary(stock))
+        parts.append(ReasonRule._score_summary(stock))
 
         return " | ".join(parts)
 
-    def build_exit_hold(self, stock: Stock, position: Position, cause: str) -> str:
+    @staticmethod
+    @ensure(lambda result: len(result) > 0, "Reason must not be empty")
+    def build_exit_hold(stock: Stock, position: Position, cause: str) -> str:
         """
         Builds HOLD reason for held position.
             - A held stock with no exit trigger should still produce an explicit HOLD decision.
@@ -82,21 +89,23 @@ class ReasonRule:
             pnl = (stock.current_price - position.average_cost) * position.quantity
             parts.append(f"Unrealized PnL: {pnl:.2f}")
 
-        parts.append(self._technical_summary(stock))
-        parts.append(self._score_summary(stock))
+        parts.append(ReasonRule._technical_summary(stock))
+        parts.append(ReasonRule._score_summary(stock))
 
         return " | ".join(parts)
 
-    def build(self, stock: Stock) -> str:
+    @staticmethod
+    def build(stock: Stock) -> str:
         """
         Backward-compatible method.
 
         Existing code may still call ReasonRule.build(stock).
         Treat it as entry reason until old callers are removed.
         """
-        return self.build_entry(stock)
+        return ReasonRule.build_entry(stock)
 
-    def _technical_summary(self, stock: Stock) -> str:
+    @staticmethod
+    def _technical_summary(stock: Stock) -> str:
         """
         Summarizes technical result.
 
@@ -110,7 +119,8 @@ class ReasonRule:
 
         return "Tech: PASS"
 
-    def _score_summary(self, stock: Stock) -> str:
+    @staticmethod
+    def _score_summary(stock: Stock) -> str:
         """
         Summarizes final score components.
 

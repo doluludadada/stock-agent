@@ -67,27 +67,23 @@ class Pipeline:
             await self._account_risk_check.execute(context)
             await self._stock_selector.execute(context)
 
-            if not context.candidates:
-                self._logger.info("No stocks selected.")
-                return
+            # Flat sequence: Only run the next step if the previous step produced results
+            if context.candidates:
+                await self._market_data.execute(context)
+            if context.priced:
+                await self._technical_filter.execute(context)
+            if context.survivors:
+                await self._news_feed.execute(context)
+                await self._ai_analyser.execute(context)
 
-            await self._market_data.execute(context)
+            # Execute final decisions if we have either new candidates OR emergency stops
+            if context.survivors or context.emergency_exit_signals:
+                await self._signals.execute(context)
+                await self._order_execution.execute(context)
+                await self._reporting.execute(context)
+            else:
+                self._logger.info("No actionable candidates or emergency exits. Pipeline resting.")
 
-            if not context.priced:
-                self._logger.info("No price data available.")
-                return
-
-            await self._technical_filter.execute(context)
-
-            if not context.survivors:
-                self._logger.info("No stocks survived the technical filter.")
-                return
-
-            await self._news_feed.execute(context)
-            await self._ai_analyser.execute(context)
-            await self._signals.execute(context)
-            await self._order_execution.execute(context)
-            await self._reporting.execute(context)
             context.stats.finish()
 
         except Exception as e:

@@ -1,7 +1,10 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+import icontract
 
+
+@icontract.invariant(lambda self: self.max_lag_minutes > 0)
 @dataclass(frozen=True)
 class DataFreshnessRule:
     """

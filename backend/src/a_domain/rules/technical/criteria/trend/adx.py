@@ -1,8 +1,11 @@
 from dataclasses import dataclass
 
+import icontract
+
 from a_domain.model.market.stock import Stock
 
 
+@icontract.invariant(lambda self: 0 <= self.min_adx <= self.max_adx <= 100)
 @dataclass(frozen=True)
 class AdxTrendCriterion:
     """

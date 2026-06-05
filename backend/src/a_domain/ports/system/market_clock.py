@@ -1,0 +1,19 @@
+# backend/src/a_domain/ports/system/market_clock.py
+
+from datetime import date, datetime, tzinfo
+from typing import Protocol
+
+
+class IMarketClock(Protocol):
+    @property
+    def timezone(self) -> tzinfo: ...
+
+    def now(self) -> datetime: ...
+
+    def today(self) -> date: ...
+
+    def to_market_datetime(self, value: datetime) -> datetime: ...
+
+    def to_trading_date(self, value: datetime) -> date: ...
+
+    def history_window(self, lookback_days: int) -> tuple[datetime, datetime]: ...

@@ -1,19 +1,18 @@
 # backend/src/b_application/use_cases/collect/watchlist.py
 
-from datetime import datetime, timedelta
-
 from a_domain.model.market.stock import Stock
-from a_domain.ports.analysis.indicator_provider import IIndicatorProvider
-from a_domain.ports.market.price_provider import IPriceProvider
-from a_domain.ports.market.stock_provider import IStockProvider
-from a_domain.ports.system.logging_provider import ILoggingProvider
+from a_domain.ports.analysis import IIndicatorProvider
+from a_domain.ports.market import IPriceProvider, IStockProvider
+from a_domain.ports.system import ILoggingProvider, IMarketClock
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
-from a_domain.rules.technical.policy import TechnicalScreeningPolicy
+from a_domain.rules.scoring.technical import TechnicalScoreCalculator
 from a_domain.types.enums import CandidateSource
+from b_application.factories import TechnicalPolicyFactory
 from b_application.schemas.config import AppConfig
 from b_application.schemas.pipeline_context import PipelineContext
 
 
+# TODO: Check the code here.
 class Watchlist:
     """
     Use Case: Build nightly technical watchlist.
@@ -25,75 +24,71 @@ class Watchlist:
         self,
         stock_provider: IStockProvider,
         price_provider: IPriceProvider,
-        watchlist_repo: IWatchlistRepository,
         indicator_provider: IIndicatorProvider,
-        screening_policy: TechnicalScreeningPolicy,
+        watchlist_repo: IWatchlistRepository,
         logger: ILoggingProvider,
         config: AppConfig,
+        market_clock: IMarketClock,
     ):
-        self._stock = stock_provider
-        self._price = price_provider
-        self._watchlist = watchlist_repo
+        self._stock_provider = stock_provider
+        self._price_provider = price_provider
         self._indicator = indicator_provider
-        self._policy = screening_policy
+        self._policy = TechnicalPolicyFactory().create(config.analysis.active_strategy, config.strategy)
+        self._score = TechnicalScoreCalculator(
+            base=config.scoring.base,
+            pass_bonus=config.scoring.pass_bonus,
+            hard_failure_penalty=config.scoring.hard_failure_penalty,
+            max_hard_penalty=config.scoring.max_hard_penalty,
+            soft_failure_penalty=config.scoring.soft_failure_penalty,
+            max_soft_penalty=config.scoring.max_soft_penalty,
+            rsi_sweet_spot_bonus=config.scoring.rsi_sweet_spot_bonus,
+            rsi_sweet_spot_min=config.scoring.rsi_sweet_spot_min,
+            rsi_sweet_spot_max=config.scoring.rsi_sweet_spot_max,
+            macd_bullish_bonus=config.scoring.macd_bullish_bonus,
+            ma_present_bonus=config.scoring.ma_present_bonus,
+        )
+        self._repo = watchlist_repo
         self._logger = logger
         self._config = config
-
+        self._clock = market_clock
 
     async def execute(self, context: PipelineContext) -> None:
-        context.all_stocks = await self._stock.get_all()
-        context.stats.total_scanned += len(context.all_stocks)
+        stocks = await self._stock_provider.get_all()
 
-        self._logger.info(f"Generating technical watchlist from {len(context.all_stocks)} symbols.")
-        survivors: list[Stock] = []
-        """
-        Stocks that pass the nightly screening policy.
-        """
+        if not stocks:
+            self._logger.warning("No stocks loaded for technical watchlist generation.")
+            return
 
-        end_date = datetime.now()
-        """
-        Last day of the historical window.
-        """
+        self._logger.info(f"Generating technical watchlist from {len(stocks)} symbols.")
 
-        start_date = end_date - timedelta(days=self._config.analysis.lookback_days)
-        """
-        First day of the historical window.
-        """
+        start_date, end_date = self._clock.history_window(self._config.analysis.lookback_days)
+        history_map = await self._price_provider.fetch_history(stocks, start_date, end_date)
 
-        # Bulk stock_id -> historical OHLCV mapping.
-        history_map = await self._price.fetch_history(
-            context.all_stocks,
-            start_date,
-            end_date,
-        )
+        passed: list[Stock] = []
 
-        for stock in context.all_stocks:
-            # Empty history means the stock cannot be technically evaluated.
+        for stock in stocks:
             history = history_map.get(stock.stock_id, [])
 
             if not history:
                 continue
 
-            try:
-                stock.source = CandidateSource.TECHNICAL_WATCHLIST
-                # TODO: Why there's hard code
-                stock.trigger_reason = "Nightly Technical Scan"
-                stock.ohlcv = history
-                stock.indicators = self._indicator.calculate_indicators(history)
+            stock.ohlcv = history
+            stock.indicators = self._indicator.calculate_indicators(history)
+            stock.source = CandidateSource.TECHNICAL_WATCHLIST
+            stock.trigger_reason = "Nightly Technical Screen"
 
-                self._policy.evaluate(stock)
+            self._policy.evaluate(stock)
+            stock.technical_score = self._score.calculate(stock)
 
-                if not stock.is_eliminated:
-                    survivors.append(stock)
+            if stock.is_eliminated:
+                continue
 
-            except Exception as e:
-                error_message = f"Scan error {stock.stock_id}: {e}"
-                self._logger.error(error_message)
-                context.stats.add_error(error_message)
+            passed.append(stock)
 
-        context.technical_watchlist = survivors
-        context.stats.passed_technical += len(survivors)
+        await self._repo.save_technical_watchlist(passed)
 
-        await self._watchlist.save_technical_watchlist(survivors)
+        context.technical_watchlist = passed
+        context.stats.total_scanned = len(stocks)
+        context.stats.passed_technical = len(passed)
 
-        self._logger.info(f"Saved {len(survivors)} stocks to Technical Watchlist.")
+        self._logger.info(f"Saved {len(passed)} stocks to Technical Watchlist.")

@@ -1,5 +1,6 @@
 from datetime import datetime
 from types import SimpleNamespace
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -7,8 +8,6 @@ import pytest
 from a_domain.model.market.article import Article
 from a_domain.model.market.stock import Stock
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from a_domain.rules.ai.parser import AiReportParser
-from a_domain.rules.ai.prompt import AiReportPromptBuilder
 from a_domain.types.enums import InformationSource
 from b_application.schemas.pipeline_context import PipelineContext
 from b_application.use_cases.process.ai_analyser import AiAnalyser
@@ -58,8 +57,11 @@ class FailingAiProvider:
 
 
 class EmptyKnowledgeRepository:
-    async def search(self, stock_id: str) -> str:
+    async def search(self, query: str, limit: int = 3) -> str:
         return ""
+
+    async def save_analysis(self, context: Stock) -> None:
+        return None
 
 
 class FailingCompletions:
@@ -145,18 +147,19 @@ async def test_ai_analyser_records_provider_failure_without_counting_success() -
         )
     ]
     context = PipelineContext(survivors=[stock])
+    config = SimpleNamespace(
+        prompts=SimpleNamespace(
+            analysis_report_fundamental="Analyze {stock_id}: {articles_text}",
+            analysis_report_momentum="Analyze {stock_id}: {articles_text}",
+        ),
+        analysis=SimpleNamespace(article_fetch_limit=10),
+        ai=SimpleNamespace(article_content_length=500),
+    )
 
     analyser = AiAnalyser(
         ai_provider=FailingAiProvider(),
-        prompt_builder=AiReportPromptBuilder(
-            fundamental_template="Analyze {stock_id}: {articles_text}",
-            momentum_template="Analyze {stock_id}: {articles_text}",
-            max_articles=10,
-            max_content_length=500,
-        ),
-        response_parser=AiReportParser(),
         knowledge_repo=EmptyKnowledgeRepository(),
-        config=SimpleNamespace(),
+        config=cast(Any, config),
         logger=FakeLogger(),
     )
 
@@ -174,8 +177,8 @@ async def test_grok_adapter_raises_on_http_failure() -> None:
         ai=SimpleNamespace(grok_api_key="test-key", connection_timeout=1),
         behavior=SimpleNamespace(enable_web_search=False, enable_x_search=False, enable_inline_citations=False),
     )
-    adapter = GrokAdapter(config=config, logger=FakeLogger(), model_name="grok-test")
-    adapter.__dict__["_client"] = FakeClient()
+    adapter = GrokAdapter(config=cast(Any, config), logger=FakeLogger(), model_name="grok-test")
+    vars(adapter)["_client"] = FakeClient()
 
     with pytest.raises(RuntimeError, match="Grok API request failed"):
         await adapter._call_api(())

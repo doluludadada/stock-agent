@@ -59,6 +59,18 @@ wheels = [
 ]
 
 [[package]]
+name = "asttokens"
+version = "2.4.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "six" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/45/1d/f03bcb60c4a3212e15f99a56085d93093a497718adf828d050b9d675da81/asttokens-2.4.1.tar.gz", hash = "sha256:b03869718ba9a6eb027e134bfdf69f38a236d681c83c160d510768af11254ba0", size = 62284, upload-time = "2023-10-26T10:03:05.06Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/45/86/4736ac618d82a20d87d2f92ae19441ebc7ac9e7a581d7e58bbe79233b24a/asttokens-2.4.1-py2.py3-none-any.whl", hash = "sha256:051ed49c3dcae8913ea7cd08e46a606dba30b79993209636c4875bc1d637bc24", size = 27764, upload-time = "2023-10-26T10:03:01.789Z" },
+]
+
+[[package]]
 name = "asyncpg"
 version = "0.31.0"
 source = { registry = "https://pypi.org/simple" }
@@ -937,6 +949,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/cc/3f/2c29224acb2e2df4d2046e4c73ee2662023c58ff5b113c4c1adac0886c43/humanfriendly-10.0.tar.gz", hash = "sha256:6b0b831ce8f15f7300721aa49829fc4e83921a9a301cc7f606be6686a2288ddc", size = 360702, upload-time = "2021-09-17T21:40:43.31Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f0/0f/310fb31e39e2d734ccaa2c0fb981ee41f7bd5056ce9bc29b2248bd569169/humanfriendly-10.0-py2.py3-none-any.whl", hash = "sha256:1697e1a8a8f550fd43c2865cd84542fc175a61dcb779b6fee18cf6b6ccba1477", size = 86794, upload-time = "2021-09-17T21:40:39.897Z" },
+]
+
+[[package]]
+name = "icontract"
+version = "2.7.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "asttokens" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/41/93/8a7d5850d848cba73aa094b961459d8101b7c96837b2e8dc91083adcf7ae/icontract-2.7.3.tar.gz", hash = "sha256:df37a43d86d532407bc6b84dea29dd9f7ece794b73211769fa8a33a76b8ed145", size = 68361, upload-time = "2026-01-29T13:11:14.724Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ee/aa/ffc16b7ed17e052e7d2140e66336f829e9383f61f31249c4d181e12fcdea/icontract-2.7.3-py3-none-any.whl", hash = "sha256:8fb0f93f71211416f214f37c01b8017fdc8c079d70159f49f0ddcc10918c14d0", size = 40983, upload-time = "2026-01-29T13:11:13.198Z" },
 ]
 
 [[package]]
@@ -2651,6 +2676,7 @@ dependencies = [
     { name = "flet", extra = ["all"] },
     { name = "google-generativeai" },
     { name = "httpx" },
+    { name = "icontract" },
     { name = "loguru" },
     { name = "lxml" },
     { name = "numpy" },
@@ -2689,6 +2715,7 @@ requires-dist = [
     { name = "flet", extras = ["all"], specifier = ">=0.28.3" },
     { name = "google-generativeai", specifier = ">=0.8.5" },
     { name = "httpx", specifier = ">=0.28.1" },
+    { name = "icontract", specifier = ">=2.7.3" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "lxml", specifier = ">=6.0.2" },
     { name = "numpy", specifier = ">=2.2.6" },

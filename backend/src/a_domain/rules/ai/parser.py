@@ -1,10 +1,13 @@
 import json
 from dataclasses import dataclass
 
+from icontract import ensure, invariant
+
 from a_domain.model.analysis.ai_analysis_report import AiAnalysisReport
 
 
 # TODO:Clean here
+@invariant(lambda self: 0 <= self.fallback_score <= 100, "fallback_score must be 0-100")
 @dataclass(frozen=True)
 class AiReportParser:
     """
@@ -16,6 +19,7 @@ class AiReportParser:
 
     fallback_score: int = 50
 
+    @ensure(lambda result: 0 <= result.score <= 100, "Parsed score must be 0-100")
     def parse(self, stock_id: str, raw_response: str) -> AiAnalysisReport:
         try:
             parsed = self._extract_json(raw_response)

@@ -1,64 +1,62 @@
 from dataclasses import dataclass
 
+import icontract
+
 from a_domain.model.market.stock import Stock
-from a_domain.types.enums import MaPeriod
 
 
-# TODO:Add comment
-# TODO: delete MaPeriod?
-def get_ma_value(stock: Stock, period: MaPeriod) -> float | None:
-    if stock.indicators is None or stock.indicators.ma is None:
-        return None
-
-    ma = stock.indicators.ma
-
-    return {
-        MaPeriod.MA_5: ma.ma_5,
-        MaPeriod.MA_10: ma.ma_10,
-        MaPeriod.MA_20: ma.ma_20,
-        MaPeriod.MA_60: ma.ma_60,
-        MaPeriod.MA_120: ma.ma_120,
-    }.get(period)
-
-
+@icontract.invariant(lambda self: self.period > 0)
 @dataclass(frozen=True)
 class PriceAboveMaCriterion:
-    ma_period: MaPeriod
+    period: int
 
     @property
     def name(self) -> str:
-        return f"Price Above {self.ma_period.value}"
+        return f"Price Above MA_{self.period}"
 
     def apply(self, stock: Stock) -> bool:
-        ma_value = get_ma_value(stock, self.ma_period)
-
-        if ma_value is None or stock.current_price is None:
+        if stock.indicators is None or stock.indicators.ma is None:
             return False
 
-        return stock.current_price > ma_value
+        if stock.current_price is None:
+            return False
+
+        price_ma = stock.indicators.ma.price_ma.get(self.period)
+
+        return price_ma is not None and stock.current_price > price_ma
 
 
+@icontract.invariant(lambda self: self.fast > 0)
+@icontract.invariant(lambda self: self.slow > 0)
+@icontract.invariant(lambda self: self.fast != self.slow)
 @dataclass(frozen=True)
 class MaAlignmentCriterion:
-    fast: MaPeriod = MaPeriod.MA_20
-    slow: MaPeriod = MaPeriod.MA_60
+    fast: int = 20
+    slow: int = 60
 
     @property
     def name(self) -> str:
-        return f"{self.fast.value} > {self.slow.value} Alignment"
+        return f"MA_{self.fast} > MA_{self.slow} Alignment"
 
     def apply(self, stock: Stock) -> bool:
-        fast_value = get_ma_value(stock, self.fast)
-        slow_value = get_ma_value(stock, self.slow)
-
-        if fast_value is None or slow_value is None:
+        if stock.indicators is None or stock.indicators.ma is None:
             return False
 
-        return fast_value > slow_value
+        ma = stock.indicators.ma
+        fast_value = ma.price_ma.get(self.fast)
+        slow_value = ma.price_ma.get(self.slow)
+
+        return fast_value is not None and slow_value is not None and fast_value > slow_value
 
 
+@icontract.invariant(lambda self: self.fast > 0)
+@icontract.invariant(lambda self: self.slow > 0)
+@icontract.invariant(lambda self: self.fast != self.slow)
+@icontract.invariant(lambda self: self.max_cross_margin > 0)
 @dataclass(frozen=True)
 class GoldenCrossCriterion:
+    fast: int = 20
+    slow: int = 60
     max_cross_margin: float = 0.03
 
     @property
@@ -66,18 +64,19 @@ class GoldenCrossCriterion:
         return "Golden Cross"
 
     def apply(self, stock: Stock) -> bool:
-        ma20 = get_ma_value(stock, MaPeriod.MA_20)
-        ma60 = get_ma_value(stock, MaPeriod.MA_60)
-
-        if ma20 is None or ma60 is None:
+        if stock.indicators is None or stock.indicators.ma is None:
             return False
 
-        if ma60 <= 0:
+        ma = stock.indicators.ma
+        fast_value = ma.price_ma.get(self.fast)
+        slow_value = ma.price_ma.get(self.slow)
+
+        if fast_value is None or slow_value is None:
             return False
 
-        if ma20 <= ma60:
+        if fast_value <= slow_value:
             return False
 
-        cross_margin = (ma20 - ma60) / ma60
+        cross_margin = (fast_value - slow_value) / slow_value
 
         return 0 < cross_margin < self.max_cross_margin

@@ -1,10 +1,16 @@
 from dataclasses import dataclass
 
+from icontract import ensure, invariant
+
 from a_domain.model.market.stock import Stock
 from a_domain.types.enums import CandidateSource
 
 
 # TODO: It was clean
+@invariant(lambda self: self.max_articles > 0, "max_articles must be positive")
+@invariant(lambda self: self.max_content_length > 0, "max_content_length must be positive")
+@invariant(lambda self: len(self.fundamental_template) > 0)
+@invariant(lambda self: len(self.momentum_template) > 0)
 @dataclass(frozen=True)
 class AiReportPromptBuilder:
     """
@@ -18,6 +24,7 @@ class AiReportPromptBuilder:
     max_articles: int
     max_content_length: int
 
+    @ensure(lambda result: len(result) > 0, "Built prompt must not be empty")
     def build(self, stock: Stock) -> str:
         articles_text = self._build_articles_text(stock)
 

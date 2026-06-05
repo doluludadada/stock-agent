@@ -1,8 +1,14 @@
 from dataclasses import dataclass
 
+import icontract
+
 from a_domain.model.market.stock import Stock
 
 
+@icontract.invariant(lambda self: self.max_daily_range_pct is None or self.max_daily_range_pct > 0)
+@icontract.invariant(lambda self: self.min_atr_pct is None or self.min_atr_pct >= 0)
+@icontract.invariant(lambda self: self.max_atr_pct is None or self.max_atr_pct > 0)
+@icontract.invariant(lambda self: self.min_atr_pct is None or self.max_atr_pct is None or self.min_atr_pct <= self.max_atr_pct)
 @dataclass(frozen=True)
 class VolatilitySafetyCriterion:
     """
