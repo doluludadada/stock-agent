@@ -1,21 +1,22 @@
 # backend/src/c_infrastructure/database/models/watchlist_dto.py
+
 from datetime import datetime
 from typing import ClassVar
-from uuid import UUID, uuid4
 
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field
+
+from a_domain.model.trading.watchlist import StockWatchlist
+from a_domain.types.enums import WatchlistType
 
 
-# TODO: why do i need it? it should be StockDto right?
-class WatchlistDTO(SQLModel, table=True):
-    """Infrastructure Database Model for tracking Watchlists."""
+class WatchlistDTO(StockWatchlist, table=True):
+    """Database representation of a Watchlist membership."""
 
-    __tablename__: ClassVar[str] = "watchlists"  # pyright: ignore[reportIncompatibleVariableOverride]
+    __tablename__: ClassVar[str] = "watchlists"
 
-    id: UUID = Field(default_factory=uuid4, primary_key=True)
-    stock_id: str = Field(index=True)
-    market: str = Field(default="TWSE", index=True)
-    name: str | None = Field(default=None)
-    list_type: str = Field(index=True)  # "TECHNICAL" or "BUZZ"
-    reason: str
-    created_at: datetime = Field(default_factory=datetime.now)
+    # One active membership record per stock.
+    stock_id: str = Field(index=True, unique=True)
+
+    type: WatchlistType = Field(index=True)
+
+    expires_at: datetime | None = Field(default=None, index=True)

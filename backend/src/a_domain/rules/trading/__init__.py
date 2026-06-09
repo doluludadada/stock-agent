@@ -3,6 +3,7 @@ from a_domain.rules.trading.entry import EntryRule
 from a_domain.rules.trading.exit import ExitRule
 from a_domain.rules.trading.reason import ReasonRule
 from a_domain.rules.trading.sizing import SizingRule
+from a_domain.rules.trading.watchlist import WatchlistRule
 
 __all__ = [
     "DecisionRule",
@@ -10,4 +11,5 @@ __all__ = [
     "ExitRule",
     "ReasonRule",
     "SizingRule",
+    "WatchlistRule",
 ]

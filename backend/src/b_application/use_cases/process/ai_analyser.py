@@ -10,6 +10,7 @@ from b_application.schemas.config import AppConfig
 from b_application.schemas.pipeline_context import PipelineContext
 
 
+# TODO: check the survivors and add to watchlist.
 class AiAnalyser:
     def __init__(
         self,
@@ -67,6 +68,5 @@ class AiAnalyser:
                 stock.analysis_report = self._response_parser.parse(stock.stock_id, "")
                 stock.ai_score = stock.analysis_report.score
 
-        context.analysed = stocks
         context.stats.ai_analysed += analysed_count
         self._logger.info(f"AI analysis complete: {analysed_count} stocks analysed")

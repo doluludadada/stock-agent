@@ -229,6 +229,7 @@ class StrategyThresholds(BaseModel):
     max_intraday_range_position: float = 0.8
     max_consecutive_up_days: int = 4
 
+
 class MarketConfig(BaseModel):
     """Universal market trading rules and friction costs."""
 
@@ -247,6 +248,14 @@ class MockTradingConfig(BaseModel):
 
     account_id: str = "mock-dev"
     initial_cash: float = Field(default=1_000_000, gt=0)
+
+
+class WatchlistConfig(BaseModel):
+    automatic_expiry_hours: int = Field(
+        default=24,
+        gt=0,
+    )
+
 
 class AppConfig(BaseSettings):
     """
@@ -281,3 +290,4 @@ class AppConfig(BaseSettings):
     strategy: StrategyThresholds = Field(default_factory=StrategyThresholds)
     market: MarketConfig = Field(default_factory=MarketConfig)
     mock_trading: MockTradingConfig = Field(default_factory=MockTradingConfig)
+    watchlist: WatchlistConfig = Field(default_factory=WatchlistConfig)

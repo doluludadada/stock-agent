@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 
 from a_domain.model.market.stock import Stock
 from a_domain.rules.technical.criteria.base import TechnicalCriterion
-from a_domain.types.enums import CandidateSource
+from a_domain.types.enums import WatchlistType
 
 
 @dataclass(frozen=True)
@@ -31,9 +31,9 @@ class TechnicalScreeningPolicy:
         stock.soft_failures.clear()
         stock.observations.clear()
 
-        is_manual = stock.source == CandidateSource.MANUAL_INPUT
+        is_manual = stock.source == WatchlistType.MANUAL_INPUT
 
-        if stock.source == CandidateSource.TECHNICAL_WATCHLIST:
+        if stock.source == WatchlistType.TECHNICAL_WATCHLIST:
             self._apply_hard(stock, self.setup_must_pass)
 
         self._apply_safety(stock, self.safety_must_pass, is_manual)

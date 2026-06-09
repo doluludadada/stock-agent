@@ -30,28 +30,42 @@ class NewsFeed:
         )
         self._logger = logger
 
-    @require(lambda context: len(context.survivors) > 0, "Pipeline guarantees survivors exist")
-    async def execute(self, context: PipelineContext) -> None:
-        stocks = context.survivors
+    @require(
+        lambda context: len(context.candidates) > 0,
+        "Should have candidates",
+    )
+    async def execute(
+        self,
+        context: PipelineContext,
+    ) -> None:
+        self._logger.info(f"Collecting news for {len(context.survivors)} stocks.")
 
-        self._logger.info(f"Collecting articles for {len(stocks)} survivors.")
+        for stock in context.survivors:
+            existing_articles = list(stock.articles)
 
-        for stock in stocks:
             try:
-                raw_articles = await self._news_provider.fetch_news(
+                fetched_articles = await self._news_provider.fetch_news(
                     stock_id=stock.stock_id,
-                    limit=self._config.analysis.article_fetch_limit,
+                    limit=(self._config.analysis.article_fetch_limit),
                 )
 
-                if not raw_articles:
-                    stock.articles = []
-                    continue
+                if fetched_articles:
+                    self._news_provider.save_as_md_file(
+                        stock.stock_id,
+                        fetched_articles,
+                    )
 
-                self._news_provider.save_as_md_file(stock.stock_id, raw_articles)
-                stock.articles = [article for article in raw_articles if self._quality.is_high_quality(article)]
+                accepted_articles = [article for article in fetched_articles if self._quality.is_high_quality(article)]
 
-            except Exception as e:
-                self._logger.error(f"Failed to collect articles for {stock.stock_id}: {e}")
-                stock.articles = []
+                articles_by_id = {article.id: article for article in existing_articles}
 
-        self._logger.info("Article collection complete")
+                for article in accepted_articles:
+                    articles_by_id[article.id] = article
+
+                stock.articles = list(articles_by_id.values())
+
+            except Exception as error:
+                self._logger.error(f"Failed to collect news for {stock.stock_id}: {error}")
+                stock.articles = existing_articles
+
+        self._logger.info("News collection complete.")

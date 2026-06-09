@@ -1,108 +1,113 @@
-# backend/src/a_domain/types/enums.py
-
-from enum import StrEnum
+from enum import StrEnum, auto
 
 
 class AiProvider(StrEnum):
-    OPENAI = "openai"
-    GROK = "grok"
-    GEMINI = "gemini"
-    GROQ = "groq"
+    OPENAI = auto()
+    GROK = auto()
+    GEMINI = auto()
+    GROQ = auto()
 
 
 class MessageRole(StrEnum):
-    SYSTEM = "system"
-    USER = "user"
-    ASSISTANT = "assistant"
+    SYSTEM = auto()
+    USER = auto()
+    ASSISTANT = auto()
 
 
 class DatabaseProvider(StrEnum):
-    MEMORY = "memory"
-    CHROMA = "chroma"
+    MEMORY = auto()
+    CHROMA = auto()
 
 
 class MarketType(StrEnum):
-    TWSE = "TWSE"
-    TPEX = "TPEX"
-    NASDAQ = "NASDAQ"
-    NYSE = "NYSE"
+    TWSE = auto()
+    TPEX = auto()
+    NASDAQ = auto()
+    NYSE = auto()
 
 
 class TradeAction(StrEnum):
-    BUY = "BUY"
-    SELL = "SELL"
-    HOLD = "HOLD"
+    BUY = auto()
+    SELL = auto()
+    HOLD = auto()
 
 
 class SignalSource(StrEnum):
-    TECHNICAL = "TECHNICAL"
-    FUNDAMENTAL = "FUNDAMENTAL"
-    HYBRID = "HYBRID"
+    TECHNICAL = auto()
+    FUNDAMENTAL = auto()
+    HYBRID = auto()
 
 
 class OrderType(StrEnum):
-    MARKET = "MARKET"
-    LIMIT = "LIMIT"
+    MARKET = auto()
+    LIMIT = auto()
 
 
 class OrderStatus(StrEnum):
-    PENDING = "PENDING"
-    SUBMITTED = "SUBMITTED"
-    FILLED = "FILLED"
-    CANCELLED = "CANCELLED"
-    FAILED = "FAILED"
-    REJECTED = "REJECTED"
+    PENDING = auto()
+    SUBMITTED = auto()
+    FILLED = auto()
+    CANCELLED = auto()
+    FAILED = auto()
+    REJECTED = auto()
 
 
 class TimeInForce(StrEnum):
-    ROD = "ROD"
-    IOC = "IOC"
-    FOK = "FOK"
+    ROD = auto()
+    IOC = auto()
+    FOK = auto()
 
 
 class InformationSource(StrEnum):
-    TWSE_MOPS = "TWSE_MOPS"
-    NEWS_MEDIA = "NEWS_MEDIA"
-    PTT_STOCK = "PTT_STOCK"
-    PTT_GOSSIPING = "PTT_GOSSIPING"
-    REUNION = "REUNION"
+    TWSE_MOPS = auto()
+    NEWS_MEDIA = auto()
+    PTT_STOCK = auto()
+    PTT_GOSSIPING = auto()
+    REUNION = auto()
 
 
 class ContentType(StrEnum):
-    FACT = "FACT"
-    NEWS = "NEWS"
-    REPORT = "REPORT"
-    ANALYSIS = "ANALYSIS"
-    DISCUSSION = "DISCUSSION"
-    NOISE = "NOISE"
+    FACT = auto()
+    NEWS = auto()
+    REPORT = auto()
+    ANALYSIS = auto()
+    DISCUSSION = auto()
+    NOISE = auto()
 
 
-class CandidateSource(StrEnum):
-    TECHNICAL_WATCHLIST = "TECHNICAL_WATCHLIST"
-    SOCIAL_BUZZ = "SOCIAL_BUZZ"
-    MANUAL_INPUT = "MANUAL_INPUT"
-    HELD_POSITION = "HELD_POSITION"
+# TODO: Rename it
+class WatchlistType(StrEnum):
+    TECHNICAL = auto()
+    BUZZ = auto()
+    TECHNICAL_AND_BUZZ = auto()
+    MANUAL = auto()
+    HELD_POSITION = auto() #
 
+# TODO: What do i do for it?
+class MarketDataMode(StrEnum):
+    LIVE = auto()
+    LATEST_COMPLETED_SESSION = auto()
 
+# TODO: Do i need it?
 class AnalysisStage(StrEnum):
-    PENDING = "PENDING"
-    DATA_COLLECTED = "DATA_COLLECTED"
-    FILTERED_PASS = "FILTERED_PASS"
-    FILTERED_FAIL = "FILTERED_FAIL"
-    ENRICHED = "ENRICHED"
-    ANALYZED = "ANALYZED"
-    DECIDED = "DECIDED"
+    PENDING = auto()
+    DATA_COLLECTED = auto()
+    FILTERED_PASS = auto()
+    FILTERED_FAIL = auto()
+    ENRICHED = auto()
+    ANALYZED = auto()
+    DECIDED = auto()
 
 
 class SystemEnvironment(StrEnum):
-    DEV = "dev"  # Logs only, mock returns
-    TEST = "test"  # Paper trading (SQLite)
-    LIVE = "live"  # Real execution (Shioaji)
+    DEV = auto()
+    TEST = auto()
+    LIVE = auto()
 
 
 class StrategyName(StrEnum):
-    CONSERVATIVE = "conservative"
-    MODERATE = "moderate"
-    AGGRESSIVE = "aggressive"
-    BUZZ = "buzz"
-    NIGHTLY = "nightly"
+    CONSERVATIVE = auto()
+    MODERATE = auto()
+    AGGRESSIVE = auto()
+    BUZZ = auto()
+    NIGHTLY = auto()

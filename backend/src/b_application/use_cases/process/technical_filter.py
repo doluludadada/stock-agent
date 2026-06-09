@@ -43,19 +43,14 @@ class TechnicalFilter:
         )
         self._logger = logger
 
-    @require(lambda context: len(context.priced) > 0, "Pipeline guarantees priced stocks exist")
+    @require(lambda context: len(context.candidates) > 0, "Pipeline stocks should be exist")
     async def execute(self, context: PipelineContext) -> None:
-        stocks = context.priced
+        stocks = context.candidates
         """
         Only stocks with fresh price/history data can be technically evaluated.
         """
 
         self._logger.info(f"Filtering {len(stocks)} stocks.")
-
-        survivors: list[Stock] = []
-        """
-        Stocks allowed to continue into NewsFeed and AiAnalyser.
-        """
 
         passed_count = 0
         """
@@ -63,42 +58,4 @@ class TechnicalFilter:
         Held failed positions may continue, but they should not be counted as technical passes.
         """
 
-        for stock in stocks:
-            is_held = stock.stock_id in context.positions_by_stock_id
-
-            try:
-                stock.indicators = self._indicator.calculate_indicators(stock.ohlcv)
-                self._policy.evaluate(stock)
-                stock.technical_score = self._calculator.calculate(stock)
-
-                if not stock.is_eliminated:
-                    stock.stage = AnalysisStage.FILTERED_PASS
-                    survivors.append(stock)
-                    passed_count += 1
-                    continue
-
-                stock.stage = AnalysisStage.FILTERED_FAIL
-
-                if is_held:
-                    survivors.append(stock)
-                    self._logger.debug(f"Keep held {stock.stock_id} for exit/HOLD decision. Failed: {stock.hard_failures}")
-                    continue
-
-                self._logger.debug(f"Drop {stock.stock_id}: Failed {stock.hard_failures}")
-
-            except Exception as e:
-                stock.stage = AnalysisStage.FILTERED_FAIL
-                error_message = f"Error filtering {stock.stock_id}: {e}"
-                self._logger.error(error_message)
-                context.stats.add_error(error_message)
-
-                if is_held:
-                    stock.hard_failures.append("Technical filter exception for held position")
-                    survivors.append(stock)
-
-        context.survivors = survivors
-        context.stats.passed_technical += passed_count
-
-        self._logger.info(
-            f"Survivors: {len(survivors)}/{len(stocks)} (technical_pass={passed_count}, held_kept={len(survivors) - passed_count})"
-        )
+        # TODO:  After scanning add to survivors

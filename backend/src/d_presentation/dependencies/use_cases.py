@@ -17,7 +17,7 @@ from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
 from b_application.pipeline import Pipeline
 from b_application.schemas.config import AppConfig
 from b_application.use_cases.collect.market_data import MarketData
-from b_application.use_cases.collect.market_scan import MarketScan
+from b_application.use_cases.collect.buzz_scanner import BuzzScanner
 from b_application.use_cases.collect.news_feed import NewsFeed
 from b_application.use_cases.collect.stock_selector import StockSelector
 from b_application.use_cases.collect.watchlist import Watchlist
@@ -75,8 +75,8 @@ def get_market_scan_use_case(
     stock_provider: IStockProvider = Depends(get_stock_provider),
     logger: ILoggingProvider = Depends(get_logger),
     config: AppConfig = Depends(get_settings),
-) -> MarketScan:
-    return MarketScan(
+) -> BuzzScanner:
+    return BuzzScanner(
         social_media_provider=social_media_provider,
         watchlist_repo=watchlist_repo,
         stock_provider=stock_provider,

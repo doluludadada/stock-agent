@@ -4,7 +4,7 @@ from a_domain.model.analysis.ai_analysis_report import AiAnalysisReport
 from a_domain.model.indicators.technical_indicators import TechnicalIndicators
 from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
-from a_domain.types.enums import AnalysisStage, CandidateSource, MarketType
+from a_domain.types.enums import MarketType
 
 
 class Stock(SQLModel):
@@ -22,16 +22,12 @@ class Stock(SQLModel):
     name: str | None = None
     industry: str | None = None
 
-    # --------------------------------- Pipeline --------------------------------- #
-    source: CandidateSource | None = None
-    trigger_reason: str = ""
-    stage: AnalysisStage = AnalysisStage.PENDING
-
     # ----------------------------------- Data ----------------------------------- #
     ohlcv: list[Ohlcv] = Field(default_factory=list)
     articles: list[Article] = Field(default_factory=list)
 
     # -------------------------------- Analysis ---------------------------------- #
+    # TODO: Actually it shoudnt be None
     indicators: TechnicalIndicators | None = None
 
     hard_failures: list[str] = Field(default_factory=list)
@@ -68,9 +64,3 @@ class Stock(SQLModel):
     @property
     def is_eliminated(self) -> bool:
         return len(self.hard_failures) > 0
-
-    @property
-    def display_name(self) -> str:
-        if self.name:
-            return f"{self.stock_id} {self.name}"
-        return self.stock_id

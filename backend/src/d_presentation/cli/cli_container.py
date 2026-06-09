@@ -2,7 +2,7 @@
 
 from b_application.pipeline import Pipeline
 from b_application.use_cases.collect.market_data import MarketData
-from b_application.use_cases.collect.market_scan import MarketScan
+from b_application.use_cases.collect.buzz_scanner import BuzzScanner
 from b_application.use_cases.collect.news_feed import NewsFeed
 from b_application.use_cases.collect.stock_selector import StockSelector
 from b_application.use_cases.collect.watchlist import Watchlist
@@ -88,7 +88,7 @@ async def build_cli_orchestrator() -> WorkflowOrchestrator:
         market_clock=market_clock,
     )
 
-    market_scan = MarketScan(
+    market_scan = BuzzScanner(
         social_media_provider=social_provider,
         watchlist_repo=watchlist_repo,
         stock_provider=stock_provider,
