@@ -1,4 +1,3 @@
-# backend/src/b_application/use_cases/ship/signals.py
 from icontract import require
 
 from a_domain.model.market.stock import Stock
@@ -18,15 +17,10 @@ from b_application.schemas.pipeline_context import PipelineContext
 
 class Signals:
     """
-    Use Case: Generate final trade signals.
+    Generates and persists final trading decisions.
 
-    Responsibilities:
-    - calculate combined score
-    - generate BUY / SELL / HOLD signals
-    - merge emergency exit signals
-    - persist generated signals
-    - persist RAG analysis memory
-    - persist RAG decision memory
+    SQL is the authoritative signal store.
+    RAG contains searchable copies of successfully persisted decisions.
     """
 
     def __init__(
@@ -35,9 +29,9 @@ class Signals:
         knowledge_repository: IKnowledgeRepository,
         config: AppConfig,
         logger: ILoggingProvider,
-    ):
+    ) -> None:
         self._signal_repository = signal_repository
-        self._knowledge = knowledge_repository
+        self._knowledge_repository = knowledge_repository
         self._logger = logger
 
         sizing_rule = SizingRule(
@@ -63,16 +57,31 @@ class Signals:
         )
 
     @require(
-        lambda context: len(context.survivors) > 0 or len(context.emergency_exit_signals) > 0,
-        "Must have stocks to analyze or emergency exits to process",
+        lambda context: (len(context.survivors) > 0 or len(context.emergency_exit_signals) > 0),
+        "Signal generation requires survivors or emergency exits",
     )
     async def execute(self, context: PipelineContext) -> None:
-        stocks = context.survivors
-        full_funnel_signals: list[TradeSignal] = []
+        context.buy_signals.clear()
+        context.exit_signals.clear()
+        context.hold_signals.clear()
 
-        for stock in stocks:
+        signals: list[TradeSignal] = [
+            *context.emergency_exit_signals,
+        ]
+
+        for stock in context.survivors:
+            if stock.stock_id in context.risk_blocked_stock_ids:
+                continue
+
+            if stock.technical_score is None or stock.ai_score is None:
+                self._logger.warning(f"Signal skipped for {stock.stock_id}: analysis is incomplete.")
+                continue
+
             try:
-                stock.combined_score = self._composite_rule.calculate(stock)
+                stock.combined_score = self._composite_rule.calculate(
+                    technical_score=stock.technical_score,
+                    ai_score=stock.ai_score,
+                )
 
                 signal = self._decision_rule.decide(
                     stock=stock,
@@ -80,68 +89,62 @@ class Signals:
                     position=context.positions_by_stock_id.get(stock.stock_id),
                 )
 
-                full_funnel_signals.append(signal)
+                signals.append(signal)
 
-            except Exception as e:
-                error_message = f"Signal generation failed for {stock.stock_id}: {e}"
+            except Exception as error:
+                error_message = f"Signal generation failed for {stock.stock_id}: {error}"
+
                 self._logger.error(error_message)
                 context.stats.add_error(error_message)
 
-        all_signals = [
-            *context.emergency_exit_signals,
-            *full_funnel_signals,
-        ]
+        context.stats.signals_generated += len(signals)
 
-        if all_signals:
-            try:
-                await self._signal_repository.save_batch(all_signals)
-            except Exception as e:
-                error_message = f"Failed to persist signals: {e}"
-                self._logger.error(error_message)
-                context.stats.add_error(error_message)
+        if not signals:
+            self._logger.info("No trading signals were generated.")
+            return
+
+        try:
+            await self._signal_repository.save_batch(signals)
+        except Exception as error:
+            error_message = f"Signal persistence failed: {error}"
+
+            self._logger.error(error_message)
+            context.stats.add_error(error_message)
+            return
+
+        context.buy_signals = [signal for signal in signals if signal.action == TradeAction.BUY]
+        context.exit_signals = [signal for signal in signals if signal.action == TradeAction.SELL]
+        context.hold_signals = [signal for signal in signals if signal.action == TradeAction.HOLD]
 
         stocks_by_id: dict[str, Stock] = {
             stock.stock_id: stock
             for stock in [
                 *context.held_candidates,
-                *stocks,
+                *context.survivors,
             ]
         }
 
-        for stock in stocks:
-            try:
-                await self._knowledge.save_analysis(stock)
-            except Exception as e:
-                error_message = f"RAG analysis write failed for {stock.stock_id}: {e}"
-                self._logger.error(error_message)
-                context.stats.add_error(error_message)
-
-        for signal in all_signals:
+        for signal in signals:
             stock = stocks_by_id.get(signal.stock_id)
 
             if stock is None:
-                self._logger.warning(f"RAG decision write skipped. Stock not found: {signal.stock_id}")
+                self._logger.warning(f"RAG decision skipped for {signal.stock_id}: stock context not found.")
                 continue
 
             try:
-                await self._knowledge.save_decision(stock, signal)
-            except Exception as e:
-                error_message = f"RAG decision write failed for {signal.stock_id}: {e}"
+                await self._knowledge_repository.save_decision(
+                    stock=stock,
+                    signal=signal,
+                )
+            except Exception as error:
+                error_message = f"RAG decision persistence failed for {signal.stock_id}: {error}"
+
                 self._logger.error(error_message)
                 context.stats.add_error(error_message)
 
-        context.buy_signals = [signal for signal in all_signals if signal.action == TradeAction.BUY]
-
-        context.exit_signals = [signal for signal in all_signals if signal.action == TradeAction.SELL]
-
-        context.hold_signals = [signal for signal in all_signals if signal.action == TradeAction.HOLD]
-
-        context.stats.signals_generated += len(all_signals)
-
         self._logger.info(
-            f"Signals generated: total={len(all_signals)}, "
-            f"account_risk_exit={len(context.emergency_exit_signals)}, "
-            f"full_funnel={len(full_funnel_signals)}, "
+            f"Signals persisted: total={len(signals)}, "
+            f"emergency={len(context.emergency_exit_signals)}, "
             f"buy={len(context.buy_signals)}, "
             f"sell={len(context.exit_signals)}, "
             f"hold={len(context.hold_signals)}"

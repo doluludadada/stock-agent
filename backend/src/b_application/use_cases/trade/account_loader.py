@@ -2,7 +2,6 @@ from a_domain.model.trading.account import Account
 from a_domain.ports.market.stock_provider import IStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.trading.execution_provider import IExecutionProvider
-from a_domain.types.enums import WatchlistType
 from b_application.schemas.pipeline_context import PipelineContext
 
 
@@ -44,7 +43,6 @@ class AccountLoader:
                 self._logger.warning(f"Held stock not found: {position.stock_id}")
                 continue
 
-            stock.source = WatchlistType.HELD_POSITION
             context.held_candidates.append(stock)
 
         self._logger.info(

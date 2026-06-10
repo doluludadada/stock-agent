@@ -29,11 +29,12 @@ class Stock(SQLModel):
     # -------------------------------- Analysis ---------------------------------- #
     # TODO: Actually it shoudnt be None
     indicators: TechnicalIndicators | None = None
-
+    
+    # TODO: move blow stuffs those stuff to StockWatchlist?
     hard_failures: list[str] = Field(default_factory=list)
     soft_failures: list[str] = Field(default_factory=list)
     observations: list[str] = Field(default_factory=list)
-
+    
     technical_score: int | None = None
 
     # -------------------------------- Sentiment --------------------------------- #

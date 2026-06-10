@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from a_domain.model.market.stock import Stock
 from a_domain.model.system.stats import SystemStats
 from a_domain.model.trading.account import Account
+from a_domain.model.trading.position import Position
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.model.trading.watchlist import StockWatchlist
 
@@ -17,10 +18,13 @@ class PipelineContext:
     account: Account = field(default_factory=Account)
 
 
-    candidates: list[Stock] = field(default_factory=list)
+    all_stocks: list[Stock] = field(default_factory=list)
     """
     universe stock (it should clean everytime runs pipeline)
     """
+    held_candidates: list[Stock] = field(default_factory=list)
+    positions_by_stock_id: dict[str, Position] = field(default_factory=dict)
+    risk_blocked_stock_ids: set[str] = field(default_factory=set)
 
     survivors: list[Stock] = field(default_factory=list)
     """

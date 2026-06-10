@@ -110,14 +110,12 @@ class TechnicalScoreCalculator:
         bonus = 0
 
         rsi = stock.indicators.rsi
-        if rsi is not None and rsi.val_14 is not None:
-            if self.rsi_sweet_spot_min <= rsi.val_14 <= self.rsi_sweet_spot_max:
-                bonus += self.rsi_sweet_spot_bonus
+        if rsi is not None and self.rsi_sweet_spot_min <= rsi.value <= self.rsi_sweet_spot_max:
+            bonus += self.rsi_sweet_spot_bonus
 
         macd = stock.indicators.macd
-        if macd is not None and macd.line is not None and macd.signal is not None:
-            if macd.line > macd.signal:
-                bonus += self.macd_bullish_bonus
+        if macd is not None and macd.line > macd.signal:
+            bonus += self.macd_bullish_bonus
 
         ma = stock.indicators.ma
         if ma is not None and ma.price_ma.get(20) is not None:

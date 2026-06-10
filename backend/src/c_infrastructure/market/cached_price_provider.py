@@ -6,19 +6,19 @@ from sqlmodel import col, select
 
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
-from a_domain.ports.market.price_provider import IPriceProvider
+from a_domain.ports.market.price_provider import IOhlcvProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.ohlcv_dto import OhlcvDTO
 
 
-class CachedPriceProvider(IPriceProvider):
+class CachedPriceProvider(IOhlcvProvider):
     SAVE_CHUNK_SIZE = 5_000
 
     def __init__(
         self,
-        price_provider: IPriceProvider,
+        price_provider: IOhlcvProvider,
         db: DatabaseConnector,
         logger: ILoggingProvider,
         market_clock: IMarketClock,

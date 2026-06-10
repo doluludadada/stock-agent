@@ -1,253 +1,232 @@
-# Stock Agent - Taiwan Stock Trading Pipeline
+# TW Stock Alpha Agent
 
-## Overview
+Application for Taiwan stock screening, report generation, watchlist management, and mock trade execution.
 
-An automated stock analysis pipeline for the Taiwan Stock Market (TWSE/TPEX). Combines nightly technical screening, social media buzz detection, and intraday AI-powered analysis to generate trade signals.
+The current primary interface is the CLI. It scans Taiwan stocks, finds social buzz, runs technical and AI analysis, builds watchlists, and can submit orders through the currently wired mock execution provider.
 
-```mermaid
-graph TD
-    subgraph Phase 1 - Nightly
-        A1[Watchlist: Scan universe] -->|Technical filter| LIST_A(Technical Watchlist ~30 stocks)
-    end
+This project is not financial advice. Treat generated signals as decision support.
 
-    subgraph Phase 2 - Morning
-        A2[MarketScan: PTT/News] -->|Trending detection| LIST_B(Buzz Watchlist ~10 stocks)
-    end
+## Current Status
 
-    subgraph Phase 3 - Intraday Pipeline
-        LIST_A & LIST_B --> SS[StockSelector: Merge + Deduplicate]
-        SS --> MD[MarketData: Realtime + History]
-        MD --> TF{TechnicalFilter}
+- Market: Taiwan stocks.
+- Primary UI: CLI at `backend/src/d_presentation/cli/interactive.py`.
+- API: FastAPI is present, but the current web router exposes LINE webhook plumbing, not the trading workflow menu.
+- Order execution: the CLI composition currently wires `MockExecutionProvider`.
+- Database: local SQLite at `stock_agent.db` unless PostgreSQL credentials are provided.
+- Knowledge store: ChromaDB path is configured by `config/appsetting.yaml`.
 
-        TF -->|Hard failure| DROP[Eliminated]
-        TF -->|Pass| SURV[Survivors 3-5 stocks]
+## CLI Workflows
 
-        SURV --> NF[NewsFeed: Collect articles]
-        NF --> AI[AiAnalyser: Sentiment scoring]
-        AI --> SIG[Signals: Composite score + Decision]
+Run the CLI from the repository root:
 
-        SIG -->|Score > threshold| BUY[OrderExecution + Reporting]
-        SIG -->|Score < threshold| HOLD[Hold / Skip]
-    end
-
-    subgraph Monitoring
-        MON[Monitoring: Check positions] -->|Stop loss hit| SELL[Exit signal]
-    end
+```powershell
+just cli
 ```
 
----
+Or run it directly:
+
+```powershell
+cd backend
+uv sync --all-extras
+$env:PYTHONPATH = "src"
+uv run python -m d_presentation.cli.interactive
+```
+
+Menu behavior:
+
+| Option | Workflow | What it does | Orders |
+| --- | --- | --- | --- |
+| 1 | Run Full Cycle | Scans the full market, builds a `TECHNICAL` watchlist, runs news and AI analysis, generates next-session signals. | Never submits orders. |
+| 2 | Scan Social Buzz | Finds discussed stocks, enriches market data, keeps technical survivors as `BUZZ`, analyses them, generates signals. | Submits only if market and order checks allow. |
+| 3 | Run Intraday Trading | Loads held positions and active watchlist, refreshes market data, revalidates technicals and AI, generates signals. | Submits only if market and order checks allow. |
+| 4 | Analyse Specific Stocks | Loads the requested stock IDs, runs technical and AI report generation, returns passing stocks as `MANUAL` watchlist candidates. | No automatic order. Manual BUY override requires confirmation. |
+
+### Specific Stock Flow
+
+When you enter a stock such as `2330`, the app should only research that stock:
+
+1. Load the stock from the stock provider.
+2. Fetch OHLCV data and calculate indicators.
+3. Run the technical filter.
+4. Run news and AI analysis for technical survivors.
+5. Show the stock report.
+6. If it passes, expose a `MANUAL` watchlist candidate.
+
+Adding the stock to the watchlist is a separate manual confirmation. A manual BUY override is also separate and still goes through `OrderExecution`, which checks market-open status and valid signal quantity.
+
+## What Counts As "Good"
+
+The project currently treats a stock as worth acting on only after multiple gates:
+
+1. Technical filter has no hard failure.
+2. News and AI analysis produce an acceptable report.
+3. Combined score passes configured thresholds.
+4. Account risk checks do not block the stock.
+5. Order execution is allowed by the market clock.
+6. Quantity and mock account constraints are valid.
+
+Main thresholds live in `config/appsetting.yaml`:
+
+```yaml
+analysis:
+  active_strategy: moderate
+  technical_weight: 0.5
+  sentiment_weight: 0.5
+  min_combined_score_buy: 80
+  max_combined_score_sell: 30
+```
+
+Strategy-specific technical thresholds live in `config/strategies.yaml`.
+
+## Watchlist Types
+
+`WatchlistType` is the source of truth for why a stock is on the watchlist:
+
+| Type | Meaning |
+| --- | --- |
+| `TECHNICAL` | Passed the full-market technical scan. |
+| `BUZZ` | Came from social buzz and passed technical filtering. |
+| `TECHNICAL_AND_BUZZ` | Existing technical and buzz entries were merged by the repository. |
+| `MANUAL` | User reviewed a specific-stock report and manually added it. |
+
+Manual entries take precedence when an existing watchlist row is merged.
+
+## Application Flow
+
+```mermaid
+flowchart TD
+    CLI[CLI Menu] --> WF[TradingWorkflow]
+
+    WF --> FULL[Run Full Cycle]
+    WF --> BUZZ[Scan Social Buzz]
+    WF --> DAY[Run Intraday Trading]
+    WF --> ONE[Analyse Specific Stocks]
+
+    FULL --> MS1[MarketScanner: universe + OHLCV + indicators]
+    BUZZ --> BS[BuzzScanner: social candidates]
+    BUZZ --> MS2[MarketScanner: candidate OHLCV + indicators]
+    DAY --> LOAD[Held positions + active watchlist]
+    LOAD --> MS3[MarketScanner: candidate OHLCV + indicators]
+    ONE --> STOCK[Load requested stock IDs]
+    STOCK --> MS4[MarketScanner: requested OHLCV + indicators]
+
+    MS1 --> TF1[TechnicalFilter -> TECHNICAL watchlist]
+    MS2 --> TF2[TechnicalFilter -> BUZZ watchlist]
+    MS3 --> TF3[TechnicalFilter]
+    MS4 --> TF4[TechnicalFilter -> MANUAL candidates]
+
+    TF1 --> AP[AnalysisPipeline: news + AI]
+    TF2 --> AP
+    TF3 --> AP
+    TF4 --> AP
+
+    AP --> SIG[Signals when generated]
+    SIG --> REP[Reporting]
+
+    FULL --> NOORDER[No order execution]
+    BUZZ --> ORDERABLE[Order path allowed]
+    DAY --> ORDERABLE
+    ONE --> MANUAL[Manual confirmation only]
+    MANUAL --> ORDERABLE
+    ORDERABLE --> ORDER[OrderExecution]
+    ORDER --> CLOCK[Market clock + signal checks]
+    CLOCK --> MOCK[MockExecutionProvider]
+```
+
+Important distinction:
+
+- `AnalysisPipeline` only runs news feed and AI analysis.
+- `TradingWorkflow` decides which use cases run and whether signals, reporting, watchlist persistence, or order execution should happen.
+- `MarketScanner` currently does both candidate loading and OHLCV plus indicator enrichment. There is no separate market-data use case right now.
 
 ## Architecture
 
-```
-Layer Boundaries
-┌─────────────────────────────────────────────────────────────────┐
-│ Layer A (Domain)                                                │
-│                                                                 │
-│   ✓ Models (SQLModel data structures)                           │
-│   ✓ Ports (Protocol interfaces, no implementation)              │
-│   ✓ Rules (pure business logic, no I/O)                         │
-│   ✓ Types (enums, constants)                                    │
-│                                                                 │
-│   ✗ No imports from Layer B, C, D                               │
-│   ✗ No I/O operations                                           │
-└─────────────────────────────────────────────────────────────────┘
+The code follows the existing Clean Architecture split:
 
-┌─────────────────────────────────────────────────────────────────┐
-│ Layer B (Application)                                           │
-│                                                                 │
-│   ✓ Use Cases (orchestrate domain rules + ports)                │
-│   ✓ Schemas (config)                                            │
-│   ✓ Factories (assemble policies from config)                   │
-│   ✓ Pipeline / Workflow (orchestrate use cases)                 │
-│                                                                 │
-│   ✗ No direct database/API calls                                │
-│   ✗ Business logic belongs in Domain Rules                      │
-└─────────────────────────────────────────────────────────────────┘
+| Layer | Path | Responsibility |
+| --- | --- | --- |
+| Domain | `backend/src/a_domain` | Models, ports, enums, pure rules. No application, infrastructure, or presentation imports. |
+| Application | `backend/src/b_application` | Use cases, workflow orchestration, pipeline context, config schemas, factories. |
+| Infrastructure | `backend/src/c_infrastructure` | Database, market data, AI adapters, feed providers, LINE platform, mock trading. |
+| Presentation | `backend/src/d_presentation` | CLI, FastAPI routers, dependency wiring, desktop entry points. |
 
-┌─────────────────────────────────────────────────────────────────┐
-│ Layer C (Infrastructure)                                        │
-│                                                                 │
-│   ✓ AI model adapters (OpenAI, Grok, Gemini, Groq)             │
-│   ✓ Persistence (ChromaDB, In-Memory)                           │
-│   ✓ Platform integrations (LINE)                                │
-│   ✓ External services (Tavily search)                           │
-└─────────────────────────────────────────────────────────────────┘
+Application use cases coordinate work. Domain rules own business decisions. Infrastructure implements ports.
 
-┌─────────────────────────────────────────────────────────────────┐
-│ Layer D (Presentation)                                          │
-│                                                                 │
-│   ✓ FastAPI web app + webhook endpoints                         │
-│   ✓ Flet desktop admin console                                  │
-│   ✓ Dependency injection                                        │
-└─────────────────────────────────────────────────────────────────┘
+## Configuration
+
+Main files:
+
+| File | Purpose |
+| --- | --- |
+| `config/appsetting.yaml` | Active model, logging, analysis weights, thresholds, folders, mock account, indicator periods. |
+| `config/strategies.yaml` | Technical screening thresholds for `conservative`, `moderate`, `aggressive`, `buzz`, and `nightly`. |
+| `config/instructions.yaml` | AI report prompts and RAG injection prompts. |
+| `.env` | API keys and optional database credentials. |
+
+Environment variables are loaded from `.env` or `../.env` relative to the backend process. Common keys:
+
+```env
+OPENAI_API_KEY=
+GROK_API_KEY=
+GEMINI_API_KEY=
+GROQ_API_KEY=
+TAVILY_API_KEY=
+LINE_CHANNEL_ID=
+LINE_CHANNEL_SECRET=
+LINE_CHANNEL_ACCESS_TOKEN=
+DB_USER=
+DB_PASSWORD=
+DB_HOST=
+DB_PORT=
+DB_NAME=
 ```
 
----
+If PostgreSQL credentials are missing, the app uses local SQLite.
 
-## Three-Phase Workflow
+## Development Commands
 
-| Phase    | Use Case     | Runs When    | Output                   |
-| -------- | ------------ | ------------ | ------------------------ |
-| Nightly  | `Watchlist`  | After hours  | Technical Watchlist (DB) |
-| Morning  | `MarketScan` | Pre-market   | Buzz Watchlist (DB)      |
-| Intraday | `Pipeline`   | Market hours | Trade Signals + Orders   |
+From `backend`:
 
-Orchestrated by `WorkflowOrchestrator` with `run_full_cycle()`, or run individually.
-
----
-
-## Technical Analysis Rules
-
-### Screening Policy (Three-Tier System)
-
-Based on Elder's Triple Screen methodology:
-
-| Tier          | Effect                         | Applied To                                                 |
-| ------------- | ------------------------------ | ---------------------------------------------------------- |
-| `must_pass`   | Hard gate — elimination        | Setup (TECHNICAL only) + Safety (all) + Entry Timing (all) |
-| `should_pass` | Soft penalty — reduces score   | All sources                                                |
-| `info_only`   | Observation — logged for audit | All sources                                                |
-
-### Source-Based Rule Application
-
-| Source              | Setup must_pass | Safety must_pass | Entry Timing | should_pass | info_only |
-| ------------------- | --------------- | ---------------- | ------------ | ----------- | --------- |
-| TECHNICAL_WATCHLIST | ✅ All          | ✅ All           | ✅ All       | ✅ All      | ✅ All    |
-| SOCIAL_BUZZ         | ❌ Skip         | ✅ All           | ✅ All       | ✅ All      | ✅ All    |
-| MANUAL_INPUT        | ❌ Skip         | ✅ All           | ✅ All       | ✅ All      | ✅ All    |
-
-### Rule Categories
-
-#### Trend (`indicators/trend/`)
-
-| Rule                   | Logic                            | Reference                       |
-| ---------------------- | -------------------------------- | ------------------------------- |
-| `PriceAboveMaRule`     | Price > specified MA period      | Murphy (1999)                   |
-| `MaAlignmentRule`      | Fast MA > Slow MA                | Murphy (1999)                   |
-| `GoldenCrossRule`      | MA20 crossed above MA60 recently | Murphy (1999), Bulkowski (2005) |
-| `AdxTrendStrengthRule` | ADX between min-max range        | Wilder (1978)                   |
-| `AdxDirectionRule`     | +DI > -DI                        | Wilder (1978)                   |
-
-#### Momentum (`indicators/momentum/`)
-
-| Rule                      | Logic              | Reference                   |
-| ------------------------- | ------------------ | --------------------------- |
-| `RsiRangeRule`            | RSI within min-max | Wilder (1978), Brown (1999) |
-| `MacdCrossRule`           | MACD Line > Signal | Appel (2005)                |
-| `MacdPositiveRule`        | MACD Line > 0      | Appel (2005)                |
-| `MacdHistogramRule`       | Histogram > 0      | Elder (1993)                |
-| `StochasticThresholdRule` | %K < threshold     | Lane (1984)                 |
-| `StochasticCrossRule`     | %K > %D            | Lane (1984)                 |
-| `MfiThresholdRule`        | MFI < threshold    | Quong & Soudack (1989)      |
-
-#### Volume (`indicators/volume/`)
-
-| Rule               | Logic                | Reference        |
-| ------------------ | -------------------- | ---------------- |
-| `VolumeRatioRule`  | Volume > ratio × avg | Murphy (1999)    |
-| `ObvTrendRule`     | OBV > OBV MA20       | Granville (1963) |
-| `LiquidityRule`    | Avg volume > minimum | O'Neil (1988)    |
-| `MinimumPriceRule` | Price > minimum      | O'Neil (1988)    |
-
-#### Volatility (`indicators/volatility/`)
-
-| Rule                     | Logic                 | Reference                       |
-| ------------------------ | --------------------- | ------------------------------- |
-| `BollingerThresholdRule` | %B < max threshold    | Bollinger (2001)                |
-| `BollingerPositionRule`  | Price > Middle Band   | Bollinger (2001)                |
-| `BollingerSqueezeRule`   | Bandwidth < threshold | Bollinger (2001)                |
-| `AtrRangeRule`           | ATR% within min-max   | Wilder (1978), Van Tharp (2006) |
-| `DailyRangeRule`         | Daily range < max     | Elder (1993)                    |
-
-#### Entry Timing (`indicators/entry_timing/`)
-
-| Rule                     | Logic                    | Reference                |
-| ------------------------ | ------------------------ | ------------------------ |
-| `PriceDropRule`          | Today's drop < threshold | Livermore (1940)         |
-| `IntradayMomentumRule`   | Close > Open             | Schwartz (1998)          |
-| `VolumeConfirmationRule` | Volume > ratio × avg     | Murphy (1999)            |
-| `GapRule`                | Gap up < threshold       | Elder (1993)             |
-| `IntradayRangeRule`      | Not at intraday high     | Schwartz (1998)          |
-| `ConsecutiveUpDaysRule`  | < N consecutive up days  | Connors & Raschke (1995) |
-
----
-
-## Strategy Configurations
-
-Strategies are defined in `config/strategies.yaml` and loaded as `StrategyThresholds`:
-
-| Strategy     | Factory Function                    | Character                      |
-| ------------ | ----------------------------------- | ------------------------------ |
-| Conservative | `create_conservative_policy()`      | Strict setup + safety gates    |
-| Moderate     | `create_moderate_policy()`          | Balanced — relaxed setup rules |
-| Nightly      | `create_nightly_screening_policy()` | No entry timing rules          |
-
-```python
-from b_application.factories.policy_factory import (
-    create_conservative_policy,
-    load_strategy_thresholds,
-)
-
-cfg = load_strategy_thresholds(strategies_path, "conservative")
-policy = create_conservative_policy(cfg)
+```powershell
+uv sync --all-extras
+$env:PYTHONPATH = "src"
+uv run ruff check src tests
+uv run python -m compileall src tests
+uv run pytest
 ```
 
----
+Run the API:
 
-## Scoring Pipeline
-
-```
-TechnicalFilter                    AiAnalyser
-    │                                  │
-    ▼                                  ▼
-technical_score (0-100)          ai_score (0-100)
-    │                                  │
-    └──────────┬───────────────────────┘
-               ▼
-    CompositeScoreRule (weighted)
-               │
-               ▼
-       combined_score (0-100)
-               │
-               ▼
-         ActionRule
-     ┌─────┼─────────┐
-     ▼     ▼         ▼
-    BUY   HOLD      SELL
-  (≥70)  (31-69)   (≤30)
+```powershell
+cd backend
+$env:PYTHONPATH = "src"
+uv run uvicorn main:app --host 0.0.0.0 --port 8800 --reload
 ```
 
----
+Run Docker:
 
-## Chat Pipeline (WIP)
+```powershell
+docker compose up --build
+```
 
-A separate chat pipeline for LINE/WhatsApp integration with AI-powered conversations. Uses the same AI provider infrastructure as the trading pipeline.
+## Data Written Locally
 
-**Status:** Frontend integration in progress. Core components exist (`ContextLoader`, `StateManager`, `Dispatcher`) but `AiProcessor` needs to be reconnected.
+- `stock_agent.db`: SQLite application and mock trading state.
+- `chroma_data/`: Chroma persistence.
+- `news_archive/`: archived news payloads.
+- `buzz_archive/`: archived social buzz payloads.
+- `ai_responses/`: saved AI outputs.
 
-## Road Map
+## Safety Rules
 
----
+- Closed-market orders are skipped by `OrderExecution`.
+- `Run Full Cycle` does not call order execution.
+- Manual BUY override is explicit user intent and still uses the same order checks.
+- The current CLI uses mock trading. A live execution provider must be wired intentionally before real brokerage orders are possible.
 
-## References
+## Known Cleanup Areas
 
-### Books
-
-1. Murphy, J.J. (1999). _Technical Analysis of the Financial Markets._ — Trends, MAs, oscillators.
-2. Elder, A. (1993). _Trading for a Living._ — Triple Screen System. Basis for three-tier screening.
-3. Wilder, J.W. (1978). _New Concepts in Technical Trading Systems._ — RSI, ADX, ATR.
-4. Appel, G. (2005). _Technical Analysis: Power Tools for Active Investors._ — MACD.
-5. Bollinger, J. (2001). _Bollinger on Bollinger Bands._ — Bollinger Bands.
-6. O'Neil, W. (1988). _How to Make Money in Stocks._ — CAN SLIM, volume confirmation.
-7. Granville, J. (1963). _Granville's New Key to Stock Market Profits._ — OBV.
-8. Bulkowski, T. (2005). _Encyclopedia of Chart Patterns._ — Golden/Death cross stats.
-9. Connors, L. & Raschke, L. (1995). _Street Smarts._ — Short-term patterns.
-10. Schwartz, M. (1998). _Pit Bull._ — Day trading.
-11. Van Tharp (2006). _Trade Your Way to Financial Freedom._ — Position sizing.
-12. Brown, C. (1999). _Technical Analysis for the Trading Professional._ — RSI range shifts.
-
-### Papers
-
-- Lane, G. (1984). "Lane's Stochastics." _Technical Analysis of Stocks & Commodities._
-- Quong, G. & Soudack, A. (1989). "Volume-Weighted RSI." _Technical Analysis of Stocks & Commodities._
+- Split manual watchlist addition and manual BUY override into clearer use cases.
+- Decide whether `MarketScanner` should stay responsible for both universe loading and market-data enrichment.
+- Keep `PipelineContext.all_stocks` as a list. Dedupe by `stock_id`; do not convert it to `set`.
+- Keep README, CLI text, workflow behavior, and tests aligned whenever a workflow changes.

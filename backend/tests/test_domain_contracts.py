@@ -17,7 +17,7 @@ def test_moving_averages_require_positive_periods() -> None:
 
 
 def test_trading_rules_reject_invalid_config() -> None:
-    rule = SizingRule(position_pct=0, lot_size=1)
+    rule = SizingRule(risk_per_trade_pct=0, stop_loss_pct=0.10, lot_size=1)
     with pytest.raises(ViolationError):
         rule.calculate(account=Account(cash=1000), price=10)
 
@@ -34,14 +34,14 @@ def test_technical_criteria_reject_invalid_periods() -> None:
 
 
 def test_entry_rule_rejects_invalid_threshold() -> None:
-    sizing_rule = SizingRule(position_pct=0.02, lot_size=1)
+    sizing_rule = SizingRule(risk_per_trade_pct=0.02, stop_loss_pct=0.10, lot_size=1)
 
     with pytest.raises(ViolationError):
         EntryRule(buy_threshold=101, sizing_rule=sizing_rule)
 
 
 def test_sizing_rule_rejects_invalid_price() -> None:
-    sizing_rule = SizingRule(position_pct=0.02, lot_size=1)
+    sizing_rule = SizingRule(risk_per_trade_pct=0.02, stop_loss_pct=0.10, lot_size=1)
 
     with pytest.raises(ViolationError):
         sizing_rule.calculate(account=Account(cash=1000), price=0)

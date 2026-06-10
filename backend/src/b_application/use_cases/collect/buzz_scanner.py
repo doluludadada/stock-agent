@@ -1,4 +1,5 @@
 from a_domain.model.market.stock import Stock
+from a_domain.model.trading.watchlist import StockWatchlist
 from a_domain.ports.market.social_media_provider import ISocialMediaProvider
 from a_domain.ports.market.stock_provider import IStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
@@ -7,7 +8,6 @@ from b_application.schemas.config import AppConfig
 from b_application.schemas.pipeline_context import PipelineContext
 
 
-# TODO: add to watchlist after scanning.
 class BuzzScanner:
     def __init__(
         self,
@@ -39,13 +39,19 @@ class BuzzScanner:
             if article.stock_id not in stocks_by_id:
                 stock = await self._stock.get_by_id(article.stock_id)
                 if stock:
-                    stock.source = WatchlistType.BUZZ
                     stock.trigger_reason = article.title
                     stocks_by_id[stock.stock_id] = stock
 
             if article.stock_id in stocks_by_id:
                 stocks_by_id[article.stock_id].articles.append(article)
 
-        context.candidates = list(stocks_by_id.values())
+        buzz_stocks = list(stocks_by_id.values())
+        watchlist_stock = [
+            StockWatchlist(stock_id=stock.stock_id, type=WatchlistType.BUZZ)
+            for stock in buzz_stocks
+        ]
 
-        self._logger.info(f"Found {len(context.candidates)} trending stocks.")
+        context.all_stocks = buzz_stocks
+        context.watchlist = watchlist_stock
+
+        self._logger.info(f"Found {len(buzz_stocks)} trending stocks.")

@@ -41,23 +41,14 @@ class MacdBullishCriterion:
         macd = stock.indicators.macd
 
         if self.require_cross:
-            if macd.line is None or macd.signal is None:
-                return self.allow_missing
-
             if macd.line <= macd.signal:
                 return False
 
         if self.require_positive:
-            if macd.line is None:
-                return self.allow_missing
-
             if macd.line <= 0:
                 return False
 
         if self.require_histogram_positive:
-            if macd.histogram is None:
-                return self.allow_missing
-
             if macd.histogram <= 0:
                 return False
 

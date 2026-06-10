@@ -3,6 +3,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from a_domain.rules.technical.calculation.parameters import IndicatorParameters
 from a_domain.types.enums import AiProvider, DatabaseProvider, StrategyName, SystemEnvironment
 
 
@@ -159,32 +160,6 @@ class QualityFiltersConfig(BaseModel):
     min_chars_gossip: int = Field(default=50, ge=0)
 
 
-class IndicatorConfig(BaseModel):
-    """
-    Configuration for Technical Indicator parameters.
-
-    TODO (Frontend Integration):
-    Currently loaded from appsetting.yaml. In the future, these should be
-    exposed to the user via the UI (e.g., Flet Dashboard) allowing them to
-    tune periods dynamically without touching configuration files.
-    """
-
-    rsi_period: int = 14
-    macd_fast: int = 12
-    macd_slow: int = 26
-    macd_signal: int = 9
-    ma_short: int = 5
-    ma_mid: int = 20
-    ma_long: int = 60
-    bb_period: int = 20
-    bb_std: float = 2.0
-    stoch_k: int = 9
-    stoch_d: int = 3
-    adx_period: int = 14
-    atr_period: int = 14
-    mfi_period: int = 14
-
-
 class StrategyThresholds(BaseModel):
     """Threshold values for one screening strategy, loaded from YAML."""
 
@@ -286,7 +261,7 @@ class AppConfig(BaseSettings):
     collect_rules: CollectRulesConfig = Field(default_factory=CollectRulesConfig)
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
     quality: QualityFiltersConfig = Field(default_factory=QualityFiltersConfig)
-    indicators: IndicatorConfig = Field(default_factory=IndicatorConfig)
+    indicators: IndicatorParameters = Field(default_factory=IndicatorParameters)
     strategy: StrategyThresholds = Field(default_factory=StrategyThresholds)
     market: MarketConfig = Field(default_factory=MarketConfig)
     mock_trading: MockTradingConfig = Field(default_factory=MockTradingConfig)

@@ -20,12 +20,7 @@ class RsiRangeCriterion:
         if stock.indicators is None or stock.indicators.rsi is None:
             return self.allow_missing
 
-        rsi_value = stock.indicators.rsi.val_14
-
-        if rsi_value is None:
-            return self.allow_missing
-
-        return self.min_rsi <= rsi_value <= self.max_rsi
+        return self.min_rsi <= stock.indicators.rsi.value <= self.max_rsi
 
 
 @icontract.invariant(lambda self: 0 <= self.max_mfi <= 100)
@@ -42,9 +37,4 @@ class MfiThresholdCriterion:
         if stock.indicators is None or stock.indicators.mfi is None:
             return self.allow_missing
 
-        mfi_value = stock.indicators.mfi.mfi_14
-
-        if mfi_value is None:
-            return self.allow_missing
-
-        return mfi_value < self.max_mfi
+        return stock.indicators.mfi.value < self.max_mfi

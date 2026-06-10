@@ -87,7 +87,4 @@ class ObvTrendCriterion:
 
         obv = stock.indicators.obv
 
-        if obv.obv is None or obv.obv_ma_20 is None:
-            return True
-
-        return obv.obv > obv.obv_ma_20
+        return obv.value > obv.moving_average

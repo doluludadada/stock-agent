@@ -32,17 +32,18 @@ class TradeAction(StrEnum):
     HOLD = auto()
 
 
+# TODO: Rethink about it.
 class SignalSource(StrEnum):
     TECHNICAL = auto()
-    FUNDAMENTAL = auto()
     HYBRID = auto()
 
 
 class OrderType(StrEnum):
     MARKET = auto()
-    LIMIT = auto()
+    LIMIT = auto()  # TODO: it should be used.
 
 
+# TODO: Needa wire it up
 class OrderStatus(StrEnum):
     PENDING = auto()
     SUBMITTED = auto()
@@ -52,6 +53,7 @@ class OrderStatus(StrEnum):
     REJECTED = auto()
 
 
+# TODO: Needa wire it up
 class TimeInForce(StrEnum):
     ROD = auto()
     IOC = auto()
@@ -75,28 +77,11 @@ class ContentType(StrEnum):
     NOISE = auto()
 
 
-# TODO: Rename it
 class WatchlistType(StrEnum):
-    TECHNICAL = auto()
+    TECHNICAL = auto()  # TODO: technical_filter.py should use it
     BUZZ = auto()
-    TECHNICAL_AND_BUZZ = auto()
-    MANUAL = auto()
-    HELD_POSITION = auto() #
-
-# TODO: What do i do for it?
-class MarketDataMode(StrEnum):
-    LIVE = auto()
-    LATEST_COMPLETED_SESSION = auto()
-
-# TODO: Do i need it?
-class AnalysisStage(StrEnum):
-    PENDING = auto()
-    DATA_COLLECTED = auto()
-    FILTERED_PASS = auto()
-    FILTERED_FAIL = auto()
-    ENRICHED = auto()
-    ANALYZED = auto()
-    DECIDED = auto()
+    TECHNICAL_AND_BUZZ = auto()  # TODO: signals.py should use it
+    MANUAL = auto()  # TODO: CLI For specific stock
 
 
 class SystemEnvironment(StrEnum):

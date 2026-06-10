@@ -31,8 +31,8 @@ class NewsFeed:
         self._logger = logger
 
     @require(
-        lambda context: len(context.candidates) > 0,
-        "Should have candidates",
+        lambda context: len(context.survivors) > 0,
+        "News collection requires surviving stocks",
     )
     async def execute(
         self,

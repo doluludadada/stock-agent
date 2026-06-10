@@ -1,14 +1,14 @@
+from a_domain.model.market.stock import Stock
+from a_domain.model.trading.signal import TradeSignal
 from a_domain.model.trading.watchlist import StockWatchlist
+from a_domain.ports.market.stock_provider import IStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
-from a_domain.types.enums import WatchlistType
+from a_domain.types.enums import SignalSource, TradeAction, WatchlistType
+from b_application.pipeline import AnalysisPipeline
 from b_application.schemas.pipeline_context import PipelineContext
 from b_application.use_cases.collect.buzz_scanner import BuzzScanner
-from b_application.use_cases.collect.market_data import MarketData
 from b_application.use_cases.collect.market_scanner import MarketScanner
-from b_application.use_cases.collect.news_feed import NewsFeed
-from b_application.use_cases.collect.stock_selector import StockSelector
-from b_application.use_cases.process.ai_analyser import AiAnalyser
 from b_application.use_cases.process.technical_filter import TechnicalFilter
 from b_application.use_cases.ship.reporting import Reporting
 from b_application.use_cases.ship.signals import Signals
@@ -17,135 +17,274 @@ from b_application.use_cases.trade.account_risk_check import AccountRiskCheck
 from b_application.use_cases.trade.order_execution import OrderExecution
 
 
-class WorkflowOrchestrator:
-    """Coordinates independent Use Cases to accomplish the 4 CLI operations."""
+class TradingWorkflow:
+    """
+    Exposes the stock-trading operations used by CLI, API and schedulers.
+
+    Each public method represents one complete application operation.
+    """
 
     def __init__(
         self,
         market_scanner: MarketScanner,
         buzz_scanner: BuzzScanner,
+        stock_provider: IStockProvider,
+        watchlist_repository: IWatchlistRepository,
         account_loader: AccountLoader,
         account_risk_check: AccountRiskCheck,
-        stock_selector: StockSelector,
-        market_data: MarketData,
         technical_filter: TechnicalFilter,
-        news_feed: NewsFeed,
-        ai_analyser: AiAnalyser,
+        analysis_pipeline: AnalysisPipeline,
         signals: Signals,
         order_execution: OrderExecution,
         reporting: Reporting,
-        watchlist_repo: IWatchlistRepository,
         logger: ILoggingProvider,
-        db=None,
-    ):
+    ) -> None:
         self._market_scanner = market_scanner
         self._buzz_scanner = buzz_scanner
+        self._stock_provider = stock_provider
+        self._watchlist_repository = watchlist_repository
         self._account_loader = account_loader
         self._account_risk_check = account_risk_check
-        self._stock_selector = stock_selector
-        self._market_data = market_data
         self._technical_filter = technical_filter
-        self._news_feed = news_feed
-        self._ai_analyser = ai_analyser
+        self._analysis_pipeline = analysis_pipeline
         self._signals = signals
         self._order_execution = order_execution
         self._reporting = reporting
-        self._watchlist_repo = watchlist_repo
         self._logger = logger
-        self._db = db
 
-    async def shutdown(self) -> None:
-        if self._db:
-            await self._db.close()
-
-    # ----------------------------------------------------------------------
-    # [1] Run Full Cycle (Nightly Scan) - Build Watchlist, Analyze, No Orders
-    # ----------------------------------------------------------------------
     async def run_full_cycle(self) -> PipelineContext:
-        ctx = PipelineContext()
-        self._logger.info("=== Starting Full Market Scan ===")
+        """
+        After-market full-universe analysis.
 
-        await self._market_scanner.execute(ctx)
-        if ctx.target_stocks:
-            await self._market_data.execute(ctx)
-            await self._technical_filter.execute(ctx)
+        Builds the technical watchlist and generates next-session signals.
+        It never submits orders.
+        """
 
-        if ctx.target_stocks:
-            entries = [StockWatchlist(stock_id=s.stock_id, type=WatchlistType.TECHNICAL) for s in ctx.target_stocks]
-            await self._watchlist_repo.upsert(entries)
+        context = PipelineContext()
 
-            await self._news_feed.execute(ctx)
-            await self._ai_analyser.execute(ctx)
-            await self._signals.execute(ctx)
+        self._logger.info("Starting full market cycle.")
 
-        ctx.stats.finish()
-        return ctx
+        await self._account_loader.execute(context)
+        await self._account_risk_check.execute(context)
+        await self._market_scanner.execute(context)
+        await self._technical_filter.execute(context, watchlist_type=WatchlistType.TECHNICAL)
+        await self._watchlist_repository.upsert(context.watchlist)
+        await self._analysis_pipeline.execute(context)
 
-    # ----------------------------------------------------------------------
-    # [2] Scan Social Buzz
-    # ----------------------------------------------------------------------
+        if context.survivors or context.emergency_exit_signals:
+            await self._signals.execute(context)
+
+        await self._reporting.execute(context)
+        context.stats.finish()
+
+        self._logger.info(
+            f"Full market cycle completed. "
+            f"Scanned={context.stats.total_scanned}, "
+            f"Survivors={len(context.survivors)}, "
+            f"Signals={context.stats.signals_generated}"
+        )
+
+        return context
+
     async def run_buzz_scan(self) -> PipelineContext:
-        ctx = PipelineContext()
-        self._logger.info("=== Starting Social Buzz Scan ===")
+        """
+        Finds currently discussed stocks and evaluates them.
 
-        # Scrapes & saves to Watchlist DB directly
-        await self._buzz_scanner.execute()
+        Only technically qualified buzz stocks are persisted to the
+        watchlist.
 
-        # Load from DB, analyse, execute mock
-        await self._stock_selector.load_from_watchlist(ctx, WatchlistType.BUZZ)
-        if ctx.target_stocks:
-            await self._account_loader.execute(ctx)
-            await self._market_data.execute(ctx)
-            await self._technical_filter.execute(ctx)
-            await self._news_feed.execute(ctx)
-            await self._ai_analyser.execute(ctx)
-            await self._signals.execute(ctx)
-            await self._order_execution.execute(ctx)
-            await self._reporting.execute(ctx)
+        Orders are passed to OrderExecution, which must enforce:
+        - market-open status
+        - valid signal quantity
+        - account and broker constraints
+        """
 
-        ctx.stats.finish()
-        return ctx
+        context = PipelineContext()
 
-    # ----------------------------------------------------------------------
-    # [3] Run Intraday Trading
-    # ----------------------------------------------------------------------
+        self._logger.info("Starting social buzz scan.")
+
+        await self._account_loader.execute(context)
+        await self._account_risk_check.execute(context)
+        await self._buzz_scanner.execute(context)
+
+        if context.all_stocks:
+            await self._market_scanner.execute(context, stocks=context.all_stocks)
+            await self._technical_filter.execute(context, watchlist_type=WatchlistType.BUZZ)
+            await self._watchlist_repository.upsert(context.watchlist)
+
+        await self._analysis_pipeline.execute(context)
+
+        if context.survivors or context.emergency_exit_signals:
+            await self._signals.execute(context)
+
+        await self._order_execution.execute(context)
+        await self._reporting.execute(context)
+        context.stats.finish()
+
+        self._logger.info(
+            f"Social buzz scan completed. "
+            f"Candidates={len(context.all_stocks)}, "
+            f"Survivors={len(context.survivors)}, "
+            f"Orders={context.stats.orders_submitted}"
+        )
+
+        return context
+
     async def run_intraday(self) -> PipelineContext:
-        ctx = PipelineContext()
-        self._logger.info("=== Starting Intraday Trading ===")
+        """
+        Revalidates held positions and active watchlist candidates
+        using current market data before submitting permitted orders.
+        """
 
-        await self._account_loader.execute(ctx)
-        await self._account_risk_check.execute(ctx)
+        context = PipelineContext()
 
-        await self._stock_selector.load_from_watchlist(ctx)  # Loads ALL active watchlist stocks
+        self._logger.info("Starting intraday trading workflow.")
 
-        if ctx.target_stocks or ctx.held_stocks:
-            await self._market_data.execute(ctx)
-            await self._technical_filter.execute(ctx)
-            await self._news_feed.execute(ctx)
-            await self._ai_analyser.execute(ctx)
-            await self._signals.execute(ctx)
-            await self._order_execution.execute(ctx)
-            await self._reporting.execute(ctx)
+        await self._account_loader.execute(context)
+        await self._account_risk_check.execute(context)
 
-        ctx.stats.finish()
-        return ctx
+        active_entries = await self._watchlist_repository.get_active()
+        context.watchlist = active_entries
 
-    # ----------------------------------------------------------------------
-    # [4] Analyse Specific Stocks
-    # ----------------------------------------------------------------------
-    async def analyze_specific_stocks(self, stock_ids: list[str]) -> PipelineContext:
-        ctx = PipelineContext()
-        self._logger.info(f"=== Analyzing Specific Stocks: {stock_ids} ===")
+        stocks_by_id = {stock.stock_id: stock for stock in context.held_candidates}
 
-        await self._account_loader.execute(ctx)
-        await self._stock_selector.load_by_ids(ctx, stock_ids)
+        for entry in active_entries:
+            if entry.stock_id in stocks_by_id:
+                continue
 
-        if ctx.target_stocks:
-            await self._market_data.execute(ctx)
-            await self._technical_filter.execute(ctx)
-            await self._news_feed.execute(ctx)
-            await self._ai_analyser.execute(ctx)
-            await self._signals.execute(ctx)
+            stock = await self._stock_provider.get_by_id(entry.stock_id)
 
-        ctx.stats.finish()
-        return ctx
+            if stock is None:
+                self._logger.warning(f"Stock not found: {entry.stock_id}")
+                continue
+
+            stocks_by_id[stock.stock_id] = stock
+
+        context.all_stocks = list(stocks_by_id.values())
+
+        self._logger.info(
+            f"Loaded intraday candidates. "
+            f"Held={len(context.held_candidates)}, "
+            f"Watchlist={len(active_entries)}, "
+            f"Candidates={len(context.all_stocks)}"
+        )
+
+        if context.all_stocks:
+            await self._market_scanner.execute(context, stocks=context.all_stocks)
+            await self._technical_filter.execute(context)
+
+        await self._analysis_pipeline.execute(context)
+
+        if context.survivors or context.emergency_exit_signals:
+            await self._signals.execute(context)
+
+        await self._order_execution.execute(context)
+        await self._reporting.execute(context)
+        context.stats.finish()
+
+        self._logger.info(
+            f"Intraday trading completed. "
+            f"Candidates={len(context.all_stocks)}, "
+            f"Survivors={len(context.survivors)}, "
+            f"Orders={context.stats.orders_submitted}"
+        )
+
+        return context
+    # TODO: Poor logic move to usecase
+    async def analyse_specific_stocks(
+        self,
+        stock_ids: list[str],
+    ) -> PipelineContext:
+        """
+        Produces complete reports for explicitly requested stocks.
+
+        Passing stocks are returned as MANUAL watchlist candidates.
+        Persisting them remains an explicit user action.
+        """
+
+        context = PipelineContext()
+
+        self._logger.info(f"Starting specific-stock analysis: {stock_ids}")
+
+        stocks: list[Stock] = []
+
+        for stock_id in dict.fromkeys(stock_ids):
+            stock = await self._stock_provider.get_by_id(stock_id)
+
+            if stock is None:
+                self._logger.warning(f"Stock not found: {stock_id}")
+                continue
+
+            stocks.append(stock)
+
+        if stocks:
+            await self._market_scanner.execute(context, stocks=stocks)
+            await self._technical_filter.execute(context, watchlist_type=WatchlistType.MANUAL)
+            await self._analysis_pipeline.execute(context)
+
+        context.stats.finish()
+
+        self._logger.info(
+            f"Specific-stock analysis completed. "
+            f"Requested={len(stock_ids)}, "
+            f"Loaded={len(context.all_stocks)}, "
+            f"Analysed={context.stats.ai_analysed}"
+        )
+
+        return context
+
+    # TODO: move to usecase
+    async def add_manual_watchlist(
+        self,
+        entries: list[StockWatchlist],
+    ) -> None:
+        """
+        Persists manually selected stocks after the user reviews their reports.
+        """
+
+        await self._watchlist_repository.upsert(entries)
+
+        self._logger.info(f"Added {len(entries)} manually selected stocks to the watchlist.")
+
+    # TODO: move to usecase
+    async def execute_manual_buy_override(
+        self,
+        stock_ids: list[str],
+        quantity: int,
+        context: PipelineContext | None = None,
+    ) -> PipelineContext:
+        """
+        Places explicit user-confirmed BUY orders for reviewed stocks.
+
+        OrderExecution still enforces market-open and signal quantity checks.
+        """
+
+        if context is None:
+            context = await self.analyse_specific_stocks(stock_ids)
+
+        if quantity <= 0:
+            self._logger.warning(f"Manual BUY override skipped. Invalid quantity={quantity}.")
+            return context
+
+        context.buy_signals = []
+
+        for stock in context.all_stocks:
+            if stock.current_price is None:
+                continue
+
+            context.buy_signals.append(
+                TradeSignal(
+                    stock_id=stock.stock_id,
+                    action=TradeAction.BUY,
+                    price_at_signal=stock.current_price,
+                    source=SignalSource.HYBRID,
+                    score=stock.combined_score,
+                    reason="MANUAL_BUY_OVERRIDE | User confirmed from CLI after reviewing the report.",
+                    quantity=quantity,
+                )
+            )
+
+        await self._order_execution.execute(context)
+        context.stats.finish()
+
+        return context

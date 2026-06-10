@@ -39,16 +39,10 @@ class StochasticHealthCriterion:
         stochastic = stock.indicators.stochastic
 
         if self.max_k is not None:
-            if stochastic.k is None:
-                return self.allow_missing
-
             if stochastic.k >= self.max_k:
                 return False
 
         if self.require_cross:
-            if stochastic.k is None or stochastic.d is None:
-                return self.allow_missing
-
             if stochastic.k <= stochastic.d:
                 return False
 

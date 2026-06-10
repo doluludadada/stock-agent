@@ -7,6 +7,7 @@ from a_domain.ports.system.market_clock import IMarketClock
 # TODO Think a better way
 TAIWAN_TIMEZONE = timezone(timedelta(hours=8), name="UTC+08:00")
 
+
 # TODO: What the hell with this name?
 class FixedOffsetMarketClock(IMarketClock):
     def __init__(self, market_timezone: tzinfo):
@@ -40,7 +41,18 @@ class FixedOffsetMarketClock(IMarketClock):
             datetime.combine(end_day, time.max, tzinfo=self._timezone),
         )
 
+    def is_market_open(self) -> bool:
+        raise NotImplementedError("Market-open rules must be implemented by the market-specific clock.")
+
 
 class TaiwanMarketClock(FixedOffsetMarketClock):
     def __init__(self):
         super().__init__(market_timezone=TAIWAN_TIMEZONE)
+
+    def is_market_open(self) -> bool:
+        now = self.now()
+
+        if now.weekday() >= 5:
+            return False
+
+        return time(9, 0) <= now.time() <= time(13, 30)

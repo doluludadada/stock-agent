@@ -35,16 +35,10 @@ class AdxTrendCriterion:
 
         adx = stock.indicators.adx
 
-        if adx.adx is None:
-            return self.allow_missing
-
         if not self.min_adx <= adx.adx <= self.max_adx:
             return False
 
         if not self.require_direction:
             return True
-
-        if adx.plus_di is None or adx.minus_di is None:
-            return self.allow_missing
 
         return adx.plus_di > adx.minus_di

@@ -158,7 +158,7 @@ async def test_ai_analyser_records_provider_failure_without_counting_success() -
 
     analyser = AiAnalyser(
         ai_provider=FailingAiProvider(),
-        knowledge_repo=EmptyKnowledgeRepository(),
+        knowledge_repository=EmptyKnowledgeRepository(),
         config=cast(Any, config),
         logger=FakeLogger(),
     )
@@ -168,7 +168,7 @@ async def test_ai_analyser_records_provider_failure_without_counting_success() -
     assert context.stats.ai_analysed == 0
     assert context.stats.total_errors == 1
     assert "provider is unavailable" in context.stats.errors[0]
-    assert stock.ai_score == 50
+    assert stock.ai_score is None
 
 
 @pytest.mark.asyncio

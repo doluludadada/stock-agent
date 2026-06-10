@@ -2,32 +2,25 @@ from dataclasses import dataclass
 
 import icontract
 
-from a_domain.model.market.stock import Stock
-
 
 @icontract.invariant(lambda self: self.technical_weight >= 0)
 @icontract.invariant(lambda self: self.sentiment_weight >= 0)
 @icontract.invariant(lambda self: self.technical_weight + self.sentiment_weight > 0)
 @dataclass(frozen=True)
 class CompositeScoreRule:
-    """
-    Combines technical score and AI sentiment score into one 0-100 score.
-    """
+    """Combines technical and AI scores into one final score."""
 
     technical_weight: float
     sentiment_weight: float
 
+    @icontract.require(lambda technical_score: 0 <= technical_score <= 100)
+    @icontract.require(lambda ai_score: 0 <= ai_score <= 100)
     @icontract.ensure(lambda result: 0 <= result <= 100)
-    def calculate(self, stock: Stock) -> int:
-        # TODO: Shoudn't be None no?
-        technical_score = stock.technical_score if stock.technical_score is not None else 50
-        ai_score = stock.ai_score if stock.ai_score is not None else 50
-
+    def calculate(
+        self,
+        technical_score: int,
+        ai_score: int,
+    ) -> int:
         total_weight = self.technical_weight + self.sentiment_weight
 
-        weighted_score = (technical_score * self.technical_weight + ai_score * self.sentiment_weight) / total_weight
-
-        return self._clamp(round(weighted_score))
-
-    def _clamp(self, score: int) -> int:
-        return max(0, min(100, score))
+        return round((technical_score * self.technical_weight + ai_score * self.sentiment_weight) / total_weight)

@@ -14,7 +14,7 @@ class VolatilitySafetyCriterion:
     """
     Volatility safety condition.
 
-    
+
     Daily range is a safety gate.
     ATR range is optional and can be used as a sizing / risk quality filter.
     """
@@ -56,10 +56,7 @@ class VolatilitySafetyCriterion:
             if stock.indicators is None or stock.indicators.atr is None:
                 return not self.require_atr
 
-            atr_percent = stock.indicators.atr.atr_percent
-
-            if atr_percent is None:
-                return not self.require_atr
+            atr_percent = stock.indicators.atr.percent
 
             if self.min_atr_pct is not None and atr_percent < self.min_atr_pct:
                 return False

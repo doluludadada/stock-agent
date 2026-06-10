@@ -1,4 +1,4 @@
-from a_domain.ports.market.price_provider import IPriceProvider
+from a_domain.ports.market.price_provider import IOhlcvProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.rules.trading.exit import ExitRule
 from a_domain.types.enums import TradeAction
@@ -10,7 +10,7 @@ class AccountRiskCheck:
     """
     Use Case: Fast account-level risk pre-check.
 
-    This runs after AccountLoader and before StockSelector.
+    This runs after AccountLoader.
 
     It only checks emergency stop-loss.
     It does not do score-based SELL, ADD, AI analysis, or full-funnel decisions.
@@ -18,7 +18,7 @@ class AccountRiskCheck:
 
     def __init__(
         self,
-        price_provider: IPriceProvider,
+        price_provider: IOhlcvProvider,
         config: AppConfig,
         logger: ILoggingProvider,
     ):

@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from icontract import ensure, invariant
 
 from a_domain.model.market.stock import Stock
-from a_domain.types.enums import WatchlistType
 
 
 # TODO: It was clean
@@ -30,12 +29,6 @@ class AiReportPromptBuilder:
 
         if stock.historical_context:
             articles_text += f"\n\n[Past Analysis]\n{stock.historical_context}"
-
-        if stock.source == WatchlistType.SOCIAL_BUZZ:
-            return self.momentum_template.format(
-                stock_id=stock.stock_id,
-                articles_text=articles_text,
-            )
 
         return self.fundamental_template.format(
             stock_id=stock.stock_id,

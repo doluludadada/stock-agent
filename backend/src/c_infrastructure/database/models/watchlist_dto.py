@@ -15,7 +15,7 @@ class WatchlistDTO(StockWatchlist, table=True):
     __tablename__: ClassVar[str] = "watchlists"
 
     # One active membership record per stock.
-    stock_id: str = Field(index=True, unique=True)
+    stock_id: str = Field(primary_key=True)
 
     type: WatchlistType = Field(index=True)
 

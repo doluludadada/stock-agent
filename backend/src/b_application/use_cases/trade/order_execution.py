@@ -1,5 +1,6 @@
 from a_domain.model.trading.order import Order
 from a_domain.ports.system.logging_provider import ILoggingProvider
+from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.execution_provider import IExecutionProvider
 from a_domain.types.enums import OrderType, TradeAction
 from b_application.schemas.pipeline_context import PipelineContext
@@ -17,9 +18,11 @@ class OrderExecution:
     def __init__(
         self,
         execution_provider: IExecutionProvider,
+        market_clock: IMarketClock,
         logger: ILoggingProvider,
     ):
         self._execution_provider = execution_provider
+        self._market_clock = market_clock
         self._logger = logger
 
     async def execute(self, context: PipelineContext) -> None:
@@ -33,6 +36,14 @@ class OrderExecution:
             ]
             if signal.action != TradeAction.HOLD
         ]
+
+        if not orderable_signals:
+            self._logger.info("Order execution skipped. No orderable signals.")
+            return
+
+        if not self._market_clock.is_market_open():
+            self._logger.warning("Order execution skipped. Market is closed.")
+            return
 
         for signal in orderable_signals:
             if signal.quantity <= 0:

@@ -11,7 +11,7 @@ import yfinance as yf
 
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
-from a_domain.ports.market.price_provider import IPriceProvider
+from a_domain.ports.market.price_provider import IOhlcvProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.types.enums import MarketType
 
@@ -63,7 +63,7 @@ def dataframe_to_bars(df: pd.DataFrame) -> list[Ohlcv]:
     return bars
 
 
-class YahooFinanceProvider(IPriceProvider):
+class YahooFinanceProvider(IOhlcvProvider):
     def __init__(
         self,
         logger: ILoggingProvider,
