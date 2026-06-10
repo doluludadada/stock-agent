@@ -51,7 +51,6 @@ class BuzzScanner:
             for stock in buzz_stocks
         ]
 
-        context.all_stocks = buzz_stocks
         context.watchlist = watchlist_stock
 
         self._logger.info(f"Found {len(buzz_stocks)} trending stocks.")

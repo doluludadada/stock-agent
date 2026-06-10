@@ -10,7 +10,7 @@ from a_domain.rules.trading.reason import ReasonRule
 from a_domain.types.enums import SignalSource, TradeAction
 
 
-# TODO: No hard code here
+# TODO: Needa check
 @invariant(lambda self: 0 < self.stop_loss_pct < 1)
 @invariant(lambda self: 0 <= self.sell_threshold <= 100)
 @dataclass(frozen=True)
@@ -46,7 +46,7 @@ class ExitRule:
                 stock_id=stock.stock_id,
                 action=TradeAction.SELL,
                 price_at_signal=current_price,
-                source=SignalSource.HYBRID,
+                source=SignalSource.COMBINED,
                 score=stock.combined_score,
                 reason=ReasonRule.build_exit(
                     stock=stock,
@@ -61,7 +61,7 @@ class ExitRule:
             stock_id=stock.stock_id,
             action=TradeAction.HOLD,
             price_at_signal=current_price,
-            source=SignalSource.HYBRID,
+            source=SignalSource.COMBINED,
             score=stock.combined_score,
             reason=ReasonRule.build_exit_hold(
                 stock=stock,

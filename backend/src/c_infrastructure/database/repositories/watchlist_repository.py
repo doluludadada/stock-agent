@@ -1,5 +1,3 @@
-# backend/src/c_infrastructure/database/repositories/watchlist_repository.py
-
 from sqlalchemy import or_
 from sqlmodel import col, delete, select
 
@@ -7,7 +5,7 @@ from a_domain.model.trading.watchlist import StockWatchlist
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
-from a_domain.types.enums import WatchlistType
+from a_domain.rules.trading.watchlist import WatchlistRule
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.watchlist_dto import WatchlistDTO
 
@@ -18,10 +16,12 @@ class WatchlistRepository(IWatchlistRepository):
         db: DatabaseConnector,
         logger: ILoggingProvider,
         market_clock: IMarketClock,
-    ):
+        watchlist_rule: WatchlistRule,
+    ) -> None:
         self._db = db
         self._logger = logger
         self._market_clock = market_clock
+        self._watchlist_rule = watchlist_rule
 
     async def get_active(self) -> list[StockWatchlist]:
         now = self._market_clock.now()
@@ -57,7 +57,7 @@ class WatchlistRepository(IWatchlistRepository):
                     session.add(WatchlistDTO.model_validate(entry))
                     continue
 
-                existing.type = self._merge_source(
+                existing.type = self._watchlist_rule.merge(
                     current=existing.type,
                     incoming=entry.type,
                 )
@@ -79,25 +79,3 @@ class WatchlistRepository(IWatchlistRepository):
             await session.commit()
 
         self._logger.debug(f"Removed {stock_id} from watchlist.")
-
-    @staticmethod
-    def _merge_source(
-        current: WatchlistType,
-        incoming: WatchlistType,
-    ) -> WatchlistType:
-        if current == incoming:
-            return current
-
-        if WatchlistType.MANUAL in {current, incoming}:
-            return WatchlistType.MANUAL
-
-        if WatchlistType.TECHNICAL_AND_BUZZ in {current, incoming}:
-            return WatchlistType.TECHNICAL_AND_BUZZ
-
-        if {current, incoming} == {
-            WatchlistType.TECHNICAL,
-            WatchlistType.BUZZ,
-        }:
-            return WatchlistType.TECHNICAL_AND_BUZZ
-
-        return incoming

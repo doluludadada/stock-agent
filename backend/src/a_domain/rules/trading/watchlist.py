@@ -1,24 +1,33 @@
-from dataclasses import dataclass
+from icontract import ensure
 
-from a_domain.model.market.stock import Stock
+from a_domain.types.enums import WatchlistType
 
 
-# TODO: Use icontract
-@dataclass(frozen=True)
 class WatchlistRule:
-    minimum_combined_score: int
+    """Owns domain decisions for combining watchlist classifications."""
 
-    def accepts(self, stock: Stock) -> bool:
-        if stock.is_eliminated:
-            return False
+    # TODO: Kinda weird logic 
+    @ensure(lambda result: isinstance(result, WatchlistType))
+    def merge(
+        self,
+        current: WatchlistType,
+        incoming: WatchlistType,
+    ) -> WatchlistType:
+        if current == incoming:
+            return current
 
-        if stock.technical_score is None:
-            return False
+        types = {current, incoming}
 
-        if stock.ai_score is None:
-            return False
+        if WatchlistType.MANUAL in types:
+            return WatchlistType.MANUAL
 
-        if stock.combined_score is None:
-            return False
+        if WatchlistType.TECHNICAL_AND_BUZZ in types:
+            return WatchlistType.TECHNICAL_AND_BUZZ
 
-        return stock.combined_score >= self.minimum_combined_score
+        if types == {
+            WatchlistType.TECHNICAL,
+            WatchlistType.BUZZ,
+        }:
+            return WatchlistType.TECHNICAL_AND_BUZZ
+
+        raise ValueError(f"Unsupported watchlist type merge: {current} + {incoming}")

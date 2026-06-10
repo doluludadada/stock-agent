@@ -6,7 +6,7 @@ from a_domain.model.trading.position import Position
 
 
 class IExecutionProvider(Protocol):
-    """Interface for executing trades and retrieving account status."""
+    """Executes orders and exposes broker account state."""
 
     async def place_order(self, order: Order) -> Order: ...
 

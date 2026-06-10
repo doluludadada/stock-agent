@@ -12,6 +12,7 @@ from a_domain.rules.trading.sizing import SizingRule
 from a_domain.types.enums import SignalSource, TradeAction
 
 
+# TODO: Might needa check this class.
 @invariant(lambda self: 0 <= self.buy_threshold <= 100)
 @dataclass(frozen=True)
 class EntryRule:
@@ -25,7 +26,7 @@ class EntryRule:
     """
 
     buy_threshold: int
-    sizing_rule: SizingRule
+    sizing_rule: SizingRule #? it should be exit logic?
 
     @require(lambda stock: stock.current_price is not None, "Entry decision requires a valid current price")
     @ensure(lambda result: result.quantity >= 0, "BUY signal quantity must be non-negative")
@@ -43,7 +44,7 @@ class EntryRule:
                 stock_id=stock.stock_id,
                 action=TradeAction.HOLD,
                 price_at_signal=current_price,
-                source=SignalSource.HYBRID,
+                source=SignalSource.COMBINED,
                 score=stock.combined_score,
                 reason=ReasonRule.build_entry_hold(
                     stock=stock,
@@ -60,7 +61,7 @@ class EntryRule:
                 stock_id=stock.stock_id,
                 action=TradeAction.HOLD,
                 price_at_signal=current_price,
-                source=SignalSource.HYBRID,
+                source=SignalSource.COMBINED,
                 score=stock.combined_score,
                 reason=ReasonRule.build_entry_hold(
                     stock=stock,
@@ -79,7 +80,7 @@ class EntryRule:
             stock_id=stock.stock_id,
             action=TradeAction.BUY,
             price_at_signal=current_price,
-            source=SignalSource.HYBRID,
+            source=SignalSource.COMBINED,
             score=stock.combined_score,
             reason=reason,
             quantity=quantity,

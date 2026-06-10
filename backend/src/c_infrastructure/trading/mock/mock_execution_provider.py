@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import select
@@ -8,78 +8,113 @@ from a_domain.model.trading.order import Order
 from a_domain.model.trading.position import Position
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.trading.execution_provider import IExecutionProvider
-from a_domain.types.enums import OrderStatus, TradeAction
+from a_domain.rules.trading.order import OrderRules
+from a_domain.types.enums import OrderStatus, OrderType, TimeInForce, TradeAction
 from b_application.schemas.config import AppConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.mock_trading_dto import MockCash, MockOrder, MockPosition
 from c_infrastructure.trading.mock.constants import MockLogMessage, MockRejectReason
 
 
+# TODO: needa check
 class MockExecutionProvider(IExecutionProvider):
-    """
-    DEV / TEST fake broker with database persistence.
-
-    State is persisted in mock_cash, mock_positions, and mock_orders.
-    Includes universal market friction costs (fees and taxes).
-    """
+    """Database-backed broker simulator."""
 
     def __init__(
         self,
         db: DatabaseConnector,
         config: AppConfig,
         logger: ILoggingProvider,
-    ):
+    ) -> None:
         self._db = db
         self._config = config
         self._logger = logger
         self._account_id = config.mock_trading.account_id
         self._initial_cash = config.mock_trading.initial_cash
 
-    async def place_order(self, order: Order) -> str:
-        await self._ensure_account()
-
-        if order.quantity <= 0:
-            return await self._save_rejected_order(order, MockRejectReason.INVALID_QUANTITY)
-
-        if order.price is None or order.price <= 0:
-            return await self._save_rejected_order(order, MockRejectReason.INVALID_PRICE)
-
-        if order.action == TradeAction.BUY:
-            return await self._place_buy_order(order)
-
-        if order.action == TradeAction.SELL:
-            return await self._place_sell_order(order)
-
-        return await self._save_rejected_order(order, MockRejectReason.UNSUPPORTED_ACTION)
-
-    async def cancel_order(self, order_id: str) -> bool:
+    async def place_order(
+        self,
+        order: Order,
+    ) -> Order:
         await self._ensure_account()
 
         try:
-            parsed_order_id = UUID(order_id)
-        except ValueError:
-            return False
+            OrderRules.validate_submission(order)
+
+        except ValueError as error:
+            OrderRules.mark_rejected(order, str(error))
+            await self._save_order(order)
+
+            self._logger.warning(f"{MockLogMessage.ORDER_REJECTED} {order.action} {order.stock_id}: {order.reason}")
+            return order
+
+        try:
+            if order.order_type != OrderType.LIMIT:
+                OrderRules.mark_rejected(
+                    order,
+                    MockRejectReason.UNSUPPORTED_ORDER_TYPE,
+                )
+                await self._save_order(order)
+
+                self._logger.warning(f"{MockLogMessage.ORDER_REJECTED} {order.action} {order.stock_id}: {order.reason}")
+                return order
+
+            if order.time_in_force == TimeInForce.ROD:
+                OrderRules.mark_submitted(order)
+                await self._save_order(order)
+
+                self._logger.info(
+                    f"{MockLogMessage.ORDER_SUBMITTED} {order.action} {order.stock_id} x {order.quantity} @ {order.limit_price}"
+                )
+                return order
+
+            if order.action == TradeAction.BUY:
+                return await self._place_buy_order(order)
+
+            return await self._place_sell_order(order)
+
+        except Exception as error:
+            if order.status in {
+                OrderStatus.PENDING,
+                OrderStatus.SUBMITTED,
+            }:
+                OrderRules.mark_failed(order, str(error))
+
+            try:
+                await self._save_order(order)
+
+            except Exception:
+                raise error
+
+            self._logger.error(f"{MockLogMessage.ORDER_FAILED} {order.stock_id}: {error}")
+            return order
+
+    async def cancel_order(
+        self,
+        order_id: UUID,
+    ) -> Order | None:
+        await self._ensure_account()
 
         async with self._db.get_session() as session:
             result = await session.execute(
                 select(MockOrder).where(
-                    col(MockOrder.id) == parsed_order_id,
+                    col(MockOrder.id) == order_id,
                     col(MockOrder.account_id) == self._account_id,
                 )
             )
             order = result.scalar_one_or_none()
 
-            if order is None:
-                return False
+            if order is None or order.status != OrderStatus.SUBMITTED:
+                return None
 
-            if order.status != OrderStatus.PENDING:
-                return False
-
-            order.status = OrderStatus.CANCELLED
-            order.updated_at = self._now()
+            OrderRules.mark_cancelled(order)
 
             await session.commit()
-            return True
+            await session.refresh(order)
+
+            self._logger.info(f"{MockLogMessage.ORDER_CANCELLED} {order.id}")
+
+            return Order.model_validate(order)
 
     async def get_positions(self) -> list[Position]:
         await self._ensure_account()
@@ -88,16 +123,16 @@ class MockExecutionProvider(IExecutionProvider):
             result = await session.execute(select(MockPosition).where(col(MockPosition.account_id) == self._account_id))
             rows = result.scalars().all()
 
-            return [
-                Position(
-                    stock_id=row.stock_id,
-                    quantity=row.quantity,
-                    average_cost=row.average_cost,
-                    opened_at=row.opened_at,
-                    updated_at=row.updated_at,
-                )
-                for row in rows
-            ]
+        return [
+            Position(
+                stock_id=row.stock_id,
+                quantity=row.quantity,
+                average_cost=row.average_cost,
+                opened_at=row.opened_at,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
 
     async def get_cash_balance(self) -> float:
         await self._ensure_account()
@@ -110,29 +145,47 @@ class MockExecutionProvider(IExecutionProvider):
 
             return cash.current_cash
 
-    async def _place_buy_order(self, order: Order) -> str:
-        price = self._require_price(order)
-        base_value = price * order.quantity
+    async def _place_buy_order(
+        self,
+        order: Order,
+    ) -> Order:
+        execution_price = order.limit_price
 
-        # Calculate universal friction costs
-        trading_rules = self._config.market
-        fee = max(trading_rules.min_fee, int(base_value * trading_rules.fee_rate))
+        if execution_price is None:
+            raise ValueError("LIMIT order requires limit_price")
+
+        base_value = execution_price * order.quantity
+        market_rules = self._config.market
+
+        fee = max(
+            market_rules.min_fee,
+            int(base_value * market_rules.fee_rate),
+        )
         total_cost = base_value + fee
 
         async with self._db.get_session() as session:
             cash = await self._get_cash(session)
 
             if cash is None:
-                raise RuntimeError("Mock account was not initialized.")
+                raise RuntimeError("Mock account was not initialized")
 
             if cash.current_cash < total_cost:
-                return await self._save_rejected_order_in_session(
-                    session=session,
-                    order=order,
-                    reason=MockRejectReason.INSUFFICIENT_CASH,
+                OrderRules.mark_rejected(
+                    order,
+                    MockRejectReason.INSUFFICIENT_CASH,
+                )
+                await self._save_order_in_session(
+                    session,
+                    order,
                 )
 
-            position = await self._get_position(session, order.stock_id)
+                self._logger.warning(f"{MockLogMessage.ORDER_REJECTED} {order.action} {order.stock_id}: {order.reason}")
+                return order
+
+            position = await self._get_position(
+                session,
+                order.stock_id,
+            )
 
             if position is None:
                 session.add(
@@ -140,15 +193,16 @@ class MockExecutionProvider(IExecutionProvider):
                         account_id=self._account_id,
                         stock_id=order.stock_id,
                         quantity=order.quantity,
-                        average_cost=price,
+                        average_cost=execution_price,
                     )
                 )
+
             else:
                 position.average_cost = self._calculate_average_cost(
                     current_quantity=position.quantity,
-                    current_average_cost=position.average_cost,
+                    current_average_cost=(position.average_cost),
                     added_quantity=order.quantity,
-                    added_price=price,
+                    added_price=execution_price,
                 )
                 position.quantity += order.quantity
                 position.updated_at = self._now()
@@ -156,102 +210,132 @@ class MockExecutionProvider(IExecutionProvider):
             cash.current_cash -= total_cost
             cash.updated_at = self._now()
 
-            mock_order = self._create_order_row(
-                order=order,
-                status=OrderStatus.FILLED,
-                reason=None,
+            OrderRules.mark_filled(
+                order,
+                execution_price,
             )
-            session.add(mock_order)
-
-            await session.commit()
+            await self._save_order_in_session(
+                session,
+                order,
+            )
 
             self._logger.success(
-                f"{MockLogMessage.ORDER_FILLED} BUY {order.stock_id} x {order.quantity} "
-                f"(Price: {price}, Fee: {fee}, Total: {total_cost})"
+                f"{MockLogMessage.ORDER_FILLED} "
+                f"BUY {order.stock_id} x {order.quantity} "
+                f"(Price: {execution_price}, "
+                f"Fee: {fee}, Total: {total_cost})"
             )
 
-            return str(mock_order.id)
+            return order
 
-    async def _place_sell_order(self, order: Order) -> str:
-        price = self._require_price(order)
-        base_value = price * order.quantity
+    async def _place_sell_order(
+        self,
+        order: Order,
+    ) -> Order:
+        execution_price = order.limit_price
 
-        # Calculate universal friction costs (Fees + Tax)
+        if execution_price is None:
+            raise ValueError("LIMIT order requires limit_price")
+
+        base_value = execution_price * order.quantity
         market_rules = self._config.market
-        fee = max(market_rules.min_fee, int(base_value * market_rules.fee_rate))
+
+        fee = max(
+            market_rules.min_fee,
+            int(base_value * market_rules.fee_rate),
+        )
         tax = int(base_value * market_rules.tax_rate)
         net_revenue = base_value - fee - tax
 
         async with self._db.get_session() as session:
             cash = await self._get_cash(session)
-            position = await self._get_position(session, order.stock_id)
+            position = await self._get_position(
+                session,
+                order.stock_id,
+            )
 
             if cash is None:
-                raise RuntimeError("Mock account was not initialized.")
+                raise RuntimeError("Mock account was not initialized")
 
             if position is None:
-                return await self._save_rejected_order_in_session(
-                    session=session,
-                    order=order,
-                    reason=MockRejectReason.POSITION_NOT_FOUND,
+                OrderRules.mark_rejected(
+                    order,
+                    MockRejectReason.POSITION_NOT_FOUND,
+                )
+                await self._save_order_in_session(
+                    session,
+                    order,
                 )
 
+                self._logger.warning(f"{MockLogMessage.ORDER_REJECTED} {order.action} {order.stock_id}: {order.reason}")
+                return order
+
             if position.quantity < order.quantity:
-                return await self._save_rejected_order_in_session(
-                    session=session,
-                    order=order,
-                    reason=MockRejectReason.INSUFFICIENT_POSITION,
+                OrderRules.mark_rejected(
+                    order,
+                    MockRejectReason.INSUFFICIENT_POSITION,
                 )
+                await self._save_order_in_session(
+                    session,
+                    order,
+                )
+
+                self._logger.warning(f"{MockLogMessage.ORDER_REJECTED} {order.action} {order.stock_id}: {order.reason}")
+                return order
 
             remaining_quantity = position.quantity - order.quantity
 
             if remaining_quantity == 0:
                 await session.delete(position)
+
             else:
                 position.quantity = remaining_quantity
                 position.updated_at = self._now()
 
-            # 增加扣除手續費及稅後的淨收入
             cash.current_cash += net_revenue
             cash.updated_at = self._now()
 
-            mock_order = self._create_order_row(
-                order=order,
-                status=OrderStatus.FILLED,
-                reason=None,
+            OrderRules.mark_filled(
+                order,
+                execution_price,
             )
-            session.add(mock_order)
-
-            await session.commit()
+            await self._save_order_in_session(
+                session,
+                order,
+            )
 
             self._logger.success(
-                f"{MockLogMessage.ORDER_FILLED} SELL {order.stock_id} x {order.quantity} "
-                f"(Price: {price}, Fee: {fee}, Tax: {tax}, Net: {net_revenue})"
+                f"{MockLogMessage.ORDER_FILLED} "
+                f"SELL {order.stock_id} x {order.quantity} "
+                f"(Price: {execution_price}, "
+                f"Fee: {fee}, Tax: {tax}, "
+                f"Net: {net_revenue})"
             )
 
-            return str(mock_order.id)
+            return order
 
-    async def _save_rejected_order(self, order: Order, reason: str) -> str:
+    async def _save_order(
+        self,
+        order: Order,
+    ) -> None:
         async with self._db.get_session() as session:
-            return await self._save_rejected_order_in_session(
-                session=session,
-                order=order,
-                reason=reason,
+            await self._save_order_in_session(
+                session,
+                order,
             )
 
-    async def _save_rejected_order_in_session(self, session, order: Order, reason: str) -> str:
-        mock_order = self._create_order_row(
-            order=order,
-            status=OrderStatus.REJECTED,
-            reason=reason,
+    async def _save_order_in_session(
+        self,
+        session,
+        order: Order,
+    ) -> None:
+        session.add(
+            MockOrder(
+                **order.model_dump(),
+                account_id=self._account_id,
+            )
         )
-        session.add(mock_order)
-
         await session.commit()
-
-        self._logger.warning(f"{MockLogMessage.ORDER_REJECTED} {order.action} {order.stock_id}: {reason}")
-
-        return str(mock_order.id)
 
     async def _ensure_account(self) -> None:
         async with self._db.get_session() as session:
@@ -267,16 +351,22 @@ class MockExecutionProvider(IExecutionProvider):
                     initial_cash=self._initial_cash,
                 )
             )
-
             await session.commit()
 
             self._logger.info(MockLogMessage.ACCOUNT_SEEDED)
 
-    async def _get_cash(self, session) -> MockCash | None:
+    async def _get_cash(
+        self,
+        session,
+    ) -> MockCash | None:
         result = await session.execute(select(MockCash).where(col(MockCash.account_id) == self._account_id))
         return result.scalar_one_or_none()
 
-    async def _get_position(self, session, stock_id: str) -> MockPosition | None:
+    async def _get_position(
+        self,
+        session,
+        stock_id: str,
+    ) -> MockPosition | None:
         result = await session.execute(
             select(MockPosition).where(
                 col(MockPosition.account_id) == self._account_id,
@@ -284,30 +374,6 @@ class MockExecutionProvider(IExecutionProvider):
             )
         )
         return result.scalar_one_or_none()
-
-    def _create_order_row(
-        self,
-        *,
-        order: Order,
-        status: OrderStatus,
-        reason: str | None,
-    ) -> MockOrder:
-        return MockOrder(
-            account_id=self._account_id,
-            stock_id=order.stock_id,
-            action=order.action,
-            order_type=order.order_type,
-            price=order.price or 0,
-            quantity=order.quantity,
-            status=status,
-            reason=reason,
-        )
-
-    def _require_price(self, order: Order) -> float:
-        if order.price is None:
-            raise ValueError(MockRejectReason.INVALID_PRICE)
-
-        return order.price
 
     def _calculate_average_cost(
         self,
@@ -324,4 +390,4 @@ class MockExecutionProvider(IExecutionProvider):
         return (current_value + added_value) / total_quantity
 
     def _now(self) -> datetime:
-        return datetime.now(timezone.utc)
+        return datetime.now()

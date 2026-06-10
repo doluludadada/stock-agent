@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.position import Position
 from a_domain.ports.trading.execution_provider import IExecutionProvider
@@ -17,10 +19,10 @@ class ShioajiExecutionProvider(IExecutionProvider):
     - Map broker response back to domain.
     """
 
-    async def place_order(self, order: Order) -> str:
+    async def place_order(self, order: Order) -> Order:
         raise NotImplementedError
 
-    async def cancel_order(self, order_id: str) -> bool:
+    async def cancel_order(self, order_id: UUID) -> Order | None:
         raise NotImplementedError
 
     async def get_positions(self) -> list[Position]:

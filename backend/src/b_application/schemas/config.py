@@ -79,6 +79,7 @@ class TavilyConfig(BaseSettings):
     search_depth: str = "basic"
 
 
+# TODO: hmmm?
 class AnalysisConfig(BaseModel):
     """Analysis pipeline weighting and risk parameters."""
 

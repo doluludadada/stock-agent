@@ -14,5 +14,8 @@ class IStockProvider(Protocol):
     """
 
     async def get_all(self) -> list[Stock]: ...
-
+    """
+    They only contain stock_id (e.g., "2330") and name (e.g., "台積電").
+    """
+    
     async def get_by_id(self, stock_id: str) -> Stock | None: ...

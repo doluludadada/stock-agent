@@ -35,7 +35,7 @@ class TradeAction(StrEnum):
 # TODO: Rethink about it.
 class SignalSource(StrEnum):
     TECHNICAL = auto()
-    HYBRID = auto()
+    COMBINED = auto()
 
 
 class OrderType(StrEnum):
