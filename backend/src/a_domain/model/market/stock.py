@@ -4,7 +4,7 @@ from a_domain.model.analysis.ai_analysis_report import AiAnalysisReport
 from a_domain.model.indicators.technical_indicators import TechnicalIndicators
 from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
-from a_domain.types.enums import MarketType
+from a_domain.types.enums import MarketType, WatchlistType
 
 
 class Stock(SQLModel):
@@ -29,12 +29,12 @@ class Stock(SQLModel):
     # -------------------------------- Analysis ---------------------------------- #
     # TODO: Actually it shoudnt be None
     indicators: TechnicalIndicators | None = None
-    
+    candidate_source: WatchlistType | None = None
     # TODO: move blow stuffs those stuff to StockWatchlist?
     hard_failures: list[str] = Field(default_factory=list)
     soft_failures: list[str] = Field(default_factory=list)
     observations: list[str] = Field(default_factory=list)
-    
+
     technical_score: int | None = None
 
     # -------------------------------- Sentiment --------------------------------- #
@@ -43,7 +43,7 @@ class Stock(SQLModel):
     ai_score: int | None = None
 
     # -------------------------------- Decision ---------------------------------- #
-    combined_score: int = 50
+    combined_score: int = 0
 
     # -------------------------------- Shortcuts --------------------------------- #
     @property

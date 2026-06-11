@@ -36,6 +36,7 @@ class TradeAction(StrEnum):
 class SignalSource(StrEnum):
     TECHNICAL = auto()
     COMBINED = auto()
+    MANUAL = auto()
 
 
 class OrderType(StrEnum):

@@ -30,13 +30,13 @@ class AccountRiskCheck:
         self._logger = logger
 
     async def execute(self, context: PipelineContext) -> None:
-        if not context.held_candidates:
+        if not context.held_stocks:
             self._logger.info("Account risk check skipped. No held positions.")
             return
 
-        realtime_bars = await self._price_provider.fetch_realtime_bars(context.held_candidates)
+        realtime_bars = await self._price_provider.fetch_realtime_bars(context.held_stocks)
 
-        for stock in context.held_candidates:
+        for stock in context.held_stocks:
             position = context.positions_by_stock_id.get(stock.stock_id)
 
             if position is None:

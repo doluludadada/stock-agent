@@ -34,7 +34,7 @@ class AccountLoader:
 
         context.positions_by_stock_id = {position.stock_id: position for position in positions}
 
-        context.held_candidates.clear()
+        context.held_stocks.clear()
 
         for position in positions:
             stock = await self._stock_provider.get_by_id(position.stock_id)
@@ -43,8 +43,8 @@ class AccountLoader:
                 self._logger.warning(f"Held stock not found: {position.stock_id}")
                 continue
 
-            context.held_candidates.append(stock)
+            context.held_stocks.append(stock)
 
         self._logger.info(
-            f"Account loaded. Cash={cash}, Positions={len(positions)}, HeldCandidates={len(context.held_candidates)}"
+            f"Account loaded. Cash={cash}, Positions={len(positions)}, HeldCandidates={len(context.held_stocks)}"
         )

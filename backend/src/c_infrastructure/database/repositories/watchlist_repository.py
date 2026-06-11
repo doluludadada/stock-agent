@@ -61,7 +61,7 @@ class WatchlistRepository(IWatchlistRepository):
                     current=existing.type,
                     incoming=entry.type,
                 )
-                existing.added_at = entry.added_at
+                existing.created_at = entry.created_at
                 existing.expires_at = entry.expires_at
 
             await session.commit()

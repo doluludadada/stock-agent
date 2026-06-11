@@ -18,20 +18,32 @@ class PipelineContext:
 
     account: Account = field(default_factory=Account)
 
-    all_stocks: list[Stock] = field(default_factory=list)
+    universe_stocks: list[Stock] = field(default_factory=list)
     """
     universe stock (it should clean everytime runs pipeline)
     """
-    held_candidates: list[Stock] = field(default_factory=list)
-    positions_by_stock_id: dict[str, Position] = field(default_factory=dict)
-    risk_blocked_stock_ids: set[str] = field(default_factory=set)
+    
+    held_stocks: list[Stock] = field(default_factory=list)
+
+    buzz_stocks: list[Stock] = field(default_factory=list)
+    """
+    From Buzz
+    """
+    manual_stocks: list[Stock] = field(default_factory=list)
 
     survivors: list[Stock] = field(default_factory=list)
     """
     After techncial filter
     """
+    stocks_cache: dict[str, Stock] = field(default_factory=dict)
+    """
+    stock_id, Stock
+    """
 
-    watchlist: list[StockWatchlist] = field(default_factory=list)
+    positions_by_stock_id: dict[str, Position] = field(default_factory=dict)
+    risk_blocked_stock_ids: set[str] = field(default_factory=set)
+
+    watchlist: StockWatchlist = field(default_factory=StockWatchlist)
     # The stock Buzz and techncial filter should be added to here
 
     buy_signals: list[TradeSignal] = field(default_factory=list)

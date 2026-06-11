@@ -1,9 +1,12 @@
+from warnings import deprecated
+
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from b_application.schemas.pipeline_context import PipelineContext
 from b_application.use_cases.collect.news_feed import NewsFeed
 from b_application.use_cases.process.ai_analyser import AiAnalyser
 
 
+@deprecated("Might delete")
 class AnalysisPipeline:
     """
     Runs the common news and AI analysis sequence.
@@ -28,8 +31,6 @@ class AnalysisPipeline:
         context: PipelineContext,
     ) -> None:
         if context.survivors:
-            await self._news_feed.execute(context)
-            await self._ai_analyser.execute(context)
             return
 
         self._logger.info("Analysis pipeline skipped. No technical survivors.")

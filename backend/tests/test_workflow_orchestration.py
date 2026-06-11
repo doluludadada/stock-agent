@@ -53,7 +53,7 @@ class FakeAccountLoader:
         self._held = held or []
 
     async def execute(self, context: PipelineContext) -> None:
-        context.held_candidates = list(self._held)
+        context.held_stocks = list(self._held)
 
 
 class FakeBuzzScanner:

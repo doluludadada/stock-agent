@@ -1,14 +1,13 @@
-from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlmodel import col
 
+from a_domain.model.trading.account import Account
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.position import Position
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.trading.execution_provider import IExecutionProvider
-from a_domain.rules.trading.order import OrderRules
 from a_domain.types.enums import OrderStatus, OrderType, TimeInForce, TradeAction
 from b_application.schemas.config import AppConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
@@ -39,10 +38,10 @@ class MockExecutionProvider(IExecutionProvider):
         await self._ensure_account()
 
         try:
-            OrderRules.validate_submission(order)
+            order.validate_submission()
 
         except ValueError as error:
-            OrderRules.mark_rejected(order, str(error))
+            order.reject(str(error))
             await self._save_order(order)
 
             self._logger.warning(f"{MockLogMessage.ORDER_REJECTED} {order.action} {order.stock_id}: {order.reason}")
@@ -50,17 +49,14 @@ class MockExecutionProvider(IExecutionProvider):
 
         try:
             if order.order_type != OrderType.LIMIT:
-                OrderRules.mark_rejected(
-                    order,
-                    MockRejectReason.UNSUPPORTED_ORDER_TYPE,
-                )
+                order.reject(MockRejectReason.UNSUPPORTED_ORDER_TYPE)
                 await self._save_order(order)
 
                 self._logger.warning(f"{MockLogMessage.ORDER_REJECTED} {order.action} {order.stock_id}: {order.reason}")
                 return order
 
             if order.time_in_force == TimeInForce.ROD:
-                OrderRules.mark_submitted(order)
+                order.submit()
                 await self._save_order(order)
 
                 self._logger.info(
@@ -78,7 +74,7 @@ class MockExecutionProvider(IExecutionProvider):
                 OrderStatus.PENDING,
                 OrderStatus.SUBMITTED,
             }:
-                OrderRules.mark_failed(order, str(error))
+                order.fail(str(error))
 
             try:
                 await self._save_order(order)
@@ -107,7 +103,12 @@ class MockExecutionProvider(IExecutionProvider):
             if order is None or order.status != OrderStatus.SUBMITTED:
                 return None
 
-            OrderRules.mark_cancelled(order)
+            cancelled_order = Order.model_validate(order)
+            cancelled_order.cancel()
+
+            order.status = cancelled_order.status
+            order.reason = cancelled_order.reason
+            order.updated_at = cancelled_order.updated_at
 
             await session.commit()
             await session.refresh(order)
@@ -169,11 +170,17 @@ class MockExecutionProvider(IExecutionProvider):
             if cash is None:
                 raise RuntimeError("Mock account was not initialized")
 
-            if cash.current_cash < total_cost:
-                OrderRules.mark_rejected(
-                    order,
-                    MockRejectReason.INSUFFICIENT_CASH,
-                )
+            position = await self._get_position(
+                session,
+                order.stock_id,
+            )
+            account = self._account_from(
+                cash,
+                position,
+            )
+
+            if not account.can_afford(total_cost):
+                order.reject(MockRejectReason.INSUFFICIENT_CASH)
                 await self._save_order_in_session(
                     session,
                     order,
@@ -182,38 +189,28 @@ class MockExecutionProvider(IExecutionProvider):
                 self._logger.warning(f"{MockLogMessage.ORDER_REJECTED} {order.action} {order.stock_id}: {order.reason}")
                 return order
 
-            position = await self._get_position(
-                session,
+            domain_position = account.buy(
                 order.stock_id,
+                order.quantity,
+                execution_price,
+                total_cost,
             )
 
             if position is None:
-                session.add(
-                    MockPosition(
-                        account_id=self._account_id,
-                        stock_id=order.stock_id,
-                        quantity=order.quantity,
-                        average_cost=execution_price,
-                    )
-                )
+                session.add(self._new_position(domain_position))
 
             else:
-                position.average_cost = self._calculate_average_cost(
-                    current_quantity=position.quantity,
-                    current_average_cost=(position.average_cost),
-                    added_quantity=order.quantity,
-                    added_price=execution_price,
+                self._sync_position(
+                    position,
+                    domain_position,
                 )
-                position.quantity += order.quantity
-                position.updated_at = self._now()
 
-            cash.current_cash -= total_cost
-            cash.updated_at = self._now()
-
-            OrderRules.mark_filled(
-                order,
-                execution_price,
+            self._sync_cash(
+                cash,
+                account,
             )
+
+            order.fill(execution_price)
             await self._save_order_in_session(
                 session,
                 order,
@@ -257,11 +254,14 @@ class MockExecutionProvider(IExecutionProvider):
             if cash is None:
                 raise RuntimeError("Mock account was not initialized")
 
-            if position is None:
-                OrderRules.mark_rejected(
-                    order,
-                    MockRejectReason.POSITION_NOT_FOUND,
-                )
+            account = self._account_from(
+                cash,
+                position,
+            )
+            domain_position = account.position_for(order.stock_id)
+
+            if domain_position is None:
+                order.reject(MockRejectReason.POSITION_NOT_FOUND)
                 await self._save_order_in_session(
                     session,
                     order,
@@ -270,11 +270,8 @@ class MockExecutionProvider(IExecutionProvider):
                 self._logger.warning(f"{MockLogMessage.ORDER_REJECTED} {order.action} {order.stock_id}: {order.reason}")
                 return order
 
-            if position.quantity < order.quantity:
-                OrderRules.mark_rejected(
-                    order,
-                    MockRejectReason.INSUFFICIENT_POSITION,
-                )
+            if not domain_position.can_cover(order.quantity):
+                order.reject(MockRejectReason.INSUFFICIENT_POSITION)
                 await self._save_order_in_session(
                     session,
                     order,
@@ -283,22 +280,27 @@ class MockExecutionProvider(IExecutionProvider):
                 self._logger.warning(f"{MockLogMessage.ORDER_REJECTED} {order.action} {order.stock_id}: {order.reason}")
                 return order
 
-            remaining_quantity = position.quantity - order.quantity
+            remaining_quantity = account.sell(
+                order.stock_id,
+                order.quantity,
+                net_revenue,
+            )
 
             if remaining_quantity == 0:
                 await session.delete(position)
 
             else:
-                position.quantity = remaining_quantity
-                position.updated_at = self._now()
+                self._sync_position(
+                    position,
+                    domain_position,
+                )
 
-            cash.current_cash += net_revenue
-            cash.updated_at = self._now()
-
-            OrderRules.mark_filled(
-                order,
-                execution_price,
+            self._sync_cash(
+                cash,
+                account,
             )
+
+            order.fill(execution_price)
             await self._save_order_in_session(
                 session,
                 order,
@@ -375,19 +377,54 @@ class MockExecutionProvider(IExecutionProvider):
         )
         return result.scalar_one_or_none()
 
-    def _calculate_average_cost(
+    def _account_from(
         self,
-        *,
-        current_quantity: int,
-        current_average_cost: float,
-        added_quantity: int,
-        added_price: float,
-    ) -> float:
-        current_value = current_quantity * current_average_cost
-        added_value = added_quantity * added_price
-        total_quantity = current_quantity + added_quantity
+        cash: MockCash,
+        position: MockPosition | None,
+    ) -> Account:
+        positions = [] if position is None else [self._to_position(position)]
 
-        return (current_value + added_value) / total_quantity
+        return Account(
+            cash=cash.current_cash,
+            positions=positions,
+        )
 
-    def _now(self) -> datetime:
-        return datetime.now()
+    def _to_position(
+        self,
+        position: MockPosition,
+    ) -> Position:
+        return Position(
+            stock_id=position.stock_id,
+            quantity=position.quantity,
+            average_cost=position.average_cost,
+            opened_at=position.opened_at,
+            updated_at=position.updated_at,
+        )
+
+    def _new_position(
+        self,
+        position: Position,
+    ) -> MockPosition:
+        return MockPosition(
+            account_id=self._account_id,
+            stock_id=position.stock_id,
+            quantity=position.quantity,
+            average_cost=position.average_cost,
+        )
+
+    def _sync_position(
+        self,
+        row: MockPosition,
+        position: Position,
+    ) -> None:
+        row.quantity = position.quantity
+        row.average_cost = position.average_cost
+        row.updated_at = position.updated_at
+
+    def _sync_cash(
+        self,
+        row: MockCash,
+        account: Account,
+    ) -> None:
+        row.current_cash = account.cash
+        row.updated_at = account.updated_at

@@ -1,6 +1,7 @@
 from icontract import require
 
 from a_domain.model.chat.message import Message, MessageRole
+from a_domain.model.market.stock import Stock
 from a_domain.ports.ai.ai_provider import IAiProvider
 from a_domain.ports.ai.knowledge_repository import IKnowledgeRepository
 from a_domain.ports.system.logging_provider import ILoggingProvider
@@ -46,10 +47,10 @@ class AiAnalyser:
         lambda context: len(context.survivors) > 0,
         "AI analysis requires at least one surviving stock",
     )
-    async def execute(self, context: PipelineContext) -> None:
+    async def execute(self, stocks: list[Stock], context: PipelineContext) -> None:
         analysed_count = 0
-        stocks = context.survivors
         self._logger.info(f"Analysing {len(stocks)} surviving stocks.")
+
         for stock in stocks:
             # Clean first
             stock.analysis_report = None
@@ -103,5 +104,5 @@ class AiAnalyser:
                 stock.ai_score = None
 
         context.stats.ai_analysed += analysed_count
-
+        
         self._logger.info(f"AI analysis completed: {analysed_count}/{len(stocks)} stocks analysed.")

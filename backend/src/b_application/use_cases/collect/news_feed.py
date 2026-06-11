@@ -1,5 +1,4 @@
-from icontract import require
-
+from a_domain.model.market.stock import Stock
 from a_domain.ports.market.news_provider import INewsProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.rules.collect import ArticleQualityRule
@@ -30,37 +29,37 @@ class NewsFeed:
         )
         self._logger = logger
 
-    @require(
-        lambda context: len(context.survivors) > 0,
-        "News collection requires surviving stocks",
-    )
     async def execute(
         self,
+        stocks: list[Stock],
         context: PipelineContext,
     ) -> None:
-        self._logger.info(f"Collecting news for {len(context.survivors)} stocks.")
+        self._logger.info(f"Collecting news for {len(stocks)} stocks.")
 
-        for stock in context.survivors:
+        for stock in stocks:
             existing_articles = list(stock.articles)
 
             try:
-                fetched_articles = await self._news_provider.fetch_news(
+                fetched_news = await self._news_provider.fetch_news(
                     stock_id=stock.stock_id,
-                    limit=(self._config.analysis.article_fetch_limit),
+                    limit=self._config.analysis.article_fetch_limit,
                 )
 
-                if fetched_articles:
+                accepted_news = [article for article in fetched_news if self._quality.is_high_quality(article)]
+
+                if accepted_news:
                     self._news_provider.save_as_md_file(
                         stock.stock_id,
-                        fetched_articles,
+                        accepted_news,
                     )
 
-                accepted_articles = [article for article in fetched_articles if self._quality.is_high_quality(article)]
-
-                articles_by_id = {article.id: article for article in existing_articles}
-
-                for article in accepted_articles:
-                    articles_by_id[article.id] = article
+                articles_by_id = {
+                    article.id: article
+                    for article in [
+                        *existing_articles,
+                        *accepted_news,
+                    ]
+                }
 
                 stock.articles = list(articles_by_id.values())
 

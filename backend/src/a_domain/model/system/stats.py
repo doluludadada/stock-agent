@@ -9,6 +9,7 @@ class SystemStats(SQLModel):
     start_time: datetime = Field(default_factory=datetime.now)
     end_time: datetime | None = None
     total_scanned: int = 0
+    buzz_scanned: int = 0
     total_skipped: int = 0
     total_filtered: int = 0
     passed_technical: int = 0

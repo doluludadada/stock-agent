@@ -1,20 +1,31 @@
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from uuid import UUID, uuid4
 
-from sqlmodel import Field, SQLModel
-
-from a_domain.types.enums import WatchlistType
+from a_domain.model.market.stock import Stock
 
 
-class StockWatchlist(SQLModel):
+@dataclass
+class StockWatchlist:
     """
-    Persistent candidate membership.
+    Runtime watchlist built by the pipeline.
 
-    Market data, technical indicators, AI analysis and scores
-    remain on the runtime Stock model.
+    Contains stocks that passed technical and AI gates and are worth watching
+    for possible entry.
     """
 
-    stock_id: str
-    type: WatchlistType
-
-    added_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    watchlist_id: UUID = field(default_factory=uuid4)
+    willing_stocks: list[Stock] = field(default_factory=list)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     expires_at: datetime | None = None
+
+    def add(self, stock: Stock) -> None:
+        for existing in self.willing_stocks:
+            if existing.stock_id == stock.stock_id:
+                return
+
+        self.willing_stocks.append(stock)
+
+    def add_many(self, stocks: list[Stock]) -> None:
+        for stock in stocks:
+            self.add(stock)

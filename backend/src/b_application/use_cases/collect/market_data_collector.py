@@ -1,3 +1,4 @@
+from a_domain.model.market.stock import Stock
 from a_domain.ports.market.price_provider import IOhlcvProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
@@ -7,7 +8,7 @@ from b_application.schemas.pipeline_context import PipelineContext
 
 
 class MarketDataCollector:
-    """Loads OHLCV history and calculates indicators for current candidates."""
+    """Loads OHLCV history and calculates indicators for current analysis candidates."""
 
     def __init__(
         self,
@@ -22,16 +23,9 @@ class MarketDataCollector:
         self._indicator_calculator = TechnicalIndicatorCalculator(config.indicators)
         self._logger = logger
 
-    async def execute(self, context: PipelineContext) -> None:
-        stocks = context.all_stocks
-
-        if not stocks:
-            self._logger.info("Market data collection skipped. No candidates.")
-            return
-
+    async def execute(self, stocks: list[Stock], context: PipelineContext) -> None:
         start_date, end_date = self._market_clock.history_window(self._lookback_days)
-
-        self._logger.info(f"Fetching OHLCV data for {len(stocks)} candidates...")
+        self._logger.info(f"Fetching OHLCV data for {len(stocks)} analysis candidates...")
 
         try:
             history_by_stock_id = await self._ohlcv_provider.fetch_history(
@@ -61,4 +55,4 @@ class MarketDataCollector:
             stock.indicators = self._indicator_calculator.calculate(bars)
             collected_count += 1
 
-        self._logger.success(f"Collected market data for {collected_count}/{len(stocks)} stocks.")
+        self._logger.success(f"Collected market data for {collected_count}/{len(stocks)} analysis candidates.")
