@@ -10,7 +10,7 @@ from a_domain.types.enums import (
     TimeInForce,
     TradeAction,
 )
-from b_application.schemas.pipeline_context import PipelineContext
+from b_application.schemas.pipeline_status import PipelineStatus
 
 
 class OrderExecution:
@@ -26,20 +26,10 @@ class OrderExecution:
         self._market_clock = market_clock
         self._logger = logger
 
-    async def execute(
-        self,
-        context: PipelineContext,
-    ) -> None:
-        context.orders.clear()
+    async def execute(self, status: PipelineStatus) -> None:
+        status.orders.clear()
 
-        orderable_signals = [
-            signal
-            for signal in [
-                *context.exit_signals,
-                *context.buy_signals,
-            ]
-            if signal.action != TradeAction.HOLD
-        ]
+        orderable_signals = [signal for signal in status.signals if signal.action != TradeAction.HOLD]
 
         if not orderable_signals:
             self._logger.info("Order execution skipped. No orderable signals.")
@@ -71,7 +61,7 @@ class OrderExecution:
 
             try:
                 processed_order = await self._execution_provider.place_order(order)
-                context.orders.append(processed_order)
+                status.orders.append(processed_order)
 
                 if processed_order.status in {
                     OrderStatus.SUBMITTED,
@@ -96,7 +86,7 @@ class OrderExecution:
                     error_message = f"Order failed: {processed_order.stock_id}, reason={processed_order.reason}"
 
                     self._logger.error(error_message)
-                    context.stats.add_error(error_message)
+                    status.stats.add_error(error_message)
                     continue
 
                 self._logger.warning(f"Unexpected order status: {processed_order.stock_id}, status={processed_order.status}")
@@ -105,9 +95,9 @@ class OrderExecution:
                 error_message = f"Order execution failed: {signal.stock_id}, reason={error}"
 
                 self._logger.error(error_message)
-                context.stats.add_error(error_message)
+                status.stats.add_error(error_message)
 
-        context.stats.orders_submitted += submitted_count
+        status.stats.orders_submitted += submitted_count
 
         # TODO: Phase 2.5 - persist decision_history.
         # TODO: Phase 2.5 - persist run_history.

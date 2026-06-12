@@ -1,14 +1,13 @@
-from icontract import require
-
-from a_domain.model.chat.message import Message, MessageRole
+from a_domain.model.chat.message import Message
 from a_domain.model.market.stock import Stock
 from a_domain.ports.ai.ai_provider import IAiProvider
 from a_domain.ports.ai.knowledge_repository import IKnowledgeRepository
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.rules.ai.parser import AiReportParser
 from a_domain.rules.ai.prompt import AiReportPromptBuilder
+from a_domain.types.enums import MessageRole
 from b_application.schemas.config import AppConfig
-from b_application.schemas.pipeline_context import PipelineContext
+from b_application.schemas.pipeline_status import PipelineStatus
 
 
 class AiAnalyser:
@@ -43,29 +42,21 @@ class AiAnalyser:
         )
         self._report_parser = AiReportParser()
 
-    @require(
-        lambda context: len(context.survivors) > 0,
-        "AI analysis requires at least one surviving stock",
-    )
-    async def execute(self, stocks: list[Stock], context: PipelineContext) -> None:
+    async def execute(
+        self,
+        stocks: list[Stock],
+        status: PipelineStatus,
+    ) -> None:
+        self._logger.info(f"Analysing {len(stocks)} stocks.")
+
         analysed_count = 0
-        self._logger.info(f"Analysing {len(stocks)} surviving stocks.")
 
         for stock in stocks:
-            # Clean first
-            stock.analysis_report = None
-            stock.ai_score = None
-            stock.historical_context = ""
-
-            # Search pervious history
             try:
-                stock.historical_context = await self._knowledge_repository.search(
-                    query=stock.stock_id,
-                )
-            except Exception as error:
-                self._logger.warning(f"Previous decision context unavailable for {stock.stock_id}: {error}")
+                stock.analysis_report = None
+                stock.ai_score = None
+                stock.historical_context = await self._knowledge_repository.search(stock.stock_id)
 
-            try:
                 prompt = self._prompt_builder.build(stock)
 
                 response = await self._ai_provider.generate_reply(
@@ -77,32 +68,17 @@ class AiAnalyser:
                     ),
                 )
 
-                # TODO: Too many try here
-                try:
-                    self._ai_provider.save_response(
-                        stock_id=stock.stock_id,
-                        content=response.content,
-                    )
-                except Exception as error:
-                    self._logger.warning(f"Failed to archive AI response for {stock.stock_id}: {error}")
-
-                report = self._report_parser.parse(
-                    stock_id=stock.stock_id,
-                    raw_response=response.content,
-                )
+                self._ai_provider.save_response(stock_id=stock.stock_id, content=response.content)
+                report = self._report_parser.parse(stock_id=stock.stock_id, raw_response=response.content)
 
                 stock.analysis_report = report
                 stock.ai_score = report.score
                 analysed_count += 1
 
             except Exception as error:
-                error_message = f"AI analysis failed for {stock.stock_id}: {error}"
+                message = f"AI analysis failed for {stock.stock_id}: {error}"
+                self._logger.error(message)
+                status.stats.add_error(message)
 
-                self._logger.error(error_message)
-                context.stats.add_error(error_message)
-                stock.analysis_report = None
-                stock.ai_score = None
-
-        context.stats.ai_analysed += analysed_count
-        
+        status.stats.ai_analysed += analysed_count
         self._logger.info(f"AI analysis completed: {analysed_count}/{len(stocks)} stocks analysed.")

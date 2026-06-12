@@ -7,9 +7,9 @@ from a_domain.model.market.stock import Stock
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.model.trading.watchlist import StockWatchlist
 from a_domain.types.enums import SignalSource, TradeAction, WatchlistType
-from b_application.schemas.pipeline_context import PipelineContext
+from b_application.schemas.pipeline_status import PipelineStatus
 from b_application.use_cases.trade.order_execution import OrderExecution
-from b_application.workflow import TradingWorkflow
+from b_application.pipeline import Pipeline
 
 
 class FakeLogger:
@@ -44,7 +44,7 @@ class FakeLogger:
 
 
 class NoopUseCase:
-    async def execute(self, context: PipelineContext) -> None:
+    async def execute(self, context: PipelineStatus) -> None:
         return None
 
 
@@ -52,7 +52,7 @@ class FakeAccountLoader:
     def __init__(self, held: list[Stock] | None = None) -> None:
         self._held = held or []
 
-    async def execute(self, context: PipelineContext) -> None:
+    async def execute(self, context: PipelineStatus) -> None:
         context.held_stocks = list(self._held)
 
 
@@ -60,7 +60,7 @@ class FakeBuzzScanner:
     def __init__(self, stocks: list[Stock]) -> None:
         self._stocks = stocks
 
-    async def execute(self, context: PipelineContext) -> None:
+    async def execute(self, context: PipelineStatus) -> None:
         context.all_stocks = list(self._stocks)
 
 
@@ -68,7 +68,7 @@ class FakeMarketScanner:
     def __init__(self) -> None:
         self.enriched_ids: list[str] = []
 
-    async def execute(self, context: PipelineContext, stocks: list[Stock] | None = None) -> None:
+    async def execute(self, context: PipelineStatus, stocks: list[Stock] | None = None) -> None:
         if stocks is not None:
             context.all_stocks = list(stocks)
         self.enriched_ids = [stock.stock_id for stock in context.all_stocks]
@@ -78,7 +78,7 @@ class FakeTechnicalFilter:
     def __init__(self, survivor_ids: set[str] | None = None) -> None:
         self._survivor_ids = survivor_ids
 
-    async def execute(self, context: PipelineContext, watchlist_type: WatchlistType | None = None) -> None:
+    async def execute(self, context: PipelineStatus, watchlist_type: WatchlistType | None = None) -> None:
         if self._survivor_ids is None:
             context.survivors = list(context.all_stocks)
         else:
@@ -112,7 +112,7 @@ class FakeOrderExecution:
     def __init__(self) -> None:
         self.called = False
 
-    async def execute(self, context: PipelineContext) -> None:
+    async def execute(self, context: PipelineStatus) -> None:
         self.called = True
 
 
@@ -155,8 +155,8 @@ def build_workflow(
     watchlist_repository: FakeWatchlistRepository | None = None,
     stock_provider: FakeStockProvider | None = None,
     order_execution: FakeOrderExecution | None = None,
-) -> TradingWorkflow:
-    return TradingWorkflow(
+) -> Pipeline:
+    return Pipeline(
         market_scanner=cast(Any, market_scanner),
         buzz_scanner=cast(Any, buzz_scanner or FakeBuzzScanner([])),
         stock_provider=cast(Any, stock_provider or FakeStockProvider([])),
@@ -249,7 +249,7 @@ async def test_order_execution_skips_closed_market_orders() -> None:
         market_clock=cast(Any, ClosedMarketClock()),
         logger=cast(Any, logger),
     )
-    context = PipelineContext(
+    context = PipelineStatus(
         buy_signals=[
             TradeSignal(
                 stock_id="2330",

@@ -26,7 +26,7 @@ from b_application.use_cases.ship.signals import Signals
 from b_application.use_cases.trade.account_loader import AccountLoader
 from b_application.use_cases.trade.account_risk_check import AccountRiskCheck
 from b_application.use_cases.trade.order_execution import OrderExecution
-from b_application.workflow import TradingWorkflow
+from b_application.pipeline import Pipeline
 from d_presentation.dependencies.core import (
     get_logger,
     get_market_clock,
@@ -201,8 +201,8 @@ def get_trading_workflow_use_case(
     order_execution: OrderExecution = Depends(get_order_execution_use_case),
     reporting: Reporting = Depends(get_reporting_use_case),
     logger: ILoggingProvider = Depends(get_logger),
-) -> TradingWorkflow:
-    return TradingWorkflow(
+) -> Pipeline:
+    return Pipeline(
         market_scanner=market_scanner,
         buzz_scanner=buzz_scanner,
         stock_provider=stock_provider,

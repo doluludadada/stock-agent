@@ -3,7 +3,7 @@ from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.rules.trading.exit import ExitRule
 from a_domain.types.enums import TradeAction
 from b_application.schemas.config import AppConfig
-from b_application.schemas.pipeline_context import PipelineContext
+from b_application.schemas.pipeline_status import PipelineStatus
 
 
 class AccountRiskCheck:
@@ -29,15 +29,15 @@ class AccountRiskCheck:
         )
         self._logger = logger
 
-    async def execute(self, context: PipelineContext) -> None:
-        if not context.held_stocks:
+    async def execute(self, status: PipelineStatus) -> None:
+        if not status.held_stocks:
             self._logger.info("Account risk check skipped. No held positions.")
             return
 
-        realtime_bars = await self._price_provider.fetch_realtime_bars(context.held_stocks)
+        realtime_bars = await self._price_provider.fetch_realtime_bars(status.held_stocks)
 
-        for stock in context.held_stocks:
-            position = context.positions_by_stock_id.get(stock.stock_id)
+        for stock in status.held_stocks:
+            position = status.positions_by_stock_id.get(stock.stock_id)
 
             if position is None:
                 continue
@@ -58,8 +58,8 @@ class AccountRiskCheck:
             if signal.action != TradeAction.SELL:
                 continue
 
-            context.emergency_exit_signals.append(signal)
-            context.risk_blocked_stock_ids.add(stock.stock_id)
+            status.signals.append(signal)
+            status.risk_blocked_stock_ids.add(stock.stock_id)
 
             self._logger.warning(
                 f"Emergency stop-loss signal generated: "

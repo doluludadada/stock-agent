@@ -9,11 +9,11 @@ from a_domain.model.trading.signal import TradeSignal
 from a_domain.model.trading.watchlist import StockWatchlist
 
 
+# TODO. Add comment for those variables.
 @dataclass
-class PipelineContext:
+class PipelineStatus:
     """
-    Streamlined Pipeline Context.
-    Passes linearly through specific Workflow Orchestrators.
+    Streamlined Pipeline Status.
     """
 
     account: Account = field(default_factory=Account)
@@ -22,7 +22,7 @@ class PipelineContext:
     """
     universe stock (it should clean everytime runs pipeline)
     """
-    
+
     held_stocks: list[Stock] = field(default_factory=list)
 
     buzz_stocks: list[Stock] = field(default_factory=list)
@@ -46,10 +46,7 @@ class PipelineContext:
     watchlist: StockWatchlist = field(default_factory=StockWatchlist)
     # The stock Buzz and techncial filter should be added to here
 
-    buy_signals: list[TradeSignal] = field(default_factory=list)
-    exit_signals: list[TradeSignal] = field(default_factory=list)
-    hold_signals: list[TradeSignal] = field(default_factory=list)
-    emergency_exit_signals: list[TradeSignal] = field(default_factory=list)
+    signals: list[TradeSignal] = field(default_factory=list)
 
     orders: list[Order] = field(default_factory=list)
     stats: SystemStats = field(default_factory=SystemStats)

@@ -4,11 +4,14 @@ from a_domain.ports.market.stock_provider import IStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.types.enums import WatchlistType
 from b_application.schemas.config import AppConfig
-from b_application.schemas.pipeline_context import PipelineContext
+from b_application.schemas.pipeline_status import PipelineStatus
 
 
-# TODO: needa check
 class BuzzScanner:
+    """
+    Loads social-buzz stocks and attaches their buzz articles.
+    """
+
     def __init__(
         self,
         social_media_provider: ISocialMediaProvider,
@@ -16,45 +19,49 @@ class BuzzScanner:
         logger: ILoggingProvider,
         config: AppConfig,
     ) -> None:
-        self._social = social_media_provider
-        self._stock = stock_provider
+        self._social_media_provider = social_media_provider
+        self._stock_provider = stock_provider
         self._logger = logger
-        self._config = config
+        self._social_trending_limit = config.collect_rules.social_trending_limit
 
-    async def execute(self, context: PipelineContext) -> None:
+    async def execute(self, status: PipelineStatus) -> None:
         self._logger.info("Scanning social media for buzz...")
 
-        # Fetch articles
-        articles = await self._social.get_trending_stocks(limit=self._config.collect_rules.social_trending_limit)
-        if not articles:
-            self._logger.info("No buzz articles found.")
-            return
+        try:
+            articles = await self._social_media_provider.get_trending_stocks(
+                limit=self._social_trending_limit,
+            )
 
-        self._social.save_social_media_data(articles)
+            if not articles:
+                self._logger.info("No buzz articles found.")
+                return
 
-        stocks: dict[str, Stock] = {}
-        """
-        stock_id, Stock
-        """
-        for article in articles:
-            stock = stocks.get(article.stock_id)
+            self._social_media_provider.save_social_media_data(articles)
 
-            if stock is None:
-                stock = context.stocks_cache.get(article.stock_id)
-            # Backup logic might not need it.
-            if stock is None:
-                stock = await self._stock.get_by_id(article.stock_id)
+            buzz_stocks: dict[str, Stock] = {}
 
-            if stock is None:
-                self._logger.warning(f"Buzz stock not found: {article.stock_id}")
-                continue
+            for article in articles:
+                stock = status.stocks_cache.get(article.stock_id)
 
-            stock.candidate_source = WatchlistType.BUZZ
-            stock.articles.append(article)
+                if stock is None:
+                    stock = await self._stock_provider.get_by_id(article.stock_id)
 
-            stocks[stock.stock_id] = stock
-            context.stocks_cache[stock.stock_id] = stock
+                if stock is None:
+                    self._logger.warning(f"Buzz stock not found: {article.stock_id}")
+                    continue
 
-        context.buzz_stocks = list(stocks.values())
+                stock.candidate_source = WatchlistType.BUZZ
+                stock.articles.append(article)
 
-        self._logger.info(f"Found {len(context.buzz_stocks)} buzz candidates.")
+                buzz_stocks[stock.stock_id] = stock
+                status.stocks_cache[stock.stock_id] = stock
+
+            status.buzz_stocks = list(buzz_stocks.values())
+            status.stats.buzz_scanned = len(status.buzz_stocks)
+
+            self._logger.info(f"Found {len(status.buzz_stocks)} buzz candidates.")
+
+        except Exception as error:
+            message = f"Failed to scan social buzz: {error}"
+            self._logger.error(message)
+            status.stats.add_error(message)

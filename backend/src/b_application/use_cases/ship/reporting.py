@@ -4,7 +4,7 @@ from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.notification_provider import INotificationProvider
 from a_domain.types.enums import TradeAction
 from b_application.schemas.config import AppConfig
-from b_application.schemas.pipeline_context import PipelineContext
+from b_application.schemas.pipeline_status import PipelineStatus
 
 
 class Reporting:
@@ -24,7 +24,7 @@ class Reporting:
         self._config = config
         self._logger = logger
 
-    async def execute(self, context: PipelineContext) -> None:
+    async def execute(self, status: PipelineStatus) -> None:
         if not self._config.notifications.enabled:
             self._logger.info("Notifications disabled.")
             return
@@ -40,10 +40,7 @@ class Reporting:
             self._logger.warning("Notification recipients are empty.")
             return
 
-        signals = [
-            *context.exit_signals,
-            *context.buy_signals,
-        ]
+        signals = status.signals
         # Only BUY and SELL are pushed to users.
         # HOLD is persisted but not pushed to avoid noisy alerts.
 
@@ -62,4 +59,4 @@ class Reporting:
             except Exception as e:
                 error_message = f"Notification failed for {signal.stock_id}: {e}"
                 self._logger.error(error_message)
-                context.stats.add_error(error_message)
+                status.stats.add_error(error_message)

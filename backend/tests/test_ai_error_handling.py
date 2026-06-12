@@ -9,7 +9,7 @@ from a_domain.model.market.article import Article
 from a_domain.model.market.stock import Stock
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.types.enums import InformationSource
-from b_application.schemas.pipeline_context import PipelineContext
+from b_application.schemas.pipeline_status import PipelineStatus
 from b_application.use_cases.process.ai_analyser import AiAnalyser
 from c_infrastructure.ai_models.ai_adapter.grok_adapter import GrokAdapter
 from c_infrastructure.feed.news.cnyes_news_provider import CnyesNewsProvider
@@ -146,7 +146,7 @@ async def test_ai_analyser_records_provider_failure_without_counting_success() -
             published_at=datetime(2026, 5, 11),
         )
     ]
-    context = PipelineContext(survivors=[stock])
+    context = PipelineStatus(survivors=[stock])
     config = SimpleNamespace(
         prompts=SimpleNamespace(
             analysis_report_fundamental="Analyze {stock_id}: {articles_text}",

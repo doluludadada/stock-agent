@@ -13,7 +13,7 @@ from b_application.use_cases.ship.signals import Signals
 from b_application.use_cases.trade.account_loader import AccountLoader
 from b_application.use_cases.trade.account_risk_check import AccountRiskCheck
 from b_application.use_cases.trade.order_execution import OrderExecution
-from b_application.workflow import TradingWorkflow
+from b_application.pipeline import Pipeline
 from c_infrastructure.ai_models.factory import AiAdapterFactory
 from c_infrastructure.database.chroma.chroma_repository import ChromaRepositoryAdapter
 from c_infrastructure.database.db_connector import DatabaseConnector
@@ -34,7 +34,7 @@ from c_infrastructure.trading.mock.mock_execution_provider import MockExecutionP
 
 @dataclass(slots=True)
 class CliRuntime:
-    workflow: TradingWorkflow
+    workflow: Pipeline
     config: AppConfig
     db: DatabaseConnector
     logger: ILoggingProvider
@@ -143,7 +143,7 @@ async def build_cli_orchestrator() -> CliRuntime:
         ai_analyser=ai_analyser,
         logger=logger,
     )
-    workflow = TradingWorkflow(
+    workflow = Pipeline(
         market_scanner=market_scanner,
         buzz_scanner=buzz_scanner,
         stock_provider=stock_provider,

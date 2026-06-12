@@ -9,8 +9,8 @@ from rich.panel import Panel
 from rich.prompt import Confirm, IntPrompt, Prompt
 from rich.table import Table
 
-from b_application.schemas.pipeline_context import PipelineContext
-from b_application.workflow import TradingWorkflow
+from b_application.schemas.pipeline_status import PipelineStatus
+from b_application.pipeline import Pipeline
 from d_presentation.cli.cli_container import build_cli_orchestrator
 
 console = Console()
@@ -38,7 +38,7 @@ async def interactive_menu() -> None:
             if choice == "0":
                 break
 
-            context: PipelineContext | None = None
+            context: PipelineStatus | None = None
 
             if choice == "1":
                 context = await workflow.run_full_cycle()
@@ -75,7 +75,7 @@ def _print_menu() -> None:
     console.print("[0] Exit")
 
 
-async def _run_specific_stock_flow(workflow: TradingWorkflow) -> PipelineContext | None:
+async def _run_specific_stock_flow(workflow: Pipeline) -> PipelineStatus | None:
     try:
         raw_symbols = Prompt.ask("Enter stock IDs separated by space or comma")
     except (KeyboardInterrupt, EOFError):
@@ -111,7 +111,7 @@ def _parse_stock_ids(raw_symbols: str) -> list[str]:
     return [symbol.strip() for symbol in raw_symbols.replace(",", " ").split() if symbol.strip()]
 
 
-def _print_context_summary(context: PipelineContext) -> None:
+def _print_context_summary(context: PipelineStatus) -> None:
     console.print("[bold green]Execution Complete[/bold green]")
     console.print(
         f"Scanned={context.stats.total_scanned}, "
@@ -150,7 +150,7 @@ def _print_context_summary(context: PipelineContext) -> None:
     console.print(table)
 
 
-def _print_stock_reports(context: PipelineContext) -> None:
+def _print_stock_reports(context: PipelineStatus) -> None:
     if not context.all_stocks:
         console.print("[yellow]No stocks loaded.[/yellow]")
         return
