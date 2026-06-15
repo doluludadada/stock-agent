@@ -91,6 +91,10 @@ quality:
   min_chars_news: 200
   min_chars_gossip: 50
 
+trading:
+  execution_provider: mock
+  order_mode: mock_only
+
 mock_trading:
   account_id: mock-dev
   initial_cash: 1000000

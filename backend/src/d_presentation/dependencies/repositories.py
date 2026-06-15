@@ -13,6 +13,8 @@ from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.execution_provider import IExecutionProvider
 from a_domain.ports.trading.signal_repository import ISignalRepository
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
+from a_domain.rules.trading.watchlist import WatchlistRule
+from a_domain.types.enums import ExecutionProvider
 from b_application.schemas.config import AppConfig
 from c_infrastructure.ai_models.factory import AiAdapterFactory
 from c_infrastructure.database.chroma.chroma_repository import ChromaRepositoryAdapter
@@ -72,6 +74,7 @@ def get_watchlist_repository(
         db=db,
         logger=logger,
         market_clock=market_clock,
+        watchlist_rule=WatchlistRule(),
     )
 
 
@@ -81,7 +84,8 @@ def get_execution_provider(
     config: AppConfig = Depends(get_settings),
     logger: ILoggingProvider = Depends(get_logger),
 ) -> IExecutionProvider:
-    # TODO: Future - switch to ShioajiExecutionProvider when environment is LIVE.
+    if config.trading.execution_provider != ExecutionProvider.MOCK:
+        raise NotImplementedError(f"Execution provider is not wired yet: {config.trading.execution_provider.value}")
 
     return MockExecutionProvider(
         db=db,

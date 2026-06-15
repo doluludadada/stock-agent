@@ -91,6 +91,17 @@ class SystemEnvironment(StrEnum):
     LIVE = auto()
 
 
+class ExecutionProvider(StrEnum):
+    MOCK = auto()
+    SHIOAJI = auto()
+
+
+class OrderMode(StrEnum):
+    MOCK_ONLY = auto()
+    LIVE = auto()
+    DISABLED = auto()
+
+
 class StrategyName(StrEnum):
     CONSERVATIVE = auto()
     MODERATE = auto()

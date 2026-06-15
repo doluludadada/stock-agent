@@ -14,9 +14,10 @@ from a_domain.ports.system.notification_provider import INotificationProvider
 from a_domain.ports.trading.execution_provider import IExecutionProvider
 from a_domain.ports.trading.signal_repository import ISignalRepository
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
-from b_application.pipeline import AnalysisPipeline
+from b_application.pipeline import Pipeline
 from b_application.schemas.config import AppConfig
 from b_application.use_cases.collect.buzz_scanner import BuzzScanner
+from b_application.use_cases.collect.market_data_collector import MarketDataCollector
 from b_application.use_cases.collect.market_scanner import MarketScanner
 from b_application.use_cases.collect.news_feed import NewsFeed
 from b_application.use_cases.process.ai_analyser import AiAnalyser
@@ -26,7 +27,6 @@ from b_application.use_cases.ship.signals import Signals
 from b_application.use_cases.trade.account_loader import AccountLoader
 from b_application.use_cases.trade.account_risk_check import AccountRiskCheck
 from b_application.use_cases.trade.order_execution import OrderExecution
-from b_application.pipeline import Pipeline
 from d_presentation.dependencies.core import (
     get_logger,
     get_market_clock,
@@ -50,14 +50,24 @@ from d_presentation.dependencies.repositories import (
 
 def get_market_scanner_use_case(
     stock_provider: IStockProvider = Depends(get_stock_provider),
-    price_provider: IOhlcvProvider = Depends(get_price_provider),
-    market_clock: IMarketClock = Depends(get_market_clock),
-    config: AppConfig = Depends(get_settings),
+    watchlist_repository: IWatchlistRepository = Depends(get_watchlist_repository),
     logger: ILoggingProvider = Depends(get_logger),
 ) -> MarketScanner:
     return MarketScanner(
         stock_provider=stock_provider,
-        Ohlcv_provider=price_provider,
+        watchlist_repository=watchlist_repository,
+        logger=logger,
+    )
+
+
+def get_market_data_collector_use_case(
+    price_provider: IOhlcvProvider = Depends(get_price_provider),
+    market_clock: IMarketClock = Depends(get_market_clock),
+    config: AppConfig = Depends(get_settings),
+    logger: ILoggingProvider = Depends(get_logger),
+) -> MarketDataCollector:
+    return MarketDataCollector(
+        ohlcv_provider=price_provider,
         market_clock=market_clock,
         config=config,
         logger=logger,
@@ -140,13 +150,11 @@ def get_account_risk_check_use_case(
 
 def get_signals_use_case(
     signal_repository: ISignalRepository = Depends(get_signal_repository),
-    knowledge_repository: IKnowledgeRepository = Depends(get_knowledge_repository),
     config: AppConfig = Depends(get_settings),
     logger: ILoggingProvider = Depends(get_logger),
 ) -> Signals:
     return Signals(
         signal_repository=signal_repository,
-        knowledge_repository=knowledge_repository,
         config=config,
         logger=logger,
     )
@@ -176,41 +184,29 @@ def get_reporting_use_case(
     )
 
 
-def get_analysis_pipeline_use_case(
-    news_feed: NewsFeed = Depends(get_news_feed_use_case),
-    ai_analyser: AiAnalyser = Depends(get_ai_analyser_use_case),
-    logger: ILoggingProvider = Depends(get_logger),
-) -> AnalysisPipeline:
-    return AnalysisPipeline(
-        news_feed=news_feed,
-        ai_analyser=ai_analyser,
-        logger=logger,
-    )
-
-
 def get_trading_workflow_use_case(
-    market_scanner: MarketScanner = Depends(get_market_scanner_use_case),
-    buzz_scanner: BuzzScanner = Depends(get_buzz_scanner_use_case),
-    stock_provider: IStockProvider = Depends(get_stock_provider),
-    watchlist_repository: IWatchlistRepository = Depends(get_watchlist_repository),
     account_loader: AccountLoader = Depends(get_account_loader_use_case),
     account_risk_check: AccountRiskCheck = Depends(get_account_risk_check_use_case),
+    market_scanner: MarketScanner = Depends(get_market_scanner_use_case),
+    data_collector: MarketDataCollector = Depends(get_market_data_collector_use_case),
+    buzz_scanner: BuzzScanner = Depends(get_buzz_scanner_use_case),
+    news: NewsFeed = Depends(get_news_feed_use_case),
+    ai: AiAnalyser = Depends(get_ai_analyser_use_case),
     technical_filter: TechnicalFilter = Depends(get_technical_filter_use_case),
-    analysis_pipeline: AnalysisPipeline = Depends(get_analysis_pipeline_use_case),
     signals: Signals = Depends(get_signals_use_case),
     order_execution: OrderExecution = Depends(get_order_execution_use_case),
     reporting: Reporting = Depends(get_reporting_use_case),
     logger: ILoggingProvider = Depends(get_logger),
 ) -> Pipeline:
     return Pipeline(
-        market_scanner=market_scanner,
-        buzz_scanner=buzz_scanner,
-        stock_provider=stock_provider,
-        watchlist_repository=watchlist_repository,
         account_loader=account_loader,
         account_risk_check=account_risk_check,
+        market_scanner=market_scanner,
+        data_collector=data_collector,
+        buzz_scanner=buzz_scanner,
+        news=news,
+        ai=ai,
         technical_filter=technical_filter,
-        analysis_pipeline=analysis_pipeline,
         signals=signals,
         order_execution=order_execution,
         reporting=reporting,

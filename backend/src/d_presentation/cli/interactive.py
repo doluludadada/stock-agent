@@ -5,29 +5,25 @@ import os
 import sys
 
 from rich.console import Console
-from rich.panel import Panel
-from rich.prompt import Confirm, IntPrompt, Prompt
+from rich.prompt import Prompt
 from rich.table import Table
 
-from b_application.schemas.pipeline_status import PipelineStatus
+from a_domain.model.market.stock import Stock
 from b_application.pipeline import Pipeline
+from b_application.schemas.config import AppConfig
+from b_application.schemas.pipeline_status import PipelineStatus
 from d_presentation.cli.cli_container import build_cli_orchestrator
 
 console = Console()
 
 
 async def interactive_menu() -> None:
-    console.print(Panel.fit("[bold cyan]TW-Stock-Alpha-Agent CLI[/bold cyan]", border_style="cyan"))
-    console.print("[yellow]Booting up and wiring dependencies...[/yellow]")
-
     runtime = await build_cli_orchestrator()
     workflow = runtime.workflow
 
-    console.print("[green]System Ready![/green]\n")
-
     try:
         while True:
-            _print_menu()
+            _print_menu(runtime.config)
 
             try:
                 choice = Prompt.ask("Select an option", choices=["0", "1", "2", "3", "4"])
@@ -44,8 +40,12 @@ async def interactive_menu() -> None:
                 context = await workflow.run_full_cycle()
             elif choice == "2":
                 context = await workflow.run_buzz_scan()
+                if context is None:
+                    console.print("[yellow]Social buzz pipeline is not implemented yet.[/yellow]")
             elif choice == "3":
-                context = await workflow.run_intraday()
+                context = await workflow.run_intraday(PipelineStatus())
+                if context is None:
+                    console.print("[yellow]Intraday trading pipeline is not implemented yet.[/yellow]")
             elif choice == "4":
                 context = await _run_specific_stock_flow(workflow)
 
@@ -59,19 +59,34 @@ async def interactive_menu() -> None:
         console.print("[bold green]System stopped.[/bold green]")
 
 
-def _print_menu() -> None:
+def _print_menu(config: AppConfig) -> None:
+    console.print(f"Environment:        {_label(config.environment.value)}")
+    console.print(f"Execution Provider: {_label(config.trading.execution_provider.value)}")
+    console.print(f"Account:            {config.mock_trading.account_id}")
+    console.print(f"Orders:             {_label(config.trading.order_mode.value)}")
+    console.print("")
     console.print("[1] Run Full Cycle")
-    console.print("    Scan the full market after close. Build the technical watchlist.")
-    console.print("    Analyse watchlist stocks with news and AI. Generate next-day trading signals.")
+    console.print("    Scan the full market after close.")
+    console.print("    Build the technical watchlist.")
+    console.print("    Analyse watchlist stocks with news and AI.")
+    console.print("    Generate next-day trading signals.")
     console.print("    Never execute closed-market orders.")
+    console.print("")
     console.print("[2] Scan Social Buzz")
-    console.print("    Find actively discussed stocks. Add qualified stocks to the watchlist.")
-    console.print("    Analyse them and generate signals. Execute only when market and risk checks allow.")
+    console.print("    Find actively discussed stocks.")
+    console.print("    Add qualified stocks to the watchlist.")
+    console.print("    Analyse them and generate signals.")
+    console.print("    Execute only when market and risk checks allow.")
+    console.print("")
     console.print("[3] Run Intraday Trading")
-    console.print("    Load held positions and watchlist. Revalidate current data, technicals and AI.")
-    console.print("    Generate signals and submit mock orders when allowed.")
+    console.print("    Load held positions and watchlist.")
+    console.print("    Revalidate current data, technicals and AI.")
+    console.print("    Generate signals and submit orders.")
+    console.print("")
     console.print("[4] Analyse Specific Stocks")
-    console.print("    Show the complete stock report. Allow manual watchlist addition or manual BUY override.")
+    console.print("    Show the complete stock report.")
+    console.print("    Allow manual watchlist addition or manual BUY override.")
+    console.print("")
     console.print("[0] Exit")
 
 
@@ -88,21 +103,11 @@ async def _run_specific_stock_flow(workflow: Pipeline) -> PipelineStatus | None:
         return None
 
     context = await workflow.analyse_specific_stocks(stock_ids)
-    _print_stock_reports(context)
+    _print_stock_reports(context.manual_stocks)
 
-    if not context.all_stocks:
-        return context
-
-    if context.watchlist and Confirm.ask("Add passing stocks to manual watchlist?", default=False):
-        await workflow.add_manual_watchlist(context.watchlist)
-
-    if Confirm.ask("Submit manual BUY override for loaded stocks?", default=False):
-        quantity = IntPrompt.ask("Quantity per stock", default=1)
-        context = await workflow.execute_manual_buy_override(
-            [stock.stock_id for stock in context.all_stocks],
-            quantity,
-            context=context,
-        )
+    if context.manual_stocks:
+        console.print("[yellow]Manual watchlist addition is waiting on a Pipeline method.[/yellow]")
+        console.print("[yellow]Manual BUY override is waiting on a Pipeline method.[/yellow]")
 
     return context
 
@@ -121,13 +126,7 @@ def _print_context_summary(context: PipelineStatus) -> None:
         f"Errors={context.stats.total_errors}"
     )
 
-    signals = [
-        *context.exit_signals,
-        *context.buy_signals,
-        *context.hold_signals,
-    ]
-
-    if not signals:
+    if not context.signals:
         console.print("No trading signals generated.")
         return
 
@@ -138,7 +137,7 @@ def _print_context_summary(context: PipelineStatus) -> None:
     table.add_column("Qty", justify="right")
     table.add_column("Reason")
 
-    for signal in signals:
+    for signal in context.signals:
         table.add_row(
             signal.stock_id,
             signal.action.value.upper(),
@@ -150,8 +149,8 @@ def _print_context_summary(context: PipelineStatus) -> None:
     console.print(table)
 
 
-def _print_stock_reports(context: PipelineStatus) -> None:
-    if not context.all_stocks:
+def _print_stock_reports(stocks: list[Stock]) -> None:
+    if not stocks:
         console.print("[yellow]No stocks loaded.[/yellow]")
         return
 
@@ -165,7 +164,7 @@ def _print_stock_reports(context: PipelineStatus) -> None:
     table.add_column("Hard Failures")
     table.add_column("AI Summary")
 
-    for stock in context.all_stocks:
+    for stock in stocks:
         report = stock.analysis_report
         table.add_row(
             stock.stock_id,
@@ -179,6 +178,10 @@ def _print_stock_reports(context: PipelineStatus) -> None:
         )
 
     console.print(table)
+
+
+def _label(value: str) -> str:
+    return value.replace("_", " ").upper()
 
 
 def _format_number(value: float | None) -> str:

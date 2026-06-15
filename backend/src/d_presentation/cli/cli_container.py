@@ -1,9 +1,12 @@
 from dataclasses import dataclass
 
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from b_application.pipeline import AnalysisPipeline
+from a_domain.rules.trading.watchlist import WatchlistRule
+from a_domain.types.enums import ExecutionProvider
+from b_application.pipeline import Pipeline
 from b_application.schemas.config import AppConfig
 from b_application.use_cases.collect.buzz_scanner import BuzzScanner
+from b_application.use_cases.collect.market_data_collector import MarketDataCollector
 from b_application.use_cases.collect.market_scanner import MarketScanner
 from b_application.use_cases.collect.news_feed import NewsFeed
 from b_application.use_cases.process.ai_analyser import AiAnalyser
@@ -13,7 +16,6 @@ from b_application.use_cases.ship.signals import Signals
 from b_application.use_cases.trade.account_loader import AccountLoader
 from b_application.use_cases.trade.account_risk_check import AccountRiskCheck
 from b_application.use_cases.trade.order_execution import OrderExecution
-from b_application.pipeline import Pipeline
 from c_infrastructure.ai_models.factory import AiAdapterFactory
 from c_infrastructure.database.chroma.chroma_repository import ChromaRepositoryAdapter
 from c_infrastructure.database.db_connector import DatabaseConnector
@@ -79,7 +81,11 @@ async def build_cli_orchestrator() -> CliRuntime:
         db=db,
         logger=logger,
         market_clock=market_clock,
+        watchlist_rule=WatchlistRule(),
     )
+    if config.trading.execution_provider != ExecutionProvider.MOCK:
+        raise NotImplementedError(f"Execution provider is not wired yet: {config.trading.execution_provider.value}")
+
     execution_provider = MockExecutionProvider(
         db=db,
         config=config,
@@ -89,7 +95,11 @@ async def build_cli_orchestrator() -> CliRuntime:
 
     market_scanner = MarketScanner(
         stock_provider=stock_provider,
-        Ohlcv_provider=price_provider,
+        watchlist_repository=watchlist_repository,
+        logger=logger,
+    )
+    data_collector = MarketDataCollector(
+        ohlcv_provider=price_provider,
         market_clock=market_clock,
         config=config,
         logger=logger,
@@ -114,7 +124,6 @@ async def build_cli_orchestrator() -> CliRuntime:
     technical_filter = TechnicalFilter(config=config, logger=logger)
     signals = Signals(
         signal_repository=signal_repository,
-        knowledge_repository=knowledge_repository,
         config=config,
         logger=logger,
     )
@@ -138,20 +147,15 @@ async def build_cli_orchestrator() -> CliRuntime:
         config=config,
         logger=logger,
     )
-    analysis_pipeline = AnalysisPipeline(
-        news_feed=news_feed,
-        ai_analyser=ai_analyser,
-        logger=logger,
-    )
     workflow = Pipeline(
-        market_scanner=market_scanner,
-        buzz_scanner=buzz_scanner,
-        stock_provider=stock_provider,
-        watchlist_repository=watchlist_repository,
         account_loader=account_loader,
         account_risk_check=account_risk_check,
+        market_scanner=market_scanner,
+        data_collector=data_collector,
+        buzz_scanner=buzz_scanner,
+        news=news_feed,
+        ai=ai_analyser,
         technical_filter=technical_filter,
-        analysis_pipeline=analysis_pipeline,
         signals=signals,
         order_execution=order_execution,
         reporting=reporting,

@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from a_domain.rules.technical.calculation.parameters import IndicatorParameters
-from a_domain.types.enums import AiProvider, DatabaseProvider, StrategyName, SystemEnvironment
+from a_domain.types.enums import AiProvider, DatabaseProvider, ExecutionProvider, OrderMode, StrategyName, SystemEnvironment
 
 
 class AiConfig(BaseSettings):
@@ -214,6 +214,13 @@ class MarketConfig(BaseModel):
     min_fee: int = Field(default=20, ge=0)
 
 
+class TradingConfig(BaseModel):
+    """Execution-provider selection and order-mode display settings."""
+
+    execution_provider: ExecutionProvider = ExecutionProvider.MOCK
+    order_mode: OrderMode = OrderMode.MOCK_ONLY
+
+
 class MockTradingConfig(BaseModel):
     """
     DEV / TEST fake broker account config.
@@ -265,5 +272,6 @@ class AppConfig(BaseSettings):
     indicators: IndicatorParameters = Field(default_factory=IndicatorParameters)
     strategy: StrategyThresholds = Field(default_factory=StrategyThresholds)
     market: MarketConfig = Field(default_factory=MarketConfig)
+    trading: TradingConfig = Field(default_factory=TradingConfig)
     mock_trading: MockTradingConfig = Field(default_factory=MockTradingConfig)
     watchlist: WatchlistConfig = Field(default_factory=WatchlistConfig)
