@@ -25,18 +25,20 @@ class TechnicalScreeningPolicy:
     info_only: list[TechnicalCriterion]
     entry_timing_must_pass: list[TechnicalCriterion] = field(default_factory=list)
 
-    def evaluate(self, stock: Stock) -> None:
+    def evaluate(self, stock: Stock, include_entry_timing: bool = True) -> None:
         stock.hard_failures.clear()
         stock.soft_failures.clear()
         stock.observations.clear()
 
         self._apply_hard(stock, self.setup_must_pass)
         self._apply_hard(stock, self.safety_must_pass)
-        self._apply_hard(stock, self.entry_timing_must_pass)
+
+        if include_entry_timing:
+            self._apply_hard(stock, self.entry_timing_must_pass)
+
         self._apply_soft(stock, self.should_pass)
         self._apply_info(stock, self.info_only)
 
-    # TODO: Wire this up for future use
     def evaluate_entry_timing(self, stock: Stock) -> bool:
         for criterion in self.entry_timing_must_pass:
             if criterion.apply(stock):

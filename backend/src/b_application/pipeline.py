@@ -118,7 +118,11 @@ class Pipeline:
 
         await self._data_collector.execute(status.manual_stocks, status)
 
-        status.survivors = await self._technical_filter.execute(status.manual_stocks, status)
+        status.survivors = await self._technical_filter.execute(
+            status.manual_stocks,
+            status,
+            include_entry_timing=False,
+        )
 
         await self._news.execute(status.manual_stocks, status)
 

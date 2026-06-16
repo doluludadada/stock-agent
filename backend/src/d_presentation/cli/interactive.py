@@ -172,12 +172,19 @@ def _print_stock_reports(stocks: list[Stock]) -> None:
             _format_number(stock.current_price),
             _format_optional_int(stock.technical_score),
             _format_optional_int(stock.ai_score),
-            str(stock.combined_score),
+            _format_combined_score(stock),
             ", ".join(stock.hard_failures) or "-",
             report.summary if report else "-",
         )
 
     console.print(table)
+
+
+def _format_combined_score(stock: Stock) -> str:
+    if stock.combined_score == 0:
+        return "-"
+
+    return str(stock.combined_score)
 
 
 def _label(value: str) -> str:

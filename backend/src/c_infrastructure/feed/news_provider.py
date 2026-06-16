@@ -1,4 +1,3 @@
-import asyncio
 from datetime import datetime
 
 from a_domain.model.market.article import Article
@@ -19,23 +18,34 @@ class NewsProvider(INewsProvider):
     async def fetch_news(self, stock_id: str, limit: int = 10) -> list[Article]:
         self._logger.debug(f"Fetching live news for {stock_id} from multiple sources...")
 
-        results = await asyncio.gather(
-            self._yahoo.fetch_news(stock_id, limit), self._cnyes.fetch_news(stock_id, limit), return_exceptions=True
-        )
+        articles: list[Article] = []
 
-        articles_list: list[Article] = []
-        for res in results:
-            if isinstance(res, list):
-                articles_list.extend(res)
+        try:
+            articles.extend(await self._cnyes.fetch_news(stock_id, limit))
+        except Exception as error:
+            self._logger.warning(f"Cnyes news fetch failed for {stock_id}: {error}")
 
-        seen_titles = set()
-        unique_articles = []
-        for article in sorted(articles_list, key=lambda x: x.published_at, reverse=True):
-            if article.title not in seen_titles:
-                seen_titles.add(article.title)
-                unique_articles.append(article)
+        if len(articles) < limit:
+            try:
+                articles.extend(await self._yahoo.fetch_news(stock_id, limit - len(articles)))
+            except Exception as error:
+                self._logger.warning(f"Yahoo news fetch failed for {stock_id}: {error}")
 
-        return unique_articles[:limit]
+        seen_keys: set[str] = set()
+        unique_articles: list[Article] = []
+
+        for article in articles:
+            key = article.url or article.title
+            if key in seen_keys:
+                continue
+
+            seen_keys.add(key)
+            unique_articles.append(article)
+
+            if len(unique_articles) >= limit:
+                break
+
+        return unique_articles
 
     def save_as_md_file(self, stock_id: str, articles: list[Article]) -> None:
         """Saves a readable Markdown file so you can inspect exactly what the AI will read."""
