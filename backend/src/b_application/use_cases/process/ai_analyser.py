@@ -59,6 +59,7 @@ class AiAnalyser:
 
                 prompt = self._prompt_builder.build(stock)
 
+                # TODO: looks stupid and unclear. hide inside of method.
                 response = await self._ai_provider.generate_reply(
                     messages=(
                         Message(

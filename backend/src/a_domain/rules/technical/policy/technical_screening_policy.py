@@ -7,16 +7,17 @@ from a_domain.rules.technical.criteria.base import TechnicalCriterion
 @dataclass(frozen=True)
 class TechnicalScreeningPolicy:
     """
-    Applies technical criteria to a stock.
+    TODO:
+    This's temperary soluation. Might need to redesinning. 18/Jun/26
 
-    Policy owns the grouping:
-        - setup_must_pass
-        - safety_must_pass
-        - should_pass
-        - info_only
-        - entry_timing_must_pass
+    Applies structural technical criteria to a stock.
 
-    Criteria own only the condition.
+    Entry timing is intentionally separated from normal evaluation.
+    Normal technical screening answers:
+        - Is this stock technically acceptable?
+
+    Entry timing answers:
+        - Is this exact moment acceptable for a BUY?
     """
 
     setup_must_pass: list[TechnicalCriterion]
@@ -25,29 +26,18 @@ class TechnicalScreeningPolicy:
     info_only: list[TechnicalCriterion]
     entry_timing_must_pass: list[TechnicalCriterion] = field(default_factory=list)
 
-    def evaluate(self, stock: Stock, include_entry_timing: bool = True) -> None:
+    def evaluate(self, stock: Stock) -> None:
         stock.hard_failures.clear()
         stock.soft_failures.clear()
         stock.observations.clear()
 
         self._apply_hard(stock, self.setup_must_pass)
         self._apply_hard(stock, self.safety_must_pass)
-
-        if include_entry_timing:
-            self._apply_hard(stock, self.entry_timing_must_pass)
-
         self._apply_soft(stock, self.should_pass)
         self._apply_info(stock, self.info_only)
 
-    def evaluate_entry_timing(self, stock: Stock) -> bool:
-        for criterion in self.entry_timing_must_pass:
-            if criterion.apply(stock):
-                continue
-
-            stock.hard_failures.append(criterion.name)
-            return False
-
-        return True
+    def entry_timing_failures(self, stock: Stock) -> list[str]:
+        return [criterion.name for criterion in self.entry_timing_must_pass if not criterion.apply(stock)]
 
     def _apply_hard(self, stock: Stock, criteria: list[TechnicalCriterion]) -> None:
         for criterion in criteria:

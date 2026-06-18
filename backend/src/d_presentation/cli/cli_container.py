@@ -1,8 +1,10 @@
 from dataclasses import dataclass
 
 from a_domain.ports.system.logging_provider import ILoggingProvider
+from a_domain.rules.scoring import TechnicalScoreCalculator
 from a_domain.rules.trading.watchlist import WatchlistRule
 from a_domain.types.enums import ExecutionProvider
+from b_application.factories import TechnicalPolicyFactory
 from b_application.pipeline import Pipeline
 from b_application.schemas.config import AppConfig
 from b_application.use_cases.collect.buzz_scanner import BuzzScanner
@@ -73,6 +75,7 @@ async def build_cli_orchestrator() -> CliRuntime:
         logger=logger,
         web_search_provider=web_search_provider,
     ).create_adapter()
+
     knowledge_repository = ChromaRepositoryAdapter(config=config, logger=logger)
     await knowledge_repository.init()
 
@@ -83,6 +86,7 @@ async def build_cli_orchestrator() -> CliRuntime:
         market_clock=market_clock,
         watchlist_rule=WatchlistRule(),
     )
+
     if config.trading.execution_provider != ExecutionProvider.MOCK:
         raise NotImplementedError(f"Execution provider is not wired yet: {config.trading.execution_provider.value}")
 
@@ -92,6 +96,14 @@ async def build_cli_orchestrator() -> CliRuntime:
         logger=logger,
     )
     notification_provider = LineNotificationAdapter(config=config, logger=logger) if config.notifications.enabled else None
+
+    technical_policy = TechnicalPolicyFactory().create(
+        config.analysis.active_strategy,
+        config.strategy,
+    )
+    technical_score_calculator = TechnicalScoreCalculator(
+        **config.scoring.model_dump(),
+    )
 
     market_scanner = MarketScanner(
         stock_provider=stock_provider,
@@ -121,7 +133,11 @@ async def build_cli_orchestrator() -> CliRuntime:
         config=config,
         logger=logger,
     )
-    technical_filter = TechnicalFilter(config=config, logger=logger)
+    technical_filter = TechnicalFilter(
+        policy=technical_policy,
+        score_calculator=technical_score_calculator,
+        logger=logger,
+    )
     signals = Signals(
         signal_repository=signal_repository,
         config=config,
@@ -147,6 +163,7 @@ async def build_cli_orchestrator() -> CliRuntime:
         config=config,
         logger=logger,
     )
+
     workflow = Pipeline(
         account_loader=account_loader,
         account_risk_check=account_risk_check,

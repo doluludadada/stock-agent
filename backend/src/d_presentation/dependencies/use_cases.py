@@ -14,6 +14,8 @@ from a_domain.ports.system.notification_provider import INotificationProvider
 from a_domain.ports.trading.execution_provider import IExecutionProvider
 from a_domain.ports.trading.signal_repository import ISignalRepository
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
+from a_domain.rules.scoring.technical import TechnicalScoreCalculator
+from b_application.factories.technical_policy import TechnicalPolicyFactory
 from b_application.pipeline import Pipeline
 from b_application.schemas.config import AppConfig
 from b_application.use_cases.collect.buzz_scanner import BuzzScanner
@@ -104,8 +106,18 @@ def get_technical_filter_use_case(
     config: AppConfig = Depends(get_settings),
     logger: ILoggingProvider = Depends(get_logger),
 ) -> TechnicalFilter:
+    technical_policy = TechnicalPolicyFactory().create(
+        config.analysis.active_strategy,
+        config.strategy,
+    )
+    # TODO: Needa check this coding method.
+    technical_score_calculator = TechnicalScoreCalculator(
+        **config.scoring.model_dump(),
+    )
+
     return TechnicalFilter(
-        config=config,
+        policy=technical_policy,
+        score_calculator=technical_score_calculator,
         logger=logger,
     )
 

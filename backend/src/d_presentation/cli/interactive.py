@@ -28,7 +28,7 @@ async def interactive_menu() -> None:
             try:
                 choice = Prompt.ask("Select an option", choices=["0", "1", "2", "3", "4"])
             except (KeyboardInterrupt, EOFError):
-                console.print("\n[yellow]Exiting...[/yellow]")
+                console.print("\n[yellow]Exiting.[/yellow]")
                 return
 
             if choice == "0":
@@ -162,6 +162,8 @@ def _print_stock_reports(stocks: list[Stock]) -> None:
     table.add_column("AI", justify="right")
     table.add_column("Combined", justify="right")
     table.add_column("Hard Failures")
+    table.add_column("Soft Failures")
+    table.add_column("Observations")
     table.add_column("AI Summary")
 
     for stock in stocks:
@@ -172,19 +174,14 @@ def _print_stock_reports(stocks: list[Stock]) -> None:
             _format_number(stock.current_price),
             _format_optional_int(stock.technical_score),
             _format_optional_int(stock.ai_score),
-            _format_combined_score(stock),
+            "-",
             ", ".join(stock.hard_failures) or "-",
+            ", ".join(stock.soft_failures) or "-",
+            ", ".join(stock.observations) or "-",
             report.summary if report else "-",
         )
 
     console.print(table)
-
-
-def _format_combined_score(stock: Stock) -> str:
-    if stock.combined_score == 0:
-        return "-"
-
-    return str(stock.combined_score)
 
 
 def _label(value: str) -> str:
@@ -208,6 +205,7 @@ def _format_optional_int(value: int | None) -> str:
 if __name__ == "__main__":
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
     try:
         asyncio.run(interactive_menu())
     except (KeyboardInterrupt, asyncio.CancelledError, SystemExit):
