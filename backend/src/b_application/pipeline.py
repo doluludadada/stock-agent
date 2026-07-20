@@ -121,7 +121,6 @@ class Pipeline:
         status.survivors = await self._technical_filter.execute(
             status.manual_stocks,
             status,
-            include_entry_timing=False,
         )
 
         await self._news.execute(status.manual_stocks, status)
