@@ -20,4 +20,3 @@ class Dispatcher:
                 count += 1
 
         self._logger.success(f"Dispatched {count}/{len(messages)} messages to user_id: {user_id}")
-

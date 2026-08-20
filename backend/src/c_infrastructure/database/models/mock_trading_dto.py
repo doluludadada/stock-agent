@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import ClassVar
 from uuid import UUID, uuid4
 
@@ -14,8 +14,8 @@ class MockCash(SQLModel, table=True):
     account_id: str = Field(primary_key=True)
     current_cash: float = Field(ge=0)
     initial_cash: float = Field(ge=0)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # TODO: Phase 2.5 - add cash snapshot history for UI / audit.
 
@@ -27,8 +27,8 @@ class MockPosition(SQLModel, table=True):
     stock_id: str = Field(primary_key=True)
     quantity: int = Field(gt=0)
     average_cost: float = Field(gt=0)
-    opened_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    opened_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # TODO: Phase 2.5 - add position snapshot table for portfolio history.
     # TODO: Future - add market_value and unrealized_pnl.
@@ -46,8 +46,8 @@ class MockOrder(SQLModel, table=True):
     quantity: int
     status: OrderStatus
     reason: str | None = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # TODO: Phase 2.5 - add run_id.
     # TODO: Phase 2.5 - add decision_id.

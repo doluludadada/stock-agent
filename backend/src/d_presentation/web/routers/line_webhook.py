@@ -16,4 +16,3 @@ async def handle_line_webhook(
 ):
     await handler.handle(request, x_line_signature)
     return {"status": "ok"}
-

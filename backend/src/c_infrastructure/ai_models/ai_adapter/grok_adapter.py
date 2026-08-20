@@ -15,9 +15,7 @@ from c_infrastructure.ai_models.base import BaseAIAdapter
 
 class GrokAdapter(BaseAIAdapter):
     @require(lambda config: bool(config.ai.grok_api_key), "Missing grok_api_key in configuration.")
-    def __init__(
-        self, config: AppConfig, logger: ILoggingProvider, model_name: str
-    ) -> None:
+    def __init__(self, config: AppConfig, logger: ILoggingProvider, model_name: str) -> None:
         super().__init__(config, logger, model_name)
 
     @cached_property

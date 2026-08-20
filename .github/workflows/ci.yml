@@ -10,6 +10,9 @@ jobs:
     test:
         name: Run Tests & Lint
         runs-on: ubuntu-latest
+        defaults:
+            run:
+                working-directory: backend
 
         steps:
             - name: Checkout code
@@ -19,20 +22,20 @@ jobs:
               uses: astral-sh/setup-uv@v5
               with:
                   enable-cache: true
-                  cache-dependency-glob: "uv.lock"
+                  cache-dependency-glob: "backend/uv.lock"
 
             - name: Set up Python 3.13
               run: uv python install 3.13
 
             - name: Install dependencies
               # Installs the project + dev dependencies defined in pyproject.toml
-              run: uv sync --all-extras --dev
+              run: uv sync --all-extras --dev --frozen
 
             - name: Lint with Ruff
               run: uv run ruff check .
 
-            - name: Check formatting with Black
-              run: uv run black --check .
+            - name: Check formatting with Ruff
+              run: uv run ruff format --check .
 
             - name: Run Pytest
               run: uv run pytest tests/

@@ -76,9 +76,7 @@ def main(page: ft.Page):
     txt_openai_key = ft.TextField(
         label="OpenAI API Key", password=True, can_reveal_password=True, value=env_data.get("OPENAI_API_KEY", "")
     )
-    txt_grok_key = ft.TextField(
-        label="Grok API Key", password=True, can_reveal_password=True, value=env_data.get("GROK_API_KEY", "")
-    )
+    txt_grok_key = ft.TextField(label="Grok API Key", password=True, can_reveal_password=True, value=env_data.get("GROK_API_KEY", ""))
     txt_line_token = ft.TextField(
         label="LINE Channel Access Token",
         password=True,
@@ -124,9 +122,7 @@ def main(page: ft.Page):
                 ),
                 ft.Divider(),
                 ft.Text("Live Logs:", size=16, weight=ft.FontWeight.BOLD),
-                ft.Container(
-                    content=log_view, bgcolor="black87", border_radius=10, padding=10, height=500, expand=True
-                ),
+                ft.Container(content=log_view, bgcolor="black87", border_radius=10, padding=10, height=500, expand=True),
             ]
         ),
     )
@@ -180,5 +176,3 @@ def main(page: ft.Page):
 
 if __name__ == "__main__":
     ft.app(target=main)
-
-

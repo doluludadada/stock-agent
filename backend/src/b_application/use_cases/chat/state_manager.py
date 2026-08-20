@@ -1,5 +1,5 @@
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from a_domain.model.chat.conversation import Conversation
 from a_domain.model.chat.message import Message
@@ -17,7 +17,7 @@ class StateManager:
             return conversation
 
         updated_msgs = conversation.messages + tuple(new_messages)
-        updated_conversation = replace(conversation, messages=updated_msgs, updated_at=datetime.now(timezone.utc))
+        updated_conversation = replace(conversation, messages=updated_msgs, updated_at=datetime.now(UTC))
         return updated_conversation
 
     async def reset_conversation(self, conversation: Conversation):
@@ -29,5 +29,3 @@ class StateManager:
     async def save(self, conversation: Conversation) -> None:
         await self._repository.save(conversation)
         self._logger.debug(f"Conversation state saved for user_id: {conversation.user_id}")
-
-

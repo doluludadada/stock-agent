@@ -29,9 +29,7 @@ class SignalRepository(ISignalRepository):
             await session.commit()
             self._logger.debug(f"Persisted {len(signals)} trade signals to DB.")
 
-    async def get_by_stock_id(
-        self, stock_id: str, start_date: datetime | None = None, limit: int = 10
-    ) -> list[TradeSignal]:
+    async def get_by_stock_id(self, stock_id: str, start_date: datetime | None = None, limit: int = 10) -> list[TradeSignal]:
         async with self._db.get_session() as session:
             stmt = select(TradeSignalDTO).where(TradeSignalDTO.stock_id == stock_id)
             if start_date:

@@ -14,9 +14,7 @@ from c_infrastructure.ai_models.base import BaseAIAdapter
 
 class GeminiAIAdapter(BaseAIAdapter):
     @require(lambda config: bool(config.ai.gemini_api_key), "Missing gemini_api_key in configuration.")
-    def __init__(
-        self, config: AppConfig, logger: ILoggingProvider, model_name: str
-    ) -> None:
+    def __init__(self, config: AppConfig, logger: ILoggingProvider, model_name: str) -> None:
         super().__init__(config, logger, model_name)
         genai.configure(api_key=self._config.ai.gemini_api_key)  # type: ignore[attr-defined]
         endpoint = getattr(self._config, "gemini_endpoint", None)
@@ -27,32 +25,20 @@ class GeminiAIAdapter(BaseAIAdapter):
                 try:
                     genai.configure(client_options={"api_endpoint": endpoint})  # type: ignore[attr-defined]
                 except Exception:
-                    self._logger.debug(
-                        "genai.configure with custom endpoint not supported by installed library version"
-                    )
+                    self._logger.debug("genai.configure with custom endpoint not supported by installed library version")
 
     @cached_property
     def _client(self) -> Any:
-        self._logger.debug(
-            f"[{self.__class__.__name__}] Creating GenerativeModel for: {self._model_name}"
-        )
+        self._logger.debug(f"[{self.__class__.__name__}] Creating GenerativeModel for: {self._model_name}")
         return genai.GenerativeModel(self._model_name)  # type: ignore[attr-defined]
 
     async def _call_api(self, messages: tuple[Message, ...]) -> str:
         prompt = self._convert_to_prompt(messages)
-        self._logger.debug(
-            f"[{self.__class__.__name__}] Calling Gemini, prompt length={len(prompt)}"
-        )
+        self._logger.debug(f"[{self.__class__.__name__}] Calling Gemini, prompt length={len(prompt)}")
         try:
-            response = await asyncio.to_thread(
-                lambda: self._client.generate_content(
-                    prompt, generation_config={"temperature": 0.7}
-                )
-            )
+            response = await asyncio.to_thread(lambda: self._client.generate_content(prompt, generation_config={"temperature": 0.7}))
         except Exception as e:
-            self._logger.error(
-                f"[{self.__class__.__name__}] Gemini API call failed: {e}"
-            )
+            self._logger.error(f"[{self.__class__.__name__}] Gemini API call failed: {e}")
             raise
         text = self._extract_text_from_response(response)
         return text
@@ -77,9 +63,7 @@ class GeminiAIAdapter(BaseAIAdapter):
             candidates = getattr(resp, "candidates", None)
             if candidates:
                 first = candidates[0]
-                content = getattr(first, "content", None) or getattr(
-                    first, "output", None
-                )
+                content = getattr(first, "content", None) or getattr(first, "output", None)
                 if content is not None:
                     parts = getattr(content, "parts", None)
                     if parts:
@@ -99,9 +83,5 @@ class GeminiAIAdapter(BaseAIAdapter):
                     return out
             return str(resp)
         except Exception as e:
-            self._logger.error(
-                f"[{self.__class__.__name__}] Failed to parse Gemini response, falling back to str(resp): {e}"
-            )
+            self._logger.error(f"[{self.__class__.__name__}] Failed to parse Gemini response, falling back to str(resp): {e}")
             return str(resp)
-
-

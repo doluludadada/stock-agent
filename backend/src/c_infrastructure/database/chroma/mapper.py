@@ -11,10 +11,9 @@ from c_infrastructure.database.chroma.schema import ChromaMetadataKey
 
 
 class ConversationMapper:
-    
     @staticmethod
     def to_persistence(conversation: Conversation) -> tuple[str, dict[str, Any]]:
-        """        """
+        """ """
         metadata: dict[str, Any] = {
             ChromaMetadataKey.UPDATED_AT: conversation.updated_at.isoformat(),
             ChromaMetadataKey.MESSAGE_COUNT: len(conversation.messages),
@@ -31,7 +30,7 @@ class ConversationMapper:
             raise TypeError(f"Type {type(obj)} not serializable")
 
         json_str = json.dumps(data, default=_json_serializer, ensure_ascii=False)
-        
+
         return json_str, metadata
 
     @staticmethod
@@ -56,5 +55,3 @@ class ConversationMapper:
             created_at=datetime.fromisoformat(data["created_at"]),
             updated_at=datetime.fromisoformat(data["updated_at"]),
         )
-
-

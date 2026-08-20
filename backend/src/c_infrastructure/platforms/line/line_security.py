@@ -33,5 +33,3 @@ class LineSecurityService:
         except Exception as e:
             self._logger.error(f"An exception occurred during signature validation: {e}")
             return False
-
-

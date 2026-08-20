@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlmodel import Field, SQLModel
 
@@ -16,4 +16,4 @@ class TradeSignal(SQLModel):
     reason: str
     quantity: int = Field(default=0)
     stop_loss_price: float | None = Field(default=None)
-    generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

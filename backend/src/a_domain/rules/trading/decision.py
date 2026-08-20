@@ -31,6 +31,7 @@ class DecisionRule:
     """
     Handles stocks that already have an open position.
     """
+
     @ensure(lambda result: len(result.stock_id) > 0, "Signal must have a stock_id")
     @ensure(lambda result: result.quantity >= 0, "Signal quantity must be non-negative")
     def decide(

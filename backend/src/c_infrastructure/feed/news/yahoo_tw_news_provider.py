@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import httpx
@@ -96,8 +96,8 @@ class YahooTwNewsProvider:
                             content=content,
                             url=item["url"],
                             content_type=ContentType.REPORT,
-                            published_at=datetime.now(timezone.utc),
-                            fetched_at=datetime.now(timezone.utc),
+                            published_at=datetime.now(UTC),
+                            fetched_at=datetime.now(UTC),
                         )
                     )
 

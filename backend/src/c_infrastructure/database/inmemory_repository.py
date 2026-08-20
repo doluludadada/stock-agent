@@ -5,7 +5,6 @@ from a_domain.ports.system.logging_provider import ILoggingProvider
 
 
 class InMemoryRepositoryAdapter(IConversationRepository):
-
     _store: dict[str, Conversation] = {}
 
     def __init__(self, logger: ILoggingProvider):
@@ -20,5 +19,3 @@ class InMemoryRepositoryAdapter(IConversationRepository):
         self._logger.debug(f"Saving conversation for user_id: {conversation.user_id} in memory.")
         self._store[conversation.user_id] = conversation
         return True
-
-

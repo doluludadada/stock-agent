@@ -22,5 +22,3 @@ class ContextLoader:
         if self._config.ai.system_prompt:
             initial_messages.append(Message(role=MessageRole.SYSTEM, content=self._config.ai.system_prompt))
         return Conversation(user_id=user_id, messages=tuple(initial_messages))
-
-

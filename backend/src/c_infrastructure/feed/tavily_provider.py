@@ -57,5 +57,3 @@ class TavilySearchAdapter(IWebSearchProvider):
         except Exception as e:
             self._logger.error(f"[TavilySearchAdapter] search failed: {e}")
             return []
-
-

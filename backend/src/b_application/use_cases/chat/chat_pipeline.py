@@ -39,5 +39,3 @@ class ChatPipeline:
         await self._manager.save(final_conversation)
 
         await self._dispatcher.execute(user_id, reply_messages)
-
-

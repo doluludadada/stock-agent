@@ -51,7 +51,7 @@ class NewsFeed:
                         stock.stock_id,
                         accepted_news,
                     )
-                    
+
             except Exception as error:
                 message = f"Failed to collect news for {stock.stock_id}: {error}"
                 self._logger.error(message)

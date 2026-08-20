@@ -45,6 +45,4 @@ class AccountLoader:
 
             status.held_stocks.append(stock)
 
-        self._logger.info(
-            f"Account loaded. Cash={cash}, Positions={len(positions)}, HeldCandidates={len(status.held_stocks)}"
-        )
+        self._logger.info(f"Account loaded. Cash={cash}, Positions={len(positions)}, HeldCandidates={len(status.held_stocks)}")

@@ -109,7 +109,7 @@ class Pipeline:
         Persisting them remains an explicit user action.
         """
         self._logger.info(f"Starting specific-stock analysis: {stock_ids}")
-        status = PipelineStatus()  # ? create a new status?
+        status = PipelineStatus()
         status.manual_stocks = await self._market_scanner.find_stocks_by_ids(stock_ids, status)
 
         if not status.manual_stocks:

@@ -61,5 +61,3 @@ class OpenAIAdapter(BaseAIAdapter):
             elif message.role == MessageRole.ASSISTANT:
                 api_messages.append(ChatCompletionAssistantMessageParam(role="assistant", content=message.content))
         return api_messages
-
-

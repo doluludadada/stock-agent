@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from a_domain.model.market.stock import Stock
@@ -16,7 +16,7 @@ class StockWatchlist:
 
     watchlist_id: UUID = field(default_factory=uuid4)
     willing_stocks: list[Stock] = field(default_factory=list)
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     expires_at: datetime | None = None
 
     def add(self, stock: Stock) -> None:

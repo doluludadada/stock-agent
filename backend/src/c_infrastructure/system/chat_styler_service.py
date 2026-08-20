@@ -61,5 +61,3 @@ class ChatStylerService(IChatStylerProvider):
         if text:
             parts.append(Message(role=MessageRole.ASSISTANT, content=text))
         return parts
-
-

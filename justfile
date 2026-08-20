@@ -7,7 +7,7 @@ dev-sync:
     uv sync --all-extras
 
 format:
-    uv run ruff format
+    cd backend; uv run ruff format
 
 ngrok:
     ngrok http 8800

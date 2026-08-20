@@ -1,5 +1,5 @@
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -51,7 +51,7 @@ class DatabaseConnector:
             await conn.run_sync(SQLModel.metadata.create_all)
 
     @asynccontextmanager
-    async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
+    async def get_session(self) -> AsyncGenerator[AsyncSession]:
         """Provide a transactional scope around a series of operations."""
         async with self._session_factory() as session:
             try:
@@ -72,4 +72,3 @@ class DatabaseConnector:
             await self._engine.dispose(close=False)
         except Exception:
             pass
-

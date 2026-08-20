@@ -25,17 +25,12 @@ class AiAdapterFactory:
         self._web_search_provider = web_search_provider
         self._logger.trace(f"AI Adapter Factory initialised. Active model provider: {self._config.ai.active_model.value}")  # noqa: E501
 
-    def create_adapter(
-        self, *, override_provider: AiProvider | None = None, override_model_name: str | None = None
-    ) -> IAiProvider:
+    def create_adapter(self, *, override_provider: AiProvider | None = None, override_model_name: str | None = None) -> IAiProvider:
         provider = override_provider or self._config.ai.active_model
         model_name = override_model_name or self._config.ai.available_models.get(provider)
 
         if model_name is None:
-            raise ValueError(
-                f"No model id resolved for provider {provider!s}. "
-                "Configure available_models or enable remote catalogue."
-            )
+            raise ValueError(f"No model id resolved for provider {provider!s}. Configure available_models or enable remote catalogue.")
 
         self._logger.debug(f"Creating AI adapter for provider: {provider.value} with model: {model_name}")
 
@@ -59,7 +54,7 @@ class AiAdapterFactory:
                 logger=self._logger,
                 model_name=model_name,
             )
-        
+
         if provider == AiProvider.GROQ:
             return GroqAIAdapter(
                 config=self._config,
@@ -68,4 +63,3 @@ class AiAdapterFactory:
                 web_search_provider=self._web_search_provider,
             )
         raise ValueError(f"Unsupported provider: {provider!s}")
-

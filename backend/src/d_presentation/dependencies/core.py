@@ -1,7 +1,7 @@
 # backend/src/d_presentation/dependencies/core.py
 
+from collections.abc import AsyncGenerator
 from functools import lru_cache
-from typing import AsyncGenerator
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,7 +42,7 @@ def get_db_connector(
 
 async def get_db_session(
     connector: DatabaseConnector = Depends(get_db_connector),
-) -> AsyncGenerator[AsyncSession, None]:
+) -> AsyncGenerator[AsyncSession]:
     async with connector.get_session() as session:
         yield session
 

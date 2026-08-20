@@ -6,7 +6,7 @@ from a_domain.types.enums import WatchlistType
 class WatchlistRule:
     """Owns domain decisions for combining watchlist classifications."""
 
-    # TODO: Kinda weird logic 
+    # TODO: Kinda weird logic
     @ensure(lambda result: isinstance(result, WatchlistType))
     def merge(
         self,

@@ -1,6 +1,6 @@
 import threading
 import time
-from typing import Callable
+from collections.abc import Callable
 
 from c_infrastructure.system.config_loader import get_project_root
 from c_infrastructure.system.ui.config_editor import ConfigEditorService
@@ -46,5 +46,3 @@ class AdminViewModel:
                 self.on_log_received(line)
             else:
                 time.sleep(0.1)
-
-

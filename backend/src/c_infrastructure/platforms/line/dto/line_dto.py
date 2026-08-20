@@ -21,5 +21,3 @@ class LineEvent(BaseModel):
 class LineWebhookPayload(BaseModel):
     destination: str
     events: list[LineEvent] = []
-
-

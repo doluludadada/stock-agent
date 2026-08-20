@@ -26,7 +26,7 @@ class EntryRule:
     """
 
     buy_threshold: int
-    sizing_rule: SizingRule #? it should be exit logic?
+    sizing_rule: SizingRule  # ? it should be exit logic?
 
     @require(lambda stock: stock.current_price is not None, "Entry decision requires a valid current price")
     @ensure(lambda result: result.quantity >= 0, "BUY signal quantity must be non-negative")
@@ -38,7 +38,7 @@ class EntryRule:
         position: Position | None = None,
     ) -> TradeSignal:
         current_price = stock.current_price
-
+        
         if stock.combined_score < self.buy_threshold:
             return TradeSignal(
                 stock_id=stock.stock_id,

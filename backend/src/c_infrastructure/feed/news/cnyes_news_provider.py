@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import httpx
@@ -47,9 +47,7 @@ class CnyesNewsProvider:
                             continue
 
                         publish_at = item.get("publishAt")
-                        published_at = (
-                            datetime.fromtimestamp(publish_at, tz=timezone.utc) if publish_at else datetime.now(timezone.utc)
-                        )
+                        published_at = datetime.fromtimestamp(publish_at, tz=UTC) if publish_at else datetime.now(UTC)
                         news_id = item.get("newsId", "")
 
                         articles.append(
@@ -62,7 +60,7 @@ class CnyesNewsProvider:
                                 url=f"https://news.cnyes.com/news/id/{news_id}",
                                 content_type=ContentType.REPORT,
                                 published_at=published_at,
-                                fetched_at=datetime.now(timezone.utc),
+                                fetched_at=datetime.now(UTC),
                             )
                         )
 

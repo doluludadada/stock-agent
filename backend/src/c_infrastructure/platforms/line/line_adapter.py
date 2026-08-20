@@ -15,7 +15,10 @@ from c_infrastructure.platforms.line.line_constants import PUSH_MESSAGE_URL
 
 
 class LinePlatformAdapter(IPlatformProvider):
-    @require(lambda config: bool(config.line.channel_access_token), "Missing line_channel_access_token in configuration. Cannot send messages.")
+    @require(
+        lambda config: bool(config.line.channel_access_token),
+        "Missing line_channel_access_token in configuration. Cannot send messages.",
+    )
     def __init__(self, config: AppConfig, logger: ILoggingProvider):
         self._channel_access_token = config.line.channel_access_token
         self._timeout = config.ai.connection_timeout
@@ -23,7 +26,6 @@ class LinePlatformAdapter(IPlatformProvider):
         self._base_url = PUSH_MESSAGE_URL
 
     async def send_message(self, user_id: str, message: Message) -> bool:
-
         headers = {
             "Authorization": f"Bearer {self._channel_access_token}",
             "Content-Type": "application/json",
@@ -46,17 +48,12 @@ class LinePlatformAdapter(IPlatformProvider):
                     return True
                 else:
                     self._logger.error(
-                        f"Failed to send LINE message to user_id: {user_id}. "
-                        f"Status: {resp.status_code}, Response: {resp.text}"
+                        f"Failed to send LINE message to user_id: {user_id}. Status: {resp.status_code}, Response: {resp.text}"
                     )
                     return False
             except httpx.RequestError as e:
                 self._logger.error(f"An HTTP error occurred while sending message to LINE for user {user_id}: {e}")
                 return False
             except Exception as e:
-                self._logger.critical(
-                    f"An unexpected error occurred during LINE message sending for user {user_id}: {e}"
-                )
+                self._logger.critical(f"An unexpected error occurred during LINE message sending for user {user_id}: {e}")
                 return False
-
-

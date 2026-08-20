@@ -1,6 +1,6 @@
 # backend/src/c_infrastructure/database/models/watchlist_dto.py
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import ClassVar
 
 from sqlalchemy import Column, String
@@ -18,5 +18,5 @@ class WatchlistDTO(SQLModel, table=True):
     stock_id: str = Field(primary_key=True)
 
     type: WatchlistType = Field(sa_column=Column(String, index=True, nullable=False))
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     expires_at: datetime | None = Field(default=None, index=True)

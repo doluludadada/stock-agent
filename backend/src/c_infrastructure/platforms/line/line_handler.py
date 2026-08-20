@@ -15,12 +15,12 @@ class LineWebhookHandler:
     async def handle(self, request: Request, signature: str | None):
         body = await request.body()
         if not self._security_service.verify_signature(body, signature):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Invalid signature')
-        
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid signature")
+
         try:
             payload = LineWebhookPayload.model_validate_json(body)
         except ValidationError as e:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f'Invalid payload: {e}')
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid payload: {e}")
 
         for event in payload.events:
             if event.type == EVENT_TYPE_MESSAGE and event.message and (event.message.type == MESSAGE_TYPE_TEXT):
@@ -28,5 +28,3 @@ class LineWebhookHandler:
                 text_content = event.message.text
                 if text_content:
                     await self._pipeline.execute(user_id=user_id, incoming_content=text_content)
-
-

@@ -16,12 +16,12 @@ def load_settings() -> AppConfig:
 
     # 1. Load Base App Settings
     if config_path.exists():
-        with open(config_path, "r", encoding="utf-8") as f:
+        with open(config_path, encoding="utf-8") as f:
             config_dict = yaml.safe_load(f) or {}
 
     # 2. Inject Prompts from instructions.yaml
     if instruction_path.exists():
-        with open(instruction_path, "r", encoding="utf-8") as f:
+        with open(instruction_path, encoding="utf-8") as f:
             instruct_data = yaml.safe_load(f) or {}
 
             ai_config = config_dict.setdefault("ai", {})
@@ -34,7 +34,7 @@ def load_settings() -> AppConfig:
 
     # 3. Inject active Strategy from strategies.yaml
     if strategies_path.exists():
-        with open(strategies_path, "r", encoding="utf-8") as f:
+        with open(strategies_path, encoding="utf-8") as f:
             strat_yaml = yaml.safe_load(f) or {}
 
             # Find out which strategy is active (default to 'moderate')
