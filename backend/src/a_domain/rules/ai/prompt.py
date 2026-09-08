@@ -1,8 +1,11 @@
+# backend/src/a_domain/rules/ai/prompt.py
+
 from dataclasses import dataclass
 
 from icontract import ensure, invariant
 
 from a_domain.model.market.stock import Stock
+from a_domain.types.enums import AiAnalysisFocus
 
 
 # TODO: It was clean
@@ -16,6 +19,7 @@ class AiReportPromptBuilder:
     Builds AI analysis prompts from stock context.
 
     This is pure string construction. It does not call an AI provider.
+    The workflow explicitly selects the analysis focus.
     """
 
     fundamental_template: str
@@ -24,20 +28,20 @@ class AiReportPromptBuilder:
     max_content_length: int
 
     @ensure(lambda result: len(result) > 0, "Built prompt must not be empty")
-    def build(self, stock: Stock) -> str:
+    def build(self, stock: Stock, historical_context: str = "", *, focus: AiAnalysisFocus) -> str:
         articles_text = self._build_articles_text(stock)
 
-        if stock.historical_context:
-            articles_text += f"\n\n[Past Analysis]\n{stock.historical_context}"
+        if historical_context:
+            articles_text += f"\n\n[Past Analysis]\n{historical_context}"
 
-        return self.fundamental_template.format(
-            stock_id=stock.stock_id,
-            articles_text=articles_text,
-        )
+        template = self.fundamental_template
+        if focus == AiAnalysisFocus.MOMENTUM:
+            template = self.momentum_template
+            
+        return template.format(stock_id=stock.stock_id, articles_text=articles_text)
 
     def _build_articles_text(self, stock: Stock) -> str:
         selected_articles = stock.articles[: self.max_articles]
-
         entries: list[str] = []
 
         for index, article in enumerate(selected_articles, 1):

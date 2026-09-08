@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 
 from icontract import ensure, invariant, require
 
@@ -34,42 +34,35 @@ class ExitRule:
     @require(lambda position: position.quantity > 0, "Exit decision requires a positive position quantity")
     @ensure(lambda result: result.action != TradeAction.SELL or result.quantity > 0, "SELL signal must have positive quantity")
     def decide(self, stock: Stock, position: Position) -> TradeSignal:
-        stop_loss_signal = self.decide_stop_loss_only(stock=stock, position=position)
+        stop_loss_signal = self.decide_stop_loss_only(stock, position)
 
         if stop_loss_signal.action == TradeAction.SELL:
             return stop_loss_signal
 
         current_price = stock.current_price
+        composite_score = stock.composite_score
 
-        if stock.combined_score <= self.sell_threshold:
-            return TradeSignal(
-                stock_id=stock.stock_id,
-                action=TradeAction.SELL,
-                price_at_signal=current_price,
-                source=SignalSource.COMBINED,
-                score=stock.combined_score,
-                reason=ReasonRule.build_exit(
-                    stock=stock,
-                    position=position,
-                    cause="SCORE_EXIT",
-                ),
-                quantity=position.quantity,
-                generated_at=datetime.now(),
-            )
+        if current_price is None:
+            raise ValueError("Exit decision requires a valid current price")
+
+        if composite_score is None:
+            raise ValueError("Exit decision requires a composite score")
+
+        should_sell = composite_score <= self.sell_threshold
+        action = TradeAction.SELL if should_sell else TradeAction.HOLD
+        cause = "SCORE_EXIT" if should_sell else "No sell condition met"
+
+        reason = ReasonRule.build_exit(stock, position, cause) if should_sell else ReasonRule.build_exit_hold(stock, position, cause)
 
         return TradeSignal(
             stock_id=stock.stock_id,
-            action=TradeAction.HOLD,
+            action=action,
             price_at_signal=current_price,
             source=SignalSource.COMBINED,
-            score=stock.combined_score,
-            reason=ReasonRule.build_exit_hold(
-                stock=stock,
-                position=position,
-                cause="No sell condition met",
-            ),
-            quantity=0,
-            generated_at=datetime.now(),
+            score=composite_score,
+            reason=reason,
+            quantity=position.quantity if should_sell else 0,
+            generated_at=datetime.now(UTC),
         )
 
     @require(lambda stock: stock.current_price is not None, "Exit decision requires a valid current price")
@@ -77,39 +70,26 @@ class ExitRule:
     def decide_stop_loss_only(self, stock: Stock, position: Position) -> TradeSignal:
         current_price = stock.current_price
 
-        stop_loss_price = self.stop_loss_price(position.average_cost)
+        if current_price is None:
+            raise ValueError("Stop-loss decision requires a valid current price")
 
-        if current_price > stop_loss_price:
-            return TradeSignal(
-                stock_id=stock.stock_id,
-                action=TradeAction.HOLD,
-                price_at_signal=current_price,
-                source=SignalSource.TECHNICAL,
-                score=stock.combined_score,
-                reason=ReasonRule.build_exit_hold(
-                    stock=stock,
-                    position=position,
-                    cause="Stop-loss not triggered",
-                ),
-                quantity=0,
-                stop_loss_price=stop_loss_price,
-                generated_at=datetime.now(),
-            )
+        stop_loss_price = self.stop_loss_price(position.average_cost)
+        should_sell = current_price <= stop_loss_price
+        action = TradeAction.SELL if should_sell else TradeAction.HOLD
+        cause = "STOP_LOSS" if should_sell else "Stop-loss not triggered"
+
+        reason = ReasonRule.build_exit(stock, position, cause) if should_sell else ReasonRule.build_exit_hold(stock, position, cause)
 
         return TradeSignal(
             stock_id=stock.stock_id,
-            action=TradeAction.SELL,
+            action=action,
             price_at_signal=current_price,
             source=SignalSource.TECHNICAL,
-            score=0,
-            reason=ReasonRule.build_exit(
-                stock=stock,
-                position=position,
-                cause="STOP_LOSS",
-            ),
-            quantity=position.quantity,
+            score=stock.technical_score or 0,
+            reason=reason,
+            quantity=position.quantity if should_sell else 0,
             stop_loss_price=stop_loss_price,
-            generated_at=datetime.now(),
+            generated_at=datetime.now(UTC),
         )
 
     @require(lambda average_cost: average_cost > 0)

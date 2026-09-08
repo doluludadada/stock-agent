@@ -1,6 +1,9 @@
+# backend/src/a_domain/model/market/stock.py
+
 from sqlmodel import Field, SQLModel
 
 from a_domain.model.analysis.ai_analysis_report import AiAnalysisReport
+from a_domain.model.analysis.technical_report import TechnicalReport
 from a_domain.model.indicators.technical_indicators import TechnicalIndicators
 from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
@@ -12,14 +15,13 @@ class Stock(SQLModel):
     Stock Domain Model.
 
     Serves as both entity identity and mutable pipeline context.
-    During pipeline execution, fields are progressively populated
-    (ohlcv → indicators → scores → signal).
+    During pipeline execution, fields are progressively populated.
     """
 
     # --------------------------------- Identity --------------------------------- #
     stock_id: str
-    market: MarketType = Field(default=MarketType.TWSE)
     name: str | None = None
+    market: MarketType = Field(default=MarketType.TWSE)
     industry: str | None = None
 
     # ----------------------------------- Data ----------------------------------- #
@@ -27,23 +29,12 @@ class Stock(SQLModel):
     articles: list[Article] = Field(default_factory=list)
 
     # -------------------------------- Analysis ---------------------------------- #
-    # TODO: Actually it shoudnt be None
-    indicators: TechnicalIndicators | None = None
-    candidate_source: WatchlistType | None = None
-    # TODO: move blow stuffs those stuff to StockWatchlist?
-    hard_failures: list[str] = Field(default_factory=list)
-    soft_failures: list[str] = Field(default_factory=list)
-    observations: list[str] = Field(default_factory=list)
+    indicators: TechnicalIndicators = Field(default_factory=TechnicalIndicators)
+    technical_report: TechnicalReport | None = None
+    ai_report: AiAnalysisReport | None = None
+    composite_score: int | None = None
 
-    technical_score: int | None = None
-
-    # -------------------------------- Sentiment --------------------------------- #
-    historical_context: str = ""  # It should be saved in RAG database.
-    analysis_report: AiAnalysisReport | None = None
-    ai_score: int | None = None
-
-    # -------------------------------- Decision ---------------------------------- #
-    combined_score: int = 0
+    watchlist_types: set[WatchlistType] = Field(default_factory=set)
 
     # -------------------------------- Shortcuts --------------------------------- #
     @property
@@ -63,5 +54,25 @@ class Stock(SQLModel):
         return self.today.volume if self.today else None
 
     @property
+    def technical_score(self) -> int | None:
+        return self.technical_report.score if self.technical_report else None
+
+    @property
+    def ai_score(self) -> int | None:
+        return self.ai_report.score if self.ai_report else None
+
+    @property
     def is_eliminated(self) -> bool:
-        return len(self.hard_failures) > 0
+        return bool(self.technical_report and not self.technical_report.passed)
+
+    @property
+    def hard_failures(self) -> list[str]:
+        return self.technical_report.hard_failures if self.technical_report else []
+
+    @property
+    def soft_failures(self) -> list[str]:
+        return self.technical_report.soft_failures if self.technical_report else []
+
+    @property
+    def observations(self) -> list[str]:
+        return self.technical_report.observations if self.technical_report else []

@@ -1,6 +1,6 @@
 # backend/src/d_presentation/dependencies/providers.py
 
-from functools import lru_cache
+from typing import Annotated
 
 from fastapi import Depends
 
@@ -22,10 +22,9 @@ from c_infrastructure.market.yahoo_finance_adapter import YahooFinanceProvider
 from d_presentation.dependencies.core import get_db_connector, get_logger, get_market_clock, get_settings
 
 
-@lru_cache
 def get_tavily_search(
-    config: AppConfig = Depends(get_settings),
-    logger: ILoggingProvider = Depends(get_logger),
+    config: Annotated[AppConfig, Depends(get_settings)],
+    logger: Annotated[ILoggingProvider, Depends(get_logger)],
 ) -> IWebSearchProvider | None:
     if not config.tavily.api_key:
         return None
@@ -33,16 +32,14 @@ def get_tavily_search(
     return TavilySearchAdapter(config=config, logger=logger)
 
 
-@lru_cache
-def get_raw_price_provider(logger: ILoggingProvider = Depends(get_logger)) -> IOhlcvProvider:
+def get_raw_price_provider(logger: Annotated[ILoggingProvider, Depends(get_logger)]) -> IOhlcvProvider:
     return YahooFinanceProvider(logger=logger)
 
 
-@lru_cache
 def get_price_provider(
-    logger: ILoggingProvider = Depends(get_logger),
-    db: DatabaseConnector = Depends(get_db_connector),
-    market_clock: IMarketClock = Depends(get_market_clock),
+    logger: Annotated[ILoggingProvider, Depends(get_logger)],
+    db: Annotated[DatabaseConnector, Depends(get_db_connector)],
+    market_clock: Annotated[IMarketClock, Depends(get_market_clock)],
 ) -> IOhlcvProvider:
     return CachedPriceProvider(
         price_provider=YahooFinanceProvider(logger=logger),
@@ -52,24 +49,21 @@ def get_price_provider(
     )
 
 
-@lru_cache
-def get_stock_provider(logger: ILoggingProvider = Depends(get_logger)) -> IStockProvider:
+def get_stock_provider(logger: Annotated[ILoggingProvider, Depends(get_logger)]) -> IStockProvider:
     return TaiwanStockProvider(logger=logger)
 
 
-@lru_cache
 def get_news_provider(
-    config: AppConfig = Depends(get_settings),
-    logger: ILoggingProvider = Depends(get_logger),
+    config: Annotated[AppConfig, Depends(get_settings)],
+    logger: Annotated[ILoggingProvider, Depends(get_logger)],
 ) -> INewsProvider:
     return NewsProvider(config=config, logger=logger)
 
 
-@lru_cache
 def get_social_media_provider(
-    config: AppConfig = Depends(get_settings),
-    logger: ILoggingProvider = Depends(get_logger),
-    stock_provider: IStockProvider = Depends(get_stock_provider),
+    config: Annotated[AppConfig, Depends(get_settings)],
+    logger: Annotated[ILoggingProvider, Depends(get_logger)],
+    stock_provider: Annotated[IStockProvider, Depends(get_stock_provider)],
 ) -> ISocialMediaProvider:
     return PttProvider(
         config=config,

@@ -1,3 +1,5 @@
+# backend/src/a_domain/rules/technical/criteria/momentum/macd_bullish.py
+
 from dataclasses import dataclass
 
 from a_domain.model.market.stock import Stock
@@ -5,29 +7,25 @@ from a_domain.model.market.stock import Stock
 
 @dataclass(frozen=True)
 class MacdBullishCriterion:
-    """
-    MACD bullish condition.
+    # TODO: Check this file
+    """Checks the current bullish MACD state."""
 
-    The factory decides which checks are required for each strategy.
-    """
-
-    require_cross: bool = True
+    require_above_signal: bool = True
     require_positive: bool = False
     require_histogram_positive: bool = False
-    allow_missing: bool = False
 
     @property
     def name(self) -> str:
         checks: list[str] = []
 
-        if self.require_cross:
-            checks.append("cross")
+        if self.require_above_signal:
+            checks.append("line > signal")
 
         if self.require_positive:
-            checks.append("positive")
+            checks.append("line > 0")
 
         if self.require_histogram_positive:
-            checks.append("histogram")
+            checks.append("histogram > 0")
 
         if not checks:
             return "MACD Available"
@@ -35,21 +33,15 @@ class MacdBullishCriterion:
         return f"MACD Bullish ({', '.join(checks)})"
 
     def apply(self, stock: Stock) -> bool:
-        if stock.indicators is None or stock.indicators.macd is None:
-            return self.allow_missing
-
         macd = stock.indicators.macd
 
-        if self.require_cross:
-            if macd.line <= macd.signal:
-                return False
+        if macd is None:
+            return False
 
-        if self.require_positive:
-            if macd.line <= 0:
-                return False
+        if self.require_above_signal and macd.line <= macd.signal:
+            return False
 
-        if self.require_histogram_positive:
-            if macd.histogram <= 0:
-                return False
+        if self.require_positive and macd.line <= 0:
+            return False
 
-        return True
+        return not self.require_histogram_positive or macd.histogram > 0

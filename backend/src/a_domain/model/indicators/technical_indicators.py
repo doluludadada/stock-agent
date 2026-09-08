@@ -40,12 +40,16 @@ class Macd:
     histogram: float
 
 
-@invariant(lambda self: all(k > 0 and math.isfinite(v) and v > 0 for k, v in self.price_ma.items()))
-@invariant(lambda self: all(k > 0 and math.isfinite(v) and v > 0 for k, v in self.volume_ma.items()))
 @dataclass(frozen=True)
 class MovingAverages:
     price_ma: dict[int, float] = field(default_factory=dict)
     volume_ma: dict[int, float] = field(default_factory=dict)
+
+    def price(self, period: int) -> float | None:
+        return self.price_ma.get(period)
+
+    def volume(self, period: int) -> float | None:
+        return self.volume_ma.get(period)
 
 
 @invariant(lambda self: self.period > 0)

@@ -2,7 +2,6 @@ from a_domain.model.market.stock import Stock
 from a_domain.ports.market.social_media_provider import ISocialMediaProvider
 from a_domain.ports.market.stock_provider import IStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from a_domain.types.enums import WatchlistType
 from b_application.schemas.config import AppConfig
 from b_application.schemas.pipeline_status import PipelineStatus
 
@@ -50,7 +49,6 @@ class BuzzScanner:
                     self._logger.warning(f"Buzz stock not found: {article.stock_id}")
                     continue
 
-                stock.candidate_source = WatchlistType.BUZZ
                 stock.articles.append(article)
 
                 buzz_stocks[stock.stock_id] = stock

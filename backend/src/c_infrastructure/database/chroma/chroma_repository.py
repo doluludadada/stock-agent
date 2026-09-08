@@ -114,10 +114,10 @@ class ChromaRepositoryAdapter(
         bullish_factors = ""
         bearish_factors = ""
 
-        if stock.analysis_report is not None:
-            analysis_summary = stock.analysis_report.summary
-            bullish_factors = ", ".join(stock.analysis_report.bullish_factors)
-            bearish_factors = ", ".join(stock.analysis_report.bearish_factors)
+        if stock.ai_report is not None:
+            analysis_summary = stock.ai_report.summary
+            bullish_factors = ", ".join(stock.ai_report.bullish_factors)
+            bearish_factors = ", ".join(stock.ai_report.bearish_factors)
 
         document_lines = [
             f"Stock: {stock.stock_id}",

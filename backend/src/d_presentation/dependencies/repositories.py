@@ -1,6 +1,6 @@
 # backend/src/d_presentation/dependencies/repositories.py
 
-from functools import lru_cache
+from typing import Annotated
 
 from fastapi import Depends
 
@@ -13,7 +13,6 @@ from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.execution_provider import IExecutionProvider
 from a_domain.ports.trading.signal_repository import ISignalRepository
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
-from a_domain.rules.trading.watchlist import WatchlistRule
 from a_domain.types.enums import ExecutionProvider
 from b_application.schemas.config import AppConfig
 from c_infrastructure.ai_models.factory import AiAdapterFactory
@@ -26,63 +25,57 @@ from d_presentation.dependencies.core import get_db_connector, get_logger, get_m
 from d_presentation.dependencies.providers import get_tavily_search
 
 
-@lru_cache
 def get_ai_provider(
-    config: AppConfig = Depends(get_settings),
-    logger: ILoggingProvider = Depends(get_logger),
-    web_search_provider: IWebSearchProvider | None = Depends(get_tavily_search),
+    config: Annotated[AppConfig, Depends(get_settings)],
+    logger: Annotated[ILoggingProvider, Depends(get_logger)],
+    web_search_provider: Annotated[IWebSearchProvider | None, Depends(get_tavily_search)],
 ) -> IAiProvider:
     factory = AiAdapterFactory(config=config, logger=logger, web_search_provider=web_search_provider)
     return factory.create_adapter()
 
 
-@lru_cache
 def get_chroma_repository(
-    config: AppConfig = Depends(get_settings),
-    logger: ILoggingProvider = Depends(get_logger),
+    config: Annotated[AppConfig, Depends(get_settings)],
+    logger: Annotated[ILoggingProvider, Depends(get_logger)],
 ) -> ChromaRepositoryAdapter:
     return ChromaRepositoryAdapter(config=config, logger=logger)
 
 
 def get_conversation_repository(
-    repo: ChromaRepositoryAdapter = Depends(get_chroma_repository),
+    repo: Annotated[ChromaRepositoryAdapter, Depends(get_chroma_repository)],
 ) -> IConversationRepository:
     return repo
 
 
 def get_knowledge_repository(
-    repo: ChromaRepositoryAdapter = Depends(get_chroma_repository),
+    repo: Annotated[ChromaRepositoryAdapter, Depends(get_chroma_repository)],
 ) -> IKnowledgeRepository:
     return repo
 
 
-@lru_cache
 def get_signal_repository(
-    db: DatabaseConnector = Depends(get_db_connector),
-    logger: ILoggingProvider = Depends(get_logger),
+    db: Annotated[DatabaseConnector, Depends(get_db_connector)],
+    logger: Annotated[ILoggingProvider, Depends(get_logger)],
 ) -> ISignalRepository:
     return SignalRepository(db=db, logger=logger)
 
 
-@lru_cache
 def get_watchlist_repository(
-    db: DatabaseConnector = Depends(get_db_connector),
-    logger: ILoggingProvider = Depends(get_logger),
-    market_clock: IMarketClock = Depends(get_market_clock),
+    db: Annotated[DatabaseConnector, Depends(get_db_connector)],
+    logger: Annotated[ILoggingProvider, Depends(get_logger)],
+    market_clock: Annotated[IMarketClock, Depends(get_market_clock)],
 ) -> IWatchlistRepository:
     return WatchlistRepository(
         db=db,
         logger=logger,
         market_clock=market_clock,
-        watchlist_rule=WatchlistRule(),
     )
 
 
-@lru_cache
 def get_execution_provider(
-    db: DatabaseConnector = Depends(get_db_connector),
-    config: AppConfig = Depends(get_settings),
-    logger: ILoggingProvider = Depends(get_logger),
+    db: Annotated[DatabaseConnector, Depends(get_db_connector)],
+    config: Annotated[AppConfig, Depends(get_settings)],
+    logger: Annotated[ILoggingProvider, Depends(get_logger)],
 ) -> IExecutionProvider:
     if config.trading.execution_provider != ExecutionProvider.MOCK:
         raise NotImplementedError(f"Execution provider is not wired yet: {config.trading.execution_provider.value}")

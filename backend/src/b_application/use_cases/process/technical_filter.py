@@ -1,46 +1,40 @@
+# backend/src/b_application/use_cases/process/technical_filter.py
+
 from a_domain.model.market.stock import Stock
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from a_domain.rules.scoring import TechnicalScoreCalculator
-from a_domain.rules.technical.policy.technical_screening_policy import TechnicalScreeningPolicy
+from a_domain.rules.technical.strategy import TechnicalStrategy
 from b_application.schemas.pipeline_status import PipelineStatus
 
 
 class TechnicalFilter:
     """
-    Applies structural technical screening and assigns technical_score.
+    Evaluates stocks using a workflow-selected technical strategy.
 
-    This use case does not decide entry timing.
-    Entry timing belongs to the BUY decision path.
+    The use case applies a strategy but does not decide which strategy
+    belongs to Full Cycle, Buzz, Manual, or another workflow.
     """
 
-    def __init__(
-        self,
-        policy: TechnicalScreeningPolicy,
-        score_calculator: TechnicalScoreCalculator,
-        logger: ILoggingProvider,
-    ) -> None:
-        self._policy = policy
-        self._score_calculator = score_calculator
+    def __init__(self, logger: ILoggingProvider) -> None:
         self._logger = logger
 
     async def execute(
         self,
         stocks: list[Stock],
         status: PipelineStatus,
+        strategy: TechnicalStrategy,
     ) -> list[Stock]:
-        self._logger.info(f"Filtering {len(stocks)} stocks.")
-
+        self._logger.info(f"Filtering {len(stocks)} stocks with the selected technical strategy.")
         survivors: list[Stock] = []
 
         for stock in stocks:
-            self._policy.evaluate(stock)
-            stock.technical_score = self._score_calculator.calculate(stock)
+            stock.technical_report = strategy.evaluate(stock)
 
-            if not stock.is_eliminated:
+            if stock.technical_report.passed:
                 survivors.append(stock)
 
+        rejected_count = len(stocks) - len(survivors)
         status.stats.passed_technical += len(survivors)
 
-        self._logger.info(f"{len(survivors)} stocks passed technical filter.")
+        self._logger.info(f"Technical filtering completed. Passed={len(survivors)}, Rejected={rejected_count}.")
 
         return survivors

@@ -5,7 +5,6 @@ from icontract import ensure, require
 from a_domain.model.trading.account import Account
 
 
-# TODO:
 @dataclass(frozen=True)
 class SizingRule:
     risk_per_trade_pct: float  # e.g., 0.02 (Risk 2% of total cash per trade)

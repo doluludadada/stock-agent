@@ -1,3 +1,6 @@
+# backend/src/b_application/use_cases/collect/market_data_collector.py
+
+from a_domain.model.indicators.technical_indicators import TechnicalIndicators
 from a_domain.model.market.stock import Stock
 from a_domain.ports.market.price_provider import IOhlcvProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
@@ -32,40 +35,40 @@ class MarketDataCollector:
     ) -> None:
         self._logger.info(f"Fetching OHLCV data for {len(stocks)} stocks.")
 
-        collected_count = 0
-
+        # TODO: move except logic to infra layer?
         try:
             start_date, end_date = self._market_clock.history_window(self._lookback_days)
-
             history_by_stock_id = await self._ohlcv_provider.fetch_history(
                 stocks=stocks,
                 start_date=start_date,
                 end_date=end_date,
             )
-
-            for stock in stocks:
-                try:
-                    stock.ohlcv = []
-                    stock.indicators = None
-
-                    bars = history_by_stock_id.get(stock.stock_id, [])
-
-                    if not bars:
-                        self._logger.warning(f"Market data unavailable: {stock.stock_id}")
-                        continue
-
-                    stock.ohlcv = list(bars)
-                    stock.indicators = self._indicator_calculator.calculate(stock.ohlcv)
-                    collected_count += 1
-
-                except Exception as error:
-                    message = f"Failed to process market data for {stock.stock_id}: {error}"
-                    self._logger.error(message)
-                    status.stats.add_error(message)
-
         except Exception as error:
             message = f"Failed to fetch market data: {error}"
             self._logger.error(message)
             status.stats.add_error(message)
+            return
+
+        collected_count = 0
+
+        for stock in stocks:
+            try:
+                stock.ohlcv = []
+                stock.indicators = TechnicalIndicators()
+                stock.technical_report = None
+
+                bars = history_by_stock_id.get(stock.stock_id, [])
+                if not bars:
+                    self._logger.warning(f"Market data unavailable: {stock.stock_id}")
+                    continue
+
+                stock.ohlcv = list(bars)
+                stock.indicators = self._indicator_calculator.calculate(stock.ohlcv)
+                collected_count += 1
+
+            except Exception as error:
+                message = f"Failed to process market data for {stock.stock_id}: {error}"
+                self._logger.error(message)
+                status.stats.add_error(message)
 
         self._logger.success(f"Collected market data for {collected_count}/{len(stocks)} stocks.")

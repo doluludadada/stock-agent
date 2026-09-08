@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 
 from icontract import ensure, invariant, require
 
@@ -22,67 +22,47 @@ class EntryRule:
     Responsibilities:
     - no position -> decide BUY / HOLD
     - existing position -> decide ADD / HOLD
-
     """
 
     buy_threshold: int
-    sizing_rule: SizingRule  # ? it should be exit logic?
+    sizing_rule: SizingRule
 
     @require(lambda stock: stock.current_price is not None, "Entry decision requires a valid current price")
     @ensure(lambda result: result.quantity >= 0, "BUY signal quantity must be non-negative")
     @ensure(lambda result: result.action != TradeAction.BUY or result.quantity > 0, "BUY signal must have positive quantity")
-    def decide(
-        self,
-        stock: Stock,
-        account: Account,
-        position: Position | None = None,
-    ) -> TradeSignal:
+    def decide(self, stock: Stock, account: Account, position: Position | None = None) -> TradeSignal:
         current_price = stock.current_price
-        
-        if stock.combined_score < self.buy_threshold:
-            return TradeSignal(
-                stock_id=stock.stock_id,
-                action=TradeAction.HOLD,
-                price_at_signal=current_price,
-                source=SignalSource.COMBINED,
-                score=stock.combined_score,
-                reason=ReasonRule.build_entry_hold(
-                    stock=stock,
-                    cause="Score below buy threshold",
-                ),
-                quantity=0,
-                generated_at=datetime.now(),
+        composite_score = stock.composite_score
+
+        if current_price is None:
+            raise ValueError("Entry decision requires a valid current price")
+
+        if composite_score is None:
+            raise ValueError("Entry decision requires a composite score")
+
+        quantity = 0
+        reason = ReasonRule.build_entry_hold(stock, "Score below buy threshold")
+
+        if composite_score >= self.buy_threshold:
+            quantity = self.sizing_rule.calculate(account=account, price=current_price)
+            reason = ReasonRule.build_entry_hold(
+                stock,
+                "Insufficient cash or position size too small",
             )
 
-        quantity = self.sizing_rule.calculate(account=account, price=current_price)
+        if quantity > 0:
+            reason = ReasonRule.build_entry(stock)
 
-        if quantity <= 0:
-            return TradeSignal(
-                stock_id=stock.stock_id,
-                action=TradeAction.HOLD,
-                price_at_signal=current_price,
-                source=SignalSource.COMBINED,
-                score=stock.combined_score,
-                reason=ReasonRule.build_entry_hold(
-                    stock=stock,
-                    cause="Insufficient cash or position size too small",
-                ),
-                quantity=0,
-                generated_at=datetime.now(),
-            )
-
-        reason = ReasonRule.build_entry(stock)
-
-        if position is not None:
+        if quantity > 0 and position is not None:
             reason = f"ADD_POSITION | CurrentQty={position.quantity} | {reason}"
 
         return TradeSignal(
             stock_id=stock.stock_id,
-            action=TradeAction.BUY,
+            action=TradeAction.BUY if quantity > 0 else TradeAction.HOLD,
             price_at_signal=current_price,
             source=SignalSource.COMBINED,
-            score=stock.combined_score,
+            score=composite_score,
             reason=reason,
             quantity=quantity,
-            generated_at=datetime.now(),
+            generated_at=datetime.now(UTC),
         )

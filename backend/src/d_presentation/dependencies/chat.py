@@ -1,3 +1,7 @@
+# src/d_presentation/dependencies/chat.py
+
+from typing import Annotated
+
 from fastapi import Depends
 
 from a_domain.ports.ai.ai_provider import IAiProvider
@@ -14,7 +18,10 @@ from c_infrastructure.platforms.line.line_handler import LineWebhookHandler
 from c_infrastructure.platforms.line.line_security import LineSecurityService
 from c_infrastructure.system.chat_styler_service import ChatStylerService
 from d_presentation.dependencies.core import get_logger, get_settings
-from d_presentation.dependencies.repositories import get_ai_provider, get_conversation_repository
+from d_presentation.dependencies.repositories import (
+    get_ai_provider,
+    get_conversation_repository,
+)
 
 
 def get_chat_styler() -> ChatStylerService:
@@ -22,31 +29,38 @@ def get_chat_styler() -> ChatStylerService:
 
 
 def get_line_platform(
-    config: AppConfig = Depends(get_settings),
-    logger: ILoggingProvider = Depends(get_logger),
+    config: Annotated[AppConfig, Depends(get_settings)],
+    logger: Annotated[ILoggingProvider, Depends(get_logger)],
 ) -> LinePlatformAdapter:
     return LinePlatformAdapter(config=config, logger=logger)
 
 
 def get_line_security(
-    config: AppConfig = Depends(get_settings),
-    logger: ILoggingProvider = Depends(get_logger),
+    config: Annotated[AppConfig, Depends(get_settings)],
+    logger: Annotated[ILoggingProvider, Depends(get_logger)],
 ) -> LineSecurityService:
-    return LineSecurityService(channel_secret=config.line.channel_secret, logger=logger)
+    return LineSecurityService(
+        channel_secret=config.line.channel_secret,
+        logger=logger,
+    )
 
 
 def get_context_loader(
-    repository: IConversationRepository = Depends(get_conversation_repository),
-    config: AppConfig = Depends(get_settings),
-    logger: ILoggingProvider = Depends(get_logger),
+    repository: Annotated[IConversationRepository, Depends(get_conversation_repository)],
+    config: Annotated[AppConfig, Depends(get_settings)],
+    logger: Annotated[ILoggingProvider, Depends(get_logger)],
 ) -> ContextLoader:
-    return ContextLoader(repository=repository, config=config, logger=logger)
+    return ContextLoader(
+        repository=repository,
+        config=config,
+        logger=logger,
+    )
 
 
 def get_ai_processor(
-    ai_provider: IAiProvider = Depends(get_ai_provider),
-    chat_styler_provider: ChatStylerService = Depends(get_chat_styler),
-    logger: ILoggingProvider = Depends(get_logger),
+    ai_provider: Annotated[IAiProvider, Depends(get_ai_provider)],
+    chat_styler_provider: Annotated[ChatStylerService, Depends(get_chat_styler)],
+    logger: Annotated[ILoggingProvider, Depends(get_logger)],
 ) -> AiProcessor:
     return AiProcessor(
         ai_provider=ai_provider,
@@ -56,25 +70,31 @@ def get_ai_processor(
 
 
 def get_state_manager(
-    repository: IConversationRepository = Depends(get_conversation_repository),
-    logger: ILoggingProvider = Depends(get_logger),
+    repository: Annotated[IConversationRepository, Depends(get_conversation_repository)],
+    logger: Annotated[ILoggingProvider, Depends(get_logger)],
 ) -> StateManager:
-    return StateManager(repository=repository, logger=logger)
+    return StateManager(
+        repository=repository,
+        logger=logger,
+    )
 
 
 def get_dispatcher(
-    platform_provider: LinePlatformAdapter = Depends(get_line_platform),
-    logger: ILoggingProvider = Depends(get_logger),
+    platform_provider: Annotated[LinePlatformAdapter, Depends(get_line_platform)],
+    logger: Annotated[ILoggingProvider, Depends(get_logger)],
 ) -> Dispatcher:
-    return Dispatcher(platform_provider=platform_provider, logger=logger)
+    return Dispatcher(
+        platform_provider=platform_provider,
+        logger=logger,
+    )
 
 
 def get_chat_pipeline(
-    loader: ContextLoader = Depends(get_context_loader),
-    processor: AiProcessor = Depends(get_ai_processor),
-    manager: StateManager = Depends(get_state_manager),
-    dispatcher: Dispatcher = Depends(get_dispatcher),
-    config: AppConfig = Depends(get_settings),
+    loader: Annotated[ContextLoader, Depends(get_context_loader)],
+    processor: Annotated[AiProcessor, Depends(get_ai_processor)],
+    manager: Annotated[StateManager, Depends(get_state_manager)],
+    dispatcher: Annotated[Dispatcher, Depends(get_dispatcher)],
+    config: Annotated[AppConfig, Depends(get_settings)],
 ) -> ChatPipeline:
     return ChatPipeline(
         loader=loader,
@@ -86,7 +106,10 @@ def get_chat_pipeline(
 
 
 def get_line_handler(
-    security: LineSecurityService = Depends(get_line_security),
-    pipeline: ChatPipeline = Depends(get_chat_pipeline),
+    security: Annotated[LineSecurityService, Depends(get_line_security)],
+    pipeline: Annotated[ChatPipeline, Depends(get_chat_pipeline)],
 ) -> LineWebhookHandler:
-    return LineWebhookHandler(security_service=security, pipeline=pipeline)
+    return LineWebhookHandler(
+        security_service=security,
+        pipeline=pipeline,
+    )

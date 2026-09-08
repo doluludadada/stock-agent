@@ -59,20 +59,26 @@ class VolumeExpansionCriterion:
         return f"Volume Expansion >= {self.min_ratio}x vs MA_{self.period}"
 
     def apply(self, stock: Stock) -> bool:
-        if stock.indicators is None or stock.indicators.ma is None:
+        moving_averages = stock.indicators.ma
+
+        if moving_averages is None:
             return False
 
-        average_volume = stock.indicators.ma.volume_ma.get(self.period)
+        average_volume = moving_averages.volume_ma.get(self.period)
 
         if average_volume is None:
-            return True
+            return False
 
         if not stock.ohlcv:
             return False
 
-        current_volume = stock.ohlcv[-1].volume
+        current_volume = stock.current_volume
+
+        if current_volume is None:
+            return False
 
         return current_volume >= average_volume * self.min_ratio
+        # TODO: Operator ">=" not supported for "None"PylancereportOptionalOperand
 
 
 @dataclass(frozen=True)
@@ -82,9 +88,9 @@ class ObvTrendCriterion:
         return "OBV Trend"
 
     def apply(self, stock: Stock) -> bool:
-        if stock.indicators is None or stock.indicators.obv is None:
-            return True
-
         obv = stock.indicators.obv
+
+        if obv is None:
+            return False
 
         return obv.value > obv.moving_average

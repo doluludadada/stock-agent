@@ -1,0 +1,2 @@
+- Application layer Usecases should stay orchestration-only
+- KISS pricinple 

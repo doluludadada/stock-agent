@@ -1,10 +1,20 @@
-from pathlib import Path
+# backend/src/b_application/schemas/config.py
 
-from pydantic import BaseModel, Field, model_validator
+from pathlib import Path
+from typing import Self
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from a_domain.rules.technical.calculation.parameters import IndicatorParameters
-from a_domain.types.enums import AiProvider, DatabaseProvider, ExecutionProvider, OrderMode, StrategyName, SystemEnvironment
+from a_domain.types.enums import (
+    AiProvider,
+    DatabaseProvider,
+    ExecutionProvider,
+    OrderMode,
+    StrategyName,
+    SystemEnvironment,
+)
 
 
 class AiConfig(BaseSettings):
@@ -79,26 +89,31 @@ class TavilyConfig(BaseSettings):
     search_depth: str = "basic"
 
 
-# TODO: hmmm?
 class AnalysisConfig(BaseModel):
     """Analysis pipeline weighting and risk parameters."""
 
     active_strategy: StrategyName = Field(default=StrategyName.MODERATE)
     lookback_days: int = Field(default=120, ge=30)
-    technical_weight: float = Field(default=0.6, ge=0.0, le=1.0)
-    sentiment_weight: float = Field(default=0.4, ge=0.0, le=1.0)
+
+    technical_weight: float = Field(default=0.5, ge=0.0, le=1.0)
+    ai_weight: float = Field(default=0.5, ge=0.0, le=1.0)
+
     min_combined_score_buy: int = Field(default=70, ge=0, le=100)
     max_combined_score_sell: int = Field(default=30, ge=0, le=100)
+
     risk_per_trade_pct: float = Field(default=0.02, ge=0.01, le=0.1)
     stop_loss_pct: float = Field(default=0.10, ge=0.01, le=0.5)
-    total_capital: int = Field(default=1000000, ge=10000)
+
+    total_capital: int = Field(default=1_000_000, ge=10_000)
     article_fetch_limit: int = Field(default=20, ge=1, le=100)
 
     @model_validator(mode="after")
-    def _validate_weights(self) -> "AnalysisConfig":
-        total_weight = self.technical_weight + self.sentiment_weight
+    def validate_weights(self) -> Self:
+        total_weight = self.technical_weight + self.ai_weight
+
         if abs(total_weight - 1.0) > 1e-5:
-            raise ValueError(f"technical_weight and sentiment_weight must sum to 1.0, got {total_weight}")
+            raise ValueError("technical_weight and ai_weight must sum to 1.0")
+
         return self
 
 
@@ -121,7 +136,21 @@ class CollectRulesConfig(BaseModel):
 
     spam_keywords: set[str] = Field(default={"廣告", "廣編", "業配", "新聞稿"})
     financial_keywords: set[str] = Field(
-        default={"營收", "EPS", "毛利", "純益", "法說", "殖利率", "擴廠", "減資", "購併", "財報", "股利", "盈餘", "轉盈"}
+        default={
+            "營收",
+            "EPS",
+            "毛利",
+            "純益",
+            "法說",
+            "殖利率",
+            "擴廠",
+            "減資",
+            "購併",
+            "財報",
+            "股利",
+            "盈餘",
+            "轉盈",
+        }
     )
 
     filter_min_price: float = 10.0
@@ -138,19 +167,14 @@ class CollectRulesConfig(BaseModel):
 
 
 class ScoringConfig(BaseModel):
-    """Rules and penalties for scoring."""
+    """Rules and penalties for technical scoring."""
+
+    model_config = ConfigDict(extra="forbid")
 
     base: int = Field(default=50, ge=0, le=100)
-    pass_bonus: int = Field(default=20, ge=0)
     hard_failure_penalty: int = Field(default=15, ge=0)
-    max_hard_penalty: int = Field(default=30, ge=0)
     soft_failure_penalty: int = Field(default=5, ge=0)
-    max_soft_penalty: int = Field(default=15, ge=0)
-    rsi_sweet_spot_bonus: int = Field(default=10, ge=0)
-    rsi_sweet_spot_min: float = Field(default=40.0, ge=0.0, le=100.0)
-    rsi_sweet_spot_max: float = Field(default=60.0, ge=0.0, le=100.0)
-    macd_bullish_bonus: int = Field(default=10, ge=0)
-    ma_present_bonus: int = Field(default=5, ge=0)
+    observation_bonus: int = Field(default=5, ge=0)
 
 
 class QualityFiltersConfig(BaseModel):
@@ -270,7 +294,11 @@ class AppConfig(BaseSettings):
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
     quality: QualityFiltersConfig = Field(default_factory=QualityFiltersConfig)
     indicators: IndicatorParameters = Field(default_factory=IndicatorParameters)
-    strategy: StrategyThresholds = Field(default_factory=StrategyThresholds)
+
+    # All strategy thresholds stay available at runtime.
+    # This lets Full Cycle and Buzz use different technical policies.
+    strategies: dict[StrategyName, StrategyThresholds] = Field(default_factory=dict)
+
     market: MarketConfig = Field(default_factory=MarketConfig)
     trading: TradingConfig = Field(default_factory=TradingConfig)
     mock_trading: MockTradingConfig = Field(default_factory=MockTradingConfig)

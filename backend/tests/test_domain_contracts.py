@@ -52,7 +52,7 @@ def test_sizing_rule_rejects_invalid_price() -> None:
 
 def test_composite_rule_rejects_zero_total_weight() -> None:
     with pytest.raises(ViolationError):
-        CompositeScoreRule(technical_weight=0, sentiment_weight=0)
+        CompositeScoreRule(technical_weight=0, ai_weight=0)
 
 
 def test_order_submit_moves_pending_order_to_submitted() -> None:

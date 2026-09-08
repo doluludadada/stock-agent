@@ -13,13 +13,13 @@ class BollingerPositionCriterion:
         return "Bollinger Above Middle"
 
     def apply(self, stock: Stock) -> bool:
-        if stock.indicators is None or stock.indicators.bollinger is None:
-            return True
-
         bollinger = stock.indicators.bollinger
 
-        if bollinger.middle is None or stock.current_price is None:
-            return True
+        if bollinger is None:
+            return False
+
+        if stock.current_price is None:
+            return False
 
         return stock.current_price > bollinger.middle
 
@@ -34,13 +34,13 @@ class BollingerThresholdCriterion:
         return f"Bollinger %B < {self.max_percent_b}"
 
     def apply(self, stock: Stock) -> bool:
-        if stock.indicators is None or stock.indicators.bollinger is None:
-            return True
+        if stock.indicators.bollinger is None:
+            return False
 
         percent_b = stock.indicators.bollinger.percent_b
 
         if percent_b is None:
-            return True
+            return False
 
         return percent_b < self.max_percent_b
 
@@ -55,12 +55,12 @@ class BollingerSqueezeCriterion:
         return f"Bollinger Squeeze < {self.max_bandwidth}"
 
     def apply(self, stock: Stock) -> bool:
-        if stock.indicators is None or stock.indicators.bollinger is None:
-            return True
+        if stock.indicators.bollinger is None:
+            return False
 
         bandwidth = stock.indicators.bollinger.bandwidth
 
         if bandwidth is None:
-            return True
+            return False
 
         return bandwidth < self.max_bandwidth

@@ -20,7 +20,6 @@ class AdxTrendCriterion:
     min_adx: float = 20.0
     max_adx: float = 50.0
     require_direction: bool = True
-    allow_missing: bool = True
 
     @property
     def name(self) -> str:
@@ -30,8 +29,8 @@ class AdxTrendCriterion:
         return f"ADX Trend {self.min_adx}-{self.max_adx}"
 
     def apply(self, stock: Stock) -> bool:
-        if stock.indicators is None or stock.indicators.adx is None:
-            return self.allow_missing
+        if stock.indicators.adx is None:
+            return False
 
         adx = stock.indicators.adx
 

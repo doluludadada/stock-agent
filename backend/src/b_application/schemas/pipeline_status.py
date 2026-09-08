@@ -13,31 +13,42 @@ from a_domain.model.trading.watchlist import StockWatchlist
 @dataclass
 class PipelineStatus:
     """
-    Streamlined Pipeline Status.
+    Runtime state for one pipeline operation.
     """
 
     account: Account = field(default_factory=Account)
 
     universe_stocks: list[Stock] = field(default_factory=list)
     """
-    universe stock (it should clean everytime runs pipeline)
+    Stocks loaded by a full-market scan.
     """
 
     held_stocks: list[Stock] = field(default_factory=list)
 
     buzz_stocks: list[Stock] = field(default_factory=list)
     """
-    From Buzz
+    Stocks discovered from the social-buzz workflow.
     """
+
     manual_stocks: list[Stock] = field(default_factory=list)
+    """
+    Stocks explicitly requested by the user.
+
+    Manual stocks remain here regardless of technical pass/fail so that
+    specific-stock analysis can continue through News and AI.
+    """
 
     survivors: list[Stock] = field(default_factory=list)
     """
-    After techncial filter
+    Stocks that passed the active technical strategy.
+
+    Automatic workflows use survivors as the gate for expensive analysis
+    and automatic trading decisions.
     """
+
     stocks_cache: dict[str, Stock] = field(default_factory=dict)
     """
-    stock_id, Stock
+    Runtime stock cache keyed by stock_id.
     """
 
     positions_by_stock_id: dict[str, Position] = field(default_factory=dict)

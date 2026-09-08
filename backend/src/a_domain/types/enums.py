@@ -1,3 +1,5 @@
+# backend/src/a_domain/types/enums.py
+
 from enum import StrEnum, auto
 
 
@@ -6,6 +8,13 @@ class AiProvider(StrEnum):
     GROK = auto()
     GEMINI = auto()
     GROQ = auto()
+
+
+# TODO:
+# Mihgt needa change name
+class AiAnalysisFocus(StrEnum):
+    FUNDAMENTAL = auto()
+    MOMENTUM = auto()
 
 
 class MessageRole(StrEnum):
@@ -81,7 +90,6 @@ class ContentType(StrEnum):
 class WatchlistType(StrEnum):
     TECHNICAL = auto()  # TODO: technical_filter.py should use it
     BUZZ = auto()
-    TECHNICAL_AND_BUZZ = auto()  # TODO: signals.py should use it
     MANUAL = auto()  # TODO: CLI For specific stock
 
 

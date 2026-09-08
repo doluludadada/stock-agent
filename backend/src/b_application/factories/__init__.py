@@ -1,11 +1,13 @@
-from b_application.factories.technical_policy import (
-    TechnicalPolicyFactory,
-    create_policy_from_config,
-    load_strategy_thresholds,
+# backend/src/b_application/factories/__init__.py
+
+from b_application.factories.technical_strategy import (
+    TechnicalStrategyFactory,
+    create_strategy_from_config,
+    create_technical_strategies,
 )
 
 __all__ = [
-    "TechnicalPolicyFactory",
-    "create_policy_from_config",
-    "load_strategy_thresholds",
+    "TechnicalStrategyFactory",
+    "create_strategy_from_config",
+    "create_technical_strategies",
 ]

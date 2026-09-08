@@ -38,10 +38,10 @@ class GapCriterion:
 
     def apply(self, stock: Stock) -> bool:
         if stock.today is None or stock.yesterday is None:
-            return True
+            return False
 
         if stock.yesterday.close == 0:
-            return True
+            return False
 
         gap = (stock.today.open - stock.yesterday.close) / stock.yesterday.close
 
@@ -75,12 +75,12 @@ class IntradayRangeCriterion:
 
     def apply(self, stock: Stock) -> bool:
         if stock.today is None:
-            return True
+            return False
 
         spread = stock.today.high - stock.today.low
 
         if spread <= 0:
-            return True
+            return False
 
         position = (stock.today.close - stock.today.low) / spread
 
@@ -99,13 +99,13 @@ class IntradayVolumeConfirmationCriterion:
         return f"Intraday Volume Confirmation vs MA_{self.period}"
 
     def apply(self, stock: Stock) -> bool:
-        if stock.indicators is None or stock.indicators.ma is None:
-            return True
+        if stock.indicators.ma is None:
+            return False
 
         average_volume = stock.indicators.ma.volume_ma.get(self.period)
 
         if average_volume is None:
-            return True
+            return False
 
         if not stock.ohlcv:
             return False
@@ -128,7 +128,7 @@ class ConsecutiveUpDaysCriterion:
         bars = stock.ohlcv
 
         if len(bars) < self.max_consecutive_up + 1:
-            return True
+            return False
 
         count = 0
 

@@ -1,7 +1,8 @@
+# backend/src/b_application/use_cases/ship/signals.py
+
 from a_domain.model.trading.watchlist import StockWatchlist
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.trading.signal_repository import ISignalRepository
-from a_domain.rules.scoring.composite import CompositeScoreRule
 from a_domain.rules.trading.decision import DecisionRule
 from a_domain.rules.trading.entry import EntryRule
 from a_domain.rules.trading.exit import ExitRule
@@ -11,9 +12,7 @@ from b_application.schemas.pipeline_status import PipelineStatus
 
 
 class Signals:
-    """
-    Generates and persists trading signals.
-    """
+    """Generates and persists trading signals."""
 
     def __init__(
         self,
@@ -41,11 +40,6 @@ class Signals:
             ),
         )
 
-        self._composite_rule = CompositeScoreRule(
-            technical_weight=config.analysis.technical_weight,
-            sentiment_weight=config.analysis.sentiment_weight,
-        )
-
     async def execute(
         self,
         watchlist: StockWatchlist,
@@ -59,16 +53,15 @@ class Signals:
                     self._logger.warning(f"Signal skipped. Risk blocked: {stock.stock_id}")
                     continue
 
-                if stock.technical_score is None or stock.ai_score is None:
-                    self._logger.warning(f"Signal skipped. Incomplete analysis: {stock.stock_id}")
+                if stock.composite_score is None:
+                    self._logger.warning(f"Signal skipped. Composite score unavailable: {stock.stock_id}")
                     continue
 
-                stock.combined_score = self._composite_rule.calculate(technical_score=stock.technical_score, ai_score=stock.ai_score)
-
                 signal = self._decision_rule.decide(
-                    stock=stock, account=status.account, position=status.positions_by_stock_id.get(stock.stock_id)
+                    stock=stock,
+                    account=status.account,
+                    position=status.positions_by_stock_id.get(stock.stock_id),
                 )
-
                 status.signals.append(signal)
 
             except Exception as error:
@@ -83,7 +76,6 @@ class Signals:
         try:
             await self._signal_repository.save_batch(status.signals)
             status.stats.signals_generated += len(status.signals)
-
         except Exception as error:
             message = f"Signal persistence failed: {error}"
             self._logger.error(message)
