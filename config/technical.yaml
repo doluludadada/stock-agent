@@ -1,0 +1,463 @@
+# config/technical.yaml
+
+active_strategy_id: moderate
+buzz_strategy_id: buzz
+
+defaults:
+  indicators:
+    rsi_period: 14
+
+    macd_fast: 12
+    macd_slow: 26
+    macd_signal: 9
+
+    ma_short: 5
+    ma_mid: 20
+    ma_long: 60
+
+    bb_period: 20
+    bb_std: 2.0
+
+    stoch_k: 9
+    stoch_d: 3
+
+    adx_period: 14
+    atr_period: 14
+    mfi_period: 14
+
+  scoring:
+    base_score: 50
+    block_failure_penalty: 15
+    failure_score_reduction: 5
+    pass_score_increase: 5
+
+strategies:
+  conservative:
+    rules:
+      - type: price_above_ma
+        effect: block_on_fail
+        period: 20
+
+      - type: price_above_ma
+        effect: block_on_fail
+        period: 60
+
+      - type: ma_alignment
+        effect: block_on_fail
+        fast: 20
+        slow: 60
+
+      - type: macd_bullish
+        effect: block_on_fail
+        require_above_signal: true
+        require_positive: true
+
+      - type: rsi_range
+        effect: block_on_fail
+        min_rsi: 50
+        max_rsi: 65
+
+      - type: stochastic_health
+        effect: block_on_fail
+        max_k: 80
+
+      - type: bollinger_threshold
+        effect: block_on_fail
+        max_percent_b: 0.85
+
+      - type: daily_range
+        effect: block_on_fail
+        max_daily_range_pct: 0.05
+
+      - type: liquidity
+        effect: block_on_fail
+        min_daily_volume: 1000
+
+      - type: minimum_price
+        effect: block_on_fail
+        min_price: 20
+
+      - type: volume_expansion
+        effect: block_on_fail
+        min_ratio: 0.7
+
+      - type: adx_trend
+        effect: reduce_score_on_fail
+        min_adx: 20
+        max_adx: 50
+        require_direction: true
+
+      - type: volume_expansion
+        effect: reduce_score_on_fail
+        min_ratio: 1.0
+
+      - type: bollinger_position
+        effect: reduce_score_on_fail
+
+      - type: macd_bullish
+        effect: reduce_score_on_fail
+        require_above_signal: false
+        require_histogram_positive: true
+
+      - type: mfi_threshold
+        effect: reduce_score_on_fail
+        max_mfi: 80
+
+      - type: stochastic_health
+        effect: reduce_score_on_fail
+        max_k: null
+        require_k_above_d: true
+
+      - type: atr_range
+        effect: reduce_score_on_fail
+        min_atr_pct: 0.01
+        max_atr_pct: 0.05
+
+      - type: rsi_range
+        effect: increase_score_on_pass
+        min_rsi: 50
+        max_rsi: 65
+
+      - type: golden_cross
+        effect: increase_score_on_pass
+        fast: 20
+        slow: 60
+        max_cross_margin: 0.03
+
+      - type: bollinger_squeeze
+        effect: increase_score_on_pass
+        max_bandwidth: 0.1
+
+      - type: volume_expansion
+        effect: increase_score_on_pass
+        min_ratio: 1.5
+
+      - type: obv_trend
+        effect: increase_score_on_pass
+
+  moderate:
+    rules:
+      - type: price_above_ma
+        effect: block_on_fail
+        period: 20
+
+      - type: ma_alignment
+        effect: block_on_fail
+        fast: 20
+        slow: 60
+
+      - type: macd_bullish
+        effect: block_on_fail
+        require_above_signal: true
+
+      - type: rsi_range
+        effect: block_on_fail
+        min_rsi: 50
+
+      - type: rsi_range
+        effect: block_on_fail
+        max_rsi: 80
+
+      - type: daily_range
+        effect: block_on_fail
+        max_daily_range_pct: 0.07
+
+      - type: liquidity
+        effect: block_on_fail
+        min_daily_volume: 500
+
+      - type: minimum_price
+        effect: block_on_fail
+        min_price: 15
+
+      - type: volume_expansion
+        effect: block_on_fail
+        min_ratio: 0.5
+
+      - type: price_above_ma
+        effect: reduce_score_on_fail
+        period: 60
+
+      - type: macd_bullish
+        effect: reduce_score_on_fail
+        require_above_signal: false
+        require_positive: true
+        require_histogram_positive: true
+
+      - type: adx_trend
+        effect: reduce_score_on_fail
+        min_adx: 20
+        max_adx: 50
+        require_direction: true
+
+      - type: stochastic_health
+        effect: reduce_score_on_fail
+        max_k: 80
+        require_k_above_d: true
+
+      - type: bollinger_threshold
+        effect: reduce_score_on_fail
+        max_percent_b: 0.9
+
+      - type: bollinger_position
+        effect: reduce_score_on_fail
+
+      - type: volume_expansion
+        effect: reduce_score_on_fail
+        min_ratio: 0.8
+
+      - type: mfi_threshold
+        effect: reduce_score_on_fail
+        max_mfi: 80
+
+      - type: atr_range
+        effect: reduce_score_on_fail
+        min_atr_pct: 0.01
+        max_atr_pct: 0.05
+
+      - type: rsi_range
+        effect: increase_score_on_pass
+        min_rsi: 50
+        max_rsi: 70
+
+      - type: golden_cross
+        effect: increase_score_on_pass
+        fast: 20
+        slow: 60
+        max_cross_margin: 0.03
+
+      - type: bollinger_squeeze
+        effect: increase_score_on_pass
+        max_bandwidth: 0.1
+
+      - type: volume_expansion
+        effect: increase_score_on_pass
+        min_ratio: 1.5
+
+      - type: obv_trend
+        effect: increase_score_on_pass
+
+  aggressive:
+    rules:
+      - type: price_above_ma
+        effect: block_on_fail
+        period: 20
+
+      - type: macd_bullish
+        effect: block_on_fail
+        require_above_signal: true
+
+      - type: rsi_range
+        effect: block_on_fail
+        max_rsi: 85
+
+      - type: daily_range
+        effect: block_on_fail
+        max_daily_range_pct: 0.07
+
+      - type: liquidity
+        effect: block_on_fail
+        min_daily_volume: 300
+
+      - type: minimum_price
+        effect: block_on_fail
+        min_price: 10
+
+      - type: volume_expansion
+        effect: block_on_fail
+        min_ratio: 0.5
+
+      - type: price_above_ma
+        effect: reduce_score_on_fail
+        period: 60
+
+      - type: macd_bullish
+        effect: reduce_score_on_fail
+        require_above_signal: false
+        require_positive: true
+        require_histogram_positive: true
+
+      - type: adx_trend
+        effect: reduce_score_on_fail
+        min_adx: 20
+        max_adx: 50
+        require_direction: true
+
+      - type: stochastic_health
+        effect: reduce_score_on_fail
+        max_k: 80
+        require_k_above_d: true
+
+      - type: bollinger_threshold
+        effect: reduce_score_on_fail
+        max_percent_b: 0.9
+
+      - type: volume_expansion
+        effect: reduce_score_on_fail
+        min_ratio: 0.8
+
+      - type: mfi_threshold
+        effect: reduce_score_on_fail
+        max_mfi: 80
+
+      - type: atr_range
+        effect: reduce_score_on_fail
+        min_atr_pct: 0.01
+        max_atr_pct: 0.05
+
+      - type: rsi_range
+        effect: increase_score_on_pass
+        min_rsi: 50
+        max_rsi: 75
+
+      - type: golden_cross
+        effect: increase_score_on_pass
+        fast: 20
+        slow: 60
+        max_cross_margin: 0.03
+
+      - type: bollinger_squeeze
+        effect: increase_score_on_pass
+        max_bandwidth: 0.1
+
+      - type: volume_expansion
+        effect: increase_score_on_pass
+        min_ratio: 1.5
+
+      - type: obv_trend
+        effect: increase_score_on_pass
+
+  buzz:
+    rules:
+      - type: minimum_price
+        effect: block_on_fail
+        min_price: 10
+
+      - type: liquidity
+        effect: block_on_fail
+        min_daily_volume: 500
+
+      - type: daily_range
+        effect: block_on_fail
+        max_daily_range_pct: 0.10
+
+      - type: rsi_range
+        effect: reduce_score_on_fail
+        max_rsi: 80
+
+      - type: volume_expansion
+        effect: reduce_score_on_fail
+        min_ratio: 1.0
+
+      - type: macd_bullish
+        effect: reduce_score_on_fail
+        require_above_signal: true
+
+      - type: stochastic_health
+        effect: reduce_score_on_fail
+        max_k: 80
+
+      - type: rsi_range
+        effect: increase_score_on_pass
+        min_rsi: 50
+        max_rsi: 70
+
+      - type: golden_cross
+        effect: increase_score_on_pass
+        fast: 20
+        slow: 60
+        max_cross_margin: 0.03
+
+      - type: bollinger_squeeze
+        effect: increase_score_on_pass
+        max_bandwidth: 0.1
+
+      - type: volume_expansion
+        effect: increase_score_on_pass
+        min_ratio: 1.5
+
+      - type: obv_trend
+        effect: increase_score_on_pass
+
+  nightly:
+    rules:
+      - type: price_above_ma
+        effect: block_on_fail
+        period: 20
+
+      - type: ma_alignment
+        effect: block_on_fail
+        fast: 20
+        slow: 60
+
+      - type: macd_bullish
+        effect: block_on_fail
+        require_above_signal: true
+
+      - type: rsi_range
+        effect: block_on_fail
+        min_rsi: 50
+
+      - type: rsi_range
+        effect: block_on_fail
+        max_rsi: 75
+
+      - type: liquidity
+        effect: block_on_fail
+        min_daily_volume: 500
+
+      - type: minimum_price
+        effect: block_on_fail
+        min_price: 15
+
+      - type: volume_expansion
+        effect: block_on_fail
+        min_ratio: 0.8
+
+      - type: price_above_ma
+        effect: reduce_score_on_fail
+        period: 60
+
+      - type: adx_trend
+        effect: reduce_score_on_fail
+        min_adx: 20
+        max_adx: 50
+        require_direction: true
+
+      - type: bollinger_position
+        effect: reduce_score_on_fail
+
+      - type: volume_expansion
+        effect: reduce_score_on_fail
+        min_ratio: 0.5
+
+      - type: mfi_threshold
+        effect: reduce_score_on_fail
+        max_mfi: 80
+
+      - type: atr_range
+        effect: reduce_score_on_fail
+        min_atr_pct: 0.01
+        max_atr_pct: 0.05
+
+      - type: rsi_range
+        effect: increase_score_on_pass
+        min_rsi: 50
+        max_rsi: 70
+
+      - type: golden_cross
+        effect: increase_score_on_pass
+        fast: 20
+        slow: 60
+        max_cross_margin: 0.03
+
+      - type: bollinger_squeeze
+        effect: increase_score_on_pass
+        max_bandwidth: 0.1
+
+      - type: volume_expansion
+        effect: increase_score_on_pass
+        min_ratio: 1.5
+
+      - type: obv_trend
+        effect: increase_score_on_pass

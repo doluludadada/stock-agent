@@ -20,20 +20,28 @@ class DecisionRule:
     - no position -> EntryRule decides BUY / HOLD
     - existing position:
         1. ExitRule decides SELL / HOLD
-        2. if not SELL, EntryRule may decide ADD / HOLD
+        2. technical hard failure prevents adding to the position
+        3. otherwise EntryRule may decide ADD / HOLD
     """
 
     entry_rule: EntryRule
     """
     Handles stocks that are not currently held.
     """
+
     exit_rule: ExitRule
     """
     Handles stocks that already have an open position.
     """
 
-    @ensure(lambda result: len(result.stock_id) > 0, "Signal must have a stock_id")
-    @ensure(lambda result: result.quantity >= 0, "Signal quantity must be non-negative")
+    @ensure(
+        lambda result: len(result.stock_id) > 0,
+        "Signal must have a stock_id",
+    )
+    @ensure(
+        lambda result: result.quantity >= 0,
+        "Signal quantity must be non-negative",
+    )
     def decide(
         self,
         stock: Stock,
@@ -43,9 +51,15 @@ class DecisionRule:
         if position is None:
             return self.entry_rule.decide(stock=stock, account=account)
 
-        exit_signal = self.exit_rule.decide(stock=stock, position=position)
+        exit_signal = self.exit_rule.decide(
+            stock=stock,
+            position=position,
+        )
 
         if exit_signal.action == TradeAction.SELL:
+            return exit_signal
+
+        if stock.is_eliminated:
             return exit_signal
 
         return self.entry_rule.decide(

@@ -53,6 +53,7 @@ class PipelineStatus:
 
     positions_by_stock_id: dict[str, Position] = field(default_factory=dict)
     risk_blocked_stock_ids: set[str] = field(default_factory=set)
+    stale_stock_ids: set[str] = field(default_factory=set)
 
     watchlist: StockWatchlist = field(default_factory=StockWatchlist)
     # The stock Buzz and techncial filter should be added to here

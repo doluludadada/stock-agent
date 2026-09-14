@@ -1,6 +1,9 @@
+# backend/src/c_infrastructure/feed/ptt_provider.py
+# Current source: :contentReference[oaicite:4]{index=4}
+
 import re
 from datetime import date, datetime, timedelta
-from uuid import uuid4
+from typing import TypedDict
 
 import httpx
 from bs4 import BeautifulSoup, Tag
@@ -11,6 +14,147 @@ from a_domain.ports.market.stock_provider import IStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.types.enums import ContentType, InformationSource
 from b_application.schemas.config import AppConfig
+
+
+class PttListing(TypedDict):
+    title: str
+    url: str
+    published_date: date
+
+
+# ---------------------------------- parsing ---------------------------------- #
+
+
+class PttParser:
+    RE_TICKER_TEMPLATE = re.compile(r"股票代碼[^:：]*[:：]\s*(\d{4})")
+    RE_TICKER_PARENS = re.compile(r"[（(](\d{4})[)）]")
+    RE_TICKER_TITLE = re.compile(r"(\d{4})")
+
+    def __init__(self, base_url: str, max_body_length: int) -> None:
+        self._base_url = base_url
+        self._max_body_length = max_body_length
+
+    def parse_listing(self, row: Tag) -> PttListing | None:
+        anchor = row.find("a")
+        if anchor is None:
+            return None
+
+        href = anchor.get("href", "")
+        if not isinstance(href, str) or not href:
+            return None
+
+        published_date = datetime.now().date()
+        date_element = row.find("div", class_="date")
+        if isinstance(date_element, Tag):
+            parts = date_element.get_text(strip=True).split("/")
+            try:
+                month, day = int(parts[0]), int(parts[1])
+                year = published_date.year if month <= published_date.month else published_date.year - 1
+                published_date = date(year, month, day)
+            except ValueError:
+                pass
+            except IndexError:
+                pass
+
+        return PttListing(title=anchor.get_text(strip=True), url=self._base_url + href, published_date=published_date)
+
+    def parse_article(self, html: str, listing: PttListing, stock_universe: set[str]) -> Article | None:
+        main_content = BeautifulSoup(html, "html.parser").find("div", id="main-content")
+        if not isinstance(main_content, Tag):
+            return None
+
+        body_text = main_content.get_text(separator="\n", strip=True)
+        stock_id = self.extract_stock_id(body_text, listing["title"])
+        if stock_id is None or stock_id not in stock_universe:
+            return None
+
+        push_count, boo_count, arrow_count = self.count_engagement(main_content)
+        content = self.clean_content(main_content)
+        if not content:
+            return None
+
+        engagement = push_count + boo_count + arrow_count
+        content = f"[{push_count}推 {boo_count}噓 {arrow_count}→]\n{content}"
+        content = content[: self._max_body_length]
+
+        return Article(
+            stock_id=stock_id,
+            source=InformationSource.PTT_STOCK,
+            title=listing["title"],
+            content=content,
+            url=listing["url"],
+            content_type=ContentType.ANALYSIS,
+            published_at=datetime.combine(listing["published_date"], datetime.min.time()),
+            raw_metadata={"engagement": engagement, "push": push_count, "boo": boo_count, "arrow": arrow_count},
+        )
+
+    def extract_stock_id(self, body: str, title: str) -> str | None:
+        template_match = self.RE_TICKER_TEMPLATE.search(body)
+        if template_match:
+            return template_match.group(1)
+
+        for stock_id in self.RE_TICKER_PARENS.findall(body):
+            if not stock_id.startswith("0"):
+                return stock_id
+
+        title_match = self.RE_TICKER_TITLE.search(title)
+        return title_match.group(1) if title_match else None
+
+    def count_engagement(self, main_content: Tag) -> tuple[int, int, int]:
+        push_count = 0
+        boo_count = 0
+        arrow_count = 0
+
+        for push_element in main_content.find_all("div", class_="push"):
+            tag_element = push_element.find("span", class_="push-tag")
+            if tag_element is None:
+                continue
+
+            push_tag = tag_element.get_text().strip()
+            if push_tag == "推":
+                push_count += 1
+            elif push_tag == "噓":
+                boo_count += 1
+            elif push_tag == "→":
+                arrow_count += 1
+
+        return push_count, boo_count, arrow_count
+
+    def clean_content(self, main_content: Tag) -> str:
+        for class_name in ("push", "article-metaline", "article-metaline-right"):
+            for element in main_content.find_all("div", class_=class_name):
+                element.decompose()
+
+        lines: list[str] = []
+        for raw_line in main_content.get_text(separator="\n", strip=True).split("\n"):
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            if line.startswith("※"):
+                continue
+
+            if "發文提醒" in line or "ctrl+y" in line.lower():
+                continue
+
+            lines.append(line)
+
+        return "\n".join(lines).strip()
+
+    def previous_page_url(self, page: BeautifulSoup) -> str | None:
+        paging = page.find("div", class_="btn-group-paging")
+        if paging is None:
+            return None
+
+        for anchor in paging.find_all("a"):
+            if "上頁" not in anchor.get_text():
+                continue
+
+            href = anchor.get("href", "")
+            if isinstance(href, str) and href:
+                return self._base_url + href
+
+        return None
 
 
 class PttProvider(ISocialMediaProvider):
@@ -25,320 +169,126 @@ class PttProvider(ISocialMediaProvider):
     SEARCH_URL = f"{BASE_URL}/bbs/Stock/search"
     MAX_PAGES = 30
     MAX_BODY_LEN = 3000
-    HEADERS = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Cookie": "over18=1",
-    }
-    RE_TICKER_TEMPLATE = re.compile(r"股票代碼[^:：]*[:：]\s*(\d{4})")
-    RE_TICKER_PARENS = re.compile(r"[（(](\d{4})[)）]")
-    RE_TICKER_TITLE = re.compile(r"(\d{4})")
 
-    def __init__(
-        self,
-        config: AppConfig,
-        logger: ILoggingProvider,
-        stock_provider: IStockProvider,
-    ):
+    HEADERS = {"User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"), "Cookie": "over18=1"}
+
+    def __init__(self, config: AppConfig, logger: ILoggingProvider, stock_provider: IStockProvider) -> None:
         self._config = config
-        self._log = logger
-        self._stock = stock_provider
-        self._universe: set[str] | None = None
+        self._logger = logger
+        self._stock_provider = stock_provider
+        self._stock_universe: set[str] | None = None
+        self._parser = PttParser(base_url=self.BASE_URL, max_body_length=self.MAX_BODY_LEN)
 
     # ── public ────────────────────────────────────────────────────── #
 
-    async def get_trending_stocks(self, limit: int) -> list[Article]:
-        self._log.info("Scanning PTT Stock board for trending posts...")
-        universe = await self._ensure_universe()
-        rules = self._config.collect_rules
-        cutoff = datetime.now().date() - timedelta(days=rules.ptt_lookback_days)
+    async def fetch_social_articles(self, limit: int) -> list[Article]:
+        self._logger.info("Scanning PTT Stock board...")
+        stock_universe = await self._get_stock_universe()
+        lookback_days = self._config.collect_rules.ptt_lookback_days
+        cutoff = datetime.now().date() - timedelta(days=lookback_days)
+        articles: list[Article] = []
 
-        collected: list[Article] = []
-        async with httpx.AsyncClient(
-            timeout=15.0,
-            headers=self.HEADERS,
-            follow_redirects=True,
-            verify=False,
-        ) as http:
-            for tag in rules.ptt_tags:
-                articles = await self._scrape_tag(
-                    http,
-                    tag,
-                    universe,
-                    cutoff,
-                    rules.ptt_min_push_score,
-                    limit,
-                )
-                collected.extend(articles)
+        async with httpx.AsyncClient(timeout=15.0, headers=self.HEADERS, follow_redirects=True, verify=False) as http_client:
+            for tag in self._config.collect_rules.ptt_tags:
+                remaining_limit = limit - len(articles)
+                if remaining_limit <= 0:
+                    break
 
-        result = _dedupe(collected)[:limit]
-        self._log.info(f"PTT scan complete. {len(result)} unique articles.")
+                articles.extend(await self._fetch_tag_articles(http_client, tag, stock_universe, cutoff, remaining_limit))
+
+        unique_articles = {article.url or str(article.id): article for article in articles}
+        result = list(unique_articles.values())[:limit]
+        self._logger.info(f"PTT scan complete. {len(result)} unique articles.")
         return result
 
     def save_social_media_data(self, articles: list[Article]) -> None:
         if not articles:
             return
-        now = datetime.now()
-        out = self._config.project_root / "buzz_archive" / now.strftime("%Y-%m-%d")
-        out.mkdir(parents=True, exist_ok=True)
-        path = out / f"ptt_buzz_{now.strftime('%H%M%S')}.md"
+
+        current_time = datetime.now()
+        archive_directory = self._config.project_root / self._config.folder.buzz_archive_dir / current_time.strftime("%Y-%m-%d")
+        archive_directory.mkdir(parents=True, exist_ok=True)
+        archive_path = archive_directory / (f"ptt_buzz_{current_time.strftime('%H%M%S')}.md")
+
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(f"# PTT Buzz — {now:%Y-%m-%d %H:%M}\n\n")
-                for i, a in enumerate(articles, 1):
-                    f.write(f"## [{i}] {a.stock_id}: {a.title}\n")
-                    f.write(f"- {a.source.value} | {a.url}\n\n")
-                    f.write(f"> {a.content[:500]}\n\n---\n\n")
-            self._log.trace(f"Buzz archive saved → {path}")
-        except Exception as e:
-            self._log.error(f"Buzz archive write failed: {e}")
+            with archive_path.open("w", encoding="utf-8") as archive_file:
+                archive_file.write(f"# PTT Buzz — {current_time:%Y-%m-%d %H:%M}\n\n")
+                for index, article in enumerate(articles, 1):
+                    archive_file.write(
+                        f"## [{index}] {article.stock_id}: {article.title}\n"
+                        f"- {article.source.value} | {article.url}\n\n"
+                        f"> {article.content[:500]}\n\n---\n\n"
+                    )
+
+            self._logger.trace(f"Buzz archive saved → {archive_path}")
+        except OSError as error:
+            self._logger.error(f"Buzz archive write failed: {error}")
 
     # --------------------------------- scraping --------------------------------- #
 
-    async def _scrape_tag(
-        self,
-        http: httpx.AsyncClient,
-        tag: str,
-        universe: set[str],
-        cutoff: date,
-        min_push: int,
-        budget: int,
+    async def _fetch_tag_articles(
+        self, http_client: httpx.AsyncClient, tag: str, stock_universe: set[str], cutoff: date, limit: int
     ) -> list[Article]:
-        self._log.debug(f"[{tag}] scraping (cutoff={cutoff}, min_push={min_push}, budget={budget})")
-
         articles: list[Article] = []
         next_url: str | None = None
 
-        for page_num in range(1, self.MAX_PAGES + 1):
-            soup = await self._get_page(http, tag, next_url)
-            if soup is None:
+        for _ in range(self.MAX_PAGES):
+            url = next_url or self.SEARCH_URL
+            params = None if next_url else {"q": tag}
+            page_html = await self._fetch_html(http_client, url, params)
+            if page_html is None:
                 break
 
-            divs = soup.find_all("div", class_="r-ent")
-            if not divs:
-                break
-
+            page = BeautifulSoup(page_html, "html.parser")
             reached_cutoff = False
-            for div in divs:
-                listing = _parse_listing(div)
+
+            for row in page.find_all("div", class_="r-ent"):
+                if not isinstance(row, Tag):
+                    continue
+
+                listing = self._parser.parse_listing(row)
                 if listing is None:
                     continue
 
-                if listing["date"] < cutoff:
+                if listing["published_date"] < cutoff:
                     reached_cutoff = True
                     continue
 
-                if listing["push"] < min_push:
+                article_html = await self._fetch_html(http_client, listing["url"])
+                if article_html is None:
                     continue
 
-                article = await self._build_article(http, listing, universe)
-                if article:
+                article = self._parser.parse_article(article_html, listing, stock_universe)
+                if article is not None:
                     articles.append(article)
-                    if len(articles) >= budget:
-                        break
 
-            self._log.debug(f"[{tag}] page {page_num}: {len(divs)} rows → {len(articles)}/{budget} collected")
+                if len(articles) >= limit:
+                    break
 
-            if reached_cutoff or len(articles) >= budget:
+            if reached_cutoff or len(articles) >= limit:
                 break
 
-            next_url = _prev_page_url(soup)
+            next_url = self._parser.previous_page_url(page)
             if next_url is None:
                 break
 
-        self._log.debug(f"[{tag}] done — {len(articles)} articles")
         return articles
 
-    async def _get_page(
-        self,
-        http: httpx.AsyncClient,
-        tag: str,
-        url: str | None,
-    ) -> BeautifulSoup | None:
+    async def _fetch_html(self, http_client: httpx.AsyncClient, url: str, params: dict[str, str] | None = None) -> str | None:
         try:
-            if url is None:
-                r = await http.get(self.SEARCH_URL, params={"q": tag})
-            else:
-                r = await http.get(url)
-            r.raise_for_status()
-            return BeautifulSoup(r.text, "html.parser")
-        except Exception as e:
-            self._log.error(f"Page fetch failed: {type(e).__name__}: {e}")
+            response = await http_client.get(url, params=params)
+            response.raise_for_status()
+            return response.text
+        except httpx.HTTPError as error:
+            self._logger.warning(f"PTT request failed: {error}")
             return None
 
-    async def _build_article(
-        self,
-        http: httpx.AsyncClient,
-        listing: dict,
-        universe: set[str],
-    ) -> Article | None:
-        body_tag = await self._fetch_body(http, listing["url"])
-        if body_tag is None:
-            return None
+    async def _get_stock_universe(self) -> set[str]:
+        if self._stock_universe is not None:
+            return self._stock_universe
 
-        text = body_tag.get_text(separator="\n", strip=True)
-        ticker = _extract_ticker(text, listing["title"])
-        if ticker is None or ticker not in universe:
-            return None
+        self._logger.debug("Loading TWSE/TPEX universe...")
+        stocks = await self._stock_provider.get_all()
+        self._stock_universe = {stock.stock_id for stock in stocks}
 
-        push, boo, arrows = _count_engagement(body_tag)
-        clean = _extract_clean_text(body_tag)
-        if not clean:
-            return None
-
-        ratio = push / (push + boo) if (push + boo) > 0 else 0.5
-        body = f"[{push}推 {boo}噓 {arrows}→ | 正面{ratio:.0%}]\n{clean}"
-        if len(body) > self.MAX_BODY_LEN:
-            body = body[: self.MAX_BODY_LEN] + "…"
-
-        self._log.debug(f"✓ {ticker} | {listing['title']} ({push}推 {boo}噓 {ratio:.0%})")
-
-        return Article(
-            id=uuid4(),
-            stock_id=ticker,
-            source=InformationSource.PTT_STOCK,
-            title=listing["title"],
-            content=body,
-            url=listing["url"],
-            content_type=ContentType.ANALYSIS,
-            published_at=datetime.now(),
-            fetched_at=datetime.now(),
-        )
-
-    async def _fetch_body(self, http: httpx.AsyncClient, url: str) -> Tag | None:
-        try:
-            r = await http.get(url)
-            if r.status_code != 200:
-                return None
-            tag = BeautifulSoup(r.text, "html.parser").find("div", id="main-content")
-            return tag if isinstance(tag, Tag) else None
-        except Exception:
-            return None
-
-    async def _ensure_universe(self) -> set[str]:
-        if self._universe is None:
-            self._log.debug("Loading TWSE/TPEX universe…")
-            stocks = await self._stock.get_all()
-            self._universe = {s.stock_id for s in stocks}
-            self._log.debug(f"Universe: {len(self._universe)} stocks")
-        return self._universe
-
-
-# ── pure helpers ─────────────────────────────────────────────────── #
-
-
-def _parse_listing(div: Tag) -> dict | None:
-    anchor = div.find("a")
-    if anchor is None:
-        return None
-    href = anchor.get("href", "")
-    if not href or not isinstance(href, str):
-        return None
-    return {
-        "title": anchor.get_text(strip=True),
-        "url": PttProvider.BASE_URL + href,
-        "push": _parse_push(div.find("div", class_="nrec")),
-        "date": _parse_date(div.find("div", class_="date")),
-    }
-
-
-def _parse_push(nrec: Tag | None) -> int:
-    if nrec is None:
-        return 0
-    t = nrec.get_text(strip=True)
-    if not t:
-        return 0
-    if t == "爆":
-        return 100
-    if t == "XX":
-        return -100
-    if t.startswith("X") and len(t) == 2 and t[1].isdigit():
-        return -int(t[1]) * 10
-    try:
-        return int(t)
-    except ValueError:
-        return 0
-
-
-def _parse_date(date_div: Tag | None) -> date:
-    today = datetime.now().date()
-    if date_div is None:
-        return today
-    parts = date_div.get_text(strip=True).split("/")
-    if len(parts) != 2:
-        return today
-    try:
-        m, d = int(parts[0]), int(parts[1])
-        y = today.year if m <= today.month else today.year - 1
-        return date(y, m, d)
-    except (ValueError, IndexError):
-        return today
-
-
-def _extract_ticker(body: str, title: str) -> str | None:
-    m = PttProvider.RE_TICKER_TEMPLATE.search(body)
-    if m:
-        return m.group(1)
-    for hit in PttProvider.RE_TICKER_PARENS.findall(body):
-        if not hit.startswith("0"):
-            return hit
-    m = PttProvider.RE_TICKER_TITLE.search(title)
-    return m.group(1) if m else None
-
-
-def _count_engagement(main: Tag) -> tuple[int, int, int]:
-    push = boo = arrow = 0
-    for div in main.find_all("div", class_="push"):
-        span = div.find("span", class_="push-tag")
-        if span is None:
-            continue
-        tag = span.get_text().strip()
-        if tag == "推":
-            push += 1
-        elif tag == "噓":
-            boo += 1
-        elif tag == "→":
-            arrow += 1
-    return push, boo, arrow
-
-
-def _extract_clean_text(main: Tag) -> str:
-    for cls in ("push", "article-metaline", "article-metaline-right"):
-        for el in main.find_all("div", class_=cls):
-            el.decompose()
-
-    lines: list[str] = []
-    for raw in main.get_text(separator="\n", strip=True).split("\n"):
-        s = raw.strip()
-        if not s:
-            if lines and lines[-1]:
-                lines.append("")
-            continue
-        if s.startswith("※") or s.startswith("---") and len(s) > 5:
-            continue
-        if "發文提醒" in s or "ctrl+y" in s.lower():
-            continue
-        lines.append(s)
-    return "\n".join(lines).strip()
-
-
-def _prev_page_url(soup: BeautifulSoup) -> str | None:
-    paging = soup.find("div", class_="btn-group-paging")
-    if paging is None:
-        return None
-    for a in paging.find_all("a"):
-        if "上頁" in a.get_text():
-            href = a.get("href", "")
-            if isinstance(href, str) and href:
-                return PttProvider.BASE_URL + href
-    return None
-
-
-def _dedupe(articles: list[Article]) -> list[Article]:
-    seen: set[str] = set()
-    out: list[Article] = []
-    for a in articles:
-        key = a.url or a.title
-        if key not in seen:
-            seen.add(key)
-            out.append(a)
-    return out
+        return self._stock_universe

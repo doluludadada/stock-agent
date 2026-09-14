@@ -1,8 +1,7 @@
-# backend/src/d_presentation/cli/interactive.py
-
 import asyncio
 import os
 import sys
+from datetime import datetime
 
 from rich.console import Console
 from rich.prompt import Confirm, Prompt
@@ -29,7 +28,6 @@ async def interactive_menu() -> None:
     try:
         while True:
             print_menu(runtime.config)
-
             choice = ask_menu_choice()
 
             if choice is None or choice == "0":
@@ -91,13 +89,8 @@ async def execute_menu_choice(
 
 async def run_buzz_scan(
     pipeline: Pipeline,
-) -> PipelineStatus | None:
-    context = await pipeline.run_buzz_scan()
-
-    if context is None:
-        console.print("[yellow]Social buzz pipeline is not implemented yet.[/yellow]")
-
-    return context
+) -> PipelineStatus:
+    return await pipeline.run_buzz_scan()
 
 
 async def run_intraday(
@@ -107,10 +100,21 @@ async def run_intraday(
 
 
 def print_menu(config: AppConfig) -> None:
-    console.print(f"Environment:        {format_label(config.environment.value)}")
-    console.print(f"Execution Provider: {format_label(config.trading.execution_provider.value)}")
-    console.print(f"Account:            {config.mock_trading.account_id}")
-    console.print(f"Orders:             {format_label(config.trading.order_mode.value)}")
+    console.print(
+        f"Environment:        "
+        f"{format_label(config.environment.value)}"
+    )
+    console.print(
+        f"Execution Provider: "
+        f"{format_label(config.trading.execution_provider.value)}"
+    )
+    console.print(
+        f"Account:            {config.mock_trading.account_id}"
+    )
+    console.print(
+        f"Orders:             "
+        f"{format_label(config.trading.order_mode.value)}"
+    )
     console.print("")
 
     console.print("[1] Run Full Cycle")
@@ -126,17 +130,19 @@ def print_menu(config: AppConfig) -> None:
     console.print("")
 
     console.print("[3] Run Intraday Trading")
-    console.print("    Revalidate positions and active watchlist stocks.")
-    console.print("    Generate signals and permitted orders.")
+    console.print(
+        "    Revalidate positions and active watchlist stocks."
+    )
+    console.print(
+        "    Generate signals and permitted orders."
+    )
     console.print("")
 
     console.print("[4] Analyse Specific Stocks")
     console.print("    Show the complete stock report.")
     console.print("    Allow manual watchlist addition.")
     console.print("    Allow explicit manual BUY override.")
-    console.print("")
-
-    console.print("[0] Exit")
+    console.print("\n[0] Exit")
 
 
 async def run_specific_stock_flow(
@@ -152,10 +158,14 @@ async def run_specific_stock_flow(
     stock_ids = parse_stock_ids(raw_symbols)
 
     if not stock_ids:
-        console.print("[yellow]No stock IDs entered.[/yellow]")
+        console.print(
+            "[yellow]No stock IDs entered.[/yellow]"
+        )
         return None
 
-    context = await pipeline.analyse_specific_stocks(stock_ids)
+    context = await pipeline.analyse_specific_stocks(
+        stock_ids
+    )
 
     print_stock_reports(context.manual_stocks)
 
@@ -174,9 +184,13 @@ async def run_specific_stock_flow(
 
 def ask_stock_ids() -> str | None:
     try:
-        return Prompt.ask("Enter stock IDs separated by space or comma")
+        return Prompt.ask(
+            "Enter stock IDs separated by space or comma"
+        )
     except USER_CANCELLED_EXCEPTIONS:
-        console.print("\n[yellow]Operation cancelled.[/yellow]")
+        console.print(
+            "\n[yellow]Operation cancelled.[/yellow]"
+        )
         return None
 
 
@@ -200,7 +214,9 @@ async def offer_manual_watchlist(
         watchlist_type=WatchlistType.MANUAL,
     )
 
-    print_watchlist_result(watchlist.willing_stocks)
+    print_watchlist_result(
+        watchlist.willing_stocks
+    )
 
 
 async def offer_manual_buy(
@@ -217,7 +233,6 @@ async def offer_manual_buy(
             continue
 
         result = await manual_buy.execute(stock)
-
         print_manual_buy_result(result)
 
 
@@ -225,12 +240,20 @@ def print_watchlist_result(
     stocks: list[Stock],
 ) -> None:
     if not stocks:
-        console.print("[yellow]No stocks were added.[/yellow]")
+        console.print(
+            "[yellow]No stocks were added.[/yellow]"
+        )
         return
 
-    stock_ids = ", ".join(stock.stock_id for stock in stocks)
+    stock_ids = ", ".join(
+        stock.stock_id
+        for stock in stocks
+    )
 
-    console.print(f"[green]Added to manual watchlist: {stock_ids}[/green]")
+    console.print(
+        f"[green]Added to manual watchlist: "
+        f"{stock_ids}[/green]"
+    )
 
 
 def print_manual_buy_result(
@@ -239,15 +262,25 @@ def print_manual_buy_result(
     if status.orders:
         order = status.orders[-1]
 
-        console.print(f"[green]Manual BUY result: {order.stock_id} | {order.status.value.upper()} | Qty={order.quantity}[/green]")
+        console.print(
+            f"[green]Manual BUY result: "
+            f"{order.stock_id} | "
+            f"{order.status.value.upper()} | "
+            f"Qty={order.quantity}[/green]"
+        )
         return
 
     if status.stats.errors:
-        console.print(f"[red]{status.stats.errors[-1]}[/red]")
+        console.print(
+            f"[red]{status.stats.errors[-1]}[/red]"
+        )
         return
 
     if status.signals:
-        console.print("[yellow]Manual BUY signal created, but no order was submitted.[/yellow]")
+        console.print(
+            "[yellow]Manual BUY signal created, "
+            "but no order was submitted.[/yellow]"
+        )
 
 
 def parse_stock_ids(
@@ -255,46 +288,90 @@ def parse_stock_ids(
 ) -> list[str]:
     normalized_symbols = raw_symbols.replace(",", " ")
 
-    return [symbol.strip() for symbol in normalized_symbols.split() if symbol.strip()]
+    return [
+        symbol.strip()
+        for symbol in normalized_symbols.split()
+        if symbol.strip()
+    ]
 
 
 def print_context_summary(
     context: PipelineStatus,
 ) -> None:
-    console.print("[bold green]Execution Complete[/bold green]")
-
+    console.print(
+        "[bold green]Execution Complete[/bold green]"
+    )
     console.print(
         f"Scanned={context.stats.total_scanned}, "
         f"Survivors={len(context.survivors)}, "
         f"Signals={context.stats.signals_generated}, "
         f"Orders={context.stats.orders_submitted}, "
+        f"Stale={context.stats.stale_market_data_count}, "
         f"Errors={context.stats.total_errors}"
     )
 
+    if context.stale_stock_ids:
+        print_stale_market_data(context)
+
     if not context.signals:
-        console.print("No trading signals generated.")
+        console.print(
+            "No trading signals generated."
+        )
         return
 
     print_signals_table(context)
+
+
+def print_stale_market_data(
+    context: PipelineStatus,
+) -> None:
+    table = Table(
+        title="Blocked Stale Market Data"
+    )
+    table.add_column("Stock")
+    table.add_column("Last Data Time")
+
+    for stock_id in sorted(context.stale_stock_ids):
+        stock = context.stocks_cache.get(stock_id)
+        data_time = (
+            stock.latest_market_data_at
+            if stock is not None
+            else None
+        )
+
+        table.add_row(
+            stock_id,
+            format_datetime(data_time),
+        )
+
+    console.print(table)
 
 
 def print_signals_table(
     context: PipelineStatus,
 ) -> None:
     table = Table(title="Signals")
-
     table.add_column("Stock")
     table.add_column("Action")
     table.add_column("Score", justify="right")
     table.add_column("Qty", justify="right")
+    table.add_column("Data Time")
     table.add_column("Reason")
 
     for signal in context.signals:
+        stock = context.stocks_cache.get(signal.stock_id)
+        data_time = (
+            stock.latest_market_data_at
+            if stock is not None
+            else None
+        )
+
         table.add_row(
             signal.stock_id,
             signal.action.value.upper(),
             str(signal.score),
             str(signal.quantity),
+            format_datetime(data_time),
             signal.reason,
         )
 
@@ -305,7 +382,9 @@ def print_stock_reports(
     stocks: list[Stock],
 ) -> None:
     if not stocks:
-        console.print("[yellow]No stocks loaded.[/yellow]")
+        console.print(
+            "[yellow]No stocks loaded.[/yellow]"
+        )
         return
 
     table = create_stock_report_table()
@@ -340,7 +419,11 @@ def add_stock_report_row(
     table: Table,
     stock: Stock,
 ) -> None:
-    ai_summary = stock.ai_report.summary if stock.ai_report else "-"
+    ai_summary = (
+        stock.ai_report.summary
+        if stock.ai_report
+        else "-"
+    )
 
     table.add_row(
         stock.stock_id,
@@ -376,6 +459,17 @@ def format_optional_int(
         return "-"
 
     return str(value)
+
+
+def format_datetime(
+    value: datetime | None,
+) -> str:
+    if value is None:
+        return "-"
+
+    return value.isoformat(
+        timespec="seconds"
+    )
 
 
 if __name__ == "__main__":

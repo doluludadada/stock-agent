@@ -7,9 +7,9 @@ from a_domain.model.market.stock import Stock
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.model.trading.watchlist import StockWatchlist
 from a_domain.types.enums import SignalSource, TradeAction, WatchlistType
+from b_application.pipeline import Pipeline
 from b_application.schemas.pipeline_status import PipelineStatus
 from b_application.use_cases.trade.order_execution import OrderExecution
-from b_application.pipeline import Pipeline
 
 
 class FakeLogger:

@@ -110,9 +110,31 @@ class OrderMode(StrEnum):
     DISABLED = auto()
 
 
-class StrategyName(StrEnum):
-    CONSERVATIVE = auto()
-    MODERATE = auto()
-    AGGRESSIVE = auto()
-    BUZZ = auto()
-    NIGHTLY = auto()
+class RuleEffect(StrEnum):
+    BLOCK_ON_FAIL = auto()
+    REDUCE_SCORE_ON_FAIL = auto()
+    INCREASE_SCORE_ON_PASS = auto()
+
+
+# TODO: Do i really need it?
+class TechnicalCriterionType(StrEnum):
+    RSI_RANGE = auto()
+    MFI_THRESHOLD = auto()
+    MACD_BULLISH = auto()
+    STOCHASTIC_HEALTH = auto()
+
+    ADX_TREND = auto()
+    GOLDEN_CROSS = auto()
+    MA_ALIGNMENT = auto()
+    PRICE_ABOVE_MA = auto()
+
+    ATR_RANGE = auto()
+    BOLLINGER_POSITION = auto()
+    BOLLINGER_SQUEEZE = auto()
+    BOLLINGER_THRESHOLD = auto()
+    DAILY_RANGE = auto()
+
+    LIQUIDITY = auto()
+    MINIMUM_PRICE = auto()
+    OBV_TREND = auto()
+    VOLUME_EXPANSION = auto()

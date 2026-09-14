@@ -3,31 +3,25 @@
 from pathlib import Path
 from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from a_domain.rules.technical.calculation.parameters import IndicatorParameters
-from a_domain.types.enums import (
-    AiProvider,
-    DatabaseProvider,
-    ExecutionProvider,
-    OrderMode,
-    StrategyName,
-    SystemEnvironment,
-)
+from a_domain.types.enums import AiProvider, DatabaseProvider, ExecutionProvider, OrderMode, SystemEnvironment
 
 
 class AiConfig(BaseSettings):
-    """AI provider and behavior settings."""
+    """AI provider and behaviour settings."""
 
     model_config = SettingsConfigDict(env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore")
 
     active_model: AiProvider = AiProvider.GROQ
     available_models: dict[AiProvider, str] = Field(default_factory=dict)
+
     openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     grok_api_key: str | None = Field(default=None, validation_alias="GROK_API_KEY")
     gemini_api_key: str | None = Field(default=None, validation_alias="GEMINI_API_KEY")
     groq_api_key: str | None = Field(default=None, validation_alias="GROQ_API_KEY")
+
     connection_timeout: int = Field(default=60, description="Timeout for AI model connections")
     system_prompt: str | None = None
     rag_injection_prompt: str | None = None
@@ -46,7 +40,7 @@ class LineConfig(BaseSettings):
 
 
 class BehaviorConfig(BaseModel):
-    """System behavior and toggles."""
+    """System behaviour and toggles."""
 
     log_level: str | int = "INFO"
     enable_web_search: bool = False
@@ -60,13 +54,14 @@ class BehaviorConfig(BaseModel):
 
 
 class DbConfig(BaseSettings):
-    """Database configuration for RAG and Application data."""
+    """Database configuration for RAG and application data."""
 
     model_config = SettingsConfigDict(env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore")
 
     provider: DatabaseProvider = DatabaseProvider.MEMORY
     chroma_persist_path: str = "chroma_db"
     reset_commands: set[str] = Field(default={"clear"})
+
     user: str | None = Field(default=None, validation_alias="DB_USER")
     password: str | None = Field(default=None, validation_alias="DB_PASSWORD")
     host: str | None = Field(default=None, validation_alias="DB_HOST")
@@ -90,13 +85,12 @@ class TavilyConfig(BaseSettings):
 
 
 class AnalysisConfig(BaseModel):
-    """Analysis pipeline weighting and risk parameters."""
+    """Cross-analysis weighting and trading parameters."""
 
-    active_strategy: StrategyName = Field(default=StrategyName.MODERATE)
     lookback_days: int = Field(default=120, ge=30)
 
-    technical_weight: float = Field(default=0.5, ge=0.0, le=1.0)
-    ai_weight: float = Field(default=0.5, ge=0.0, le=1.0)
+    technical_weight: float = Field(default=0.5, ge=0, le=1)
+    ai_weight: float = Field(default=0.5, ge=0, le=1)
 
     min_combined_score_buy: int = Field(default=70, ge=0, le=100)
     max_combined_score_sell: int = Field(default=30, ge=0, le=100)
@@ -136,45 +130,18 @@ class CollectRulesConfig(BaseModel):
 
     spam_keywords: set[str] = Field(default={"廣告", "廣編", "業配", "新聞稿"})
     financial_keywords: set[str] = Field(
-        default={
-            "營收",
-            "EPS",
-            "毛利",
-            "純益",
-            "法說",
-            "殖利率",
-            "擴廠",
-            "減資",
-            "購併",
-            "財報",
-            "股利",
-            "盈餘",
-            "轉盈",
-        }
+        default={"營收", "EPS", "毛利", "純益", "法說", "殖利率", "擴廠", "減資", "購併", "財報", "股利", "盈餘", "轉盈"}
     )
 
     filter_min_price: float = 10.0
     filter_min_volume: int = 500
-    buzz_min_mentions: int = 20
-    buzz_min_push_count: int = 100
-    social_trending_limit: int = Field(default=10, ge=1, le=100)
-    ptt_required_tags: set[str] = Field(default={"[標的]"})
 
-    # PTT scraper settings
+    buzz_min_mentions: int = Field(default=20, ge=0)
+    buzz_min_engagement: int = Field(default=100, ge=0)
+    social_article_limit: int = Field(default=100, ge=1, le=1000)
+
     ptt_lookback_days: int = Field(default=5, ge=1, le=30)
-    ptt_min_push_score: int = Field(default=10, ge=0)
     ptt_tags: list[str] = Field(default=["[標的]", "[新聞]"])
-
-
-class ScoringConfig(BaseModel):
-    """Rules and penalties for technical scoring."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    base: int = Field(default=50, ge=0, le=100)
-    hard_failure_penalty: int = Field(default=15, ge=0)
-    soft_failure_penalty: int = Field(default=5, ge=0)
-    observation_bonus: int = Field(default=5, ge=0)
 
 
 class QualityFiltersConfig(BaseModel):
@@ -183,51 +150,6 @@ class QualityFiltersConfig(BaseModel):
     min_chars_stock: int = Field(default=100, ge=0)
     min_chars_news: int = Field(default=200, ge=0)
     min_chars_gossip: int = Field(default=50, ge=0)
-
-
-class StrategyThresholds(BaseModel):
-    """Threshold values for one screening strategy, loaded from YAML."""
-
-    # Trend
-    rsi_healthy_min: float = 50.0
-    rsi_healthy_max: float = 70.0
-    rsi_overbought: float = 80.0
-
-    # Safety
-    stoch_overbought: float = 80.0
-    bollinger_max_pct_b: float = 0.9
-    max_daily_volatility: float = 0.07
-    min_liquidity: int = 500
-    min_price: float = 15.0
-    volume_dry_ratio: float = 0.5
-
-    # Volume
-    volume_above_avg_ratio: float = 1.0
-    volume_breakout_ratio: float = 1.5
-
-    # ADX
-    adx_min: float = 20.0
-    adx_max: float = 50.0
-
-    # Bollinger
-    bollinger_squeeze_bandwidth: float = 0.1
-
-    # ATR
-    atr_min_pct: float = 0.01
-    atr_max_pct: float = 0.05
-
-    # MFI
-    mfi_overbought: float = 80.0
-
-    # Golden Cross
-    golden_cross_margin: float = 0.03
-
-    # Entry Timing
-    max_drop_pct: float = 0.03
-    min_volume_confirmation: float = 0.5
-    max_gap_pct: float = 0.03
-    max_intraday_range_position: float = 0.8
-    max_consecutive_up_days: int = 4
 
 
 class MarketConfig(BaseModel):
@@ -239,7 +161,7 @@ class MarketConfig(BaseModel):
 
 
 class TradingConfig(BaseModel):
-    """Execution-provider selection and order-mode display settings."""
+    """Execution-provider selection and order-mode settings."""
 
     execution_provider: ExecutionProvider = ExecutionProvider.MOCK
     order_mode: OrderMode = OrderMode.MOCK_ONLY
@@ -247,10 +169,9 @@ class TradingConfig(BaseModel):
 
 class MockTradingConfig(BaseModel):
     """
-    DEV / TEST fake broker account config.
+    DEV / TEST fake broker account configuration.
 
-    The initial cash is only used when mock_cash has no row yet.
-    After seeding, cash must be read from database state.
+    Initial cash is only used when mock_cash has no row yet.
     """
 
     account_id: str = "mock-dev"
@@ -258,28 +179,16 @@ class MockTradingConfig(BaseModel):
 
 
 class WatchlistConfig(BaseModel):
-    automatic_expiry_hours: int = Field(
-        default=24,
-        gt=0,
-    )
+    automatic_expiry_hours: int = Field(default=24, gt=0)
 
 
 class AppConfig(BaseSettings):
-    """
-    Application Configuration.
+    """Application and infrastructure configuration."""
 
-    Load from config.yaml via infrastructure layer.
-    """
-
-    model_config = SettingsConfigDict(
-        env_file=(".env", "../.env"),
-        env_file_encoding="utf-8",
-        extra="ignore",
-        frozen=False,
-    )
+    model_config = SettingsConfigDict(env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore", frozen=False)
 
     project_root: Path
-    environment: SystemEnvironment = Field(default=SystemEnvironment.DEV)
+    environment: SystemEnvironment = SystemEnvironment.DEV
 
     ai: AiConfig = Field(default_factory=AiConfig)
     line: LineConfig = Field(default_factory=LineConfig)
@@ -291,14 +200,7 @@ class AppConfig(BaseSettings):
     notifications: NotificationConfig = Field(default_factory=NotificationConfig)
     prompts: PromptsConfig = Field(default_factory=PromptsConfig)
     collect_rules: CollectRulesConfig = Field(default_factory=CollectRulesConfig)
-    scoring: ScoringConfig = Field(default_factory=ScoringConfig)
     quality: QualityFiltersConfig = Field(default_factory=QualityFiltersConfig)
-    indicators: IndicatorParameters = Field(default_factory=IndicatorParameters)
-
-    # All strategy thresholds stay available at runtime.
-    # This lets Full Cycle and Buzz use different technical policies.
-    strategies: dict[StrategyName, StrategyThresholds] = Field(default_factory=dict)
-
     market: MarketConfig = Field(default_factory=MarketConfig)
     trading: TradingConfig = Field(default_factory=TradingConfig)
     mock_trading: MockTradingConfig = Field(default_factory=MockTradingConfig)

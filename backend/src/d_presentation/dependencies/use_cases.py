@@ -1,11 +1,12 @@
-# backend/src/d_presentation/dependencies/use_cases.py
-
 from typing import Annotated
 
 from fastapi import Depends
 
 from a_domain.ports.ai.ai_provider import IAiProvider
 from a_domain.ports.ai.knowledge_repository import IKnowledgeRepository
+from a_domain.ports.analysis.technical_settings_repository import (
+    ITechnicalSettingsRepository,
+)
 from a_domain.ports.market.news_provider import INewsProvider
 from a_domain.ports.market.price_provider import IOhlcvProvider
 from a_domain.ports.market.social_media_provider import ISocialMediaProvider
@@ -16,17 +17,18 @@ from a_domain.ports.system.notification_provider import INotificationProvider
 from a_domain.ports.trading.execution_provider import IExecutionProvider
 from a_domain.ports.trading.signal_repository import ISignalRepository
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
-from b_application.factories.technical_strategy import create_technical_strategies
 from b_application.pipeline import Pipeline
 from b_application.schemas.config import AppConfig
-from b_application.schemas.technical_strategies import TechnicalStrategies
 from b_application.use_cases.collect.buzz_scanner import BuzzScanner
-from b_application.use_cases.collect.market_data_collector import MarketDataCollector
+from b_application.use_cases.collect.market_data_collector import (
+    MarketDataCollector,
+)
 from b_application.use_cases.collect.market_scanner import MarketScanner
 from b_application.use_cases.collect.news_feed import NewsFeed
 from b_application.use_cases.process.ai_analyser import AiAnalyser
 from b_application.use_cases.process.composite_scorer import CompositeScorer
 from b_application.use_cases.process.technical_filter import TechnicalFilter
+from b_application.use_cases.ship.decision_memory import DecisionMemory
 from b_application.use_cases.ship.reporting import Reporting
 from b_application.use_cases.ship.signals import Signals
 from b_application.use_cases.trade.account_loader import AccountLoader
@@ -50,6 +52,7 @@ from d_presentation.dependencies.repositories import (
     get_execution_provider,
     get_knowledge_repository,
     get_signal_repository,
+    get_technical_settings_repository,
     get_watchlist_repository,
 )
 
@@ -154,20 +157,7 @@ def get_technical_filter_use_case(
         Depends(get_logger),
     ],
 ) -> TechnicalFilter:
-    return TechnicalFilter(
-        logger=logger,
-    )
-
-
-def get_technical_strategies(
-    config: Annotated[
-        AppConfig,
-        Depends(get_settings),
-    ],
-) -> TechnicalStrategies:
-    return create_technical_strategies(
-        config,
-    )
+    return TechnicalFilter(logger=logger)
 
 
 def get_ai_analyser_use_case(
@@ -234,9 +224,9 @@ def get_account_loader_use_case(
 
 
 def get_account_risk_check_use_case(
-    price_provider: Annotated[
-        IOhlcvProvider,
-        Depends(get_price_provider),
+    signal_repository: Annotated[
+        ISignalRepository,
+        Depends(get_signal_repository),
     ],
     config: Annotated[
         AppConfig,
@@ -248,7 +238,7 @@ def get_account_risk_check_use_case(
     ],
 ) -> AccountRiskCheck:
     return AccountRiskCheck(
-        price_provider=price_provider,
+        signal_repository=signal_repository,
         config=config,
         logger=logger,
     )
@@ -275,6 +265,22 @@ def get_signals_use_case(
     )
 
 
+def get_decision_memory_use_case(
+    knowledge_repository: Annotated[
+        IKnowledgeRepository,
+        Depends(get_knowledge_repository),
+    ],
+    logger: Annotated[
+        ILoggingProvider,
+        Depends(get_logger),
+    ],
+) -> DecisionMemory:
+    return DecisionMemory(
+        knowledge_repository=knowledge_repository,
+        logger=logger,
+    )
+
+
 def get_order_execution_use_case(
     execution_provider: Annotated[
         IExecutionProvider,
@@ -284,6 +290,10 @@ def get_order_execution_use_case(
         IMarketClock,
         Depends(get_market_clock),
     ],
+    config: Annotated[
+        AppConfig,
+        Depends(get_settings),
+    ],
     logger: Annotated[
         ILoggingProvider,
         Depends(get_logger),
@@ -292,6 +302,7 @@ def get_order_execution_use_case(
     return OrderExecution(
         execution_provider=execution_provider,
         market_clock=market_clock,
+        config=config,
         logger=logger,
     )
 
@@ -366,17 +377,21 @@ def get_pipeline(
         TechnicalFilter,
         Depends(get_technical_filter_use_case),
     ],
-    technical_strategies: Annotated[
-        TechnicalStrategies,
-        Depends(get_technical_strategies),
-    ],
     composite_scorer: Annotated[
         CompositeScorer,
         Depends(get_composite_scorer_use_case),
     ],
+    watch_stocks: Annotated[
+        WatchStocks,
+        Depends(get_watch_stocks_use_case),
+    ],
     signals: Annotated[
         Signals,
         Depends(get_signals_use_case),
+    ],
+    decision_memory: Annotated[
+        DecisionMemory,
+        Depends(get_decision_memory_use_case),
     ],
     order_execution: Annotated[
         OrderExecution,
@@ -386,9 +401,9 @@ def get_pipeline(
         Reporting,
         Depends(get_reporting_use_case),
     ],
-    watch_stocks: Annotated[
-        WatchStocks,
-        Depends(get_watch_stocks_use_case),
+    technical_settings_repository: Annotated[
+        ITechnicalSettingsRepository,
+        Depends(get_technical_settings_repository),
     ],
     logger: Annotated[
         ILoggingProvider,
@@ -404,11 +419,12 @@ def get_pipeline(
         news=news,
         ai=ai,
         technical_filter=technical_filter,
-        technical_strategies=technical_strategies,
         composite_scorer=composite_scorer,
+        watch_stocks=watch_stocks,
         signals=signals,
+        decision_memory=decision_memory,
         order_execution=order_execution,
         reporting=reporting,
-        watch_stocks=watch_stocks,
+        technical_settings_repository=technical_settings_repository,
         logger=logger,
     )

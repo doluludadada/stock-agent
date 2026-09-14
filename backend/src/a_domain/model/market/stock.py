@@ -1,4 +1,4 @@
-# backend/src/a_domain/model/market/stock.py
+from datetime import datetime
 
 from sqlmodel import Field, SQLModel
 
@@ -26,6 +26,7 @@ class Stock(SQLModel):
 
     # ----------------------------------- Data ----------------------------------- #
     ohlcv: list[Ohlcv] = Field(default_factory=list)
+    realtime_bar: Ohlcv | None = None
     articles: list[Article] = Field(default_factory=list)
 
     # -------------------------------- Analysis ---------------------------------- #
@@ -47,7 +48,17 @@ class Stock(SQLModel):
 
     @property
     def current_price(self) -> float | None:
+        if self.realtime_bar is not None:
+            return self.realtime_bar.close
+
         return self.today.close if self.today else None
+
+    @property
+    def latest_market_data_at(self) -> datetime | None:
+        if self.realtime_bar is not None:
+            return self.realtime_bar.ts
+
+        return self.today.ts if self.today else None
 
     @property
     def current_volume(self) -> int | None:
