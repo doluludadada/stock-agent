@@ -124,17 +124,22 @@ async def test_quarter_being_filed_is_refetched_after_six_hours_and_final_quarte
 
 
 @pytest.mark.asyncio
-async def test_failed_refresh_serves_the_cached_page(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_failed_refresh_serves_the_cached_page_marked_as_a_failed_refresh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     provider, mops, clock = await build(tmp_path, monkeypatch)
-    await provider.fetch_cumulative_eps([BEING_FILED])
+    fresh = (await provider.fetch_cumulative_eps([BEING_FILED]))[BEING_FILED]
     mops.pages[(MarketType.TWSE, BEING_FILED)] = None
 
     clock.current += timedelta(hours=7)
     filings = await provider.fetch_cumulative_eps([BEING_FILED])
 
     being_filed = filings[BEING_FILED]
+    assert isinstance(fresh, QuarterEps) and not fresh.refresh_failed
     assert isinstance(being_filed, QuarterEps)
     assert being_filed.cumulative_eps == {"1232": 8.03}
+    assert being_filed.fetched_at == datetime(2026, 10, 30, 18, 0, tzinfo=TAIWAN_TIMEZONE)
+    assert being_filed.refresh_failed
 
 
 @pytest.mark.asyncio

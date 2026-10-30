@@ -1,5 +1,5 @@
 import math
-from datetime import UTC, datetime
+from datetime import datetime
 from types import SimpleNamespace
 
 import pandas as pd
@@ -11,6 +11,7 @@ from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.types.enums import MarketType
 from c_infrastructure.market.yahoo_finance_adapter import YahooFinanceProvider
+from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 
 NAN = math.nan
 PRICE_COLUMNS = ["Open", "High", "Low", "Close", "Adj Close", "Volume"]
@@ -25,12 +26,12 @@ def yahoo_frame(index: pd.DatetimeIndex, rows_by_ticker: dict[str, list[tuple]])
     return pd.concat(frames.values(), axis=1, keys=frames.keys(), names=["Ticker", "Price"])
 
 
+def session(year: int, month: int, day: int) -> datetime:
+    return datetime(year, month, day, 13, 30, tzinfo=TAIWAN_TIMEZONE)
+
+
 def daily(*days: str) -> pd.DatetimeIndex:
     return pd.DatetimeIndex(days, name="Date")
-
-
-def intraday(*moments: str) -> pd.DatetimeIndex:
-    return pd.DatetimeIndex(moments, tz="UTC", name="Datetime")
 
 
 @pytest.fixture
@@ -60,7 +61,7 @@ def assert_requested(call: dict, tickers: list[str], **params) -> None:
 
 
 @pytest.mark.asyncio
-async def test_history_returns_daily_bars_per_stock_from_a_multi_ticker_download(yahoo) -> None:
+async def test_history_returns_daily_bars_per_stock_stamped_at_their_session_close(yahoo) -> None:
     yahoo.frames.append(
         yahoo_frame(
             daily("2026-10-29", "2026-10-30"),
@@ -77,12 +78,12 @@ async def test_history_returns_daily_bars_per_stock_from_a_multi_ticker_download
     assert_requested(yahoo.calls[0], ["2330.TW", "6488.TWO", "9999.TW"], start="2026-10-20", end="2026-10-31", interval="1d")
     assert list(history) == ["2330", "6488"]
     assert history["2330"] == [
-        Ohlcv(ts=datetime(2026, 10, 29), open=2420.0, high=2425.0, low=2390.0, close=2415.0, volume=16872114, adj_close=2415.0),
-        Ohlcv(ts=datetime(2026, 10, 30), open=2380.0, high=2380.0, low=2360.0, close=2370.0, volume=34795531, adj_close=2370.0),
+        Ohlcv(ts=session(2026, 10, 29), open=2420.0, high=2425.0, low=2390.0, close=2415.0, volume=16872114, adj_close=2415.0),
+        Ohlcv(ts=session(2026, 10, 30), open=2380.0, high=2380.0, low=2360.0, close=2370.0, volume=34795531, adj_close=2370.0),
     ]
     assert history["6488"] == [
-        Ohlcv(ts=datetime(2026, 10, 29), open=850.0, high=853.0, low=803.0, close=814.0, volume=7045788, adj_close=814.0),
-        Ohlcv(ts=datetime(2026, 10, 30), open=775.0, high=779.0, low=741.0, close=756.0, volume=9821343, adj_close=756.0),
+        Ohlcv(ts=session(2026, 10, 29), open=850.0, high=853.0, low=803.0, close=814.0, volume=7045788, adj_close=814.0),
+        Ohlcv(ts=session(2026, 10, 30), open=775.0, high=779.0, low=741.0, close=756.0, volume=9821343, adj_close=756.0),
     ]
 
 
@@ -124,68 +125,36 @@ async def test_history_skips_rows_without_close_and_fills_other_missing_values(y
     history = await provider().fetch_history([TSMC], datetime(2026, 10, 28), datetime(2026, 10, 31))
 
     assert history["2330"] == [
-        Ohlcv(ts=datetime(2026, 10, 29), open=2415.0, high=2415.0, low=2415.0, close=2415.0, volume=16872114, adj_close=None),
-        Ohlcv(ts=datetime(2026, 10, 31), open=2375.0, high=2380.0, low=2370.0, close=2372.0, volume=1200, adj_close=2372.0),
+        Ohlcv(ts=session(2026, 10, 29), open=2415.0, high=2415.0, low=2415.0, close=2415.0, volume=16872114, adj_close=None),
+        Ohlcv(ts=session(2026, 10, 31), open=2375.0, high=2380.0, low=2370.0, close=2372.0, volume=1200, adj_close=2372.0),
     ]
 
 
 @pytest.mark.asyncio
-async def test_realtime_returns_last_five_minute_bar_per_stock_in_utc(yahoo) -> None:
-    yahoo.frames.append(
-        yahoo_frame(
-            intraday("2026-10-30 05:15", "2026-10-30 05:20", "2026-10-30 05:25"),
-            {
-                "6488.TWO": [(757.0, 758.0, 757.0, 757.0, 757.0, 126678), (758.0, 758.0, 754.0, 755.0, 755.0, 264517), (NAN,) * 6],
-                "2330.TW": [
-                    (2370.0, 2375.0, 2370.0, 2370.0, 2370.0, 555810),
-                    (2375.0, 2375.0, 2365.0, 2365.0, 2365.0, 990118),
-                    (2365.0,) * 5 + (0,),
-                ],
-                "9999.TW": [(NAN,) * 6] * 3,
-            },
-        )
-    )
-
-    bars = await provider().fetch_realtime_bars([TSMC, PEGAVISION, UNLISTED])
-
-    assert_requested(yahoo.calls[0], ["2330.TW", "6488.TWO", "9999.TW"], period="1d", interval="5m")
-    assert list(bars) == ["2330", "6488"]
-    assert bars["2330"] == Ohlcv(
-        ts=datetime(2026, 10, 30, 5, 25, tzinfo=UTC), open=2365.0, high=2365.0, low=2365.0, close=2365.0, volume=0, adj_close=2365.0
-    )
-    assert bars["6488"] == Ohlcv(
-        ts=datetime(2026, 10, 30, 5, 20, tzinfo=UTC), open=758.0, high=758.0, low=754.0, close=755.0, volume=264517, adj_close=755.0
-    )
-    assert bars["6488"].ts.utcoffset() is not None
-
-
-@pytest.mark.asyncio
 async def test_unknown_ticker_and_empty_download_return_no_bars(yahoo) -> None:
-    yahoo.frames.append(yahoo_frame(intraday(), {"9999.TW": []}))
+    yahoo.frames.append(yahoo_frame(daily(), {"9999.TW": []}))
     yahoo.frames.append(pd.DataFrame())
     yahoo.frames.append(yahoo_frame(daily("2026-10-30"), {"2330.TW": [(2380.0, 2380.0, 2360.0, 2370.0, 2370.0, 34795531)]}))
     yahoo.frames.append(None)
 
-    assert await provider().fetch_realtime_bars([UNLISTED]) == {}
+    assert await provider().fetch_history([UNLISTED], datetime(2026, 10, 30), datetime(2026, 10, 30)) == {}
     assert await provider().fetch_history([TSMC], datetime(2026, 10, 30), datetime(2026, 10, 30)) == {}
     assert await provider().fetch_history([PEGAVISION], datetime(2026, 10, 30), datetime(2026, 10, 30)) == {}
-    assert await provider().fetch_realtime_bars([TSMC]) == {}
+    assert await provider().fetch_history([TSMC], datetime(2026, 10, 30), datetime(2026, 10, 30)) == {}
 
 
 @pytest.mark.asyncio
 async def test_stocks_are_deduplicated_and_requested_in_batches(yahoo) -> None:
     stocks = [Stock(stock_id=stock_id) for stock_id in ("2330", "2317", "2330", "2454", "2317", "2303")]
-    yahoo.frames.extend([pd.DataFrame()] * 4)
+    yahoo.frames.extend([pd.DataFrame()] * 2)
 
-    assert await provider(batch_size=2).fetch_realtime_bars(stocks) == {}
     assert await provider(batch_size=2).fetch_history(stocks, datetime(2026, 10, 1), datetime(2026, 10, 30)) == {}
-    assert [call["tickers"] for call in yahoo.calls] == [["2330.TW", "2317.TW"], ["2454.TW", "2303.TW"]] * 2
+    assert [call["tickers"] for call in yahoo.calls] == [["2330.TW", "2317.TW"], ["2454.TW", "2303.TW"]]
 
 
 @pytest.mark.asyncio
 async def test_no_stocks_means_no_request(yahoo) -> None:
     assert await provider().fetch_history([], datetime(2026, 10, 1), datetime(2026, 10, 30)) == {}
-    assert await provider().fetch_realtime_bars([]) == {}
     assert yahoo.calls == []
 
 

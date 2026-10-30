@@ -1,0 +1,2 @@
+class OutdatedDatabaseError(RuntimeError):
+    pass

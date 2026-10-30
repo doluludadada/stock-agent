@@ -43,6 +43,23 @@ class MarketDataCollector:
             if self.apply_history(stock, history_by_stock_id, calculator, status):
                 collected_count += 1
 
+        settled_session = self._market_clock.last_settled_session()
+        behind = sorted(
+            stock.stock_id
+            for stock in stocks
+            if stock.ohlcv and self._market_clock.to_trading_date(stock.ohlcv[-1].ts) < settled_session
+        )
+
+        if behind:
+            shown = ", ".join(behind[:10]) + (", ..." if len(behind) > 10 else "")
+            message = (
+                f"Daily history lacks the {settled_session} session for {len(behind)}/{collected_count} stocks ({shown}): "
+                "the price source has not published it, so their analysis ends at an earlier close. "
+                "An exchange holiday also reads as missing."
+            )
+            self._logger.warning(message)
+            status.stats.add_error(message)
+
         self._logger.success(f"Collected market data for {collected_count}/{len(stocks)} stocks.")
 
     async def fetch_history(self, stocks: list[Stock], status: PipelineStatus) -> dict[str, list[Ohlcv]] | None:

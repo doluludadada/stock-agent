@@ -98,12 +98,13 @@ class FakeStockProvider:
 
 
 class FakeFundamentalsProvider:
-    """MOPS stand-in: cumulative EPS filed per quarter, industries, and quarters that fail to fetch."""
+    """MOPS stand-in: cumulative EPS filed per quarter, industries, quarters that fail to fetch, and quarters whose refresh failed."""
 
     def __init__(self) -> None:
         self.cumulative_eps: dict[FiscalQuarter, dict[str, float]] = {}
         self.industries: dict[str, str] = {}
         self.failed_quarters: set[FiscalQuarter] = set()
+        self.refresh_failed_quarters: set[FiscalQuarter] = set()
         self.requested: list[set[FiscalQuarter]] = []
         self.fetched_at = datetime(2026, 10, 19, 18, 0)
 
@@ -112,7 +113,12 @@ class FakeFundamentalsProvider:
         return {
             quarter: None
             if quarter in self.failed_quarters
-            else QuarterEps(quarter=quarter, cumulative_eps=dict(self.cumulative_eps.get(quarter, {})), fetched_at=self.fetched_at)
+            else QuarterEps(
+                quarter=quarter,
+                cumulative_eps=dict(self.cumulative_eps.get(quarter, {})),
+                fetched_at=self.fetched_at,
+                refresh_failed=quarter in self.refresh_failed_quarters,
+            )
             for quarter in quarters
         }
 

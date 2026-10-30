@@ -88,6 +88,19 @@ async def test_failed_quarter_is_reported_and_never_turns_into_zero() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_quarter_whose_refresh_failed_is_reported_with_the_age_of_the_page_it_reuses() -> None:
+    harness = market_harness()
+    harness.fundamentals.refresh_failed_quarters.add(Q(2026, 3))
+
+    market = await harness.runtime.valuation.load_market()
+
+    assert isinstance(market.find("1232").eps, Eps)
+    assert market.source_warnings == (
+        "MOPS 2026Q3 財報更新失敗，沿用 2026-10-19 18:00 取得的資料，其後申報的公司 EPS 將標示為資料不足或非最新",
+    )
+
+
+@pytest.mark.asyncio
 async def test_numbers_come_from_the_domain_and_never_from_the_ai() -> None:
     harness = market_harness()
     harness.ai.valuation_replies["2330"] = {

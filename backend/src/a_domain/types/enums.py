@@ -1,7 +1,6 @@
 # backend/src/a_domain/types/enums.py
 
 from enum import StrEnum, auto
-from typing import Self
 
 
 class AiProvider(StrEnum):
@@ -45,7 +44,7 @@ class SecurityKind(StrEnum):
     """Exchange-traded fund. Taiwan ETF codes start with 00: 0050, 00878, 006208, 00679B."""
 
     @classmethod
-    def of(cls, stock_id: str) -> Self:
+    def of(cls, stock_id: str) -> SecurityKind:
         return cls.ETF if stock_id.startswith("00") else cls.STOCK
 
 

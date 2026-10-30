@@ -47,6 +47,7 @@ from c_infrastructure.feed.news_provider import NewsProvider
 from c_infrastructure.feed.ptt_provider import PttProvider
 from c_infrastructure.feed.tavily_provider import TavilySearchAdapter
 from c_infrastructure.market.cached_price_provider import CachedPriceProvider
+from c_infrastructure.market.mis_quote_provider import MisQuoteProvider
 from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider
 from c_infrastructure.market.twse_provider import TaiwanStockProvider
 from c_infrastructure.market.yahoo_finance_adapter import YahooFinanceProvider
@@ -205,7 +206,13 @@ async def build_provider_dependencies(
     stock_provider = TaiwanStockProvider(logger=logger)
     yahoo_provider = YahooFinanceProvider(logger=logger)
 
-    price_provider = CachedPriceProvider(price_provider=yahoo_provider, db=db, logger=logger, market_clock=market_clock)
+    price_provider = CachedPriceProvider(
+        history_provider=yahoo_provider,
+        quote_provider=MisQuoteProvider(logger=logger),
+        db=db,
+        logger=logger,
+        market_clock=market_clock,
+    )
 
     knowledge_repository = ChromaRepositoryAdapter(config=config, logger=logger)
     await knowledge_repository.init()

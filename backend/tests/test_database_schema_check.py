@@ -76,6 +76,37 @@ async def test_old_trade_signals_layout_stops_startup_and_stays_untouched(tmp_pa
         assert connection.execute("SELECT reason FROM trade_signals").fetchall() == [("old",)]
 
 
+# ohlcv_data as stock_agent.db held it while each bar also stored its session in a trading_date column.
+OLD_OHLCV_DATA = """
+CREATE TABLE ohlcv_data (
+    open FLOAT NOT NULL,
+    high FLOAT NOT NULL,
+    low FLOAT NOT NULL,
+    close FLOAT NOT NULL,
+    volume INTEGER NOT NULL,
+    adj_close FLOAT,
+    stock_id VARCHAR NOT NULL,
+    trading_date DATE NOT NULL,
+    ts DATETIME NOT NULL,
+    PRIMARY KEY (stock_id, ts)
+)
+"""
+
+
+async def test_old_ohlcv_cache_layout_stops_startup_and_says_the_cache_refills(tmp_path: Path) -> None:
+    db_path = tmp_path / "stock_agent.db"
+
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(OLD_OHLCV_DATA)
+
+    with pytest.raises(OutdatedDatabaseError) as refused:
+        await init_db(tmp_path)
+
+    message = str(refused.value)
+    assert "ohlcv_data (missing columns: none; columns no longer used: trading_date)" in message
+    assert "Cached prices and EPS refill themselves" in message
+
+
 async def test_a_database_the_current_models_created_starts_again(tmp_path: Path) -> None:
     await init_db(tmp_path)
     created = sqlite_layout(tmp_path / "stock_agent.db")

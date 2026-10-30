@@ -90,7 +90,7 @@ class TaiwanStockProvider(IStockProvider):
         stocks: list[Stock] = []
         closes: dict[str, Ohlcv] = {}
 
-        async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             try:
                 self._logger.debug("Fetching TWSE (上市) stocks...")
                 twse_resp = await client.get(self.TWSE_URL)

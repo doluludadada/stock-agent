@@ -32,6 +32,13 @@ class IMarketClock(Protocol):
         """The latest weekday whose session has closed: the newest daily bar that can exist. Exchange holidays are not modelled."""
         ...
 
+    def last_settled_session(self) -> date:
+        """
+        The latest weekday session whose daily bar is final in every price source, which happens a while after its close.
+        Exchange holidays are not modelled.
+        """
+        ...
+
     def trading_phase(self) -> TradingPhase:
         """Where the exchange's trading day stands now. Exchange holidays and a delayed open or close are not modelled."""
         ...

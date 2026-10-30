@@ -67,6 +67,21 @@ def test_the_last_closed_session_is_the_latest_weekday_whose_close_has_passed(mo
 
 
 @pytest.mark.parametrize(
+    ("moment", "settled_session"),
+    [
+        (datetime(2026, 10, 30, 14, 59), date(2026, 10, 29)),
+        (datetime(2026, 10, 30, 15, 0), date(2026, 10, 30)),
+        (datetime(2026, 10, 31, 2, 10), date(2026, 10, 30)),
+        (datetime(2026, 11, 2, 9, 0), date(2026, 10, 30)),
+        (datetime(2026, 11, 2, 15, 30), date(2026, 11, 2)),
+    ],
+    ids=["fri-14:59-is-thu", "fri-15:00-is-fri", "sat-is-fri", "mon-09:00-is-previous-fri", "mon-15:30-is-mon"],
+)
+def test_the_last_settled_session_is_the_latest_weekday_settled_by_three_pm(moment: datetime, settled_session: date) -> None:
+    assert ClockAt(moment.replace(tzinfo=TAIWAN_TIMEZONE)).last_settled_session() == settled_session
+
+
+@pytest.mark.parametrize(
     ("moment", "sessions", "close"),
     [
         (datetime(2026, 10, 30, 18, 0), 1, datetime(2026, 11, 2, 13, 30)),

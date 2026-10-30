@@ -17,16 +17,7 @@ TICK_SIZES: Mapping[SecurityKind, tuple[tuple[Decimal, Decimal], ...]] = {
     ),
     SecurityKind.ETF: ((Decimal(50), Decimal("0.05")), (Decimal(0), Decimal("0.01"))),
 }
-"""
-The exchanges' price ticks (升降單位) as (lowest price of the band, tick), highest band first. TWSE and TPEx use the
-same table. Sources, read 2026-10-31: TWSE 交易制度 一般交易 升降單位
-(https://www.twse.com.tw/zh/products/system/trading.html) and TPEx 上櫃有價證券交易系統簡介 四、升降單位
-(https://www.tpex.org.tw/zh-tw/mainboard/trading/rules/system.html).
-
-- Stocks: below 10 NT$0.01; 10 to below 50 NT$0.05; 50 to below 100 NT$0.1; 100 to below 500 NT$0.5;
-  500 to below 1,000 NT$1; 1,000 and above NT$5.
-- ETFs: below 50 NT$0.01; 50 and above NT$0.05.
-"""
+"""The exchanges' price ticks as (lowest price of the band, tick), highest band first. TickRule says where they come from."""
 
 FLOAT_NOISE = Decimal("0.01")
 """
@@ -36,7 +27,18 @@ float32 prices, so 28.35 arrives as 28.350000381469727. No exchange price lies t
 
 
 class TickRule:
-    """The exchange's price grid. An order's limit price must be a tick, or the exchange refuses it."""
+    """
+    The exchange's price grid. An order's limit price must be a tick, or the exchange refuses it.
+
+    TWSE and TPEx use the same ticks (TICK_SIZES):
+    - Stocks: below 10 NT$0.01; 10 to below 50 NT$0.05; 50 to below 100 NT$0.1; 100 to below 500 NT$0.5;
+      500 to below 1,000 NT$1; 1,000 and above NT$5.
+    - ETFs: below 50 NT$0.01; 50 and above NT$0.05.
+
+    Sources, read 2026-10-31: the TWSE trading mechanism page, regular trading, tick sizes
+    (https://www.twse.com.tw/zh/products/system/trading.html), and the TPEx trading system overview,
+    section 4, tick sizes (https://www.tpex.org.tw/zh-tw/mainboard/trading/rules/system.html).
+    """
 
     @staticmethod
     def tick_size(stock_id: str, price: Decimal) -> Decimal:

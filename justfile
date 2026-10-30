@@ -9,6 +9,10 @@ dev-sync:
 format:
     cd backend; uv run ruff format
 
+# Check backend/src against docs/clean_architecture_guide.md; add --pyright to count type errors too.
+arch *args:
+    cd backend; uv run python tools/architecture_check.py {{args}}
+
 ngrok:
     ngrok http 8800
 

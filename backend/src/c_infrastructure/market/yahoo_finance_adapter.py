@@ -10,12 +10,13 @@ import yfinance as yf
 
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
-from a_domain.ports.market.price_provider import IOhlcvProvider
+from a_domain.ports.market.price_provider import IPriceHistoryProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.types.enums import MarketType
+from c_infrastructure.system.market_clock import TAIWAN_SESSION_CLOSE, TAIWAN_TIMEZONE
 
 
-class YahooFinanceProvider(IOhlcvProvider):
+class YahooFinanceProvider(IPriceHistoryProvider):
     def __init__(self, logger: ILoggingProvider, batch_size: int = 50, delay_seconds: float = 1.5):
         self._logger = logger
         self._batch_size = batch_size
@@ -23,19 +24,13 @@ class YahooFinanceProvider(IOhlcvProvider):
 
     async def fetch_history(self, stocks: list[Stock], start_date: datetime, end_date: datetime) -> dict[str, list[Ohlcv]]:
         bars_by_stock = await self._download_bars(
-            stocks, "1d", start=start_date.strftime("%Y-%m-%d"), end=(end_date + timedelta(days=1)).strftime("%Y-%m-%d")
+            stocks, start=start_date.strftime("%Y-%m-%d"), end=(end_date + timedelta(days=1)).strftime("%Y-%m-%d")
         )
         # Yahoo emits a flat zero-volume bar for days the market was closed, such as typhoon days.
         traded = {stock_id: [bar for bar in bars if bar.volume > 0] for stock_id, bars in bars_by_stock.items()}
         return {stock_id: bars for stock_id, bars in traded.items() if bars}
 
-    async def fetch_realtime_bars(self, stocks: list[Stock]) -> dict[str, Ohlcv]:
-        bars_by_stock = await self._download_bars(stocks, "5m", period="1d")
-        return {stock_id: bars[-1] for stock_id, bars in bars_by_stock.items()}
-
-    async def _download_bars(
-        self, stocks: list[Stock], interval: str, start: str | None = None, end: str | None = None, period: str | None = None
-    ) -> dict[str, list[Ohlcv]]:
+    async def _download_bars(self, stocks: list[Stock], start: str, end: str) -> dict[str, list[Ohlcv]]:
         unique_stocks = list({stock.stock_id: stock for stock in stocks}.values())
         bars_by_stock: dict[str, list[Ohlcv]] = {}
         started_at = time.perf_counter()
@@ -50,8 +45,7 @@ class YahooFinanceProvider(IOhlcvProvider):
                 tickers=list(stock_id_by_ticker),
                 start=start,
                 end=end,
-                period=period,
-                interval=interval,
+                interval="1d",
                 group_by="ticker",
                 multi_level_index=True,
                 auto_adjust=False,
@@ -64,7 +58,7 @@ class YahooFinanceProvider(IOhlcvProvider):
                     bars_by_stock[stock_id] = bars
 
             self._logger.info(
-                f"Yahoo {interval} bars: {offset + len(batch)}/{len(unique_stocks)} stocks requested, "
+                f"Yahoo daily bars: {offset + len(batch)}/{len(unique_stocks)} stocks requested, "
                 f"{len(bars_by_stock)} with data, elapsed={time.perf_counter() - started_at:.1f}s"
             )
             await asyncio.sleep(self._delay_seconds)
@@ -82,7 +76,7 @@ def _to_bars(download: pd.DataFrame | None, ticker: str) -> list[Ohlcv]:
 
     return [
         Ohlcv(
-            ts=row["ts"].to_pydatetime(),
+            ts=datetime.combine(row["ts"].date(), TAIWAN_SESSION_CLOSE, TAIWAN_TIMEZONE),
             open=row["Open"],
             high=row["High"],
             low=row["Low"],

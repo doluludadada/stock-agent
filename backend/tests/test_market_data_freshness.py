@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 import pytest
 from trading_stack import SilentLogger, run_status
@@ -13,6 +13,10 @@ from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketCl
 pytestmark = pytest.mark.asyncio
 
 NOW = datetime(2026, 10, 19, 10, 0, tzinfo=TAIWAN_TIMEZONE)
+MISSING_FRIDAY = (
+    "Daily history lacks the 2026-10-16 session for 2/2 stocks (2317, 2330): the price source has not published it, "
+    "so their analysis ends at an earlier close. An exchange holiday also reads as missing."
+)
 
 
 class ClockAt(TaiwanMarketClock):
@@ -62,3 +66,15 @@ async def test_realtime_quotes_use_the_minute_limit_not_the_day_limit(tmp_path, 
     await collector(feed, tmp_path).refresh_realtime([Stock(stock_id="2330")], status)
 
     assert ("2330" in status.stale_stock_ids) is stale
+
+
+@pytest.mark.parametrize(("last_session", "errors"), [(date(2026, 10, 16), []), (date(2026, 10, 15), [MISSING_FRIDAY])])
+async def test_history_without_the_last_settled_session_is_a_run_error(tmp_path, last_session: date, errors: list[str]) -> None:
+    status = run_status()
+    feed = QuoteFeed(daily_close_at=datetime.combine(last_session, time(13, 30), TAIWAN_TIMEZONE), quote_at=NOW)
+    stocks = [Stock(stock_id="2330"), Stock(stock_id="2317")]
+
+    await collector(feed, tmp_path).execute(stocks, status, IndicatorParameters())
+
+    assert status.stats.errors == errors
+    assert all(stock.ohlcv for stock in stocks)

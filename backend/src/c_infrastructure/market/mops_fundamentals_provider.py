@@ -97,7 +97,7 @@ class MopsFundamentalsProvider(IFundamentalsProvider):
 
         for quarter in sorted(quarters, reverse=True):
             pages = [await self._page(market, quarter, today) for market in self.TYPEK]
-            present = [page for page in pages if page is not None]
+            present = [page for page, _ in pages if page is not None]
 
             if len(present) < len(pages):
                 filings[quarter] = None
@@ -105,7 +105,10 @@ class MopsFundamentalsProvider(IFundamentalsProvider):
 
             cumulative_eps = {company: eps for page in present for company, eps in page.cumulative_eps.items()}
             fetched_at = min(self._clock.to_market_datetime(page.fetched_at) for page in present)
-            filings[quarter] = QuarterEps(quarter=quarter, cumulative_eps=cumulative_eps, fetched_at=fetched_at)
+            refresh_failed = any(failed for _, failed in pages)
+            filings[quarter] = QuarterEps(
+                quarter=quarter, cumulative_eps=cumulative_eps, fetched_at=fetched_at, refresh_failed=refresh_failed
+            )
 
         return filings
 
@@ -118,7 +121,7 @@ class MopsFundamentalsProvider(IFundamentalsProvider):
         ]
 
         if stale:
-            async with httpx.AsyncClient(timeout=self.TIMEOUT_SECONDS, verify=False) as client:
+            async with httpx.AsyncClient(timeout=self.TIMEOUT_SECONDS) as client:
                 for market in stale:
                     url, id_field = self.INDUSTRY_SOURCES[market]
 
@@ -141,14 +144,15 @@ class MopsFundamentalsProvider(IFundamentalsProvider):
 
         return industries
 
-    async def _page(self, market: MarketType, quarter: FiscalQuarter, today: date) -> QuarterEpsDTO | None:
+    async def _page(self, market: MarketType, quarter: FiscalQuarter, today: date) -> tuple[QuarterEpsDTO | None, bool]:
+        """The market's page for the quarter, if any, and whether it is an old page served because its refresh failed."""
         label = f"MOPS {quarter} {self.TYPEK[market]}"
         cached = await self._load(market, quarter)
         now = self._clock.now()
 
         if cached is not None and self._is_reusable(cached, quarter, now):
             self._logger.debug(f"{label}: cached page, {len(cached.cumulative_eps)} companies")
-            return cached
+            return cached, False
 
         cumulative_eps = await self._download(market, quarter)
 
@@ -160,7 +164,7 @@ class MopsFundamentalsProvider(IFundamentalsProvider):
             if cached is not None:
                 self._logger.warning(f"{label}: refresh failed, using the page fetched at {cached.fetched_at:%Y-%m-%d %H:%M}")
 
-            return cached
+            return cached, cached is not None
 
         page = QuarterEpsDTO(
             market=market.value, year=quarter.year, quarter=quarter.quarter, fetched_at=now, cumulative_eps=cumulative_eps
@@ -168,7 +172,7 @@ class MopsFundamentalsProvider(IFundamentalsProvider):
         await self._save(page)
         self._logger.info(f"{label}: fetched {len(cumulative_eps)} companies")
 
-        return page
+        return page, False
 
     def _is_reusable(self, page: QuarterEpsDTO, quarter: FiscalQuarter, now: datetime) -> bool:
         fetched_at = self._clock.to_market_datetime(page.fetched_at)
@@ -193,7 +197,7 @@ class MopsFundamentalsProvider(IFundamentalsProvider):
         await self._wait_for_request_slot()
 
         try:
-            async with httpx.AsyncClient(timeout=self.TIMEOUT_SECONDS, verify=False) as client:
+            async with httpx.AsyncClient(timeout=self.TIMEOUT_SECONDS) as client:
                 response = await client.post(self.EPS_URL, data=form)
                 response.raise_for_status()
         except Exception as error:

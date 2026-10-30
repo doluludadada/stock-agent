@@ -5,6 +5,17 @@ from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 
 
-class IOhlcvProvider(Protocol):
-    async def fetch_realtime_bars(self, stocks: list[Stock]) -> dict[str, Ohlcv]: ...
-    async def fetch_history(self, stocks: list[Stock], start_date: datetime, end_date: datetime) -> dict[str, list[Ohlcv]]: ...
+class IPriceHistoryProvider(Protocol):
+    async def fetch_history(self, stocks: list[Stock], start_date: datetime, end_date: datetime) -> dict[str, list[Ohlcv]]:
+        """Daily bars per stock, oldest first, each stamped at its session's 13:30 close in Asia/Taipei."""
+        ...
+
+
+class IRealtimeQuoteProvider(Protocol):
+    async def fetch_realtime_bars(self, stocks: list[Stock]) -> dict[str, Ohlcv]:
+        """Each stock's session so far, closing at its last trade and stamped with that trade's time. No trade, no bar."""
+        ...
+
+
+class IOhlcvProvider(IPriceHistoryProvider, IRealtimeQuoteProvider, Protocol):
+    """Daily history for analysis and realtime quotes for orders: what the workflows read."""

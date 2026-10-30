@@ -172,6 +172,8 @@ class QuarterEps:
     quarter: FiscalQuarter
     cumulative_eps: Mapping[str, float]
     fetched_at: datetime
+    refresh_failed: bool = False
+    """The page was due for a refresh that failed, so it is the last one fetched and may miss later filings."""
 
 
 type EpsFilings = Mapping[FiscalQuarter, QuarterEps | None]
