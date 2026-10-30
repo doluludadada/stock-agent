@@ -1,0 +1,63 @@
+from datetime import UTC, datetime
+from typing import Any
+
+from sqlmodel import col, select
+
+from a_domain.model.system.stats import SystemStats
+from a_domain.model.trading.account_snapshot import AccountSnapshot
+from a_domain.model.trading.order import Order
+from a_domain.model.trading.signal import TradeSignal
+from a_domain.ports.trading.trading_journal import ITradingJournal
+from a_domain.types.ids import RunId
+from c_infrastructure.database.db_connector import DatabaseConnector
+from c_infrastructure.database.models.trading_journal_dto import AccountSnapshotDTO, OrderDTO, TradeSignalDTO, WorkflowRunDTO
+
+
+def stored(row: dict[str, Any]) -> dict[str, Any]:
+    """SQLite keeps no zone, so every timestamp is stored as UTC wall-clock time."""
+    return {key: value.astimezone(UTC).replace(tzinfo=None) if isinstance(value, datetime) else value for key, value in row.items()}
+
+
+def loaded(row: dict[str, Any]) -> dict[str, Any]:
+    return {key: value.replace(tzinfo=UTC) if isinstance(value, datetime) else value for key, value in row.items()}
+
+
+class TradingJournal(ITradingJournal):
+    """SQL tables workflow_runs, trade_signals, orders and account_snapshots. Every save is an upsert by primary key."""
+
+    def __init__(self, db: DatabaseConnector) -> None:
+        self._db = db
+
+    async def save_run(self, run: SystemStats) -> None:
+        async with self._db.get_session() as session:
+            await session.merge(WorkflowRunDTO.model_validate(stored(run.model_dump())))
+            await session.commit()
+
+    async def save_signals(self, run_id: RunId, signals: list[TradeSignal]) -> None:
+        async with self._db.get_session() as session:
+            for signal in signals:
+                reports = signal.model_dump(mode="json", include={"technical_report", "ai_report"})
+                await session.merge(TradeSignalDTO.model_validate(stored({**signal.model_dump(), **reports, "run_id": run_id})))
+
+            await session.commit()
+
+    async def save_order(self, order: Order) -> None:
+        async with self._db.get_session() as session:
+            await session.merge(OrderDTO.model_validate(stored(order.model_dump())))
+            await session.commit()
+
+    async def save_snapshot(self, snapshot: AccountSnapshot) -> None:
+        async with self._db.get_session() as session:
+            await session.merge(
+                AccountSnapshotDTO.model_validate(
+                    stored(snapshot.model_dump(mode="json") | snapshot.model_dump(exclude={"positions"}))
+                )
+            )
+            await session.commit()
+
+    async def snapshots(self) -> list[AccountSnapshot]:
+        async with self._db.get_session() as session:
+            result = await session.execute(select(AccountSnapshotDTO).order_by(col(AccountSnapshotDTO.taken_at)))
+            rows = result.scalars().all()
+
+        return [AccountSnapshot.model_validate(loaded(row.model_dump())) for row in rows]

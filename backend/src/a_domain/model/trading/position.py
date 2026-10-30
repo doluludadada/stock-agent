@@ -5,7 +5,7 @@ from sqlmodel import Field, SQLModel
 
 
 class Position(SQLModel):
-    """Broker/account ownership state."""
+    """Broker/account ownership state. `average_cost` is per share and includes the buy fees paid."""
 
     stock_id: str = Field(min_length=1)
     quantity: int = Field(gt=0)
@@ -18,6 +18,10 @@ class Position(SQLModel):
     @property
     def cost_basis(self) -> float:
         return self.quantity * self.average_cost
+
+    def profit_on_sale(self, quantity: int, net_proceeds: float) -> float:
+        """Net proceeds of selling `quantity` shares minus their cost basis. The one PnL formula, realized or not."""
+        return net_proceeds - quantity * self.average_cost
 
     def can_cover(self, quantity: int) -> bool:
         if quantity <= 0:

@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from a_domain.model.chat.message import Message
+from a_domain.model.system.stats import SystemStats
 from a_domain.model.valuation.scan import MarketValuation, ValuationScan
 from a_domain.model.valuation.valuation import ValuationExplanation, ValuationReport
 from a_domain.ports.ai.ai_provider import IAiProvider
@@ -10,12 +11,22 @@ from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.rules.ai.parser import parse_valuation_explanation
 from a_domain.rules.ai.prompt import ValuationPromptBuilder
-from a_domain.types.enums import MessageRole
+from a_domain.types.enums import ExecutionProvider, MessageRole, OrderMode, Workflow
 from b_application.schemas.pipeline_status import PipelineStatus
 from b_application.use_cases.collect.fundamentals_feed import FundamentalsFeed
 from b_application.use_cases.collect.market_data_collector import MarketDataCollector
 from b_application.use_cases.collect.news_feed import NewsFeed
 from b_application.use_cases.process.technical_filter import TechnicalFilter
+
+
+def valuation_status() -> PipelineStatus:
+    """
+    Collects one valuation step's counters and errors for the shared collect and process use cases.
+    Valuation records no run and sends no order, so the run identity is fixed to values that cannot order.
+    """
+    return PipelineStatus(
+        stats=SystemStats(workflow=Workflow.VALUATION, execution_provider=ExecutionProvider.MOCK, order_mode=OrderMode.DISABLED)
+    )
 
 
 @dataclass(slots=True)
@@ -42,7 +53,7 @@ class ValuationPipeline:
 
     async def load_market(self) -> MarketValuation:
         """Every listed and OTC stock with its official close, TTM EPS and industry: bulk sources, a few requests."""
-        status = PipelineStatus()
+        status = valuation_status()
         stocks = [stock.model_copy(deep=True) for stock in await self.stock_provider.get_all()]
         closes = await self.stock_provider.get_latest_closes()
 
@@ -59,7 +70,7 @@ class ValuationPipeline:
     async def confirm_technical(self, scan: ValuationScan) -> ValuationScan:
         """US-109 step 2: the active technical strategy, applied exactly as the trading workflows apply it."""
         strategy = (await self.technical_settings_repository.load()).active_strategy
-        status = PipelineStatus()
+        status = valuation_status()
         stocks = [report.stock for report in scan.survivors]
 
         await self.data_collector.execute(stocks, status, strategy.indicators)
@@ -72,7 +83,7 @@ class ValuationPipeline:
         stock = report.stock
 
         if not stock.articles:
-            await self.news.execute([stock], PipelineStatus())
+            await self.news.execute([stock], valuation_status())
 
         prompt = self.prompt_builder.build(report)
 

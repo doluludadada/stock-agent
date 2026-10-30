@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from datetime import UTC, datetime
 
 from icontract import ensure, invariant, require
 
@@ -12,7 +11,6 @@ from a_domain.rules.trading.sizing import SizingRule
 from a_domain.types.enums import SignalSource, TradeAction
 
 
-# TODO: Might needa check this class.
 @invariant(lambda self: 0 <= self.buy_threshold <= 100)
 @dataclass(frozen=True)
 class EntryRule:
@@ -22,6 +20,7 @@ class EntryRule:
     Responsibilities:
     - no position -> decide BUY / HOLD
     - existing position -> decide ADD / HOLD
+    - manual override -> BUY sized like any other, or HOLD saying why no quantity fits
     """
 
     buy_threshold: int
@@ -53,13 +52,40 @@ class EntryRule:
         if quantity > 0 and position is not None:
             reason = f"ADD_POSITION | CurrentQty={position.quantity} | {reason}"
 
-        return TradeSignal(
-            stock_id=stock.stock_id,
+        return TradeSignal.of(
+            stock,
             action=TradeAction.BUY if quantity > 0 else TradeAction.HOLD,
-            price_at_signal=current_price,
             source=SignalSource.COMBINED,
             score=composite_score,
             reason=reason,
             quantity=quantity,
-            generated_at=datetime.now(UTC),
+        )
+
+    @require(lambda stock: stock.current_price is not None, "Manual BUY requires a current price")
+    @require(lambda stock: stock.composite_score is not None, "Manual BUY requires a composite score")
+    @ensure(lambda result: result.source == SignalSource.MANUAL)
+    def decide_manual(self, stock: Stock, account: Account) -> TradeSignal:
+        """The user's BUY: skips the buy threshold, never the sizing."""
+        current_price = stock.current_price
+        composite_score = stock.composite_score
+
+        if current_price is None or composite_score is None:
+            raise ValueError("Manual BUY requires a current price and a composite score")
+
+        quantity = self.sizing_rule.calculate(account=account, price=current_price)
+        reason = "Manual BUY override confirmed by user."
+
+        if quantity == 0:
+            reason = (
+                f"Manual BUY not sized: cash {account.cash:,.0f} buys no share of {stock.stock_id} at {current_price:.2f} "
+                f"within a {self.sizing_rule.risk_per_trade_pct:.0%} risk budget after fees."
+            )
+
+        return TradeSignal.of(
+            stock,
+            action=TradeAction.BUY if quantity > 0 else TradeAction.HOLD,
+            source=SignalSource.MANUAL,
+            score=composite_score,
+            reason=reason,
+            quantity=quantity,
         )

@@ -24,7 +24,7 @@ async def test_full_cycle_saves_only_survivors_as_technical_and_never_orders() -
 
     assert stock_ids(status.survivors) == ["2330"]
     assert harness.watchlist.rows == [("2330", WatchlistType.TECHNICAL)]
-    assert [(signal.stock_id, signal.action) for signal in harness.signals.saved] == [("2330", TradeAction.BUY)]
+    assert [(signal.stock_id, signal.action) for signal in harness.journal.signals] == [("2330", TradeAction.BUY)]
     assert harness.ai.analysed_stock_ids == ["2330"]
     assert harness.broker.placed == []
     assert status.stats.orders_submitted == 0
@@ -89,7 +89,7 @@ async def test_buzz_scan_orders_only_when_market_is_open_and_quote_is_fresh(
 
     status = await harness.run_menu("2")
 
-    assert [signal.stock_id for signal in harness.signals.saved if signal.action == TradeAction.BUY] == buy_signals
+    assert [signal.stock_id for signal in harness.journal.signals if signal.action == TradeAction.BUY] == buy_signals
     assert [order.stock_id for order in harness.broker.placed] == orders
     assert status.stats.orders_submitted == len(orders)
 
@@ -163,7 +163,7 @@ async def test_order_execution_skips_closed_market_orders(now: datetime, market_
 
     status = await harness.run_menu("3")
 
-    assert [(signal.stock_id, signal.action) for signal in harness.signals.saved] == [("2330", TradeAction.BUY)]
+    assert [(signal.stock_id, signal.action) for signal in harness.journal.signals] == [("2330", TradeAction.BUY)]
     assert [order.stock_id for order in harness.broker.placed] == orders
     assert status.stats.orders_submitted == len(orders)
 
@@ -188,7 +188,7 @@ async def test_specific_stock_analysis_returns_manual_watchlist_candidates_witho
     assert passed.composite_score is not None
     assert failed.composite_score is not None
     assert harness.watchlist.rows == []
-    assert harness.signals.saved == []
+    assert harness.journal.signals == []
     assert harness.broker.placed == []
 
 
@@ -209,7 +209,7 @@ async def test_specific_stock_watchlist_prompt_writes_only_manual_rows(
 
     assert harness.watchlist.rows == rows
     assert stock_ids(status.survivors) == ["2330"]
-    assert harness.signals.saved == []
+    assert harness.journal.signals == []
     assert harness.broker.placed == []
 
 
@@ -221,7 +221,7 @@ async def test_confirmed_manual_buy_sends_one_manual_signal_to_the_broker() -> N
 
     await harness.run_menu("4", stock_ids="2330 2317", buy={"2317"})
 
-    [signal] = harness.signals.saved
+    [signal] = harness.journal.signals
     assert (signal.stock_id, signal.action, signal.source) == ("2317", TradeAction.BUY, SignalSource.MANUAL)
     assert signal.quantity > 0
     assert [(order.stock_id, order.action, order.quantity, order.limit_price) for order in harness.broker.placed] == [

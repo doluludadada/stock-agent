@@ -1,7 +1,7 @@
 """Menus 5 and 6 through the real CLI dispatch and ValuationPipeline, with only the ports faked (tests/support)."""
 
 import io
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pytest
 from rich.console import Console
@@ -33,7 +33,12 @@ INDUSTRIES = {"2330": "半導體業", "1101": "水泥工業", "1232": "食品工
 def market_harness(now: datetime = AFTER_CLOSE_FRIDAY, market_open: bool = False) -> CliHarness:
     """2330 trends up, 2603 trends down, 1232 has no daily history, 1101 lost money, 0050 files no EPS."""
     harness = build_harness(now=now, market_open=market_open)
-    history = {"2330": rising_history(2415.0), "2603": falling_history(60.0), "1232": [], "1101": rising_history(28.2)}
+    history = {
+        "2330": rising_history(2415.0, THURSDAY),
+        "2603": falling_history(60.0, THURSDAY),
+        "1232": [],
+        "1101": rising_history(28.2, THURSDAY),
+    }
 
     for stock_id, price in CLOSES.items():
         harness.list_stock(stock_id, history.get(stock_id, []))
@@ -158,6 +163,19 @@ async def test_scan_then_technical_step_records_where_each_stock_left() -> None:
 
 
 @pytest.mark.asyncio
+async def test_technical_step_drops_daily_history_older_than_the_history_limit() -> None:
+    harness = market_harness()
+    stale_session = harness.clock.today() - timedelta(days=harness.config.freshness.history_max_lag_days + 1)
+    harness.prices.history["2330"] = rising_history(2415.0, stale_session)
+    market = await harness.valuation.load_market()
+
+    confirmed = await harness.valuation.confirm_technical(market.screen(ScanCriteria(target_pe=TargetPe(30), min_undervaluation=0.0)))
+
+    assert [report.stock.stock_id for report in confirmed.survivors] == []
+    assert confirmed.technical_eliminations["2330"].reason == EliminationReason.NO_PRICE_HISTORY
+
+
+@pytest.mark.asyncio
 async def test_undervalued_stock_prompt_asks_the_ai_to_explain_low_pe_causes() -> None:
     harness = market_harness()
     market = await harness.valuation.load_market()
@@ -219,7 +237,7 @@ async def test_menu_6_scans_confirms_technically_and_explains_the_survivor(monke
 async def test_valuation_menus_never_place_orders_or_write_the_watchlist(monkeypatch: pytest.MonkeyPatch) -> None:
     harness = market_harness(now=datetime(2026, 10, 30, 10, 0, tzinfo=TAIWAN_TIMEZONE), market_open=True)
     capture_cli_output(monkeypatch)
-    harness.list_stock("2330", rising_history(2415.0), realtime_price=2415.0)
+    harness.list_stock("2330", rising_history(2415.0, THURSDAY), realtime_price=2415.0)
     harness.publish_close("2330", 2415.0, THURSDAY)
     harness.hold("2330", quantity=1000, average_cost=2000.0)
     harness.watch("2330", WatchlistType.TECHNICAL)
@@ -228,9 +246,10 @@ async def test_valuation_menus_never_place_orders_or_write_the_watchlist(monkeyp
     await harness.run_valuation_menu("6", answers=["100", "0"], confirm=[True, True])
 
     assert harness.broker.placed == []
-    assert harness.signals.saved == []
+    assert (harness.journal.runs, harness.journal.signals, harness.journal.orders) == ({}, [], {})
     assert harness.watchlist.rows == [("2330", WatchlistType.TECHNICAL)]
 
     await harness.run_menu("4", stock_ids="2330", buy=["2330"])
 
     assert [order.stock_id for order in harness.broker.placed] == ["2330"]
+    assert [order.stock_id for order in harness.journal.orders.values()] == ["2330"]

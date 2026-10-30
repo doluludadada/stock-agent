@@ -132,8 +132,6 @@ class ChromaRepositoryAdapter(IConversationRepository, IKnowledgeRepository):
         if signal.stop_loss_price is not None:
             metadata["stop_loss_price"] = signal.stop_loss_price
 
-        decision_id = f"{signal.stock_id}_{signal.generated_at.strftime('%Y%m%d%H%M%S%f')}"
-
-        self._knowledge_collection.upsert(ids=[decision_id], documents=["\n".join(document_lines)], metadatas=[metadata])
+        self._knowledge_collection.upsert(ids=[str(signal.decision_id)], documents=["\n".join(document_lines)], metadatas=[metadata])
 
         self._logger.debug(f"RAG decision saved: {signal.action.value} {signal.stock_id}")

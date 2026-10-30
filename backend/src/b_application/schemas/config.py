@@ -1,11 +1,19 @@
 # backend/src/b_application/schemas/config.py
 
+from datetime import timedelta
 from pathlib import Path
 from typing import Self
 
 from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from a_domain.rules.collect.freshness import DataFreshnessRule
+from a_domain.rules.trading.cost import TradingCostRule
+from a_domain.rules.trading.decision import DecisionRule
+from a_domain.rules.trading.entry import EntryRule
+from a_domain.rules.trading.exit import ExitRule
+from a_domain.rules.trading.order_rule import OrderRule
+from a_domain.rules.trading.sizing import SizingRule
 from a_domain.types.enums import AiProvider, DatabaseProvider, ExecutionProvider, OrderMode, SystemEnvironment
 
 
@@ -160,6 +168,29 @@ class MarketConfig(BaseModel):
     tax_rate: float = Field(default=0.003, ge=0)
     min_fee: int = Field(default=20, ge=0)
 
+    def cost_rule(self) -> TradingCostRule:
+        return TradingCostRule(fee_rate=self.fee_rate, tax_rate=self.tax_rate, min_fee=self.min_fee)
+
+
+class FreshnessConfig(BaseModel):
+    """
+    How old market data may be before it is blocked.
+
+    Realtime quotes price orders, so their limit is minutes. Daily history feeds technical
+    analysis, so its limit is calendar days and must cover weekends and market holidays.
+    The official closes that price a P/E valuation follow DailyCloseFreshnessRule instead: it tolerates
+    only the exchanges' publication lag, which is a fact about the source, not a setting.
+    """
+
+    realtime_max_lag_minutes: int = Field(default=15, gt=0)
+    history_max_lag_days: int = Field(default=10, gt=0)
+
+    def realtime_rule(self) -> DataFreshnessRule:
+        return DataFreshnessRule(max_lag=timedelta(minutes=self.realtime_max_lag_minutes))
+
+    def history_rule(self) -> DataFreshnessRule:
+        return DataFreshnessRule(max_lag=timedelta(days=self.history_max_lag_days))
+
 
 class TradingConfig(BaseModel):
     """Execution-provider selection and order-mode settings."""
@@ -177,6 +208,8 @@ class MockTradingConfig(BaseModel):
 
     account_id: str = "mock-dev"
     initial_cash: float = Field(default=1_000_000, gt=0)
+    max_fill_quantity: int | None = Field(default=None, gt=0)
+    """Most shares the simulated market fills per order at the limit price. Unset fills any quantity."""
 
 
 class ValuationConfig(BaseModel):
@@ -213,7 +246,28 @@ class AppConfig(BaseSettings):
     collect_rules: CollectRulesConfig = Field(default_factory=CollectRulesConfig)
     quality: QualityFiltersConfig = Field(default_factory=QualityFiltersConfig)
     market: MarketConfig = Field(default_factory=MarketConfig)
+    freshness: FreshnessConfig = Field(default_factory=FreshnessConfig)
     trading: TradingConfig = Field(default_factory=TradingConfig)
     mock_trading: MockTradingConfig = Field(default_factory=MockTradingConfig)
     watchlist: WatchlistConfig = Field(default_factory=WatchlistConfig)
     valuation: ValuationConfig = Field(default_factory=ValuationConfig)
+
+    def decision_rule(self) -> DecisionRule:
+        """The trading rules as configured. Signals, AccountRiskCheck and ManualBuy all take theirs from here."""
+        sizing_rule = SizingRule(
+            risk_per_trade_pct=self.analysis.risk_per_trade_pct,
+            stop_loss_pct=self.analysis.stop_loss_pct,
+            cost_rule=self.market.cost_rule(),
+        )
+
+        return DecisionRule(
+            entry_rule=EntryRule(buy_threshold=self.analysis.min_combined_score_buy, sizing_rule=sizing_rule),
+            exit_rule=ExitRule(stop_loss_pct=self.analysis.stop_loss_pct, sell_threshold=self.analysis.max_combined_score_sell),
+        )
+
+    def order_rule(self) -> OrderRule:
+        return OrderRule(
+            order_mode=self.trading.order_mode,
+            execution_provider=self.trading.execution_provider,
+            price_freshness=self.freshness.realtime_rule(),
+        )

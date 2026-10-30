@@ -7,7 +7,7 @@ behind that port would observe: rows written, prompts sent, orders placed.
 import json
 import re
 from collections.abc import Collection
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from uuid import UUID
 
@@ -17,11 +17,16 @@ from a_domain.model.fundamentals.eps import EpsFilings, FiscalQuarter, QuarterEp
 from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
+from a_domain.model.system.stats import SystemStats
+from a_domain.model.trading.account import Account
+from a_domain.model.trading.account_snapshot import AccountSnapshot
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.position import Position
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.model.trading.watchlist import StockWatchlist
-from a_domain.types.enums import AiAnalysisFocus, MessageRole, WatchlistType
+from a_domain.rules.trading.cost import TradingCostRule
+from a_domain.types.enums import AiAnalysisFocus, MessageRole, TradeAction, WatchlistType
+from a_domain.types.ids import DecisionId, RunId
 from c_infrastructure.system.market_clock import TaiwanMarketClock
 
 PROMPT_TEMPLATES = {
@@ -67,7 +72,6 @@ class FakeMarketClock(TaiwanMarketClock):
     """Taiwan-time clock whose current time and market session are set by the test."""
 
     def __init__(self, now: datetime, market_open: bool) -> None:
-        super().__init__()
         self.current_time = now
         self.market_open = market_open
 
@@ -233,26 +237,32 @@ class FakeKnowledgeRepository:
         self.decisions.append((stock.stock_id, signal))
 
 
-class FakeSignalRepository:
-    def __init__(self) -> None:
-        self.saved: list[TradeSignal] = []
+@dataclass
+class FakeTradingJournal:
+    """Holds what TradingJournal writes: one row per run, decision, order and snapshot, upserted by key."""
 
-    async def save(self, signal: TradeSignal) -> None:
-        self.saved.append(signal.model_copy())
+    runs: dict[RunId, SystemStats] = field(default_factory=dict)
+    signals: list[TradeSignal] = field(default_factory=list)
+    signal_runs: dict[DecisionId, RunId] = field(default_factory=dict)
+    orders: dict[UUID, Order] = field(default_factory=dict)
+    account_snapshots: list[AccountSnapshot] = field(default_factory=list)
 
-    async def save_batch(self, signals: list[TradeSignal]) -> None:
-        self.saved.extend(signal.model_copy() for signal in signals)
+    async def save_run(self, run: SystemStats) -> None:
+        self.runs[run.run_id] = run.model_copy(deep=True)
 
-    async def get_by_stock_id(self, stock_id: str, start_date: datetime | None = None, limit: int = 10) -> list[TradeSignal]:
-        matching = [
-            signal
-            for signal in self.saved
-            if signal.stock_id == stock_id and (start_date is None or signal.generated_at >= start_date)
-        ]
-        return sorted(matching, key=lambda signal: signal.generated_at, reverse=True)[:limit]
+    async def save_signals(self, run_id: RunId, signals: list[TradeSignal]) -> None:
+        for signal in signals:
+            self.signals.append(signal.model_copy())
+            self.signal_runs[signal.decision_id] = run_id
 
-    async def get_latest(self, limit: int = 50) -> list[TradeSignal]:
-        return sorted(self.saved, key=lambda signal: signal.generated_at, reverse=True)[:limit]
+    async def save_order(self, order: Order) -> None:
+        self.orders[order.id] = order.model_copy()
+
+    async def save_snapshot(self, snapshot: AccountSnapshot) -> None:
+        self.account_snapshots.append(snapshot.model_copy(deep=True))
+
+    async def snapshots(self) -> list[AccountSnapshot]:
+        return sorted(self.account_snapshots, key=lambda snapshot: snapshot.taken_at)
 
 
 class FakeWatchlistRepository:
@@ -285,34 +295,28 @@ class FakeWatchlistRepository:
 
 
 class RecordingExecutionProvider:
-    """Broker that records each place_order call, rejects invalid orders like MockExecutionProvider, and fills the rest."""
+    """Broker that records each place_order call and fills it in full at its limit, charging fees like the mock."""
 
-    def __init__(self, cash: float = 1_000_000.0) -> None:
+    def __init__(self, cash: float = 1_000_000.0, cost_rule: TradingCostRule | None = None) -> None:
         self.cash = cash
         self.positions: list[Position] = []
         self.placed: list[Order] = []
+        self._cost_rule = cost_rule or TradingCostRule(fee_rate=0.001425, tax_rate=0.003, min_fee=20)
 
     async def place_order(self, order: Order) -> Order:
         self.placed.append(order.model_copy())
+        assert order.limit_price is not None, "the app sends LIMIT orders only"
 
-        try:
-            order.validate_submission()
-        except ValueError as error:
-            order.reject(str(error))
-            return order
+        cost = self._cost_rule.cost_of(order.action, order.limit_price, order.quantity)
+        held = next((position for position in self.positions if position.stock_id == order.stock_id), None)
+        realized_pnl = held.profit_on_sale(order.quantity, cost.net) if order.action == TradeAction.SELL and held else None
 
-        assert order.limit_price is not None
-        order.fill(order.limit_price)
+        order.submit()
+        order.fill(order.quantity, order.limit_price, cost, realized_pnl)
         return order
 
-    async def cancel_order(self, order_id: UUID) -> Order | None:
-        return None
-
-    async def get_positions(self) -> list[Position]:
-        return [position.model_copy() for position in self.positions]
-
-    async def get_cash_balance(self) -> float:
-        return self.cash
+    async def get_account(self) -> Account:
+        return Account(cash=self.cash, positions=[position.model_copy() for position in self.positions])
 
 
 class FakeTechnicalSettingsRepository:

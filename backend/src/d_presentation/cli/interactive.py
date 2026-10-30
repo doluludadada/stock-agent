@@ -1,7 +1,7 @@
 import asyncio
 import os
 import sys
-from datetime import datetime
+from datetime import date, datetime
 
 from rich.console import Console
 from rich.panel import Panel
@@ -20,18 +20,22 @@ from a_domain.model.valuation.valuation import (
     TargetPe,
     ValuationExplanation,
 )
+from a_domain.rules.trading.valuation import AccountValuation, EquityPoint
 from a_domain.types.enums import WatchlistType
 from b_application.pipeline import Pipeline
 from b_application.schemas.config import AppConfig
 from b_application.schemas.pipeline_status import PipelineStatus
-from b_application.use_cases.trade.manual_buy import ManualBuy
+from b_application.use_cases.trade.account_history import AccountHistory
+from b_application.use_cases.trade.manual_buy import ManualBuy, ManualBuyRefusal, ManualBuyResult
 from b_application.use_cases.trade.watch_stocks import WatchStocks
 from b_application.valuation_pipeline import ValuationPipeline
+from c_infrastructure.database.db_connector import OutdatedDatabaseError
+from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 from d_presentation.cli.cli_container import build_cli_orchestrator
 
 console = Console()
 
-# TODO:simplify it and catch only KeyboardInterrupt locally
+# Ctrl-C raises KeyboardInterrupt and Ctrl-D (end of input) raises EOFError; both cancel the prompt.
 USER_CANCELLED_EXCEPTIONS = (KeyboardInterrupt, EOFError)
 
 VALUATION_MENU_CHOICES = ("5", "6")
@@ -52,7 +56,11 @@ async def interactive_menu() -> None:
                 await execute_valuation_choice(choice=choice, valuation=runtime.valuation, config=runtime.config)
             else:
                 context = await execute_menu_choice(
-                    choice=choice, pipeline=runtime.pipeline, watch_stocks=runtime.watch_stocks, manual_buy=runtime.manual_buy
+                    choice=choice,
+                    pipeline=runtime.pipeline,
+                    watch_stocks=runtime.watch_stocks,
+                    manual_buy=runtime.manual_buy,
+                    account_history=runtime.account_history,
                 )
 
                 if context is not None:
@@ -68,14 +76,14 @@ async def interactive_menu() -> None:
 
 def ask_menu_choice() -> str | None:
     try:
-        return Prompt.ask("Select an option", choices=["0", "1", "2", "3", "4", "5", "6"])
+        return Prompt.ask("Select an option", choices=["0", "1", "2", "3", "4", "5", "6", "7"])
     except USER_CANCELLED_EXCEPTIONS:
         console.print("\n[yellow]Exiting.[/yellow]")
         return None
 
 
 async def execute_menu_choice(
-    choice: str, pipeline: Pipeline, watch_stocks: WatchStocks, manual_buy: ManualBuy
+    choice: str, pipeline: Pipeline, watch_stocks: WatchStocks, manual_buy: ManualBuy, account_history: AccountHistory
 ) -> PipelineStatus | None:
     if choice == "1":
         return await pipeline.run_full_cycle()
@@ -88,6 +96,9 @@ async def execute_menu_choice(
 
     if choice == "4":
         return await run_specific_stock_flow(pipeline=pipeline, watch_stocks=watch_stocks, manual_buy=manual_buy)
+
+    if choice == "7":
+        await run_account_history(account_history)
 
     return None
 
@@ -140,6 +151,11 @@ def print_menu(config: AppConfig) -> None:
     console.print("    Find stocks priced below EPS x your target P/E.")
     console.print("    Optionally confirm the matches with the active technical strategy.")
     console.print("    Read-only: never touches the watchlist or orders.")
+    console.print("")
+
+    console.print("[7] Account History")
+    console.print("    Show cash, positions and unrealized PnL at the latest prices.")
+    console.print("    Show the equity curve and the account as of a date. Never places orders.")
     console.print("\n[0] Exit")
 
 
@@ -209,19 +225,96 @@ def print_watchlist_result(stocks: list[Stock]) -> None:
     console.print(f"[green]Added to manual watchlist: {stock_ids}[/green]")
 
 
-def print_manual_buy_result(status: PipelineStatus) -> None:
-    if status.orders:
-        order = status.orders[-1]
-
-        console.print(f"[green]Manual BUY result: {order.stock_id} | {order.status.value.upper()} | Qty={order.quantity}[/green]")
+def print_manual_buy_result(result: ManualBuyResult) -> None:
+    if isinstance(result, ManualBuyRefusal):
+        console.print(f"[yellow]Manual BUY not placed: {result.stock_id} | {result.reason}[/yellow]")
         return
 
-    if status.stats.errors:
-        console.print(f"[red]{status.stats.errors[-1]}[/red]")
+    style = "green" if result.filled_quantity else "red"
+    console.print(
+        f"[{style}]Manual BUY result: {result.stock_id} | {result.status.value.upper()} | "
+        f"Filled {result.filled_quantity}/{result.quantity} @ {format_number(result.average_filled_price)} | "
+        f"Fee={result.fee} | Reason: {result.reason or '-'}[/{style}]"
+    )
+
+
+async def run_account_history(account_history: AccountHistory) -> None:
+    as_of = ask_as_of_date()
+    report = await account_history.execute(as_of=as_of)
+
+    print_account_valuation("Account Now", report.current)
+    print_equity_curve(report.equity_curve)
+
+    if as_of is None:
         return
 
-    if status.signals:
-        console.print("[yellow]Manual BUY signal created, but no order was submitted.[/yellow]")
+    if report.as_of is None:
+        console.print(f"[yellow]No fill recorded on or before {as_of.isoformat()}.[/yellow]")
+        return
+
+    snapshot, valuation = report.as_of
+    print_account_valuation(f"Account As Of {as_of.isoformat()} (last fill {format_datetime(snapshot.taken_at)})", valuation)
+
+
+def ask_as_of_date() -> date | None:
+    try:
+        raw_date = Prompt.ask("Show the account as of date (YYYY-MM-DD, blank to skip)", default="", show_default=False)
+    except USER_CANCELLED_EXCEPTIONS:
+        return None
+
+    if not raw_date.strip():
+        return None
+
+    try:
+        return date.fromisoformat(raw_date.strip())
+    except ValueError:
+        console.print(f"[yellow]Not a date: {raw_date}. Showing the current account only.[/yellow]")
+        return None
+
+
+def print_account_valuation(title: str, valuation: AccountValuation) -> None:
+    table = Table(title=title)
+    table.add_column("Stock")
+    table.add_column("Qty", justify="right")
+    table.add_column("Avg Cost", justify="right")
+    table.add_column("Price", justify="right")
+    table.add_column("Price Time")
+    table.add_column("Market Value", justify="right")
+    table.add_column("Unrealized PnL", justify="right")
+
+    for held in valuation.positions:
+        table.add_row(
+            held.position.stock_id,
+            str(held.position.quantity),
+            format_number(held.position.average_cost),
+            format_number(held.mark.close if held.mark else None),
+            format_datetime(held.mark.ts if held.mark else None),
+            format_number(held.market_value),
+            format_number(held.unrealized_pnl),
+        )
+
+    console.print(table)
+    console.print(
+        f"Cash={format_number(valuation.cash)}, Market Value={format_number(valuation.market_value)}, "
+        f"Equity={format_number(valuation.equity)}, Unrealized PnL={format_number(valuation.unrealized_pnl)}"
+    )
+
+
+def print_equity_curve(points: list[EquityPoint]) -> None:
+    if not points:
+        console.print("No fills recorded yet, so there is no equity curve.")
+        return
+
+    table = Table(title="Equity Curve")
+    table.add_column("Day")
+    table.add_column("Cash", justify="right")
+    table.add_column("Market Value", justify="right")
+    table.add_column("Equity", justify="right")
+
+    for point in points:
+        table.add_row(point.day.isoformat(), format_number(point.cash), format_number(point.market_value), format_number(point.equity))
+
+    console.print(table)
 
 
 def parse_stock_ids(raw_symbols: str) -> list[str]:
@@ -250,6 +343,9 @@ def print_context_summary(context: PipelineStatus) -> None:
 
     print_signals_table(context)
 
+    if context.orders:
+        print_orders_table(context)
+
 
 def print_stale_market_data(context: PipelineStatus) -> None:
     table = Table(title="Blocked Stale Market Data")
@@ -275,16 +371,41 @@ def print_signals_table(context: PipelineStatus) -> None:
     table.add_column("Reason")
 
     for signal in context.signals:
-        stock = context.stocks_cache.get(signal.stock_id)
-        data_time = stock.latest_market_data_at if stock is not None else None
-
         table.add_row(
             signal.stock_id,
             signal.action.value.upper(),
             str(signal.score),
             str(signal.quantity),
-            format_datetime(data_time),
+            format_datetime(signal.price_observed_at),
             signal.reason,
+        )
+
+    console.print(table)
+
+
+def print_orders_table(context: PipelineStatus) -> None:
+    table = Table(title="Orders")
+    table.add_column("Stock")
+    table.add_column("Action")
+    table.add_column("Status")
+    table.add_column("Filled", justify="right")
+    table.add_column("Price", justify="right")
+    table.add_column("Fee", justify="right")
+    table.add_column("Tax", justify="right")
+    table.add_column("Realized PnL", justify="right")
+    table.add_column("Reason")
+
+    for order in context.orders:
+        table.add_row(
+            order.stock_id,
+            order.action.value.upper(),
+            order.status.value.upper(),
+            f"{order.filled_quantity}/{order.quantity}",
+            format_number(order.average_filled_price or order.limit_price),
+            str(order.fee),
+            str(order.tax),
+            format_number(order.realized_pnl),
+            order.reason or "-",
         )
 
     console.print(table)
@@ -309,6 +430,7 @@ def create_stock_report_table() -> Table:
     table.add_column("Stock")
     table.add_column("Name")
     table.add_column("Price", justify="right")
+    table.add_column("Data Time")
     table.add_column("Tech", justify="right")
     table.add_column("AI", justify="right")
     table.add_column("Composite", justify="right")
@@ -327,6 +449,7 @@ def add_stock_report_row(table: Table, stock: Stock) -> None:
         stock.stock_id,
         stock.name or "",
         format_number(stock.current_price),
+        format_datetime(stock.latest_market_data_at),
         format_optional_int(stock.technical_score),
         format_optional_int(stock.ai_score),
         format_optional_int(stock.composite_score),
@@ -624,10 +747,15 @@ def format_datetime(value: datetime | None) -> str:
     if value is None:
         return "-"
 
-    return value.isoformat(timespec="seconds")
+    if value.tzinfo is None:
+        return f"{value:%Y-%m-%d %H:%M}"
+
+    return f"{value.astimezone(TAIWAN_TIMEZONE):%Y-%m-%d %H:%M}"
 
 
 if __name__ == "__main__":
+    exit_code = 0
+
     try:
         if sys.platform == "win32":
             asyncio.run(interactive_menu(), loop_factory=asyncio.SelectorEventLoop)
@@ -637,5 +765,9 @@ if __name__ == "__main__":
     except KeyboardInterrupt, asyncio.CancelledError, SystemExit:
         pass
 
+    except OutdatedDatabaseError as error:
+        console.print(str(error), style="red", markup=False, highlight=False)
+        exit_code = 1
+
     finally:
-        os._exit(0)
+        os._exit(exit_code)

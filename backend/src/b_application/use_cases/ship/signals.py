@@ -2,48 +2,42 @@ from a_domain.model.market.stock import Stock
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.model.trading.watchlist import StockWatchlist
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from a_domain.ports.trading.signal_repository import ISignalRepository
-from a_domain.rules.trading.decision import DecisionRule
-from a_domain.rules.trading.entry import EntryRule
-from a_domain.rules.trading.exit import ExitRule
-from a_domain.rules.trading.sizing import SizingRule
+from a_domain.ports.trading.trading_journal import ITradingJournal
 from b_application.schemas.config import AppConfig
 from b_application.schemas.pipeline_status import PipelineStatus
 
 
 class Signals:
-    """Generates and persists trading signals."""
+    """Generates trading decisions and records them. Only recorded decisions reach the run's signals."""
 
-    def __init__(self, signal_repository: ISignalRepository, config: AppConfig, logger: ILoggingProvider) -> None:
-        self._signal_repository = signal_repository
+    def __init__(self, journal: ITradingJournal, config: AppConfig, logger: ILoggingProvider) -> None:
+        self._journal = journal
+        self._decision_rule = config.decision_rule()
         self._logger = logger
-
-        sizing_rule = SizingRule(
-            risk_per_trade_pct=config.analysis.risk_per_trade_pct, stop_loss_pct=config.analysis.stop_loss_pct, lot_size=1
-        )
-
-        self._decision_rule = DecisionRule(
-            entry_rule=EntryRule(buy_threshold=config.analysis.min_combined_score_buy, sizing_rule=sizing_rule),
-            exit_rule=ExitRule(stop_loss_pct=config.analysis.stop_loss_pct, sell_threshold=config.analysis.max_combined_score_sell),
-        )
 
     async def execute(self, watchlist: StockWatchlist, status: PipelineStatus) -> None:
         self._logger.info(f"Generating signals for {len(watchlist.willing_stocks)} watchlist stocks.")
 
-        generated_signals: list[TradeSignal] = []
-
-        for stock in watchlist.willing_stocks:
-            signal = self.generate_signal(stock, status)
-
-            if signal is not None:
-                status.signals.append(signal)
-                generated_signals.append(signal)
+        generated_signals = [
+            signal for stock in watchlist.willing_stocks if (signal := self.generate_signal(stock, status)) is not None
+        ]
 
         if not generated_signals:
             self._logger.info("No new trading signals were generated.")
             return
 
-        await self.persist_signals(generated_signals, status)
+        try:
+            await self._journal.save_signals(status.stats.run_id, generated_signals)
+
+        except Exception as error:
+            message = f"Signal persistence failed, so none of these {len(generated_signals)} decisions is acted on: {error}"
+            self._logger.error(message)
+            status.stats.add_error(message)
+            return
+
+        status.signals.extend(generated_signals)
+        status.stats.signals_generated += len(generated_signals)
+        self._logger.info(f"Signals persisted: total={len(generated_signals)}")
 
     def generate_signal(self, stock: Stock, status: PipelineStatus) -> TradeSignal | None:
         if stock.stock_id in status.risk_blocked_stock_ids:
@@ -60,7 +54,7 @@ class Signals:
 
         try:
             return self._decision_rule.decide(
-                stock=stock, account=status.account, position=status.positions_by_stock_id.get(stock.stock_id)
+                stock=stock, account=status.account, position=status.account.position_for(stock.stock_id)
             )
 
         except Exception as error:
@@ -68,16 +62,3 @@ class Signals:
             self._logger.error(message)
             status.stats.add_error(message)
             return None
-
-    async def persist_signals(self, signals: list[TradeSignal], status: PipelineStatus) -> None:
-        try:
-            await self._signal_repository.save_batch(signals)
-            status.stats.signals_generated += len(signals)
-
-        except Exception as error:
-            message = f"Signal persistence failed: {error}"
-            self._logger.error(message)
-            status.stats.add_error(message)
-            return
-
-        self._logger.info(f"Signals persisted: total={len(signals)}")

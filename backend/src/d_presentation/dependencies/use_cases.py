@@ -13,7 +13,7 @@ from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.system.notification_provider import INotificationProvider
 from a_domain.ports.trading.execution_provider import IExecutionProvider
-from a_domain.ports.trading.signal_repository import ISignalRepository
+from a_domain.ports.trading.trading_journal import ITradingJournal
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
 from b_application.pipeline import Pipeline
 from b_application.schemas.config import AppConfig
@@ -26,6 +26,7 @@ from b_application.use_cases.process.composite_scorer import CompositeScorer
 from b_application.use_cases.process.technical_filter import TechnicalFilter
 from b_application.use_cases.ship.decision_memory import DecisionMemory
 from b_application.use_cases.ship.reporting import Reporting
+from b_application.use_cases.ship.run_history import RunHistory
 from b_application.use_cases.ship.signals import Signals
 from b_application.use_cases.trade.account_loader import AccountLoader
 from b_application.use_cases.trade.account_risk_check import AccountRiskCheck
@@ -37,8 +38,8 @@ from d_presentation.dependencies.repositories import (
     get_ai_provider,
     get_execution_provider,
     get_knowledge_repository,
-    get_signal_repository,
     get_technical_settings_repository,
+    get_trading_journal,
     get_watchlist_repository,
 )
 
@@ -99,25 +100,29 @@ def get_composite_scorer_use_case(
 def get_account_loader_use_case(
     execution_provider: Annotated[IExecutionProvider, Depends(get_execution_provider)],
     stock_provider: Annotated[IStockProvider, Depends(get_stock_provider)],
+    journal: Annotated[ITradingJournal, Depends(get_trading_journal)],
+    market_clock: Annotated[IMarketClock, Depends(get_market_clock)],
     logger: Annotated[ILoggingProvider, Depends(get_logger)],
 ) -> AccountLoader:
-    return AccountLoader(execution_provider=execution_provider, stock_provider=stock_provider, logger=logger)
+    return AccountLoader(
+        execution_provider=execution_provider, stock_provider=stock_provider, journal=journal, market_clock=market_clock, logger=logger
+    )
 
 
 def get_account_risk_check_use_case(
-    signal_repository: Annotated[ISignalRepository, Depends(get_signal_repository)],
+    journal: Annotated[ITradingJournal, Depends(get_trading_journal)],
     config: Annotated[AppConfig, Depends(get_settings)],
     logger: Annotated[ILoggingProvider, Depends(get_logger)],
 ) -> AccountRiskCheck:
-    return AccountRiskCheck(signal_repository=signal_repository, config=config, logger=logger)
+    return AccountRiskCheck(journal=journal, config=config, logger=logger)
 
 
 def get_signals_use_case(
-    signal_repository: Annotated[ISignalRepository, Depends(get_signal_repository)],
+    journal: Annotated[ITradingJournal, Depends(get_trading_journal)],
     config: Annotated[AppConfig, Depends(get_settings)],
     logger: Annotated[ILoggingProvider, Depends(get_logger)],
 ) -> Signals:
-    return Signals(signal_repository=signal_repository, config=config, logger=logger)
+    return Signals(journal=journal, config=config, logger=logger)
 
 
 def get_decision_memory_use_case(
@@ -129,11 +134,28 @@ def get_decision_memory_use_case(
 
 def get_order_execution_use_case(
     execution_provider: Annotated[IExecutionProvider, Depends(get_execution_provider)],
+    journal: Annotated[ITradingJournal, Depends(get_trading_journal)],
+    account_loader: Annotated[AccountLoader, Depends(get_account_loader_use_case)],
     market_clock: Annotated[IMarketClock, Depends(get_market_clock)],
     config: Annotated[AppConfig, Depends(get_settings)],
     logger: Annotated[ILoggingProvider, Depends(get_logger)],
 ) -> OrderExecution:
-    return OrderExecution(execution_provider=execution_provider, market_clock=market_clock, config=config, logger=logger)
+    return OrderExecution(
+        execution_provider=execution_provider,
+        journal=journal,
+        account_loader=account_loader,
+        market_clock=market_clock,
+        config=config,
+        logger=logger,
+    )
+
+
+def get_run_history_use_case(
+    journal: Annotated[ITradingJournal, Depends(get_trading_journal)],
+    config: Annotated[AppConfig, Depends(get_settings)],
+    logger: Annotated[ILoggingProvider, Depends(get_logger)],
+) -> RunHistory:
+    return RunHistory(journal=journal, config=config, logger=logger)
 
 
 def get_reporting_use_case(
@@ -166,6 +188,7 @@ def get_pipeline(
     decision_memory: Annotated[DecisionMemory, Depends(get_decision_memory_use_case)],
     order_execution: Annotated[OrderExecution, Depends(get_order_execution_use_case)],
     reporting: Annotated[Reporting, Depends(get_reporting_use_case)],
+    run_history: Annotated[RunHistory, Depends(get_run_history_use_case)],
     technical_settings_repository: Annotated[ITechnicalSettingsRepository, Depends(get_technical_settings_repository)],
     logger: Annotated[ILoggingProvider, Depends(get_logger)],
 ) -> Pipeline:
@@ -184,6 +207,7 @@ def get_pipeline(
         decision_memory=decision_memory,
         order_execution=order_execution,
         reporting=reporting,
+        run_history=run_history,
         technical_settings_repository=technical_settings_repository,
         logger=logger,
     )

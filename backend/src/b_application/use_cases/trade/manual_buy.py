@@ -1,108 +1,96 @@
-from datetime import UTC, datetime
+from dataclasses import dataclass
 
 from a_domain.model.market.stock import Stock
-from a_domain.model.trading.signal import TradeSignal
+from a_domain.model.trading.order import Order
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from a_domain.ports.trading.signal_repository import ISignalRepository
-from a_domain.rules.trading.sizing import SizingRule
-from a_domain.types.enums import SignalSource, TradeAction
+from a_domain.ports.trading.trading_journal import ITradingJournal
+from a_domain.types.enums import TradeAction, Workflow
 from b_application.schemas.config import AppConfig
-from b_application.schemas.pipeline_status import PipelineStatus
 from b_application.use_cases.collect.market_data_collector import MarketDataCollector
 from b_application.use_cases.ship.decision_memory import DecisionMemory
+from b_application.use_cases.ship.run_history import RunHistory
 from b_application.use_cases.trade.account_loader import AccountLoader
 from b_application.use_cases.trade.order_execution import OrderExecution
 
 
+@dataclass(frozen=True)
+class ManualBuyRefusal:
+    """A confirmed manual BUY that produced no order, and why."""
+
+    stock_id: str
+    reason: str
+
+
+type ManualBuyResult = Order | ManualBuyRefusal
+"""The order record when the BUY decision reached OrderExecution (its status and reason say what happened), else the refusal."""
+
+
 class ManualBuy:
     """
-    Use Case: Explicit user BUY override.
+    Use Case: Explicit user BUY override, as its own recorded run.
 
-    This bypasses the automatic EntryRule BUY threshold.
-
-    It does not bypass:
-    - account loading
-    - realtime data freshness
-    - position sizing
-    - order-mode validation
-    - market-open validation
-    - order validation
-    - execution-provider validation
+    It bypasses only the automatic buy threshold. Account loading, realtime refresh, sizing with
+    fees, decision recording, the order gates (order mode, market open, price freshness) and the
+    broker's own checks all still apply.
     """
 
     def __init__(
         self,
+        run_history: RunHistory,
         account_loader: AccountLoader,
         market_data_collector: MarketDataCollector,
-        signal_repository: ISignalRepository,
+        journal: ITradingJournal,
         decision_memory: DecisionMemory,
         order_execution: OrderExecution,
         config: AppConfig,
         logger: ILoggingProvider,
     ) -> None:
+        self._run_history = run_history
         self._account_loader = account_loader
         self._market_data_collector = market_data_collector
-        self._signal_repository = signal_repository
+        self._journal = journal
         self._decision_memory = decision_memory
         self._order_execution = order_execution
+        self._entry_rule = config.decision_rule().entry_rule
         self._logger = logger
 
-        self._sizing_rule = SizingRule(
-            risk_per_trade_pct=config.analysis.risk_per_trade_pct, stop_loss_pct=config.analysis.stop_loss_pct, lot_size=1
-        )
+    async def execute(self, stock: Stock) -> ManualBuyResult:
+        async with self._run_history.open(Workflow.MANUAL_BUY) as status:
+            status.manual_stocks = [stock]
+            status.stocks_cache[stock.stock_id] = stock
 
-    async def execute(self, stock: Stock) -> PipelineStatus:
-        status = PipelineStatus(manual_stocks=[stock], stocks_cache={stock.stock_id: stock})
+            if stock.composite_score is None:
+                return self.refuse(stock, "analysis incomplete: no composite score")
 
-        if stock.composite_score is None:
-            return self.reject(status, f"Manual BUY rejected. Analysis incomplete: {stock.stock_id}")
+            await self._account_loader.execute(status)
+            await self._market_data_collector.refresh_realtime([stock], status)
 
-        await self._account_loader.execute(status)
-        await self._market_data_collector.refresh_realtime([stock], status)
+            if stock.current_price is None:
+                return self.refuse(stock, "no price: the realtime quote and the daily history are both unavailable")
 
-        current_price = stock.current_price
+            signal = self._entry_rule.decide_manual(stock, status.account)
 
-        if stock.stock_id in status.stale_stock_ids or current_price is None or current_price <= 0:
-            return self.reject(status, f"Manual BUY rejected. Realtime price unavailable: {stock.stock_id}")
+            try:
+                await self._journal.save_signals(status.stats.run_id, [signal])
 
-        quantity = self._sizing_rule.calculate(account=status.account, price=current_price)
+            except Exception as error:
+                status.stats.add_error(f"Manual BUY decision not saved: {error}")
+                return self.refuse(stock, f"the decision could not be recorded, so no order was sent: {error}")
 
-        if quantity <= 0:
-            return self.reject(status, f"Manual BUY rejected. No valid quantity: {stock.stock_id}")
+            status.signals.append(signal)
+            status.stats.signals_generated += 1
 
-        signal = self.create_signal(stock, current_price, quantity)
+            if signal.action == TradeAction.HOLD:
+                return self.refuse(stock, signal.reason)
 
-        await self._signal_repository.save(signal)
-        status.signals.append(signal)
-        status.stats.signals_generated += 1
+            await self._decision_memory.execute(status)
+            await self._order_execution.execute([signal], status)
 
-        await self._decision_memory.execute(status)
-        await self._order_execution.execute([signal], status)
+            order = next(order for order in status.orders if order.decision_id == signal.decision_id)
+            self._logger.info(f"Manual BUY {stock.stock_id}: {order.status.value.upper()} {order.reason or ''}")
 
-        status.stats.finish()
+            return order
 
-        self._logger.info(f"Manual BUY completed: {stock.stock_id}, quantity={quantity}, price={stock.current_price}")
-
-        return status
-
-    def create_signal(self, stock: Stock, current_price: float, quantity: int) -> TradeSignal:
-        if stock.composite_score is None:
-            raise ValueError("Manual BUY requires composite score")
-
-        return TradeSignal(
-            stock_id=stock.stock_id,
-            action=TradeAction.BUY,
-            price_at_signal=current_price,
-            source=SignalSource.MANUAL,
-            score=stock.composite_score,
-            reason="Manual BUY override confirmed by user.",
-            quantity=quantity,
-            generated_at=datetime.now(UTC),
-        )
-
-    def reject(self, status: PipelineStatus, message: str) -> PipelineStatus:
-        status.stats.add_error(message)
-        status.stats.finish()
-        self._logger.warning(message)
-
-        return status
+    def refuse(self, stock: Stock, reason: str) -> ManualBuyRefusal:
+        self._logger.warning(f"Manual BUY {stock.stock_id} not placed: {reason}")
+        return ManualBuyRefusal(stock_id=stock.stock_id, reason=reason)

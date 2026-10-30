@@ -1,35 +1,29 @@
-# backend/src/c_infrastructure/services/market_clock.py
+# backend/src/c_infrastructure/system/market_clock.py
 
-from datetime import date, datetime, time, timedelta, timezone, tzinfo
+from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 from a_domain.ports.system.market_clock import IMarketClock
 
-# TODO Think a better way
-TAIWAN_TIMEZONE = timezone(timedelta(hours=8), name="UTC+08:00")
-SESSION_OPEN = time(9, 0)
-SESSION_CLOSE = time(13, 30)
+TAIWAN_TIMEZONE = ZoneInfo("Asia/Taipei")
+TAIWAN_SESSION_OPEN = time(9, 0)
+TAIWAN_SESSION_CLOSE = time(13, 30)
 
 
-# TODO: What the hell with this name?
-class FixedOffsetMarketClock(IMarketClock):
-    def __init__(self, market_timezone: tzinfo):
-        self._timezone = market_timezone
-
-    @property
-    def timezone(self) -> tzinfo:
-        return self._timezone
+class TaiwanMarketClock(IMarketClock):
+    """Asia/Taipei wall clock and the regular TWSE/TPEX trading session (Mon-Fri 09:00-13:30)."""
 
     def now(self) -> datetime:
-        return datetime.now(self._timezone)
+        return datetime.now(TAIWAN_TIMEZONE)
 
     def today(self) -> date:
         return self.now().date()
 
     def to_market_datetime(self, value: datetime) -> datetime:
         if value.tzinfo is None:
-            return value.replace(tzinfo=self._timezone)
+            return value.replace(tzinfo=TAIWAN_TIMEZONE)
 
-        return value.astimezone(self._timezone)
+        return value.astimezone(TAIWAN_TIMEZONE)
 
     def to_trading_date(self, value: datetime) -> date:
         return self.to_market_datetime(value).date()
@@ -39,37 +33,20 @@ class FixedOffsetMarketClock(IMarketClock):
         start_day = end_day - timedelta(days=lookback_days)
 
         return (
-            datetime.combine(start_day, time.min, tzinfo=self._timezone),
-            datetime.combine(end_day, time.max, tzinfo=self._timezone),
+            datetime.combine(start_day, time.min, tzinfo=TAIWAN_TIMEZONE),
+            datetime.combine(end_day, time.max, tzinfo=TAIWAN_TIMEZONE),
         )
 
-    def is_market_open(self) -> bool:
-        raise NotImplementedError("Market-open rules must be implemented by the market-specific clock.")
-
-    def last_closed_session(self) -> date:
-        raise NotImplementedError("Session rules must be implemented by the market-specific clock.")
-
-
-class TaiwanMarketClock(FixedOffsetMarketClock):
-    def __init__(self):
-        super().__init__(market_timezone=TAIWAN_TIMEZONE)
-
-    def is_market_open(self) -> bool:
-        now = self.now()
-
-        if now.weekday() >= 5:
-            return False
-
-        return SESSION_OPEN <= now.time() <= SESSION_CLOSE
-
     def last_closed_session(self) -> date:
         now = self.now()
+        day = now.date() if now.time() >= TAIWAN_SESSION_CLOSE else now.date() - timedelta(days=1)
 
-        if now.weekday() < 5 and now.time() >= SESSION_CLOSE:
-            return now.date()
-
-        day = now.date() - timedelta(days=1)
         while day.weekday() >= 5:
             day -= timedelta(days=1)
 
         return day
+
+    def is_market_open(self) -> bool:
+        now = self.now()
+
+        return now.weekday() < 5 and TAIWAN_SESSION_OPEN <= now.time() <= TAIWAN_SESSION_CLOSE

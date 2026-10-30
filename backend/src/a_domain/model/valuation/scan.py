@@ -158,7 +158,7 @@ ELIMINATION_LABELS = {
     EliminationReason.PRICE_MISSING: "無有效股價",
     EliminationReason.PRICE_STALE: "股價過期",
     EliminationReason.BELOW_MIN_UNDERVALUATION: "低估幅度未達條件",
-    EliminationReason.NO_PRICE_HISTORY: "無日線資料，無法執行技術策略",
+    EliminationReason.NO_PRICE_HISTORY: "無可用日線資料（缺漏或已過期），無法執行技術策略",
     EliminationReason.TECHNICAL_HARD_FAILURE: "技術面 hard failure",
 }
 

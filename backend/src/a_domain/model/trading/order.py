@@ -1,109 +1,133 @@
 import math
-from datetime import datetime
-from uuid import UUID, uuid4
+from collections.abc import Mapping
+from datetime import UTC, datetime
+from typing import Literal, Self
 
+from pydantic import model_validator
 from sqlmodel import Field, SQLModel
 
-from a_domain.types.enums import OrderStatus, OrderType, TimeInForce, TradeAction
+from a_domain.rules.trading.cost import TradeCost
+from a_domain.types.enums import OrderStatus, OrderType, RejectReason, TimeInForce, TradeAction
+from a_domain.types.ids import DecisionId, OrderId, RunId, new_order_id
+
+ORDER_TRANSITIONS: Mapping[OrderStatus, frozenset[OrderStatus]] = {
+    OrderStatus.PENDING: frozenset({OrderStatus.SUBMITTED, OrderStatus.REJECTED, OrderStatus.FAILED, OrderStatus.CANCELLED}),
+    OrderStatus.SUBMITTED: frozenset({OrderStatus.SUBMITTED, OrderStatus.FILLED, OrderStatus.CANCELLED, OrderStatus.FAILED}),
+    OrderStatus.FILLED: frozenset(),
+    OrderStatus.CANCELLED: frozenset(),
+    OrderStatus.REJECTED: frozenset(),
+    OrderStatus.FAILED: frozenset(),
+}
+"""
+Every legal status change. SUBMITTED -> SUBMITTED is a partial fill that leaves the rest working.
+
+- PENDING: built by the app, not yet accepted by a broker.
+- SUBMITTED: accepted and working; may hold a partial fill.
+- FILLED: the whole quantity executed.
+- CANCELLED: stopped before the whole quantity executed (by a cancel, an IOC remainder, or a FOK kill); may hold a partial fill.
+- REJECTED: refused by a business or validation rule before acceptance (gate refused, invalid order, insufficient cash or shares).
+- FAILED: a technical error (exception, broker unreachable), whatever state the order was in.
+"""
+
+
+class IllegalOrderTransition(ValueError):
+    pass
 
 
 class Order(SQLModel):
-    """Represents a broker order and its current execution state."""
+    """
+    The app's record of one order: the decision it executes, what went to (or was refused before)
+    the broker, and how it ended. OrderExecution saves it in the `orders` table whichever provider ran it.
+    """
 
-    id: UUID = Field(default_factory=uuid4)
+    id: OrderId = Field(default_factory=new_order_id)
+    run_id: RunId
+    decision_id: DecisionId
 
     stock_id: str = Field(min_length=1)
-    action: TradeAction
+    action: Literal[TradeAction.BUY, TradeAction.SELL]
     order_type: OrderType
     quantity: int = Field(gt=0)
-
     limit_price: float | None = Field(default=None, gt=0)
-    average_filled_price: float | None = Field(default=None, gt=0)
-    time_in_force: TimeInForce = TimeInForce.ROD
+    time_in_force: TimeInForce
 
     status: OrderStatus = OrderStatus.PENDING
     reason: str | None = None
 
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
+    filled_quantity: int = Field(default=0, ge=0)
+    average_filled_price: float | None = Field(default=None, gt=0)
+    fee: int = Field(default=0, ge=0)
+    tax: int = Field(default=0, ge=0)
+    realized_pnl: float | None = None
+    """SELL only: proceeds net of fee and tax minus the cost basis (buy fees included) of the shares sold."""
 
-    # ---------------------------------------------------------------------------- #
-    #                                   Functions                                  #
-    # ---------------------------------------------------------------------------- #
-    def validate_submission(self) -> None:
-        if self.status != OrderStatus.PENDING:
-            raise ValueError(f"Cannot submit order from status {self.status}")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
-        if self.action == TradeAction.HOLD:
-            raise ValueError("HOLD is not an executable order action")
+    @model_validator(mode="after")
+    def _price_matches_order_type(self) -> Self:
+        if (self.order_type == OrderType.LIMIT) != (self.limit_price is not None):
+            raise ValueError("A LIMIT order needs a limit_price and a MARKET order must not have one")
 
-        if self.order_type == OrderType.LIMIT and self.limit_price is None:
-            raise ValueError("LIMIT order requires limit_price")
+        return self
 
-        if self.order_type == OrderType.MARKET and self.limit_price is not None:
-            raise ValueError("MARKET order must not contain limit_price")
-
-        if self.average_filled_price is not None:
-            raise ValueError("New order must not contain average_filled_price")
-
-        if self.reason is not None:
-            raise ValueError("New order must not contain a terminal reason")
+    @property
+    def remaining_quantity(self) -> int:
+        return self.quantity - self.filled_quantity
 
     def submit(self) -> None:
-        self.validate_submission()
+        """The broker accepted the order."""
+        self._move_to(OrderStatus.SUBMITTED)
 
-        self.status = OrderStatus.SUBMITTED
-        self.reason = None
-        self.updated_at = datetime.now()
+    def fill(self, quantity: int, price: float, cost: TradeCost, realized_pnl: float | None = None) -> None:
+        """Records one execution. The order becomes FILLED when nothing remains, otherwise it keeps working."""
+        self._check_move(OrderStatus.FILLED)
 
-    def fill(self, filled_price: float) -> None:
-        if self.status not in {OrderStatus.PENDING, OrderStatus.SUBMITTED}:
-            raise ValueError(f"Cannot fill order from status {self.status}")
+        if not 0 < quantity <= self.remaining_quantity:
+            raise ValueError(f"Fill quantity {quantity} must be between 1 and the remaining {self.remaining_quantity}")
 
-        if not math.isfinite(filled_price) or filled_price <= 0:
+        if not math.isfinite(price) or price <= 0:
             raise ValueError("Filled price must be positive")
 
-        if self.order_type == OrderType.LIMIT:
-            if self.limit_price is None:
-                raise ValueError("LIMIT order requires limit_price")
+        if cost.action != self.action:
+            raise ValueError(f"{cost.action} cost cannot settle a {self.action} order")
 
-            if self.action == TradeAction.BUY and filled_price > self.limit_price:
-                raise ValueError("BUY fill price cannot exceed limit_price")
+        if self.limit_price is not None and self.action == TradeAction.BUY and price > self.limit_price:
+            raise ValueError("BUY fill price cannot exceed limit_price")
 
-            if self.action == TradeAction.SELL and filled_price < self.limit_price:
-                raise ValueError("SELL fill price cannot be below limit_price")
+        if self.limit_price is not None and self.action == TradeAction.SELL and price < self.limit_price:
+            raise ValueError("SELL fill price cannot be below limit_price")
 
-        self.status = OrderStatus.FILLED
-        self.average_filled_price = filled_price
-        self.reason = None
-        self.updated_at = datetime.now()
+        filled_quantity = self.filled_quantity + quantity
+        self._move_to(OrderStatus.FILLED if filled_quantity == self.quantity else OrderStatus.SUBMITTED)
 
-    def cancel(self) -> None:
-        if self.status != OrderStatus.SUBMITTED:
-            raise ValueError(f"Cannot cancel order from status {self.status}")
+        self.average_filled_price = ((self.average_filled_price or 0) * self.filled_quantity + price * quantity) / filled_quantity
+        self.filled_quantity = filled_quantity
+        self.fee += cost.fee
+        self.tax += cost.tax
 
-        self.status = OrderStatus.CANCELLED
-        self.reason = None
-        self.updated_at = datetime.now()
+        if realized_pnl is not None:
+            self.realized_pnl = (self.realized_pnl or 0) + realized_pnl
 
-    def reject(self, reason: str) -> None:
-        if self.status != OrderStatus.PENDING:
-            raise ValueError(f"Cannot reject order from status {self.status}")
+    def cancel(self, reason: str) -> None:
+        self._move_to(OrderStatus.CANCELLED, reason)
 
-        if not reason.strip():
-            raise ValueError("Rejected order requires a reason")
-
-        self.status = OrderStatus.REJECTED
-        self.reason = reason
-        self.updated_at = datetime.now()
+    def reject(self, reason: RejectReason, detail: str) -> None:
+        self._move_to(OrderStatus.REJECTED, f"{reason.name}: {detail}")
 
     def fail(self, reason: str) -> None:
-        if self.status not in {OrderStatus.PENDING, OrderStatus.SUBMITTED}:
-            raise ValueError(f"Cannot fail order from status {self.status}")
+        self._move_to(OrderStatus.FAILED, reason)
 
-        if not reason.strip():
-            raise ValueError("Failed order requires a reason")
+    def _check_move(self, status: OrderStatus) -> None:
+        if status not in ORDER_TRANSITIONS[self.status]:
+            raise IllegalOrderTransition(f"Cannot move order from {self.status} to {status}")
 
-        self.status = OrderStatus.FAILED
+    def _move_to(self, status: OrderStatus, reason: str | None = None) -> None:
+        self._check_move(status)
+
+        if status in {OrderStatus.CANCELLED, OrderStatus.REJECTED, OrderStatus.FAILED} and not (reason and reason.strip()):
+            raise ValueError(f"{status.value.capitalize()} order requires a reason")
+
+        self.status = status
         self.reason = reason
-        self.updated_at = datetime.now()
+        self.updated_at = datetime.now(UTC)

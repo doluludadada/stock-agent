@@ -8,7 +8,7 @@ from a_domain.model.market.stock import Stock
 from a_domain.ports.market.stock_provider import IStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.types.enums import MarketType
-from c_infrastructure.system.market_clock import SESSION_CLOSE, TAIWAN_TIMEZONE
+from c_infrastructure.system.market_clock import TAIWAN_SESSION_CLOSE, TAIWAN_TIMEZONE
 
 ROC_YEAR_OFFSET = 1911
 
@@ -38,7 +38,7 @@ def parse_daily_close(row: dict[str, str], fields: tuple[str, str, str, str, str
         return None
 
     return Ohlcv(
-        ts=datetime.combine(session, SESSION_CLOSE, TAIWAN_TIMEZONE), open=open_, high=high, low=low, close=close, volume=volume
+        ts=datetime.combine(session, TAIWAN_SESSION_CLOSE, TAIWAN_TIMEZONE), open=open_, high=high, low=low, close=close, volume=volume
     )
 
 

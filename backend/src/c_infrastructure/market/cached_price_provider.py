@@ -35,9 +35,19 @@ class CachedPriceProvider(IOhlcvProvider):
         end_day = self._clock.to_trading_date(end_date)
         stock_ids = [stock.stock_id for stock in stocks]
 
-        cached = await self._load_cached_bars(stock_ids=stock_ids, start_day=start_day, end_day=end_day)
+        # Daily history holds closed sessions only. Yahoo also returns the session in progress, whose bar keeps
+        # changing until the close; caching it would freeze an intraday price as that day's close.
+        last_closed_session = min(end_day, self._clock.last_closed_session())
+        cached = self._closed_sessions(
+            await self._load_cached_bars(stock_ids=stock_ids, start_day=start_day, end_day=end_day), last_closed_session
+        )
 
-        missing = [stock for stock in stocks if stock.stock_id not in cached]
+        # A cached history that ends before the last closed session is refetched; otherwise it would never gain new bars.
+        missing = [
+            stock
+            for stock in stocks
+            if stock.stock_id not in cached or self._clock.to_trading_date(cached[stock.stock_id][-1].ts) < last_closed_session
+        ]
 
         if not missing:
             self._logger.info(f"History cache hit: {len(stocks)}/{len(stocks)} stocks")
@@ -45,7 +55,7 @@ class CachedPriceProvider(IOhlcvProvider):
 
         self._logger.info(f"History cache miss: {len(missing)}/{len(stocks)} stocks")
 
-        fresh = await self._price_provider.fetch_history(missing, start_date, end_date)
+        fresh = self._closed_sessions(await self._price_provider.fetch_history(missing, start_date, end_date), last_closed_session)
 
         await self._save_bars(fresh)
 
@@ -70,7 +80,9 @@ class CachedPriceProvider(IOhlcvProvider):
         bars_by_stock: dict[str, list[Ohlcv]] = {}
 
         for record in records:
-            bars_by_stock.setdefault(record.stock_id, []).append(Ohlcv.model_validate(record))
+            bar = Ohlcv.model_validate(record)
+            bar.ts = self._clock.to_market_datetime(bar.ts)
+            bars_by_stock.setdefault(record.stock_id, []).append(bar)
 
         return bars_by_stock
 
@@ -109,6 +121,13 @@ class CachedPriceProvider(IOhlcvProvider):
             await session.commit()
 
         self._logger.info(f"Saved OHLCV cache completed: {saved_count}/{total}")
+
+    def _closed_sessions(self, bars_by_stock: dict[str, list[Ohlcv]], last_closed_session: date) -> dict[str, list[Ohlcv]]:
+        closed = {
+            stock_id: [bar for bar in bars if self._clock.to_trading_date(bar.ts) <= last_closed_session]
+            for stock_id, bars in bars_by_stock.items()
+        }
+        return {stock_id: bars for stock_id, bars in closed.items() if bars}
 
     def _clean_result(self, bars_by_stock: dict[str, list[Ohlcv]]) -> dict[str, list[Ohlcv]]:
         result: dict[str, list[Ohlcv]] = {}

@@ -1,8 +1,7 @@
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from a_domain.ports.trading.signal_repository import ISignalRepository
-from a_domain.rules.trading.exit import ExitRule
+from a_domain.ports.trading.trading_journal import ITradingJournal
 from a_domain.types.enums import TradeAction
 from b_application.schemas.config import AppConfig
 from b_application.schemas.pipeline_status import PipelineStatus
@@ -12,15 +11,16 @@ class AccountRiskCheck:
     """
     Use Case: Fast account-level risk pre-check.
 
-    This runs after AccountLoader and realtime market-data refresh.
+    This runs after AccountLoader and realtime market-data refresh, and the workflow sends the
+    stop-loss SELLs it records right away, while their quotes are fresh.
 
     It only checks emergency stop-loss.
     It does not fetch market data or run score-based trading decisions.
     """
 
-    def __init__(self, signal_repository: ISignalRepository, config: AppConfig, logger: ILoggingProvider) -> None:
-        self._signal_repository = signal_repository
-        self._exit_rule = ExitRule(stop_loss_pct=config.analysis.stop_loss_pct, sell_threshold=config.analysis.max_combined_score_sell)
+    def __init__(self, journal: ITradingJournal, config: AppConfig, logger: ILoggingProvider) -> None:
+        self._journal = journal
+        self._exit_rule = config.decision_rule().exit_rule
         self._logger = logger
 
     async def execute(self, status: PipelineStatus) -> None:
@@ -32,7 +32,7 @@ class AccountRiskCheck:
             if not self.has_executable_market_data(stock, status):
                 continue
 
-            position = status.positions_by_stock_id.get(stock.stock_id)
+            position = status.account.position_for(stock.stock_id)
 
             if position is None:
                 continue
@@ -54,17 +54,19 @@ class AccountRiskCheck:
         return True
 
     async def record_stop_loss(self, signal: TradeSignal, status: PipelineStatus) -> None:
-        status.signals.append(signal)
         status.risk_blocked_stock_ids.add(signal.stock_id)
 
         try:
-            await self._signal_repository.save(signal)
-            status.stats.signals_generated += 1
+            await self._journal.save_signals(status.stats.run_id, [signal])
 
         except Exception as error:
-            message = f"Stop-loss signal persistence failed: {signal.stock_id}, error={error}"
+            message = f"Stop-loss signal persistence failed, so it is not acted on: {signal.stock_id}, error={error}"
             self._logger.error(message)
             status.stats.add_error(message)
+            return
+
+        status.signals.append(signal)
+        status.stats.signals_generated += 1
 
         self._logger.warning(
             f"Emergency stop-loss signal generated: "

@@ -42,6 +42,9 @@ Menu behavior:
 | 4 | Analyse Specific Stocks | Loads the requested stock IDs, runs technical and AI report generation, returns passing stocks as `MANUAL` watchlist candidates. | No automatic order. Manual BUY override requires confirmation. |
 | 5 | Value Specific Stocks | Shows TTM EPS from MOPS filings, the exchange's official close and the current P/E, asks a target P/E, then prints three fair-price scenarios and an AI explanation built from those numbers. | Never. No watchlist write either. |
 | 6 | Scan Undervalued Stocks | Screens every listed and OTC stock at a target P/E and minimum undervaluation, optionally confirms the matches with the active technical strategy, and can ask the AI to explain the top matches. | Never. No watchlist write either. |
+| 7 | Account History | Shows cash, positions with unrealized PnL at the latest quote, the equity curve since the first fill, and the account as of a date you enter. | Never submits orders. |
+
+Every BUY or SELL decision ends as one row in the `orders` table with its run id and decision id: REJECTED with the reason when a gate refuses it (order mode, market closed, a quote older than `freshness.realtime_max_lag_minutes`), otherwise what the broker did with it, including the fee, the tax and, for a SELL, the realized PnL. Orders are LIMIT at the decision's price and IOC. Fees and tax come from `market` in `config/appsetting.yaml`.
 
 ### Specific Stock Flow
 
@@ -54,7 +57,7 @@ When you enter a stock such as `2330`, the app should only research that stock:
 5. Show the stock report.
 6. If it passes, expose a `MANUAL` watchlist candidate.
 
-Adding the stock to the watchlist is a separate manual confirmation. A manual BUY override is also separate and still goes through `OrderExecution`, which checks market-open status and valid signal quantity.
+Adding the stock to the watchlist is a separate manual confirmation. A manual BUY override is also separate. It is sized with fees included and still goes through `OrderExecution`, which checks the order mode, market-open status and the age of the quote. The CLI prints the order's status and reason, or why no order could be built.
 
 ## What Counts As "Good"
 
@@ -213,7 +216,9 @@ docker compose up --build
 
 ## Data Written Locally
 
-- `stock_agent.db`: SQLite application and mock trading state.
+- `stock_agent.db`: SQLite application and mock trading state. The trading record is `workflow_runs`, `trade_signals`, `orders` and `account_snapshots`; the mock broker's book is `mock_cash` and `mock_positions`.
+
+Tables are created with `create_all`, which never changes an existing table. At startup the app compares every table it declares with the database and stops, changing nothing, when an existing table's columns differ. The message names each outdated table. A `stock_agent.db` made before the `orders` table existed is refused this way for its `trade_signals` table. Delete that file, or drop the tables the message names; the next start recreates them empty. Cached prices and EPS refill themselves, while the mock account, watchlist and trading rows in a dropped table are lost. Such a file's `mock_positions` also hold average costs without the buy fee, and its unused `mock_orders` table can be dropped.
 - `chroma_data/`: Chroma persistence.
 - `news_archive/`: archived news payloads.
 - `buzz_archive/`: archived social buzz payloads.
@@ -221,7 +226,7 @@ docker compose up --build
 
 ## Safety Rules
 
-- Closed-market orders are skipped by `OrderExecution`.
+- Every BUY or SELL decision gets one `orders` row before anything reaches the broker. A closed market, a disabled order mode or a quote older than `freshness.realtime_max_lag_minutes` makes that row `REJECTED` with the reason, and nothing is sent.
 - `Run Full Cycle` does not call order execution.
 - Manual BUY override is explicit user intent and still uses the same order checks.
 - The current CLI uses mock trading. A live execution provider must be wired intentionally before real brokerage orders are possible.

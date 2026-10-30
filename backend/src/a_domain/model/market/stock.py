@@ -27,7 +27,12 @@ class Stock(SQLModel):
 
     # ----------------------------------- Data ----------------------------------- #
     ohlcv: list[Ohlcv] = Field(default_factory=list)
-    realtime_bar: Ohlcv | None = None  # TODO: Do i really that?
+    realtime_bar: Ohlcv | None = None
+    """
+    The latest intraday quote, set by MarketDataCollector.refresh_realtime. It is the only price an
+    order should use: current_price prefers it, and OrderRule refuses a decision whose quote is older
+    than freshness.realtime_max_lag_minutes. Daily `ohlcv` stays the input of technical analysis.
+    """
     articles: list[Article] = Field(default_factory=list)
     eps: Eps | EpsUnavailable = Field(default_factory=lambda: EpsUnavailable(EpsUnavailableReason.NOT_LOADED))
 

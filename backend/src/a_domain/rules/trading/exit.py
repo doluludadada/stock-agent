@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from datetime import UTC, datetime
 
 from icontract import ensure, invariant, require
 
@@ -10,13 +9,12 @@ from a_domain.rules.trading.reason import ReasonRule
 from a_domain.types.enums import SignalSource, TradeAction
 
 
-# TODO: Needa check
 @invariant(lambda self: 0 < self.stop_loss_pct < 1)
 @invariant(lambda self: 0 <= self.sell_threshold <= 100)
 @dataclass(frozen=True)
 class ExitRule:
     """
-    Sell-side rule.
+    Sell-side rule. The stop-loss price is measured from the position's average cost, buy fees included.
 
     Responsibilities:
     - emergency stop-loss SELL
@@ -54,15 +52,13 @@ class ExitRule:
 
         reason = ReasonRule.build_exit(stock, position, cause) if should_sell else ReasonRule.build_exit_hold(stock, position, cause)
 
-        return TradeSignal(
-            stock_id=stock.stock_id,
+        return TradeSignal.of(
+            stock,
             action=action,
-            price_at_signal=current_price,
             source=SignalSource.COMBINED,
             score=composite_score,
             reason=reason,
             quantity=position.quantity if should_sell else 0,
-            generated_at=datetime.now(UTC),
         )
 
     @require(lambda stock: stock.current_price is not None, "Exit decision requires a valid current price")
@@ -80,16 +76,14 @@ class ExitRule:
 
         reason = ReasonRule.build_exit(stock, position, cause) if should_sell else ReasonRule.build_exit_hold(stock, position, cause)
 
-        return TradeSignal(
-            stock_id=stock.stock_id,
+        return TradeSignal.of(
+            stock,
             action=action,
-            price_at_signal=current_price,
-            source=SignalSource.TECHNICAL,
+            source=SignalSource.STOP_LOSS,
             score=stock.technical_score or 0,
             reason=reason,
             quantity=position.quantity if should_sell else 0,
             stop_loss_price=stop_loss_price,
-            generated_at=datetime.now(UTC),
         )
 
     @require(lambda average_cost: average_cost > 0)

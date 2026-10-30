@@ -6,7 +6,6 @@ from a_domain.model.market.stock import Stock
 from a_domain.ports.market.price_provider import IOhlcvProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
-from a_domain.rules.collect.freshness import DataFreshnessRule
 from a_domain.rules.technical.calculation import IndicatorParameters, TechnicalIndicatorCalculator
 from b_application.schemas.config import AppConfig
 from b_application.schemas.pipeline_status import PipelineStatus
@@ -16,8 +15,8 @@ class MarketDataCollector:
     """
     Loads historical and realtime market data.
 
-    Daily OHLCV is used for technical indicators.
-    Realtime OHLCV is kept separately for execution decisions.
+    Daily OHLCV is used for technical indicators and must pass the history freshness rule.
+    Realtime OHLCV is kept separately for execution decisions and must pass the realtime freshness rule.
     """
 
     def __init__(
@@ -26,7 +25,8 @@ class MarketDataCollector:
         self._ohlcv_provider = ohlcv_provider
         self._market_clock = market_clock
         self._lookback_days = config.analysis.lookback_days
-        self._freshness_rule = DataFreshnessRule()
+        self._realtime_freshness = config.freshness.realtime_rule()
+        self._history_freshness = config.freshness.history_rule()
         self._logger = logger
 
     async def execute(self, stocks: list[Stock], status: PipelineStatus, indicators: IndicatorParameters) -> None:
@@ -46,7 +46,6 @@ class MarketDataCollector:
         self._logger.success(f"Collected market data for {collected_count}/{len(stocks)} stocks.")
 
     async def fetch_history(self, stocks: list[Stock], status: PipelineStatus) -> dict[str, list[Ohlcv]] | None:
-        # TODO: move try catch to infra layer?
         try:
             start_date, end_date = self._market_clock.history_window(self._lookback_days)
             return await self._ohlcv_provider.fetch_history(stocks=stocks, start_date=start_date, end_date=end_date)
@@ -71,6 +70,18 @@ class MarketDataCollector:
 
             if not bars:
                 self._logger.warning(f"Market data unavailable: {stock.stock_id}")
+                return False
+
+            last_trading_date = self._market_clock.to_trading_date(bars[-1].ts)
+
+            if not self._history_freshness.is_fresh(last_trading_date, self._market_clock.today()):
+                status.stats.stale_market_data_count += 1
+                message = (
+                    f"Technical analysis blocked: {stock.stock_id}, stale daily history: last bar {last_trading_date.isoformat()}"
+                )
+                status.stats.log(message)
+                self._logger.warning(message)
+                stock.ohlcv = []
                 return False
 
             stock.indicators = calculator.calculate(stock.ohlcv)
@@ -110,7 +121,7 @@ class MarketDataCollector:
         if stock.realtime_bar is None:
             return True
 
-        return not self._freshness_rule.is_fresh(stock.realtime_bar.ts, current_time)
+        return not self._realtime_freshness.is_fresh(stock.realtime_bar.ts, current_time)
 
     def apply_realtime_bar(self, stock: Stock, bar: Ohlcv | None, current_time: datetime, status: PipelineStatus) -> None:
         if bar is None:
@@ -119,7 +130,7 @@ class MarketDataCollector:
 
         stock.realtime_bar = bar
 
-        if not self._freshness_rule.is_fresh(bar.ts, current_time):
+        if not self._realtime_freshness.is_fresh(bar.ts, current_time):
             self.mark_stale(stock, status, f"stale realtime bar: {bar.ts.isoformat()}")
             return
 

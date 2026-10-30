@@ -99,6 +99,12 @@ market:
   tax_rate: 0.003
   min_fee: 20
 
+freshness:
+  # Realtime quotes older than this never price an order.
+  realtime_max_lag_minutes: 15
+  # Daily history whose last bar is older than this is not analysed.
+  history_max_lag_days: 10
+
 trading:
   execution_provider: mock
   order_mode: mock_only

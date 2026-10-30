@@ -6,6 +6,7 @@ from a_domain.ports.market.fundamentals_provider import IFundamentalsProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.notification_provider import INotificationProvider
 from a_domain.ports.trading.execution_provider import IExecutionProvider
+from a_domain.ports.trading.trading_journal import ITradingJournal
 from a_domain.rules.ai.prompt import ValuationPromptBuilder
 from a_domain.types.enums import ExecutionProvider, OrderMode, SystemEnvironment
 from b_application.pipeline import Pipeline
@@ -20,7 +21,9 @@ from b_application.use_cases.process.composite_scorer import CompositeScorer
 from b_application.use_cases.process.technical_filter import TechnicalFilter
 from b_application.use_cases.ship.decision_memory import DecisionMemory
 from b_application.use_cases.ship.reporting import Reporting
+from b_application.use_cases.ship.run_history import RunHistory
 from b_application.use_cases.ship.signals import Signals
+from b_application.use_cases.trade.account_history import AccountHistory
 from b_application.use_cases.trade.account_loader import AccountLoader
 from b_application.use_cases.trade.account_risk_check import AccountRiskCheck
 from b_application.use_cases.trade.manual_buy import ManualBuy
@@ -30,7 +33,7 @@ from b_application.valuation_pipeline import ValuationPipeline
 from c_infrastructure.ai_models.factory import AiAdapterFactory
 from c_infrastructure.database.chroma.chroma_repository import ChromaRepositoryAdapter
 from c_infrastructure.database.db_connector import DatabaseConnector
-from c_infrastructure.database.repositories.signal_repository import SignalRepository
+from c_infrastructure.database.repositories.trading_journal import TradingJournal
 from c_infrastructure.database.repositories.watchlist_repository import WatchlistRepository
 from c_infrastructure.feed.news_provider import NewsProvider
 from c_infrastructure.feed.ptt_provider import PttProvider
@@ -53,6 +56,7 @@ class CliRuntime:
     valuation: ValuationPipeline
     watch_stocks: WatchStocks
     manual_buy: ManualBuy
+    account_history: AccountHistory
     config: AppConfig
     db: DatabaseConnector
     logger: ILoggingProvider
@@ -70,7 +74,7 @@ class ProviderDependencies:
     social_media_provider: PttProvider
     ai_provider: IAiProvider
     knowledge_repository: ChromaRepositoryAdapter
-    signal_repository: SignalRepository
+    journal: ITradingJournal
     watchlist_repository: WatchlistRepository
     technical_settings_repository: ITechnicalSettingsRepository
     execution_provider: IExecutionProvider
@@ -98,10 +102,12 @@ class TradingUseCases:
     account_risk_check: AccountRiskCheck
     watch_stocks: WatchStocks
     manual_buy: ManualBuy
+    account_history: AccountHistory
     signals: Signals
     decision_memory: DecisionMemory
     order_execution: OrderExecution
     reporting: Reporting
+    run_history: RunHistory
 
 
 def validate_trading_environment(config: AppConfig) -> None:
@@ -166,7 +172,7 @@ async def build_provider_dependencies(
         social_media_provider=PttProvider(config=config, logger=logger, stock_provider=stock_provider),
         ai_provider=create_ai_provider(config, logger),
         knowledge_repository=knowledge_repository,
-        signal_repository=SignalRepository(db=db, logger=logger),
+        journal=TradingJournal(db=db),
         watchlist_repository=WatchlistRepository(db=db, logger=logger, market_clock=market_clock),
         technical_settings_repository=YamlTechnicalSettingsRepository(technical_path),
         execution_provider=create_execution_provider(config, db, logger),
@@ -216,35 +222,59 @@ def build_trading_use_cases(
     dependencies: ProviderDependencies,
     data_collector: MarketDataCollector,
 ) -> TradingUseCases:
+    run_history = RunHistory(journal=dependencies.journal, config=config, logger=logger)
+
     account_loader = AccountLoader(
-        execution_provider=dependencies.execution_provider, stock_provider=dependencies.stock_provider, logger=logger
+        execution_provider=dependencies.execution_provider,
+        stock_provider=dependencies.stock_provider,
+        journal=dependencies.journal,
+        market_clock=market_clock,
+        logger=logger,
     )
 
     decision_memory = DecisionMemory(knowledge_repository=dependencies.knowledge_repository, logger=logger)
 
     order_execution = OrderExecution(
-        execution_provider=dependencies.execution_provider, market_clock=market_clock, config=config, logger=logger
+        execution_provider=dependencies.execution_provider,
+        journal=dependencies.journal,
+        account_loader=account_loader,
+        market_clock=market_clock,
+        config=config,
+        logger=logger,
     )
 
     manual_buy = ManualBuy(
+        run_history=run_history,
         account_loader=account_loader,
         market_data_collector=data_collector,
-        signal_repository=dependencies.signal_repository,
+        journal=dependencies.journal,
         decision_memory=decision_memory,
         order_execution=order_execution,
         config=config,
         logger=logger,
     )
 
+    account_history = AccountHistory(
+        execution_provider=dependencies.execution_provider,
+        journal=dependencies.journal,
+        stock_provider=dependencies.stock_provider,
+        ohlcv_provider=dependencies.price_provider,
+        market_clock=market_clock,
+        config=config,
+        logger=logger,
+    )
+
     return TradingUseCases(
         account_loader=account_loader,
-        account_risk_check=AccountRiskCheck(dependencies.signal_repository, config, logger),
+        account_risk_check=AccountRiskCheck(dependencies.journal, config, logger),
         watch_stocks=WatchStocks(dependencies.watchlist_repository, logger),
         manual_buy=manual_buy,
-        signals=Signals(dependencies.signal_repository, config, logger),
+        account_history=account_history,
+        signals=Signals(dependencies.journal, config, logger),
         decision_memory=decision_memory,
         order_execution=order_execution,
         reporting=Reporting(dependencies.notification_provider, config, logger),
+        run_history=run_history,
     )
 
 
@@ -270,6 +300,7 @@ def build_pipeline(
         decision_memory=trading.decision_memory,
         order_execution=trading.order_execution,
         reporting=trading.reporting,
+        run_history=trading.run_history,
         technical_settings_repository=technical_settings_repository,
         logger=logger,
     )
@@ -332,6 +363,7 @@ async def build_cli_orchestrator() -> CliRuntime:
         valuation=valuation,
         watch_stocks=trading.watch_stocks,
         manual_buy=trading.manual_buy,
+        account_history=trading.account_history,
         config=config,
         db=db,
         logger=logger,

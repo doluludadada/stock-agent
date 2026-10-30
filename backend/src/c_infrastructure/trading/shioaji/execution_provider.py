@@ -1,32 +1,18 @@
-from uuid import UUID
-
+from a_domain.model.trading.account import Account
 from a_domain.model.trading.order import Order
-from a_domain.model.trading.position import Position
 from a_domain.ports.trading.execution_provider import IExecutionProvider
 
 
 class ShioajiExecutionProvider(IExecutionProvider):
     """
-    Future real broker adapter.
+    Real broker adapter, not implemented (US-301 in docs/requirements.md); create_execution_provider refuses SHIOAJI.
 
-    TODO:
-
-    - Login to Shioaji.
-    - Load real cash balance.
-    - Load real positions.
-    - Convert domain Order to Shioaji order.
-    - Submit real order.
-    - Map broker response back to domain.
+    place_order must return the order final, with each execution recorded through Order.fill using the
+    fee and tax the broker charged, so the app's `orders` table gets the same audit trail as the mock.
     """
 
     async def place_order(self, order: Order) -> Order:
         raise NotImplementedError
 
-    async def cancel_order(self, order_id: UUID) -> Order | None:
-        raise NotImplementedError
-
-    async def get_positions(self) -> list[Position]:
-        raise NotImplementedError
-
-    async def get_cash_balance(self) -> float:
+    async def get_account(self) -> Account:
         raise NotImplementedError

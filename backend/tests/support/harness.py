@@ -35,10 +35,11 @@ from a_domain.types.enums import (
 from b_application.pipeline import Pipeline
 from b_application.schemas.config import AppConfig, NotificationConfig, PromptsConfig, TradingConfig
 from b_application.schemas.pipeline_status import PipelineStatus
+from b_application.use_cases.trade.account_history import AccountHistory
 from b_application.use_cases.trade.manual_buy import ManualBuy
 from b_application.use_cases.trade.watch_stocks import WatchStocks
 from b_application.valuation_pipeline import ValuationPipeline
-from c_infrastructure.system.market_clock import SESSION_CLOSE, TAIWAN_TIMEZONE
+from c_infrastructure.system.market_clock import TAIWAN_SESSION_CLOSE, TAIWAN_TIMEZONE
 from d_presentation.cli import interactive
 from d_presentation.cli.cli_container import (
     ProviderDependencies,
@@ -58,10 +59,10 @@ from support.fakes import (
     FakeMarketClock,
     FakeNewsProvider,
     FakeOhlcvProvider,
-    FakeSignalRepository,
     FakeSocialMediaProvider,
     FakeStockProvider,
     FakeTechnicalSettingsRepository,
+    FakeTradingJournal,
     FakeWatchlistRepository,
     RecordingExecutionProvider,
     RecordingLogger,
@@ -106,22 +107,26 @@ def harness_config() -> AppConfig:
     )
 
 
-def daily_history(closes: list[float]) -> list[Ohlcv]:
-    last_close_at = MARKET_OPEN.replace(hour=13, minute=30) - timedelta(days=1)
+HISTORY_LAST_SESSION = MARKET_OPEN.date() - timedelta(days=1)
+
+
+def daily_history(closes: list[float], last_session: date = HISTORY_LAST_SESSION) -> list[Ohlcv]:
+    """One bar per calendar day, the last closing at 13:30 on last_session. Keep last_session within the history freshness limit."""
+    last_close_at = datetime.combine(last_session, TAIWAN_SESSION_CLOSE, TAIWAN_TIMEZONE)
     return [
         Ohlcv(ts=last_close_at - timedelta(days=len(closes) - 1 - day), open=close, high=close, low=close, close=close, volume=1000)
         for day, close in enumerate(closes)
     ]
 
 
-def rising_history(last_close: float) -> list[Ohlcv]:
+def rising_history(last_close: float, last_session: date = HISTORY_LAST_SESSION) -> list[Ohlcv]:
     """Ten daily closes climbing to last_close: the price sits above its 5-day average, so the trend strategy passes."""
-    return daily_history([last_close - step for step in range(9, -1, -1)])
+    return daily_history([last_close - step for step in range(9, -1, -1)], last_session)
 
 
-def falling_history(last_close: float) -> list[Ohlcv]:
+def falling_history(last_close: float, last_session: date = HISTORY_LAST_SESSION) -> list[Ohlcv]:
     """Ten daily closes sliding to last_close: the price sits below its 5-day average, so the trend strategy fails."""
-    return daily_history([last_close + step for step in range(9, -1, -1)])
+    return daily_history([last_close + step for step in range(9, -1, -1)], last_session)
 
 
 @dataclass
@@ -135,7 +140,7 @@ class CliHarness:
     social: FakeSocialMediaProvider
     ai: FakeAiProvider
     knowledge: FakeKnowledgeRepository
-    signals: FakeSignalRepository
+    journal: FakeTradingJournal
     watchlist: FakeWatchlistRepository
     broker: RecordingExecutionProvider
     technical_settings: FakeTechnicalSettingsRepository
@@ -143,6 +148,7 @@ class CliHarness:
     pipeline: Pipeline
     watch_stocks: WatchStocks
     manual_buy: ManualBuy
+    account_history: AccountHistory
     valuation: ValuationPipeline
 
     def list_stock(
@@ -164,7 +170,7 @@ class CliHarness:
 
     def publish_close(self, stock_id: str, price: float, session: date) -> None:
         """The exchange's official close for the stock in that session, as the listing feeds publish it."""
-        ts = datetime.combine(session, SESSION_CLOSE, TAIWAN_TIMEZONE)
+        ts = datetime.combine(session, TAIWAN_SESSION_CLOSE, TAIWAN_TIMEZONE)
         self.stocks.closes[stock_id] = Ohlcv(ts=ts, open=price, high=price, low=price, close=price, volume=1000)
 
     def file_eps(self, stock_id: str, cumulative_eps: dict[FiscalQuarter, float], industry: str | None = None) -> None:
@@ -199,11 +205,29 @@ class CliHarness:
         self, choice: str, *, stock_ids: str | None = None, add_to_watchlist: bool = False, buy: Iterable[str] = ()
     ) -> PipelineStatus:
         """Runs one CLI menu choice. Answers the stock-ID prompt, the watchlist confirmation and each per-stock BUY confirmation."""
+        status = await self.answer_menu(choice, stock_ids=stock_ids, add_to_watchlist=add_to_watchlist, buy=buy)
+        assert status is not None, f"menu {choice} returned no status"
+        return status
+
+    async def show_account_history(self, as_of: str = "") -> None:
+        """Runs menu 7 and answers its as-of-date prompt."""
+        assert await self.answer_menu("7", as_of=as_of) is None
+
+    async def answer_menu(
+        self,
+        choice: str,
+        *,
+        stock_ids: str | None = None,
+        add_to_watchlist: bool = False,
+        buy: Iterable[str] = (),
+        as_of: str | None = None,
+    ) -> PipelineStatus | None:
         buy_stock_ids = set(buy)
 
         def answer_prompt(prompt: str, *args, **kwargs) -> str:
-            assert stock_ids is not None, f"menu {choice} asked an unexpected prompt: {prompt!r}"
-            return stock_ids
+            answer = as_of if "as of date" in prompt else stock_ids
+            assert answer is not None, f"menu {choice} asked an unexpected prompt: {prompt!r}"
+            return answer
 
         def answer_confirm(question: str, *args, **kwargs) -> bool:
             if "watchlist" in question.lower():
@@ -215,12 +239,13 @@ class CliHarness:
             raise AssertionError(f"menu {choice} asked an unexpected confirmation: {question!r}")
 
         with patch.object(Prompt, "ask", answer_prompt), patch.object(Confirm, "ask", answer_confirm):
-            status = await interactive.execute_menu_choice(
-                choice=choice, pipeline=self.pipeline, watch_stocks=self.watch_stocks, manual_buy=self.manual_buy
+            return await interactive.execute_menu_choice(
+                choice=choice,
+                pipeline=self.pipeline,
+                watch_stocks=self.watch_stocks,
+                manual_buy=self.manual_buy,
+                account_history=self.account_history,
             )
-
-        assert status is not None, f"menu {choice} returned no status"
-        return status
 
     async def run_valuation_menu(self, choice: str, *, answers: Iterable[str], confirm: Iterable[bool] = ()) -> list[str]:
         """
@@ -267,7 +292,7 @@ def build_harness(
     social = FakeSocialMediaProvider()
     ai = FakeAiProvider()
     knowledge = FakeKnowledgeRepository()
-    signals = FakeSignalRepository()
+    journal = FakeTradingJournal()
     watchlist = FakeWatchlistRepository()
     technical_settings = FakeTechnicalSettingsRepository(settings or harness_settings())
     broker = RecordingExecutionProvider()
@@ -280,7 +305,7 @@ def build_harness(
         social_media_provider=social,
         ai_provider=ai,
         knowledge_repository=knowledge,
-        signal_repository=signals,
+        journal=journal,
         watchlist_repository=watchlist,
         technical_settings_repository=technical_settings,
         execution_provider=broker,
@@ -302,7 +327,7 @@ def build_harness(
         social=social,
         ai=ai,
         knowledge=knowledge,
-        signals=signals,
+        journal=journal,
         watchlist=watchlist,
         broker=broker,
         technical_settings=technical_settings,
@@ -310,5 +335,6 @@ def build_harness(
         pipeline=pipeline,
         watch_stocks=trading.watch_stocks,
         manual_buy=trading.manual_buy,
+        account_history=trading.account_history,
         valuation=valuation,
     )

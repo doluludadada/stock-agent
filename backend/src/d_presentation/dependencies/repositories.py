@@ -12,14 +12,14 @@ from a_domain.ports.chat.web_search_provider import IWebSearchProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.execution_provider import IExecutionProvider
-from a_domain.ports.trading.signal_repository import ISignalRepository
+from a_domain.ports.trading.trading_journal import ITradingJournal
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
 from a_domain.types.enums import ExecutionProvider
 from b_application.schemas.config import AppConfig
 from c_infrastructure.ai_models.factory import AiAdapterFactory
 from c_infrastructure.database.chroma.chroma_repository import ChromaRepositoryAdapter
 from c_infrastructure.database.db_connector import DatabaseConnector
-from c_infrastructure.database.repositories.signal_repository import SignalRepository
+from c_infrastructure.database.repositories.trading_journal import TradingJournal
 from c_infrastructure.database.repositories.watchlist_repository import WatchlistRepository
 from c_infrastructure.technical.yaml_technical_settings_repository import YamlTechnicalSettingsRepository
 from c_infrastructure.trading.mock.mock_execution_provider import MockExecutionProvider
@@ -52,10 +52,8 @@ def get_knowledge_repository(repository: Annotated[ChromaRepositoryAdapter, Depe
     return repository
 
 
-def get_signal_repository(
-    database: Annotated[DatabaseConnector, Depends(get_db_connector)], logger: Annotated[ILoggingProvider, Depends(get_logger)]
-) -> ISignalRepository:
-    return SignalRepository(db=database, logger=logger)
+def get_trading_journal(database: Annotated[DatabaseConnector, Depends(get_db_connector)]) -> ITradingJournal:
+    return TradingJournal(db=database)
 
 
 def get_watchlist_repository(

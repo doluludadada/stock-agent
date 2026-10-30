@@ -7,11 +7,28 @@ from a_domain.model.trading.position import Position
 from a_domain.rules.scoring import CompositeScoreRule
 from a_domain.rules.technical.criteria.trend import MaAlignmentCriterion, PriceAboveMaCriterion
 from a_domain.rules.trading import EntryRule, ExitRule, SizingRule
-from a_domain.types.enums import OrderStatus, OrderType, TradeAction
+from a_domain.rules.trading.cost import TradingCostRule
+from a_domain.types.enums import OrderStatus, OrderType, TimeInForce, TradeAction
+from a_domain.types.ids import new_decision_id, new_run_id
+
+COSTS = TradingCostRule(fee_rate=0.001425, tax_rate=0.003, min_fee=20)
+
+
+def limit_order(action: TradeAction = TradeAction.BUY) -> Order:
+    return Order(
+        run_id=new_run_id(),
+        decision_id=new_decision_id(),
+        stock_id="2330",
+        action=action,
+        order_type=OrderType.LIMIT,
+        time_in_force=TimeInForce.IOC,
+        quantity=1,
+        limit_price=100,
+    )
 
 
 def test_trading_rules_reject_invalid_config() -> None:
-    rule = SizingRule(risk_per_trade_pct=0, stop_loss_pct=0.10, lot_size=1)
+    rule = SizingRule(risk_per_trade_pct=0, stop_loss_pct=0.10, cost_rule=COSTS, lot_size=1)
     with pytest.raises(ViolationError):
         rule.calculate(account=Account(cash=1000), price=10)
 
@@ -28,14 +45,14 @@ def test_technical_criteria_reject_invalid_periods() -> None:
 
 
 def test_entry_rule_rejects_invalid_threshold() -> None:
-    sizing_rule = SizingRule(risk_per_trade_pct=0.02, stop_loss_pct=0.10, lot_size=1)
+    sizing_rule = SizingRule(risk_per_trade_pct=0.02, stop_loss_pct=0.10, cost_rule=COSTS, lot_size=1)
 
     with pytest.raises(ViolationError):
         EntryRule(buy_threshold=101, sizing_rule=sizing_rule)
 
 
 def test_sizing_rule_rejects_invalid_price() -> None:
-    sizing_rule = SizingRule(risk_per_trade_pct=0.02, stop_loss_pct=0.10, lot_size=1)
+    sizing_rule = SizingRule(risk_per_trade_pct=0.02, stop_loss_pct=0.10, cost_rule=COSTS, lot_size=1)
 
     with pytest.raises(ViolationError):
         sizing_rule.calculate(account=Account(cash=1000), price=0)
@@ -47,7 +64,7 @@ def test_composite_rule_rejects_zero_total_weight() -> None:
 
 
 def test_order_submit_moves_pending_order_to_submitted() -> None:
-    order = Order(stock_id="2330", action=TradeAction.BUY, order_type=OrderType.LIMIT, quantity=1, limit_price=100)
+    order = limit_order()
 
     order.submit()
 
@@ -56,26 +73,25 @@ def test_order_submit_moves_pending_order_to_submitted() -> None:
 
 
 def test_order_rejects_hold_submission() -> None:
-    order = Order(stock_id="2330", action=TradeAction.HOLD, order_type=OrderType.LIMIT, quantity=1, limit_price=100)
-
-    with pytest.raises(ValueError, match="HOLD is not an executable order action"):
-        order.validate_submission()
+    with pytest.raises(ValueError, match="action"):
+        limit_order(action=TradeAction.HOLD)
 
 
 def test_order_fill_applies_limit_price_rules() -> None:
-    order = Order(stock_id="2330", action=TradeAction.BUY, order_type=OrderType.LIMIT, quantity=1, limit_price=100)
+    order = limit_order()
+    order.submit()
 
     with pytest.raises(ValueError, match="BUY fill price cannot exceed limit_price"):
-        order.fill(101)
+        order.fill(1, 101, COSTS.cost_of(TradeAction.BUY, 101, 1))
 
-    order.fill(99)
+    order.fill(1, 99, COSTS.cost_of(TradeAction.BUY, 99, 1))
 
     assert order.status == OrderStatus.FILLED
     assert order.average_filled_price == 99
 
 
 def test_order_requires_reason_for_terminal_failures() -> None:
-    order = Order(stock_id="2330", action=TradeAction.BUY, order_type=OrderType.LIMIT, quantity=1, limit_price=100)
+    order = limit_order()
 
     with pytest.raises(ValueError, match="Failed order requires a reason"):
         order.fail(" ")
