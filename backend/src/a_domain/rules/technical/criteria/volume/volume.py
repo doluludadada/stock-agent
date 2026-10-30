@@ -4,13 +4,16 @@ import icontract
 
 from a_domain.model.market.stock import Stock
 
-# TODO:
-# ADD Comment
-
 
 @icontract.invariant(lambda self: self.min_daily_volume >= 0)
 @dataclass(frozen=True)
 class LiquidityCriterion:
+    """
+    Passes when the average volume of the latest five daily bars reaches `min_daily_volume`.
+
+    Volume is in shares, as the OHLCV provider reports it, not in 1,000-share lots.
+    """
+
     min_daily_volume: int = 500
 
     @property
@@ -22,10 +25,6 @@ class LiquidityCriterion:
             return False
 
         recent_volumes = [bar.volume for bar in stock.ohlcv[-5:]]
-
-        if not recent_volumes:
-            return False
-
         average_volume = sum(recent_volumes) / len(recent_volumes)
 
         return average_volume >= self.min_daily_volume
@@ -34,6 +33,8 @@ class LiquidityCriterion:
 @icontract.invariant(lambda self: self.min_price > 0)
 @dataclass(frozen=True)
 class MinimumPriceCriterion:
+    """Passes when the current price, realtime when available, is at least `min_price`."""
+
     min_price: float = 15.0
 
     @property
@@ -51,6 +52,12 @@ class MinimumPriceCriterion:
 @icontract.invariant(lambda self: self.period > 0)
 @dataclass(frozen=True)
 class VolumeExpansionCriterion:
+    """
+    Passes when the latest daily volume is at least `min_ratio` times its `period`-day average.
+
+    A ratio below 1 is a dry-volume floor; a ratio above 1 asks for expansion.
+    """
+
     min_ratio: float = 1.0
     period: int = 5
 
@@ -59,30 +66,21 @@ class VolumeExpansionCriterion:
         return f"Volume Expansion >= {self.min_ratio}x vs MA_{self.period}"
 
     def apply(self, stock: Stock) -> bool:
-        moving_averages = stock.indicators.ma
-
-        if moving_averages is None:
+        if stock.indicators.ma is None or stock.current_volume is None:
             return False
 
-        average_volume = moving_averages.volume_ma.get(self.period)
+        average_volume = stock.indicators.ma.volume_ma.get(self.period)
 
         if average_volume is None:
             return False
 
-        if not stock.ohlcv:
-            return False
-
-        current_volume = stock.current_volume
-
-        if current_volume is None:
-            return False
-
-        return current_volume >= average_volume * self.min_ratio
-        # TODO: Operator ">=" not supported for "None"PylancereportOptionalOperand
+        return stock.current_volume >= average_volume * self.min_ratio
 
 
 @dataclass(frozen=True)
 class ObvTrendCriterion:
+    """Passes when on-balance volume is above its moving average, meaning volume has favoured up days."""
+
     @property
     def name(self) -> str:
         return "OBV Trend"

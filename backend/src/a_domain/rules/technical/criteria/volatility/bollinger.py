@@ -5,9 +5,10 @@ import icontract
 from a_domain.model.market.stock import Stock
 
 
-# TODO: Add comment
 @dataclass(frozen=True)
 class BollingerPositionCriterion:
+    """Passes when the current price is above the middle band, the band's moving average."""
+
     @property
     def name(self) -> str:
         return "Bollinger Above Middle"
@@ -15,10 +16,7 @@ class BollingerPositionCriterion:
     def apply(self, stock: Stock) -> bool:
         bollinger = stock.indicators.bollinger
 
-        if bollinger is None:
-            return False
-
-        if stock.current_price is None:
+        if bollinger is None or stock.current_price is None:
             return False
 
         return stock.current_price > bollinger.middle
@@ -27,6 +25,13 @@ class BollingerPositionCriterion:
 @icontract.invariant(lambda self: self.max_percent_b > 0)
 @dataclass(frozen=True)
 class BollingerThresholdCriterion:
+    """
+    Passes when %B is below `max_percent_b`.
+
+    %B is 0 at the lower band and 1 at the upper band, so a limit near 1 rejects a close
+    that is already stretched against the upper band.
+    """
+
     max_percent_b: float = 0.9
 
     @property
@@ -37,17 +42,14 @@ class BollingerThresholdCriterion:
         if stock.indicators.bollinger is None:
             return False
 
-        percent_b = stock.indicators.bollinger.percent_b
-
-        if percent_b is None:
-            return False
-
-        return percent_b < self.max_percent_b
+        return stock.indicators.bollinger.percent_b < self.max_percent_b
 
 
 @icontract.invariant(lambda self: self.max_bandwidth > 0)
 @dataclass(frozen=True)
 class BollingerSqueezeCriterion:
+    """Passes when band width relative to the middle band is below `max_bandwidth`, a volatility squeeze."""
+
     max_bandwidth: float = 0.1
 
     @property
@@ -58,9 +60,4 @@ class BollingerSqueezeCriterion:
         if stock.indicators.bollinger is None:
             return False
 
-        bandwidth = stock.indicators.bollinger.bandwidth
-
-        if bandwidth is None:
-            return False
-
-        return bandwidth < self.max_bandwidth
+        return stock.indicators.bollinger.bandwidth < self.max_bandwidth

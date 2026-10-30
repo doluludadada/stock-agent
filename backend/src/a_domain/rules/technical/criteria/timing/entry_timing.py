@@ -5,10 +5,11 @@ import icontract
 from a_domain.model.market.stock import Stock
 
 
-# TODO: Add comment
 @icontract.invariant(lambda self: self.max_drop_pct >= 0)
 @dataclass(frozen=True)
 class PriceDropCriterion:
+    """Passes unless the latest close fell more than `max_drop_pct` from the previous close."""
+
     max_drop_pct: float = 0.03
 
     @property
@@ -30,6 +31,8 @@ class PriceDropCriterion:
 @icontract.invariant(lambda self: self.max_gap_pct >= 0)
 @dataclass(frozen=True)
 class GapCriterion:
+    """Passes unless the latest open gapped up `max_gap_pct` or more above the previous close."""
+
     max_gap_pct: float = 0.03
 
     @property
@@ -50,6 +53,8 @@ class GapCriterion:
 
 @dataclass(frozen=True)
 class IntradayMomentumCriterion:
+    """Passes when the latest daily bar closed above its open."""
+
     @property
     def name(self) -> str:
         return "Intraday Momentum"
@@ -67,6 +72,12 @@ class IntradayMomentumCriterion:
 @icontract.invariant(lambda self: 0 <= self.max_range_position <= 1)
 @dataclass(frozen=True)
 class IntradayRangeCriterion:
+    """
+    Passes when the latest close sits below `max_range_position` of the day's low-to-high range.
+
+    0 is the low and 1 is the high, so the check avoids entries at the top of the day.
+    """
+
     max_range_position: float = 0.8
 
     @property
@@ -87,37 +98,11 @@ class IntradayRangeCriterion:
         return position < self.max_range_position
 
 
-@icontract.invariant(lambda self: self.min_volume_ratio >= 0)
-@icontract.invariant(lambda self: self.period > 0)
-@dataclass(frozen=True)
-class IntradayVolumeConfirmationCriterion:
-    min_volume_ratio: float = 0.5
-    period: int = 5
-
-    @property
-    def name(self) -> str:
-        return f"Intraday Volume Confirmation vs MA_{self.period}"
-
-    def apply(self, stock: Stock) -> bool:
-        if stock.indicators.ma is None:
-            return False
-
-        average_volume = stock.indicators.ma.volume_ma.get(self.period)
-
-        if average_volume is None:
-            return False
-
-        if not stock.ohlcv:
-            return False
-
-        today_volume = stock.ohlcv[-1].volume
-
-        return today_volume >= average_volume * self.min_volume_ratio
-
-
 @icontract.invariant(lambda self: self.max_consecutive_up > 0)
 @dataclass(frozen=True)
 class ConsecutiveUpDaysCriterion:
+    """Passes when the stock has closed higher on fewer than `max_consecutive_up` consecutive days."""
+
     max_consecutive_up: int = 4
 
     @property

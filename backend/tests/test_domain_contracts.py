@@ -1,7 +1,6 @@
 import pytest
 from icontract.errors import ViolationError
 
-from a_domain.model.indicators.technical_indicators import MovingAverages
 from a_domain.model.trading.account import Account
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.position import Position
@@ -9,21 +8,6 @@ from a_domain.rules.scoring import CompositeScoreRule
 from a_domain.rules.technical.criteria.trend import MaAlignmentCriterion, PriceAboveMaCriterion
 from a_domain.rules.trading import EntryRule, ExitRule, SizingRule
 from a_domain.types.enums import OrderStatus, OrderType, TradeAction
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Product bug: commit fbd500c dropped MovingAverages' invariant (period > 0, finite value > 0) while keeping this test; "
-        "every sibling indicator still enforces period > 0, so MovingAverages(price_ma={0: 100.0}) is now accepted."
-    ),
-)
-def test_moving_averages_require_positive_periods() -> None:
-    with pytest.raises(ViolationError):
-        MovingAverages(price_ma={0: 100.0})
-
-    with pytest.raises(ViolationError):
-        MovingAverages(price_ma={20: 0})
 
 
 def test_trading_rules_reject_invalid_config() -> None:

@@ -1,7 +1,10 @@
 # config/technical.yaml
 
 active_strategy_id: moderate
-buzz_strategy_id: buzz
+
+# Social Buzz uses buzz_strategy_id. Choose one of the three Buzz modes below,
+# or any other strategy ID.
+buzz_strategy_id: buzz_safety_only
 
 defaults:
   indicators:
@@ -308,7 +311,7 @@ strategies:
       - type: rsi_range
         effect: increase_score_on_pass
         min_rsi: 50
-        max_rsi: 75
+        max_rsi: 70
 
       - type: golden_cross
         effect: increase_score_on_pass
@@ -327,7 +330,12 @@ strategies:
       - type: obv_trend
         effect: increase_score_on_pass
 
-  buzz:
+  # Buzz modes share thresholds and differ only in which confirmation
+  # signals (RSI, volume expansion, MACD, Stochastic) reject a stock.
+  #
+  # Safety Only: only minimum price, liquidity and daily range reject a stock.
+  # The confirmation signals only lower the score.
+  buzz_safety_only:
     rules:
       - type: minimum_price
         effect: block_on_fail
@@ -355,6 +363,114 @@ strategies:
 
       - type: stochastic_health
         effect: reduce_score_on_fail
+        max_k: 80
+
+      - type: rsi_range
+        effect: increase_score_on_pass
+        min_rsi: 50
+        max_rsi: 70
+
+      - type: golden_cross
+        effect: increase_score_on_pass
+        fast: 20
+        slow: 60
+        max_cross_margin: 0.03
+
+      - type: bollinger_squeeze
+        effect: increase_score_on_pass
+        max_bandwidth: 0.1
+
+      - type: volume_expansion
+        effect: increase_score_on_pass
+        min_ratio: 1.5
+
+      - type: obv_trend
+        effect: increase_score_on_pass
+
+  # Loose Confirmation: Safety Only, plus the move must be confirmed by
+  # MACD above its signal line and at least average volume.
+  # RSI and Stochastic still only lower the score.
+  buzz_loose_confirmation:
+    rules:
+      - type: minimum_price
+        effect: block_on_fail
+        min_price: 10
+
+      - type: liquidity
+        effect: block_on_fail
+        min_daily_volume: 500
+
+      - type: daily_range
+        effect: block_on_fail
+        max_daily_range_pct: 0.10
+
+      - type: rsi_range
+        effect: reduce_score_on_fail
+        max_rsi: 80
+
+      - type: volume_expansion
+        effect: block_on_fail
+        min_ratio: 1.0
+
+      - type: macd_bullish
+        effect: block_on_fail
+        require_above_signal: true
+
+      - type: stochastic_health
+        effect: reduce_score_on_fail
+        max_k: 80
+
+      - type: rsi_range
+        effect: increase_score_on_pass
+        min_rsi: 50
+        max_rsi: 70
+
+      - type: golden_cross
+        effect: increase_score_on_pass
+        fast: 20
+        slow: 60
+        max_cross_margin: 0.03
+
+      - type: bollinger_squeeze
+        effect: increase_score_on_pass
+        max_bandwidth: 0.1
+
+      - type: volume_expansion
+        effect: increase_score_on_pass
+        min_ratio: 1.5
+
+      - type: obv_trend
+        effect: increase_score_on_pass
+
+  # Strict Confirmation: every confirmation signal must pass.
+  buzz_strict_confirmation:
+    rules:
+      - type: minimum_price
+        effect: block_on_fail
+        min_price: 10
+
+      - type: liquidity
+        effect: block_on_fail
+        min_daily_volume: 500
+
+      - type: daily_range
+        effect: block_on_fail
+        max_daily_range_pct: 0.10
+
+      - type: rsi_range
+        effect: block_on_fail
+        max_rsi: 80
+
+      - type: volume_expansion
+        effect: block_on_fail
+        min_ratio: 1.0
+
+      - type: macd_bullish
+        effect: block_on_fail
+        require_above_signal: true
+
+      - type: stochastic_health
+        effect: block_on_fail
         max_k: 80
 
       - type: rsi_range

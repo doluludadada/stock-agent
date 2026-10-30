@@ -67,12 +67,14 @@ class TechnicalIndicatorCalculator:
         indicators = self._indicators
         price_ma = {
             period: value
-            for period in sorted({indicators.ma_short, indicators.ma_mid, indicators.ma_long})
+            for period in sorted(indicators.price_ma_periods)
             if (value := latest_sma(closes, period)) is not None and value > 0
         }
-
-        volume_ma_value = latest_sma(volumes, indicators.ma_short)
-        volume_ma = {indicators.ma_short: volume_ma_value} if volume_ma_value is not None and volume_ma_value > 0 else {}
+        volume_ma = {
+            period: value
+            for period in sorted(indicators.volume_ma_periods)
+            if (value := latest_sma(volumes, period)) is not None and value > 0
+        }
 
         if not price_ma and not volume_ma:
             return None

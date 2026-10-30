@@ -30,3 +30,11 @@ class IndicatorParameters:
     adx_period: int = 14
     atr_period: int = 14
     mfi_period: int = 14
+
+    @property
+    def price_ma_periods(self) -> frozenset[int]:
+        return frozenset({self.ma_short, self.ma_mid, self.ma_long})
+
+    @property
+    def volume_ma_periods(self) -> frozenset[int]:
+        return frozenset({self.ma_short})

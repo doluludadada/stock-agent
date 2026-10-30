@@ -7,8 +7,11 @@ from a_domain.model.market.stock import Stock
 
 @dataclass(frozen=True)
 class MacdBullishCriterion:
-    # TODO: Check this file
-    """Checks the current bullish MACD state."""
+    """
+    Passes when the latest MACD meets every enabled check.
+
+    With no check enabled it only requires that MACD could be calculated.
+    """
 
     require_above_signal: bool = True
     require_positive: bool = False

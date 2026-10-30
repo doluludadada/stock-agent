@@ -15,6 +15,8 @@ wheels/
 /.last_conversation.json
 /.uv_cache
 /config/appsetting.dev.yaml
+/config/technical.local.yaml
+/config/.technical.local.yaml.*.tmp
 /scan.py
 /test/rsa.py
 /chroma_data

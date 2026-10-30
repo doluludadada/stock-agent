@@ -7,9 +7,9 @@ from icontract import invariant
 from a_domain.rules.technical.strategy import TechnicalStrategy
 
 
-@invariant(lambda self: bool(self.active_strategy_id.strip()))
-@invariant(lambda self: bool(self.buzz_strategy_id.strip()))
-@invariant(lambda self: len(self.strategies) > 0)
+@invariant(lambda self: len({strategy.strategy_id for strategy in self.strategies}) == len(self.strategies))
+@invariant(lambda self: self.active_strategy_id in {strategy.strategy_id for strategy in self.strategies})
+@invariant(lambda self: self.buzz_strategy_id in {strategy.strategy_id for strategy in self.strategies})
 @dataclass(frozen=True)
 class TechnicalSettings:
     active_strategy_id: str

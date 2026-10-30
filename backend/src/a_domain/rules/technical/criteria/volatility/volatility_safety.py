@@ -8,12 +8,7 @@ from a_domain.model.market.stock import Stock
 @icontract.invariant(lambda self: self.max_daily_range_pct > 0)
 @dataclass(frozen=True)
 class DailyRangeCriterion:
-    """
-    Volatility safety condition.
-
-
-    Daily range is a safety gate.
-    """
+    """Safety gate. Passes when the latest daily bar's high-low range, relative to its low, is below `max_daily_range_pct`."""
 
     max_daily_range_pct: float
 
@@ -21,8 +16,6 @@ class DailyRangeCriterion:
     def name(self) -> str:
         return "Daily Range Safety"
 
-    # TODO: Function with declared return type "bool" must return value on all code paths
-    #   "None" is not assignable to "bool"
     def apply(self, stock: Stock) -> bool:
         if stock.today is None or stock.today.low <= 0:
             return False
@@ -38,9 +31,7 @@ class DailyRangeCriterion:
 @icontract.invariant(lambda self: self.min_atr_pct is None or self.max_atr_pct is None or self.min_atr_pct <= self.max_atr_pct)
 @dataclass(frozen=True)
 class AtrRangeCriterion:
-    """
-    ATR range is optional and can be used as a sizing / risk quality filter.
-    """
+    """Passes when ATR as a fraction of the latest close lies within the configured bounds. Either bound may be omitted."""
 
     min_atr_pct: float | None = None
     max_atr_pct: float | None = None
