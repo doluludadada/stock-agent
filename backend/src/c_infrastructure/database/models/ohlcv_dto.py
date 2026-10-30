@@ -7,7 +7,6 @@ from sqlmodel import Field
 from a_domain.model.market.ohlcv import Ohlcv
 
 
-# TODO: Think about 3NF, there's two PKs
 class OhlcvDTO(Ohlcv, table=True):
     """Infrastructure Database Model for Caching OHLCV Data."""
 

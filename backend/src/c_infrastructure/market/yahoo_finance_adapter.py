@@ -1,10 +1,9 @@
 # backend/src/c_infrastructure/market/yahoo_finance_adapter.py
 
 import asyncio
-import math
 import time
 from datetime import datetime, timedelta
-from typing import Any, cast
+from typing import cast
 
 import pandas as pd
 import yfinance as yf
@@ -16,53 +15,6 @@ from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.types.enums import MarketType
 
 
-# TODO: This file is dirty af. Needa clean it.
-def format_yahoo_ticker(stock: Stock) -> str:
-    if stock.market == MarketType.TPEX:
-        return f"{stock.stock_id}.TWO"
-
-    return f"{stock.stock_id}.TW"
-
-
-def dataframe_to_bars(df: pd.DataFrame) -> list[Ohlcv]:
-    if df.empty:
-        return []
-
-    required_columns = {"Open", "High", "Low", "Close", "Volume"}
-    if not required_columns.issubset(df.columns):
-        return []
-
-    bars: list[Ohlcv] = []
-
-    for index in range(len(df)):
-        row = df.iloc[index]
-        timestamp = pd.Timestamp(cast(Any, df.index[index]))
-
-        if not isinstance(timestamp, pd.Timestamp):
-            continue
-
-        close = row["Close"]
-        if pd.isna(close):
-            continue
-
-        close_value = float(close)
-        adj_close = row.get("Adj Close")
-
-        bars.append(
-            Ohlcv(
-                ts=timestamp.to_pydatetime(),
-                open=float(row["Open"]) if not pd.isna(row["Open"]) else close_value,
-                high=float(row["High"]) if not pd.isna(row["High"]) else close_value,
-                low=float(row["Low"]) if not pd.isna(row["Low"]) else close_value,
-                close=close_value,
-                volume=int(row["Volume"]) if not pd.isna(row["Volume"]) else 0,
-                adj_close=float(adj_close) if adj_close is not None and not pd.isna(adj_close) else None,
-            )
-        )
-
-    return bars
-
-
 class YahooFinanceProvider(IOhlcvProvider):
     def __init__(self, logger: ILoggingProvider, batch_size: int = 50, delay_seconds: float = 1.5):
         self._logger = logger
@@ -70,160 +22,73 @@ class YahooFinanceProvider(IOhlcvProvider):
         self._delay_seconds = delay_seconds
 
     async def fetch_history(self, stocks: list[Stock], start_date: datetime, end_date: datetime) -> dict[str, list[Ohlcv]]:
-        stocks = self._remove_duplicates(stocks)
-
-        if not stocks:
-            return {}
-
-        result: dict[str, list[Ohlcv]] = {}
-        batches = self._split_batches(stocks)
-        total_batches = len(batches)
-
-        self._logger.info(f"Fetching Yahoo history: {len(stocks)} stocks, batch size={self._batch_size}, batches={total_batches}")
-
-        completed_symbols = 0
-        started_at = time.perf_counter()
-
-        for batch_index, batch in enumerate(batches, start=1):
-            batch_started_at = time.perf_counter()
-            ticker_to_stock = {format_yahoo_ticker(stock): stock for stock in batch}
-
-            self._logger.info(f"Yahoo history batch {batch_index}/{total_batches} started: {len(ticker_to_stock)} symbols")
-
-            df = await self._download(
-                tickers=list(ticker_to_stock.keys()), start_date=start_date, end_date=end_date + timedelta(days=1), interval="1d"
-            )
-
-            success_count = 0
-
-            for ticker, stock in ticker_to_stock.items():
-                stock_df = self._get_stock_dataframe(df, ticker)
-                # Yahoo emits a flat zero-volume bar for days the market was closed, such as typhoon days.
-                bars = [bar for bar in dataframe_to_bars(stock_df) if bar.volume > 0]
-
-                if bars:
-                    result[stock.stock_id] = bars
-                    success_count += 1
-
-            completed_symbols += len(batch)
-            failed_count = len(batch) - success_count
-            elapsed = time.perf_counter() - batch_started_at
-            total_elapsed = time.perf_counter() - started_at
-
-            self._logger.info(
-                f"Yahoo history batch {batch_index}/{total_batches} done: "
-                f"success={success_count}, failed={failed_count}, "
-                f"progress={completed_symbols}/{len(stocks)}, "
-                f"elapsed={elapsed:.1f}s, total_elapsed={total_elapsed:.1f}s"
-            )
-
-            await asyncio.sleep(self._delay_seconds)
-
-        self._logger.info(f"Yahoo history completed: {len(result)}/{len(stocks)} stocks returned data")
-        return result
+        bars_by_stock = await self._download_bars(
+            stocks, "1d", start=start_date.strftime("%Y-%m-%d"), end=(end_date + timedelta(days=1)).strftime("%Y-%m-%d")
+        )
+        # Yahoo emits a flat zero-volume bar for days the market was closed, such as typhoon days.
+        traded = {stock_id: [bar for bar in bars if bar.volume > 0] for stock_id, bars in bars_by_stock.items()}
+        return {stock_id: bars for stock_id, bars in traded.items() if bars}
 
     async def fetch_realtime_bars(self, stocks: list[Stock]) -> dict[str, Ohlcv]:
-        stocks = self._remove_duplicates(stocks)
+        bars_by_stock = await self._download_bars(stocks, "5m", period="1d")
+        return {stock_id: bars[-1] for stock_id, bars in bars_by_stock.items()}
 
-        if not stocks:
-            return {}
-
-        result: dict[str, Ohlcv] = {}
-        batches = self._split_batches(stocks)
-        total_batches = len(batches)
-
-        self._logger.info(f"Fetching Yahoo latest bars: {len(stocks)} stocks, batch size={self._batch_size}, batches={total_batches}")
-
-        completed_symbols = 0
+    async def _download_bars(
+        self, stocks: list[Stock], interval: str, start: str | None = None, end: str | None = None, period: str | None = None
+    ) -> dict[str, list[Ohlcv]]:
+        unique_stocks = list({stock.stock_id: stock for stock in stocks}.values())
+        bars_by_stock: dict[str, list[Ohlcv]] = {}
         started_at = time.perf_counter()
 
-        for batch_index, batch in enumerate(batches, start=1):
-            batch_started_at = time.perf_counter()
-            ticker_to_stock = {format_yahoo_ticker(stock): stock for stock in batch}
-
-            self._logger.info(f"Yahoo latest batch {batch_index}/{total_batches} started: {len(ticker_to_stock)} symbols")
-
-            df = await self._download(tickers=list(ticker_to_stock.keys()), period="1d", interval="5m")
-
-            success_count = 0
-
-            for ticker, stock in ticker_to_stock.items():
-                stock_df = self._get_stock_dataframe(df, ticker)
-                bars = dataframe_to_bars(stock_df)
-
-                if bars:
-                    result[stock.stock_id] = bars[-1]
-                    success_count += 1
-
-            completed_symbols += len(batch)
-            failed_count = len(batch) - success_count
-            elapsed = time.perf_counter() - batch_started_at
-            total_elapsed = time.perf_counter() - started_at
-
-            self._logger.info(
-                f"Yahoo latest batch {batch_index}/{total_batches} done: "
-                f"success={success_count}, failed={failed_count}, "
-                f"progress={completed_symbols}/{len(stocks)}, "
-                f"elapsed={elapsed:.1f}s, total_elapsed={total_elapsed:.1f}s"
-            )
-
-            await asyncio.sleep(self._delay_seconds)
-
-        return result
-
-    async def _download(
-        self,
-        tickers: list[str],
-        interval: str,
-        start_date: datetime | None = None,
-        end_date: datetime | None = None,
-        period: str | None = None,
-    ) -> pd.DataFrame:
-        def call_yahoo() -> object:
-            return yf.download(
-                tickers=tickers,
-                start=start_date.strftime("%Y-%m-%d") if start_date else None,
-                end=end_date.strftime("%Y-%m-%d") if end_date else None,
+        for offset in range(0, len(unique_stocks), self._batch_size):
+            batch = unique_stocks[offset : offset + self._batch_size]
+            stock_id_by_ticker = {
+                f"{stock.stock_id}.{'TWO' if stock.market == MarketType.TPEX else 'TW'}": stock.stock_id for stock in batch
+            }
+            download = await asyncio.to_thread(
+                yf.download,
+                tickers=list(stock_id_by_ticker),
+                start=start,
+                end=end,
                 period=period,
                 interval=interval,
                 group_by="ticker",
+                multi_level_index=True,
                 auto_adjust=False,
                 threads=True,
                 progress=False,
             )
 
-        downloaded = await asyncio.to_thread(call_yahoo)
+            for ticker, stock_id in stock_id_by_ticker.items():
+                if bars := _to_bars(download, ticker):
+                    bars_by_stock[stock_id] = bars
 
-        if isinstance(downloaded, pd.DataFrame):
-            return downloaded
+            self._logger.info(
+                f"Yahoo {interval} bars: {offset + len(batch)}/{len(unique_stocks)} stocks requested, "
+                f"{len(bars_by_stock)} with data, elapsed={time.perf_counter() - started_at:.1f}s"
+            )
+            await asyncio.sleep(self._delay_seconds)
 
-        return pd.DataFrame()
+        return bars_by_stock
 
-    def _get_stock_dataframe(self, df: pd.DataFrame, ticker: str) -> pd.DataFrame:
-        if df.empty:
-            return pd.DataFrame()
 
-        if isinstance(df.columns, pd.MultiIndex):
-            if ticker not in df.columns.get_level_values(0):
-                return pd.DataFrame()
+def _to_bars(download: pd.DataFrame | None, ticker: str) -> list[Ohlcv]:
+    if download is None or ticker not in download.columns.get_level_values(0):
+        return []
 
-            stock_df = df[ticker]
-            return stock_df if isinstance(stock_df, pd.DataFrame) else pd.DataFrame()
+    frame = cast(pd.DataFrame, download[ticker]).dropna(subset=["Close"])
+    close = frame["Close"]
+    frame = frame.fillna({"Open": close, "High": close, "Low": close, "Volume": 0})
 
-        return df
-
-    def _split_batches(self, stocks: list[Stock]) -> list[list[Stock]]:
-        if not stocks:
-            return []
-
-        batch_count = math.ceil(len(stocks) / self._batch_size)
-
-        return [stocks[index * self._batch_size : (index + 1) * self._batch_size] for index in range(batch_count)]
-
-    def _remove_duplicates(self, stocks: list[Stock]) -> list[Stock]:
-        unique: dict[str, Stock] = {}
-
-        for stock in stocks:
-            unique[stock.stock_id] = stock
-
-        return list(unique.values())
+    return [
+        Ohlcv(
+            ts=row["ts"].to_pydatetime(),
+            open=row["Open"],
+            high=row["High"],
+            low=row["Low"],
+            close=row["Close"],
+            volume=row["Volume"],
+            adj_close=None if pd.isna(row["Adj Close"]) else row["Adj Close"],
+        )
+        for row in frame.rename_axis("ts").reset_index().to_dict("records")
+    ]
