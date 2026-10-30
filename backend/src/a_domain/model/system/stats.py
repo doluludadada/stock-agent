@@ -38,9 +38,7 @@ class SystemStats(SQLModel):
         self.end_time = datetime.now()
 
     def log(self, message: str) -> None:
-        self.execution_log.append(
-            f"[{datetime.now().strftime('%H:%M:%S')}] {message}"
-        )
+        self.execution_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
 
     def add_error(self, error: str) -> None:
         self.errors.append(error)

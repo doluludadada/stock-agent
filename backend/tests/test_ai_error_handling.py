@@ -74,9 +74,10 @@ class FakeClient:
 
 
 class FakeCnyesResponse:
-    def __init__(self, status_code: int, payload: dict) -> None:
+    def __init__(self, status_code: int, payload: dict | None = None, text: str = "") -> None:
         self.status_code = status_code
-        self._payload = payload
+        self._payload = payload or {}
+        self.text = text
         self.request = httpx.Request("GET", "https://api.cnyes.com/media/api/v1/search")
 
     def raise_for_status(self) -> None:
@@ -99,23 +100,14 @@ class SymbolNewsCnyesClient:
         return False
 
     async def get(self, url: str, *args, **kwargs) -> FakeCnyesResponse:
+        if url == "https://news.cnyes.com/news/id/2":
+            return FakeCnyesResponse(200, text='<html><div id="article-container"><p>2486 matched content</p></div></html>')
         if "TWS:2486:STOCK/symbolNews" not in url:
             raise AssertionError(f"Unexpected Cnyes URL: {url}")
+        # symbolNews lists headlines only; the body lives on the article page.
         return FakeCnyesResponse(
             200,
-            {
-                "items": {
-                    "data": [
-                        {
-                            "newsId": 2,
-                            "title": "一詮測試新聞",
-                            "summary": "一詮 symbol news article",
-                            "content": "<p>2486 matched content</p>",
-                            "publishAt": 1778489049,
-                        },
-                    ]
-                }
-            },
+            {"items": {"data": [{"newsId": 2, "title": "一詮測試新聞", "publishAt": 1778489049}]}},
         )
 
 

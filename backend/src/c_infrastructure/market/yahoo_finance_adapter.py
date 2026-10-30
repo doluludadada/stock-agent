@@ -111,7 +111,8 @@ class YahooFinanceProvider(IOhlcvProvider):
 
             for ticker, stock in ticker_to_stock.items():
                 stock_df = self._get_stock_dataframe(df, ticker)
-                bars = dataframe_to_bars(stock_df)
+                # Yahoo emits a flat zero-volume bar for days the market was closed, such as typhoon days.
+                bars = [bar for bar in dataframe_to_bars(stock_df) if bar.volume > 0]
 
                 if bars:
                     result[stock.stock_id] = bars

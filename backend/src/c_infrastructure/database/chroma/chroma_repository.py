@@ -1,3 +1,5 @@
+import os
+
 import chromadb
 
 from a_domain.model.chat.conversation import Conversation
@@ -14,6 +16,9 @@ from c_infrastructure.database.chroma.schema import (
     ChromaCollection,
     ChromaResultKey,
 )
+
+# The embedding tokenizer warns on every later fork of the process unless its parallelism is set explicitly.
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 
 # TODO: Check it later

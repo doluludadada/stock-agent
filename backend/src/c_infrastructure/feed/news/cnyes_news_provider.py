@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -64,6 +65,12 @@ class CnyesNewsProvider:
                             )
                         )
 
+                    # symbolNews lists headlines only, so read the missing bodies from the article pages.
+                    missing_body = [article for article in articles if not article.content]
+                    bodies = await asyncio.gather(*(self._fetch_article_body(client, str(article.url)) for article in missing_body))
+                    for article, body in zip(missing_body, bodies, strict=True):
+                        article.content = body
+
                     if articles:
                         self._logger.info(f"Successfully fetched {len(articles)} Cnyes articles for {stock_id}.")
                         return articles[:limit]
@@ -80,3 +87,14 @@ class CnyesNewsProvider:
 
         self._logger.warning(f"No Cnyes articles found for {stock_id}.")
         return []
+
+    async def _fetch_article_body(self, client: httpx.AsyncClient, url: str) -> str:
+        try:
+            resp = await client.get(url)
+            resp.raise_for_status()
+        except httpx.HTTPError as e:
+            self._logger.debug(f"Failed to fetch Cnyes body for {url}: {e!r}")
+            return ""
+
+        body = BeautifulSoup(resp.text, "html.parser").select_one("#article-container")
+        return body.get_text(separator="\n", strip=True) if body else ""

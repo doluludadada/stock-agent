@@ -24,6 +24,12 @@ build-docker:
 run-docker:
     docker run -p 8000:8000 --env-file .env chat-friend
 
+[windows]
 cli:
     @echo "Starting CLI..."
     cd backend; $env:PYTHONPATH="src"; uv run python -m d_presentation.cli.interactive
+
+[unix]
+cli:
+    @echo "Starting CLI..."
+    cd backend && PYTHONPATH=src uv run python -m d_presentation.cli.interactive

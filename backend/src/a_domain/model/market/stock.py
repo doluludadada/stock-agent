@@ -26,7 +26,7 @@ class Stock(SQLModel):
 
     # ----------------------------------- Data ----------------------------------- #
     ohlcv: list[Ohlcv] = Field(default_factory=list)
-    realtime_bar: Ohlcv | None = None
+    realtime_bar: Ohlcv | None = None  # TODO: Do i really that?
     articles: list[Article] = Field(default_factory=list)
 
     # -------------------------------- Analysis ---------------------------------- #

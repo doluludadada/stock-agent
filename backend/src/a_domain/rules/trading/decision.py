@@ -34,27 +34,13 @@ class DecisionRule:
     Handles stocks that already have an open position.
     """
 
-    @ensure(
-        lambda result: len(result.stock_id) > 0,
-        "Signal must have a stock_id",
-    )
-    @ensure(
-        lambda result: result.quantity >= 0,
-        "Signal quantity must be non-negative",
-    )
-    def decide(
-        self,
-        stock: Stock,
-        account: Account,
-        position: Position | None = None,
-    ) -> TradeSignal:
+    @ensure(lambda result: len(result.stock_id) > 0, "Signal must have a stock_id")
+    @ensure(lambda result: result.quantity >= 0, "Signal quantity must be non-negative")
+    def decide(self, stock: Stock, account: Account, position: Position | None = None) -> TradeSignal:
         if position is None:
             return self.entry_rule.decide(stock=stock, account=account)
 
-        exit_signal = self.exit_rule.decide(
-            stock=stock,
-            position=position,
-        )
+        exit_signal = self.exit_rule.decide(stock=stock, position=position)
 
         if exit_signal.action == TradeAction.SELL:
             return exit_signal
@@ -62,8 +48,4 @@ class DecisionRule:
         if stock.is_eliminated:
             return exit_signal
 
-        return self.entry_rule.decide(
-            stock=stock,
-            account=account,
-            position=position,
-        )
+        return self.entry_rule.decide(stock=stock, account=account, position=position)
