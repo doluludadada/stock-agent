@@ -1,9 +1,13 @@
 import math
 from datetime import datetime
 
+from icontract import require
 from sqlmodel import Field, SQLModel
 
+from a_domain.model.trading.order import Order
 from a_domain.model.trading.position import Position
+from a_domain.rules.trading.cost import TradingCostRule
+from a_domain.types.enums import RejectReason, TradeAction
 
 
 class Account(SQLModel):
@@ -32,6 +36,30 @@ class Account(SQLModel):
         for position in self.positions:
             if position.stock_id == stock_id:
                 return position
+
+        return None
+
+    @require(lambda order: order.limit_price is not None, "Only a priced (LIMIT) order has a known cost")
+    def refusal_for(self, order: Order, cost_rule: TradingCostRule) -> tuple[RejectReason, str] | None:
+        """
+        Why this account cannot pay for or deliver `order` at its limit price, or None. A broker's pre-trade check:
+        a BUY needs the cash for the whole quantity plus fee, a SELL needs the shares.
+        """
+        if order.action == TradeAction.BUY:
+            needed = -cost_rule.cost_of(TradeAction.BUY, order.limit_price, order.quantity).net
+
+            if not self.can_afford(needed):
+                return RejectReason.INSUFFICIENT_CASH, f"needs {needed:,.0f} including fee, cash is {self.cash:,.0f}"
+
+            return None
+
+        position = self.position_for(order.stock_id)
+
+        if position is None:
+            return RejectReason.POSITION_NOT_FOUND, f"no {order.stock_id} shares held"
+
+        if not position.can_cover(order.quantity):
+            return RejectReason.INSUFFICIENT_POSITION, f"holds {position.quantity}, selling {order.quantity}"
 
         return None
 

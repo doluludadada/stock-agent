@@ -115,20 +115,38 @@ class TradingUseCases:
     run_history: RunHistory
 
 
+class TradingSetupError(RuntimeError):
+    """The trading settings or the broker login do not let the CLI start. The message says what to change."""
+
+
 def validate_trading_environment(config: AppConfig) -> None:
     """
-    DEV must never use a real execution provider.
+    Refuses a trading setup that could send an order nobody meant to send, before any broker is contacted.
 
-    OrderMode.DISABLED is still allowed in DEV.
+    - DEV uses the mock broker only.
+    - mock_only order mode needs the mock broker.
+    - live order mode needs environment live and the Shioaji broker.
+    - The Shioaji broker needs its credentials.
+    Order mode disabled never orders, so outside DEV it may read a real Shioaji account.
     """
-    if config.environment != SystemEnvironment.DEV:
-        return
+    environment, provider, mode = config.environment, config.trading.execution_provider, config.trading.order_mode
 
-    if config.trading.execution_provider != ExecutionProvider.MOCK:
-        raise ValueError("DEV environment requires MockExecutionProvider")
+    if environment == SystemEnvironment.DEV and provider != ExecutionProvider.MOCK:
+        raise TradingSetupError("DEV environment requires MockExecutionProvider")
 
-    if config.trading.order_mode == OrderMode.LIVE:
-        raise ValueError("DEV environment cannot use LIVE order mode")
+    if mode == OrderMode.MOCK_ONLY and provider != ExecutionProvider.MOCK:
+        raise TradingSetupError(
+            f"order_mode mock_only needs execution_provider mock, not {provider.value}. "
+            f"Use order_mode disabled to read the {provider.value} account without ordering"
+        )
+
+    if mode == OrderMode.LIVE and (environment != SystemEnvironment.LIVE or provider != ExecutionProvider.SHIOAJI):
+        raise TradingSetupError(
+            f"order_mode live needs environment live and execution_provider shioaji, not {environment.value} and {provider.value}"
+        )
+
+    if provider == ExecutionProvider.SHIOAJI and (missing := config.shioaji.missing_credentials()):
+        raise TradingSetupError(f"execution_provider shioaji needs {', '.join(missing)} in the environment or .env")
 
 
 def create_ai_provider(config: AppConfig, logger: ILoggingProvider) -> IAiProvider:
@@ -142,11 +160,24 @@ def create_ai_provider(config: AppConfig, logger: ILoggingProvider) -> IAiProvid
     return factory.create_adapter()
 
 
-def create_execution_provider(config: AppConfig, db: DatabaseConnector, logger: ILoggingProvider) -> IExecutionProvider:
-    if config.trading.execution_provider != ExecutionProvider.MOCK:
-        raise NotImplementedError(f"Execution provider is not wired yet: {config.trading.execution_provider.value}")
+async def create_execution_provider(config: AppConfig, db: DatabaseConnector, logger: ILoggingProvider) -> IExecutionProvider:
+    if config.trading.execution_provider == ExecutionProvider.MOCK:
+        return MockExecutionProvider(db=db, config=config, logger=logger)
 
-    return MockExecutionProvider(db=db, config=config, logger=logger)
+    # Imported only for Shioaji: importing shioaji creates shioaji.log in the working directory and logs a warning.
+    from c_infrastructure.trading.shioaji.execution_provider import ShioajiExecutionProvider
+
+    broker = "simulation" if config.shioaji.simulation else "production"
+
+    try:
+        provider = await ShioajiExecutionProvider.connect(config, logger)
+
+    except Exception as error:
+        raise TradingSetupError(f"Shioaji {broker} login failed: {type(error).__name__}: {error}") from error
+
+    logger.info(f"Logged in to Shioaji {broker}. Order mode: {config.trading.order_mode.value}")
+
+    return provider
 
 
 def create_notification_provider(config: AppConfig, logger: ILoggingProvider) -> INotificationProvider | None:
@@ -182,7 +213,7 @@ async def build_provider_dependencies(
         journal=TradingJournal(db=db),
         watchlist_repository=WatchlistRepository(db=db, logger=logger, market_clock=market_clock),
         technical_settings_repository=YamlTechnicalSettingsRepository(technical_path),
-        execution_provider=create_execution_provider(config, db, logger),
+        execution_provider=await create_execution_provider(config, db, logger),
         notification_provider=create_notification_provider(config, logger),
     )
 

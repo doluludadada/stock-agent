@@ -23,7 +23,7 @@ from a_domain.model.valuation.valuation import (
     ValuationExplanation,
 )
 from a_domain.rules.trading.valuation import AccountValuation, EquityPoint
-from a_domain.types.enums import WatchlistType
+from a_domain.types.enums import ExecutionProvider, OrderMode, WatchlistType
 from b_application.pipeline import Pipeline
 from b_application.schemas.config import AppConfig
 from b_application.schemas.pipeline_status import PipelineStatus
@@ -33,7 +33,7 @@ from b_application.use_cases.trade.watch_stocks import WatchStocks
 from b_application.valuation_pipeline import ValuationPipeline
 from c_infrastructure.database.db_connector import OutdatedDatabaseError
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
-from d_presentation.cli.cli_container import build_cli_orchestrator
+from d_presentation.cli.cli_container import TradingSetupError, build_cli_orchestrator
 
 console = Console()
 
@@ -166,10 +166,29 @@ async def run_intraday(pipeline: Pipeline) -> PipelineStatus:
 
 
 def print_menu(config: AppConfig) -> None:
+    real_broker = config.trading.execution_provider != ExecutionProvider.MOCK
+
     console.print(f"Environment:        {format_label(config.environment.value)}")
     console.print(f"Execution Provider: {format_label(config.trading.execution_provider.value)}")
-    console.print(f"Account:            {config.mock_trading.account_id}")
+    console.print(f"Account:            {'the broker default stock account' if real_broker else config.mock_trading.account_id}")
     console.print(f"Orders:             {format_label(config.trading.order_mode.value)}")
+
+    if real_broker:
+        server = "SIMULATION (paper trading)" if config.shioaji.simulation else "PRODUCTION: REAL ACCOUNT, REAL MONEY"
+        orders = (
+            "menus 2 and 3 and a confirmed manual BUY send orders to the broker"
+            if config.trading.order_mode == OrderMode.LIVE
+            else "no order is sent; cash and positions are read from the broker"
+        )
+        console.print(
+            Panel(
+                f"{format_label(config.trading.execution_provider.value)} {server}\n"
+                f"Orders {format_label(config.trading.order_mode.value)}: {orders}",
+                title="REAL BROKER",
+                style="bold red",
+            )
+        )
+
     console.print("")
 
     console.print("[1] Run Full Cycle")
@@ -814,7 +833,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt, asyncio.CancelledError, SystemExit:
         pass
 
-    except OutdatedDatabaseError as error:
+    except (OutdatedDatabaseError, TradingSetupError) as error:
         console.print(str(error), style="red", markup=False, highlight=False)
         exit_code = 1
 

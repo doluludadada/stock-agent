@@ -11,7 +11,7 @@ This project is not financial advice. Treat generated signals as decision suppor
 - Market: Taiwan stocks.
 - Primary UI: CLI at `backend/src/d_presentation/cli/interactive.py`.
 - API: FastAPI is present, but the current web router exposes LINE webhook plumbing, not the trading workflow menu.
-- Order execution: the CLI composition currently wires `MockExecutionProvider`.
+- Order execution: `MockExecutionProvider` by default. `ShioajiExecutionProvider` (Sinopac) is wired for `execution_provider: shioaji`, see [Real broker (Shioaji)](#real-broker-shioaji). It has not been run against a real Shioaji account.
 - Database: local SQLite at `stock_agent.db` unless PostgreSQL credentials are provided.
 - Knowledge store: ChromaDB path is configured by `config/appsetting.yaml`.
 
@@ -165,7 +165,25 @@ Main files:
 | `config/appsetting.yaml` | Active model, logging, analysis weights, thresholds, folders, mock account, indicator periods. |
 | `config/strategies.yaml` | Technical screening thresholds for `conservative`, `moderate`, `aggressive`, `buzz`, and `nightly`. |
 | `config/instructions.yaml` | AI report prompts and RAG injection prompts. |
-| `.env` | API keys and optional database credentials. |
+| `.env` | API keys, optional database credentials and the Shioaji credentials. |
+
+### Real broker (Shioaji)
+
+The shipped settings use the mock broker in `mock_only` order mode. The CLI refuses to start a combination that could send an order nobody meant to send, and says what to change:
+
+| `environment` | `execution_provider` | `order_mode` | Starts? |
+| --- | --- | --- | --- |
+| any | `mock` | `mock_only` or `disabled` | Yes. |
+| any | `mock` | `live` | No. Live order mode needs Shioaji. |
+| `dev` | `shioaji` | any | No. DEV never touches a real broker. |
+| `test` or `live` | `shioaji` | `mock_only` | No. Use `disabled` to read the Shioaji account without ordering. |
+| `test` or `live` | `shioaji` | `disabled` | Yes. Cash and positions come from Shioaji, no order is sent. |
+| `test` | `shioaji` | `live` | No. Live order mode needs `environment: live`. |
+| `live` | `shioaji` | `live` | Yes. Menus 2 and 3 and a confirmed manual BUY send orders to Shioaji. |
+
+`shioaji.simulation: true` (the default) logs in to Shioaji's paper-trading environment. Set it to `false` only after testing there; the account is then real money. Shioaji needs `SHIOAJI_API_KEY` and `SHIOAJI_SECRET_KEY` in the environment or `.env`, and in production also `SHIOAJI_CA_PATH`, `SHIOAJI_CA_PASSWORD` and `SHIOAJI_PERSON_ID`. With any non-mock broker the menu header shows a red REAL BROKER panel with the broker, simulation or production, and the order mode.
+
+How the adapter trades: quantities are shares; whole 1000-share lots go as one board-lot order and the rest as one intraday odd-lot order, both LIMIT IOC. Before sending, it refuses a BUY that the cash cannot pay, because the broker checks the trading limit, not the cash. Cash is the bank balance minus settlement payments due and minus the BUYs the broker lists as dealt today. An order still working after a few seconds is cancelled; one the broker still reports as working, or a timed-out call it cannot find again, ends FAILED with a reason that says to check the broker.
 
 Environment variables are loaded from `.env` or `../.env` relative to the backend process. Common keys:
 
@@ -228,7 +246,7 @@ Tables are created with `create_all`, which never changes an existing table. At 
 - Every BUY or SELL decision gets one `orders` row before anything reaches the broker. A closed market, a disabled order mode or a quote older than `freshness.realtime_max_lag_minutes` makes that row `REJECTED` with the reason, and nothing is sent.
 - `Run Full Cycle` does not call order execution.
 - Manual BUY override is explicit user intent and still uses the same order checks.
-- The current CLI uses mock trading. A live execution provider must be wired intentionally before real brokerage orders are possible.
+- Real orders need `environment: live`, `execution_provider: shioaji`, `order_mode: live` and the Shioaji credentials together. Any other combination with Shioaji either refuses to start or only reads the account.
 
 ## Known Cleanup Areas
 

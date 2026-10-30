@@ -93,23 +93,7 @@ class MockExecutionProvider(IExecutionProvider):
                 "the mock accepts IOC and FOK only; a ROD remainder would stay working forever",
             )
 
-        if order.action == TradeAction.BUY:
-            needed = -self._cost_rule.cost_of(TradeAction.BUY, order.limit_price, order.quantity).net
-
-            if not account.can_afford(needed):
-                return RejectReason.INSUFFICIENT_CASH, f"needs {needed:,.0f} including fee, cash is {account.cash:,.0f}"
-
-            return None
-
-        position = account.position_for(order.stock_id)
-
-        if position is None:
-            return RejectReason.POSITION_NOT_FOUND, f"no {order.stock_id} shares held"
-
-        if not position.can_cover(order.quantity):
-            return RejectReason.INSUFFICIENT_POSITION, f"holds {position.quantity}, selling {order.quantity}"
-
-        return None
+        return account.refusal_for(order, self._cost_rule)
 
     def _fill_quantity(self, order: Order) -> int:
         available = order.quantity if self._max_fill_quantity is None else min(order.quantity, self._max_fill_quantity)

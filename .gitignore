@@ -38,4 +38,5 @@ wheels/
 /news_archive
 /ai_responses
 /buzz_archive
-/backend/tests/leetcodeshioaji.log
+/backend/tests/leetcode
+shioaji.log

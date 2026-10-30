@@ -85,6 +85,8 @@ class RejectReason(StrEnum):
     INSUFFICIENT_POSITION = auto()
     UNSUPPORTED_ORDER_TYPE = auto()
     UNSUPPORTED_TIME_IN_FORCE = auto()
+    BROKER_REFUSED = auto()
+    """The real broker refused the order before it worked (its own checks or the exchange's); the detail quotes the broker."""
 
 
 class TimeInForce(StrEnum):

@@ -112,6 +112,12 @@ mock_trading:
   account_id: mock-dev
   initial_cash: 1000000
 
+# Used only with trading.execution_provider: shioaji. Credentials come from the environment or .env:
+# SHIOAJI_API_KEY and SHIOAJI_SECRET_KEY, plus SHIOAJI_CA_PATH, SHIOAJI_CA_PASSWORD and SHIOAJI_PERSON_ID in production.
+shioaji:
+  # true: Shioaji's paper-trading environment. false: the real account, real money.
+  simulation: true
+
 watchlist:
   automatic_expiry_hours: 24
 

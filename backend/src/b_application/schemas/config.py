@@ -4,7 +4,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Self
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from a_domain.rules.collect.freshness import DataFreshnessRule
@@ -212,6 +212,37 @@ class MockTradingConfig(BaseModel):
     """Most shares the simulated market fills per order at the limit price. Unset fills any quantity."""
 
 
+class ShioajiConfig(BaseSettings):
+    """
+    Shioaji (Sinopac) broker login, used when trading.execution_provider is shioaji.
+
+    Credentials come from the environment or .env only. Simulation logs in to Shioaji's paper-trading
+    environment and needs no CA certificate; production signs real orders with the CA. The env prefix keeps
+    an unrelated SIMULATION variable from switching the broker to production.
+    """
+
+    model_config = SettingsConfigDict(env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore", env_prefix="SHIOAJI_")
+
+    simulation: bool = True
+
+    api_key: SecretStr | None = Field(default=None, validation_alias="SHIOAJI_API_KEY")
+    secret_key: SecretStr | None = Field(default=None, validation_alias="SHIOAJI_SECRET_KEY")
+    ca_path: str | None = Field(default=None, validation_alias="SHIOAJI_CA_PATH")
+    ca_password: SecretStr | None = Field(default=None, validation_alias="SHIOAJI_CA_PASSWORD")
+    person_id: SecretStr | None = Field(default=None, validation_alias="SHIOAJI_PERSON_ID")
+
+    @field_validator("api_key", "secret_key", "ca_path", "ca_password", "person_id", mode="before")
+    @classmethod
+    def _blank_is_missing(cls, value: object) -> object:
+        return None if isinstance(value, str) and not value.strip() else value
+
+    def missing_credentials(self) -> list[str]:
+        """The environment variables a login still needs: the API key pair always, the CA trio in production."""
+        required = ["api_key", "secret_key"] if self.simulation else ["api_key", "secret_key", "ca_path", "ca_password", "person_id"]
+
+        return [str(type(self).model_fields[name].validation_alias) for name in required if getattr(self, name) is None]
+
+
 class ValuationConfig(BaseModel):
     """P/E valuation (menus 5 and 6)."""
 
@@ -249,6 +280,7 @@ class AppConfig(BaseSettings):
     freshness: FreshnessConfig = Field(default_factory=FreshnessConfig)
     trading: TradingConfig = Field(default_factory=TradingConfig)
     mock_trading: MockTradingConfig = Field(default_factory=MockTradingConfig)
+    shioaji: ShioajiConfig = Field(default_factory=ShioajiConfig)
     watchlist: WatchlistConfig = Field(default_factory=WatchlistConfig)
     valuation: ValuationConfig = Field(default_factory=ValuationConfig)
 

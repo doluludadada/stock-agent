@@ -1215,7 +1215,7 @@ AI 不得：
 - 預設仍使用 MockExecutionProvider。
     
 
-目前 Shioaji execution provider 的所有方法仍為未實作。
+ShioajiExecutionProvider 已實作並在 `execution_provider: shioaji` 時接上，預設登入 Shioaji 模擬環境（`shioaji.simulation: true`）。它只以依 shioaji 1.3.1 模型建立的假客戶端測試過，尚未以真實 Shioaji 帳戶驗證。
 
 ---
 
