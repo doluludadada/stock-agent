@@ -27,7 +27,6 @@ class BuzzScanner:
         self._article_limit = rules.social_article_limit
         self._criteria = SocialBuzzCriteria(min_mentions=rules.buzz_min_mentions, min_engagement=rules.buzz_min_engagement)
 
-    # TODO: I wanna improve this method
     async def execute(self, status: PipelineStatus) -> None:
         self._logger.info("Scanning social media for buzz...")
         articles = await self._social_media_provider.fetch_social_articles(limit=self._article_limit)
@@ -40,16 +39,13 @@ class BuzzScanner:
         for article in articles:
             articles_by_stock[article.stock_id].append(article)
 
-        status.stats.buzz_scanned = len(articles_by_stock)
         buzz_stocks: list[Stock] = []
         for stock_id, stock_articles in articles_by_stock.items():
-            engagement = sum(int((article.raw_metadata or {}).get("engagement", 0)) for article in stock_articles)
-            if not self._criteria.is_trending(len(stock_articles), engagement):
+            engagement = sum(article.engagement for article in stock_articles)
+            if not self._criteria.is_trending(mention_count=len(stock_articles), engagement=engagement):
                 continue
 
-            stock = status.stocks_cache.get(stock_id)
-            if stock is None:
-                stock = await self._stock_provider.get_by_id(stock_id)
+            stock = status.stocks_cache.get(stock_id) or await self._stock_provider.get_by_id(stock_id)
             if stock is None:
                 self._logger.warning(f"Buzz stock not found: {stock_id}")
                 continue
@@ -59,5 +55,6 @@ class BuzzScanner:
             buzz_stocks.append(stock)
 
         status.buzz_stocks = buzz_stocks
+        status.stats.buzz_scanned = len(articles_by_stock)
         status.stats.buzz_qualified = len(buzz_stocks)
         self._logger.info(f"Buzz candidates: {status.stats.buzz_scanned} -> {status.stats.buzz_qualified}")

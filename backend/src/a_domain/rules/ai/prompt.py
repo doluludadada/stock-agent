@@ -10,7 +10,6 @@ from a_domain.model.valuation.valuation import PeNotApplicable, ValuationReport
 from a_domain.types.enums import AiAnalysisFocus
 
 
-# TODO: It was clean
 @invariant(lambda self: self.max_articles > 0, "max_articles must be positive")
 @invariant(lambda self: self.max_content_length > 0, "max_content_length must be positive")
 @invariant(lambda self: len(self.fundamental_template) > 0)

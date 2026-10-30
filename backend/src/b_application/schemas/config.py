@@ -34,7 +34,6 @@ class AiConfig(BaseSettings):
     system_prompt: str | None = None
     rag_injection_prompt: str | None = None
     article_content_length: int = Field(default=500, ge=100)
-    neutral_score: int = Field(default=50, ge=0, le=100)
 
 
 class LineConfig(BaseSettings):
@@ -132,6 +131,7 @@ class PromptsConfig(BaseModel):
     analysis_report_fundamental: str = ""
     analysis_report_momentum: str = ""
     valuation_explanation: str = ""
+    social_sentiment: str = ""
 
 
 class CollectRulesConfig(BaseModel):

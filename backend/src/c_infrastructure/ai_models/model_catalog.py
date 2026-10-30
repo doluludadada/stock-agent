@@ -1,6 +1,5 @@
 import asyncio
 
-import google.generativeai as genai
 import httpx
 from openai import AsyncOpenAI, OpenAIError
 
@@ -31,11 +30,8 @@ class ModelsCatalog(IModelCatalogRepository):
             return tuple()
         self._logger.debug("Fetching models from OpenAI...")
         try:
-            resp = await self._openai_client.models.list()
-            # TODO: too ugly
-            models = tuple(
-                AIModel(provider=AiProvider.OPENAI, name=m.id) for m in getattr(resp, "data", []) if "gpt" in getattr(m, "id", "")
-            )
+            response = await self._openai_client.models.list()
+            models = tuple(AIModel(provider=AiProvider.OPENAI, name=model.id) for model in response.data if "gpt" in model.id)
             self._logger.info(f"Found {len(models)} compatible models from OpenAI.")
             return models
         except OpenAIError as e:
@@ -51,8 +47,8 @@ class ModelsCatalog(IModelCatalogRepository):
             return tuple()
         self._logger.debug("Fetching models from Grok (X.ai)...")
         try:
-            resp = await self._xai_client.models.list()
-            models = tuple(AIModel(provider=AiProvider.GROK, name=m.id) for m in getattr(resp, "data", []) if getattr(m, "id", None))
+            response = await self._xai_client.models.list()
+            models = tuple(AIModel(provider=AiProvider.GROK, name=model.id) for model in response.data)
             self._logger.info(f"Found {len(models)} models from Grok (X.ai).")
             return models
         except OpenAIError as e:
@@ -60,20 +56,6 @@ class ModelsCatalog(IModelCatalogRepository):
             return tuple()
         except Exception as e:
             self._logger.critical(f"Unexpected error fetching Grok models: {e}")
-            return tuple()
-
-    async def _fetch_gemini_models(self) -> tuple[str, ...]:
-        if not getattr(self._config, "gemini_api_key", None):
-            self._logger.debug("Gemini API key not configured. Skipping model fetch.")
-            return tuple()
-        self._logger.debug("Fetching models from Gemini...")
-        try:
-            genai.configure(api_key=self._config.ai.gemini_api_key)  # type: ignore[attr-defined]
-            resp = await asyncio.to_thread(lambda: getattr(genai, "list_models", lambda: [])())
-            ids = tuple(getattr(m, "name", str(m)) for m in resp or [])
-            return ids
-        except Exception as e:
-            self._logger.error(f"Gemini API error while listing models: {e}")
             return tuple()
 
     async def list_chat_models(self) -> tuple[AIModel, ...]:

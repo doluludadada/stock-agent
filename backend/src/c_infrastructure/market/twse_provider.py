@@ -47,6 +47,9 @@ class TaiwanStockProvider(IStockProvider):
     Fetches the full universe of stocks from the Taiwan Stock Exchange OpenAPI.
     Results are cached with a TTL since the listed stock universe rarely changes.
     The same listings carry each stock's latest official close, cached with the universe.
+
+    Every call returns new Stock and Ohlcv objects. Workflows fill a Stock with articles, prices and reports,
+    so handing out the cached instances would carry one workflow's data into the next.
     """
 
     TWSE_URL = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
@@ -60,27 +63,28 @@ class TaiwanStockProvider(IStockProvider):
         self._cache_expiry: datetime = datetime.min
 
     async def get_all(self) -> list[Stock]:
+        stocks = await self._cached_stocks()
+        return [stock.model_copy(deep=True) for stock in stocks]
+
+    async def get_by_id(self, stock_id: str) -> Stock | None:
+        for stock in await self._cached_stocks():
+            if stock.stock_id == stock_id:
+                return stock.model_copy(deep=True)
+        return None
+
+    async def _cached_stocks(self) -> list[Stock]:
         now = datetime.now()
         if self._cache and now < self._cache_expiry:
             self._logger.debug(f"Returning cached stock list ({len(self._cache)} stocks)")
             return self._cache
 
-        stocks, closes = await self._fetch_from_api()
-        self._cache = stocks
-        self._closes = closes
+        self._cache, self._closes = await self._fetch_from_api()
         self._cache_expiry = now + self.CACHE_TTL
-        return stocks
-
-    async def get_by_id(self, stock_id: str) -> Stock | None:
-        all_stocks = await self.get_all()
-        for stock in all_stocks:
-            if stock.stock_id == stock_id:
-                return stock
-        return None
+        return self._cache
 
     async def get_latest_closes(self) -> dict[str, Ohlcv]:
-        await self.get_all()
-        return self._closes
+        await self._cached_stocks()
+        return {stock_id: close.model_copy() for stock_id, close in self._closes.items()}
 
     async def _fetch_from_api(self) -> tuple[list[Stock], dict[str, Ohlcv]]:
         stocks: list[Stock] = []

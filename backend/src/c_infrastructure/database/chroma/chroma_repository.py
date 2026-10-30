@@ -16,7 +16,6 @@ from c_infrastructure.database.chroma.schema import ChromaCollection, ChromaResu
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 
-# TODO: Check it later
 class ChromaRepositoryAdapter(IConversationRepository, IKnowledgeRepository):
     def __init__(self, config: AppConfig, logger: ILoggingProvider) -> None:
         self._logger = logger
@@ -63,20 +62,18 @@ class ChromaRepositoryAdapter(IConversationRepository, IKnowledgeRepository):
             self._logger.error(f"Failed to save conversation: {error}")
             return False
 
-    async def search(self, query: str, limit: int = 3) -> str:
+    async def find_decision_history(self, stock_id: str, limit: int = 3) -> str:
         try:
-            result = self._knowledge_collection.query(query_texts=[query], n_results=limit)
-
-            documents = result.get(ChromaResultKey.DOCUMENTS)
-
-            if not documents or not documents[0]:
-                return ""
-
-            return "\n\n---\n\n".join(str(document) for document in documents[0])
-
+            result = self._knowledge_collection.get(where={"stock_id": stock_id}, include=["documents", "metadatas"])
         except Exception as error:
-            self._logger.error(f"RAG search failed for '{query}': {error}")
+            self._logger.error(f"Decision history lookup failed for {stock_id}: {error}")
             return ""
+
+        documents = result.get(ChromaResultKey.DOCUMENTS) or []
+        metadatas = result.get(ChromaResultKey.METADATAS) or []
+        newest_first = sorted(zip(documents, metadatas, strict=True), key=lambda item: str(item[1]["generated_at"]), reverse=True)
+
+        return "\n\n---\n\n".join(document for document, _ in newest_first[:limit])
 
     async def save_decision(self, stock: Stock, signal: TradeSignal) -> None:
         technical_score: int | str = stock.technical_score if stock.technical_score is not None else "Unavailable"

@@ -54,7 +54,7 @@ class ValuationPipeline:
     async def load_market(self) -> MarketValuation:
         """Every listed and OTC stock with its official close, TTM EPS and industry: bulk sources, a few requests."""
         status = valuation_status()
-        stocks = [stock.model_copy(deep=True) for stock in await self.stock_provider.get_all()]
+        stocks = await self.stock_provider.get_all()
         closes = await self.stock_provider.get_latest_closes()
 
         await self.fundamentals.execute(stocks, status)

@@ -94,14 +94,6 @@ async def test_buzz_scan_orders_only_when_market_is_open_and_quote_is_fresh(
     assert status.stats.orders_submitted == len(orders)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Product bug: BuzzScanner extends articles on the Stock object that the stock provider caches (TaiwanStockProvider "
-        "keeps it for 6 hours) instead of a copy, so a second Buzz scan in one CLI session prompts the AI with the "
-        "previous scan's discussions."
-    ),
-)
 @pytest.mark.asyncio
 async def test_second_buzz_scan_in_a_session_prompts_only_current_discussions() -> None:
     harness = build_harness()

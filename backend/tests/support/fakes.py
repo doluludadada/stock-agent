@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from uuid import UUID
 
+from a_domain.model.analysis.social_sentiment import SentimentClassification
 from a_domain.model.analysis.technical_settings import TechnicalSettings
 from a_domain.model.chat.message import Message
 from a_domain.model.fundamentals.eps import EpsFilings, FiscalQuarter, QuarterEps
@@ -23,9 +24,9 @@ from a_domain.model.trading.account_snapshot import AccountSnapshot
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.position import Position
 from a_domain.model.trading.signal import TradeSignal
-from a_domain.model.trading.watchlist import StockWatchlist
+from a_domain.model.trading.watchlist import WatchlistEntry
 from a_domain.rules.trading.cost import TradingCostRule
-from a_domain.types.enums import AiAnalysisFocus, MessageRole, TradeAction, WatchlistType
+from a_domain.types.enums import AiAnalysisFocus, MessageRole, SentimentLabel, TradeAction, WatchlistType
 from a_domain.types.ids import DecisionId, RunId
 from c_infrastructure.system.market_clock import TaiwanMarketClock
 
@@ -83,17 +84,18 @@ class FakeMarketClock(TaiwanMarketClock):
 
 
 class FakeStockProvider:
-    """Like TaiwanStockProvider, every call returns the same shared Stock objects."""
+    """Like TaiwanStockProvider, every call returns new copies of the listed stocks, as IStockProvider promises."""
 
     def __init__(self) -> None:
         self.stocks: dict[str, Stock] = {}
         self.closes: dict[str, Ohlcv] = {}
 
     async def get_all(self) -> list[Stock]:
-        return list(self.stocks.values())
+        return [stock.model_copy(deep=True) for stock in self.stocks.values()]
 
     async def get_by_id(self, stock_id: str) -> Stock | None:
-        return self.stocks.get(stock_id)
+        stock = self.stocks.get(stock_id)
+        return stock.model_copy(deep=True) if stock is not None else None
 
     async def get_latest_closes(self) -> dict[str, Ohlcv]:
         return {stock_id: bar.model_copy() for stock_id, bar in self.closes.items()}
@@ -230,7 +232,7 @@ class FakeKnowledgeRepository:
     def __init__(self) -> None:
         self.decisions: list[tuple[str, TradeSignal]] = []
 
-    async def search(self, query: str, limit: int = 3) -> str:
+    async def find_decision_history(self, stock_id: str, limit: int = 3) -> str:
         return ""
 
     async def save_decision(self, stock: Stock, signal: TradeSignal) -> None:
@@ -266,32 +268,39 @@ class FakeTradingJournal:
 
 
 class FakeWatchlistRepository:
-    """Holds one row per (stock_id, type), like the watchlist table that WatchlistRepository writes."""
+    """Holds one entry per (stock_id, type), like the watchlists table, and returns the entries not expired at the clock's time."""
 
-    def __init__(self) -> None:
-        self.rows: list[tuple[str, WatchlistType]] = []
+    def __init__(self, clock: FakeMarketClock) -> None:
+        self._clock = clock
+        self.entries: dict[tuple[str, WatchlistType], WatchlistEntry] = {}
 
-    async def get_active(self) -> StockWatchlist:
-        stocks_by_id: dict[str, Stock] = {}
+    @property
+    def rows(self) -> list[tuple[str, WatchlistType]]:
+        return list(self.entries)
 
-        for stock_id, watchlist_type in self.rows:
-            stocks_by_id.setdefault(stock_id, Stock(stock_id=stock_id)).watchlist_types.add(watchlist_type)
+    async def get_active(self) -> list[WatchlistEntry]:
+        now = self._clock.now()
+        return [entry for entry in self.entries.values() if entry.expires_at is None or entry.expires_at > now]
 
-        return StockWatchlist(willing_stocks=list(stocks_by_id.values()))
-
-    async def add(self, stocks: list[Stock], watchlist_type: WatchlistType) -> StockWatchlist:
-        unique_stocks = {stock.stock_id: stock for stock in stocks}
-
-        for stock in unique_stocks.values():
-            stock.watchlist_types.add(watchlist_type)
-
-            if (stock.stock_id, watchlist_type) not in self.rows:
-                self.rows.append((stock.stock_id, watchlist_type))
-
-        return StockWatchlist(willing_stocks=list(unique_stocks.values()))
+    async def save(self, entries: list[WatchlistEntry]) -> None:
+        for entry in entries:
+            self.entries[(entry.stock_id, entry.watchlist_type)] = entry
 
     async def remove(self, stock_id: str) -> None:
-        self.rows = [row for row in self.rows if row[0] != stock_id]
+        self.entries = {key: entry for key, entry in self.entries.items() if entry.stock_id != stock_id}
+
+
+class FakeSentimentClassifier:
+    """Labels every post with the label set for its stock and records which posts each stock sent."""
+
+    def __init__(self) -> None:
+        self.labels: dict[str, SentimentLabel] = {}
+        self.classified: list[tuple[str, list[str]]] = []
+
+    async def classify(self, stock_id: str, articles: list[Article]) -> list[SentimentClassification]:
+        self.classified.append((stock_id, [article.title for article in articles]))
+        label = self.labels.get(stock_id, SentimentLabel.NEUTRAL)
+        return [SentimentClassification(label=label, confidence=0.9) for _ in articles]
 
 
 class RecordingExecutionProvider:

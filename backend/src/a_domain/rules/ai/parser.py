@@ -1,64 +1,51 @@
 import json
-from dataclasses import dataclass
-
-from icontract import ensure, invariant
 
 from a_domain.model.analysis.ai_analysis_report import AiAnalysisReport
 from a_domain.model.valuation.valuation import ValuationExplanation, ValuationReport
 
 
-# TODO:Clean here
-@invariant(lambda self: 0 <= self.fallback_score <= 100, "fallback_score must be 0-100")
-@dataclass(frozen=True)
-class AiReportParser:
+class AiReportParseError(ValueError):
+    """The model response holds no usable report, so the stock gets no AI score."""
+
+
+def parse_ai_report(raw_response: str) -> AiAnalysisReport:
     """
     Parses raw LLM output into AiAnalysisReport.
 
-    This belongs to domain rules because it converts untrusted model output
-    into a structured domain value object.
+    The score must come from the model. A response without a valid 0-100 confidence_score
+    raises AiReportParseError instead of falling back to a default score.
     """
+    parsed = extract_json_object(raw_response)
+    score = parsed.get("confidence_score")
 
-    fallback_score: int = 50
+    if isinstance(score, float) and score.is_integer():
+        score = int(score)
 
-    @ensure(lambda result: 0 <= result.score <= 100, "Parsed score must be 0-100")
-    def parse(self, stock_id: str, raw_response: str) -> AiAnalysisReport:
-        try:
-            parsed = extract_json_object(raw_response)
+    if isinstance(score, bool) or not isinstance(score, int) or not 0 <= score <= 100:
+        raise AiReportParseError(f"confidence_score must be an integer from 0 to 100, got {score!r}.")
 
-            return AiAnalysisReport(
-                score=int(parsed.get("confidence_score", self.fallback_score)),
-                bullish_factors=to_text_list(parsed.get("bullish_factors")),
-                bearish_factors=to_text_list(parsed.get("bearish_factors")),
-                summary=str(parsed.get("summary", f"AI Analysis for {stock_id}")),
-                raw_response=raw_response,
-            )
+    summary = parsed.get("summary")
 
-        except json.JSONDecodeError, ValueError, TypeError:
-            return self._fallback(raw_response)
-
-    def _fallback(self, raw_response: str) -> AiAnalysisReport:
-        return AiAnalysisReport(
-            score=self.fallback_score,
-            bullish_factors=[],
-            bearish_factors=[],
-            summary="Parse Error or Neutral",
-            raw_response=raw_response,
-        )
+    return AiAnalysisReport(
+        score=score,
+        bullish_factors=to_text_list(parsed.get("bullish_factors")),
+        bearish_factors=to_text_list(parsed.get("bearish_factors")),
+        summary=summary.strip() if isinstance(summary, str) else "",
+        raw_response=raw_response,
+    )
 
 
 def extract_json_object(raw_response: str) -> dict:
     json_start = raw_response.find("{")
     json_end = raw_response.rfind("}") + 1
 
-    if json_start == -1 or json_end <= 0:
-        raise ValueError("No JSON object found in AI response.")
+    if json_start == -1 or json_end <= json_start:
+        raise AiReportParseError("No JSON object found in the AI response.")
 
-    parsed = json.loads(raw_response[json_start:json_end])
-
-    if not isinstance(parsed, dict):
-        raise ValueError("AI response JSON is not an object.")
-
-    return parsed
+    try:
+        return json.loads(raw_response[json_start:json_end])
+    except json.JSONDecodeError as error:
+        raise AiReportParseError(f"AI response JSON is malformed: {error}") from error
 
 
 def to_text_list(value: object) -> list[str]:

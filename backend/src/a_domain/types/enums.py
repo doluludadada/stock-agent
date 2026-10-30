@@ -107,6 +107,30 @@ class InformationSource(StrEnum):
     PTT_GOSSIPING = auto()
     REUNION = auto()
 
+    @property
+    def is_social(self) -> bool:
+        """Public discussion boards, as opposed to news media and company filings."""
+        return self in {InformationSource.PTT_STOCK, InformationSource.PTT_GOSSIPING}
+
+
+class SentimentLabel(StrEnum):
+    """One post's stance toward its stock."""
+
+    BULLISH = auto()
+    BEARISH = auto()
+    NEUTRAL = auto()
+    UNCLEAR = auto()
+
+
+class SentimentConsensus(StrEnum):
+    """What a stock's posts say together. DISAGREEMENT is its own state and never folds into NEUTRAL."""
+
+    BULLISH = auto()
+    BEARISH = auto()
+    NEUTRAL = auto()
+    DISAGREEMENT = auto()
+    UNCLEAR = auto()
+
 
 class ContentType(StrEnum):
     FACT = auto()

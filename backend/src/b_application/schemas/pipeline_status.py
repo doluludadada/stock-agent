@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 
+from a_domain.model.analysis.social_sentiment import SocialSentiment
 from a_domain.model.market.stock import Stock
 from a_domain.model.system.stats import SystemStats
 from a_domain.model.trading.account import Account
@@ -73,7 +74,13 @@ class PipelineStatus:
 
     watchlist: StockWatchlist = field(default_factory=StockWatchlist)
     """
-    The watchlist this run trades from: technical or buzz survivors, or the active watchlist for intraday.
+    Watchlist stocks of this run: the survivors that Full Cycle and Buzz add,
+    or the active watchlist that Intraday loads.
+    """
+
+    sentiment_by_stock_id: dict[str, SocialSentiment] = field(default_factory=dict)
+    """
+    Buzz report only. Kept off Stock, which DecisionRule reads, and filled after orders are executed.
     """
 
     signals: list[TradeSignal] = field(default_factory=list)

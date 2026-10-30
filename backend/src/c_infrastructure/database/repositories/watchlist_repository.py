@@ -3,8 +3,7 @@
 from sqlalchemy import or_
 from sqlmodel import col, delete, select
 
-from a_domain.model.market.stock import Stock
-from a_domain.model.trading.watchlist import StockWatchlist
+from a_domain.model.trading.watchlist import WatchlistEntry
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
@@ -19,7 +18,7 @@ class WatchlistRepository(IWatchlistRepository):
         self._logger = logger
         self._market_clock = market_clock
 
-    async def get_active(self) -> StockWatchlist:
+    async def get_active(self) -> list[WatchlistEntry]:
         now = self._market_clock.now()
 
         async with self._db.get_session() as session:
@@ -27,39 +26,23 @@ class WatchlistRepository(IWatchlistRepository):
             result = await session.execute(statement)
             rows = result.scalars().all()
 
-        stocks_by_id: dict[str, Stock] = {}
+        return [self._to_entry(row) for row in rows]
 
-        for row in rows:
-            stock = stocks_by_id.setdefault(row.stock_id, Stock(stock_id=row.stock_id))
-            stock.watchlist_types.add(WatchlistType(row.type))
-
-        return StockWatchlist(willing_stocks=list(stocks_by_id.values()))
-
-    async def add(self, stocks: list[Stock], watchlist_type: WatchlistType) -> StockWatchlist:
-        unique_stocks = {stock.stock_id: stock for stock in stocks}
-
-        for stock in unique_stocks.values():
-            stock.watchlist_types.add(watchlist_type)
-
-        watchlist = StockWatchlist(willing_stocks=list(unique_stocks.values()))
-
-        if not unique_stocks:
-            return watchlist
+    async def save(self, entries: list[WatchlistEntry]) -> None:
+        if not entries:
+            return
 
         async with self._db.get_session() as session:
-            statement = select(WatchlistDTO.stock_id).where(
-                col(WatchlistDTO.stock_id).in_(unique_stocks), WatchlistDTO.type == watchlist_type
-            )
-            result = await session.execute(statement)
-            existing_stock_ids = set(result.scalars().all())
-
-            for stock_id in unique_stocks.keys() - existing_stock_ids:
-                session.add(WatchlistDTO(stock_id=stock_id, type=watchlist_type, created_at=watchlist.created_at))
+            for entry in entries:
+                await session.merge(
+                    WatchlistDTO(
+                        stock_id=entry.stock_id, type=entry.watchlist_type, created_at=entry.created_at, expires_at=entry.expires_at
+                    )
+                )
 
             await session.commit()
 
-        self._logger.debug(f"Added {len(unique_stocks)} {watchlist_type.value} watchlist stocks.")
-        return watchlist
+        self._logger.debug(f"Saved {len(entries)} watchlist entries.")
 
     async def remove(self, stock_id: str) -> None:
         async with self._db.get_session() as session:
@@ -68,3 +51,12 @@ class WatchlistRepository(IWatchlistRepository):
             await session.commit()
 
         self._logger.debug(f"Removed {stock_id} from watchlist.")
+
+    def _to_entry(self, row: WatchlistDTO) -> WatchlistEntry:
+        # SQLite drops the UTC offset, so stored times are read back as market time.
+        return WatchlistEntry(
+            stock_id=row.stock_id,
+            watchlist_type=WatchlistType(row.type),
+            created_at=self._market_clock.to_market_datetime(row.created_at),
+            expires_at=self._market_clock.to_market_datetime(row.expires_at) if row.expires_at is not None else None,
+        )

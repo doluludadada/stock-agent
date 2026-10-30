@@ -19,6 +19,7 @@ from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.position import Position
+from a_domain.model.trading.watchlist import WatchlistEntry
 from a_domain.rules.technical.calculation import IndicatorParameters
 from a_domain.rules.technical.criteria.trend import PriceAboveMaCriterion
 from a_domain.rules.technical.criteria.volume.volume import MinimumPriceCriterion
@@ -59,6 +60,7 @@ from support.fakes import (
     FakeMarketClock,
     FakeNewsProvider,
     FakeOhlcvProvider,
+    FakeSentimentClassifier,
     FakeSocialMediaProvider,
     FakeStockProvider,
     FakeTechnicalSettingsRepository,
@@ -139,6 +141,7 @@ class CliHarness:
     news: FakeNewsProvider
     social: FakeSocialMediaProvider
     ai: FakeAiProvider
+    sentiment: FakeSentimentClassifier
     knowledge: FakeKnowledgeRepository
     journal: FakeTradingJournal
     watchlist: FakeWatchlistRepository
@@ -185,7 +188,10 @@ class CliHarness:
         self.broker.positions.append(Position(stock_id=stock_id, quantity=quantity, average_cost=average_cost))
 
     def watch(self, stock_id: str, watchlist_type: WatchlistType) -> None:
-        self.watchlist.rows.append((stock_id, watchlist_type))
+        """Puts an active entry on the watchlist."""
+        self.watchlist.entries[(stock_id, watchlist_type)] = WatchlistEntry(
+            stock_id=stock_id, watchlist_type=watchlist_type, created_at=self.clock.now(), expires_at=None
+        )
 
     def discuss(self, stock_id: str, mentions: int, engagement: int, title: str = "[標的]") -> None:
         """Posts `mentions` social articles about the stock whose engagement adds up to `engagement`."""
@@ -196,7 +202,7 @@ class CliHarness:
                 title=f"{title} {stock_id}",
                 content=f"discussion {index} about {stock_id}",
                 published_at=self.clock.now() - timedelta(hours=1),
-                raw_metadata={"engagement": engagement if index == 0 else 0},
+                engagement=engagement if index == 0 else 0,
             )
             for index in range(mentions)
         )
@@ -291,9 +297,10 @@ def build_harness(
     news = FakeNewsProvider()
     social = FakeSocialMediaProvider()
     ai = FakeAiProvider()
+    sentiment = FakeSentimentClassifier()
     knowledge = FakeKnowledgeRepository()
     journal = FakeTradingJournal()
-    watchlist = FakeWatchlistRepository()
+    watchlist = FakeWatchlistRepository(clock)
     technical_settings = FakeTechnicalSettingsRepository(settings or harness_settings())
     broker = RecordingExecutionProvider()
 
@@ -304,6 +311,7 @@ def build_harness(
         news_provider=news,
         social_media_provider=social,
         ai_provider=ai,
+        sentiment_classifier=sentiment,
         knowledge_repository=knowledge,
         journal=journal,
         watchlist_repository=watchlist,
@@ -326,6 +334,7 @@ def build_harness(
         news=news,
         social=social,
         ai=ai,
+        sentiment=sentiment,
         knowledge=knowledge,
         journal=journal,
         watchlist=watchlist,

@@ -1,28 +1,38 @@
-# backend/src/b_application/use_cases/trade/watch_stocks.py
+from datetime import timedelta
 
 from a_domain.model.market.stock import Stock
-from a_domain.model.trading.watchlist import StockWatchlist
+from a_domain.model.trading.watchlist import WatchlistAddition
 from a_domain.ports.system.logging_provider import ILoggingProvider
+from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
+from a_domain.rules.watchlist import WatchlistRule
 from a_domain.types.enums import WatchlistType
+from b_application.schemas.config import AppConfig
 
 
 class WatchStocks:
-    """Adds stocks to the watchlist with an explicit source."""
+    """Adds stocks to one watchlist type according to WatchlistRule."""
 
-    def __init__(self, watchlist_repository: IWatchlistRepository, logger: ILoggingProvider) -> None:
+    def __init__(
+        self, watchlist_repository: IWatchlistRepository, market_clock: IMarketClock, config: AppConfig, logger: ILoggingProvider
+    ) -> None:
         self._watchlist_repository = watchlist_repository
+        self._market_clock = market_clock
+        self._rule = WatchlistRule(automatic_expiry=timedelta(hours=config.watchlist.automatic_expiry_hours))
         self._logger = logger
 
-    async def execute(self, stocks: list[Stock], watchlist_type: WatchlistType) -> StockWatchlist:
-        if not stocks:
-            self._logger.info(f"Watchlist update skipped. Type={watchlist_type.value}, stocks=0.")
-            return StockWatchlist()
+    async def execute(self, stocks: list[Stock], watchlist_type: WatchlistType) -> WatchlistAddition:
+        active_entries = await self._watchlist_repository.get_active()
+        addition = self._rule.add(active_entries, stocks, watchlist_type, self._market_clock.now())
 
-        self._logger.info(f"Adding {len(stocks)} stocks to {watchlist_type.value} watchlist.")
+        await self._watchlist_repository.save(addition.entries)
 
-        watchlist = await self._watchlist_repository.add(stocks=stocks, watchlist_type=watchlist_type)
+        for stock in addition.stocks:
+            stock.watchlist_types.add(watchlist_type)
 
-        self._logger.info(f"Watchlist updated. Type={watchlist_type.value}, stocks={len(watchlist.willing_stocks)}.")
+        self._logger.info(
+            f"Watchlist updated. Type={watchlist_type.value}, "
+            f"added={len(addition.added_stock_ids)}, already present={len(addition.already_present_stock_ids)}."
+        )
 
-        return watchlist
+        return addition

@@ -70,7 +70,7 @@ class StockDirectory:
 
 
 class ForgetfulKnowledge:
-    async def search(self, query: str, limit: int = 3) -> str:
+    async def find_decision_history(self, stock_id: str, limit: int = 3) -> str:
         return ""
 
     async def save_decision(self, stock: Stock, signal: TradeSignal) -> None:

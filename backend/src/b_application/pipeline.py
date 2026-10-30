@@ -11,6 +11,7 @@ from b_application.use_cases.collect.market_scanner import MarketScanner
 from b_application.use_cases.collect.news_feed import NewsFeed
 from b_application.use_cases.process.ai_analyser import AiAnalyser
 from b_application.use_cases.process.composite_scorer import CompositeScorer
+from b_application.use_cases.process.sentiment_analyser import SentimentAnalyser
 from b_application.use_cases.process.technical_filter import TechnicalFilter
 from b_application.use_cases.ship.decision_memory import DecisionMemory
 from b_application.use_cases.ship.reporting import Reporting
@@ -44,6 +45,7 @@ class Pipeline:
     ai: AiAnalyser
     technical_filter: TechnicalFilter
     composite_scorer: CompositeScorer
+    sentiment: SentimentAnalyser
     watch_stocks: WatchStocks
     signals: Signals
     decision_memory: DecisionMemory
@@ -68,7 +70,7 @@ class Pipeline:
             await self.news.execute(status.survivors, status)
             await self.ai.execute(status.survivors, status, AiAnalysisFocus.FUNDAMENTAL)
             self.composite_scorer.execute(status.survivors)
-            status.watchlist = await self.watch_stocks.execute(status.survivors, WatchlistType.TECHNICAL)
+            status.watchlist = (await self.watch_stocks.execute(status.survivors, WatchlistType.TECHNICAL)).watchlist
             await self.signals.execute(status.watchlist, status)
             await self.decision_memory.execute(status)
             await self.reporting.execute(status)
@@ -102,7 +104,7 @@ class Pipeline:
 
             await self.data_collector.execute(status.buzz_stocks, status, strategy.indicators)
             status.survivors = await self.technical_filter.execute(status.buzz_stocks, status, strategy)
-            status.watchlist = await self.watch_stocks.execute(status.survivors, WatchlistType.BUZZ)
+            status.watchlist = (await self.watch_stocks.execute(status.survivors, WatchlistType.BUZZ)).watchlist
             await self.news.execute(status.survivors, status)
             await self.ai.execute(status.survivors, status, AiAnalysisFocus.MOMENTUM)
             self.composite_scorer.execute(status.survivors)
@@ -110,6 +112,8 @@ class Pipeline:
             await self.signals.execute(status.watchlist, status)
             await self.decision_memory.execute(status)
             await self.order_execution.execute(status.signals, status)
+            # Sentiment is report only, so it runs after every trading step.
+            await self.sentiment.execute(status.buzz_stocks, status)
             await self.reporting.execute(status)
 
         self.logger.info(

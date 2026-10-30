@@ -36,7 +36,8 @@ ai_analysis_report_prompt_fundamental: |
   {{
       "confidence_score": <int 0-100>,
       "bullish_factors": ["<factor1>", "<factor2>"],
-      "bearish_factors": ["<risk1>", "<risk2>"]
+      "bearish_factors": ["<risk1>", "<risk2>"],
+      "summary": "<one sentence>"
   }}
 
 # Template for Buzz/Momentum Stocks
@@ -55,7 +56,27 @@ ai_analysis_report_prompt_momentum: |
   {{
       "confidence_score": <int 0-100>,
       "bullish_factors": ["<hype_reason1>", "<catalyst>"],
-      "bearish_factors": ["<risk_warning>", "<reversal_sign>"]
+      "bearish_factors": ["<risk_warning>", "<reversal_sign>"],
+      "summary": "<one sentence>"
+  }}
+
+# Template for the Buzz report's social sentiment (report only, never a trading input)
+social_sentiment_prompt: |
+  You read Taiwan stock forum posts and judge each author's stance toward one stock.
+  Target Stock: {stock_id}
+
+  bullish: the author expects the price to rise.
+  bearish: the author expects the price to fall.
+  neutral: the author discusses the stock without a directional view.
+  unclear: off-topic, unresolvable sarcasm, or the stock is only mentioned in passing.
+  The [N推 M噓 K→] header counts reader reactions. It is not the author's stance.
+
+  Posts:
+  {posts_text}
+
+  Respond with only this JSON object, one entry per post number:
+  {{
+      "posts": [{{"index": <post number>, "label": "<bullish|bearish|neutral|unclear>", "confidence": <0.0-1.0>}}]
   }}
 
 # Template for the P/E valuation explanation (menus 5 and 6). The system computes every number.

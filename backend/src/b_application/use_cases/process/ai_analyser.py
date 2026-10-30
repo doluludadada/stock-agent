@@ -5,7 +5,7 @@ from a_domain.model.market.stock import Stock
 from a_domain.ports.ai.ai_provider import IAiProvider
 from a_domain.ports.ai.knowledge_repository import IKnowledgeRepository
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from a_domain.rules.ai.parser import AiReportParser
+from a_domain.rules.ai.parser import parse_ai_report
 from a_domain.rules.ai.prompt import AiReportPromptBuilder
 from a_domain.types.enums import AiAnalysisFocus, MessageRole
 from b_application.schemas.config import AppConfig
@@ -33,7 +33,6 @@ class AiAnalyser:
             max_articles=config.analysis.article_fetch_limit,
             max_content_length=config.ai.article_content_length,
         )
-        self._report_parser = AiReportParser()
 
     async def execute(self, stocks: list[Stock], status: PipelineStatus, focus: AiAnalysisFocus) -> None:
         self._logger.info(f"Analysing {len(stocks)} stocks. Focus={focus.value}.")
@@ -42,11 +41,11 @@ class AiAnalyser:
         for stock in stocks:
             try:
                 stock.ai_report = None
-                historical_context = await self._knowledge_repository.search(stock.stock_id)
+                historical_context = await self._knowledge_repository.find_decision_history(stock.stock_id)
                 prompt = self._prompt_builder.build(stock=stock, historical_context=historical_context, focus=focus)
                 response = await self._ai_provider.generate_reply(messages=(Message(role=MessageRole.USER, content=prompt),))
                 self._ai_provider.save_response(stock.stock_id, response.content)
-                stock.ai_report = self._report_parser.parse(stock.stock_id, response.content)
+                stock.ai_report = parse_ai_report(response.content)
                 analysed_count += 1
             except Exception as error:
                 message = f"AI analysis failed for {stock.stock_id}: {error}"

@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from a_domain.ports.ai.ai_provider import IAiProvider
+from a_domain.ports.ai.sentiment_classifier import ISentimentClassifier
 from a_domain.ports.analysis.technical_settings_repository import ITechnicalSettingsRepository
 from a_domain.ports.market.fundamentals_provider import IFundamentalsProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
@@ -18,6 +19,7 @@ from b_application.use_cases.collect.market_scanner import MarketScanner
 from b_application.use_cases.collect.news_feed import NewsFeed
 from b_application.use_cases.process.ai_analyser import AiAnalyser
 from b_application.use_cases.process.composite_scorer import CompositeScorer
+from b_application.use_cases.process.sentiment_analyser import SentimentAnalyser
 from b_application.use_cases.process.technical_filter import TechnicalFilter
 from b_application.use_cases.ship.decision_memory import DecisionMemory
 from b_application.use_cases.ship.reporting import Reporting
@@ -31,6 +33,7 @@ from b_application.use_cases.trade.order_execution import OrderExecution
 from b_application.use_cases.trade.watch_stocks import WatchStocks
 from b_application.valuation_pipeline import ValuationPipeline
 from c_infrastructure.ai_models.factory import AiAdapterFactory
+from c_infrastructure.ai_models.sentiment_classifier import AiSentimentClassifier
 from c_infrastructure.database.chroma.chroma_repository import ChromaRepositoryAdapter
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.repositories.trading_journal import TradingJournal
@@ -73,6 +76,7 @@ class ProviderDependencies:
     news_provider: NewsProvider
     social_media_provider: PttProvider
     ai_provider: IAiProvider
+    sentiment_classifier: ISentimentClassifier
     knowledge_repository: ChromaRepositoryAdapter
     journal: ITradingJournal
     watchlist_repository: WatchlistRepository
@@ -94,6 +98,7 @@ class ProcessUseCases:
     ai_analyser: AiAnalyser
     technical_filter: TechnicalFilter
     composite_scorer: CompositeScorer
+    sentiment_analyser: SentimentAnalyser
 
 
 @dataclass(slots=True)
@@ -163,6 +168,7 @@ async def build_provider_dependencies(
     await knowledge_repository.init()
 
     technical_path = config.project_root / "config" / "technical.yaml"
+    ai_provider = create_ai_provider(config, logger)
 
     return ProviderDependencies(
         stock_provider=stock_provider,
@@ -170,7 +176,8 @@ async def build_provider_dependencies(
         fundamentals_provider=MopsFundamentalsProvider(db=db, market_clock=market_clock, logger=logger),
         news_provider=NewsProvider(config=config, logger=logger),
         social_media_provider=PttProvider(config=config, logger=logger, stock_provider=stock_provider),
-        ai_provider=create_ai_provider(config, logger),
+        ai_provider=ai_provider,
+        sentiment_classifier=AiSentimentClassifier(ai_provider=ai_provider, db=db, config=config, logger=logger),
         knowledge_repository=knowledge_repository,
         journal=TradingJournal(db=db),
         watchlist_repository=WatchlistRepository(db=db, logger=logger, market_clock=market_clock),
@@ -212,6 +219,7 @@ def build_process_use_cases(config: AppConfig, logger: ILoggingProvider, depende
         ai_analyser=ai_analyser,
         technical_filter=TechnicalFilter(logger=logger),
         composite_scorer=CompositeScorer(config=config, logger=logger),
+        sentiment_analyser=SentimentAnalyser(classifier=dependencies.sentiment_classifier, logger=logger),
     )
 
 
@@ -267,7 +275,7 @@ def build_trading_use_cases(
     return TradingUseCases(
         account_loader=account_loader,
         account_risk_check=AccountRiskCheck(dependencies.journal, config, logger),
-        watch_stocks=WatchStocks(dependencies.watchlist_repository, logger),
+        watch_stocks=WatchStocks(dependencies.watchlist_repository, market_clock, config, logger),
         manual_buy=manual_buy,
         account_history=account_history,
         signals=Signals(dependencies.journal, config, logger),
@@ -295,6 +303,7 @@ def build_pipeline(
         ai=process.ai_analyser,
         technical_filter=process.technical_filter,
         composite_scorer=process.composite_scorer,
+        sentiment=process.sentiment_analyser,
         watch_stocks=trading.watch_stocks,
         signals=trading.signals,
         decision_memory=trading.decision_memory,

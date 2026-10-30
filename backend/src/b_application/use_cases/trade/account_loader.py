@@ -60,14 +60,12 @@ class AccountLoader:
         if cached_stock is not None:
             return cached_stock
 
-        source_stock = await self._stock_provider.get_by_id(stock_id)
+        stock = await self._stock_provider.get_by_id(stock_id)
 
-        if source_stock is None:
+        if stock is None:
             self._logger.warning(f"Held stock not found: {stock_id}")
             return None
 
-        stock = source_stock.model_copy(deep=True)
-        stock.realtime_bar = None
         status.stocks_cache[stock.stock_id] = stock
 
         return stock

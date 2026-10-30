@@ -2,6 +2,7 @@ import asyncio
 import os
 import sys
 from datetime import date, datetime
+from signal import SIGINT, default_int_handler, signal as set_signal_handler
 
 from rich.console import Console
 from rich.panel import Panel
@@ -10,6 +11,7 @@ from rich.table import Table
 
 from a_domain.model.fundamentals.eps import SOURCE_LABELS, Eps
 from a_domain.model.market.stock import Stock
+from a_domain.model.trading.watchlist import WatchlistAddition
 from a_domain.model.valuation.scan import MarketValuation, ScanCriteria, ScanStep, ValuationScan
 from a_domain.model.valuation.valuation import (
     LABEL,
@@ -34,9 +36,6 @@ from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 from d_presentation.cli.cli_container import build_cli_orchestrator
 
 console = Console()
-
-# Ctrl-C raises KeyboardInterrupt and Ctrl-D (end of input) raises EOFError; both cancel the prompt.
-USER_CANCELLED_EXCEPTIONS = (KeyboardInterrupt, EOFError)
 
 VALUATION_MENU_CHOICES = ("5", "6")
 
@@ -75,11 +74,25 @@ async def interactive_menu() -> None:
 
 
 def ask_menu_choice() -> str | None:
-    try:
-        return Prompt.ask("Select an option", choices=["0", "1", "2", "3", "4", "5", "6", "7"])
-    except USER_CANCELLED_EXCEPTIONS:
+    choice = ask_user("Select an option", choices=["0", "1", "2", "3", "4", "5", "6", "7"])
+
+    if choice is None:
         console.print("\n[yellow]Exiting.[/yellow]")
+
+    return choice
+
+
+def ask_user(question: str, choices: list[str] | None = None) -> str | None:
+    """Returns None when the user presses Ctrl-C or Ctrl-D at the prompt."""
+    # asyncio.run turns Ctrl-C into a cancel of the next workflow, so the prompt restores Python's own handler while it waits.
+    asyncio_sigint_handler = set_signal_handler(SIGINT, default_int_handler)
+
+    try:
+        return Prompt.ask(question, choices=choices)
+    except KeyboardInterrupt, EOFError:
         return None
+    finally:
+        set_signal_handler(SIGINT, asyncio_sigint_handler)
 
 
 async def execute_menu_choice(
@@ -104,7 +117,48 @@ async def execute_menu_choice(
 
 
 async def run_buzz_scan(pipeline: Pipeline) -> PipelineStatus:
-    return await pipeline.run_buzz_scan()
+    context = await pipeline.run_buzz_scan()
+
+    print_buzz_report(context)
+
+    return context
+
+
+def print_buzz_report(context: PipelineStatus) -> None:
+    console.print(f"Buzz Filter: Discussed={context.stats.buzz_scanned}, Qualified={context.stats.buzz_qualified}")
+
+    if not context.buzz_stocks:
+        return
+
+    table = Table(title="Social Sentiment", caption="Report only. Sentiment never changes signals or orders.")
+    table.add_column("Stock")
+    table.add_column("Name")
+    table.add_column("Posts", justify="right")
+    table.add_column("Bullish", justify="right")
+    table.add_column("Bearish", justify="right")
+    table.add_column("Neutral", justify="right")
+    table.add_column("Unclear", justify="right")
+    table.add_column("Sentiment")
+
+    for stock in context.buzz_stocks:
+        sentiment = context.sentiment_by_stock_id.get(stock.stock_id)
+
+        if sentiment is None:
+            table.add_row(stock.stock_id, stock.name or "", "-", "-", "-", "-", "-", "FAILED")
+            continue
+
+        table.add_row(
+            stock.stock_id,
+            stock.name or "",
+            f"{sentiment.classified}/{sentiment.posts}",
+            f"{sentiment.bullish_ratio:.0%}",
+            f"{sentiment.bearish_ratio:.0%}",
+            f"{sentiment.neutral_ratio:.0%}",
+            str(sentiment.unclear),
+            format_label(sentiment.consensus.value),
+        )
+
+    console.print(table)
 
 
 async def run_intraday(pipeline: Pipeline) -> PipelineStatus:
@@ -183,11 +237,12 @@ async def run_specific_stock_flow(pipeline: Pipeline, watch_stocks: WatchStocks,
 
 
 def ask_stock_ids() -> str | None:
-    try:
-        return Prompt.ask("Enter stock IDs separated by space or comma")
-    except USER_CANCELLED_EXCEPTIONS:
+    raw_symbols = ask_user("Enter stock IDs separated by space or comma")
+
+    if raw_symbols is None:
         console.print("\n[yellow]Operation cancelled.[/yellow]")
-        return None
+
+    return raw_symbols
 
 
 async def offer_manual_watchlist(stocks: list[Stock], watch_stocks: WatchStocks) -> None:
@@ -199,9 +254,9 @@ async def offer_manual_watchlist(stocks: list[Stock], watch_stocks: WatchStocks)
     if not confirmed:
         return
 
-    watchlist = await watch_stocks.execute(stocks=stocks, watchlist_type=WatchlistType.MANUAL)
+    addition = await watch_stocks.execute(stocks=stocks, watchlist_type=WatchlistType.MANUAL)
 
-    print_watchlist_result(watchlist.willing_stocks)
+    print_watchlist_result(addition)
 
 
 async def offer_manual_buy(stocks: list[Stock], manual_buy: ManualBuy) -> None:
@@ -215,14 +270,12 @@ async def offer_manual_buy(stocks: list[Stock], manual_buy: ManualBuy) -> None:
         print_manual_buy_result(result)
 
 
-def print_watchlist_result(stocks: list[Stock]) -> None:
-    if not stocks:
-        console.print("[yellow]No stocks were added.[/yellow]")
-        return
+def print_watchlist_result(addition: WatchlistAddition) -> None:
+    if addition.added_stock_ids:
+        console.print(f"[green]Added to manual watchlist: {', '.join(addition.added_stock_ids)}[/green]")
 
-    stock_ids = ", ".join(stock.stock_id for stock in stocks)
-
-    console.print(f"[green]Added to manual watchlist: {stock_ids}[/green]")
+    if addition.already_present_stock_ids:
+        console.print(f"[yellow]Already present on manual watchlist: {', '.join(addition.already_present_stock_ids)}[/yellow]")
 
 
 def print_manual_buy_result(result: ManualBuyResult) -> None:
@@ -257,12 +310,9 @@ async def run_account_history(account_history: AccountHistory) -> None:
 
 
 def ask_as_of_date() -> date | None:
-    try:
-        raw_date = Prompt.ask("Show the account as of date (YYYY-MM-DD, blank to skip)", default="", show_default=False)
-    except USER_CANCELLED_EXCEPTIONS:
-        return None
+    raw_date = ask_user("Show the account as of date (YYYY-MM-DD, blank to skip)")
 
-    if not raw_date.strip():
+    if raw_date is None or not raw_date.strip():
         return None
 
     try:
@@ -443,7 +493,7 @@ def create_stock_report_table() -> Table:
 
 
 def add_stock_report_row(table: Table, stock: Stock) -> None:
-    ai_summary = stock.ai_report.summary if stock.ai_report else "-"
+    ai_summary = (stock.ai_report.summary if stock.ai_report else "") or "-"
 
     table.add_row(
         stock.stock_id,
@@ -469,7 +519,8 @@ async def execute_valuation_choice(choice: str, valuation: ValuationPipeline, co
         if choice == "6":
             await run_undervalued_scan(valuation, config.valuation.max_scan_explanations)
 
-    except USER_CANCELLED_EXCEPTIONS:
+    except EOFError:
+        # Ctrl-D at a y/n prompt. Text prompts go through ask_user, which already turns Ctrl-C and Ctrl-D into a cancel.
         console.print("\n[yellow]Valuation cancelled.[/yellow]")
 
 
@@ -568,9 +619,9 @@ def find_valuations(market: MarketValuation, stock_ids: list[str]) -> list[Stock
 
 def ask_target_pe() -> TargetPe | None:
     while True:
-        raw_value = Prompt.ask("Target P/E (a finite number > 0; blank cancels)", default="", show_default=False)
+        raw_value = ask_user("Target P/E (a finite number > 0; blank cancels)")
 
-        if not raw_value.strip():
+        if raw_value is None or not raw_value.strip():
             return None
 
         try:
@@ -586,11 +637,9 @@ def ask_scan_criteria() -> ScanCriteria | None:
         return None
 
     while True:
-        raw_value = Prompt.ask(
-            "Minimum undervaluation % (a finite number >= 0, e.g. 20; blank cancels)", default="", show_default=False
-        )
+        raw_value = ask_user("Minimum undervaluation % (a finite number >= 0, e.g. 20; blank cancels)")
 
-        if not raw_value.strip():
+        if raw_value is None or not raw_value.strip():
             return None
 
         try:

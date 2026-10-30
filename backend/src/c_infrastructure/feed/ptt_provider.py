@@ -73,7 +73,6 @@ class PttParser:
         if not content:
             return None
 
-        engagement = push_count + boo_count + arrow_count
         content = f"[{push_count}推 {boo_count}噓 {arrow_count}→]\n{content}"
         content = content[: self._max_body_length]
 
@@ -85,7 +84,8 @@ class PttParser:
             url=listing["url"],
             content_type=ContentType.ANALYSIS,
             published_at=datetime.combine(listing["published_date"], datetime.min.time()),
-            raw_metadata={"engagement": engagement, "push": push_count, "boo": boo_count, "arrow": arrow_count},
+            engagement=push_count + boo_count + arrow_count,
+            raw_metadata={"push": push_count, "boo": boo_count, "arrow": arrow_count},
         )
 
     def extract_stock_id(self, body: str, title: str) -> str | None:

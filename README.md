@@ -89,12 +89,11 @@ Strategy-specific technical thresholds live in `config/strategies.yaml`.
 
 | Type | Meaning |
 | --- | --- |
-| `TECHNICAL` | Passed the full-market technical scan. |
-| `BUZZ` | Came from social buzz and passed technical filtering. |
-| `TECHNICAL_AND_BUZZ` | Existing technical and buzz entries were merged by the repository. |
-| `MANUAL` | User reviewed a specific-stock report and manually added it. |
+| `TECHNICAL` | Passed the full-market technical scan. Expires `watchlist.automatic_expiry_hours` (24) after Full Cycle last selected it. |
+| `BUZZ` | Came from social buzz and passed technical filtering. Expires like `TECHNICAL`, counted from the last Buzz scan that selected it. |
+| `MANUAL` | User reviewed a specific-stock report and manually added it. Never expires. |
 
-Manual entries take precedence when an existing watchlist row is merged.
+A stock has one `watchlists` row per type, so it can be `TECHNICAL`, `BUZZ` and `MANUAL` at once. `WatchlistRule` renews an automatic row each time its workflow selects the stock again and never changes a `MANUAL` row. Adding a stock that is already on the manual watchlist prints `Already present on manual watchlist`.
 
 ## Application Flow
 

@@ -11,7 +11,6 @@ ai:
     gemini: gemini-2.5-flash
     groq: openai/gpt-oss-20b
   article_content_length: 500
-  neutral_score: 50
 
 behavior:
   log_level: DEBUG
