@@ -1,0 +1,162 @@
+from datetime import datetime, timedelta
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
+
+import pytest
+
+from a_domain.model.fundamentals.eps import FiscalQuarter, QuarterEps
+from a_domain.types.enums import MarketType
+from c_infrastructure.database.db_connector import DatabaseConnector
+from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider, parse_cumulative_eps
+from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
+
+FIXTURES = Path(__file__).parent / "fixtures"
+Q = FiscalQuarter
+BEING_FILED = Q(2026, 3)
+FINAL = Q(2025, 4)
+
+
+class SilentLogger:
+    def _drop(self, message: str) -> None:
+        return None
+
+    info = warning = debug = error = success = trace = critical = exception = _drop
+
+
+class MovableClock(TaiwanMarketClock):
+    def __init__(self) -> None:
+        super().__init__()
+        self.current = datetime(2026, 10, 30, 18, 0, tzinfo=TAIWAN_TIMEZONE)
+
+    def now(self) -> datetime:
+        return self.current
+
+
+class FakeMops:
+    """Stands in for the HTTP download: one answer per (market, quarter), None for a failed request."""
+
+    def __init__(self) -> None:
+        self.pages: dict[tuple[MarketType, FiscalQuarter], dict[str, float] | None] = {
+            (MarketType.TWSE, BEING_FILED): {"1232": 8.03},
+            (MarketType.TPEX, BEING_FILED): {},
+            (MarketType.TWSE, FINAL): {"2330": 66.26, "1101": -1.60},
+            (MarketType.TPEX, FINAL): {"6488": 20.10},
+        }
+        self.requests: list[tuple[MarketType, FiscalQuarter]] = []
+
+    async def download(self, market: MarketType, quarter: FiscalQuarter) -> dict[str, float] | None:
+        self.requests.append((market, quarter))
+        return self.pages.get((market, quarter))
+
+
+async def build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[MopsFundamentalsProvider, FakeMops, MovableClock]:
+    config = SimpleNamespace(project_root=tmp_path, db=SimpleNamespace(user=None, password=None, host=None, name=None, port=5432))
+    db = DatabaseConnector(config=cast(Any, config), logger=SilentLogger())
+    await db.init_db()
+    clock = MovableClock()
+    provider = MopsFundamentalsProvider(db=db, market_clock=clock, logger=SilentLogger())
+    mops = FakeMops()
+    monkeypatch.setattr(provider, "_download", mops.download)
+    return provider, mops, clock
+
+
+def test_parser_reads_every_industry_table_of_a_real_page() -> None:
+    html = (FIXTURES / "mops_t163sb04_sii_115_02.html").read_text(encoding="utf-8")
+
+    assert parse_cumulative_eps(html) == {
+        "2801": 0.94,
+        "2855": 6.96,
+        "1101": 0.38,
+        "1213": -0.56,
+        "2330": 49.33,
+        "2880": 1.24,
+        "2816": 7.84,
+        "1409": 1.18,
+    }
+
+
+def test_parser_reads_an_unpublished_season_as_no_filings_yet() -> None:
+    html = (FIXTURES / "mops_t163sb04_sii_115_04_unpublished.html").read_text(encoding="utf-8")
+
+    assert parse_cumulative_eps(html) == {}
+
+
+def test_parser_rejects_a_page_it_does_not_recognise() -> None:
+    assert parse_cumulative_eps("<html><body>系統忙碌中，請稍後再試</body></html>") is None
+
+
+@pytest.mark.asyncio
+async def test_markets_are_merged_and_pages_are_cached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    provider, mops, _ = await build(tmp_path, monkeypatch)
+
+    first = await provider.fetch_cumulative_eps([BEING_FILED, FINAL])
+    second = await provider.fetch_cumulative_eps([BEING_FILED, FINAL])
+
+    final = first[FINAL]
+    assert isinstance(final, QuarterEps)
+    assert final.cumulative_eps == {"2330": 66.26, "1101": -1.60, "6488": 20.10}
+    assert final.fetched_at == datetime(2026, 10, 30, 18, 0, tzinfo=TAIWAN_TIMEZONE)
+    assert len(mops.requests) == 4
+    assert second == first
+
+
+@pytest.mark.asyncio
+async def test_quarter_being_filed_is_refetched_after_six_hours_and_final_quarter_never(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    provider, mops, clock = await build(tmp_path, monkeypatch)
+    await provider.fetch_cumulative_eps([BEING_FILED, FINAL])
+    mops.requests.clear()
+    mops.pages[(MarketType.TWSE, BEING_FILED)] = {"1232": 8.03, "2330": 70.0}
+
+    clock.current += timedelta(hours=5)
+    await provider.fetch_cumulative_eps([BEING_FILED, FINAL])
+    assert mops.requests == []
+
+    clock.current += timedelta(hours=2)
+    filings = await provider.fetch_cumulative_eps([BEING_FILED, FINAL])
+
+    assert set(mops.requests) == {(MarketType.TWSE, BEING_FILED), (MarketType.TPEX, BEING_FILED)}
+    being_filed = filings[BEING_FILED]
+    assert isinstance(being_filed, QuarterEps)
+    assert being_filed.cumulative_eps == {"1232": 8.03, "2330": 70.0}
+
+
+@pytest.mark.asyncio
+async def test_failed_refresh_serves_the_cached_page(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    provider, mops, clock = await build(tmp_path, monkeypatch)
+    await provider.fetch_cumulative_eps([BEING_FILED])
+    mops.pages[(MarketType.TWSE, BEING_FILED)] = None
+
+    clock.current += timedelta(hours=7)
+    filings = await provider.fetch_cumulative_eps([BEING_FILED])
+
+    being_filed = filings[BEING_FILED]
+    assert isinstance(being_filed, QuarterEps)
+    assert being_filed.cumulative_eps == {"1232": 8.03}
+
+
+@pytest.mark.asyncio
+async def test_failed_market_without_a_cached_page_fails_the_quarter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    provider, mops, _ = await build(tmp_path, monkeypatch)
+    mops.pages[(MarketType.TPEX, FINAL)] = None
+
+    filings = await provider.fetch_cumulative_eps([FINAL])
+
+    assert filings == {FINAL: None}
+
+
+@pytest.mark.asyncio
+async def test_empty_page_for_a_final_quarter_is_a_failure_and_is_not_cached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    provider, mops, _ = await build(tmp_path, monkeypatch)
+    mops.pages[(MarketType.TWSE, FINAL)] = {}
+
+    assert await provider.fetch_cumulative_eps([FINAL]) == {FINAL: None}
+
+    mops.pages[(MarketType.TWSE, FINAL)] = {"2330": 66.26}
+    filings = await provider.fetch_cumulative_eps([FINAL])
+
+    final = filings[FINAL]
+    assert isinstance(final, QuarterEps)
+    assert final.cumulative_eps == {"2330": 66.26, "6488": 20.10}

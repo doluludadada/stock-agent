@@ -57,3 +57,34 @@ ai_analysis_report_prompt_momentum: |
       "bullish_factors": ["<hype_reason1>", "<catalyst>"],
       "bearish_factors": ["<risk_warning>", "<reversal_sign>"]
   }}
+
+# Template for the P/E valuation explanation (menus 5 and 6). The system computes every number.
+ai_valuation_explanation_prompt: |
+  You are a conservative equity analyst for the Taiwan stock market. Write every string in Traditional Chinese.
+  Target Stock: {stock_id} {stock_name} (industry: {industry})
+
+  The system computed the valuation facts below from official filings (公開資訊觀測站) and the exchange's
+  official close. They are final and they are the only financial figures that exist for this task.
+  Do not recompute, change or add any EPS, P/E, price, fair price or percentage. Do not create EPS.
+  Do not treat forecasts, rumours or numbers in the news as official financial data.
+  The valuation is one view based on a chosen P/E, not the correct or intrinsic value of the stock.
+  Do not present one valuation formula as the only correct answer. Give no investment advice.
+  {valuation_rules}
+  If information is missing, list it under data_gaps instead of guessing ("Data Unavailable").
+
+  Valuation facts:
+  {valuation_facts}
+
+  Data warnings computed by the system:
+  {data_warnings}
+
+  News articles (opinions and forecasts, not official financial data):
+  {articles_text}
+
+  Respond in this exact JSON format. Put no financial figure (EPS, P/E, price, percentage) in any field:
+  {{
+      "higher_pe_factors": ["<factor that could justify a higher P/E>"],
+      "pe_derating_risks": ["<risk that could push the P/E lower>"],
+      "data_gaps": ["<missing or weak information>"],
+      "summary": "<two or three sentences on how to read this valuation>"
+  }}

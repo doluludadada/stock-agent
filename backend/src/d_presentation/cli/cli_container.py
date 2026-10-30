@@ -2,13 +2,16 @@ from dataclasses import dataclass
 
 from a_domain.ports.ai.ai_provider import IAiProvider
 from a_domain.ports.analysis.technical_settings_repository import ITechnicalSettingsRepository
+from a_domain.ports.market.fundamentals_provider import IFundamentalsProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.notification_provider import INotificationProvider
 from a_domain.ports.trading.execution_provider import IExecutionProvider
+from a_domain.rules.ai.prompt import ValuationPromptBuilder
 from a_domain.types.enums import ExecutionProvider, OrderMode, SystemEnvironment
 from b_application.pipeline import Pipeline
 from b_application.schemas.config import AppConfig
 from b_application.use_cases.collect.buzz_scanner import BuzzScanner
+from b_application.use_cases.collect.fundamentals_feed import FundamentalsFeed
 from b_application.use_cases.collect.market_data_collector import MarketDataCollector
 from b_application.use_cases.collect.market_scanner import MarketScanner
 from b_application.use_cases.collect.news_feed import NewsFeed
@@ -23,6 +26,7 @@ from b_application.use_cases.trade.account_risk_check import AccountRiskCheck
 from b_application.use_cases.trade.manual_buy import ManualBuy
 from b_application.use_cases.trade.order_execution import OrderExecution
 from b_application.use_cases.trade.watch_stocks import WatchStocks
+from b_application.valuation_pipeline import ValuationPipeline
 from c_infrastructure.ai_models.factory import AiAdapterFactory
 from c_infrastructure.database.chroma.chroma_repository import ChromaRepositoryAdapter
 from c_infrastructure.database.db_connector import DatabaseConnector
@@ -32,6 +36,7 @@ from c_infrastructure.feed.news_provider import NewsProvider
 from c_infrastructure.feed.ptt_provider import PttProvider
 from c_infrastructure.feed.tavily_provider import TavilySearchAdapter
 from c_infrastructure.market.cached_price_provider import CachedPriceProvider
+from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider
 from c_infrastructure.market.twse_provider import TaiwanStockProvider
 from c_infrastructure.market.yahoo_finance_adapter import YahooFinanceProvider
 from c_infrastructure.platforms.line.line_notification_adapter import LineNotificationAdapter
@@ -45,6 +50,7 @@ from c_infrastructure.trading.mock.mock_execution_provider import MockExecutionP
 @dataclass(slots=True)
 class CliRuntime:
     pipeline: Pipeline
+    valuation: ValuationPipeline
     watch_stocks: WatchStocks
     manual_buy: ManualBuy
     config: AppConfig
@@ -59,6 +65,7 @@ class CliRuntime:
 class ProviderDependencies:
     stock_provider: TaiwanStockProvider
     price_provider: CachedPriceProvider
+    fundamentals_provider: IFundamentalsProvider
     news_provider: NewsProvider
     social_media_provider: PttProvider
     ai_provider: IAiProvider
@@ -154,6 +161,7 @@ async def build_provider_dependencies(
     return ProviderDependencies(
         stock_provider=stock_provider,
         price_provider=price_provider,
+        fundamentals_provider=MopsFundamentalsProvider(db=db, market_clock=market_clock, logger=logger),
         news_provider=NewsProvider(config=config, logger=logger),
         social_media_provider=PttProvider(config=config, logger=logger, stock_provider=stock_provider),
         ai_provider=create_ai_provider(config, logger),
@@ -267,6 +275,36 @@ def build_pipeline(
     )
 
 
+def build_valuation_pipeline(
+    config: AppConfig,
+    logger: ILoggingProvider,
+    market_clock: TaiwanMarketClock,
+    dependencies: ProviderDependencies,
+    collect: CollectUseCases,
+    process: ProcessUseCases,
+) -> ValuationPipeline:
+    """Menus 5 and 6. It takes no TradingUseCases: valuation never reaches orders, signals or the watchlist."""
+    prompt_builder = ValuationPromptBuilder(
+        template=config.prompts.valuation_explanation,
+        max_articles=config.analysis.article_fetch_limit,
+        max_content_length=config.ai.article_content_length,
+    )
+
+    return ValuationPipeline(
+        stock_provider=dependencies.stock_provider,
+        fundamentals=FundamentalsFeed(dependencies.fundamentals_provider, market_clock, logger),
+        data_collector=collect.data_collector,
+        technical_filter=process.technical_filter,
+        news=collect.news_feed,
+        ai_provider=dependencies.ai_provider,
+        prompt_builder=prompt_builder,
+        technical_settings_repository=dependencies.technical_settings_repository,
+        market_clock=market_clock,
+        scenario_spread=config.valuation.scenario_spread,
+        logger=logger,
+    )
+
+
 async def build_cli_orchestrator() -> CliRuntime:
     config = load_settings()
     validate_trading_environment(config)
@@ -287,6 +325,14 @@ async def build_cli_orchestrator() -> CliRuntime:
 
     pipeline = build_pipeline(collect, process, trading, dependencies.technical_settings_repository, logger)
 
+    valuation = build_valuation_pipeline(config, logger, market_clock, dependencies, collect, process)
+
     return CliRuntime(
-        pipeline=pipeline, watch_stocks=trading.watch_stocks, manual_buy=trading.manual_buy, config=config, db=db, logger=logger
+        pipeline=pipeline,
+        valuation=valuation,
+        watch_stocks=trading.watch_stocks,
+        manual_buy=trading.manual_buy,
+        config=config,
+        db=db,
+        logger=logger,
     )

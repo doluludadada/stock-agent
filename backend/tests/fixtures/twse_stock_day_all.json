@@ -1,0 +1,67 @@
+[
+ {
+  "Date": "1151029",
+  "Code": "00400A",
+  "Name": "主動國泰動能高息",
+  "TradeVolume": "29745814",
+  "TradeValue": "428344232",
+  "OpeningPrice": "14.70",
+  "HighestPrice": "14.75",
+  "LowestPrice": "14.27",
+  "ClosingPrice": "14.36",
+  "Change": "-0.3500",
+  "Transaction": "10539"
+ },
+ {
+  "Date": "1151029",
+  "Code": "1101",
+  "Name": "台泥",
+  "TradeVolume": "31963999",
+  "TradeValue": "896876493",
+  "OpeningPrice": "27.85",
+  "HighestPrice": "28.45",
+  "LowestPrice": "27.70",
+  "ClosingPrice": "28.20",
+  "Change": "0.2000",
+  "Transaction": "11349"
+ },
+ {
+  "Date": "1151029",
+  "Code": "1213",
+  "Name": "大飲",
+  "TradeVolume": "",
+  "TradeValue": "",
+  "OpeningPrice": "",
+  "HighestPrice": "",
+  "LowestPrice": "",
+  "ClosingPrice": "",
+  "Change": "0.0000",
+  "Transaction": ""
+ },
+ {
+  "Date": "1151029",
+  "Code": "1538",
+  "Name": "正峰",
+  "TradeVolume": "55",
+  "TradeValue": "456",
+  "OpeningPrice": "",
+  "HighestPrice": "",
+  "LowestPrice": "",
+  "ClosingPrice": "",
+  "Change": "0.0000",
+  "Transaction": "1"
+ },
+ {
+  "Date": "1151029",
+  "Code": "2330",
+  "Name": "台積電",
+  "TradeVolume": "18403916",
+  "TradeValue": "44316626887",
+  "OpeningPrice": "2420.00",
+  "HighestPrice": "2425.00",
+  "LowestPrice": "2390.00",
+  "ClosingPrice": "2415.00",
+  "Change": "-10.0000",
+  "Transaction": "103233"
+ }
+]

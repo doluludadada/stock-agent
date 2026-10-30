@@ -6,12 +6,14 @@ behind that port would observe: rows written, prompts sent, orders placed.
 
 import json
 import re
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
 from a_domain.model.analysis.technical_settings import TechnicalSettings
 from a_domain.model.chat.message import Message
+from a_domain.model.fundamentals.eps import EpsFilings, FiscalQuarter, QuarterEps
 from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
@@ -20,13 +22,16 @@ from a_domain.model.trading.position import Position
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.model.trading.watchlist import StockWatchlist
 from a_domain.types.enums import AiAnalysisFocus, MessageRole, WatchlistType
-from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, FixedOffsetMarketClock
+from c_infrastructure.system.market_clock import TaiwanMarketClock
 
 PROMPT_TEMPLATES = {
     AiAnalysisFocus.FUNDAMENTAL: "fundamental analysis of {stock_id}\n{articles_text}",
     AiAnalysisFocus.MOMENTUM: "momentum analysis of {stock_id}\n{articles_text}",
 }
-PROMPT_HEADER = re.compile(r"^(fundamental|momentum) analysis of (\S+)")
+VALUATION_PROMPT_TEMPLATE = (
+    "valuation explanation of {stock_id}\n{valuation_facts}\n{data_warnings}\n{valuation_rules}\n{articles_text}"
+)
+PROMPT_HEADER = re.compile(r"^(fundamental analysis|momentum analysis|valuation explanation) of (\S+)")
 
 
 class RecordingLogger:
@@ -58,11 +63,11 @@ class RecordingLogger:
         self.records.append(("exception", message))
 
 
-class FakeMarketClock(FixedOffsetMarketClock):
+class FakeMarketClock(TaiwanMarketClock):
     """Taiwan-time clock whose current time and market session are set by the test."""
 
     def __init__(self, now: datetime, market_open: bool) -> None:
-        super().__init__(market_timezone=TAIWAN_TIMEZONE)
+        super().__init__()
         self.current_time = now
         self.market_open = market_open
 
@@ -78,12 +83,39 @@ class FakeStockProvider:
 
     def __init__(self) -> None:
         self.stocks: dict[str, Stock] = {}
+        self.closes: dict[str, Ohlcv] = {}
 
     async def get_all(self) -> list[Stock]:
         return list(self.stocks.values())
 
     async def get_by_id(self, stock_id: str) -> Stock | None:
         return self.stocks.get(stock_id)
+
+    async def get_latest_closes(self) -> dict[str, Ohlcv]:
+        return {stock_id: bar.model_copy() for stock_id, bar in self.closes.items()}
+
+
+class FakeFundamentalsProvider:
+    """MOPS stand-in: cumulative EPS filed per quarter, industries, and quarters that fail to fetch."""
+
+    def __init__(self) -> None:
+        self.cumulative_eps: dict[FiscalQuarter, dict[str, float]] = {}
+        self.industries: dict[str, str] = {}
+        self.failed_quarters: set[FiscalQuarter] = set()
+        self.requested: list[set[FiscalQuarter]] = []
+        self.fetched_at = datetime(2026, 10, 19, 18, 0)
+
+    async def fetch_cumulative_eps(self, quarters: Collection[FiscalQuarter]) -> EpsFilings:
+        self.requested.append(set(quarters))
+        return {
+            quarter: None
+            if quarter in self.failed_quarters
+            else QuarterEps(quarter=quarter, cumulative_eps=dict(self.cumulative_eps.get(quarter, {})), fetched_at=self.fetched_at)
+            for quarter in quarters
+        }
+
+    async def fetch_industries(self) -> dict[str, str]:
+        return dict(self.industries)
 
 
 class FakeOhlcvProvider:
@@ -133,27 +165,46 @@ class FakeSocialMediaProvider:
 @dataclass(frozen=True)
 class AiCall:
     stock_id: str
-    focus: AiAnalysisFocus
+    focus: AiAnalysisFocus | None
+    """None for a valuation explanation."""
+
     prompt: str
 
 
 class FakeAiProvider:
-    """Answers each prompt with the score set for its stock; reads the stock from PROMPT_TEMPLATES' header."""
+    """
+    Answers each prompt for the stock named in its header (PROMPT_TEMPLATES or VALUATION_PROMPT_TEMPLATE):
+    an analysis prompt with the stock's score, a valuation prompt with the stock's valuation reply.
+    """
 
     def __init__(self, default_score: int = 90) -> None:
         self.default_score = default_score
         self.scores: dict[str, int] = {}
+        self.valuation_replies: dict[str, dict] = {}
         self.failures: dict[str, Exception] = {}
         self.calls: list[AiCall] = []
 
     async def generate_reply(self, messages: tuple[Message, ...]) -> Message:
         header = PROMPT_HEADER.match(messages[-1].content)
-        assert header is not None, f"prompt does not start with a PROMPT_TEMPLATES header: {messages[-1].content!r}"
-        focus, stock_id = AiAnalysisFocus(header.group(1)), header.group(2)
+        assert header is not None, f"prompt does not start with a known template header: {messages[-1].content!r}"
+        kind, stock_id = header.group(1), header.group(2)
+        focus = None if kind == "valuation explanation" else AiAnalysisFocus(kind.split()[0])
         self.calls.append(AiCall(stock_id=stock_id, focus=focus, prompt=messages[-1].content))
 
         if stock_id in self.failures:
             raise self.failures[stock_id]
+
+        if focus is None:
+            reply = self.valuation_replies.get(
+                stock_id,
+                {
+                    "higher_pe_factors": [f"fake factor for {stock_id}"],
+                    "pe_derating_risks": [f"fake risk for {stock_id}"],
+                    "data_gaps": [],
+                    "summary": f"fake valuation explanation of {stock_id}",
+                },
+            )
+            return Message(role=MessageRole.ASSISTANT, content=json.dumps(reply))
 
         report = {
             "confidence_score": self.scores.get(stock_id, self.default_score),

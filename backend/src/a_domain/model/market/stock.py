@@ -4,6 +4,7 @@ from sqlmodel import Field, SQLModel
 
 from a_domain.model.analysis.ai_analysis_report import AiAnalysisReport
 from a_domain.model.analysis.technical_report import TechnicalReport
+from a_domain.model.fundamentals.eps import Eps, EpsUnavailable, EpsUnavailableReason
 from a_domain.model.indicators.technical_indicators import TechnicalIndicators
 from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
@@ -28,6 +29,7 @@ class Stock(SQLModel):
     ohlcv: list[Ohlcv] = Field(default_factory=list)
     realtime_bar: Ohlcv | None = None  # TODO: Do i really that?
     articles: list[Article] = Field(default_factory=list)
+    eps: Eps | EpsUnavailable = Field(default_factory=lambda: EpsUnavailable(EpsUnavailableReason.NOT_LOADED))
 
     # -------------------------------- Analysis ---------------------------------- #
     indicators: TechnicalIndicators = Field(default_factory=TechnicalIndicators)

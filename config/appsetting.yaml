@@ -109,3 +109,7 @@ mock_trading:
 
 watchlist:
   automatic_expiry_hours: 24
+
+valuation:
+  scenario_spread: 0.2
+  max_scan_explanations: 3

@@ -37,6 +37,7 @@ def inject_prompt_settings(config_dict: dict, instruction_dict: dict) -> None:
     prompts_config = config_dict.setdefault("prompts", {})
     prompts_config["analysis_report_fundamental"] = instruction_dict.get("ai_analysis_report_prompt_fundamental")
     prompts_config["analysis_report_momentum"] = instruction_dict.get("ai_analysis_report_prompt_momentum")
+    prompts_config["valuation_explanation"] = instruction_dict.get("ai_valuation_explanation_prompt")
 
 
 def get_project_root() -> Path:

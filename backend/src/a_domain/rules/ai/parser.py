@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from icontract import ensure, invariant
 
 from a_domain.model.analysis.ai_analysis_report import AiAnalysisReport
+from a_domain.model.valuation.valuation import ValuationExplanation, ValuationReport
 
 
 # TODO:Clean here
@@ -22,41 +23,18 @@ class AiReportParser:
     @ensure(lambda result: 0 <= result.score <= 100, "Parsed score must be 0-100")
     def parse(self, stock_id: str, raw_response: str) -> AiAnalysisReport:
         try:
-            parsed = self._extract_json(raw_response)
+            parsed = extract_json_object(raw_response)
 
             return AiAnalysisReport(
                 score=int(parsed.get("confidence_score", self.fallback_score)),
-                bullish_factors=self._to_list(parsed.get("bullish_factors")),
-                bearish_factors=self._to_list(parsed.get("bearish_factors")),
+                bullish_factors=to_text_list(parsed.get("bullish_factors")),
+                bearish_factors=to_text_list(parsed.get("bearish_factors")),
                 summary=str(parsed.get("summary", f"AI Analysis for {stock_id}")),
                 raw_response=raw_response,
             )
 
         except json.JSONDecodeError, ValueError, TypeError:
             return self._fallback(raw_response)
-
-    def _extract_json(self, raw_response: str) -> dict:
-        json_start = raw_response.find("{")
-        json_end = raw_response.rfind("}") + 1
-
-        if json_start == -1 or json_end <= 0:
-            raise ValueError("No JSON object found in AI response.")
-
-        parsed = json.loads(raw_response[json_start:json_end])
-
-        if not isinstance(parsed, dict):
-            raise ValueError("AI response JSON is not an object.")
-
-        return parsed
-
-    def _to_list(self, value) -> list[str]:
-        if isinstance(value, list):
-            return [str(item).strip() for item in value if str(item).strip()]
-
-        if isinstance(value, str):
-            return [item.strip() for item in value.split(",") if item.strip()]
-
-        return []
 
     def _fallback(self, raw_response: str) -> AiAnalysisReport:
         return AiAnalysisReport(
@@ -66,3 +44,54 @@ class AiReportParser:
             summary="Parse Error or Neutral",
             raw_response=raw_response,
         )
+
+
+def extract_json_object(raw_response: str) -> dict:
+    json_start = raw_response.find("{")
+    json_end = raw_response.rfind("}") + 1
+
+    if json_start == -1 or json_end <= 0:
+        raise ValueError("No JSON object found in AI response.")
+
+    parsed = json.loads(raw_response[json_start:json_end])
+
+    if not isinstance(parsed, dict):
+        raise ValueError("AI response JSON is not an object.")
+
+    return parsed
+
+
+def to_text_list(value: object) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+
+    return []
+
+
+def parse_valuation_explanation(report: ValuationReport, raw_response: str) -> ValuationExplanation:
+    """Reads only the text keys. Any other key, numeric or not, is ignored, so no number reaches the report from the AI."""
+    try:
+        parsed = extract_json_object(raw_response)
+    except ValueError:
+        return ValuationExplanation(
+            report=report,
+            higher_pe_factors=(),
+            pe_derating_risks=(),
+            data_gaps=("AI 回覆無法解析",),
+            summary="",
+            raw_response=raw_response,
+        )
+
+    summary = parsed.get("summary")
+
+    return ValuationExplanation(
+        report=report,
+        higher_pe_factors=tuple(to_text_list(parsed.get("higher_pe_factors"))),
+        pe_derating_risks=tuple(to_text_list(parsed.get("pe_derating_risks"))),
+        data_gaps=tuple(to_text_list(parsed.get("data_gaps"))),
+        summary=summary.strip() if isinstance(summary, str) else "",
+        raw_response=raw_response,
+    )

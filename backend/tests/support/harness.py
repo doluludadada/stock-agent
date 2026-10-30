@@ -7,13 +7,14 @@ use-case constructors.
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
 from rich.prompt import Confirm, Prompt
 
 from a_domain.model.analysis.technical_settings import TechnicalSettings
+from a_domain.model.fundamentals.eps import FiscalQuarter
 from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
@@ -36,7 +37,8 @@ from b_application.schemas.config import AppConfig, NotificationConfig, PromptsC
 from b_application.schemas.pipeline_status import PipelineStatus
 from b_application.use_cases.trade.manual_buy import ManualBuy
 from b_application.use_cases.trade.watch_stocks import WatchStocks
-from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
+from b_application.valuation_pipeline import ValuationPipeline
+from c_infrastructure.system.market_clock import SESSION_CLOSE, TAIWAN_TIMEZONE
 from d_presentation.cli import interactive
 from d_presentation.cli.cli_container import (
     ProviderDependencies,
@@ -44,11 +46,14 @@ from d_presentation.cli.cli_container import (
     build_pipeline,
     build_process_use_cases,
     build_trading_use_cases,
+    build_valuation_pipeline,
     validate_trading_environment,
 )
 from support.fakes import (
     PROMPT_TEMPLATES,
+    VALUATION_PROMPT_TEMPLATE,
     FakeAiProvider,
+    FakeFundamentalsProvider,
     FakeKnowledgeRepository,
     FakeMarketClock,
     FakeNewsProvider,
@@ -94,6 +99,7 @@ def harness_config() -> AppConfig:
         prompts=PromptsConfig(
             analysis_report_fundamental=PROMPT_TEMPLATES[AiAnalysisFocus.FUNDAMENTAL],
             analysis_report_momentum=PROMPT_TEMPLATES[AiAnalysisFocus.MOMENTUM],
+            valuation_explanation=VALUATION_PROMPT_TEMPLATE,
         ),
         trading=TradingConfig(execution_provider=ExecutionProvider.MOCK, order_mode=OrderMode.MOCK_ONLY),
         notifications=NotificationConfig(enabled=False),
@@ -123,6 +129,7 @@ class CliHarness:
     config: AppConfig
     clock: FakeMarketClock
     stocks: FakeStockProvider
+    fundamentals: FakeFundamentalsProvider
     prices: FakeOhlcvProvider
     news: FakeNewsProvider
     social: FakeSocialMediaProvider
@@ -136,6 +143,7 @@ class CliHarness:
     pipeline: Pipeline
     watch_stocks: WatchStocks
     manual_buy: ManualBuy
+    valuation: ValuationPipeline
 
     def list_stock(
         self, stock_id: str, history: list[Ohlcv], realtime_price: float | None = None, realtime_age: timedelta = FRESH
@@ -153,6 +161,19 @@ class CliHarness:
                 close=realtime_price,
                 volume=1000,
             )
+
+    def publish_close(self, stock_id: str, price: float, session: date) -> None:
+        """The exchange's official close for the stock in that session, as the listing feeds publish it."""
+        ts = datetime.combine(session, SESSION_CLOSE, TAIWAN_TIMEZONE)
+        self.stocks.closes[stock_id] = Ohlcv(ts=ts, open=price, high=price, low=price, close=price, volume=1000)
+
+    def file_eps(self, stock_id: str, cumulative_eps: dict[FiscalQuarter, float], industry: str | None = None) -> None:
+        """The company's cumulative basic EPS per quarter as filed on MOPS."""
+        for quarter, value in cumulative_eps.items():
+            self.fundamentals.cumulative_eps.setdefault(quarter, {})[stock_id] = value
+
+        if industry is not None:
+            self.fundamentals.industries[stock_id] = industry
 
     def hold(self, stock_id: str, quantity: int, average_cost: float) -> None:
         self.broker.positions.append(Position(stock_id=stock_id, quantity=quantity, average_cost=average_cost))
@@ -201,6 +222,31 @@ class CliHarness:
         assert status is not None, f"menu {choice} returned no status"
         return status
 
+    async def run_valuation_menu(self, choice: str, *, answers: Iterable[str], confirm: Iterable[bool] = ()) -> list[str]:
+        """
+        Runs menu 5 or 6, answering each text prompt and each yes/no confirmation in order.
+        Returns the prompts asked, so a test can assert which questions the user saw.
+        """
+        remaining_answers = list(answers)
+        remaining_confirms = list(confirm)
+        asked: list[str] = []
+
+        def answer_prompt(prompt: str, *args, **kwargs) -> str:
+            asked.append(prompt)
+            assert remaining_answers, f"menu {choice} asked an unexpected prompt: {prompt!r}"
+            return remaining_answers.pop(0)
+
+        def answer_confirm(question: str, *args, **kwargs) -> bool:
+            asked.append(question)
+            assert remaining_confirms, f"menu {choice} asked an unexpected confirmation: {question!r}"
+            return remaining_confirms.pop(0)
+
+        with patch.object(Prompt, "ask", answer_prompt), patch.object(Confirm, "ask", answer_confirm):
+            await interactive.execute_valuation_choice(choice=choice, valuation=self.valuation, config=self.config)
+
+        assert not remaining_answers and not remaining_confirms, f"menu {choice} left answers unused"
+        return asked
+
 
 def build_harness(
     *,
@@ -215,6 +261,7 @@ def build_harness(
     logger = RecordingLogger()
     clock = FakeMarketClock(now=now, market_open=market_open)
     stocks = FakeStockProvider()
+    fundamentals = FakeFundamentalsProvider()
     prices = FakeOhlcvProvider()
     news = FakeNewsProvider()
     social = FakeSocialMediaProvider()
@@ -228,6 +275,7 @@ def build_harness(
     dependencies = ProviderDependencies(
         stock_provider=stocks,
         price_provider=prices,
+        fundamentals_provider=fundamentals,
         news_provider=news,
         social_media_provider=social,
         ai_provider=ai,
@@ -242,11 +290,13 @@ def build_harness(
     process = build_process_use_cases(config, logger, dependencies)
     trading = build_trading_use_cases(config, logger, clock, dependencies, collect.data_collector)
     pipeline = build_pipeline(collect, process, trading, technical_settings, logger)
+    valuation = build_valuation_pipeline(config, logger, clock, dependencies, collect, process)
 
     return CliHarness(
         config=config,
         clock=clock,
         stocks=stocks,
+        fundamentals=fundamentals,
         prices=prices,
         news=news,
         social=social,
@@ -260,4 +310,5 @@ def build_harness(
         pipeline=pipeline,
         watch_stocks=trading.watch_stocks,
         manual_buy=trading.manual_buy,
+        valuation=valuation,
     )

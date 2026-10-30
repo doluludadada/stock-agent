@@ -123,6 +123,7 @@ class PromptsConfig(BaseModel):
 
     analysis_report_fundamental: str = ""
     analysis_report_momentum: str = ""
+    valuation_explanation: str = ""
 
 
 class CollectRulesConfig(BaseModel):
@@ -178,6 +179,16 @@ class MockTradingConfig(BaseModel):
     initial_cash: float = Field(default=1_000_000, gt=0)
 
 
+class ValuationConfig(BaseModel):
+    """P/E valuation (menus 5 and 6)."""
+
+    scenario_spread: float = Field(default=0.2, gt=0, lt=1)
+    """US-106 rule: the conservative and optimistic target P/E are the user's target × (1 ∓ spread)."""
+
+    max_scan_explanations: int = Field(default=3, ge=1, le=20)
+    """The undervalued scan asks the AI to explain at most this many top stocks (one paid call each)."""
+
+
 class WatchlistConfig(BaseModel):
     automatic_expiry_hours: int = Field(default=24, gt=0)
 
@@ -205,3 +216,4 @@ class AppConfig(BaseSettings):
     trading: TradingConfig = Field(default_factory=TradingConfig)
     mock_trading: MockTradingConfig = Field(default_factory=MockTradingConfig)
     watchlist: WatchlistConfig = Field(default_factory=WatchlistConfig)
+    valuation: ValuationConfig = Field(default_factory=ValuationConfig)
