@@ -3,6 +3,8 @@
 from datetime import date, datetime
 from typing import Protocol
 
+from a_domain.types.enums import TradingPhase
+
 
 class IMarketClock(Protocol):
     """The exchange's local clock. Every time the trading code compares against comes from here."""
@@ -19,8 +21,17 @@ class IMarketClock(Protocol):
 
     def history_window(self, lookback_days: int) -> tuple[datetime, datetime]: ...
 
+    def session_close_after(self, value: datetime, sessions: int) -> datetime:
+        """
+        The close of the `sessions`-th weekday session that opens after `value`: Friday evening and 1 give Monday's close.
+        Exchange holidays are not modelled.
+        """
+        ...
+
     def last_closed_session(self) -> date:
         """The latest weekday whose session has closed: the newest daily bar that can exist. Exchange holidays are not modelled."""
         ...
 
-    def is_market_open(self) -> bool: ...
+    def trading_phase(self) -> TradingPhase:
+        """Where the exchange's trading day stands now. Exchange holidays and a delayed open or close are not modelled."""
+        ...

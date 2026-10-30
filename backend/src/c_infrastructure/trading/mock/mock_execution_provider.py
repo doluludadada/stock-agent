@@ -110,7 +110,7 @@ class MockExecutionProvider(IExecutionProvider):
         price = order.limit_price
 
         if quantity > 0 and price is not None:
-            cost = self._cost_rule.cost_of(order.action, price, quantity)
+            cost = self._cost_rule.cost_of(order.action, order.stock_id, price, quantity)
             realized_pnl = None
 
             if order.action == TradeAction.BUY:

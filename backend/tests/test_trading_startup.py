@@ -15,7 +15,7 @@ from c_infrastructure.system.config_loader import load_settings
 from c_infrastructure.trading.mock.mock_execution_provider import MockExecutionProvider
 from c_infrastructure.trading.shioaji.execution_provider import ShioajiExecutionProvider
 from d_presentation.cli import interactive
-from d_presentation.cli.cli_container import TradingSetupError, create_execution_provider, validate_trading_environment
+from d_presentation.container import TradingSetupError, create_execution_provider, validate_trading_environment
 
 pytestmark = pytest.mark.asyncio
 
@@ -155,6 +155,31 @@ async def test_the_menu_header_shows_no_broker_warning_for_the_mock(screen: io.S
     output = screen.getvalue()
     assert "REAL BROKER" not in output
     assert "Execution Provider: MOCK" in output and "Account:            mock-dev" in output
+
+
+def menu_entry(output: str, title: str) -> list[str]:
+    lines = output.splitlines()
+    start = lines.index(title)
+    return [line.strip() for line in lines[start + 1 : lines.index("", start)]]
+
+
+@pytest.mark.parametrize(
+    ("environment", "provider", "mode", "orders"),
+    [
+        (DEV, MOCK, OrderMode.MOCK_ONLY, "May submit orders to the mock broker (order mode MOCK ONLY)."),
+        (TEST, MOCK, OrderMode.DISABLED, "Would submit orders, but order mode DISABLED records each one REJECTED and sends none."),
+        (LIVE, SHIOAJI, OrderMode.LIVE, "May submit orders to the SHIOAJI broker (order mode LIVE)."),
+    ],
+)
+async def test_menus_2_and_3_say_they_may_submit_orders_under_the_current_order_mode(
+    screen: io.StringIO, environment: SystemEnvironment, provider: ExecutionProvider, mode: OrderMode, orders: str
+) -> None:
+    interactive.print_menu(trading_config(environment, provider, mode, **ALL_CREDENTIALS))
+
+    output = screen.getvalue()
+    assert orders in menu_entry(output, "[2] Scan Social Buzz")
+    assert orders in menu_entry(output, "[3] Run Intraday Trading")
+    assert not any("submit orders" in line for line in menu_entry(output, "[1] Run Full Cycle"))
 
 
 async def test_only_shioaji_simulation_in_the_environment_can_turn_simulation_off(monkeypatch) -> None:

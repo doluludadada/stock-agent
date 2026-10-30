@@ -82,3 +82,6 @@ class YamlTechnicalSettingsRepository(ITechnicalSettingsRepository):
             temporary_path.replace(self._saved_path)
         finally:
             temporary_path.unlink(missing_ok=True)
+
+    async def reset(self) -> None:
+        self._saved_path.unlink(missing_ok=True)

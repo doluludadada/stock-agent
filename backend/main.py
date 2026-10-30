@@ -1,13 +1,11 @@
 import os
 
 import uvicorn
-from fastapi import FastAPI
 
-from d_presentation.web.routers.api_v1 import router as api_v1_router
+from d_presentation.container import open_runtime
+from d_presentation.web.app import create_app
 
-app = FastAPI(title="TW-Stock-Alpha-Agent", description="Automated stock analysis and trading pipeline API.", version="0.1.0")
-
-app.include_router(api_v1_router)
+app = create_app(open_runtime)
 
 
 def main():

@@ -1,5 +1,3 @@
-from datetime import timedelta
-
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.watchlist import WatchlistAddition
 from a_domain.ports.system.logging_provider import ILoggingProvider
@@ -11,19 +9,24 @@ from b_application.schemas.config import AppConfig
 
 
 class WatchStocks:
-    """Adds stocks to one watchlist type according to WatchlistRule."""
+    """
+    Adds stocks to one watchlist type according to WatchlistRule. An automatic entry stays active through the close
+    of the `watchlist.automatic_expiry_sessions`-th trading session that opens after its workflow last selected it.
+    """
 
     def __init__(
         self, watchlist_repository: IWatchlistRepository, market_clock: IMarketClock, config: AppConfig, logger: ILoggingProvider
     ) -> None:
         self._watchlist_repository = watchlist_repository
         self._market_clock = market_clock
-        self._rule = WatchlistRule(automatic_expiry=timedelta(hours=config.watchlist.automatic_expiry_hours))
+        self._automatic_expiry_sessions = config.watchlist.automatic_expiry_sessions
         self._logger = logger
 
     async def execute(self, stocks: list[Stock], watchlist_type: WatchlistType) -> WatchlistAddition:
         active_entries = await self._watchlist_repository.get_active()
-        addition = self._rule.add(active_entries, stocks, watchlist_type, self._market_clock.now())
+        now = self._market_clock.now()
+        automatic_expires_at = self._market_clock.session_close_after(now, self._automatic_expiry_sessions)
+        addition = WatchlistRule.add(active_entries, stocks, watchlist_type, now, automatic_expires_at)
 
         await self._watchlist_repository.save(addition.entries)
 

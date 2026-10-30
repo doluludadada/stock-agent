@@ -66,7 +66,7 @@ class ValuationRule:
             unrealized_pnl = 0.0
 
             if mark is not None:
-                proceeds = self.cost_rule.cost_of(TradeAction.SELL, mark.close, position.quantity).net
+                proceeds = self.cost_rule.cost_of(TradeAction.SELL, position.stock_id, mark.close, position.quantity).net
                 unrealized_pnl = position.profit_on_sale(position.quantity, proceeds)
 
             valuations.append(PositionValuation(position=position, mark=mark, unrealized_pnl=unrealized_pnl))

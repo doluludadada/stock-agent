@@ -1,5 +1,4 @@
 from a_domain.model.market.stock import Stock
-from a_domain.model.trading.signal import TradeSignal
 from a_domain.model.trading.watchlist import StockWatchlist
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.trading.trading_journal import ITradingJournal
@@ -8,7 +7,10 @@ from b_application.schemas.pipeline_status import PipelineStatus
 
 
 class Signals:
-    """Generates trading decisions and records them. Only recorded decisions reach the run's signals."""
+    """
+    Generates one run's trading decisions with DecisionRule.decide_run and records them. Only recorded
+    decisions reach the run's signals, in decision order: best composite score first.
+    """
 
     def __init__(self, journal: ITradingJournal, config: AppConfig, logger: ILoggingProvider) -> None:
         self._journal = journal
@@ -18,9 +20,16 @@ class Signals:
     async def execute(self, watchlist: StockWatchlist, status: PipelineStatus) -> None:
         self._logger.info(f"Generating signals for {len(watchlist.willing_stocks)} watchlist stocks.")
 
-        generated_signals = [
-            signal for stock in watchlist.willing_stocks if (signal := self.generate_signal(stock, status)) is not None
-        ]
+        candidates = [stock for stock in watchlist.willing_stocks if self.is_decidable(stock, status)]
+
+        try:
+            generated_signals = self._decision_rule.decide_run(candidates, status.account)
+
+        except Exception as error:
+            message = f"Signal generation failed, so this run decides on none of {len(candidates)} stocks: {error}"
+            self._logger.error(message)
+            status.stats.add_error(message)
+            return
 
         if not generated_signals:
             self._logger.info("No new trading signals were generated.")
@@ -39,26 +48,21 @@ class Signals:
         status.stats.signals_generated += len(generated_signals)
         self._logger.info(f"Signals persisted: total={len(generated_signals)}")
 
-    def generate_signal(self, stock: Stock, status: PipelineStatus) -> TradeSignal | None:
+    def is_decidable(self, stock: Stock, status: PipelineStatus) -> bool:
         if stock.stock_id in status.risk_blocked_stock_ids:
             self._logger.warning(f"Signal skipped. Risk blocked: {stock.stock_id}")
-            return None
+            return False
 
         if stock.stock_id in status.stale_stock_ids:
             self._logger.warning(f"Signal skipped. Market data is stale: {stock.stock_id}")
-            return None
+            return False
 
         if stock.composite_score is None:
             self._logger.warning(f"Signal skipped. Composite score unavailable: {stock.stock_id}")
-            return None
+            return False
 
-        try:
-            return self._decision_rule.decide(
-                stock=stock, account=status.account, position=status.account.position_for(stock.stock_id)
-            )
+        if stock.current_price is None:
+            self._logger.warning(f"Signal skipped. No price: {stock.stock_id}")
+            return False
 
-        except Exception as error:
-            message = f"Signal generation failed for {stock.stock_id}: {error}"
-            self._logger.error(message)
-            status.stats.add_error(message)
-            return None
+        return True

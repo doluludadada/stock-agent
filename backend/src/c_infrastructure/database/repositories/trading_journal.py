@@ -61,3 +61,30 @@ class TradingJournal(ITradingJournal):
             rows = result.scalars().all()
 
         return [AccountSnapshot.model_validate(loaded(row.model_dump())) for row in rows]
+
+    async def recent_runs(self, limit: int) -> list[SystemStats]:
+        async with self._db.get_session() as session:
+            result = await session.execute(select(WorkflowRunDTO).order_by(col(WorkflowRunDTO.start_time).desc()).limit(limit))
+            rows = result.scalars().all()
+
+        return [SystemStats.model_validate(loaded(row.model_dump())) for row in rows]
+
+    async def find_run(self, run_id: RunId) -> SystemStats | None:
+        async with self._db.get_session() as session:
+            row = await session.get(WorkflowRunDTO, run_id)
+
+        return SystemStats.model_validate(loaded(row.model_dump())) if row is not None else None
+
+    async def signals_of(self, run_id: RunId) -> list[TradeSignal]:
+        async with self._db.get_session() as session:
+            statement = select(TradeSignalDTO).where(col(TradeSignalDTO.run_id) == run_id).order_by(col(TradeSignalDTO.generated_at))
+            rows = (await session.execute(statement)).scalars().all()
+
+        return [TradeSignal.model_validate(loaded(row.model_dump(exclude={"run_id"}))) for row in rows]
+
+    async def orders_of(self, run_id: RunId) -> list[Order]:
+        async with self._db.get_session() as session:
+            statement = select(OrderDTO).where(col(OrderDTO.run_id) == run_id).order_by(col(OrderDTO.created_at))
+            rows = (await session.execute(statement)).scalars().all()
+
+        return [Order.model_validate(loaded(row.model_dump())) for row in rows]

@@ -46,7 +46,7 @@ class Account(SQLModel):
         a BUY needs the cash for the whole quantity plus fee, a SELL needs the shares.
         """
         if order.action == TradeAction.BUY:
-            needed = -cost_rule.cost_of(TradeAction.BUY, order.limit_price, order.quantity).net
+            needed = -cost_rule.cost_of(TradeAction.BUY, order.stock_id, order.limit_price, order.quantity).net
 
             if not self.can_afford(needed):
                 return RejectReason.INSUFFICIENT_CASH, f"needs {needed:,.0f} including fee, cash is {self.cash:,.0f}"

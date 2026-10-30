@@ -4,6 +4,7 @@ from a_domain.model.trading.watchlist import StockWatchlist
 from a_domain.ports.analysis.technical_settings_repository import ITechnicalSettingsRepository
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.types.enums import AiAnalysisFocus, WatchlistType, Workflow
+from a_domain.types.ids import RunId
 from b_application.schemas.pipeline_status import PipelineStatus
 from b_application.use_cases.collect.buzz_scanner import BuzzScanner
 from b_application.use_cases.collect.market_data_collector import MarketDataCollector
@@ -33,7 +34,8 @@ class Pipeline:
     Technical settings are loaded once at the beginning of each workflow.
     The loaded snapshot remains fixed until that workflow completes.
 
-    Each workflow runs inside RunHistory.open, so it has one run id and a saved run record.
+    Each workflow runs inside RunHistory.open, so it has one run id and a saved run record. The Web API starts
+    Full Cycle and specific-stock analysis under a run id it already returned to its caller.
     """
 
     account_loader: AccountLoader
@@ -55,12 +57,12 @@ class Pipeline:
     technical_settings_repository: ITechnicalSettingsRepository
     logger: ILoggingProvider
 
-    async def run_full_cycle(self) -> PipelineStatus:
+    async def run_full_cycle(self, run_id: RunId | None = None) -> PipelineStatus:
         """After-market full-universe analysis. It never submits orders."""
         settings = await self.technical_settings_repository.load()
         strategy = settings.active_strategy
 
-        async with self.run_history.open(Workflow.FULL_CYCLE) as status:
+        async with self.run_history.open(Workflow.FULL_CYCLE, run_id) as status:
             self.logger.info(f"Starting full market cycle. Strategy={strategy.strategy_id}.")
 
             await self.account_loader.execute(status)
@@ -167,12 +169,12 @@ class Pipeline:
 
         return status
 
-    async def analyse_specific_stocks(self, stock_ids: list[str]) -> PipelineStatus:
+    async def analyse_specific_stocks(self, stock_ids: list[str], run_id: RunId | None = None) -> PipelineStatus:
         """Produces complete reports for explicitly requested stocks."""
         settings = await self.technical_settings_repository.load()
         strategy = settings.active_strategy
 
-        async with self.run_history.open(Workflow.SPECIFIC_STOCKS) as status:
+        async with self.run_history.open(Workflow.SPECIFIC_STOCKS, run_id) as status:
             self.logger.info(f"Starting specific-stock analysis: {stock_ids}")
 
             status.manual_stocks = await self.market_scanner.find_stocks_by_ids(stock_ids, status)

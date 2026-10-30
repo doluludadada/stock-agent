@@ -70,17 +70,13 @@ class RecordingLogger:
 
 
 class FakeMarketClock(TaiwanMarketClock):
-    """Taiwan-time clock whose current time and market session are set by the test."""
+    """Taiwan-time clock whose current time is set by the test; the trading phase follows that time."""
 
-    def __init__(self, now: datetime, market_open: bool) -> None:
+    def __init__(self, now: datetime) -> None:
         self.current_time = now
-        self.market_open = market_open
 
     def now(self) -> datetime:
         return self.current_time
-
-    def is_market_open(self) -> bool:
-        return self.market_open
 
 
 class FakeStockProvider:
@@ -266,6 +262,18 @@ class FakeTradingJournal:
     async def snapshots(self) -> list[AccountSnapshot]:
         return sorted(self.account_snapshots, key=lambda snapshot: snapshot.taken_at)
 
+    async def recent_runs(self, limit: int) -> list[SystemStats]:
+        return sorted(self.runs.values(), key=lambda run: run.start_time, reverse=True)[:limit]
+
+    async def find_run(self, run_id: RunId) -> SystemStats | None:
+        return self.runs.get(run_id)
+
+    async def signals_of(self, run_id: RunId) -> list[TradeSignal]:
+        return [signal for signal in self.signals if self.signal_runs[signal.decision_id] == run_id]
+
+    async def orders_of(self, run_id: RunId) -> list[Order]:
+        return [order for order in self.orders.values() if order.run_id == run_id]
+
 
 class FakeWatchlistRepository:
     """Holds one entry per (stock_id, type), like the watchlists table, and returns the entries not expired at the clock's time."""
@@ -310,13 +318,13 @@ class RecordingExecutionProvider:
         self.cash = cash
         self.positions: list[Position] = []
         self.placed: list[Order] = []
-        self._cost_rule = cost_rule or TradingCostRule(fee_rate=0.001425, tax_rate=0.003, min_fee=20)
+        self._cost_rule = cost_rule or TradingCostRule(fee_rate=0.001425, tax_rate=0.003, etf_tax_rate=0.001, min_fee=20)
 
     async def place_order(self, order: Order) -> Order:
         self.placed.append(order.model_copy())
         assert order.limit_price is not None, "the app sends LIMIT orders only"
 
-        cost = self._cost_rule.cost_of(order.action, order.limit_price, order.quantity)
+        cost = self._cost_rule.cost_of(order.action, order.stock_id, order.limit_price, order.quantity)
         held = next((position for position in self.positions if position.stock_id == order.stock_id), None)
         realized_pnl = held.profit_on_sale(order.quantity, cost.net) if order.action == TradeAction.SELL and held else None
 
@@ -329,11 +337,17 @@ class RecordingExecutionProvider:
 
 
 class FakeTechnicalSettingsRepository:
-    def __init__(self, settings: TechnicalSettings) -> None:
-        self.settings = settings
+    """Like the YAML repository: load returns the saved settings when there are any, else the template."""
+
+    def __init__(self, template: TechnicalSettings) -> None:
+        self.template = template
+        self.saved: TechnicalSettings | None = None
 
     async def load(self) -> TechnicalSettings:
-        return self.settings
+        return self.saved or self.template
 
     async def save(self, settings: TechnicalSettings) -> None:
-        self.settings = settings
+        self.saved = settings
+
+    async def reset(self) -> None:
+        self.saved = None

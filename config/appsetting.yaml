@@ -95,7 +95,9 @@ quality:
 
 market:
   fee_rate: 0.001425
+  # Securities transaction tax on a SELL: stocks, and ETFs (codes starting with 00).
   tax_rate: 0.003
+  etf_tax_rate: 0.001
   min_fee: 20
 
 freshness:
@@ -119,7 +121,9 @@ shioaji:
   simulation: true
 
 watchlist:
-  automatic_expiry_hours: 24
+  # A TECHNICAL or BUZZ entry stays active through the close of this many trading sessions after its workflow last
+  # selected it. 1 keeps Friday evening's Full Cycle entries through Monday's session.
+  automatic_expiry_sessions: 1
 
 valuation:
   scenario_spread: 0.2

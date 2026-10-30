@@ -1,7 +1,7 @@
-"""Builds the CLI the way build_cli_orchestrator() does, with only the ports replaced by fakes.
+"""Builds the runtime the way open_runtime() does, with only the ports replaced by fakes.
 
-Every use case, domain rule and the Pipeline come from the real build_* functions
-in cli_container.py, so a test written against CliHarness survives changes to
+Every use case, domain rule and the Pipeline come from the real compose_runtime()
+in container.py, so a test written against CliHarness survives changes to
 use-case constructors.
 """
 
@@ -33,24 +33,11 @@ from a_domain.types.enums import (
     SystemEnvironment,
     WatchlistType,
 )
-from b_application.pipeline import Pipeline
 from b_application.schemas.config import AppConfig, NotificationConfig, PromptsConfig, TradingConfig
 from b_application.schemas.pipeline_status import PipelineStatus
-from b_application.use_cases.trade.account_history import AccountHistory
-from b_application.use_cases.trade.manual_buy import ManualBuy
-from b_application.use_cases.trade.watch_stocks import WatchStocks
-from b_application.valuation_pipeline import ValuationPipeline
 from c_infrastructure.system.market_clock import TAIWAN_SESSION_CLOSE, TAIWAN_TIMEZONE
 from d_presentation.cli import interactive
-from d_presentation.cli.cli_container import (
-    ProviderDependencies,
-    build_collect_use_cases,
-    build_pipeline,
-    build_process_use_cases,
-    build_trading_use_cases,
-    build_valuation_pipeline,
-    validate_trading_environment,
-)
+from d_presentation.container import ProviderDependencies, Runtime, compose_runtime, validate_trading_environment
 from support.fakes import (
     PROMPT_TEMPLATES,
     VALUATION_PROMPT_TEMPLATE,
@@ -148,11 +135,7 @@ class CliHarness:
     broker: RecordingExecutionProvider
     technical_settings: FakeTechnicalSettingsRepository
     logger: RecordingLogger
-    pipeline: Pipeline
-    watch_stocks: WatchStocks
-    manual_buy: ManualBuy
-    account_history: AccountHistory
-    valuation: ValuationPipeline
+    runtime: Runtime
 
     def list_stock(
         self, stock_id: str, history: list[Ohlcv], realtime_price: float | None = None, realtime_age: timedelta = FRESH
@@ -247,10 +230,10 @@ class CliHarness:
         with patch.object(Prompt, "ask", answer_prompt), patch.object(Confirm, "ask", answer_confirm):
             return await interactive.execute_menu_choice(
                 choice=choice,
-                pipeline=self.pipeline,
-                watch_stocks=self.watch_stocks,
-                manual_buy=self.manual_buy,
-                account_history=self.account_history,
+                pipeline=self.runtime.pipeline,
+                watch_stocks=self.runtime.watch_stocks,
+                manual_buy=self.runtime.manual_buy,
+                account_history=self.runtime.account_history,
             )
 
     async def run_valuation_menu(self, choice: str, *, answers: Iterable[str], confirm: Iterable[bool] = ()) -> list[str]:
@@ -273,24 +256,20 @@ class CliHarness:
             return remaining_confirms.pop(0)
 
         with patch.object(Prompt, "ask", answer_prompt), patch.object(Confirm, "ask", answer_confirm):
-            await interactive.execute_valuation_choice(choice=choice, valuation=self.valuation, config=self.config)
+            await interactive.execute_valuation_choice(choice=choice, valuation=self.runtime.valuation, config=self.config)
 
         assert not remaining_answers and not remaining_confirms, f"menu {choice} left answers unused"
         return asked
 
 
 def build_harness(
-    *,
-    now: datetime = MARKET_OPEN,
-    market_open: bool = True,
-    config: AppConfig | None = None,
-    settings: TechnicalSettings | None = None,
+    *, now: datetime = MARKET_OPEN, config: AppConfig | None = None, settings: TechnicalSettings | None = None
 ) -> CliHarness:
     config = config or harness_config()
     validate_trading_environment(config)
 
     logger = RecordingLogger()
-    clock = FakeMarketClock(now=now, market_open=market_open)
+    clock = FakeMarketClock(now=now)
     stocks = FakeStockProvider()
     fundamentals = FakeFundamentalsProvider()
     prices = FakeOhlcvProvider()
@@ -319,12 +298,6 @@ def build_harness(
         execution_provider=broker,
         notification_provider=None,
     )
-    collect = build_collect_use_cases(config, logger, clock, dependencies)
-    process = build_process_use_cases(config, logger, dependencies)
-    trading = build_trading_use_cases(config, logger, clock, dependencies, collect.data_collector)
-    pipeline = build_pipeline(collect, process, trading, technical_settings, logger)
-    valuation = build_valuation_pipeline(config, logger, clock, dependencies, collect, process)
-
     return CliHarness(
         config=config,
         clock=clock,
@@ -341,9 +314,5 @@ def build_harness(
         broker=broker,
         technical_settings=technical_settings,
         logger=logger,
-        pipeline=pipeline,
-        watch_stocks=trading.watch_stocks,
-        manual_buy=trading.manual_buy,
-        account_history=trading.account_history,
-        valuation=valuation,
+        runtime=compose_runtime(config, logger, clock, dependencies),
     )

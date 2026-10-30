@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, timedelta
 
 import pytest
@@ -90,6 +91,30 @@ async def test_a_refused_manual_buy_is_a_recorded_rejected_order_with_its_reason
 
 
 @pytest.mark.parametrize(
+    ("hour", "minute", "status", "reason"),
+    [
+        (8, 45, OrderStatus.REJECTED, "MARKET_CLOSED: Mon 2026-10-19 08:45 falls in the market's opening_auction phase"),
+        (9, 0, OrderStatus.FILLED, None),
+        (13, 24, OrderStatus.FILLED, None),
+        (13, 25, OrderStatus.REJECTED, "MARKET_CLOSED: Mon 2026-10-19 13:25 falls in the market's closing_auction phase"),
+        (13, 29, OrderStatus.REJECTED, "MARKET_CLOSED: Mon 2026-10-19 13:29 falls in the market's closing_auction phase"),
+    ],
+)
+async def test_only_continuous_trading_takes_the_apps_ioc_orders(
+    tmp_path, hour: int, minute: int, status: OrderStatus, reason: str | None
+) -> None:
+    stack = await open_stack(tmp_path)
+    stack.clock.current = MONDAY_10_00.replace(hour=hour, minute=minute)
+    stack.quotes.realtime["2330"] = bar(stack.clock.current - timedelta(minutes=1), 100)
+
+    result = await stack.manual_buy.execute(analysed_stock())
+
+    assert isinstance(result, Order)
+    assert result.status == status
+    assert reason is None or (result.reason is not None and result.reason.startswith(reason))
+
+
+@pytest.mark.parametrize(
     ("initial_cash", "composite_score", "reason"),
     [(50, 90, "Manual BUY not sized: cash 50 buys no share of 2330"), (1_000_000, None, "analysis incomplete")],
 )
@@ -179,3 +204,62 @@ async def test_a_run_is_recorded_when_it_starts_and_when_it_aborts(tmp_path) -> 
 
     assert ended is not None and ended.end_time is not None
     assert ended.errors == ["Run aborted: RuntimeError: Yahoo hung"]
+
+
+class SlowBroker:
+    """The mock broker behind a gate: place_order waits until the test opens it, as a slow broker call does."""
+
+    def __init__(self, stack) -> None:
+        self.stack = stack
+        self.called = asyncio.Event()
+        self.gate = asyncio.Event()
+
+    async def place_order(self, order: Order) -> Order:
+        self.called.set()
+        await self.gate.wait()
+        return await self.stack.broker.place_order(order)
+
+    async def get_account(self):
+        return await self.stack.broker.get_account()
+
+
+async def cancel_during_the_broker_call(stack, cancels: int) -> None:
+    broker = SlowBroker(stack)
+    stack.order_execution._execution_provider = broker
+    run = asyncio.create_task(stack.manual_buy.execute(analysed_stock()))
+    await broker.called.wait()
+
+    for _ in range(cancels):
+        run.cancel()
+        await asyncio.sleep(0.01)
+
+    broker.gate.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await run
+
+
+async def recorded_orders(stack) -> list[tuple[OrderStatus, int, str | None]]:
+    async with stack.db.get_session() as session:
+        rows = (await session.execute(select(OrderDTO))).scalars().all()
+
+    return [(row.status, row.filled_quantity, row.reason) for row in rows]
+
+
+async def test_a_cancel_during_the_broker_call_lets_the_call_finish_and_records_what_the_broker_did(tmp_path) -> None:
+    stack = await open_stack(tmp_path)
+
+    await cancel_during_the_broker_call(stack, cancels=1)
+
+    assert await recorded_orders(stack) == [(OrderStatus.FILLED, 2000, None)]
+    assert [position.quantity for position in (await stack.broker.get_account()).positions] == [2000]
+
+
+async def test_a_second_cancel_that_stops_the_broker_call_records_the_order_failed(tmp_path) -> None:
+    stack = await open_stack(tmp_path)
+
+    await cancel_during_the_broker_call(stack, cancels=2)
+
+    [(status, filled, reason)] = await recorded_orders(stack)
+    assert (status, filled) == (OrderStatus.FAILED, 0)
+    assert reason is not None and "cancelled during the broker call" in reason

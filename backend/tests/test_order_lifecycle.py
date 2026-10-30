@@ -7,7 +7,7 @@ from a_domain.rules.trading.cost import TradingCostRule
 from a_domain.types.enums import OrderStatus, OrderType, RejectReason, TimeInForce, TradeAction
 from a_domain.types.ids import new_decision_id, new_run_id
 
-COSTS = TradingCostRule(fee_rate=0.001425, tax_rate=0.003, min_fee=20)
+COSTS = TradingCostRule(fee_rate=0.001425, tax_rate=0.003, etf_tax_rate=0.001, min_fee=20)
 
 LEGAL = {
     (OrderStatus.PENDING, OrderStatus.SUBMITTED),
@@ -35,7 +35,7 @@ def new_order(action: TradeAction = TradeAction.BUY, quantity: int = 1000) -> Or
 
 
 def fill(order: Order, quantity: int) -> None:
-    order.fill(quantity, 100, COSTS.cost_of(order.action, 100, quantity))
+    order.fill(quantity, 100, COSTS.cost_of(order.action, "2330", 100, quantity))
 
 
 def order_in(status: OrderStatus) -> Order:
@@ -95,8 +95,8 @@ def test_partial_fills_accumulate_price_quantity_fee_and_tax() -> None:
     order = new_order(action=TradeAction.SELL)
     order.submit()
 
-    order.fill(400, 100, COSTS.cost_of(TradeAction.SELL, 100, 400), realized_pnl=1_000)
-    order.fill(600, 110, COSTS.cost_of(TradeAction.SELL, 110, 600), realized_pnl=2_000)
+    order.fill(400, 100, COSTS.cost_of(TradeAction.SELL, "2330", 100, 400), realized_pnl=1_000)
+    order.fill(600, 110, COSTS.cost_of(TradeAction.SELL, "2330", 110, 600), realized_pnl=2_000)
 
     assert order.status == OrderStatus.FILLED
     assert order.filled_quantity == 1000
@@ -117,7 +117,7 @@ def test_a_fill_beyond_the_limit_price_is_refused() -> None:
     order = order_in(OrderStatus.SUBMITTED)
 
     with pytest.raises(ValueError, match="BUY fill price cannot exceed limit_price"):
-        order.fill(1, 101, COSTS.cost_of(TradeAction.BUY, 101, 1))
+        order.fill(1, 101, COSTS.cost_of(TradeAction.BUY, "2330", 101, 1))
 
     assert (order.status, order.filled_quantity) == (OrderStatus.SUBMITTED, 0)
 

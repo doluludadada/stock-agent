@@ -1,6 +1,7 @@
 # backend/src/a_domain/types/enums.py
 
 from enum import StrEnum, auto
+from typing import Self
 
 
 class AiProvider(StrEnum):
@@ -33,6 +34,19 @@ class MarketType(StrEnum):
     TPEX = auto()
     NASDAQ = auto()
     NYSE = auto()
+
+
+class SecurityKind(StrEnum):
+    """What a listed code trades as. Tick sizes and the SELL transaction tax differ by kind."""
+
+    STOCK = auto()
+
+    ETF = auto()
+    """Exchange-traded fund. Taiwan ETF codes start with 00: 0050, 00878, 006208, 00679B."""
+
+    @classmethod
+    def of(cls, stock_id: str) -> Self:
+        return cls.ETF if stock_id.startswith("00") else cls.STOCK
 
 
 class TradeAction(StrEnum):
@@ -87,6 +101,21 @@ class RejectReason(StrEnum):
     UNSUPPORTED_TIME_IN_FORCE = auto()
     BROKER_REFUSED = auto()
     """The real broker refused the order before it worked (its own checks or the exchange's); the detail quotes the broker."""
+
+
+class TradingPhase(StrEnum):
+    """Where the exchange's trading day stands. Only CONTINUOUS trading takes the IOC orders the app sends."""
+
+    CLOSED = auto()
+
+    OPENING_AUCTION = auto()
+    """Orders queue for the opening call auction, which takes limit ROD orders only."""
+
+    CONTINUOUS = auto()
+    """Continuous trading: limit and market orders, ROD, IOC and FOK."""
+
+    CLOSING_AUCTION = auto()
+    """Orders queue for the closing call auction, which takes limit ROD orders only."""
 
 
 class TimeInForce(StrEnum):

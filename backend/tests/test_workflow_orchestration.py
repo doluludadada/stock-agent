@@ -5,6 +5,7 @@ from support.harness import FRESH, MARKET_CLOSED, MARKET_OPEN, STALE, build_harn
 
 from a_domain.model.market.stock import Stock
 from a_domain.types.enums import AiAnalysisFocus, SignalSource, TradeAction, WatchlistType
+from a_domain.types.ids import new_run_id
 
 
 def stock_ids(stocks: list[Stock]) -> list[str]:
@@ -16,7 +17,7 @@ def stock_ids(stocks: list[Stock]) -> list[str]:
 
 @pytest.mark.asyncio
 async def test_full_cycle_saves_only_survivors_as_technical_and_never_orders() -> None:
-    harness = build_harness(now=MARKET_OPEN, market_open=True)
+    harness = build_harness(now=MARKET_OPEN)
     harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
     harness.list_stock("2317", falling_history(100.0), realtime_price=100.0)
 
@@ -75,15 +76,15 @@ async def test_buzz_scan_never_analyses_stocks_below_both_buzz_thresholds() -> N
 
 
 @pytest.mark.parametrize(
-    ("now", "market_open", "quote_age", "buy_signals", "orders"),
-    [(MARKET_OPEN, True, FRESH, ["2330"], ["2330"]), (MARKET_CLOSED, False, FRESH, ["2330"], []), (MARKET_OPEN, True, STALE, [], [])],
+    ("now", "quote_age", "buy_signals", "orders"),
+    [(MARKET_OPEN, FRESH, ["2330"], ["2330"]), (MARKET_CLOSED, FRESH, ["2330"], []), (MARKET_OPEN, STALE, [], [])],
     ids=["open-and-fresh", "market-closed", "stale-quote"],
 )
 @pytest.mark.asyncio
 async def test_buzz_scan_orders_only_when_market_is_open_and_quote_is_fresh(
-    now: datetime, market_open: bool, quote_age: timedelta, buy_signals: list[str], orders: list[str]
+    now: datetime, quote_age: timedelta, buy_signals: list[str], orders: list[str]
 ) -> None:
-    harness = build_harness(now=now, market_open=market_open)
+    harness = build_harness(now=now)
     harness.list_stock("2330", rising_history(100.0), realtime_price=100.0, realtime_age=quote_age)
     harness.discuss("2330", mentions=1, engagement=harness.config.collect_rules.buzz_min_engagement)
 
@@ -131,6 +132,25 @@ async def test_intraday_loads_held_positions_and_active_watchlist() -> None:
 
 
 @pytest.mark.asyncio
+async def test_one_runs_buys_are_sized_best_score_first_against_the_cash_the_earlier_buys_left() -> None:
+    harness = build_harness()
+    ai_scores = {"1101": 92, "2317": 98, "2330": 88, "2454": 96, "2603": 90, "3008": 94}
+
+    for stock_id, ai_score in ai_scores.items():
+        harness.list_stock(stock_id, rising_history(100.0), realtime_price=100.0)
+        harness.watch(stock_id, WatchlistType.TECHNICAL)
+        harness.ai.scores[stock_id] = ai_score
+
+    await harness.run_menu("3")
+
+    # 2% of the cash not yet committed, over the 10 NT$ a share loses at the stop; each BUY commits 100 x shares + fee.
+    buys = [(signal.stock_id, signal.quantity) for signal in harness.journal.signals if signal.action == TradeAction.BUY]
+    assert buys == [("2317", 2000), ("2454", 1599), ("3008", 1279), ("1101", 1023), ("2603", 818), ("2330", 654)]
+    assert [order.stock_id for order in harness.broker.placed] == [stock_id for stock_id, _ in buys]
+    assert sum(100 * quantity + max(20, int(100 * quantity * 0.001425)) for _, quantity in buys) == 738_348 <= 1_000_000
+
+
+@pytest.mark.asyncio
 async def test_intraday_places_no_order_for_a_stale_quote() -> None:
     harness = build_harness()
     harness.list_stock("2330", rising_history(100.0), realtime_price=100.0, realtime_age=FRESH)
@@ -144,12 +164,10 @@ async def test_intraday_places_no_order_for_a_stale_quote() -> None:
     assert [order.stock_id for order in harness.broker.placed] == ["2330"]
 
 
-@pytest.mark.parametrize(
-    ("now", "market_open", "orders"), [(MARKET_OPEN, True, ["2330"]), (MARKET_CLOSED, False, [])], ids=["market-open", "market-closed"]
-)
+@pytest.mark.parametrize(("now", "orders"), [(MARKET_OPEN, ["2330"]), (MARKET_CLOSED, [])], ids=["market-open", "market-closed"])
 @pytest.mark.asyncio
-async def test_order_execution_skips_closed_market_orders(now: datetime, market_open: bool, orders: list[str]) -> None:
-    harness = build_harness(now=now, market_open=market_open)
+async def test_order_execution_skips_closed_market_orders(now: datetime, orders: list[str]) -> None:
+    harness = build_harness(now=now)
     harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
     harness.watch("2330", WatchlistType.TECHNICAL)
 
@@ -220,3 +238,20 @@ async def test_confirmed_manual_buy_sends_one_manual_signal_to_the_broker() -> N
         ("2317", TradeAction.BUY, signal.quantity, 98.0)
     ]
     assert harness.watchlist.rows == []
+
+
+# ------------------------------ Caller-named run ids ------------------------------ #
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("workflow", "arguments"), [("run_full_cycle", ()), ("analyse_specific_stocks", (["2330"],))])
+async def test_a_workflow_started_under_a_named_run_id_records_under_it(workflow: str, arguments: tuple) -> None:
+    harness = build_harness()
+    harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
+    run_id = new_run_id()
+
+    status = await getattr(harness.runtime.pipeline, workflow)(*arguments, run_id=run_id)
+
+    assert status.stats.run_id == run_id
+    assert list(harness.journal.runs) == [run_id]
+    assert {harness.journal.signal_runs[signal.decision_id] for signal in harness.journal.signals} <= {run_id}

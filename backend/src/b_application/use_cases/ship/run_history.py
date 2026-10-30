@@ -5,6 +5,7 @@ from a_domain.model.system.stats import SystemStats
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.trading.trading_journal import ITradingJournal
 from a_domain.types.enums import Workflow
+from a_domain.types.ids import RunId, new_run_id
 from b_application.schemas.config import AppConfig
 from b_application.schemas.pipeline_status import PipelineStatus
 
@@ -15,6 +16,8 @@ class RunHistory:
     twice: when the run starts, and when it ends, normally or by an exception. A run whose record
     still has no end_time never finished. A failed save is logged in the run; the run goes on,
     because nothing acts on a decision whose own save failed.
+
+    A caller that must name the run before it starts (the Web API answers with the run id at once) passes that id.
     """
 
     def __init__(self, journal: ITradingJournal, config: AppConfig, logger: ILoggingProvider) -> None:
@@ -23,9 +26,12 @@ class RunHistory:
         self._logger = logger
 
     @asynccontextmanager
-    async def open(self, workflow: Workflow) -> AsyncIterator[PipelineStatus]:
+    async def open(self, workflow: Workflow, run_id: RunId | None = None) -> AsyncIterator[PipelineStatus]:
         stats = SystemStats(
-            workflow=workflow, execution_provider=self._config.trading.execution_provider, order_mode=self._config.trading.order_mode
+            run_id=run_id or new_run_id(),
+            workflow=workflow,
+            execution_provider=self._config.trading.execution_provider,
+            order_mode=self._config.trading.order_mode,
         )
         await self._save(stats)
 

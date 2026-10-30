@@ -43,7 +43,7 @@ class EntryRule:
         reason = ReasonRule.build_entry_hold(stock, "Score below buy threshold")
 
         if composite_score >= self.buy_threshold:
-            quantity = self.sizing_rule.calculate(account=account, price=current_price)
+            quantity = self.sizing_rule.calculate(account=account, stock_id=stock.stock_id, price=current_price)
             reason = ReasonRule.build_entry_hold(stock, "Insufficient cash or position size too small")
 
         if quantity > 0:
@@ -72,7 +72,7 @@ class EntryRule:
         if current_price is None or composite_score is None:
             raise ValueError("Manual BUY requires a current price and a composite score")
 
-        quantity = self.sizing_rule.calculate(account=account, price=current_price)
+        quantity = self.sizing_rule.calculate(account=account, stock_id=stock.stock_id, price=current_price)
         reason = "Manual BUY override confirmed by user."
 
         if quantity == 0:

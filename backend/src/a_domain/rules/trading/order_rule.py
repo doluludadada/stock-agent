@@ -6,7 +6,17 @@ from icontract import ensure, require
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.rules.collect.freshness import DataFreshnessRule
-from a_domain.types.enums import ExecutionProvider, OrderMode, OrderStatus, OrderType, RejectReason, TimeInForce, TradeAction
+from a_domain.rules.trading.tick import TickRule
+from a_domain.types.enums import (
+    ExecutionProvider,
+    OrderMode,
+    OrderStatus,
+    OrderType,
+    RejectReason,
+    TimeInForce,
+    TradeAction,
+    TradingPhase,
+)
 from a_domain.types.ids import RunId
 
 
@@ -16,11 +26,15 @@ class OrderRule:
     Turns a BUY or SELL decision into the order the app may send now, or into a REJECTED order that says why not.
 
     Every order is a LIMIT at the decision's price with time in force IOC:
-    - LIMIT at the price the decision saw, so no fill is worse than what was decided on.
+    - LIMIT at the price the decision saw, as an exchange tick (TickRule). A traded price is a tick, so no fill is
+      worse than what was decided on. A price off the tick grid rounds up for a BUY and down for a SELL, at most
+      one tick, so the order still executes at that price.
     - IOC trades what is available at that price now and cancels the rest at once. The app tracks no
       working orders (no cancel, no expiry, no reconciliation), so ROD is out: its remainder could fill
       hours later at a price no decision saw. FOK is out because sizing gives a maximum, not a target:
       a partial BUY is still a valid smaller position and a partial stop-loss SELL still cuts the loss.
+    - IOC trades only in continuous trading, so an order outside it (the opening and closing call auctions
+      take ROD only) is REJECTED as MARKET_CLOSED and never sent.
 
     The gates run per decision right before submission, against one reading of the clock. The price
     age is measured from the quote behind the decision to `now`, so a quote that was fresh when fetched
@@ -33,7 +47,7 @@ class OrderRule:
 
     @require(lambda signal: signal.action != TradeAction.HOLD, "HOLD is not an order")
     @ensure(lambda result: result.status in {OrderStatus.PENDING, OrderStatus.REJECTED})
-    def order_for(self, signal: TradeSignal, run_id: RunId, now: datetime, market_open: bool) -> Order:
+    def order_for(self, signal: TradeSignal, run_id: RunId, now: datetime, phase: TradingPhase) -> Order:
         order = Order(
             run_id=run_id,
             decision_id=signal.decision_id,
@@ -42,7 +56,7 @@ class OrderRule:
             order_type=OrderType.LIMIT,
             time_in_force=TimeInForce.IOC,
             quantity=signal.quantity,
-            limit_price=signal.price_at_signal,
+            limit_price=TickRule.limit_price(signal.action, signal.stock_id, signal.price_at_signal),
         )
 
         if self.order_mode == OrderMode.DISABLED:
@@ -54,8 +68,11 @@ class OrderRule:
         elif self.order_mode == OrderMode.LIVE and self.execution_provider == ExecutionProvider.MOCK:
             order.reject(RejectReason.ORDER_MODE_MISMATCH, "live order mode cannot use the mock execution provider")
 
-        elif not market_open:
-            order.reject(RejectReason.MARKET_CLOSED, f"the Taiwan session is closed at {now:%a %Y-%m-%d %H:%M}")
+        elif phase != TradingPhase.CONTINUOUS:
+            order.reject(
+                RejectReason.MARKET_CLOSED,
+                f"{now:%a %Y-%m-%d %H:%M} falls in the market's {phase} phase; IOC orders trade only in continuous trading",
+            )
 
         elif not self.price_freshness.is_fresh(signal.price_observed_at, now):
             age_minutes = int(self.price_freshness.age(signal.price_observed_at, now).total_seconds() // 60)

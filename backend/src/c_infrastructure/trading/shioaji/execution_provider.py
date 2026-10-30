@@ -207,7 +207,7 @@ class ShioajiExecutionProvider(IExecutionProvider):
         payments_due = math.fsum(min(settlement.amount, 0) for settlement in self._client.settlements(stock_account))
         self._client.update_status(account=stock_account)
         bought_today = math.fsum(
-            -self._cost_rule.cost_of(TradeAction.BUY, fill_price(trade), dealt_shares(trade)).net
+            -self._cost_rule.cost_of(TradeAction.BUY, trade.contract.code, fill_price(trade), dealt_shares(trade)).net
             for trade in self._client.list_trades()
             if trade.order.account == stock_account and trade.order.action == Action.Buy and dealt_units(trade) > 0
         )
@@ -333,7 +333,7 @@ class ShioajiExecutionProvider(IExecutionProvider):
 
         quantity = dealt_shares(trade)
         price = fill_price(trade)
-        cost = self._cost_rule.cost_of(order.action, price, quantity)
+        cost = self._cost_rule.cost_of(order.action, order.stock_id, price, quantity)
         realized_pnl = held.profit_on_sale(quantity, cost.net) if order.action == TradeAction.SELL and held else None
 
         if order.status == OrderStatus.PENDING:

@@ -4,7 +4,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Self
 
-from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from a_domain.rules.collect.freshness import DataFreshnessRule
@@ -44,6 +44,19 @@ class LineConfig(BaseSettings):
     channel_id: str | None = Field(default=None, validation_alias="LINE_CHANNEL_ID")
     channel_secret: str | None = Field(default=None, validation_alias="LINE_CHANNEL_SECRET")
     channel_access_token: str | None = Field(default=None, validation_alias="LINE_CHANNEL_ACCESS_TOKEN")
+
+
+class ApiConfig(BaseSettings):
+    """Web API access. Every write needs `Authorization: Bearer <API_TOKEN>`; while API_TOKEN is unset or blank, writes are refused."""
+
+    model_config = SettingsConfigDict(env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore")
+
+    token: SecretStr | None = Field(default=None, validation_alias="API_TOKEN")
+
+    @field_validator("token", mode="before")
+    @classmethod
+    def _blank_is_unset(cls, value: object) -> object:
+        return None if isinstance(value, str) and not value.strip() else value
 
 
 class BehaviorConfig(BaseModel):
@@ -166,10 +179,15 @@ class MarketConfig(BaseModel):
 
     fee_rate: float = Field(default=0.001425, ge=0)
     tax_rate: float = Field(default=0.003, ge=0)
+    """Securities transaction tax on a stock SELL."""
+
+    etf_tax_rate: float = Field(default=0.001, ge=0)
+    """Securities transaction tax on an ETF SELL (codes starting with 00)."""
+
     min_fee: int = Field(default=20, ge=0)
 
     def cost_rule(self) -> TradingCostRule:
-        return TradingCostRule(fee_rate=self.fee_rate, tax_rate=self.tax_rate, min_fee=self.min_fee)
+        return TradingCostRule(fee_rate=self.fee_rate, tax_rate=self.tax_rate, etf_tax_rate=self.etf_tax_rate, min_fee=self.min_fee)
 
 
 class FreshnessConfig(BaseModel):
@@ -254,7 +272,13 @@ class ValuationConfig(BaseModel):
 
 
 class WatchlistConfig(BaseModel):
-    automatic_expiry_hours: int = Field(default=24, gt=0)
+    model_config = ConfigDict(extra="forbid")
+
+    automatic_expiry_sessions: int = Field(default=1, gt=0)
+    """
+    A TECHNICAL or BUZZ entry stays active through the close of this many trading sessions after its workflow
+    last selected it: 1 keeps Friday evening's Full Cycle entries through Monday's session.
+    """
 
 
 class AppConfig(BaseSettings):
@@ -267,6 +291,7 @@ class AppConfig(BaseSettings):
 
     ai: AiConfig = Field(default_factory=AiConfig)
     line: LineConfig = Field(default_factory=LineConfig)
+    api: ApiConfig = Field(default_factory=ApiConfig)
     behavior: BehaviorConfig = Field(default_factory=BehaviorConfig)
     db: DbConfig = Field(default_factory=DbConfig)
     folder: FolderConfig = Field(default_factory=FolderConfig)

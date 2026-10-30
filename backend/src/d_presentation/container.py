@@ -1,13 +1,18 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
 from a_domain.ports.ai.ai_provider import IAiProvider
 from a_domain.ports.ai.sentiment_classifier import ISentimentClassifier
 from a_domain.ports.analysis.technical_settings_repository import ITechnicalSettingsRepository
+from a_domain.ports.chat.conversation_repository import IConversationRepository
 from a_domain.ports.market.fundamentals_provider import IFundamentalsProvider
+from a_domain.ports.market.stock_provider import IStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.notification_provider import INotificationProvider
 from a_domain.ports.trading.execution_provider import IExecutionProvider
 from a_domain.ports.trading.trading_journal import ITradingJournal
+from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
 from a_domain.rules.ai.prompt import ValuationPromptBuilder
 from a_domain.types.enums import ExecutionProvider, OrderMode, SystemEnvironment
 from b_application.pipeline import Pipeline
@@ -54,18 +59,25 @@ from c_infrastructure.trading.mock.mock_execution_provider import MockExecutionP
 
 
 @dataclass(slots=True)
-class CliRuntime:
+class Runtime:
+    """
+    The one object graph the CLI and the Web API run on. open_runtime() builds it from the real adapters;
+    compose_runtime() wires the same graph over any ports, so tests and the order-gate check run it over fakes.
+    """
+
     pipeline: Pipeline
     valuation: ValuationPipeline
     watch_stocks: WatchStocks
     manual_buy: ManualBuy
     account_history: AccountHistory
+    stock_provider: IStockProvider
+    journal: ITradingJournal
+    watchlist_repository: IWatchlistRepository
+    technical_settings_repository: ITechnicalSettingsRepository
+    ai_provider: IAiProvider
+    conversation_repository: IConversationRepository
     config: AppConfig
-    db: DatabaseConnector
     logger: ILoggingProvider
-
-    async def shutdown(self) -> None:
-        await self.db.close()
 
 
 @dataclass(slots=True)
@@ -116,7 +128,7 @@ class TradingUseCases:
 
 
 class TradingSetupError(RuntimeError):
-    """The trading settings or the broker login do not let the CLI start. The message says what to change."""
+    """The trading settings or the broker login do not let the CLI or the Web API start. The message says what to change."""
 
 
 def validate_trading_environment(config: AppConfig) -> None:
@@ -376,35 +388,47 @@ def build_valuation_pipeline(
     )
 
 
-async def build_cli_orchestrator() -> CliRuntime:
+def compose_runtime(
+    config: AppConfig, logger: ILoggingProvider, market_clock: TaiwanMarketClock, dependencies: ProviderDependencies
+) -> Runtime:
+    collect = build_collect_use_cases(config, logger, market_clock, dependencies)
+    process = build_process_use_cases(config, logger, dependencies)
+    trading = build_trading_use_cases(config, logger, market_clock, dependencies, collect.data_collector)
+
+    return Runtime(
+        pipeline=build_pipeline(collect, process, trading, dependencies.technical_settings_repository, logger),
+        valuation=build_valuation_pipeline(config, logger, market_clock, dependencies, collect, process),
+        watch_stocks=trading.watch_stocks,
+        manual_buy=trading.manual_buy,
+        account_history=trading.account_history,
+        stock_provider=dependencies.stock_provider,
+        journal=dependencies.journal,
+        watchlist_repository=dependencies.watchlist_repository,
+        technical_settings_repository=dependencies.technical_settings_repository,
+        ai_provider=dependencies.ai_provider,
+        conversation_repository=dependencies.knowledge_repository,
+        config=config,
+        logger=logger,
+    )
+
+
+@asynccontextmanager
+async def open_runtime() -> AsyncIterator[Runtime]:
+    """
+    Builds the runtime from config/ and the real adapters, once per process, and closes the database when the caller is done.
+    It raises TradingSetupError for an unsafe trading setup and OutdatedDatabaseError for an old database, before any workflow runs.
+    """
     config = load_settings()
     validate_trading_environment(config)
 
     logger = LoggerService(level=config.behavior.log_level)
     market_clock = TaiwanMarketClock()
-
     db = DatabaseConnector(config=config, logger=logger)
-    await db.init_db()
 
-    dependencies = await build_provider_dependencies(config, db, logger, market_clock)
+    try:
+        await db.init_db()
+        dependencies = await build_provider_dependencies(config, db, logger, market_clock)
+        yield compose_runtime(config, logger, market_clock, dependencies)
 
-    collect = build_collect_use_cases(config, logger, market_clock, dependencies)
-
-    process = build_process_use_cases(config, logger, dependencies)
-
-    trading = build_trading_use_cases(config, logger, market_clock, dependencies, collect.data_collector)
-
-    pipeline = build_pipeline(collect, process, trading, dependencies.technical_settings_repository, logger)
-
-    valuation = build_valuation_pipeline(config, logger, market_clock, dependencies, collect, process)
-
-    return CliRuntime(
-        pipeline=pipeline,
-        valuation=valuation,
-        watch_stocks=trading.watch_stocks,
-        manual_buy=trading.manual_buy,
-        account_history=trading.account_history,
-        config=config,
-        db=db,
-        logger=logger,
-    )
+    finally:
+        await db.close()

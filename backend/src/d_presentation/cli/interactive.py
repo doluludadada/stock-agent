@@ -33,7 +33,7 @@ from b_application.use_cases.trade.watch_stocks import WatchStocks
 from b_application.valuation_pipeline import ValuationPipeline
 from c_infrastructure.database.db_connector import OutdatedDatabaseError
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
-from d_presentation.cli.cli_container import TradingSetupError, build_cli_orchestrator
+from d_presentation.container import TradingSetupError, open_runtime
 
 console = Console()
 
@@ -41,36 +41,35 @@ VALUATION_MENU_CHOICES = ("5", "6")
 
 
 async def interactive_menu() -> None:
-    runtime = await build_cli_orchestrator()
+    async with open_runtime() as runtime:
+        try:
+            while True:
+                print_menu(runtime.config)
+                choice = ask_menu_choice()
 
-    try:
-        while True:
-            print_menu(runtime.config)
-            choice = ask_menu_choice()
+                if choice is None or choice == "0":
+                    break
 
-            if choice is None or choice == "0":
-                return
+                if choice in VALUATION_MENU_CHOICES:
+                    await execute_valuation_choice(choice=choice, valuation=runtime.valuation, config=runtime.config)
+                else:
+                    context = await execute_menu_choice(
+                        choice=choice,
+                        pipeline=runtime.pipeline,
+                        watch_stocks=runtime.watch_stocks,
+                        manual_buy=runtime.manual_buy,
+                        account_history=runtime.account_history,
+                    )
 
-            if choice in VALUATION_MENU_CHOICES:
-                await execute_valuation_choice(choice=choice, valuation=runtime.valuation, config=runtime.config)
-            else:
-                context = await execute_menu_choice(
-                    choice=choice,
-                    pipeline=runtime.pipeline,
-                    watch_stocks=runtime.watch_stocks,
-                    manual_buy=runtime.manual_buy,
-                    account_history=runtime.account_history,
-                )
+                    if context is not None:
+                        print_context_summary(context)
 
-                if context is not None:
-                    print_context_summary(context)
+                console.print("\n" + "=" * 50 + "\n")
 
-            console.print("\n" + "=" * 50 + "\n")
+        finally:
+            console.print("\n[yellow]Shutting down...[/yellow]")
 
-    finally:
-        console.print("\n[yellow]Shutting down...[/yellow]")
-        await runtime.shutdown()
-        console.print("[bold green]System stopped.[/bold green]")
+    console.print("[bold green]System stopped.[/bold green]")
 
 
 def ask_menu_choice() -> str | None:
@@ -198,14 +197,24 @@ def print_menu(config: AppConfig) -> None:
     console.print("    Generate next-day trading signals.")
     console.print("")
 
+    mode = format_label(config.trading.order_mode.value)
+    broker = format_label(config.trading.execution_provider.value)
+    orders = {
+        OrderMode.MOCK_ONLY: f"May submit orders to the mock broker (order mode {mode}).",
+        OrderMode.LIVE: f"May submit orders to the {broker} broker (order mode {mode}).",
+        OrderMode.DISABLED: f"Would submit orders, but order mode {mode} records each one REJECTED and sends none.",
+    }[config.trading.order_mode]
+
     console.print("[2] Scan Social Buzz")
     console.print("    Find actively discussed stocks.")
     console.print("    Analyse qualified buzz stocks.")
+    console.print(f"    {orders}")
     console.print("")
 
     console.print("[3] Run Intraday Trading")
     console.print("    Revalidate positions and active watchlist stocks.")
-    console.print("    Generate signals and permitted orders.")
+    console.print("    Generate signals.")
+    console.print(f"    {orders}")
     console.print("")
 
     console.print("[4] Analyse Specific Stocks")

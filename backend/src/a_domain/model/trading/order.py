@@ -7,6 +7,7 @@ from pydantic import model_validator
 from sqlmodel import Field, SQLModel
 
 from a_domain.rules.trading.cost import TradeCost
+from a_domain.rules.trading.tick import TickRule
 from a_domain.types.enums import OrderStatus, OrderType, RejectReason, TimeInForce, TradeAction
 from a_domain.types.ids import DecisionId, OrderId, RunId, new_order_id
 
@@ -68,6 +69,9 @@ class Order(SQLModel):
     def _price_matches_order_type(self) -> Self:
         if (self.order_type == OrderType.LIMIT) != (self.limit_price is not None):
             raise ValueError("A LIMIT order needs a limit_price and a MARKET order must not have one")
+
+        if self.limit_price is not None and not TickRule.is_tick(self.stock_id, self.limit_price):
+            raise ValueError(f"limit_price {self.limit_price!r} is not an exchange tick for {self.stock_id}")
 
         return self
 

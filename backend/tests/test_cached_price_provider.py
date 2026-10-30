@@ -6,6 +6,7 @@ from trading_stack import MONDAY_10_00, MovableClock, SilentLogger, bar
 
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
+from a_domain.types.enums import TradingPhase
 from b_application.schemas.config import AppConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.market.cached_price_provider import CachedPriceProvider
@@ -25,7 +26,7 @@ class CountingYahoo:
         last_close = datetime.combine(self.clock.last_closed_session(), time(13, 30), tzinfo=self.clock.current.tzinfo)
         bars = [bar(last_close - timedelta(days=day), 100) for day in range(3, -1, -1)]
 
-        if self.clock.is_market_open():
+        if self.clock.trading_phase() in {TradingPhase.CONTINUOUS, TradingPhase.CLOSING_AUCTION}:
             bars.append(bar(self.clock.current.replace(hour=0), 110))
 
         return {stock.stock_id: [one.model_copy() for one in bars] for stock in stocks}

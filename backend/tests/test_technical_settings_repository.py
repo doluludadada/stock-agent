@@ -55,14 +55,18 @@ async def test_next_load_uses_saved_settings_and_template_stays_untouched(templa
 
 
 @pytest.mark.asyncio
-async def test_deleting_the_saved_file_resets_to_the_template(template: Path) -> None:
+async def test_reset_deletes_the_saved_file_and_the_next_load_uses_the_template(template: Path) -> None:
+    template_text = template.read_text(encoding="utf-8")
     repository = YamlTechnicalSettingsRepository(template)
     template_settings = await repository.load()
     await repository.save(replace(template_settings, active_strategy_id="conservative"))
 
-    (template.parent / "technical.local.yaml").unlink()
+    await repository.reset()
+    await repository.reset()
 
     assert await repository.load() == template_settings
+    assert not (template.parent / "technical.local.yaml").exists()
+    assert template.read_text(encoding="utf-8") == template_text
 
 
 @pytest.mark.asyncio

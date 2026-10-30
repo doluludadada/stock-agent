@@ -79,7 +79,7 @@ async def test_a_whole_lot_buy_is_one_board_lot_limit_order_on_the_logged_in_acc
     )
     assert (broker_order.account, broker_order.custom_field) == (client.stock_account, f"{placing.id.hex[:5]}0")
     assert (placed.status, placed.filled_quantity, placed.average_filled_price) == (OrderStatus.FILLED, 2000, 101.5)
-    cost = COSTS.cost_of(TradeAction.BUY, 101.5, 2000)
+    cost = COSTS.cost_of(TradeAction.BUY, "2330", 101.5, 2000)
     assert (placed.fee, placed.tax) == (cost.fee, cost.tax)
 
 
@@ -90,7 +90,7 @@ async def test_fewer_than_1000_shares_are_one_intraday_odd_lot_order_in_shares()
 
     assert sent(client) == [(StockOrderLot.IntradayOdd, 500, BrokerTimeInForce.IOC, 99.0)]
     assert client.placed[0].order.action == Action.Sell
-    cost = COSTS.cost_of(TradeAction.SELL, 99.0, 500)
+    cost = COSTS.cost_of(TradeAction.SELL, "2330", 99.0, 500)
     assert (placed.status, placed.filled_quantity, placed.tax) == (OrderStatus.FILLED, 500, cost.tax)
     assert placed.realized_pnl == pytest.approx(cost.net - 500 * 90.0)
 
@@ -106,7 +106,7 @@ async def test_a_mixed_quantity_is_split_into_a_board_lot_order_and_an_odd_lot_o
         (StockOrderLot.IntradayOdd, 500, BrokerTimeInForce.IOC, 100.0),
     ]
     assert [trade.order.custom_field for trade in client.placed] == [f"{placing.id.hex[:5]}0", f"{placing.id.hex[:5]}1"]
-    lots, odd = COSTS.cost_of(TradeAction.BUY, 100.0, 2000), COSTS.cost_of(TradeAction.BUY, 100.0, 500)
+    lots, odd = COSTS.cost_of(TradeAction.BUY, "2330", 100.0, 2000), COSTS.cost_of(TradeAction.BUY, "2330", 100.0, 500)
     assert (placed.status, placed.filled_quantity, placed.fee) == (OrderStatus.FILLED, 2500, lots.fee + odd.fee)
 
 
@@ -207,7 +207,7 @@ async def test_a_partial_fill_is_recorded_before_the_ioc_remainder_is_cancelled(
 
     placed = await provider(client).place_order(order(quantity=3000))
 
-    cost = COSTS.cost_of(TradeAction.BUY, 100.0, 1000)
+    cost = COSTS.cost_of(TradeAction.BUY, "2330", 100.0, 1000)
     assert (placed.status, placed.filled_quantity, placed.fee, client.cancelled) == (OrderStatus.CANCELLED, 1000, cost.fee, [])
 
 

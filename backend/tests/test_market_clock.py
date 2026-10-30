@@ -2,6 +2,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
+from a_domain.types.enums import TradingPhase
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
 
 
@@ -14,17 +15,21 @@ class ClockAt(TaiwanMarketClock):
 
 
 @pytest.mark.parametrize(
-    ("moment", "is_open"),
+    ("moment", "phase"),
     [
-        (datetime(2026, 10, 19, 8, 59, tzinfo=TAIWAN_TIMEZONE), False),
-        (datetime(2026, 10, 19, 9, 0, tzinfo=TAIWAN_TIMEZONE), True),
-        (datetime(2026, 10, 19, 13, 30, tzinfo=TAIWAN_TIMEZONE), True),
-        (datetime(2026, 10, 19, 13, 31, tzinfo=TAIWAN_TIMEZONE), False),
-        (datetime(2026, 10, 24, 10, 0, tzinfo=TAIWAN_TIMEZONE), False),
+        (datetime(2026, 10, 19, 8, 29, tzinfo=TAIWAN_TIMEZONE), TradingPhase.CLOSED),
+        (datetime(2026, 10, 19, 8, 30, tzinfo=TAIWAN_TIMEZONE), TradingPhase.OPENING_AUCTION),
+        (datetime(2026, 10, 19, 8, 59, 59, tzinfo=TAIWAN_TIMEZONE), TradingPhase.OPENING_AUCTION),
+        (datetime(2026, 10, 19, 9, 0, tzinfo=TAIWAN_TIMEZONE), TradingPhase.CONTINUOUS),
+        (datetime(2026, 10, 19, 13, 24, 59, tzinfo=TAIWAN_TIMEZONE), TradingPhase.CONTINUOUS),
+        (datetime(2026, 10, 19, 13, 25, tzinfo=TAIWAN_TIMEZONE), TradingPhase.CLOSING_AUCTION),
+        (datetime(2026, 10, 19, 13, 29, 59, tzinfo=TAIWAN_TIMEZONE), TradingPhase.CLOSING_AUCTION),
+        (datetime(2026, 10, 19, 13, 30, tzinfo=TAIWAN_TIMEZONE), TradingPhase.CLOSED),
+        (datetime(2026, 10, 24, 10, 0, tzinfo=TAIWAN_TIMEZONE), TradingPhase.CLOSED),
     ],
 )
-def test_taiwan_session_is_weekdays_from_nine_to_half_past_one(moment: datetime, is_open: bool) -> None:
-    assert ClockAt(moment).is_market_open() is is_open
+def test_a_weekday_runs_the_opening_auction_continuous_trading_and_the_closing_auction(moment: datetime, phase: TradingPhase) -> None:
+    assert ClockAt(moment).trading_phase() == phase
 
 
 def test_trading_date_is_the_taipei_calendar_date() -> None:
@@ -59,3 +64,24 @@ def test_trading_date_is_the_taipei_calendar_date() -> None:
 )
 def test_the_last_closed_session_is_the_latest_weekday_whose_close_has_passed(moment: datetime, last_session: date) -> None:
     assert ClockAt(moment.replace(tzinfo=TAIWAN_TIMEZONE)).last_closed_session() == last_session
+
+
+@pytest.mark.parametrize(
+    ("moment", "sessions", "close"),
+    [
+        (datetime(2026, 10, 30, 18, 0), 1, datetime(2026, 11, 2, 13, 30)),
+        (datetime(2026, 10, 31, 9, 0), 1, datetime(2026, 11, 2, 13, 30)),
+        (datetime(2026, 11, 2, 8, 45), 1, datetime(2026, 11, 2, 13, 30)),
+        (datetime(2026, 11, 2, 9, 0), 1, datetime(2026, 11, 3, 13, 30)),
+        (datetime(2026, 11, 2, 15, 0), 1, datetime(2026, 11, 3, 13, 30)),
+        (datetime(2026, 10, 29, 18, 0), 2, datetime(2026, 11, 2, 13, 30)),
+        (datetime(2026, 10, 30, 18, 0), 5, datetime(2026, 11, 6, 13, 30)),
+    ],
+    ids=["fri-evening-1", "sat-1", "mon-pre-open-1", "mon-open-1", "mon-after-close-1", "thu-evening-2", "fri-evening-5"],
+)
+def test_a_session_count_ends_at_the_close_of_that_many_weekday_sessions_opening_after_the_moment(
+    moment: datetime, sessions: int, close: datetime
+) -> None:
+    clock = TaiwanMarketClock()
+
+    assert clock.session_close_after(moment.replace(tzinfo=TAIWAN_TIMEZONE), sessions) == close.replace(tzinfo=TAIWAN_TIMEZONE)

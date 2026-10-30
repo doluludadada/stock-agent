@@ -10,7 +10,7 @@ This project is not financial advice. Treat generated signals as decision suppor
 
 - Market: Taiwan stocks.
 - Primary UI: CLI at `backend/src/d_presentation/cli/interactive.py`.
-- API: FastAPI is present, but the current web router exposes LINE webhook plumbing, not the trading workflow menu.
+- API: FastAPI at `backend/main.py` starts Full Cycle and specific-stock analysis, reads runs, signals, orders, the watchlist and the account, and edits the technical settings (page at `/ui/settings`). It never orders. See [Web API](#web-api).
 - Order execution: `MockExecutionProvider` by default. `ShioajiExecutionProvider` (Sinopac) is wired for `execution_provider: shioaji`, see [Real broker (Shioaji)](#real-broker-shioaji). It has not been run against a real Shioaji account.
 - Database: local SQLite at `stock_agent.db` unless PostgreSQL credentials are provided.
 - Knowledge store: ChromaDB path is configured by `config/appsetting.yaml`.
@@ -44,7 +44,7 @@ Menu behavior:
 | 6 | Scan Undervalued Stocks | Screens every listed and OTC stock at a target P/E and minimum undervaluation, optionally confirms the matches with the active technical strategy, and can ask the AI to explain the top matches. | Never. No watchlist write either. |
 | 7 | Account History | Shows cash, positions with unrealized PnL at the latest quote, the equity curve since the first fill, and the account as of a date you enter. | Never submits orders. |
 
-Every BUY or SELL decision ends as one row in the `orders` table with its run id and decision id: REJECTED with the reason when a gate refuses it (order mode, market closed, a quote older than `freshness.realtime_max_lag_minutes`), otherwise what the broker did with it, including the fee, the tax and, for a SELL, the realized PnL. Orders are LIMIT at the decision's price and IOC. Fees and tax come from `market` in `config/appsetting.yaml`.
+Every BUY or SELL decision ends as one row in the `orders` table with its run id and decision id: REJECTED with the reason when a gate refuses it (order mode, market closed, a quote older than `freshness.realtime_max_lag_minutes`). IOC orders trade only in continuous trading, 09:00 to 13:25 on weekdays; the opening call auction (08:30-09:00) and the closing call auction (13:25-13:30) take ROD only, so an order then is REJECTED as `MARKET_CLOSED`, otherwise what the broker did with it, including the fee, the tax and, for a SELL, the realized PnL. Orders are LIMIT at the decision's price and IOC. The limit is a valid exchange tick (`TickRule`, the TWSE/TPEx tick table): a quote off the tick grid rounds up for a BUY and down for a SELL, and sizing prices a BUY at that limit. One run decides best composite score first, a tie going to the lower stock id, and sizes each BUY against the cash the run's earlier BUYs left, their fees included, so a run never commits more than the account's cash; when it runs out, the lower-scored stocks get HOLD. Fees and tax come from `market` in `config/appsetting.yaml`: a SELL pays the transaction tax `tax_rate` (0.3%) on a stock and `etf_tax_rate` (0.1%) on an ETF, which is a code starting with `00`.
 
 ### Specific Stock Flow
 
@@ -89,7 +89,7 @@ Strategy-specific technical thresholds live in `config/strategies.yaml`.
 
 | Type | Meaning |
 | --- | --- |
-| `TECHNICAL` | Passed the full-market technical scan. Expires `watchlist.automatic_expiry_hours` (24) after Full Cycle last selected it. |
+| `TECHNICAL` | Passed the full-market technical scan. Stays active through the close of the `watchlist.automatic_expiry_sessions`-th (1) trading session that opens after Full Cycle last selected it, so Friday evening's entries last through Monday's session. |
 | `BUZZ` | Came from social buzz and passed technical filtering. Expires like `TECHNICAL`, counted from the last Buzz scan that selected it. |
 | `MANUAL` | User reviewed a specific-stock report and manually added it. Never expires. |
 
@@ -152,7 +152,7 @@ The code follows the existing Clean Architecture split:
 | Domain | `backend/src/a_domain` | Models, ports, enums, pure rules. No application, infrastructure, or presentation imports. |
 | Application | `backend/src/b_application` | Use cases, workflow orchestration, pipeline context, config schemas, factories. |
 | Infrastructure | `backend/src/c_infrastructure` | Database, market data, AI adapters, feed providers, LINE platform, mock trading. |
-| Presentation | `backend/src/d_presentation` | CLI, FastAPI routers, dependency wiring, desktop entry points. |
+| Presentation | `backend/src/d_presentation` | CLI, Web API, the one composition root both use (`container.py`), desktop entry points. |
 
 Application use cases coordinate work. Domain rules own business decisions. Infrastructure implements ports.
 
@@ -169,7 +169,7 @@ Main files:
 
 ### Real broker (Shioaji)
 
-The shipped settings use the mock broker in `mock_only` order mode. The CLI refuses to start a combination that could send an order nobody meant to send, and says what to change:
+The shipped settings use the mock broker in `mock_only` order mode. The CLI and the Web API refuse to start a combination that could send an order nobody meant to send, and says what to change:
 
 | `environment` | `execution_provider` | `order_mode` | Starts? |
 | --- | --- | --- | --- |
@@ -196,6 +196,7 @@ TAVILY_API_KEY=
 LINE_CHANNEL_ID=
 LINE_CHANNEL_SECRET=
 LINE_CHANNEL_ACCESS_TOKEN=
+API_TOKEN=
 DB_USER=
 DB_PASSWORD=
 DB_HOST=
@@ -222,6 +223,7 @@ Run the API:
 ```powershell
 cd backend
 $env:PYTHONPATH = "src"
+$env:API_TOKEN = "<a long random string>"
 uv run uvicorn main:app --host 0.0.0.0 --port 8800 --reload
 ```
 
@@ -230,6 +232,25 @@ Run Docker:
 ```powershell
 docker compose up --build
 ```
+
+## Web API
+
+The API runs on the same runtime as the CLI: `backend/src/d_presentation/container.py` builds it once at startup, with the same trading-setup checks, so the API refuses to start on any setup the CLI refuses. The OpenAPI page is at `/docs`.
+
+No endpoint places, cancels or modifies an order. The API starts only Full Cycle and specific-stock analysis, which never reach order execution, and it has no manual BUY.
+
+| Method and path | What it does |
+| --- | --- |
+| `POST /v1/runs/full-cycle` | Starts menu 1 in the background. Answers 202 with the run id. |
+| `POST /v1/runs/specific-stocks` | Starts menu 4's analysis of `stock_ids` in the background. Each stock is one AI call. |
+| `GET /v1/runs`, `GET /v1/runs/{run_id}` | Run state (`running`, `finished`, `failed`, `unfinished`) and the run record. A specific-stock run also lists each stock's report while the server runs. |
+| `GET /v1/runs/{run_id}/signals`, `.../orders` | The run's decisions and orders, with run id, decision id, status, reason, fee, tax and realized PnL. |
+| `GET /v1/watchlist`, `POST /v1/watchlist/manual` | Active entries with type and expiry; add listed stocks to the MANUAL watchlist. |
+| `GET`/`PUT /v1/technical-settings`, `POST /v1/technical-settings/reset`, `GET /v1/technical-settings/schema` | Read, save and reset the technical settings. The next workflow uses the saved ones. |
+| `GET /v1/account/history?as_of=YYYY-MM-DD` | Menu 7. |
+| `GET /ui/settings` | A page that edits each strategy's indicator parameters through the endpoints above. |
+
+One workflow runs at a time; a second start answers 409. Every write needs `Authorization: Bearer <API_TOKEN>` and `"confirm": true` in the JSON body: 403 while `API_TOKEN` is unset, 401 without the token, 422 without the confirmation. Reads need no token, so do not expose the port beyond a network you trust.
 
 ## Data Written Locally
 
@@ -245,6 +266,7 @@ Tables are created with `create_all`, which never changes an existing table. At 
 
 - Every BUY or SELL decision gets one `orders` row before anything reaches the broker. A closed market, a disabled order mode or a quote older than `freshness.realtime_max_lag_minutes` makes that row `REJECTED` with the reason, and nothing is sent.
 - `Run Full Cycle` does not call order execution.
+- The Web API never orders: it starts only Full Cycle and specific-stock analysis, and every write needs `API_TOKEN` and `confirm: true`.
 - Manual BUY override is explicit user intent and still uses the same order checks.
 - Real orders need `environment: live`, `execution_provider: shioaji`, `order_mode: live` and the Shioaji credentials together. Any other combination with Shioaji either refuses to start or only reads the account.
 

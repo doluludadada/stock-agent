@@ -23,11 +23,13 @@ async def open_broker(tmp_path, initial_cash: float = 1_000_000, max_fill_quanti
     return db, MockExecutionProvider(db=db, config=config, logger=SilentLogger())
 
 
-def order(action: TradeAction, quantity: int, price: float, time_in_force: TimeInForce = TimeInForce.IOC) -> Order:
+def order(
+    action: TradeAction, quantity: int, price: float, time_in_force: TimeInForce = TimeInForce.IOC, stock_id: str = "2330"
+) -> Order:
     return Order(
         run_id=new_run_id(),
         decision_id=new_decision_id(),
-        stock_id="2330",
+        stock_id=stock_id,
         action=action,
         order_type=OrderType.LIMIT,
         quantity=quantity,
@@ -71,6 +73,17 @@ async def test_sell_realizes_pnl_net_of_both_fees_and_the_tax(tmp_path) -> None:
     assert sold.realized_pnl == pytest.approx(110_000 - 156 - 330 - 100_142)
     assert await cash(broker) == pytest.approx(1_000_000 - 100_142 + 110_000 - 156 - 330)
     assert await holdings(broker) == []
+    await db.close()
+
+
+async def test_an_etf_sell_pays_the_etf_transaction_tax_from_the_config(tmp_path) -> None:
+    db, broker = await open_broker(tmp_path)
+    await broker.place_order(order(TradeAction.BUY, 1000, 100, stock_id="0050"))
+
+    sold = await broker.place_order(order(TradeAction.SELL, 1000, 110, stock_id="0050"))
+
+    assert (sold.fee, sold.tax) == (156, 110)
+    assert sold.realized_pnl == pytest.approx(110_000 - 156 - 110 - 100_142)
     await db.close()
 
 

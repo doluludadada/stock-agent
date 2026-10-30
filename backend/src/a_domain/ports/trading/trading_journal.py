@@ -28,3 +28,17 @@ class ITradingJournal(Protocol):
     async def snapshots(self) -> list[AccountSnapshot]:
         """Every account snapshot, oldest first."""
         ...
+
+    async def recent_runs(self, limit: int) -> list[SystemStats]:
+        """The latest `limit` runs, newest first."""
+        ...
+
+    async def find_run(self, run_id: RunId) -> SystemStats | None: ...
+
+    async def signals_of(self, run_id: RunId) -> list[TradeSignal]:
+        """The run's decisions, HOLD included, oldest first."""
+        ...
+
+    async def orders_of(self, run_id: RunId) -> list[Order]:
+        """The run's orders, oldest first."""
+        ...

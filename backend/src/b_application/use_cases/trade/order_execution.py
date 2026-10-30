@@ -1,3 +1,6 @@
+import asyncio
+
+from a_domain.model.trading.order import Order
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
@@ -19,6 +22,9 @@ class OrderExecution:
     A broker is never called for an order the journal does not hold. A decision that already has an
     order in this run is skipped, so a workflow can send stop-loss SELLs early and the rest at the end.
     After any fill, AccountLoader re-reads the account and snapshots it.
+
+    A cancel (Ctrl-C) during the send waits for the broker's answer and its record before it stops the
+    run, so the journal never says PENDING about an order the broker saw.
     """
 
     def __init__(
@@ -46,7 +52,7 @@ class OrderExecution:
 
             handled_decisions.add(signal.decision_id)
             order = self._order_rule.order_for(
-                signal, status.stats.run_id, now=self._market_clock.now(), market_open=self._market_clock.is_market_open()
+                signal, status.stats.run_id, now=self._market_clock.now(), phase=self._market_clock.trading_phase()
             )
 
             try:
@@ -62,26 +68,14 @@ class OrderExecution:
 
             if order.status == OrderStatus.PENDING:
                 status.stats.orders_submitted += 1
+                sending = asyncio.ensure_future(self.send(order, status))
 
                 try:
-                    order = await self._execution_provider.place_order(order)
+                    order = await asyncio.shield(sending)
 
-                except Exception as error:
-                    if order.status in {OrderStatus.PENDING, OrderStatus.SUBMITTED}:
-                        order.fail(f"broker call failed: {type(error).__name__}: {error}")
-
-                try:
-                    await self._journal.save_order(order)
-
-                except Exception as error:
-                    self.record_error(status, f"Order {order.id} ended {order.status} but its record still says PENDING: {error}")
-
-                if order.filled_quantity > 0:
-                    try:
-                        await self._account_loader.record_fill(status, order)
-
-                    except Exception as error:
-                        self.record_error(status, f"Account snapshot after {order.stock_id} fill not saved: {error}")
+                except asyncio.CancelledError:
+                    await sending
+                    raise
 
             status.orders.append(order)
 
@@ -97,6 +91,40 @@ class OrderExecution:
                 f"filled {order.filled_quantity}/{order.quantity} @ {order.limit_price}, fee={order.fee}, tax={order.tax}"
                 + (f", reason={order.reason}" if order.reason else "")
             )
+
+    async def send(self, order: Order, status: PipelineStatus) -> Order:
+        """Sends a recorded PENDING order and records the broker's answer. Cancelled itself, it records the order FAILED."""
+        try:
+            order = await self._execution_provider.place_order(order)
+
+        except asyncio.CancelledError:
+            if order.status in {OrderStatus.PENDING, OrderStatus.SUBMITTED}:
+                order.fail("the run was cancelled during the broker call, so the broker may hold this order: check it")
+
+            await self.record(order, status)
+            raise
+
+        except Exception as error:
+            if order.status in {OrderStatus.PENDING, OrderStatus.SUBMITTED}:
+                order.fail(f"broker call failed: {type(error).__name__}: {error}")
+
+        await self.record(order, status)
+
+        if order.filled_quantity > 0:
+            try:
+                await self._account_loader.record_fill(status, order)
+
+            except Exception as error:
+                self.record_error(status, f"Account snapshot after {order.stock_id} fill not saved: {error}")
+
+        return order
+
+    async def record(self, order: Order, status: PipelineStatus) -> None:
+        try:
+            await self._journal.save_order(order)
+
+        except Exception as error:
+            self.record_error(status, f"Order {order.id} ended {order.status} but its record still says PENDING: {error}")
 
     def record_error(self, status: PipelineStatus, message: str) -> None:
         self._logger.error(message)

@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
+from pydantic import ValidationError
 from support.harness import build_harness, falling_history, rising_history
 
 from a_domain.model.market.stock import Stock
@@ -13,9 +14,10 @@ from b_application.schemas.config import AppConfig, WatchlistConfig
 from b_application.use_cases.trade.watch_stocks import WatchStocks
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.repositories.watchlist_repository import WatchlistRepository
+from c_infrastructure.system.config_loader import load_settings
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
 
-START = datetime(2026, 10, 30, 15, 0, tzinfo=TAIWAN_TIMEZONE)
+FRIDAY_EVENING = datetime(2026, 10, 30, 18, 0, tzinfo=TAIWAN_TIMEZONE)
 
 
 class SilentLogger:
@@ -26,7 +28,7 @@ class SilentLogger:
 class SettableClock(TaiwanMarketClock):
     def __init__(self) -> None:
         super().__init__()
-        self.current = START
+        self.current = FRIDAY_EVENING
 
     def now(self) -> datetime:
         return self.current
@@ -35,10 +37,10 @@ class SettableClock(TaiwanMarketClock):
 class Watchlist:
     """The real WatchStocks use case and SQLite repository, driven by a clock the test moves."""
 
-    def __init__(self, db: DatabaseConnector) -> None:
+    def __init__(self, db: DatabaseConnector, automatic_expiry_sessions: int = 1) -> None:
         self.clock = SettableClock()
         self.repository = WatchlistRepository(db=db, logger=SilentLogger(), market_clock=self.clock)
-        config = AppConfig(project_root=Path("."), watchlist=WatchlistConfig(automatic_expiry_hours=24))
+        config = AppConfig(project_root=Path("."), watchlist=WatchlistConfig(automatic_expiry_sessions=automatic_expiry_sessions))
         self.watch_stocks = WatchStocks(self.repository, self.clock, config, SilentLogger())
 
     async def add(self, watchlist_type: WatchlistType, *stock_ids: str):
@@ -51,13 +53,25 @@ class Watchlist:
     def advance(self, hours: int) -> None:
         self.clock.current = self.clock.current + timedelta(hours=hours)
 
+    def move_to(self, moment: str) -> None:
+        """A weekday and time after FRIDAY_EVENING, such as "Mon 13:29" or "next Mon 10:00"."""
+        *week, day, clock = moment.split()
+        days_ahead = ["Sat", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri"].index(day) + 1 + (7 if week else 0)
+        hour, minute = map(int, clock.split(":"))
+        self.clock.current = (FRIDAY_EVENING + timedelta(days=days_ahead)).replace(hour=hour, minute=minute)
+
 
 @pytest_asyncio.fixture
-async def watchlist(tmp_path: Path) -> AsyncIterator[Watchlist]:
+async def database(tmp_path: Path) -> AsyncIterator[DatabaseConnector]:
     db = DatabaseConnector(config=AppConfig(project_root=tmp_path), logger=SilentLogger())
     await db.init_db()
-    yield Watchlist(db)
+    yield db
     await db.close()
+
+
+@pytest.fixture
+def watchlist(database: DatabaseConnector) -> Watchlist:
+    return Watchlist(database)
 
 
 @pytest.mark.asyncio
@@ -86,14 +100,29 @@ async def test_a_stock_holds_every_type_it_was_added_under_merged_by_stock_id(wa
 
 
 @pytest.mark.asyncio
-async def test_automatic_entries_expire_after_the_configured_hours(watchlist: Watchlist) -> None:
+async def test_friday_evenings_automatic_entries_are_active_for_mondays_session_and_expire_at_its_close(watchlist: Watchlist) -> None:
     await watchlist.add(WatchlistType.TECHNICAL, "2330")
     await watchlist.add(WatchlistType.BUZZ, "2317")
 
-    watchlist.advance(hours=23)
+    watchlist.move_to("Mon 10:00")
     assert set(await watchlist.active_types()) == {"2330", "2317"}
 
-    watchlist.advance(hours=2)
+    watchlist.move_to("Mon 13:29")
+    assert set(await watchlist.active_types()) == {"2330", "2317"}
+
+    watchlist.move_to("Mon 13:30")
+    assert await watchlist.active_types() == {}
+
+
+@pytest.mark.asyncio
+async def test_automatic_entries_last_through_the_configured_number_of_sessions(database: DatabaseConnector) -> None:
+    watchlist = Watchlist(database, automatic_expiry_sessions=3)
+    await watchlist.add(WatchlistType.TECHNICAL, "2330")
+
+    watchlist.move_to("Wed 13:29")
+    assert set(await watchlist.active_types()) == {"2330"}
+
+    watchlist.move_to("Wed 13:30")
     assert await watchlist.active_types() == {}
 
 
@@ -111,10 +140,10 @@ async def test_manual_entries_never_expire_and_outlive_automatic_ones(watchlist:
 @pytest.mark.asyncio
 async def test_selecting_an_automatic_stock_again_renews_its_expiry(watchlist: Watchlist) -> None:
     await watchlist.add(WatchlistType.TECHNICAL, "2330")
-    watchlist.advance(hours=20)
+    watchlist.move_to("Mon 10:00")
     renewed = await watchlist.add(WatchlistType.TECHNICAL, "2330")
 
-    watchlist.advance(hours=20)
+    watchlist.move_to("Tue 13:29")
 
     assert renewed.already_present_stock_ids == ["2330"]
     assert await watchlist.active_types() == {"2330": {WatchlistType.TECHNICAL}}
@@ -123,7 +152,7 @@ async def test_selecting_an_automatic_stock_again_renews_its_expiry(watchlist: W
 @pytest.mark.asyncio
 async def test_an_expired_automatic_stock_is_added_again_not_reported_as_present(watchlist: Watchlist) -> None:
     await watchlist.add(WatchlistType.BUZZ, "2330")
-    watchlist.advance(hours=30)
+    watchlist.move_to("Mon 13:30")
 
     again = await watchlist.add(WatchlistType.BUZZ, "2330")
 
@@ -146,3 +175,10 @@ async def test_the_cli_reports_newly_added_and_already_present_manual_stocks(cap
     assert "Added to manual watchlist: 2317" in second_output
     assert "Already present on manual watchlist: 2330" in second_output
     assert harness.watchlist.rows == [("2330", WatchlistType.MANUAL), ("2317", WatchlistType.MANUAL)]
+
+
+def test_the_watchlist_config_counts_sessions_and_refuses_the_old_hours_key() -> None:
+    assert load_settings().watchlist.automatic_expiry_sessions == 1
+
+    with pytest.raises(ValidationError, match="automatic_expiry_hours"):
+        WatchlistConfig.model_validate({"automatic_expiry_hours": 24})

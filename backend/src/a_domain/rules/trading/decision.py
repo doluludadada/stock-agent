@@ -1,6 +1,7 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
 
-from icontract import ensure
+from icontract import ensure, require
 
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.account import Account
@@ -49,3 +50,24 @@ class DecisionRule:
             return exit_signal
 
         return self.entry_rule.decide(stock=stock, account=account, position=position)
+
+    @require(lambda stocks: all(stock.composite_score is not None for stock in stocks), "Every stock needs a composite score")
+    @require(lambda stocks: len({stock.stock_id for stock in stocks}) == len(stocks), "One decision per stock")
+    def decide_run(self, stocks: Sequence[Stock], account: Account) -> list[TradeSignal]:
+        """
+        One run's decisions, best composite score first and a tie to the lower stock id. Each decision sees the cash
+        the run's earlier BUYs left: their quantity at the order's limit plus the fee. So the BUYs of one run never
+        commit more than the account's cash, and when the cash runs out the better-scored stocks have it.
+        """
+        cash = account.cash
+        signals: list[TradeSignal] = []
+
+        for stock in sorted(stocks, key=lambda stock: (-(stock.composite_score or 0), stock.stock_id)):
+            signal = self.decide(stock, account.model_copy(update={"cash": cash}), account.position_for(stock.stock_id))
+
+            if signal.action == TradeAction.BUY:
+                cash -= self.entry_rule.sizing_rule.buy_cost(signal.stock_id, signal.price_at_signal, signal.quantity)
+
+            signals.append(signal)
+
+        return signals

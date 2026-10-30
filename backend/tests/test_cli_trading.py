@@ -1,7 +1,10 @@
 import io
+from contextlib import nullcontext
+from unittest.mock import patch
 
 import pytest
 from rich.console import Console
+from rich.prompt import Prompt
 from support.harness import MARKET_CLOSED, build_harness, falling_history, rising_history
 
 from a_domain.types.enums import OrderStatus
@@ -18,7 +21,7 @@ def screen(monkeypatch) -> io.StringIO:
 
 
 async def test_a_refused_manual_buy_shows_its_status_and_reason(screen: io.StringIO) -> None:
-    harness = build_harness(now=MARKET_CLOSED, market_open=False)
+    harness = build_harness(now=MARKET_CLOSED)
     harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
 
     await harness.run_menu("4", stock_ids="2330", buy={"2330"})
@@ -26,7 +29,7 @@ async def test_a_refused_manual_buy_shows_its_status_and_reason(screen: io.Strin
     [order] = harness.journal.orders.values()
     assert (order.status, harness.broker.placed) == (OrderStatus.REJECTED, [])
     assert f"Manual BUY result: 2330 | REJECTED | Filled 0/{order.quantity}" in screen.getvalue()
-    assert "Reason: MARKET_CLOSED: the Taiwan session is closed at Mon 2026-10-19 14:00" in screen.getvalue()
+    assert "Reason: MARKET_CLOSED: Mon 2026-10-19 14:00 falls in the market's closed phase" in screen.getvalue()
 
 
 async def test_a_filled_manual_buy_shows_the_fill_and_its_fee(screen: io.StringIO) -> None:
@@ -51,3 +54,14 @@ async def test_account_history_shows_positions_and_never_places_an_order(screen:
     assert "Account Now" in output and "2330" in output and "112.00" in output
     assert "No fills recorded yet, so there is no equity curve." in output
     assert "No fill recorded on or before 2026-10-19." in output
+
+
+async def test_exit_from_the_menu_shuts_down_and_says_the_system_stopped(screen: io.StringIO, monkeypatch) -> None:
+    harness = build_harness()
+    monkeypatch.setattr(interactive, "open_runtime", lambda: nullcontext(harness.runtime))
+
+    with patch.object(Prompt, "ask", lambda *args, **kwargs: "0"):
+        await interactive.interactive_menu()
+
+    output = screen.getvalue()
+    assert output.index("Shutting down...") < output.index("System stopped.")
