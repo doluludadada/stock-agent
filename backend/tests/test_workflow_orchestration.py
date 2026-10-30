@@ -1,269 +1,230 @@
-from datetime import date, datetime, timezone
-from typing import Any, cast
+from datetime import datetime, timedelta
 
 import pytest
+from support.harness import FRESH, MARKET_CLOSED, MARKET_OPEN, STALE, build_harness, falling_history, rising_history
 
 from a_domain.model.market.stock import Stock
-from a_domain.model.trading.signal import TradeSignal
-from a_domain.model.trading.watchlist import StockWatchlist
-from a_domain.types.enums import SignalSource, TradeAction, WatchlistType
-from b_application.pipeline import Pipeline
-from b_application.schemas.pipeline_status import PipelineStatus
-from b_application.use_cases.trade.order_execution import OrderExecution
+from a_domain.types.enums import AiAnalysisFocus, SignalSource, TradeAction, WatchlistType
 
 
-class FakeLogger:
-    def __init__(self) -> None:
-        self.messages: list[str] = []
-        self.warnings: list[str] = []
-
-    def info(self, message: str) -> None:
-        self.messages.append(message)
-
-    def warning(self, message: str) -> None:
-        self.warnings.append(message)
-        self.messages.append(message)
-
-    def debug(self, message: str) -> None:
-        self.messages.append(message)
-
-    def critical(self, message: str) -> None:
-        self.messages.append(message)
-
-    def error(self, message: str) -> None:
-        self.messages.append(message)
-
-    def success(self, message: str) -> None:
-        self.messages.append(message)
-
-    def trace(self, message: str) -> None:
-        self.messages.append(message)
-
-    def exception(self, message: str) -> None:
-        self.messages.append(message)
+def stock_ids(stocks: list[Stock]) -> list[str]:
+    return [stock.stock_id for stock in stocks]
 
 
-class NoopUseCase:
-    async def execute(self, context: PipelineStatus) -> None:
-        return None
+# ------------------------------- Menu 1: Full Cycle ------------------------------- #
 
 
-class FakeAccountLoader:
-    def __init__(self, held: list[Stock] | None = None) -> None:
-        self._held = held or []
+@pytest.mark.asyncio
+async def test_full_cycle_saves_only_survivors_as_technical_and_never_orders() -> None:
+    harness = build_harness(now=MARKET_OPEN, market_open=True)
+    harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
+    harness.list_stock("2317", falling_history(100.0), realtime_price=100.0)
 
-    async def execute(self, context: PipelineStatus) -> None:
-        context.held_stocks = list(self._held)
+    status = await harness.run_menu("1")
 
+    assert stock_ids(status.survivors) == ["2330"]
+    assert harness.watchlist.rows == [("2330", WatchlistType.TECHNICAL)]
+    assert [(signal.stock_id, signal.action) for signal in harness.signals.saved] == [("2330", TradeAction.BUY)]
+    assert harness.ai.analysed_stock_ids == ["2330"]
+    assert harness.broker.placed == []
+    assert status.stats.orders_submitted == 0
 
-class FakeBuzzScanner:
-    def __init__(self, stocks: list[Stock]) -> None:
-        self._stocks = stocks
+    await harness.run_menu("3")
 
-    async def execute(self, context: PipelineStatus) -> None:
-        context.all_stocks = list(self._stocks)
-
-
-class FakeMarketScanner:
-    def __init__(self) -> None:
-        self.enriched_ids: list[str] = []
-
-    async def execute(self, context: PipelineStatus, stocks: list[Stock] | None = None) -> None:
-        if stocks is not None:
-            context.all_stocks = list(stocks)
-        self.enriched_ids = [stock.stock_id for stock in context.all_stocks]
+    assert [(order.stock_id, order.action) for order in harness.broker.placed] == [("2330", TradeAction.BUY)]
 
 
-class FakeTechnicalFilter:
-    def __init__(self, survivor_ids: set[str] | None = None) -> None:
-        self._survivor_ids = survivor_ids
-
-    async def execute(self, context: PipelineStatus, watchlist_type: WatchlistType | None = None) -> None:
-        if self._survivor_ids is None:
-            context.survivors = list(context.all_stocks)
-        else:
-            context.survivors = [stock for stock in context.all_stocks if stock.stock_id in self._survivor_ids]
-
-        if watchlist_type is not None:
-            context.watchlist = [StockWatchlist(stock_id=stock.stock_id, type=watchlist_type) for stock in context.survivors]
-
-
-class FakeStockProvider:
-    def __init__(self, stocks: list[Stock]) -> None:
-        self._stocks = {stock.stock_id: stock for stock in stocks}
-
-    async def get_by_id(self, stock_id: str) -> Stock | None:
-        return self._stocks.get(stock_id)
-
-
-class FakeWatchlistRepository:
-    def __init__(self, active: list[StockWatchlist] | None = None) -> None:
-        self._active = active or []
-        self.upserted: list[StockWatchlist] = []
-
-    async def get_active(self) -> list[StockWatchlist]:
-        return list(self._active)
-
-    async def upsert(self, entries: list[StockWatchlist]) -> None:
-        self.upserted = list(entries)
-
-
-class FakeOrderExecution:
-    def __init__(self) -> None:
-        self.called = False
-
-    async def execute(self, context: PipelineStatus) -> None:
-        self.called = True
-
-
-class ClosedMarketClock:
-    @property
-    def timezone(self):
-        return timezone.utc
-
-    def now(self) -> datetime:
-        return datetime(2026, 6, 6, 14, 0, tzinfo=timezone.utc)
-
-    def today(self) -> date:
-        return self.now().date()
-
-    def to_market_datetime(self, value: datetime) -> datetime:
-        return value
-
-    def to_trading_date(self, value: datetime) -> date:
-        return value.date()
-
-    def history_window(self, lookback_days: int) -> tuple[datetime, datetime]:
-        now = self.now()
-        return now, now
-
-    def is_market_open(self) -> bool:
-        return False
-
-
-class FailingExecutionProvider:
-    async def place_order(self, order) -> str:
-        raise AssertionError("closed-market order should not be submitted")
-
-
-def build_workflow(
-    *,
-    market_scanner: FakeMarketScanner,
-    buzz_scanner: FakeBuzzScanner | None = None,
-    account_loader: FakeAccountLoader | None = None,
-    technical_filter: FakeTechnicalFilter | None = None,
-    watchlist_repository: FakeWatchlistRepository | None = None,
-    stock_provider: FakeStockProvider | None = None,
-    order_execution: FakeOrderExecution | None = None,
-) -> Pipeline:
-    return Pipeline(
-        market_scanner=cast(Any, market_scanner),
-        buzz_scanner=cast(Any, buzz_scanner or FakeBuzzScanner([])),
-        stock_provider=cast(Any, stock_provider or FakeStockProvider([])),
-        watchlist_repository=cast(Any, watchlist_repository or FakeWatchlistRepository()),
-        account_loader=cast(Any, account_loader or FakeAccountLoader()),
-        account_risk_check=cast(Any, NoopUseCase()),
-        technical_filter=cast(Any, technical_filter or FakeTechnicalFilter()),
-        analysis_pipeline=cast(Any, NoopUseCase()),
-        signals=cast(Any, NoopUseCase()),
-        order_execution=cast(Any, order_execution or FakeOrderExecution()),
-        reporting=cast(Any, NoopUseCase()),
-        logger=cast(Any, FakeLogger()),
-    )
+# ------------------------------ Menu 2: Social Buzz ------------------------------- #
 
 
 @pytest.mark.asyncio
 async def test_buzz_scan_persists_only_technical_survivors() -> None:
-    stock_a = Stock(stock_id="2330")
-    stock_b = Stock(stock_id="2317")
-    market_scanner = FakeMarketScanner()
-    watchlist_repository = FakeWatchlistRepository()
-    workflow = build_workflow(
-        market_scanner=market_scanner,
-        buzz_scanner=FakeBuzzScanner([stock_a, stock_b]),
-        technical_filter=FakeTechnicalFilter({"2330"}),
-        watchlist_repository=watchlist_repository,
-    )
+    harness = build_harness()
+    hot = harness.config.collect_rules.buzz_min_engagement
+    harness.list_stock("2603", falling_history(50.0), realtime_price=50.0)
+    harness.list_stock("1101", rising_history(10.0), realtime_price=10.0)
+    harness.discuss("2603", mentions=1, engagement=hot)
+    harness.discuss("1101", mentions=1, engagement=hot)
 
-    context = await workflow.run_buzz_scan()
+    status = await harness.run_menu("2")
 
-    assert [entry.stock_id for entry in watchlist_repository.upserted] == ["2330"]
-    assert watchlist_repository.upserted[0].type == WatchlistType.BUZZ
-    assert [stock.stock_id for stock in context.survivors] == ["2330"]
-    assert market_scanner.enriched_ids == ["2330", "2317"]
+    assert stock_ids(status.buzz_stocks) == ["2603", "1101"]
+    assert set(harness.prices.history_requests) == {"2603", "1101"}
+    assert stock_ids(status.survivors) == ["2603"], "the Buzz strategy, not the trend strategy, decides survivors"
+    assert harness.watchlist.rows == [("2603", WatchlistType.BUZZ)]
+    assert [(call.stock_id, call.focus) for call in harness.ai.calls] == [("2603", AiAnalysisFocus.MOMENTUM)]
+
+
+@pytest.mark.asyncio
+async def test_buzz_scan_never_analyses_stocks_below_both_buzz_thresholds() -> None:
+    harness = build_harness()
+    rules = harness.config.collect_rules
+    for stock_id in ("2330", "2317", "2454"):
+        harness.list_stock(stock_id, rising_history(100.0), realtime_price=100.0)
+    harness.discuss("2330", mentions=rules.buzz_min_mentions, engagement=0)
+    harness.discuss("2317", mentions=1, engagement=rules.buzz_min_engagement)
+    harness.discuss("2454", mentions=rules.buzz_min_mentions - 1, engagement=rules.buzz_min_engagement - 1)
+
+    status = await harness.run_menu("2")
+
+    assert stock_ids(status.buzz_stocks) == ["2330", "2317"]
+    assert (status.stats.buzz_scanned, status.stats.buzz_qualified) == (3, 2)
+    assert set(harness.prices.history_requests) == {"2330", "2317"}
+    assert set(harness.news.requested) == {"2330", "2317"}
+    assert set(harness.ai.analysed_stock_ids) == {"2330", "2317"}
+
+
+@pytest.mark.parametrize(
+    ("now", "market_open", "quote_age", "buy_signals", "orders"),
+    [(MARKET_OPEN, True, FRESH, ["2330"], ["2330"]), (MARKET_CLOSED, False, FRESH, ["2330"], []), (MARKET_OPEN, True, STALE, [], [])],
+    ids=["open-and-fresh", "market-closed", "stale-quote"],
+)
+@pytest.mark.asyncio
+async def test_buzz_scan_orders_only_when_market_is_open_and_quote_is_fresh(
+    now: datetime, market_open: bool, quote_age: timedelta, buy_signals: list[str], orders: list[str]
+) -> None:
+    harness = build_harness(now=now, market_open=market_open)
+    harness.list_stock("2330", rising_history(100.0), realtime_price=100.0, realtime_age=quote_age)
+    harness.discuss("2330", mentions=1, engagement=harness.config.collect_rules.buzz_min_engagement)
+
+    status = await harness.run_menu("2")
+
+    assert [signal.stock_id for signal in harness.signals.saved if signal.action == TradeAction.BUY] == buy_signals
+    assert [order.stock_id for order in harness.broker.placed] == orders
+    assert status.stats.orders_submitted == len(orders)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Product bug: BuzzScanner extends articles on the Stock object that the stock provider caches (TaiwanStockProvider "
+        "keeps it for 6 hours) instead of a copy, so a second Buzz scan in one CLI session prompts the AI with the "
+        "previous scan's discussions."
+    ),
+)
+@pytest.mark.asyncio
+async def test_second_buzz_scan_in_a_session_prompts_only_current_discussions() -> None:
+    harness = build_harness()
+    hot = harness.config.collect_rules.buzz_min_engagement
+    harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
+    harness.discuss("2330", mentions=1, engagement=hot, title="morning thread")
+    await harness.run_menu("2")
+    harness.social.articles.clear()
+    harness.discuss("2330", mentions=1, engagement=hot, title="afternoon thread")
+
+    await harness.run_menu("2")
+
+    second_prompt = harness.ai.calls[-1].prompt
+    assert "afternoon thread" in second_prompt
+    assert "morning thread" not in second_prompt
+
+
+# ---------------------------- Menu 3: Intraday Trading ---------------------------- #
 
 
 @pytest.mark.asyncio
 async def test_intraday_loads_held_positions_and_active_watchlist() -> None:
-    held_stock = Stock(stock_id="2330")
-    watched_stock = Stock(stock_id="2317")
-    market_scanner = FakeMarketScanner()
-    order_execution = FakeOrderExecution()
-    workflow = build_workflow(
-        market_scanner=market_scanner,
-        account_loader=FakeAccountLoader([held_stock]),
-        stock_provider=FakeStockProvider([held_stock, watched_stock]),
-        watchlist_repository=FakeWatchlistRepository(
-            [
-                StockWatchlist(stock_id="2317", type=WatchlistType.TECHNICAL),
-                StockWatchlist(stock_id="2330", type=WatchlistType.BUZZ),
-            ]
-        ),
-        order_execution=order_execution,
-    )
+    harness = build_harness()
+    for stock_id in ("2330", "2317", "2454"):
+        harness.list_stock(stock_id, rising_history(100.0), realtime_price=100.0)
+    harness.hold("2330", quantity=1000, average_cost=95.0)
+    harness.watch("2330", WatchlistType.TECHNICAL)
+    harness.watch("2317", WatchlistType.BUZZ)
 
-    context = await workflow.run_intraday()
+    status = await harness.run_menu("3")
 
-    assert [stock.stock_id for stock in context.all_stocks] == ["2330", "2317"]
-    assert market_scanner.enriched_ids == ["2330", "2317"]
-    assert order_execution.called is True
+    assert status.stats.total_scanned == 2
+    assert sorted(harness.ai.analysed_stock_ids) == ["2317", "2330"], "2330 is held and watched but analysed once"
+    assert sorted(order.stock_id for order in harness.broker.placed) == ["2317", "2330"]
+
+
+@pytest.mark.asyncio
+async def test_intraday_places_no_order_for_a_stale_quote() -> None:
+    harness = build_harness()
+    harness.list_stock("2330", rising_history(100.0), realtime_price=100.0, realtime_age=FRESH)
+    harness.list_stock("2317", rising_history(100.0), realtime_price=100.0, realtime_age=STALE)
+    harness.watch("2330", WatchlistType.TECHNICAL)
+    harness.watch("2317", WatchlistType.TECHNICAL)
+
+    status = await harness.run_menu("3")
+
+    assert status.stale_stock_ids == {"2317"}
+    assert [order.stock_id for order in harness.broker.placed] == ["2330"]
+
+
+@pytest.mark.parametrize(
+    ("now", "market_open", "orders"), [(MARKET_OPEN, True, ["2330"]), (MARKET_CLOSED, False, [])], ids=["market-open", "market-closed"]
+)
+@pytest.mark.asyncio
+async def test_order_execution_skips_closed_market_orders(now: datetime, market_open: bool, orders: list[str]) -> None:
+    harness = build_harness(now=now, market_open=market_open)
+    harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
+    harness.watch("2330", WatchlistType.TECHNICAL)
+
+    status = await harness.run_menu("3")
+
+    assert [(signal.stock_id, signal.action) for signal in harness.signals.saved] == [("2330", TradeAction.BUY)]
+    assert [order.stock_id for order in harness.broker.placed] == orders
+    assert status.stats.orders_submitted == len(orders)
+
+
+# ------------------------- Menu 4: Analyse Specific Stocks ------------------------ #
 
 
 @pytest.mark.asyncio
 async def test_specific_stock_analysis_returns_manual_watchlist_candidates_without_orders() -> None:
-    stock = Stock(stock_id="2330")
-    market_scanner = FakeMarketScanner()
-    order_execution = FakeOrderExecution()
-    workflow = build_workflow(
-        market_scanner=market_scanner,
-        stock_provider=FakeStockProvider([stock]),
-        technical_filter=FakeTechnicalFilter({"2330"}),
-        order_execution=order_execution,
-    )
+    harness = build_harness()
+    harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
+    harness.list_stock("2317", falling_history(100.0), realtime_price=100.0)
 
-    context = await workflow.analyse_specific_stocks(["2330"])
+    status = await harness.run_menu("4", stock_ids="2330 2317")
 
-    assert [stock.stock_id for stock in context.all_stocks] == ["2330"]
-    assert [stock.stock_id for stock in context.survivors] == ["2330"]
-    assert [entry.stock_id for entry in context.watchlist] == ["2330"]
-    assert context.watchlist[0].type == WatchlistType.MANUAL
-    assert context.stats.signals_generated == 0
-    assert order_execution.called is False
+    passed, failed = status.manual_stocks
+    assert stock_ids(status.manual_stocks) == ["2330", "2317"]
+    assert stock_ids(status.survivors) == ["2330"]
+    assert failed.hard_failures
+    assert harness.news.requested == ["2330", "2317"]
+    assert harness.ai.analysed_stock_ids == ["2330", "2317"]
+    assert passed.composite_score is not None
+    assert failed.composite_score is not None
+    assert harness.watchlist.rows == []
+    assert harness.signals.saved == []
+    assert harness.broker.placed == []
+
+
+@pytest.mark.parametrize(
+    ("add_to_watchlist", "rows"),
+    [(True, [("2330", WatchlistType.MANUAL), ("2317", WatchlistType.MANUAL)]), (False, [])],
+    ids=["confirmed", "declined"],
+)
+@pytest.mark.asyncio
+async def test_specific_stock_watchlist_prompt_writes_only_manual_rows(
+    add_to_watchlist: bool, rows: list[tuple[str, WatchlistType]]
+) -> None:
+    harness = build_harness()
+    harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
+    harness.list_stock("2317", falling_history(100.0), realtime_price=100.0)
+
+    status = await harness.run_menu("4", stock_ids="2330 2317", add_to_watchlist=add_to_watchlist)
+
+    assert harness.watchlist.rows == rows
+    assert stock_ids(status.survivors) == ["2330"]
+    assert harness.signals.saved == []
+    assert harness.broker.placed == []
 
 
 @pytest.mark.asyncio
-async def test_order_execution_skips_closed_market_orders() -> None:
-    logger = FakeLogger()
-    order_execution = OrderExecution(
-        execution_provider=cast(Any, FailingExecutionProvider()),
-        market_clock=cast(Any, ClosedMarketClock()),
-        logger=cast(Any, logger),
-    )
-    context = PipelineStatus(
-        buy_signals=[
-            TradeSignal(
-                stock_id="2330",
-                action=TradeAction.BUY,
-                price_at_signal=100,
-                source=SignalSource.HYBRID,
-                score=80,
-                reason="test",
-                quantity=1,
-            )
-        ]
-    )
+async def test_confirmed_manual_buy_sends_one_manual_signal_to_the_broker() -> None:
+    harness = build_harness()
+    harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
+    harness.list_stock("2317", falling_history(100.0), realtime_price=98.0)
 
-    await order_execution.execute(context)
+    await harness.run_menu("4", stock_ids="2330 2317", buy={"2317"})
 
-    assert context.stats.orders_submitted == 0
-    assert "Order execution skipped. Market is closed." in logger.warnings
+    [signal] = harness.signals.saved
+    assert (signal.stock_id, signal.action, signal.source) == ("2317", TradeAction.BUY, SignalSource.MANUAL)
+    assert signal.quantity > 0
+    assert [(order.stock_id, order.action, order.quantity, order.limit_price) for order in harness.broker.placed] == [
+        ("2317", TradeAction.BUY, signal.quantity, 98.0)
+    ]
+    assert harness.watchlist.rows == []

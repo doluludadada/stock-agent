@@ -1,16 +1,11 @@
-from datetime import datetime
 from types import SimpleNamespace
 from typing import Any, cast
 
 import httpx
 import pytest
+from support.harness import build_harness, rising_history
 
-from a_domain.model.market.article import Article
-from a_domain.model.market.stock import Stock
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from a_domain.types.enums import InformationSource
-from b_application.schemas.pipeline_status import PipelineStatus
-from b_application.use_cases.process.ai_analyser import AiAnalyser
 from c_infrastructure.ai_models.ai_adapter.grok_adapter import GrokAdapter
 from c_infrastructure.feed.news.cnyes_news_provider import CnyesNewsProvider
 
@@ -46,22 +41,6 @@ class FakeLogger(ILoggingProvider):
 
     def exception(self, message: str):
         self.messages.append(message)
-
-
-class FailingAiProvider:
-    async def generate_reply(self, messages):
-        raise RuntimeError("provider is unavailable")
-
-    def save_response(self, stock_id: str, content: str) -> None:
-        raise AssertionError("save_response should not be called after provider failure")
-
-
-class EmptyKnowledgeRepository:
-    async def search(self, query: str, limit: int = 3) -> str:
-        return ""
-
-    async def save_analysis(self, context: Stock) -> None:
-        return None
 
 
 class FailingCompletions:
@@ -105,10 +84,7 @@ class SymbolNewsCnyesClient:
         if "TWS:2486:STOCK/symbolNews" not in url:
             raise AssertionError(f"Unexpected Cnyes URL: {url}")
         # symbolNews lists headlines only; the body lives on the article page.
-        return FakeCnyesResponse(
-            200,
-            {"items": {"data": [{"newsId": 2, "title": "一詮測試新聞", "publishAt": 1778489049}]}},
-        )
+        return FakeCnyesResponse(200, {"items": {"data": [{"newsId": 2, "title": "一詮測試新聞", "publishAt": 1778489049}]}})
 
 
 @pytest.mark.asyncio
@@ -128,39 +104,20 @@ async def test_cnyes_fetches_symbol_news(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_ai_analyser_records_provider_failure_without_counting_success() -> None:
-    stock = Stock(stock_id="2486")
-    stock.articles = [
-        Article(
-            stock_id="2486",
-            source=InformationSource.NEWS_MEDIA,
-            title="Test article",
-            content="A long enough article body for the prompt builder.",
-            published_at=datetime(2026, 5, 11),
-        )
-    ]
-    context = PipelineStatus(survivors=[stock])
-    config = SimpleNamespace(
-        prompts=SimpleNamespace(
-            analysis_report_fundamental="Analyze {stock_id}: {articles_text}",
-            analysis_report_momentum="Analyze {stock_id}: {articles_text}",
-        ),
-        analysis=SimpleNamespace(article_fetch_limit=10),
-        ai=SimpleNamespace(article_content_length=500),
-    )
+    harness = build_harness()
+    harness.list_stock("2486", rising_history(100.0), realtime_price=100.0)
+    harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
+    harness.ai.failures["2486"] = RuntimeError("provider is unavailable")
 
-    analyser = AiAnalyser(
-        ai_provider=FailingAiProvider(),
-        knowledge_repository=EmptyKnowledgeRepository(),
-        config=cast(Any, config),
-        logger=FakeLogger(),
-    )
+    status = await harness.run_menu("4", stock_ids="2486 2330")
 
-    await analyser.execute(context)
-
-    assert context.stats.ai_analysed == 0
-    assert context.stats.total_errors == 1
-    assert "provider is unavailable" in context.stats.errors[0]
-    assert stock.ai_score is None
+    failed, analysed = status.manual_stocks
+    assert status.stats.ai_analysed == 1
+    [error] = status.stats.errors
+    assert "2486" in error
+    assert "provider is unavailable" in error
+    assert (failed.ai_score, failed.composite_score) == (None, None)
+    assert analysed.ai_score == harness.ai.default_score
 
 
 @pytest.mark.asyncio
