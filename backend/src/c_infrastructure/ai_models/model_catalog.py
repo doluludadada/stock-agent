@@ -20,11 +20,7 @@ class ModelsCatalog(IModelCatalogRepository):
             AsyncOpenAI(api_key=self._config.ai.openai_api_key, timeout=self._timeout) if self._config.ai.openai_api_key else None
         )
         self._xai_client = (
-            AsyncOpenAI(
-                api_key=self._config.ai.grok_api_key,
-                base_url="https://api.x.ai/v1",
-                timeout=self._timeout,
-            )
+            AsyncOpenAI(api_key=self._config.ai.grok_api_key, base_url="https://api.x.ai/v1", timeout=self._timeout)
             if self._config.ai.grok_api_key
             else None
         )

@@ -84,7 +84,7 @@ class YahooTwNewsProvider:
 
                 # 4. Assemble Article entities
                 articles: list[Article] = []
-                for item, body in zip(pending_articles, bodies):
+                for item, body in zip(pending_articles, bodies, strict=True):
                     content = body if isinstance(body, str) and body else item["title"]
 
                     articles.append(

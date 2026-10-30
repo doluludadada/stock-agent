@@ -3,14 +3,7 @@ from a_domain.model.trading.signal import TradeSignal
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.execution_provider import IExecutionProvider
-from a_domain.types.enums import (
-    ExecutionProvider,
-    OrderMode,
-    OrderStatus,
-    OrderType,
-    TimeInForce,
-    TradeAction,
-)
+from a_domain.types.enums import ExecutionProvider, OrderMode, OrderStatus, OrderType, TimeInForce, TradeAction
 from b_application.schemas.config import AppConfig
 from b_application.schemas.pipeline_status import PipelineStatus
 
@@ -31,11 +24,7 @@ class OrderExecution:
     """
 
     def __init__(
-        self,
-        execution_provider: IExecutionProvider,
-        market_clock: IMarketClock,
-        config: AppConfig,
-        logger: ILoggingProvider,
+        self, execution_provider: IExecutionProvider, market_clock: IMarketClock, config: AppConfig, logger: ILoggingProvider
     ) -> None:
         self._execution_provider = execution_provider
         self._market_clock = market_clock
@@ -43,102 +32,53 @@ class OrderExecution:
         self._order_mode = config.trading.order_mode
         self._logger = logger
 
-    async def execute(
-        self,
-        signals: list[TradeSignal],
-        status: PipelineStatus,
-    ) -> None:
-        orderable_signals = [
-            signal
-            for signal in signals
-            if signal.action != TradeAction.HOLD
-        ]
+    async def execute(self, signals: list[TradeSignal], status: PipelineStatus) -> None:
+        orderable_signals = [signal for signal in signals if signal.action != TradeAction.HOLD]
 
         if not orderable_signals:
-            self._logger.info(
-                "Order execution skipped. No orderable signals."
-            )
+            self._logger.info("Order execution skipped. No orderable signals.")
             return
 
         if not self.is_execution_allowed(status):
             return
 
         if not self._market_clock.is_market_open():
-            self._logger.warning(
-                "Order execution skipped. Market is closed."
-            )
+            self._logger.warning("Order execution skipped. Market is closed.")
             return
 
         for signal in orderable_signals:
             if signal.stock_id in status.stale_stock_ids:
-                self._logger.warning(
-                    f"Order skipped. Market data is stale: "
-                    f"{signal.stock_id}"
-                )
+                self._logger.warning(f"Order skipped. Market data is stale: {signal.stock_id}")
                 continue
 
-            await self.execute_signal(
-                signal,
-                status,
-            )
+            await self.execute_signal(signal, status)
 
-    def is_execution_allowed(
-        self,
-        status: PipelineStatus,
-    ) -> bool:
+    def is_execution_allowed(self, status: PipelineStatus) -> bool:
         if self._order_mode == OrderMode.DISABLED:
-            self._logger.warning(
-                "Order execution disabled by configuration."
-            )
+            self._logger.warning("Order execution disabled by configuration.")
             return False
 
-        if (
-            self._order_mode == OrderMode.MOCK_ONLY
-            and self._execution_provider_type != ExecutionProvider.MOCK
-        ):
-            return self.reject_invalid_mode(
-                status,
-                "MOCK_ONLY requires MockExecutionProvider",
-            )
+        if self._order_mode == OrderMode.MOCK_ONLY and self._execution_provider_type != ExecutionProvider.MOCK:
+            return self.reject_invalid_mode(status, "MOCK_ONLY requires MockExecutionProvider")
 
-        if (
-            self._order_mode == OrderMode.LIVE
-            and self._execution_provider_type == ExecutionProvider.MOCK
-        ):
-            return self.reject_invalid_mode(
-                status,
-                "LIVE order mode cannot use MockExecutionProvider",
-            )
+        if self._order_mode == OrderMode.LIVE and self._execution_provider_type == ExecutionProvider.MOCK:
+            return self.reject_invalid_mode(status, "LIVE order mode cannot use MockExecutionProvider")
 
         return True
 
-    def reject_invalid_mode(
-        self,
-        status: PipelineStatus,
-        message: str,
-    ) -> bool:
+    def reject_invalid_mode(self, status: PipelineStatus, message: str) -> bool:
         self._logger.error(message)
         status.stats.add_error(message)
 
         return False
 
-    async def execute_signal(
-        self,
-        signal: TradeSignal,
-        status: PipelineStatus,
-    ) -> None:
+    async def execute_signal(self, signal: TradeSignal, status: PipelineStatus) -> None:
         if signal.quantity <= 0:
-            self._logger.warning(
-                f"Order skipped. Invalid quantity: "
-                f"{signal.stock_id}, quantity={signal.quantity}"
-            )
+            self._logger.warning(f"Order skipped. Invalid quantity: {signal.stock_id}, quantity={signal.quantity}")
             return
 
         if signal.price_at_signal <= 0:
-            self._logger.warning(
-                f"Order skipped. Invalid price: "
-                f"{signal.stock_id}, price={signal.price_at_signal}"
-            )
+            self._logger.warning(f"Order skipped. Invalid price: {signal.stock_id}, price={signal.price_at_signal}")
             return
 
         order = Order(
@@ -150,66 +90,34 @@ class OrderExecution:
             time_in_force=TimeInForce.IOC,
         )
 
-        await self.submit_order(
-            order,
-            status,
-        )
+        await self.submit_order(order, status)
 
-    async def submit_order(
-        self,
-        order: Order,
-        status: PipelineStatus,
-    ) -> None:
+    async def submit_order(self, order: Order, status: PipelineStatus) -> None:
         try:
-            processed_order = await self._execution_provider.place_order(
-                order
-            )
+            processed_order = await self._execution_provider.place_order(order)
 
         except Exception as error:
-            message = (
-                f"Order execution failed: "
-                f"{order.stock_id}, error={error}"
-            )
+            message = f"Order execution failed: {order.stock_id}, error={error}"
             self._logger.error(message)
             status.stats.add_error(message)
             return
 
         status.orders.append(processed_order)
 
-        if processed_order.status in {
-            OrderStatus.SUBMITTED,
-            OrderStatus.FILLED,
-        }:
+        if processed_order.status in {OrderStatus.SUBMITTED, OrderStatus.FILLED}:
             status.stats.orders_submitted += 1
-            self._logger.success(
-                f"Order {processed_order.status}: "
-                f"{processed_order.stock_id} "
-                f"x {processed_order.quantity}"
-            )
+            self._logger.success(f"Order {processed_order.status}: {processed_order.stock_id} x {processed_order.quantity}")
             return
 
-        self.handle_terminal_order(
-            processed_order,
-            status,
-        )
+        self.handle_terminal_order(processed_order, status)
 
-    def handle_terminal_order(
-        self,
-        order: Order,
-        status: PipelineStatus,
-    ) -> None:
+    def handle_terminal_order(self, order: Order, status: PipelineStatus) -> None:
         if order.status == OrderStatus.REJECTED:
-            self._logger.warning(
-                f"Order rejected: "
-                f"{order.stock_id}, reason={order.reason}"
-            )
+            self._logger.warning(f"Order rejected: {order.stock_id}, reason={order.reason}")
             return
 
         if order.status == OrderStatus.FAILED:
-            message = (
-                f"Order failed: "
-                f"{order.stock_id}, reason={order.reason}"
-            )
+            message = f"Order failed: {order.stock_id}, reason={order.reason}"
             self._logger.error(message)
             status.stats.add_error(message)
 

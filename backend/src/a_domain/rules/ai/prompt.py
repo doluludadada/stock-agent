@@ -37,7 +37,7 @@ class AiReportPromptBuilder:
         template = self.fundamental_template
         if focus == AiAnalysisFocus.MOMENTUM:
             template = self.momentum_template
-            
+
         return template.format(stock_id=stock.stock_id, articles_text=articles_text)
 
     def _build_articles_text(self, stock: Stock) -> str:

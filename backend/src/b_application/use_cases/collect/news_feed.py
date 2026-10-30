@@ -11,12 +11,7 @@ class NewsFeed:
     Collects accepted news articles for stocks.
     """
 
-    def __init__(
-        self,
-        news_provider: INewsProvider,
-        config: AppConfig,
-        logger: ILoggingProvider,
-    ) -> None:
+    def __init__(self, news_provider: INewsProvider, config: AppConfig, logger: ILoggingProvider) -> None:
         self._news_provider = news_provider
         self._quality = ArticleQualityRule(
             spam_keywords=frozenset(config.collect_rules.spam_keywords),
@@ -28,29 +23,19 @@ class NewsFeed:
         self._article_fetch_limit = config.analysis.article_fetch_limit
         self._logger = logger
 
-    async def execute(
-        self,
-        stocks: list[Stock],
-        status: PipelineStatus,
-    ) -> None:
+    async def execute(self, stocks: list[Stock], status: PipelineStatus) -> None:
         self._logger.info(f"Collecting news for {len(stocks)} stocks.")
 
         for stock in stocks:
             try:
-                news = await self._news_provider.fetch_news(
-                    stock_id=stock.stock_id,
-                    limit=self._article_fetch_limit,
-                )
+                news = await self._news_provider.fetch_news(stock_id=stock.stock_id, limit=self._article_fetch_limit)
 
                 accepted_news = [article for article in news if self._quality.is_high_quality(article)]
 
                 stock.articles.extend(accepted_news)
 
                 if accepted_news:
-                    self._news_provider.save_as_md_file(
-                        stock.stock_id,
-                        accepted_news,
-                    )
+                    self._news_provider.save_as_md_file(stock.stock_id, accepted_news)
 
             except Exception as error:
                 message = f"Failed to collect news for {stock.stock_id}: {error}"

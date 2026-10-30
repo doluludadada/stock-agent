@@ -20,7 +20,7 @@ class OhlcvDTO(Ohlcv, table=True):
     ts: datetime = Field(primary_key=True, description="Timestamp of the candle")
 
     @model_validator(mode="after")
-    def _check_invariants(self) -> "OhlcvDTO":
+    def _check_invariants(self) -> OhlcvDTO:
         assert self.open >= 0, "open must be non-negative"
         assert self.high >= 0, "high must be non-negative"
         assert self.low >= 0, "low must be non-negative"

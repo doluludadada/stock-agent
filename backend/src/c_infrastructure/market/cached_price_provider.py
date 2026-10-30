@@ -16,13 +16,7 @@ from c_infrastructure.database.models.ohlcv_dto import OhlcvDTO
 class CachedPriceProvider(IOhlcvProvider):
     SAVE_CHUNK_SIZE = 5_000
 
-    def __init__(
-        self,
-        price_provider: IOhlcvProvider,
-        db: DatabaseConnector,
-        logger: ILoggingProvider,
-        market_clock: IMarketClock,
-    ):
+    def __init__(self, price_provider: IOhlcvProvider, db: DatabaseConnector, logger: ILoggingProvider, market_clock: IMarketClock):
         self._price_provider = price_provider
         self._db = db
         self._logger = logger
@@ -31,12 +25,7 @@ class CachedPriceProvider(IOhlcvProvider):
     async def fetch_realtime_bars(self, stocks: list[Stock]) -> dict[str, Ohlcv]:
         return await self._price_provider.fetch_realtime_bars(stocks)
 
-    async def fetch_history(
-        self,
-        stocks: list[Stock],
-        start_date: datetime,
-        end_date: datetime,
-    ) -> dict[str, list[Ohlcv]]:
+    async def fetch_history(self, stocks: list[Stock], start_date: datetime, end_date: datetime) -> dict[str, list[Ohlcv]]:
         stocks = self._remove_duplicate_stocks(stocks)
 
         if not stocks:
@@ -46,11 +35,7 @@ class CachedPriceProvider(IOhlcvProvider):
         end_day = self._clock.to_trading_date(end_date)
         stock_ids = [stock.stock_id for stock in stocks]
 
-        cached = await self._load_cached_bars(
-            stock_ids=stock_ids,
-            start_day=start_day,
-            end_day=end_day,
-        )
+        cached = await self._load_cached_bars(stock_ids=stock_ids, start_day=start_day, end_day=end_day)
 
         missing = [stock for stock in stocks if stock.stock_id not in cached]
 
@@ -60,11 +45,7 @@ class CachedPriceProvider(IOhlcvProvider):
 
         self._logger.info(f"History cache miss: {len(missing)}/{len(stocks)} stocks")
 
-        fresh = await self._price_provider.fetch_history(
-            missing,
-            start_date,
-            end_date,
-        )
+        fresh = await self._price_provider.fetch_history(missing, start_date, end_date)
 
         await self._save_bars(fresh)
 
@@ -73,12 +54,7 @@ class CachedPriceProvider(IOhlcvProvider):
 
         return self._clean_result(cached)
 
-    async def _load_cached_bars(
-        self,
-        stock_ids: list[str],
-        start_day: date,
-        end_day: date,
-    ) -> dict[str, list[Ohlcv]]:
+    async def _load_cached_bars(self, stock_ids: list[str], start_day: date, end_day: date) -> dict[str, list[Ohlcv]]:
         async with self._db.get_session() as session:
             stmt = (
                 select(OhlcvDTO)
@@ -143,10 +119,7 @@ class CachedPriceProvider(IOhlcvProvider):
             for bar in bars:
                 unique_bars[self._clock.to_trading_date(bar.ts)] = bar
 
-            sorted_bars = sorted(
-                unique_bars.values(),
-                key=lambda bar: self._clock.to_trading_date(bar.ts),
-            )
+            sorted_bars = sorted(unique_bars.values(), key=lambda bar: self._clock.to_trading_date(bar.ts))
 
             if sorted_bars:
                 result[stock_id] = sorted_bars

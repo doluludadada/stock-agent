@@ -6,12 +6,7 @@ from a_domain.ports.system.logging_provider import ILoggingProvider
 
 
 class AiProcessor:
-    def __init__(
-        self,
-        ai_provider: IAiProvider,
-        chat_styler_provider: IChatStylerProvider,
-        logger: ILoggingProvider,
-    ):
+    def __init__(self, ai_provider: IAiProvider, chat_styler_provider: IChatStylerProvider, logger: ILoggingProvider):
         self._ai_provider = ai_provider
         self._chat_styler_provider = chat_styler_provider
         self._logger = logger

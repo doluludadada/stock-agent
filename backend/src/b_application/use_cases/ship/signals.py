@@ -14,41 +14,21 @@ from b_application.schemas.pipeline_status import PipelineStatus
 class Signals:
     """Generates and persists trading signals."""
 
-    def __init__(
-        self,
-        signal_repository: ISignalRepository,
-        config: AppConfig,
-        logger: ILoggingProvider,
-    ) -> None:
+    def __init__(self, signal_repository: ISignalRepository, config: AppConfig, logger: ILoggingProvider) -> None:
         self._signal_repository = signal_repository
         self._logger = logger
 
         sizing_rule = SizingRule(
-            risk_per_trade_pct=config.analysis.risk_per_trade_pct,
-            stop_loss_pct=config.analysis.stop_loss_pct,
-            lot_size=1,
+            risk_per_trade_pct=config.analysis.risk_per_trade_pct, stop_loss_pct=config.analysis.stop_loss_pct, lot_size=1
         )
 
         self._decision_rule = DecisionRule(
-            entry_rule=EntryRule(
-                buy_threshold=config.analysis.min_combined_score_buy,
-                sizing_rule=sizing_rule,
-            ),
-            exit_rule=ExitRule(
-                stop_loss_pct=config.analysis.stop_loss_pct,
-                sell_threshold=config.analysis.max_combined_score_sell,
-            ),
+            entry_rule=EntryRule(buy_threshold=config.analysis.min_combined_score_buy, sizing_rule=sizing_rule),
+            exit_rule=ExitRule(stop_loss_pct=config.analysis.stop_loss_pct, sell_threshold=config.analysis.max_combined_score_sell),
         )
 
-    async def execute(
-        self,
-        watchlist: StockWatchlist,
-        status: PipelineStatus,
-    ) -> None:
-        self._logger.info(
-            f"Generating signals for "
-            f"{len(watchlist.willing_stocks)} watchlist stocks."
-        )
+    async def execute(self, watchlist: StockWatchlist, status: PipelineStatus) -> None:
+        self._logger.info(f"Generating signals for {len(watchlist.willing_stocks)} watchlist stocks.")
 
         generated_signals: list[TradeSignal] = []
 
@@ -63,55 +43,33 @@ class Signals:
             self._logger.info("No new trading signals were generated.")
             return
 
-        await self.persist_signals(
-            generated_signals,
-            status,
-        )
+        await self.persist_signals(generated_signals, status)
 
-    def generate_signal(
-        self,
-        stock: Stock,
-        status: PipelineStatus,
-    ) -> TradeSignal | None:
+    def generate_signal(self, stock: Stock, status: PipelineStatus) -> TradeSignal | None:
         if stock.stock_id in status.risk_blocked_stock_ids:
-            self._logger.warning(
-                f"Signal skipped. Risk blocked: {stock.stock_id}"
-            )
+            self._logger.warning(f"Signal skipped. Risk blocked: {stock.stock_id}")
             return None
 
         if stock.stock_id in status.stale_stock_ids:
-            self._logger.warning(
-                f"Signal skipped. Market data is stale: {stock.stock_id}"
-            )
+            self._logger.warning(f"Signal skipped. Market data is stale: {stock.stock_id}")
             return None
 
         if stock.composite_score is None:
-            self._logger.warning(
-                f"Signal skipped. Composite score unavailable: {stock.stock_id}"
-            )
+            self._logger.warning(f"Signal skipped. Composite score unavailable: {stock.stock_id}")
             return None
 
         try:
             return self._decision_rule.decide(
-                stock=stock,
-                account=status.account,
-                position=status.positions_by_stock_id.get(stock.stock_id),
+                stock=stock, account=status.account, position=status.positions_by_stock_id.get(stock.stock_id)
             )
 
         except Exception as error:
-            message = (
-                f"Signal generation failed for "
-                f"{stock.stock_id}: {error}"
-            )
+            message = f"Signal generation failed for {stock.stock_id}: {error}"
             self._logger.error(message)
             status.stats.add_error(message)
             return None
 
-    async def persist_signals(
-        self,
-        signals: list[TradeSignal],
-        status: PipelineStatus,
-    ) -> None:
+    async def persist_signals(self, signals: list[TradeSignal], status: PipelineStatus) -> None:
         try:
             await self._signal_repository.save_batch(signals)
             status.stats.signals_generated += len(signals)
@@ -122,6 +80,4 @@ class Signals:
             status.stats.add_error(message)
             return
 
-        self._logger.info(
-            f"Signals persisted: total={len(signals)}"
-        )
+        self._logger.info(f"Signals persisted: total={len(signals)}")

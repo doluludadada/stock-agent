@@ -8,12 +8,7 @@ from b_application.use_cases.chat.state_manager import StateManager
 
 class ChatPipeline:
     def __init__(
-        self,
-        loader: ContextLoader,
-        processor: AiProcessor,
-        manager: StateManager,
-        dispatcher: Dispatcher,
-        config: AppConfig,
+        self, loader: ContextLoader, processor: AiProcessor, manager: StateManager, dispatcher: Dispatcher, config: AppConfig
     ):
         self._loader = loader
         self._processor = processor

@@ -40,12 +40,7 @@ class GrokAdapter(BaseAIAdapter):
             extra_body["include"] = ["inline_citations"]
 
         try:
-            params: dict[str, Any] = {
-                "model": self._model_name,
-                "messages": api_messages,
-                "temperature": 0.7,
-                "stream": True,
-            }
+            params: dict[str, Any] = {"model": self._model_name, "messages": api_messages, "temperature": 0.7, "stream": True}
 
             # In the OpenAI SDK, tools are a top-level parameter
             if tools:

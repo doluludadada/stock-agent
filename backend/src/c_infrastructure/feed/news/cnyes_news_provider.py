@@ -14,10 +14,7 @@ class CnyesNewsProvider:
     def __init__(self, logger: ILoggingProvider):
         self._logger = logger
         self._base_url = "https://api.cnyes.com/media/api/v1"
-        self._headers = {
-            "Accept": "application/json",
-            "User-Agent": "Mozilla/5.0",
-        }
+        self._headers = {"Accept": "application/json", "User-Agent": "Mozilla/5.0"}
 
     async def fetch_news(self, stock_id: str, limit: int) -> list[Article]:
         self._logger.debug(f"Fetching Cnyes News for {stock_id}...")

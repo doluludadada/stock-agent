@@ -53,6 +53,7 @@ fixable = ["ALL"]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true
+split-on-trailing-comma = false
 
 [tool.ruff.format]
 quote-style = "double"

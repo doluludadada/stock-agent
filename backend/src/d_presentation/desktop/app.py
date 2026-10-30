@@ -78,16 +78,10 @@ def main(page: ft.Page):
     )
     txt_grok_key = ft.TextField(label="Grok API Key", password=True, can_reveal_password=True, value=env_data.get("GROK_API_KEY", ""))
     txt_line_token = ft.TextField(
-        label="LINE Channel Access Token",
-        password=True,
-        can_reveal_password=True,
-        value=env_data.get("LINE_CHANNEL_ACCESS_TOKEN", ""),
+        label="LINE Channel Access Token", password=True, can_reveal_password=True, value=env_data.get("LINE_CHANNEL_ACCESS_TOKEN", "")
     )
     txt_line_secret = ft.TextField(
-        label="LINE Channel Secret",
-        password=True,
-        can_reveal_password=True,
-        value=env_data.get("LINE_CHANNEL_SECRET", ""),
+        label="LINE Channel Secret", password=True, can_reveal_password=True, value=env_data.get("LINE_CHANNEL_SECRET", "")
     )
 
     def save_settings(e):
@@ -116,10 +110,7 @@ def main(page: ft.Page):
         padding=20,
         content=ft.Column(
             [
-                ft.Row(
-                    [status_indicator, status_text, ft.Container(width=20), btn_server],
-                    alignment=ft.MainAxisAlignment.START,
-                ),
+                ft.Row([status_indicator, status_text, ft.Container(width=20), btn_server], alignment=ft.MainAxisAlignment.START),
                 ft.Divider(),
                 ft.Text("Live Logs:", size=16, weight=ft.FontWeight.BOLD),
                 ft.Container(content=log_view, bgcolor="black87", border_radius=10, padding=10, height=500, expand=True),

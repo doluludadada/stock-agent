@@ -23,9 +23,7 @@ def get_settings() -> AppConfig:
     return load_settings()
 
 
-def get_logger(
-    config: Annotated[AppConfig, Depends(get_settings)],
-) -> ILoggingProvider:
+def get_logger(config: Annotated[AppConfig, Depends(get_settings)]) -> ILoggingProvider:
     return LoggerService(level=config.behavior.log_level)
 
 
@@ -35,25 +33,18 @@ def get_market_clock() -> IMarketClock:
 
 
 def get_db_connector(
-    config: Annotated[AppConfig, Depends(get_settings)],
-    logger: Annotated[ILoggingProvider, Depends(get_logger)],
+    config: Annotated[AppConfig, Depends(get_settings)], logger: Annotated[ILoggingProvider, Depends(get_logger)]
 ) -> DatabaseConnector:
-    return DatabaseConnector(
-        config=config,
-        logger=logger,
-    )
+    return DatabaseConnector(config=config, logger=logger)
 
 
-async def get_db_session(
-    connector: Annotated[DatabaseConnector, Depends(get_db_connector)],
-) -> AsyncGenerator[AsyncSession]:
+async def get_db_session(connector: Annotated[DatabaseConnector, Depends(get_db_connector)]) -> AsyncGenerator[AsyncSession]:
     async with connector.get_session() as session:
         yield session
 
 
 def get_notification_provider(
-    config: Annotated[AppConfig, Depends(get_settings)],
-    logger: Annotated[ILoggingProvider, Depends(get_logger)],
+    config: Annotated[AppConfig, Depends(get_settings)], logger: Annotated[ILoggingProvider, Depends(get_logger)]
 ) -> INotificationProvider | None:
     if not config.notifications.enabled:
         return None

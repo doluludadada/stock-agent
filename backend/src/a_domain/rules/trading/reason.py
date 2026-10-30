@@ -24,10 +24,7 @@ class ReasonRule:
         - Used when EntryRule produces an executable BUY signal.
         - EntryRule may prepend ADD_POSITION when the stock is already held.
         """
-        parts = [
-            "Entry: BUY",
-            ReasonRule.build_technical_summary(stock),
-        ]
+        parts = ["Entry: BUY", ReasonRule.build_technical_summary(stock)]
 
         if stock.ai_report and stock.ai_report.bullish_factors:
             parts.append(f"Bull: {stock.ai_report.bullish_factors[:3]}")
@@ -43,10 +40,7 @@ class ReasonRule:
 
         - HOLD is a real decision, not None.
         """
-        parts = [
-            f"Entry: HOLD - {cause}",
-            ReasonRule.build_technical_summary(stock),
-        ]
+        parts = [f"Entry: HOLD - {cause}", ReasonRule.build_technical_summary(stock)]
 
         if stock.ai_report and stock.ai_report.bearish_factors:
             parts.append(f"Risk: {stock.ai_report.bearish_factors[:3]}")
@@ -62,10 +56,7 @@ class ReasonRule:
 
         - Used when ExitRule produces an executable SELL signal.
         """
-        parts = [
-            f"Exit: SELL - {cause}",
-            f"Position: qty={position.quantity}, avg={position.average_cost:.2f}",
-        ]
+        parts = [f"Exit: SELL - {cause}", f"Position: qty={position.quantity}, avg={position.average_cost:.2f}"]
 
         if stock.current_price is not None:
             profit_loss = (stock.current_price - position.average_cost) * position.quantity
@@ -88,10 +79,7 @@ class ReasonRule:
         - A held stock with no exit trigger should still produce
           an explicit HOLD decision.
         """
-        parts = [
-            f"Exit: HOLD - {cause}",
-            f"Position: qty={position.quantity}, avg={position.average_cost:.2f}",
-        ]
+        parts = [f"Exit: HOLD - {cause}", f"Position: qty={position.quantity}, avg={position.average_cost:.2f}"]
 
         if stock.current_price is not None:
             profit_loss = (stock.current_price - position.average_cost) * position.quantity

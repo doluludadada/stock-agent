@@ -41,12 +41,7 @@ class TechnicalIndicatorCalculator:
         volumes = [float(bar.volume) for bar in bars]
 
         rsi_value = latest_rsi(closes, indicators.rsi_period)
-        macd_values = latest_macd(
-            closes,
-            indicators.macd_fast,
-            indicators.macd_slow,
-            indicators.macd_signal,
-        )
+        macd_values = latest_macd(closes, indicators.macd_fast, indicators.macd_slow, indicators.macd_signal)
         bollinger_values = latest_bollinger(closes, indicators.bb_period, indicators.bb_std)
         stochastic_values = latest_stochastic(bars, indicators.stoch_k, indicators.stoch_d)
         adx_values = latest_adx(bars, indicators.adx_period)
@@ -68,11 +63,7 @@ class TechnicalIndicatorCalculator:
             mfi=Mfi(period=indicators.mfi_period, value=mfi_value) if mfi_value is not None else None,
         )
 
-    def _calculate_moving_averages(
-        self,
-        closes: Sequence[float],
-        volumes: Sequence[float],
-    ) -> MovingAverages | None:
+    def _calculate_moving_averages(self, closes: Sequence[float], volumes: Sequence[float]) -> MovingAverages | None:
         indicators = self._indicators
         price_ma = {
             period: value
@@ -103,10 +94,7 @@ class TechnicalIndicatorCalculator:
             histogram=histogram,
         )
 
-    def _create_bollinger(
-        self,
-        values: tuple[float, float, float, float, float] | None,
-    ) -> BollingerBands | None:
+    def _create_bollinger(self, values: tuple[float, float, float, float, float] | None) -> BollingerBands | None:
         if values is None:
             return None
 
@@ -128,42 +116,24 @@ class TechnicalIndicatorCalculator:
 
         k, d = values
         indicators = self._indicators
-        return Stochastic(
-            k_period=indicators.stoch_k,
-            d_period=indicators.stoch_d,
-            k=k,
-            d=d,
-        )
+        return Stochastic(k_period=indicators.stoch_k, d_period=indicators.stoch_d, k=k, d=d)
 
     def _create_adx(self, values: tuple[float, float, float] | None) -> Adx | None:
         if values is None:
             return None
 
         adx, plus_di, minus_di = values
-        return Adx(
-            period=self._indicators.adx_period,
-            adx=adx,
-            plus_di=plus_di,
-            minus_di=minus_di,
-        )
+        return Adx(period=self._indicators.adx_period, adx=adx, plus_di=plus_di, minus_di=minus_di)
 
     def _create_atr(self, value: float | None, latest_close: float) -> Atr | None:
         if value is None or latest_close <= 0:
             return None
 
-        return Atr(
-            period=self._indicators.atr_period,
-            value=value,
-            percent=value / latest_close,
-        )
+        return Atr(period=self._indicators.atr_period, value=value, percent=value / latest_close)
 
     def _create_obv(self, values: tuple[float, float] | None) -> Obv | None:
         if values is None:
             return None
 
         value, moving_average = values
-        return Obv(
-            ma_period=self._indicators.ma_mid,
-            value=value,
-            moving_average=moving_average,
-        )
+        return Obv(ma_period=self._indicators.ma_mid, value=value, moving_average=moving_average)

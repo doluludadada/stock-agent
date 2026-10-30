@@ -71,8 +71,5 @@ class TechnicalStrategy:
                 score += self.scoring.pass_score_increase if passed else 0
 
         return TechnicalReport(
-            score=max(0, min(100, score)),
-            hard_failures=hard_failures,
-            soft_failures=soft_failures,
-            observations=observations,
+            score=max(0, min(100, score)), hard_failures=hard_failures, soft_failures=soft_failures, observations=observations
         )

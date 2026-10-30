@@ -64,22 +64,12 @@ def dataframe_to_bars(df: pd.DataFrame) -> list[Ohlcv]:
 
 
 class YahooFinanceProvider(IOhlcvProvider):
-    def __init__(
-        self,
-        logger: ILoggingProvider,
-        batch_size: int = 50,
-        delay_seconds: float = 1.5,
-    ):
+    def __init__(self, logger: ILoggingProvider, batch_size: int = 50, delay_seconds: float = 1.5):
         self._logger = logger
         self._batch_size = batch_size
         self._delay_seconds = delay_seconds
 
-    async def fetch_history(
-        self,
-        stocks: list[Stock],
-        start_date: datetime,
-        end_date: datetime,
-    ) -> dict[str, list[Ohlcv]]:
+    async def fetch_history(self, stocks: list[Stock], start_date: datetime, end_date: datetime) -> dict[str, list[Ohlcv]]:
         stocks = self._remove_duplicates(stocks)
 
         if not stocks:
@@ -101,10 +91,7 @@ class YahooFinanceProvider(IOhlcvProvider):
             self._logger.info(f"Yahoo history batch {batch_index}/{total_batches} started: {len(ticker_to_stock)} symbols")
 
             df = await self._download(
-                tickers=list(ticker_to_stock.keys()),
-                start_date=start_date,
-                end_date=end_date + timedelta(days=1),
-                interval="1d",
+                tickers=list(ticker_to_stock.keys()), start_date=start_date, end_date=end_date + timedelta(days=1), interval="1d"
             )
 
             success_count = 0
@@ -156,11 +143,7 @@ class YahooFinanceProvider(IOhlcvProvider):
 
             self._logger.info(f"Yahoo latest batch {batch_index}/{total_batches} started: {len(ticker_to_stock)} symbols")
 
-            df = await self._download(
-                tickers=list(ticker_to_stock.keys()),
-                period="1d",
-                interval="5m",
-            )
+            df = await self._download(tickers=list(ticker_to_stock.keys()), period="1d", interval="5m")
 
             success_count = 0
 

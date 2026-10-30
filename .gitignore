@@ -36,4 +36,4 @@ wheels/
 /news_archive
 /ai_responses
 /buzz_archive
-/backend/tests
+/backend/tests/leetcode

@@ -13,11 +13,7 @@ class CompositeScoreRule:
     technical_weight: float
     ai_weight: float
 
-    def calculate(
-        self,
-        technical_score: int,
-        ai_score: int,
-    ) -> int:
+    def calculate(self, technical_score: int, ai_score: int) -> int:
         score = technical_score * self.technical_weight + ai_score * self.ai_weight
 
         return round(score)

@@ -45,10 +45,7 @@ class EntryRule:
 
         if composite_score >= self.buy_threshold:
             quantity = self.sizing_rule.calculate(account=account, price=current_price)
-            reason = ReasonRule.build_entry_hold(
-                stock,
-                "Insufficient cash or position size too small",
-            )
+            reason = ReasonRule.build_entry_hold(stock, "Insufficient cash or position size too small")
 
         if quantity > 0:
             reason = ReasonRule.build_entry(stock)

@@ -1,4 +1,4 @@
-# src/d_presentation/web/endpoints/line_webhook.py
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, Request
 
@@ -11,8 +11,8 @@ router = APIRouter()
 @router.post("")
 async def handle_line_webhook(
     request: Request,
-    x_line_signature: str | None = Header(None),
-    handler: LineWebhookHandler = Depends(get_line_handler),
+    handler: Annotated[LineWebhookHandler, Depends(get_line_handler)],
+    x_line_signature: Annotated[str | None, Header()] = None,
 ):
     await handler.handle(request, x_line_signature)
     return {"status": "ok"}

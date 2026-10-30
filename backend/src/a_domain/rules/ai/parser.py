@@ -32,7 +32,7 @@ class AiReportParser:
                 raw_response=raw_response,
             )
 
-        except (json.JSONDecodeError, ValueError, TypeError):
+        except json.JSONDecodeError, ValueError, TypeError:
             return self._fallback(raw_response)
 
     def _extract_json(self, raw_response: str) -> dict:

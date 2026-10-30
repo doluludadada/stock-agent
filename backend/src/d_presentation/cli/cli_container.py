@@ -1,23 +1,15 @@
 from dataclasses import dataclass
 
 from a_domain.ports.ai.ai_provider import IAiProvider
-from a_domain.ports.analysis.technical_settings_repository import (
-    ITechnicalSettingsRepository,
-)
+from a_domain.ports.analysis.technical_settings_repository import ITechnicalSettingsRepository
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.notification_provider import INotificationProvider
 from a_domain.ports.trading.execution_provider import IExecutionProvider
-from a_domain.types.enums import (
-    ExecutionProvider,
-    OrderMode,
-    SystemEnvironment,
-)
+from a_domain.types.enums import ExecutionProvider, OrderMode, SystemEnvironment
 from b_application.pipeline import Pipeline
 from b_application.schemas.config import AppConfig
 from b_application.use_cases.collect.buzz_scanner import BuzzScanner
-from b_application.use_cases.collect.market_data_collector import (
-    MarketDataCollector,
-)
+from b_application.use_cases.collect.market_data_collector import MarketDataCollector
 from b_application.use_cases.collect.market_scanner import MarketScanner
 from b_application.use_cases.collect.news_feed import NewsFeed
 from b_application.use_cases.process.ai_analyser import AiAnalyser
@@ -32,34 +24,22 @@ from b_application.use_cases.trade.manual_buy import ManualBuy
 from b_application.use_cases.trade.order_execution import OrderExecution
 from b_application.use_cases.trade.watch_stocks import WatchStocks
 from c_infrastructure.ai_models.factory import AiAdapterFactory
-from c_infrastructure.database.chroma.chroma_repository import (
-    ChromaRepositoryAdapter,
-)
+from c_infrastructure.database.chroma.chroma_repository import ChromaRepositoryAdapter
 from c_infrastructure.database.db_connector import DatabaseConnector
-from c_infrastructure.database.repositories.signal_repository import (
-    SignalRepository,
-)
-from c_infrastructure.database.repositories.watchlist_repository import (
-    WatchlistRepository,
-)
+from c_infrastructure.database.repositories.signal_repository import SignalRepository
+from c_infrastructure.database.repositories.watchlist_repository import WatchlistRepository
 from c_infrastructure.feed.news_provider import NewsProvider
 from c_infrastructure.feed.ptt_provider import PttProvider
 from c_infrastructure.feed.tavily_provider import TavilySearchAdapter
 from c_infrastructure.market.cached_price_provider import CachedPriceProvider
 from c_infrastructure.market.twse_provider import TaiwanStockProvider
 from c_infrastructure.market.yahoo_finance_adapter import YahooFinanceProvider
-from c_infrastructure.platforms.line.line_notification_adapter import (
-    LineNotificationAdapter,
-)
+from c_infrastructure.platforms.line.line_notification_adapter import LineNotificationAdapter
 from c_infrastructure.system.config_loader import load_settings
 from c_infrastructure.system.logger_service import LoggerService
 from c_infrastructure.system.market_clock import TaiwanMarketClock
-from c_infrastructure.technical.yaml_technical_settings_repository import (
-    YamlTechnicalSettingsRepository,
-)
-from c_infrastructure.trading.mock.mock_execution_provider import (
-    MockExecutionProvider,
-)
+from c_infrastructure.technical.yaml_technical_settings_repository import YamlTechnicalSettingsRepository
+from c_infrastructure.trading.mock.mock_execution_provider import MockExecutionProvider
 
 
 @dataclass(slots=True)
@@ -117,9 +97,7 @@ class TradingUseCases:
     reporting: Reporting
 
 
-def validate_trading_environment(
-    config: AppConfig,
-) -> None:
+def validate_trading_environment(config: AppConfig) -> None:
     """
     DEV must never use a real execution provider.
 
@@ -129,151 +107,74 @@ def validate_trading_environment(
         return
 
     if config.trading.execution_provider != ExecutionProvider.MOCK:
-        raise ValueError(
-            "DEV environment requires MockExecutionProvider"
-        )
+        raise ValueError("DEV environment requires MockExecutionProvider")
 
     if config.trading.order_mode == OrderMode.LIVE:
-        raise ValueError(
-            "DEV environment cannot use LIVE order mode"
-        )
+        raise ValueError("DEV environment cannot use LIVE order mode")
 
 
-def create_ai_provider(
-    config: AppConfig,
-    logger: ILoggingProvider,
-) -> IAiProvider:
+def create_ai_provider(config: AppConfig, logger: ILoggingProvider) -> IAiProvider:
     web_search_provider = None
 
     if config.tavily.api_key:
-        web_search_provider = TavilySearchAdapter(
-            config=config,
-            logger=logger,
-        )
+        web_search_provider = TavilySearchAdapter(config=config, logger=logger)
 
-    factory = AiAdapterFactory(
-        config=config,
-        logger=logger,
-        web_search_provider=web_search_provider,
-    )
+    factory = AiAdapterFactory(config=config, logger=logger, web_search_provider=web_search_provider)
 
     return factory.create_adapter()
 
 
-def create_execution_provider(
-    config: AppConfig,
-    db: DatabaseConnector,
-    logger: ILoggingProvider,
-) -> IExecutionProvider:
+def create_execution_provider(config: AppConfig, db: DatabaseConnector, logger: ILoggingProvider) -> IExecutionProvider:
     if config.trading.execution_provider != ExecutionProvider.MOCK:
-        raise NotImplementedError(
-            f"Execution provider is not wired yet: "
-            f"{config.trading.execution_provider.value}"
-        )
+        raise NotImplementedError(f"Execution provider is not wired yet: {config.trading.execution_provider.value}")
 
-    return MockExecutionProvider(
-        db=db,
-        config=config,
-        logger=logger,
-    )
+    return MockExecutionProvider(db=db, config=config, logger=logger)
 
 
-def create_notification_provider(
-    config: AppConfig,
-    logger: ILoggingProvider,
-) -> INotificationProvider | None:
+def create_notification_provider(config: AppConfig, logger: ILoggingProvider) -> INotificationProvider | None:
     if not config.notifications.enabled:
         return None
 
-    return LineNotificationAdapter(
-        config=config,
-        logger=logger,
-    )
+    return LineNotificationAdapter(config=config, logger=logger)
 
 
 async def build_provider_dependencies(
-    config: AppConfig,
-    db: DatabaseConnector,
-    logger: ILoggingProvider,
-    market_clock: TaiwanMarketClock,
+    config: AppConfig, db: DatabaseConnector, logger: ILoggingProvider, market_clock: TaiwanMarketClock
 ) -> ProviderDependencies:
     stock_provider = TaiwanStockProvider(logger=logger)
     yahoo_provider = YahooFinanceProvider(logger=logger)
 
-    price_provider = CachedPriceProvider(
-        price_provider=yahoo_provider,
-        db=db,
-        logger=logger,
-        market_clock=market_clock,
-    )
+    price_provider = CachedPriceProvider(price_provider=yahoo_provider, db=db, logger=logger, market_clock=market_clock)
 
-    knowledge_repository = ChromaRepositoryAdapter(
-        config=config,
-        logger=logger,
-    )
+    knowledge_repository = ChromaRepositoryAdapter(config=config, logger=logger)
     await knowledge_repository.init()
 
-    technical_path = (
-        config.project_root
-        / "config"
-        / "technical.yaml"
-    )
+    technical_path = config.project_root / "config" / "technical.yaml"
 
     return ProviderDependencies(
         stock_provider=stock_provider,
         price_provider=price_provider,
-        news_provider=NewsProvider(
-            config=config,
-            logger=logger,
-        ),
-        social_media_provider=PttProvider(
-            config=config,
-            logger=logger,
-            stock_provider=stock_provider,
-        ),
+        news_provider=NewsProvider(config=config, logger=logger),
+        social_media_provider=PttProvider(config=config, logger=logger, stock_provider=stock_provider),
         ai_provider=create_ai_provider(config, logger),
         knowledge_repository=knowledge_repository,
-        signal_repository=SignalRepository(
-            db=db,
-            logger=logger,
-        ),
-        watchlist_repository=WatchlistRepository(
-            db=db,
-            logger=logger,
-            market_clock=market_clock,
-        ),
-        technical_settings_repository=YamlTechnicalSettingsRepository(
-            technical_path
-        ),
-        execution_provider=create_execution_provider(
-            config,
-            db,
-            logger,
-        ),
-        notification_provider=create_notification_provider(
-            config,
-            logger,
-        ),
+        signal_repository=SignalRepository(db=db, logger=logger),
+        watchlist_repository=WatchlistRepository(db=db, logger=logger, market_clock=market_clock),
+        technical_settings_repository=YamlTechnicalSettingsRepository(technical_path),
+        execution_provider=create_execution_provider(config, db, logger),
+        notification_provider=create_notification_provider(config, logger),
     )
 
 
 def build_collect_use_cases(
-    config: AppConfig,
-    logger: ILoggingProvider,
-    market_clock: TaiwanMarketClock,
-    dependencies: ProviderDependencies,
+    config: AppConfig, logger: ILoggingProvider, market_clock: TaiwanMarketClock, dependencies: ProviderDependencies
 ) -> CollectUseCases:
     market_scanner = MarketScanner(
-        stock_provider=dependencies.stock_provider,
-        watchlist_repository=dependencies.watchlist_repository,
-        logger=logger,
+        stock_provider=dependencies.stock_provider, watchlist_repository=dependencies.watchlist_repository, logger=logger
     )
 
     data_collector = MarketDataCollector(
-        ohlcv_provider=dependencies.price_provider,
-        market_clock=market_clock,
-        config=config,
-        logger=logger,
+        ohlcv_provider=dependencies.price_provider, market_clock=market_clock, config=config, logger=logger
     )
 
     buzz_scanner = BuzzScanner(
@@ -283,39 +184,20 @@ def build_collect_use_cases(
         config=config,
     )
 
-    news_feed = NewsFeed(
-        news_provider=dependencies.news_provider,
-        config=config,
-        logger=logger,
-    )
+    news_feed = NewsFeed(news_provider=dependencies.news_provider, config=config, logger=logger)
 
-    return CollectUseCases(
-        market_scanner,
-        data_collector,
-        buzz_scanner,
-        news_feed,
-    )
+    return CollectUseCases(market_scanner, data_collector, buzz_scanner, news_feed)
 
 
-def build_process_use_cases(
-    config: AppConfig,
-    logger: ILoggingProvider,
-    dependencies: ProviderDependencies,
-) -> ProcessUseCases:
+def build_process_use_cases(config: AppConfig, logger: ILoggingProvider, dependencies: ProviderDependencies) -> ProcessUseCases:
     ai_analyser = AiAnalyser(
-        ai_provider=dependencies.ai_provider,
-        knowledge_repository=dependencies.knowledge_repository,
-        config=config,
-        logger=logger,
+        ai_provider=dependencies.ai_provider, knowledge_repository=dependencies.knowledge_repository, config=config, logger=logger
     )
 
     return ProcessUseCases(
         ai_analyser=ai_analyser,
         technical_filter=TechnicalFilter(logger=logger),
-        composite_scorer=CompositeScorer(
-            config=config,
-            logger=logger,
-        ),
+        composite_scorer=CompositeScorer(config=config, logger=logger),
     )
 
 
@@ -327,21 +209,13 @@ def build_trading_use_cases(
     data_collector: MarketDataCollector,
 ) -> TradingUseCases:
     account_loader = AccountLoader(
-        execution_provider=dependencies.execution_provider,
-        stock_provider=dependencies.stock_provider,
-        logger=logger,
+        execution_provider=dependencies.execution_provider, stock_provider=dependencies.stock_provider, logger=logger
     )
 
-    decision_memory = DecisionMemory(
-        knowledge_repository=dependencies.knowledge_repository,
-        logger=logger,
-    )
+    decision_memory = DecisionMemory(knowledge_repository=dependencies.knowledge_repository, logger=logger)
 
     order_execution = OrderExecution(
-        execution_provider=dependencies.execution_provider,
-        market_clock=market_clock,
-        config=config,
-        logger=logger,
+        execution_provider=dependencies.execution_provider, market_clock=market_clock, config=config, logger=logger
     )
 
     manual_buy = ManualBuy(
@@ -356,28 +230,13 @@ def build_trading_use_cases(
 
     return TradingUseCases(
         account_loader=account_loader,
-        account_risk_check=AccountRiskCheck(
-            dependencies.signal_repository,
-            config,
-            logger,
-        ),
-        watch_stocks=WatchStocks(
-            dependencies.watchlist_repository,
-            logger,
-        ),
+        account_risk_check=AccountRiskCheck(dependencies.signal_repository, config, logger),
+        watch_stocks=WatchStocks(dependencies.watchlist_repository, logger),
         manual_buy=manual_buy,
-        signals=Signals(
-            dependencies.signal_repository,
-            config,
-            logger,
-        ),
+        signals=Signals(dependencies.signal_repository, config, logger),
         decision_memory=decision_memory,
         order_execution=order_execution,
-        reporting=Reporting(
-            dependencies.notification_provider,
-            config,
-            logger,
-        ),
+        reporting=Reporting(dependencies.notification_provider, config, logger),
     )
 
 
@@ -412,58 +271,22 @@ async def build_cli_orchestrator() -> CliRuntime:
     config = load_settings()
     validate_trading_environment(config)
 
-    logger = LoggerService(
-        level=config.behavior.log_level
-    )
+    logger = LoggerService(level=config.behavior.log_level)
     market_clock = TaiwanMarketClock()
 
-    db = DatabaseConnector(
-        config=config,
-        logger=logger,
-    )
+    db = DatabaseConnector(config=config, logger=logger)
     await db.init_db()
 
-    dependencies = await build_provider_dependencies(
-        config,
-        db,
-        logger,
-        market_clock,
-    )
+    dependencies = await build_provider_dependencies(config, db, logger, market_clock)
 
-    collect = build_collect_use_cases(
-        config,
-        logger,
-        market_clock,
-        dependencies,
-    )
+    collect = build_collect_use_cases(config, logger, market_clock, dependencies)
 
-    process = build_process_use_cases(
-        config,
-        logger,
-        dependencies,
-    )
+    process = build_process_use_cases(config, logger, dependencies)
 
-    trading = build_trading_use_cases(
-        config,
-        logger,
-        market_clock,
-        dependencies,
-        collect.data_collector,
-    )
+    trading = build_trading_use_cases(config, logger, market_clock, dependencies, collect.data_collector)
 
-    pipeline = build_pipeline(
-        collect,
-        process,
-        trading,
-        dependencies.technical_settings_repository,
-        logger,
-    )
+    pipeline = build_pipeline(collect, process, trading, dependencies.technical_settings_repository, logger)
 
     return CliRuntime(
-        pipeline=pipeline,
-        watch_stocks=trading.watch_stocks,
-        manual_buy=trading.manual_buy,
-        config=config,
-        db=db,
-        logger=logger,
+        pipeline=pipeline, watch_stocks=trading.watch_stocks, manual_buy=trading.manual_buy, config=config, db=db, logger=logger
     )

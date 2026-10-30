@@ -41,10 +41,7 @@ class LineNotificationAdapter(INotificationProvider):
             f"Reason : {signal.reason}"
         )
 
-        headers = {
-            "Authorization": f"Bearer {self._token}",
-            "Content-Type": "application/json",
-        }
+        headers = {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"}
 
         payload = {"to": recipients, "messages": [{"type": "text", "text": message_text}]}
 

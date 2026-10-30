@@ -26,17 +26,9 @@ class LinePlatformAdapter(IPlatformProvider):
         self._base_url = PUSH_MESSAGE_URL
 
     async def send_message(self, user_id: str, message: Message) -> bool:
-        headers = {
-            "Authorization": f"Bearer {self._channel_access_token}",
-            "Content-Type": "application/json",
-        }
+        headers = {"Authorization": f"Bearer {self._channel_access_token}", "Content-Type": "application/json"}
 
-        payload = {
-            "to": user_id,
-            "messages": [
-                {"type": "text", "text": message.content},
-            ],
-        }
+        payload = {"to": user_id, "messages": [{"type": "text", "text": message.content}]}
 
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             try:

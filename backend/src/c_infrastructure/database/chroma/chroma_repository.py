@@ -6,31 +6,19 @@ from a_domain.model.chat.conversation import Conversation
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.ports.ai.knowledge_repository import IKnowledgeRepository
-from a_domain.ports.chat.conversation_repository import (
-    IConversationRepository,
-)
+from a_domain.ports.chat.conversation_repository import IConversationRepository
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from b_application.schemas.config import AppConfig
 from c_infrastructure.database.chroma.mapper import ConversationMapper
-from c_infrastructure.database.chroma.schema import (
-    ChromaCollection,
-    ChromaResultKey,
-)
+from c_infrastructure.database.chroma.schema import ChromaCollection, ChromaResultKey
 
 # The embedding tokenizer warns on every later fork of the process unless its parallelism is set explicitly.
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 
 # TODO: Check it later
-class ChromaRepositoryAdapter(
-    IConversationRepository,
-    IKnowledgeRepository,
-):
-    def __init__(
-        self,
-        config: AppConfig,
-        logger: ILoggingProvider,
-    ) -> None:
+class ChromaRepositoryAdapter(IConversationRepository, IKnowledgeRepository):
+    def __init__(self, config: AppConfig, logger: ILoggingProvider) -> None:
         self._logger = logger
 
         self._logger.info(f"Initializing ChromaDB at: {config.db.chroma_persist_path}")
@@ -49,10 +37,7 @@ class ChromaRepositoryAdapter(
         except Exception as error:
             self._logger.error(f"ChromaDB warmup failed: {error}")
 
-    async def get_conversation_by_user_id(
-        self,
-        user_id: str,
-    ) -> Conversation | None:
+    async def get_conversation_by_user_id(self, user_id: str) -> Conversation | None:
         try:
             result = self._chat_collection.get(ids=[user_id])
             documents = result.get(ChromaResultKey.DOCUMENTS)
@@ -66,18 +51,11 @@ class ChromaRepositoryAdapter(
             self._logger.error(f"Failed to load conversation for {user_id}: {error}")
             return None
 
-    async def save(
-        self,
-        conversation: Conversation,
-    ) -> bool:
+    async def save(self, conversation: Conversation) -> bool:
         try:
             document, metadata = ConversationMapper.to_persistence(conversation)
 
-            self._chat_collection.upsert(
-                ids=[conversation.user_id],
-                documents=[document],
-                metadatas=[metadata],
-            )
+            self._chat_collection.upsert(ids=[conversation.user_id], documents=[document], metadatas=[metadata])
 
             return True
 
@@ -85,16 +63,9 @@ class ChromaRepositoryAdapter(
             self._logger.error(f"Failed to save conversation: {error}")
             return False
 
-    async def search(
-        self,
-        query: str,
-        limit: int = 3,
-    ) -> str:
+    async def search(self, query: str, limit: int = 3) -> str:
         try:
-            result = self._knowledge_collection.query(
-                query_texts=[query],
-                n_results=limit,
-            )
+            result = self._knowledge_collection.query(query_texts=[query], n_results=limit)
 
             documents = result.get(ChromaResultKey.DOCUMENTS)
 
@@ -107,11 +78,7 @@ class ChromaRepositoryAdapter(
             self._logger.error(f"RAG search failed for '{query}': {error}")
             return ""
 
-    async def save_decision(
-        self,
-        stock: Stock,
-        signal: TradeSignal,
-    ) -> None:
+    async def save_decision(self, stock: Stock, signal: TradeSignal) -> None:
         technical_score: int | str = stock.technical_score if stock.technical_score is not None else "Unavailable"
         ai_score: int | str = stock.ai_score if stock.ai_score is not None else "Unavailable"
 
@@ -167,10 +134,6 @@ class ChromaRepositoryAdapter(
 
         decision_id = f"{signal.stock_id}_{signal.generated_at.strftime('%Y%m%d%H%M%S%f')}"
 
-        self._knowledge_collection.upsert(
-            ids=[decision_id],
-            documents=["\n".join(document_lines)],
-            metadatas=[metadata],
-        )
+        self._knowledge_collection.upsert(ids=[decision_id], documents=["\n".join(document_lines)], metadatas=[metadata])
 
         self._logger.debug(f"RAG decision saved: {signal.action.value} {signal.stock_id}")

@@ -22,11 +22,7 @@ class AiAnalyser:
     """
 
     def __init__(
-        self,
-        ai_provider: IAiProvider,
-        knowledge_repository: IKnowledgeRepository,
-        config: AppConfig,
-        logger: ILoggingProvider,
+        self, ai_provider: IAiProvider, knowledge_repository: IKnowledgeRepository, config: AppConfig, logger: ILoggingProvider
     ) -> None:
         self._ai_provider = ai_provider
         self._knowledge_repository = knowledge_repository
@@ -39,12 +35,7 @@ class AiAnalyser:
         )
         self._report_parser = AiReportParser()
 
-    async def execute(
-        self,
-        stocks: list[Stock],
-        status: PipelineStatus,
-        focus: AiAnalysisFocus,
-    ) -> None:
+    async def execute(self, stocks: list[Stock], status: PipelineStatus, focus: AiAnalysisFocus) -> None:
         self._logger.info(f"Analysing {len(stocks)} stocks. Focus={focus.value}.")
         analysed_count = 0
 

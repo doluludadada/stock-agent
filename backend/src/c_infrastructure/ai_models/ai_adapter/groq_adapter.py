@@ -10,11 +10,7 @@ from functools import cached_property
 import httpx
 from icontract import require
 from openai import AsyncOpenAI, OpenAIError
-from openai.types.chat import (
-    ChatCompletionAssistantMessageParam,
-    ChatCompletionSystemMessageParam,
-    ChatCompletionUserMessageParam,
-)
+from openai.types.chat import ChatCompletionAssistantMessageParam, ChatCompletionSystemMessageParam, ChatCompletionUserMessageParam
 
 from a_domain.model.chat.message import Message, MessageRole
 from a_domain.ports.chat.web_search_provider import IWebSearchProvider
@@ -73,10 +69,7 @@ class GroqAIAdapter(BaseAIAdapter):
         # LLM call — always runs regardless of search outcome
         try:
             stream = await self._client.chat.completions.create(
-                model=self._model_name,
-                messages=api_messages,
-                temperature=0.7,
-                stream=True,
+                model=self._model_name, messages=api_messages, temperature=0.7, stream=True
             )
 
             full_content = ""
@@ -109,10 +102,7 @@ class GroqAIAdapter(BaseAIAdapter):
             return ""
 
         self._logger.debug(f"Performing web search for: {user_query}")
-        results = await self._web_search_provider.search(
-            user_query,
-            limit=self._config.behavior.web_search_max_results,
-        )
+        results = await self._web_search_provider.search(user_query, limit=self._config.behavior.web_search_max_results)
 
         if not results:
             return ""

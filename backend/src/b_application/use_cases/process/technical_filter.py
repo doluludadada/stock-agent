@@ -17,12 +17,7 @@ class TechnicalFilter:
     def __init__(self, logger: ILoggingProvider) -> None:
         self._logger = logger
 
-    async def execute(
-        self,
-        stocks: list[Stock],
-        status: PipelineStatus,
-        strategy: TechnicalStrategy,
-    ) -> list[Stock]:
+    async def execute(self, stocks: list[Stock], status: PipelineStatus, strategy: TechnicalStrategy) -> list[Stock]:
         self._logger.info(f"Filtering {len(stocks)} stocks with the selected technical strategy.")
         survivors: list[Stock] = []
 

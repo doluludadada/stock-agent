@@ -37,12 +37,7 @@ class DatabaseConnector:
             connection_url = f"sqlite+aiosqlite:///{sqlite_path}"
             self._engine = create_async_engine(connection_url, echo=False)
 
-        self._session_factory = async_sessionmaker(
-            bind=self._engine,
-            class_=AsyncSession,
-            expire_on_commit=False,
-            autoflush=False,
-        )
+        self._session_factory = async_sessionmaker(bind=self._engine, class_=AsyncSession, expire_on_commit=False, autoflush=False)
 
     async def init_db(self) -> None:
         """Create tables if they don't exist based on SQLModel metadata."""

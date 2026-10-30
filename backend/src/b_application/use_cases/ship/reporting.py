@@ -14,12 +14,7 @@ class Reporting:
         - It must not execute orders, change signal decisions, or mutate order counts.
     """
 
-    def __init__(
-        self,
-        notification_provider: INotificationProvider | None,
-        config: AppConfig,
-        logger: ILoggingProvider,
-    ):
+    def __init__(self, notification_provider: INotificationProvider | None, config: AppConfig, logger: ILoggingProvider):
         self._notification = notification_provider
         self._config = config
         self._logger = logger

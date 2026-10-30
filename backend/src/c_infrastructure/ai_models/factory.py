@@ -14,12 +14,7 @@ class AiAdapterFactory:
     Factory class responsible for creating AI model adapter instances based on configuration.
     """
 
-    def __init__(
-        self,
-        config: AppConfig,
-        logger: ILoggingProvider,
-        web_search_provider: IWebSearchProvider | None = None,
-    ):
+    def __init__(self, config: AppConfig, logger: ILoggingProvider, web_search_provider: IWebSearchProvider | None = None):
         self._config = config
         self._logger = logger
         self._web_search_provider = web_search_provider
@@ -35,31 +30,16 @@ class AiAdapterFactory:
         self._logger.debug(f"Creating AI adapter for provider: {provider.value} with model: {model_name}")
 
         if provider == AiProvider.OPENAI:
-            return OpenAIAdapter(
-                config=self._config,
-                logger=self._logger,
-                model_name=model_name,
-            )
+            return OpenAIAdapter(config=self._config, logger=self._logger, model_name=model_name)
 
         if provider == AiProvider.GROK:
-            return GrokAdapter(
-                config=self._config,
-                logger=self._logger,
-                model_name=model_name,
-            )
+            return GrokAdapter(config=self._config, logger=self._logger, model_name=model_name)
 
         if provider == AiProvider.GEMINI:
-            return GeminiAIAdapter(
-                config=self._config,
-                logger=self._logger,
-                model_name=model_name,
-            )
+            return GeminiAIAdapter(config=self._config, logger=self._logger, model_name=model_name)
 
         if provider == AiProvider.GROQ:
             return GroqAIAdapter(
-                config=self._config,
-                logger=self._logger,
-                model_name=model_name,
-                web_search_provider=self._web_search_provider,
+                config=self._config, logger=self._logger, model_name=model_name, web_search_provider=self._web_search_provider
             )
         raise ValueError(f"Unsupported provider: {provider!s}")

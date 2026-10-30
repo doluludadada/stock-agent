@@ -25,11 +25,7 @@ class Position(SQLModel):
 
         return self.quantity >= quantity
 
-    def add(
-        self,
-        quantity: int,
-        price: float,
-    ) -> None:
+    def add(self, quantity: int, price: float) -> None:
         if quantity <= 0:
             raise ValueError("Quantity must be positive")
 
@@ -47,10 +43,7 @@ class Position(SQLModel):
 
         return self.quantity - quantity
 
-    def reduce(
-        self,
-        quantity: int,
-    ) -> None:
+    def reduce(self, quantity: int) -> None:
         remaining_quantity = self.remaining_after_sell(quantity)
 
         if remaining_quantity == 0:

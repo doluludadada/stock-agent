@@ -3,11 +3,7 @@ from functools import cached_property
 import httpx
 from icontract import require
 from openai import AsyncOpenAI, OpenAIError
-from openai.types.chat import (
-    ChatCompletionAssistantMessageParam,
-    ChatCompletionSystemMessageParam,
-    ChatCompletionUserMessageParam,
-)
+from openai.types.chat import ChatCompletionAssistantMessageParam, ChatCompletionSystemMessageParam, ChatCompletionUserMessageParam
 
 from a_domain.model.chat.message import Message, MessageRole
 from a_domain.ports.system.logging_provider import ILoggingProvider
@@ -23,20 +19,14 @@ class OpenAIAdapter(BaseAIAdapter):
     @cached_property
     def _client(self) -> AsyncOpenAI:
         self._logger.debug("Initialising AsyncOpenAI client...")
-        return AsyncOpenAI(
-            api_key=self._config.ai.openai_api_key,
-            timeout=httpx.Timeout(self._config.ai.connection_timeout),
-        )
+        return AsyncOpenAI(api_key=self._config.ai.openai_api_key, timeout=httpx.Timeout(self._config.ai.connection_timeout))
 
     async def _call_api(self, messages: tuple[Message, ...]):
         """Calls the OpenAI Chat Completions API."""
         api_messages = self._convert_to_api_format(messages)
         try:
             stream = await self._client.chat.completions.create(
-                model=self._model_name,
-                messages=api_messages,
-                temperature=0.7,
-                stream=True,
+                model=self._model_name, messages=api_messages, temperature=0.7, stream=True
             )
 
             full_content = ""

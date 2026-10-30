@@ -8,11 +8,7 @@ class DecisionMemory:
     Saves generated trading decisions for future AI context.
     """
 
-    def __init__(
-        self,
-        knowledge_repository: IKnowledgeRepository,
-        logger: ILoggingProvider,
-    ) -> None:
+    def __init__(self, knowledge_repository: IKnowledgeRepository, logger: ILoggingProvider) -> None:
         self._knowledge_repository = knowledge_repository
         self._logger = logger
 
@@ -25,10 +21,7 @@ class DecisionMemory:
                     self._logger.warning(f"Decision memory skipped. Stock not found: {signal.stock_id}")
                     continue
 
-                await self._knowledge_repository.save_decision(
-                    stock=stock,
-                    signal=signal,
-                )
+                await self._knowledge_repository.save_decision(stock=stock, signal=signal)
 
             except Exception as error:
                 message = f"Decision memory failed for {signal.stock_id}: {error}"

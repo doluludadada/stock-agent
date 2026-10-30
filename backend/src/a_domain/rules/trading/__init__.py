@@ -4,10 +4,4 @@ from a_domain.rules.trading.exit import ExitRule
 from a_domain.rules.trading.reason import ReasonRule
 from a_domain.rules.trading.sizing import SizingRule
 
-__all__ = [
-    "DecisionRule",
-    "EntryRule",
-    "ExitRule",
-    "ReasonRule",
-    "SizingRule",
-]
+__all__ = ["DecisionRule", "EntryRule", "ExitRule", "ReasonRule", "SizingRule"]

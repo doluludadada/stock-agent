@@ -9,15 +9,8 @@ from b_application.schemas.config import AppConfig
 class CompositeScorer:
     """Calculates the final score from technical and AI analysis."""
 
-    def __init__(
-        self,
-        config: AppConfig,
-        logger: ILoggingProvider,
-    ) -> None:
-        self._score_rule = CompositeScoreRule(
-            technical_weight=config.analysis.technical_weight,
-            ai_weight=config.analysis.ai_weight,
-        )
+    def __init__(self, config: AppConfig, logger: ILoggingProvider) -> None:
+        self._score_rule = CompositeScoreRule(technical_weight=config.analysis.technical_weight, ai_weight=config.analysis.ai_weight)
         self._logger = logger
 
     def execute(self, stocks: list[Stock]) -> None:
@@ -30,10 +23,7 @@ class CompositeScorer:
                 self._logger.warning(f"Composite score skipped. Incomplete analysis: {stock.stock_id}")
                 continue
 
-            stock.composite_score = self._score_rule.calculate(
-                technical_score=stock.technical_score,
-                ai_score=stock.ai_score,
-            )
+            stock.composite_score = self._score_rule.calculate(technical_score=stock.technical_score, ai_score=stock.ai_score)
             scored_count += 1
 
         self._logger.info(f"Composite scoring completed: {scored_count}/{len(stocks)} stocks scored.")

@@ -52,12 +52,7 @@ def latest_rsi(closes: Sequence[float], period: int) -> float | None:
     return _oscillator_from_average_gain_loss(average_gain, average_loss)
 
 
-def latest_macd(
-    closes: Sequence[float],
-    fast: int,
-    slow: int,
-    signal_period: int,
-) -> tuple[float, float, float] | None:
+def latest_macd(closes: Sequence[float], fast: int, slow: int, signal_period: int) -> tuple[float, float, float] | None:
     if min(fast, slow, signal_period) <= 0 or fast == slow:
         return None
 
@@ -82,11 +77,7 @@ def latest_macd(
     return line, signal, line - signal
 
 
-def latest_bollinger(
-    closes: Sequence[float],
-    period: int,
-    std_multiplier: float,
-) -> tuple[float, float, float, float, float] | None:
+def latest_bollinger(closes: Sequence[float], period: int, std_multiplier: float) -> tuple[float, float, float, float, float] | None:
     if period <= 0 or std_multiplier <= 0 or len(closes) < period:
         return None
 
@@ -103,11 +94,7 @@ def latest_bollinger(
     return upper, middle, lower, bandwidth, percent_b
 
 
-def latest_stochastic(
-    bars: Sequence[Ohlcv],
-    k_period: int,
-    d_period: int,
-) -> tuple[float, float] | None:
+def latest_stochastic(bars: Sequence[Ohlcv], k_period: int, d_period: int) -> tuple[float, float] | None:
     if min(k_period, d_period) <= 0 or len(bars) < k_period + d_period - 1:
         return None
 
@@ -179,11 +166,7 @@ def latest_adx(bars: Sequence[Ohlcv], period: int) -> tuple[float, float, float]
             smoothed_plus_dm = smoothed_plus_dm - (smoothed_plus_dm / period) + plus_dms[index]
             smoothed_minus_dm = smoothed_minus_dm - (smoothed_minus_dm / period) + minus_dms[index]
 
-        dx, latest_plus_di, latest_minus_di = _directional_index(
-            smoothed_tr,
-            smoothed_plus_dm,
-            smoothed_minus_dm,
-        )
+        dx, latest_plus_di, latest_minus_di = _directional_index(smoothed_tr, smoothed_plus_dm, smoothed_minus_dm)
         dx_values.append(dx)
 
         if len(dx_values) == period:
@@ -197,11 +180,7 @@ def latest_adx(bars: Sequence[Ohlcv], period: int) -> tuple[float, float, float]
     return adx, latest_plus_di, latest_minus_di
 
 
-def latest_obv(
-    closes: Sequence[float],
-    volumes: Sequence[float],
-    ma_period: int,
-) -> tuple[float, float] | None:
+def latest_obv(closes: Sequence[float], volumes: Sequence[float], ma_period: int) -> tuple[float, float] | None:
     if ma_period <= 0 or len(closes) < ma_period or len(closes) != len(volumes):
         return None
 
@@ -248,18 +227,10 @@ def _true_ranges(bars: Sequence[Ohlcv]) -> list[float]:
 
 
 def _true_range(bar: Ohlcv, previous_close: float) -> float:
-    return max(
-        bar.high - bar.low,
-        abs(bar.high - previous_close),
-        abs(bar.low - previous_close),
-    )
+    return max(bar.high - bar.low, abs(bar.high - previous_close), abs(bar.low - previous_close))
 
 
-def _directional_index(
-    smoothed_tr: float,
-    smoothed_plus_dm: float,
-    smoothed_minus_dm: float,
-) -> tuple[float, float, float]:
+def _directional_index(smoothed_tr: float, smoothed_plus_dm: float, smoothed_minus_dm: float) -> tuple[float, float, float]:
     if smoothed_tr <= 0:
         return 0.0, 0.0, 0.0
 

@@ -18,27 +18,14 @@ class AccountRiskCheck:
     It does not fetch market data or run score-based trading decisions.
     """
 
-    def __init__(
-        self,
-        signal_repository: ISignalRepository,
-        config: AppConfig,
-        logger: ILoggingProvider,
-    ) -> None:
+    def __init__(self, signal_repository: ISignalRepository, config: AppConfig, logger: ILoggingProvider) -> None:
         self._signal_repository = signal_repository
-        self._exit_rule = ExitRule(
-            stop_loss_pct=config.analysis.stop_loss_pct,
-            sell_threshold=config.analysis.max_combined_score_sell,
-        )
+        self._exit_rule = ExitRule(stop_loss_pct=config.analysis.stop_loss_pct, sell_threshold=config.analysis.max_combined_score_sell)
         self._logger = logger
 
-    async def execute(
-        self,
-        status: PipelineStatus,
-    ) -> None:
+    async def execute(self, status: PipelineStatus) -> None:
         if not status.held_stocks:
-            self._logger.info(
-                "Account risk check skipped. No held positions."
-            )
+            self._logger.info("Account risk check skipped. No held positions.")
             return
 
         for stock in status.held_stocks:
@@ -50,43 +37,23 @@ class AccountRiskCheck:
             if position is None:
                 continue
 
-            signal = self._exit_rule.decide_stop_loss_only(
-                stock=stock,
-                position=position,
-            )
+            signal = self._exit_rule.decide_stop_loss_only(stock=stock, position=position)
 
             if signal.action == TradeAction.SELL:
-                await self.record_stop_loss(
-                    signal,
-                    status,
-                )
+                await self.record_stop_loss(signal, status)
 
-    def has_executable_market_data(
-        self,
-        stock: Stock,
-        status: PipelineStatus,
-    ) -> bool:
+    def has_executable_market_data(self, stock: Stock, status: PipelineStatus) -> bool:
         if stock.stock_id in status.stale_stock_ids:
-            self._logger.warning(
-                f"Risk check skipped. Market data is stale: "
-                f"{stock.stock_id}"
-            )
+            self._logger.warning(f"Risk check skipped. Market data is stale: {stock.stock_id}")
             return False
 
         if stock.realtime_bar is None:
-            self._logger.warning(
-                f"Risk check skipped. Realtime bar unavailable: "
-                f"{stock.stock_id}"
-            )
+            self._logger.warning(f"Risk check skipped. Realtime bar unavailable: {stock.stock_id}")
             return False
 
         return True
 
-    async def record_stop_loss(
-        self,
-        signal: TradeSignal,
-        status: PipelineStatus,
-    ) -> None:
+    async def record_stop_loss(self, signal: TradeSignal, status: PipelineStatus) -> None:
         status.signals.append(signal)
         status.risk_blocked_stock_ids.add(signal.stock_id)
 
@@ -95,10 +62,7 @@ class AccountRiskCheck:
             status.stats.signals_generated += 1
 
         except Exception as error:
-            message = (
-                f"Stop-loss signal persistence failed: "
-                f"{signal.stock_id}, error={error}"
-            )
+            message = f"Stop-loss signal persistence failed: {signal.stock_id}, error={error}"
             self._logger.error(message)
             status.stats.add_error(message)
 

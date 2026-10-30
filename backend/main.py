@@ -5,11 +5,7 @@ from fastapi import FastAPI
 
 from d_presentation.web.routers.api_v1 import router as api_v1_router
 
-app = FastAPI(
-    title="TW-Stock-Alpha-Agent",
-    description="Automated stock analysis and trading pipeline API.",
-    version="0.1.0",
-)
+app = FastAPI(title="TW-Stock-Alpha-Agent", description="Automated stock analysis and trading pipeline API.", version="0.1.0")
 
 app.include_router(api_v1_router)
 

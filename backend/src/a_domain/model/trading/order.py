@@ -18,10 +18,7 @@ class Order(SQLModel):
     quantity: int = Field(gt=0)
 
     limit_price: float | None = Field(default=None, gt=0)
-    average_filled_price: float | None = Field(
-        default=None,
-        gt=0,
-    )
+    average_filled_price: float | None = Field(default=None, gt=0)
     time_in_force: TimeInForce = TimeInForce.ROD
 
     status: OrderStatus = OrderStatus.PENDING
@@ -59,14 +56,8 @@ class Order(SQLModel):
         self.reason = None
         self.updated_at = datetime.now()
 
-    def fill(
-        self,
-        filled_price: float,
-    ) -> None:
-        if self.status not in {
-            OrderStatus.PENDING,
-            OrderStatus.SUBMITTED,
-        }:
+    def fill(self, filled_price: float) -> None:
+        if self.status not in {OrderStatus.PENDING, OrderStatus.SUBMITTED}:
             raise ValueError(f"Cannot fill order from status {self.status}")
 
         if not math.isfinite(filled_price) or filled_price <= 0:
@@ -95,10 +86,7 @@ class Order(SQLModel):
         self.reason = None
         self.updated_at = datetime.now()
 
-    def reject(
-        self,
-        reason: str,
-    ) -> None:
+    def reject(self, reason: str) -> None:
         if self.status != OrderStatus.PENDING:
             raise ValueError(f"Cannot reject order from status {self.status}")
 
@@ -109,14 +97,8 @@ class Order(SQLModel):
         self.reason = reason
         self.updated_at = datetime.now()
 
-    def fail(
-        self,
-        reason: str,
-    ) -> None:
-        if self.status not in {
-            OrderStatus.PENDING,
-            OrderStatus.SUBMITTED,
-        }:
+    def fail(self, reason: str) -> None:
+        if self.status not in {OrderStatus.PENDING, OrderStatus.SUBMITTED}:
             raise ValueError(f"Cannot fail order from status {self.status}")
 
         if not reason.strip():

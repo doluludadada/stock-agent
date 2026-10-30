@@ -23,8 +23,7 @@ from d_presentation.dependencies.core import get_db_connector, get_logger, get_m
 
 
 def get_tavily_search(
-    config: Annotated[AppConfig, Depends(get_settings)],
-    logger: Annotated[ILoggingProvider, Depends(get_logger)],
+    config: Annotated[AppConfig, Depends(get_settings)], logger: Annotated[ILoggingProvider, Depends(get_logger)]
 ) -> IWebSearchProvider | None:
     if not config.tavily.api_key:
         return None
@@ -41,12 +40,7 @@ def get_price_provider(
     db: Annotated[DatabaseConnector, Depends(get_db_connector)],
     market_clock: Annotated[IMarketClock, Depends(get_market_clock)],
 ) -> IOhlcvProvider:
-    return CachedPriceProvider(
-        price_provider=YahooFinanceProvider(logger=logger),
-        db=db,
-        logger=logger,
-        market_clock=market_clock,
-    )
+    return CachedPriceProvider(price_provider=YahooFinanceProvider(logger=logger), db=db, logger=logger, market_clock=market_clock)
 
 
 def get_stock_provider(logger: Annotated[ILoggingProvider, Depends(get_logger)]) -> IStockProvider:
@@ -54,8 +48,7 @@ def get_stock_provider(logger: Annotated[ILoggingProvider, Depends(get_logger)])
 
 
 def get_news_provider(
-    config: Annotated[AppConfig, Depends(get_settings)],
-    logger: Annotated[ILoggingProvider, Depends(get_logger)],
+    config: Annotated[AppConfig, Depends(get_settings)], logger: Annotated[ILoggingProvider, Depends(get_logger)]
 ) -> INewsProvider:
     return NewsProvider(config=config, logger=logger)
 
@@ -65,8 +58,4 @@ def get_social_media_provider(
     logger: Annotated[ILoggingProvider, Depends(get_logger)],
     stock_provider: Annotated[IStockProvider, Depends(get_stock_provider)],
 ) -> ISocialMediaProvider:
-    return PttProvider(
-        config=config,
-        logger=logger,
-        stock_provider=stock_provider,
-    )
+    return PttProvider(config=config, logger=logger, stock_provider=stock_provider)

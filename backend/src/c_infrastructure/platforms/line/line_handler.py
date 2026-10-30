@@ -20,7 +20,7 @@ class LineWebhookHandler:
         try:
             payload = LineWebhookPayload.model_validate_json(body)
         except ValidationError as e:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid payload: {e}")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid payload: {e}") from e
 
         for event in payload.events:
             if event.type == EVENT_TYPE_MESSAGE and event.message and (event.message.type == MESSAGE_TYPE_TEXT):

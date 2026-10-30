@@ -70,13 +70,7 @@ class Account(SQLModel):
 
         return None
 
-    def buy(
-        self,
-        stock_id: str,
-        quantity: int,
-        price: float,
-        total_cost: float,
-    ) -> Position:
+    def buy(self, stock_id: str, quantity: int, price: float, total_cost: float) -> Position:
         if not stock_id.strip():
             raise ValueError("stock_id is required")
 
@@ -91,29 +85,17 @@ class Account(SQLModel):
         position = self.position_for(stock_id)
 
         if position is None:
-            position = Position(
-                stock_id=stock_id,
-                quantity=quantity,
-                average_cost=price,
-            )
+            position = Position(stock_id=stock_id, quantity=quantity, average_cost=price)
             self.positions.append(position)
 
         else:
-            position.add(
-                quantity=quantity,
-                price=price,
-            )
+            position.add(quantity=quantity, price=price)
 
         self.updated_at = datetime.now()
 
         return position
 
-    def sell(
-        self,
-        stock_id: str,
-        quantity: int,
-        cash_delta: float,
-    ) -> int:
+    def sell(self, stock_id: str, quantity: int, cash_delta: float) -> int:
         if not stock_id.strip():
             raise ValueError("stock_id is required")
 

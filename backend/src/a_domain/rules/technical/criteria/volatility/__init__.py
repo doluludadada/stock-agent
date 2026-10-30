@@ -3,10 +3,7 @@ from a_domain.rules.technical.criteria.volatility.bollinger import (
     BollingerSqueezeCriterion,
     BollingerThresholdCriterion,
 )
-from a_domain.rules.technical.criteria.volatility.volatility_safety import (
-    AtrRangeCriterion,
-    DailyRangeCriterion,
-)
+from a_domain.rules.technical.criteria.volatility.volatility_safety import AtrRangeCriterion, DailyRangeCriterion
 
 __all__ = [
     "AtrRangeCriterion",
