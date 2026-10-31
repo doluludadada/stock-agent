@@ -1,5 +1,6 @@
 from a_domain.ports.ai.ai_provider import IAiProvider
 from a_domain.ports.ai.knowledge_repository import IKnowledgeRepository
 from a_domain.ports.ai.sentiment_classifier import ISentimentClassifier
+from a_domain.ports.ai.sentiment_repository import ISentimentRepository
 
-__all__ = ["IAiProvider", "IKnowledgeRepository", "ISentimentClassifier"]
+__all__ = ["IAiProvider", "IKnowledgeRepository", "ISentimentClassifier", "ISentimentRepository"]

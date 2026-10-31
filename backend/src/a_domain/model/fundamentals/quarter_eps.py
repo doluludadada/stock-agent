@@ -9,7 +9,7 @@ from a_domain.model.fundamentals.fiscal_quarter import FiscalQuarter
 
 @dataclass(frozen=True)
 class QuarterEps:
-    """Cumulative year-to-date basic EPS as filed for one quarter, every market merged."""
+    """Cumulative year-to-date basic EPS as filed for one quarter: one market's MOPS page, or every market merged."""
 
     quarter: FiscalQuarter
     cumulative_eps: Mapping[str, float]

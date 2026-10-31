@@ -123,6 +123,16 @@ class TimeInForce(StrEnum):
     """Fill or Kill: fill the whole quantity now or cancel all of it."""
 
 
+class LotKind(StrEnum):
+    """How the exchange counts an order's quantity. A broker sends each kind as its own exchange order."""
+
+    BOARD_LOT = auto()
+    """Whole board lots (market.board_lot_shares shares each), traded on the regular board."""
+
+    ODD_LOT = auto()
+    """Fewer shares than one board lot, traded on the intraday odd-lot board."""
+
+
 class InformationSource(StrEnum):
     TWSE_MOPS = auto()
     NEWS_MEDIA = auto()
@@ -217,10 +227,10 @@ class EpsKind(StrEnum):
 
 
 EPS_KIND_LABELS = {
-    EpsKind.SINGLE_QUARTER: "單季",
-    EpsKind.CUMULATIVE: "累計",
-    EpsKind.ANNUAL: "年度",
-    EpsKind.TRAILING_TWELVE_MONTHS: "近四季 TTM",
+    EpsKind.SINGLE_QUARTER: "single quarter",
+    EpsKind.CUMULATIVE: "cumulative",
+    EpsKind.ANNUAL: "annual",
+    EpsKind.TRAILING_TWELVE_MONTHS: "TTM",
 }
 
 
@@ -230,7 +240,7 @@ class EpsBasis(StrEnum):
 
     @property
     def label(self) -> str:
-        return "實際值" if self == EpsBasis.ACTUAL else "預估值"
+        return "actual" if self == EpsBasis.ACTUAL else "estimate"
 
 
 class EpsUnavailableReason(StrEnum):
@@ -253,7 +263,7 @@ class ScanStep(StrEnum):
 
     @property
     def label(self) -> str:
-        return "估值" if self == ScanStep.VALUATION else "技術面"
+        return "valuation" if self == ScanStep.VALUATION else "technical"
 
 
 class EliminationReason(StrEnum):
@@ -278,13 +288,13 @@ class EliminationReason(StrEnum):
 
 
 ELIMINATION_LABELS = {
-    EliminationReason.EPS_UNAVAILABLE: "EPS 資料不足",
+    EliminationReason.EPS_UNAVAILABLE: "insufficient EPS data",
     EliminationReason.EPS_NOT_POSITIVE: "EPS ≤ 0",
-    EliminationReason.PRICE_MISSING: "無有效股價",
-    EliminationReason.PRICE_STALE: "股價過期",
-    EliminationReason.BELOW_MIN_UNDERVALUATION: "低估幅度未達條件",
-    EliminationReason.NO_PRICE_HISTORY: "無可用日線資料（缺漏或已過期），無法執行技術策略",
-    EliminationReason.TECHNICAL_HARD_FAILURE: "技術面 hard failure",
+    EliminationReason.PRICE_MISSING: "no valid price",
+    EliminationReason.PRICE_STALE: "stale price",
+    EliminationReason.BELOW_MIN_UNDERVALUATION: "undervaluation below the minimum",
+    EliminationReason.NO_PRICE_HISTORY: "no usable daily history (missing or stale), so the technical strategy cannot run",
+    EliminationReason.TECHNICAL_HARD_FAILURE: "technical hard failure",
 }
 
 
@@ -300,10 +310,10 @@ class PeNotApplicableReason(StrEnum):
 
 
 PE_NOT_APPLICABLE_LABELS = {
-    PeNotApplicableReason.EPS_UNAVAILABLE: "資料不足",
-    PeNotApplicableReason.EPS_ZERO: "無法計算",
-    PeNotApplicableReason.EPS_NEGATIVE: "虧損，本益比不適用",
-    PeNotApplicableReason.INVALID_PRICE: "無有效股價",
+    PeNotApplicableReason.EPS_UNAVAILABLE: "insufficient data",
+    PeNotApplicableReason.EPS_ZERO: "cannot be computed",
+    PeNotApplicableReason.EPS_NEGATIVE: "loss-making, P/E not applicable",
+    PeNotApplicableReason.INVALID_PRICE: "no valid price",
 }
 
 
@@ -314,4 +324,4 @@ class ScenarioName(StrEnum):
 
     @property
     def label(self) -> str:
-        return {ScenarioName.CONSERVATIVE: "保守", ScenarioName.BASE: "基準", ScenarioName.OPTIMISTIC: "樂觀"}[self]
+        return {ScenarioName.CONSERVATIVE: "Conservative", ScenarioName.BASE: "Base", ScenarioName.OPTIMISTIC: "Optimistic"}[self]

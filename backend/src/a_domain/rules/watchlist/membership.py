@@ -16,8 +16,8 @@ class WatchlistRule:
     An automatic entry expires at `automatic_expires_at` and is renewed whenever its workflow selects the stock again.
     """
 
-    @staticmethod
-    def add(
+    def apply(
+        self,
         active_entries: list[WatchlistEntry],
         stocks: list[Stock],
         watchlist_type: WatchlistType,
@@ -26,26 +26,19 @@ class WatchlistRule:
     ) -> WatchlistAddition:
         current_entries = {entry.stock_id: entry for entry in active_entries if entry.watchlist_type == watchlist_type}
         unique_stocks = list({stock.stock_id: stock for stock in stocks}.values())
-        already_present_stock_ids: list[str] = []
-        entries: list[WatchlistEntry] = []
+        already_present_stock_ids = [stock.stock_id for stock in unique_stocks if stock.stock_id in current_entries]
+        is_manual = watchlist_type == WatchlistType.MANUAL
 
-        for stock in unique_stocks:
-            current_entry = current_entries.get(stock.stock_id)
-
-            if current_entry is not None:
-                already_present_stock_ids.append(stock.stock_id)
-
-            if current_entry is not None and watchlist_type == WatchlistType.MANUAL:
-                continue
-
-            entries.append(
-                WatchlistEntry(
-                    stock_id=stock.stock_id,
-                    watchlist_type=watchlist_type,
-                    created_at=current_entry.created_at if current_entry is not None else now,
-                    expires_at=None if watchlist_type == WatchlistType.MANUAL else automatic_expires_at,
-                )
+        entries = [
+            WatchlistEntry(
+                stock_id=stock.stock_id,
+                watchlist_type=watchlist_type,
+                created_at=current_entries[stock.stock_id].created_at if stock.stock_id in current_entries else now,
+                expires_at=None if is_manual else automatic_expires_at,
             )
+            for stock in unique_stocks
+            if not (is_manual and stock.stock_id in current_entries)
+        ]
 
         return WatchlistAddition(
             watchlist_type=watchlist_type, stocks=unique_stocks, already_present_stock_ids=already_present_stock_ids, entries=entries

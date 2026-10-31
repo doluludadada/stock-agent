@@ -1,5 +1,3 @@
-# backend/src/a_domain/rules/ai/prompt.py
-
 from dataclasses import dataclass
 
 from icontract import ensure, invariant
@@ -30,7 +28,7 @@ class AiReportPromptBuilder:
     max_content_length: int
 
     @ensure(lambda result: len(result) > 0, "Built prompt must not be empty")
-    def build(self, stock: Stock, historical_context: str = "", *, focus: AiAnalysisFocus) -> str:
+    def apply(self, stock: Stock, historical_context: str = "", *, focus: AiAnalysisFocus) -> str:
         articles_text = format_articles(stock.articles, self.max_articles, self.max_content_length)
 
         if historical_context:
@@ -51,6 +49,20 @@ def format_articles(articles: list[Article], max_articles: int, max_content_leng
         entries.append(f"[{index}] Title: {article.title}\nContent: {preview}")
 
     return "\n\n".join(entries)
+
+
+@invariant(lambda self: self.max_content_length > 0, "max_content_length must be positive")
+@invariant(lambda self: len(self.template) > 0)
+@dataclass(frozen=True)
+class SentimentPromptBuilder:
+    """Builds the prompt that asks for each social post's stance toward one stock. Posts are numbered from 1, in order."""
+
+    template: str
+    max_content_length: int
+
+    @ensure(lambda result: len(result) > 0, "Built prompt must not be empty")
+    def apply(self, stock_id: str, posts: list[Article]) -> str:
+        return self.template.format(stock_id=stock_id, posts_text=format_articles(posts, len(posts), self.max_content_length))
 
 
 NO_FAIR_PRICE_RULE = (
@@ -78,10 +90,10 @@ class ValuationPromptBuilder:
     max_content_length: int
 
     @ensure(lambda result: len(result) > 0, "Built prompt must not be empty")
-    def build(self, report: ValuationReport) -> str:
+    def apply(self, report: ValuationReport) -> str:
         stock = report.stock
         facts = "\n".join(f"- {section.title}: {' / '.join(section.lines)}" for section in report.fact_sections())
-        warnings = "\n".join(f"- {warning}" for warning in report.valuation.warnings) or "- 無"
+        warnings = "\n".join(f"- {warning}" for warning in report.valuation.warnings) or "- none"
 
         if isinstance(report.fair_value, PeNotApplicable):
             rules = [NO_FAIR_PRICE_RULE.format(reason=report.fair_value.reason.label)]
@@ -94,7 +106,7 @@ class ValuationPromptBuilder:
         return self.template.format(
             stock_id=stock.stock_id,
             stock_name=stock.name or "",
-            industry=stock.industry or "未知",
+            industry=stock.industry or "unknown",
             valuation_facts=facts,
             data_warnings=warnings,
             valuation_rules="\n".join(f"- {rule}" for rule in rules),

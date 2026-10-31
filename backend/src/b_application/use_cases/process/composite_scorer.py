@@ -1,5 +1,3 @@
-# backend/src/b_application/use_cases/process/composite_scorer.py
-
 from a_domain.model.market.stock import Stock
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.rules.scoring.composite import CompositeScoreRule
@@ -23,7 +21,7 @@ class CompositeScorer:
                 self._logger.warning(f"Composite score skipped. Incomplete analysis: {stock.stock_id}")
                 continue
 
-            stock.composite_score = self._score_rule.calculate(technical_score=stock.technical_score, ai_score=stock.ai_score)
+            stock.composite_score = self._score_rule.apply(technical_score=stock.technical_score, ai_score=stock.ai_score)
             scored_count += 1
 
         self._logger.info(f"Composite scoring completed: {scored_count}/{len(stocks)} stocks scored.")

@@ -1,28 +1,22 @@
-from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time
 
 from a_domain.model.market.ohlcv import Ohlcv
-from a_domain.model.market.stock import Stock
-from a_domain.model.trading.account_snapshot import AccountSnapshot
+from a_domain.model.trading.account_history_report import AccountHistoryReport
 from a_domain.ports.market.price_provider import IOhlcvProvider
 from a_domain.ports.market.stock_provider import IStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.execution_provider import IExecutionProvider
 from a_domain.ports.trading.trading_journal import ITradingJournal
-from a_domain.rules.trading.valuation import AccountValuation, EquityPoint, ValuationRule
+from a_domain.rules.trading.valuation import (
+    AccountAsOfRule,
+    AccountHistoryRule,
+    EquityCurveRule,
+    PriceHistoryStartRule,
+    SnapshotValuationRule,
+    ValuationRule,
+)
 from b_application.config.app_config import AppConfig
-
-
-@dataclass(frozen=True)
-class AccountHistoryReport:
-    current: AccountValuation
-    """The account now, each position marked at its latest quote (realtime, else the last daily close)."""
-
-    equity_curve: list[EquityPoint]
-
-    as_of: tuple[AccountSnapshot, AccountValuation] | None
-    """The account at the end of the requested day, or None when no fill happened on or before it."""
 
 
 class AccountHistory:
@@ -48,69 +42,41 @@ class AccountHistory:
         self._stock_provider = stock_provider
         self._ohlcv_provider = ohlcv_provider
         self._market_clock = market_clock
-        self._valuation_rule = ValuationRule(cost_rule=config.market.cost_rule())
-        self._history_days = config.freshness.history_max_lag_days
+        valuation_rule = ValuationRule(cost_rule=config.market.cost_rule())
+        snapshot_valuation_rule = SnapshotValuationRule(valuation_rule=valuation_rule)
+        self._history_rule = AccountHistoryRule(
+            valuation_rule=valuation_rule,
+            equity_curve_rule=EquityCurveRule(snapshot_valuation_rule=snapshot_valuation_rule),
+            as_of_rule=AccountAsOfRule(snapshot_valuation_rule=snapshot_valuation_rule),
+        )
+        self._start_rule = PriceHistoryStartRule(history_days=config.freshness.history_max_lag_days)
         self._logger = logger
 
     async def execute(self, as_of: date | None) -> AccountHistoryReport:
         account = await self._execution_provider.get_account()
         snapshots = await self._journal.snapshots()
-
         held_ids = {position.stock_id for position in account.positions}
-        snapshot_ids = {held.stock_id for snapshot in snapshots for held in snapshot.positions}
-        stocks = await self.load_stocks(held_ids | snapshot_ids)
+        stock_ids = sorted(held_ids | {held.stock_id for snapshot in snapshots for held in snapshot.positions})
+        stocks = [stock for stock_id in stock_ids if (stock := await self._stock_provider.get_by_id(stock_id)) is not None]
 
-        first_day = self._market_clock.today() - timedelta(days=self._history_days)
-
-        if snapshots:
-            first_day = min(first_day, self._market_clock.to_trading_date(snapshots[0].taken_at))
-
-        daily_bars = await self.fetch_daily_bars(stocks, first_day)
-        realtime_bars = await self.fetch_realtime_bars([stock for stock in stocks if stock.stock_id in held_ids])
-        marks = {stock_id: bars[-1] for stock_id, bars in daily_bars.items() if bars} | realtime_bars
-
-        trading_date = self._market_clock.to_trading_date
-
-        return AccountHistoryReport(
-            current=self._valuation_rule.value(account.cash, account.positions, marks),
-            equity_curve=self._valuation_rule.equity_curve(snapshots, daily_bars, trading_date),
-            as_of=None if as_of is None else self._valuation_rule.as_of(snapshots, daily_bars, as_of, trading_date),
-        )
-
-    async def load_stocks(self, stock_ids: set[str]) -> list[Stock]:
-        stocks = []
-
-        for stock_id in sorted(stock_ids):
-            stock = await self._stock_provider.get_by_id(stock_id)
-
-            if stock is None:
-                self._logger.warning(f"Account history: stock not found: {stock_id}")
-                continue
-
-            stocks.append(stock)
-
-        return stocks
-
-    async def fetch_daily_bars(self, stocks: list[Stock], first_day: date) -> dict[str, list[Ohlcv]]:
-        if not stocks:
-            return {}
+        for stock_id in sorted(set(stock_ids) - {stock.stock_id for stock in stocks}):
+            self._logger.warning(f"Account history: stock not found: {stock_id}")
 
         now = self._market_clock.now()
+        first_day = self._start_rule.apply(self._market_clock.today(), snapshots, self._market_clock.to_trading_date)
+        held = [stock for stock in stocks if stock.stock_id in held_ids]
+        daily_bars: dict[str, list[Ohlcv]] = {}
+        realtime_bars: dict[str, Ohlcv] = {}
 
         try:
-            return await self._ohlcv_provider.fetch_history(stocks, datetime.combine(first_day, time.min, tzinfo=now.tzinfo), now)
-
+            start = datetime.combine(first_day, time.min, tzinfo=now.tzinfo)
+            daily_bars = await self._ohlcv_provider.fetch_history(stocks, start, now) if stocks else {}
         except Exception as error:
             self._logger.error(f"Account history: daily prices unavailable: {error}")
-            return {}
-
-    async def fetch_realtime_bars(self, stocks: list[Stock]) -> dict[str, Ohlcv]:
-        if not stocks:
-            return {}
 
         try:
-            return await self._ohlcv_provider.fetch_realtime_bars(stocks)
-
+            realtime_bars = await self._ohlcv_provider.fetch_realtime_bars(held) if held else {}
         except Exception as error:
             self._logger.error(f"Account history: latest quotes unavailable: {error}")
-            return {}
+
+        return self._history_rule.apply(account, snapshots, daily_bars, realtime_bars, as_of, self._market_clock.to_trading_date)

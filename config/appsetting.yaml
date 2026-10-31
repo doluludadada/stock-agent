@@ -5,6 +5,7 @@ environment: dev
 ai:
   active_model: grok
   connection_timeout: 60
+  temperature: 0.7
   available_models:
     openai: gpt-5.5-mini
     grok: grok-4.7
@@ -33,6 +34,7 @@ folder:
 
 tavily:
   search_depth: basic
+  connection_timeout: 30
 
 analysis:
   lookback_days: 120
@@ -45,12 +47,25 @@ analysis:
 
   risk_per_trade_pct: 0.02
   stop_loss_pct: 0.10
+  # A BUY quantity is a multiple of this many shares: 1 sizes odd lots, 1000 whole board lots.
+  lot_size: 1
+  # Most AI factors and soft technical failures a decision reason lists.
+  reason_item_limit: 3
 
   article_fetch_limit: 10
 
 notifications:
   enabled: false
   recipients: []
+
+# The Buzz report's social sentiment. Report only: it never changes signals or orders.
+sentiment:
+  # A post classified with less confidence than this counts as unclear.
+  min_confidence: 0.5
+  # With fewer bullish, bearish or neutral posts than this, the stock's consensus is unclear.
+  min_opinions: 2
+  # The share of the opinions one stance needs to be the consensus. Above one half, so only one stance can reach it.
+  consensus_share: 0.6
 
 collect_rules:
   spam_keywords:
@@ -95,12 +110,55 @@ market:
   tax_rate: 0.003
   etf_tax_rate: 0.001
   min_fee: 20
+  # Shares in one board lot, the exchange's trading unit. Fewer shares trade as an intraday odd lot.
+  board_lot_shares: 1000
+  # The exchanges' price grid, the same on TWSE and TPEx: from each band's lowest price up, a limit price is a multiple
+  # of the band's tick, or the exchange refuses the order. Sources, read 2026-10-31: the TWSE trading mechanism page,
+  # regular trading, tick sizes (https://www.twse.com.tw/zh/products/system/trading.html), and the TPEx trading system
+  # overview, section 4, tick sizes (https://www.tpex.org.tw/zh-tw/mainboard/trading/rules/system.html).
+  stock_ticks: {0: "0.01", 10: "0.05", 50: "0.1", 100: "0.5", 500: "1", 1000: "5"}
+  etf_ticks: {0: "0.01", 50: "0.05"}
+  # A quote this close to a tick, as a fraction of the tick, is that tick carried through a binary float: Yahoo serves
+  # float32 prices, so 28.35 arrives as 28.350000381469727.
+  tick_float_tolerance: "0.01"
 
 freshness:
   # Realtime quotes older than this never price an order.
   realtime_max_lag_minutes: 15
   # Daily history whose last bar is older than this is not analysed.
   history_max_lag_days: 10
+  # The run error for daily histories that lack the last settled session names at most this many stocks.
+  missing_session_listed_stocks: 10
+  # An official close that prices a P/E valuation is stale once more weekday sessions than this have closed after
+  # its session. One is tolerated because the exchanges publish a day's close hours after 13:30.
+  daily_close_max_missed_sessions: 1
+
+# The regular TWSE and TPEx trading day, Asia/Taipei time, Monday to Friday. Orders are taken from the opening
+# auction; the closing call auction takes limit ROD orders only.
+market_hours:
+  opening_auction_start: "08:30"
+  continuous_start: "09:00"
+  closing_auction_start: "13:25"
+  close: "13:30"
+  # A session's daily bar is final in every price source from this time: the after-hours fixed-price session ends at
+  # 14:30, and delayed feeds such as Yahoo's run 20 minutes behind.
+  settled: "15:00"
+
+# How the price and listing adapters pace, batch and cache their requests.
+market_data:
+  # TWSE MIS realtime quotes: it answers 100 channels per request and refuses 200, and asks for 5 s between requests.
+  quote_batch_size: 50
+  quote_request_interval_seconds: 5.0
+  quote_timeout_seconds: 10.0
+  # Yahoo daily history.
+  history_batch_size: 50
+  history_batch_delay_seconds: 1.5
+  # A history that lacks the last settled session is asked for again at most this often.
+  history_retry_hours: 2
+  history_save_chunk_size: 5000
+  # The TWSE and TPEX listings, with each stock's latest official close.
+  listing_cache_hours: 6
+  listing_timeout_seconds: 30.0
 
 trading:
   execution_provider: mock
@@ -115,6 +173,10 @@ mock_trading:
 shioaji:
   # true: Shioaji's paper-trading environment. false: the real account, real money.
   simulation: true
+  # Seconds between two reads of an order's status at the broker.
+  poll_interval_seconds: 0.5
+  # Reads of an order's status before a working order is cancelled, and again after the cancel request.
+  max_polls: 10
 
 watchlist:
   # A TECHNICAL or BUZZ entry stays active through the close of this many trading sessions after its workflow last
@@ -133,6 +195,9 @@ sources:
     mis_quotes_url: "https://mis.twse.com.tw/stock/api/getStockInfo.jsp"
   mops:
     eps_url: "https://mopsov.twse.com.tw/mops/web/ajax_t163sb04"
+    eps_form_fields: {"encodeURIComponent": "1", "step": "1", "firstin": "1", "off": "1", "isQuery": "Y"}
+    twse_market_code: "sii"
+    tpex_market_code: "otc"
     company_id_header: "公司代號"
     eps_header_prefix: "基本每股盈餘"
     no_data_marker: "查詢無資料"
@@ -141,6 +206,10 @@ sources:
     tpex_industries_url: "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap14_O"
     tpex_industry_company_field: "SecuritiesCompanyCode"
     industry_field: "產業別"
+    request_interval_seconds: 2.0
+    timeout_seconds: 60.0
+    provisional_page_max_age_hours: 6
+    industry_max_age_hours: 24
   ptt:
     base_url: "https://www.ptt.cc"
     search_path: "/bbs/Stock/search"
@@ -164,3 +233,4 @@ sources:
     push_url: "https://api.line.me/v2/bot/message/push"
     multicast_url: "https://api.line.me/v2/bot/message/multicast"
     sentence_endings: "。.！!？?"
+    max_message_length: 400

@@ -1,70 +1,51 @@
-from a_domain.model.market.stock import Stock
 from a_domain.model.trading.stock_watchlist import StockWatchlist
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.trading_journal import ITradingJournal
+from a_domain.rules.trading.decision import DecisionSkipRule
 from b_application.config.app_config import AppConfig
 from b_application.schemas.pipeline_status import PipelineStatus
 
 
 class Signals:
     """
-    Generates one run's trading decisions with DecisionRule.decide_run and records them. Only recorded
-    decisions reach the run's signals, in decision order: best composite score first.
+    Generates one run's trading decisions with RunDecisionsRule and records them. A stock DecisionSkipRule skips gets
+    no decision. Only recorded decisions reach the run's signals, in decision order: best composite score first.
     """
 
     def __init__(self, journal: ITradingJournal, market_clock: IMarketClock, config: AppConfig, logger: ILoggingProvider) -> None:
         self._journal = journal
         self._market_clock = market_clock
-        self._decision_rule = config.decision_rule()
+        self._skip_rule = DecisionSkipRule()
+        self._decisions_rule = config.run_decisions_rule()
         self._logger = logger
 
     async def execute(self, watchlist: StockWatchlist, status: PipelineStatus) -> None:
         self._logger.info(f"Generating signals for {len(watchlist.willing_stocks)} watchlist stocks.")
+        skipped = self._skip_rule.apply(watchlist.willing_stocks, status.risk_blocked_stock_ids, status.stale_stock_ids)
+        candidates = [stock for stock in watchlist.willing_stocks if stock.stock_id not in skipped]
 
-        candidates = [stock for stock in watchlist.willing_stocks if self.is_decidable(stock, status)]
+        for stock_id, skip in skipped.items():
+            self._logger.warning(f"Signal skipped. {skip}: {stock_id}")
 
         try:
-            generated_signals = self._decision_rule.decide_run(candidates, status.account, now=self._market_clock.now())
-
+            signals = self._decisions_rule.apply(candidates, status.account, now=self._market_clock.now())
         except Exception as error:
             message = f"Signal generation failed, so this run decides on none of {len(candidates)} stocks: {error}"
-            self._logger.error(message)
-            status.stats.add_error(message)
+            self._logger.error(status.stats.add_error(message))
             return
 
-        if not generated_signals:
+        if not signals:
             self._logger.info("No new trading signals were generated.")
             return
 
         try:
-            await self._journal.save_signals(status.stats.run_id, generated_signals)
-
+            await self._journal.save_signals(status.stats.run_id, signals)
         except Exception as error:
-            message = f"Signal persistence failed, so none of these {len(generated_signals)} decisions is acted on: {error}"
-            self._logger.error(message)
-            status.stats.add_error(message)
+            message = f"Signal persistence failed, so none of these {len(signals)} decisions is acted on: {error}"
+            self._logger.error(status.stats.add_error(message))
             return
 
-        status.signals.extend(generated_signals)
-        status.stats.signals_generated += len(generated_signals)
-        self._logger.info(f"Signals persisted: total={len(generated_signals)}")
-
-    def is_decidable(self, stock: Stock, status: PipelineStatus) -> bool:
-        if stock.stock_id in status.risk_blocked_stock_ids:
-            self._logger.warning(f"Signal skipped. Risk blocked: {stock.stock_id}")
-            return False
-
-        if stock.stock_id in status.stale_stock_ids:
-            self._logger.warning(f"Signal skipped. Market data is stale: {stock.stock_id}")
-            return False
-
-        if stock.composite_score is None:
-            self._logger.warning(f"Signal skipped. Composite score unavailable: {stock.stock_id}")
-            return False
-
-        if stock.current_price is None:
-            self._logger.warning(f"Signal skipped. No price: {stock.stock_id}")
-            return False
-
-        return True
+        status.signals.extend(signals)
+        status.stats.signals_generated += len(signals)
+        self._logger.info(f"Signals persisted: total={len(signals)}")

@@ -16,10 +16,12 @@ from pathlib import Path
 
 import pytest
 
+from a_domain.model.analysis.technical_scoring import TechnicalScoring
 from a_domain.model.analysis.technical_settings import TechnicalSettings
 from a_domain.model.indicators.adx import Adx
 from a_domain.model.indicators.atr import Atr
 from a_domain.model.indicators.bollinger_bands import BollingerBands
+from a_domain.model.indicators.indicator_parameters import IndicatorParameters
 from a_domain.model.indicators.macd import Macd
 from a_domain.model.indicators.mfi import Mfi
 from a_domain.model.indicators.moving_averages import MovingAverages
@@ -29,7 +31,6 @@ from a_domain.model.indicators.stochastic import Stochastic
 from a_domain.model.indicators.technical_indicators import TechnicalIndicators
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
-from a_domain.rules.technical.calculation.parameters import IndicatorParameters
 from a_domain.rules.technical.criteria.base import TechnicalCriterion
 from a_domain.rules.technical.criteria.momentum import (
     MacdBullishCriterion,
@@ -56,7 +57,7 @@ from a_domain.rules.technical.criteria.volume import (
     ObvTrendCriterion,
     VolumeExpansionCriterion,
 )
-from a_domain.rules.technical.strategy import TechnicalScoring, TechnicalStrategy
+from a_domain.rules.technical.strategy import TechnicalStrategy
 from a_domain.types.enums import RuleEffect
 from c_infrastructure.technical.yaml_technical_settings_repository import YamlTechnicalSettingsRepository
 
@@ -462,7 +463,7 @@ PRE_MIGRATION_HARD_FAILURES = [
 def test_strategy_hard_failures_match_pre_migration_thresholds(
     template_settings: TechnicalSettings, stock: Stock, old_name: str, hard_failures: list[str]
 ) -> None:
-    report = template_settings.get_strategy(MIGRATED_STRATEGY_IDS[old_name]).evaluate(stock)
+    report = template_settings.get_strategy(MIGRATED_STRATEGY_IDS[old_name]).apply(stock)
 
     assert report.hard_failures == hard_failures
     assert report.passed is (not hard_failures)
@@ -478,7 +479,7 @@ def test_strategy_hard_failures_match_pre_migration_thresholds(
 def test_buzz_confirmation_failures_only_lower_the_score(
     template_settings: TechnicalSettings, stock: Stock, soft_failures: list[str]
 ) -> None:
-    report = template_settings.get_strategy("buzz_safety_only").evaluate(stock)
+    report = template_settings.get_strategy("buzz_safety_only").apply(stock)
 
     assert report.soft_failures == soft_failures
 
@@ -524,7 +525,7 @@ def test_social_buzz_uses_buzz_safety_only_by_default(template_settings: Technic
 def test_buzz_modes_differ_in_which_confirmations_reject_a_stock(
     template_settings: TechnicalSettings, stock: Stock, strategy_id: str, hard_failures: list[str]
 ) -> None:
-    report = template_settings.get_strategy(strategy_id).evaluate(stock)
+    report = template_settings.get_strategy(strategy_id).apply(stock)
 
     assert report.hard_failures == hard_failures
 

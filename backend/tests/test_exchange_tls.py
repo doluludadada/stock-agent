@@ -10,11 +10,13 @@ from trading_stack import MONDAY_10_00, MovableClock, SilentLogger
 from a_domain.model.fundamentals.fiscal_quarter import FiscalQuarter
 from a_domain.model.market.stock import Stock
 from b_application.config.app_config import AppConfig
+from b_application.config.market_data_config import MarketDataConfig, MarketHoursConfig
 from b_application.config.sources_config import SourcesConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.market.mis_quote_provider import MisQuoteProvider
 from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider
 from c_infrastructure.market.twse_provider import TaiwanStockProvider
+from c_infrastructure.system.market_clock import TaiwanMarketClock
 
 SOURCES = SourcesConfig()
 
@@ -39,22 +41,27 @@ def clients(monkeypatch) -> list[dict[str, Any]]:
         return real_client(transport=httpx.MockTransport(answer))
 
     monkeypatch.setattr(httpx, "AsyncClient", open_client)
-    monkeypatch.setattr(MopsFundamentalsProvider, "REQUEST_INTERVAL_SECONDS", 0.0)
     return opened
 
 
 async def test_exchange_clients_keep_certificate_verification_on(clients: list[dict[str, Any]], tmp_path: Path) -> None:
     db = DatabaseConnector(config=AppConfig(project_root=tmp_path), logger=SilentLogger())
     await db.init_db()
-    mops = MopsFundamentalsProvider(db=db, market_clock=MovableClock(MONDAY_10_00), mops=SOURCES.mops, logger=SilentLogger())
+    unspaced = SOURCES.mops.model_copy(update={"request_interval_seconds": 0.0})
+    mops = MopsFundamentalsProvider(db=db, market_clock=MovableClock(MONDAY_10_00), mops=unspaced, logger=SilentLogger())
 
     try:
-        await TaiwanStockProvider(exchange=SOURCES.exchange, logger=SilentLogger()).get_all()
+        await TaiwanStockProvider(
+            exchange=SOURCES.exchange,
+            market_clock=TaiwanMarketClock(MarketHoursConfig()),
+            market_data=MarketDataConfig(),
+            logger=SilentLogger(),
+        ).get_all()
         await mops.fetch_industries()
         await mops.fetch_cumulative_eps([FiscalQuarter(2026, 3)])
-        await MisQuoteProvider(SOURCES.exchange, SilentLogger()).fetch_realtime_bars([Stock(stock_id="2330")])
+        await MisQuoteProvider(SOURCES.exchange, MarketDataConfig(), SilentLogger()).fetch_realtime_bars([Stock(stock_id="2330")])
     finally:
         await db.close()
 
-    assert len(clients) == 5
-    assert [client.get("verify", True) for client in clients] == [True] * 5
+    assert len(clients) == 6
+    assert [client.get("verify", True) for client in clients] == [True] * 6

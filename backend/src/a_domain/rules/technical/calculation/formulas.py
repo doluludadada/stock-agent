@@ -133,51 +133,13 @@ def latest_adx(bars: Sequence[Ohlcv], period: int) -> tuple[float, float, float]
     if period <= 0 or len(bars) < period * 2:
         return None
 
-    true_ranges: list[float] = []
-    plus_dms: list[float] = []
-    minus_dms: list[float] = []
-
-    for index in range(1, len(bars)):
-        current = bars[index]
-        previous = bars[index - 1]
-
-        true_ranges.append(_true_range(current, previous.close))
-
-        up_move = current.high - previous.high
-        down_move = previous.low - current.low
-        plus_dms.append(up_move if up_move > down_move and up_move > 0 else 0.0)
-        minus_dms.append(down_move if down_move > up_move and down_move > 0 else 0.0)
+    true_ranges = _true_ranges(bars)
+    plus_dms, minus_dms = _directional_movements(bars)
 
     if len(true_ranges) < (period * 2) - 1:
         return None
 
-    smoothed_tr = sum(true_ranges[:period])
-    smoothed_plus_dm = sum(plus_dms[:period])
-    smoothed_minus_dm = sum(minus_dms[:period])
-
-    dx_values: list[float] = []
-    adx: float | None = None
-    latest_plus_di = 0.0
-    latest_minus_di = 0.0
-
-    for index in range(period - 1, len(true_ranges)):
-        if index >= period:
-            smoothed_tr = smoothed_tr - (smoothed_tr / period) + true_ranges[index]
-            smoothed_plus_dm = smoothed_plus_dm - (smoothed_plus_dm / period) + plus_dms[index]
-            smoothed_minus_dm = smoothed_minus_dm - (smoothed_minus_dm / period) + minus_dms[index]
-
-        dx, latest_plus_di, latest_minus_di = _directional_index(smoothed_tr, smoothed_plus_dm, smoothed_minus_dm)
-        dx_values.append(dx)
-
-        if len(dx_values) == period:
-            adx = sum(dx_values) / period
-        elif len(dx_values) > period and adx is not None:
-            adx = ((adx * (period - 1)) + dx) / period
-
-    if adx is None:
-        return None
-
-    return adx, latest_plus_di, latest_minus_di
+    return _smoothed_adx(true_ranges, plus_dms, minus_dms, period)
 
 
 def latest_obv(closes: Sequence[float], volumes: Sequence[float], ma_period: int) -> tuple[float, float] | None:
@@ -228,6 +190,51 @@ def _true_ranges(bars: Sequence[Ohlcv]) -> list[float]:
 
 def _true_range(bar: Ohlcv, previous_close: float) -> float:
     return max(bar.high - bar.low, abs(bar.high - previous_close), abs(bar.low - previous_close))
+
+
+def _directional_movements(bars: Sequence[Ohlcv]) -> tuple[list[float], list[float]]:
+    plus_dms: list[float] = []
+    minus_dms: list[float] = []
+
+    for index in range(1, len(bars)):
+        up_move = bars[index].high - bars[index - 1].high
+        down_move = bars[index - 1].low - bars[index].low
+        plus_dms.append(up_move if up_move > down_move and up_move > 0 else 0.0)
+        minus_dms.append(down_move if down_move > up_move and down_move > 0 else 0.0)
+
+    return plus_dms, minus_dms
+
+
+def _smoothed_adx(
+    true_ranges: Sequence[float], plus_dms: Sequence[float], minus_dms: Sequence[float], period: int
+) -> tuple[float, float, float] | None:
+    smoothed_tr = sum(true_ranges[:period])
+    smoothed_plus_dm = sum(plus_dms[:period])
+    smoothed_minus_dm = sum(minus_dms[:period])
+
+    dx_values: list[float] = []
+    adx: float | None = None
+    latest_plus_di = 0.0
+    latest_minus_di = 0.0
+
+    for index in range(period - 1, len(true_ranges)):
+        if index >= period:
+            smoothed_tr = smoothed_tr - (smoothed_tr / period) + true_ranges[index]
+            smoothed_plus_dm = smoothed_plus_dm - (smoothed_plus_dm / period) + plus_dms[index]
+            smoothed_minus_dm = smoothed_minus_dm - (smoothed_minus_dm / period) + minus_dms[index]
+
+        dx, latest_plus_di, latest_minus_di = _directional_index(smoothed_tr, smoothed_plus_dm, smoothed_minus_dm)
+        dx_values.append(dx)
+
+        if len(dx_values) == period:
+            adx = sum(dx_values) / period
+        elif len(dx_values) > period and adx is not None:
+            adx = ((adx * (period - 1)) + dx) / period
+
+    if adx is None:
+        return None
+
+    return adx, latest_plus_di, latest_minus_di
 
 
 def _directional_index(smoothed_tr: float, smoothed_plus_dm: float, smoothed_minus_dm: float) -> tuple[float, float, float]:

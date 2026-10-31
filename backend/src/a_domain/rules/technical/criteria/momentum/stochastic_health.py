@@ -1,6 +1,7 @@
 # backend/src/a_domain/rules/technical/criteria/momentum/stochastic_health.py
 
 from dataclasses import dataclass
+from typing import override
 
 import icontract
 
@@ -15,8 +16,8 @@ class StochasticHealthCriterion:
     max_k: float | None = 80.0
     require_k_above_d: bool = False
 
-    @property
-    def name(self) -> str:
+    @override
+    def __str__(self) -> str:
         checks: list[str] = []
 
         if self.max_k is not None:

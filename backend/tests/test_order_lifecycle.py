@@ -41,7 +41,7 @@ def new_order(action: TradeAction = TradeAction.BUY, quantity: int = 1000) -> Or
 
 
 def fill(order: Order, quantity: int) -> None:
-    order.fill(quantity, 100, COSTS.cost_of(order.action, "2330", 100, quantity), now=NOW)
+    order.fill(quantity, 100, COSTS.apply(order.action, "2330", 100, quantity), now=NOW)
 
 
 def order_in(status: OrderStatus) -> Order:
@@ -101,8 +101,8 @@ def test_partial_fills_accumulate_price_quantity_fee_and_tax() -> None:
     order = new_order(action=TradeAction.SELL)
     order.submit(now=NOW)
 
-    order.fill(400, 100, COSTS.cost_of(TradeAction.SELL, "2330", 100, 400), realized_pnl=1_000, now=NOW)
-    order.fill(600, 110, COSTS.cost_of(TradeAction.SELL, "2330", 110, 600), realized_pnl=2_000, now=NOW)
+    order.fill(400, 100, COSTS.apply(TradeAction.SELL, "2330", 100, 400), realized_pnl=1_000, now=NOW)
+    order.fill(600, 110, COSTS.apply(TradeAction.SELL, "2330", 110, 600), realized_pnl=2_000, now=NOW)
 
     assert order.status == OrderStatus.FILLED
     assert order.filled_quantity == 1000
@@ -123,7 +123,7 @@ def test_a_fill_beyond_the_limit_price_is_refused() -> None:
     order = order_in(OrderStatus.SUBMITTED)
 
     with pytest.raises(ValueError, match="BUY fill price cannot exceed limit_price"):
-        order.fill(1, 101, COSTS.cost_of(TradeAction.BUY, "2330", 101, 1), now=NOW)
+        order.fill(1, 101, COSTS.apply(TradeAction.BUY, "2330", 101, 1), now=NOW)
 
     assert (order.status, order.filled_quantity) == (OrderStatus.SUBMITTED, 0)
 

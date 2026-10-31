@@ -1,13 +1,16 @@
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 
 import pytest
+from pydantic import ValidationError
 
 from a_domain.types.enums import TradingPhase
+from b_application.config.market_data_config import MarketHoursConfig
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
 
 
 class ClockAt(TaiwanMarketClock):
-    def __init__(self, moment: datetime) -> None:
+    def __init__(self, moment: datetime, hours: MarketHoursConfig | None = None) -> None:
+        super().__init__(hours or MarketHoursConfig())
         self._moment = moment
 
     def now(self) -> datetime:
@@ -33,7 +36,7 @@ def test_a_weekday_runs_the_opening_auction_continuous_trading_and_the_closing_a
 
 
 def test_trading_date_is_the_taipei_calendar_date() -> None:
-    clock = TaiwanMarketClock()
+    clock = TaiwanMarketClock(MarketHoursConfig())
 
     assert clock.to_trading_date(datetime(2026, 10, 19, 17, 0, tzinfo=UTC)) == date(2026, 10, 20)
     assert clock.now().utcoffset() == timedelta(hours=8)
@@ -97,6 +100,20 @@ def test_the_last_settled_session_is_the_latest_weekday_settled_by_three_pm(mome
 def test_a_session_count_ends_at_the_close_of_that_many_weekday_sessions_opening_after_the_moment(
     moment: datetime, sessions: int, close: datetime
 ) -> None:
-    clock = TaiwanMarketClock()
+    clock = TaiwanMarketClock(MarketHoursConfig())
 
     assert clock.session_close_after(moment.replace(tzinfo=TAIWAN_TIMEZONE), sessions) == close.replace(tzinfo=TAIWAN_TIMEZONE)
+
+
+def test_the_trading_day_and_the_bar_stamp_follow_the_configured_market_hours() -> None:
+    hours = MarketHoursConfig(closing_auction_start=time(13, 0), close=time(13, 5))
+    monday = date(2026, 10, 19)
+
+    assert ClockAt(datetime.combine(monday, time(13, 1), TAIWAN_TIMEZONE), hours).trading_phase() == TradingPhase.CLOSING_AUCTION
+    assert ClockAt(datetime.combine(monday, time(13, 5), TAIWAN_TIMEZONE), hours).last_closed_session() == monday
+    assert TaiwanMarketClock(hours).session_close(monday) == datetime.combine(monday, time(13, 5), TAIWAN_TIMEZONE)
+
+
+def test_market_hours_out_of_order_are_refused() -> None:
+    with pytest.raises(ValidationError, match="market hours"):
+        MarketHoursConfig(close=time(13, 0))

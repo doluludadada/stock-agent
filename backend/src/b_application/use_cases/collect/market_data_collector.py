@@ -1,22 +1,17 @@
-from datetime import datetime
-
-from a_domain.model.indicators.technical_indicators import TechnicalIndicators
-from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.ports.market.price_provider import IOhlcvProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
-from a_domain.rules.technical.calculation import IndicatorParameters, TechnicalIndicatorCalculator
 from b_application.config.app_config import AppConfig
 from b_application.schemas.pipeline_status import PipelineStatus
 
 
 class MarketDataCollector:
     """
-    Loads historical and realtime market data.
+    Loads each stock's daily history, the input of technical analysis.
 
-    Daily OHLCV is used for technical indicators and must pass the history freshness rule.
-    Realtime OHLCV is kept separately for execution decisions and must pass the realtime freshness rule.
+    History older than the history freshness limit is dropped, so that stock is not analysed. Realtime quotes,
+    which price orders, are RealtimeQuoteFeed's job.
     """
 
     def __init__(
@@ -25,139 +20,37 @@ class MarketDataCollector:
         self._ohlcv_provider = ohlcv_provider
         self._market_clock = market_clock
         self._lookback_days = config.analysis.lookback_days
-        self._realtime_freshness = config.freshness.realtime_rule()
         self._history_freshness = config.freshness.history_rule()
+        self._missing_session = config.freshness.missing_session_rule()
         self._logger = logger
 
-    async def execute(self, stocks: list[Stock], status: PipelineStatus, indicators: IndicatorParameters) -> None:
+    async def execute(self, stocks: list[Stock], status: PipelineStatus) -> None:
         self._logger.info(f"Fetching OHLCV data for {len(stocks)} stocks.")
-        history_by_stock_id = await self.fetch_history(stocks, status)
 
-        if history_by_stock_id is None:
+        try:
+            history = await self._ohlcv_provider.fetch_history(stocks, *self._market_clock.history_window(self._lookback_days))
+        except Exception as error:
+            self._logger.error(f"Failed to fetch market data: {error}")
+            status.stats.add_error(f"Failed to fetch market data: {error}")
             return
 
-        calculator = TechnicalIndicatorCalculator(indicators)
-        collected_count = 0
-
         for stock in stocks:
-            if self.apply_history(stock, history_by_stock_id, calculator, status):
-                collected_count += 1
+            stock.load_history(history.get(stock.stock_id, []))
+            last_session = self._market_clock.to_trading_date(stock.ohlcv[-1].ts) if stock.ohlcv else None
 
-        settled_session = self._market_clock.last_settled_session()
-        behind = sorted(
-            stock.stock_id
-            for stock in stocks
-            if stock.ohlcv and self._market_clock.to_trading_date(stock.ohlcv[-1].ts) < settled_session
-        )
-
-        if behind:
-            shown = ", ".join(behind[:10]) + (", ..." if len(behind) > 10 else "")
-            message = (
-                f"Daily history lacks the {settled_session} session for {len(behind)}/{collected_count} stocks ({shown}): "
-                "the price source has not published it, so their analysis ends at an earlier close. "
-                "An exchange holiday also reads as missing."
-            )
-            self._logger.warning(message)
-            status.stats.add_error(message)
-
-        self._logger.success(f"Collected market data for {collected_count}/{len(stocks)} stocks.")
-
-    async def fetch_history(self, stocks: list[Stock], status: PipelineStatus) -> dict[str, list[Ohlcv]] | None:
-        try:
-            start_date, end_date = self._market_clock.history_window(self._lookback_days)
-            return await self._ohlcv_provider.fetch_history(stocks=stocks, start_date=start_date, end_date=end_date)
-        except Exception as error:
-            message = f"Failed to fetch market data: {error}"
-            self._logger.error(message)
-            status.stats.add_error(message)
-            return None
-
-    def apply_history(
-        self,
-        stock: Stock,
-        history_by_stock_id: dict[str, list[Ohlcv]],
-        calculator: TechnicalIndicatorCalculator,
-        status: PipelineStatus,
-    ) -> bool:
-        try:
-            bars = history_by_stock_id.get(stock.stock_id, [])
-            stock.ohlcv = list(bars)
-            stock.indicators = TechnicalIndicators()
-            stock.technical_report = None
-
-            if not bars:
+            if last_session is None:
                 self._logger.warning(f"Market data unavailable: {stock.stock_id}")
-                return False
-
-            last_trading_date = self._market_clock.to_trading_date(bars[-1].ts)
-
-            if not self._history_freshness.is_fresh(last_trading_date, self._market_clock.today()):
+            elif not self._history_freshness.apply(last_session, self._market_clock.today()):
+                message = f"Technical analysis blocked: {stock.stock_id}, stale daily history: last bar {last_session.isoformat()}"
                 status.stats.stale_market_data_count += 1
-                message = (
-                    f"Technical analysis blocked: {stock.stock_id}, stale daily history: last bar {last_trading_date.isoformat()}"
-                )
                 status.stats.log(message, now=self._market_clock.now())
                 self._logger.warning(message)
                 stock.ohlcv = []
-                return False
 
-            stock.indicators = calculator.calculate(stock.ohlcv)
-            return True
+        last_sessions = {stock.stock_id: self._market_clock.to_trading_date(stock.ohlcv[-1].ts) for stock in stocks if stock.ohlcv}
 
-        except Exception as error:
-            message = f"Failed to process market data for {stock.stock_id}: {error}"
-            self._logger.error(message)
-            status.stats.add_error(message)
-            return False
+        if missing_session := self._missing_session.apply(last_sessions, self._market_clock.last_settled_session()):
+            self._logger.warning(missing_session)
+            status.stats.add_error(missing_session)
 
-    async def refresh_realtime(self, stocks: list[Stock], status: PipelineStatus) -> None:
-        unique_stocks = list({stock.stock_id: stock for stock in stocks}.values())
-        current_time = self._market_clock.now()
-        pending_stocks = [stock for stock in unique_stocks if self.needs_realtime_refresh(stock, current_time)]
-
-        if not pending_stocks:
-            return
-
-        try:
-            realtime_bars = await self._ohlcv_provider.fetch_realtime_bars(pending_stocks)
-        except Exception as error:
-            message = f"Failed to fetch realtime market data: {error}"
-            self._logger.error(message)
-            status.stats.add_error(message)
-
-            for stock in pending_stocks:
-                self.mark_stale(stock, status, "realtime fetch failed")
-            return
-
-        current_time = self._market_clock.now()
-
-        for stock in pending_stocks:
-            self.apply_realtime_bar(stock, realtime_bars.get(stock.stock_id), current_time, status)
-
-    def needs_realtime_refresh(self, stock: Stock, current_time: datetime) -> bool:
-        if stock.realtime_bar is None:
-            return True
-
-        return not self._realtime_freshness.is_fresh(stock.realtime_bar.ts, current_time)
-
-    def apply_realtime_bar(self, stock: Stock, bar: Ohlcv | None, current_time: datetime, status: PipelineStatus) -> None:
-        if bar is None:
-            self.mark_stale(stock, status, "missing realtime bar")
-            return
-
-        stock.realtime_bar = bar
-
-        if not self._realtime_freshness.is_fresh(bar.ts, current_time):
-            self.mark_stale(stock, status, f"stale realtime bar: {bar.ts.isoformat()}")
-            return
-
-        status.stale_stock_ids.discard(stock.stock_id)
-
-    def mark_stale(self, stock: Stock, status: PipelineStatus, reason: str) -> None:
-        if stock.stock_id not in status.stale_stock_ids:
-            status.stats.stale_market_data_count += 1
-
-        status.stale_stock_ids.add(stock.stock_id)
-        message = f"Market data blocked: {stock.stock_id}, {reason}"
-        status.stats.log(message, now=self._market_clock.now())
-        self._logger.warning(message)
+        self._logger.success(f"Collected market data for {len(last_sessions)}/{len(stocks)} stocks.")

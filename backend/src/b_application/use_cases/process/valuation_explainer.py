@@ -25,14 +25,14 @@ class ValuationExplainer:
 
     async def execute(self, report: ValuationReport) -> ValuationExplanation:
         stock_id = report.stock.stock_id
-        prompt = self._prompt_builder.build(report)
+        prompt = self._prompt_builder.apply(report)
 
         try:
             message = Message(role=MessageRole.USER, content=prompt, timestamp=self._market_clock.now())
             response = await self._ai_provider.generate_reply((message,))
         except Exception as error:
             self._logger.error(f"Valuation explanation failed for {stock_id}: {error}")
-            return ValuationExplanation.without_ai(report, f"AI 解釋無法取得：{error}")
+            return ValuationExplanation.without_ai(report, f"AI explanation unavailable: {error}")
 
         self._ai_provider.save_response(stock_id, response.content)
 

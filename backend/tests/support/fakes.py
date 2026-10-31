@@ -30,6 +30,7 @@ from a_domain.model.trading.watchlist_entry import WatchlistEntry
 from a_domain.rules.trading.cost import TradingCostRule
 from a_domain.types.enums import AiAnalysisFocus, MessageRole, SentimentLabel, TradeAction, WatchlistType
 from a_domain.types.ids import DecisionId, RunId
+from b_application.config.market_data_config import MarketHoursConfig
 from c_infrastructure.system.market_clock import TaiwanMarketClock
 
 PROMPT_TEMPLATES = {
@@ -75,6 +76,7 @@ class FakeMarketClock(TaiwanMarketClock):
     """Taiwan-time clock whose current time is set by the test; the trading phase follows that time."""
 
     def __init__(self, now: datetime) -> None:
+        super().__init__(MarketHoursConfig())
         self.current_time = now
 
     def now(self) -> datetime:
@@ -357,7 +359,7 @@ class RecordingExecutionProvider:
         self.placed.append(order.model_copy())
         assert order.limit_price is not None, "the app sends LIMIT orders only"
 
-        cost = self._cost_rule.cost_of(order.action, order.stock_id, order.limit_price, order.quantity)
+        cost = self._cost_rule.apply(order.action, order.stock_id, order.limit_price, order.quantity)
         held = next((position for position in self.positions if position.stock_id == order.stock_id), None)
         realized_pnl = held.profit_on_sale(order.quantity, cost.net) if order.action == TradeAction.SELL and held else None
 

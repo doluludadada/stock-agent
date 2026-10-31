@@ -15,10 +15,16 @@ class ExchangeSources(BaseModel):
 class MopsSources(BaseModel):
     """
     MOPS: the bulk income statements (cumulative EPS) and the income-statement summaries that carry each company's
-    industry. The headers are the Chinese column names those pages and feeds use.
+    industry. The headers are the Chinese column names those pages and feeds use. The form fields and market codes
+    are what the income-statement form posts, and the ages and intervals say how often MOPS is asked.
     """
 
     eps_url: str
+    eps_form_fields: dict[str, str]
+    """The form fields every income-statement request posts, besides the market code, year and season."""
+
+    twse_market_code: str
+    tpex_market_code: str
     company_id_header: str
     eps_header_prefix: str
     no_data_marker: str
@@ -27,6 +33,14 @@ class MopsSources(BaseModel):
     tpex_industries_url: str
     tpex_industry_company_field: str
     industry_field: str
+    request_interval_seconds: float
+    """A cold load sends ten requests to a shared public service, so they go one at a time, this far apart."""
+
+    timeout_seconds: float
+    provisional_page_max_age_hours: float
+    """A page that is not final yet is downloaded again once it is this old."""
+
+    industry_max_age_hours: float
 
 
 class PttSources(BaseModel):
@@ -65,11 +79,12 @@ class AiSources(BaseModel):
 
 
 class LineSources(BaseModel):
-    """The LINE Messaging API, and the sentence endings a long chat reply is split at."""
+    """The LINE Messaging API, and how a chat reply is split: the longest message, cut at a sentence ending if it can."""
 
     push_url: str
     multicast_url: str
     sentence_endings: str
+    max_message_length: int
 
 
 class SourcesConfig(BaseSettings):

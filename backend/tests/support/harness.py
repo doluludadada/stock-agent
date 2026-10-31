@@ -13,17 +13,19 @@ from unittest.mock import patch
 
 from rich.prompt import Confirm, Prompt
 
+from a_domain.model.analysis.technical_rule import TechnicalRule
+from a_domain.model.analysis.technical_scoring import TechnicalScoring
 from a_domain.model.analysis.technical_settings import TechnicalSettings
 from a_domain.model.fundamentals.fiscal_quarter import FiscalQuarter
+from a_domain.model.indicators.indicator_parameters import IndicatorParameters
 from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.position import Position
 from a_domain.model.trading.watchlist_entry import WatchlistEntry
-from a_domain.rules.technical.calculation import IndicatorParameters
 from a_domain.rules.technical.criteria.trend import PriceAboveMaCriterion
 from a_domain.rules.technical.criteria.volume.volume import MinimumPriceCriterion
-from a_domain.rules.technical.strategy import TechnicalRule, TechnicalScoring, TechnicalStrategy
+from a_domain.rules.technical.strategy import TechnicalStrategy
 from a_domain.types.enums import (
     AiAnalysisFocus,
     ExecutionProvider,
@@ -36,9 +38,10 @@ from a_domain.types.enums import (
 from b_application.config.ai_config import PromptsConfig
 from b_application.config.app_config import AppConfig
 from b_application.config.chat_config import NotificationConfig
+from b_application.config.market_data_config import MarketHoursConfig
 from b_application.config.trading_config import TradingConfig
 from b_application.schemas.pipeline_status import PipelineStatus
-from c_infrastructure.system.market_clock import TAIWAN_SESSION_CLOSE, TAIWAN_TIMEZONE
+from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 from d_presentation.cli import interactive
 from d_presentation.dependencies import ProviderDependencies, Runtime, compose_runtime, validate_trading_environment
 from support.fakes import (
@@ -106,7 +109,7 @@ HISTORY_LAST_SESSION = MARKET_OPEN.date() - timedelta(days=1)
 
 def daily_history(closes: list[float], last_session: date = HISTORY_LAST_SESSION) -> list[Ohlcv]:
     """One bar per calendar day, the last closing at 13:30 on last_session. Keep last_session within the history freshness limit."""
-    last_close_at = datetime.combine(last_session, TAIWAN_SESSION_CLOSE, TAIWAN_TIMEZONE)
+    last_close_at = datetime.combine(last_session, MarketHoursConfig().close, TAIWAN_TIMEZONE)
     return [
         Ohlcv(ts=last_close_at - timedelta(days=len(closes) - 1 - day), open=close, high=close, low=close, close=close, volume=1000)
         for day, close in enumerate(closes)
@@ -163,7 +166,7 @@ class CliHarness:
 
     def publish_close(self, stock_id: str, price: float, session: date) -> None:
         """The exchange's official close for the stock in that session, as the listing feeds publish it."""
-        ts = datetime.combine(session, TAIWAN_SESSION_CLOSE, TAIWAN_TIMEZONE)
+        ts = datetime.combine(session, MarketHoursConfig().close, TAIWAN_TIMEZONE)
         self.stocks.closes[stock_id] = Ohlcv(ts=ts, open=price, high=price, low=price, close=price, volume=1000)
 
     def file_eps(self, stock_id: str, cumulative_eps: dict[FiscalQuarter, float], industry: str | None = None) -> None:

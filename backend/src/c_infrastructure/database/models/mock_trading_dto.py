@@ -4,13 +4,12 @@ from typing import ClassVar
 from sqlmodel import Field, SQLModel
 
 from c_infrastructure.database.utc_datetime import UtcDateTime
-from c_infrastructure.trading.mock.constants import MockTableName
 
 
 class MockCash(SQLModel, table=True):
     """The mock broker's cash. Its history lives in account_snapshots, which the app writes after every fill."""
 
-    __tablename__: ClassVar[str] = MockTableName.CASH
+    __tablename__: ClassVar[str] = "mock_cash"
 
     account_id: str = Field(primary_key=True)
     current_cash: float = Field(ge=0)
@@ -22,7 +21,7 @@ class MockCash(SQLModel, table=True):
 class MockPosition(SQLModel, table=True):
     """The mock broker's open positions. Their history, market value and PnL live in account_snapshots."""
 
-    __tablename__: ClassVar[str] = MockTableName.POSITIONS
+    __tablename__: ClassVar[str] = "mock_positions"
 
     account_id: str = Field(primary_key=True)
     stock_id: str = Field(primary_key=True)

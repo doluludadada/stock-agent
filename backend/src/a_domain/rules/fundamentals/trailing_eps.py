@@ -11,30 +11,17 @@ from a_domain.types.enums import EpsBasis, EpsKind, EpsUnavailableReason, Inform
 @dataclass(frozen=True)
 class TrailingEpsRule:
     """
-    Picks the latest quarter each stock has filed and turns cumulative EPS into trailing-twelve-month EPS.
+    Picks the latest candidate quarter a stock has filed and turns cumulative EPS into trailing-twelve-month EPS.
 
     TTM(Y, n) = cum(Y, n) + cum(Y-1, 4) - cum(Y-1, n) for n < 4, and TTM(Y, 4) = cum(Y, 4).
     Any missing input makes the EPS unavailable with a reason, never 0.
     """
 
-    candidates: tuple[FiscalQuarter, FiscalQuarter]
-    """Newest first: the latest ended quarter, which may still be being filed, and the one before it."""
-
-    @classmethod
-    def as_of(cls, day: date) -> TrailingEpsRule:
-        # Two candidates suffice: each quarter's filing deadline falls on or before the end of the next quarter,
-        # so while one quarter is being filed, the quarter before it is complete.
-        latest = FiscalQuarter.latest_ended(day)
-        return cls(candidates=(latest, latest.previous()))
-
-    @property
-    def required_quarters(self) -> frozenset[FiscalQuarter]:
-        return frozenset(quarter for candidate in self.candidates for quarter in candidate.ttm_inputs)
-
-    def evaluate(self, stock_id: str, filings: EpsFilings) -> Eps | EpsUnavailable:
+    def apply(self, stock_id: str, filings: EpsFilings, today: date) -> Eps | EpsUnavailable:
+        candidates = FiscalQuarter.filing_candidates(today)
         newer: list[FiscalQuarter] = []
 
-        for candidate in self.candidates:
+        for candidate in candidates:
             filing = filings.get(candidate)
 
             if filing is not None and stock_id in filing.cumulative_eps:
@@ -42,7 +29,7 @@ class TrailingEpsRule:
 
             newer.append(candidate)
 
-        oldest = self.candidates[-1]
+        oldest = candidates[-1]
         reason = EpsUnavailableReason.SOURCE_FAILED if filings.get(oldest) is None else EpsUnavailableReason.NOT_REPORTED
 
         return EpsUnavailable(reason=reason, quarter=oldest)

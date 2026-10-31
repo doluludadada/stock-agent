@@ -1,5 +1,3 @@
-# backend/src/c_infrastructure/database/models/watchlist_dto.py
-
 from datetime import UTC, datetime
 from typing import ClassVar
 

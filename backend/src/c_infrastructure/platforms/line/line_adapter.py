@@ -1,9 +1,5 @@
-# ***********************************************************************
-#  Author:        Shiou
-#  Created:       2025-11-06
-#  Description:   Description of the file
-#  Location:      src\c_infrastructure\platforms\line\line_adapter.py
-# ***********************************************************************
+from typing import override
+
 import httpx
 from icontract import require
 
@@ -24,27 +20,27 @@ class LinePlatformAdapter(IPlatformProvider):
         self._logger = logger
         self._base_url = config.sources.line.push_url
 
+    @override
     async def send_message(self, user_id: str, message: Message) -> bool:
         headers = {"Authorization": f"Bearer {self._channel_access_token}", "Content-Type": "application/json"}
-
         payload = {"to": user_id, "messages": [{"type": "text", "text": message.content}]}
 
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             try:
                 self._logger.debug(f"Sending LINE message to user_id: {user_id}")
-                resp = await client.post(self._base_url, headers=headers, json=payload)
-
-                if 200 <= resp.status_code < 300:
-                    self._logger.success(f"Successfully sent LINE message to user_id: {user_id}.")
-                    return True
-                else:
-                    self._logger.error(
-                        f"Failed to send LINE message to user_id: {user_id}. Status: {resp.status_code}, Response: {resp.text}"
-                    )
-                    return False
+                response = await client.post(self._base_url, headers=headers, json=payload)
             except httpx.RequestError as error:
                 self._logger.error(f"An HTTP error occurred while sending message to LINE for user {user_id}: {error}")
                 return False
             except Exception as error:
                 self._logger.critical(f"An unexpected error occurred during LINE message sending for user {user_id}: {error}")
                 return False
+
+        if not 200 <= response.status_code < 300:
+            self._logger.error(
+                f"Failed to send LINE message to user_id: {user_id}. Status: {response.status_code}, Response: {response.text}"
+            )
+            return False
+
+        self._logger.success(f"Successfully sent LINE message to user_id: {user_id}.")
+        return True

@@ -1,6 +1,5 @@
 import math
 
-from icontract import require
 from sqlmodel import Field, SQLModel
 
 from a_domain.model.trading.order import Order
@@ -36,14 +35,16 @@ class Account(SQLModel):
 
         return None
 
-    @require(lambda order: order.limit_price is not None, "Only a priced (LIMIT) order has a known cost")
     def refusal_for(self, order: Order, cost_rule: TradingCostRule) -> tuple[RejectReason, str] | None:
         """
         Why this account cannot pay for or deliver `order` at its limit price, or None. A broker's pre-trade check:
         a BUY needs the cash for the whole quantity plus fee, a SELL needs the shares.
         """
+        if order.limit_price is None:
+            raise ValueError("Only a priced (LIMIT) order has a known cost")
+
         if order.action == TradeAction.BUY:
-            needed = -cost_rule.cost_of(TradeAction.BUY, order.stock_id, order.limit_price, order.quantity).net
+            needed = -cost_rule.apply(TradeAction.BUY, order.stock_id, order.limit_price, order.quantity).net
 
             if not self.can_afford(needed):
                 return RejectReason.INSUFFICIENT_CASH, f"needs {needed:,.0f} including fee, cash is {self.cash:,.0f}"

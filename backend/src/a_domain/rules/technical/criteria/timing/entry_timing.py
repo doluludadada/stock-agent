@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import override
 
 import icontract
 
@@ -12,8 +13,8 @@ class PriceDropCriterion:
 
     max_drop_pct: float = 0.03
 
-    @property
-    def name(self) -> str:
+    @override
+    def __str__(self) -> str:
         return "Price Drop Check"
 
     def apply(self, stock: Stock) -> bool:
@@ -35,8 +36,8 @@ class GapCriterion:
 
     max_gap_pct: float = 0.03
 
-    @property
-    def name(self) -> str:
+    @override
+    def __str__(self) -> str:
         return "Gap Check"
 
     def apply(self, stock: Stock) -> bool:
@@ -55,8 +56,8 @@ class GapCriterion:
 class IntradayMomentumCriterion:
     """Passes when the latest daily bar closed above its open."""
 
-    @property
-    def name(self) -> str:
+    @override
+    def __str__(self) -> str:
         return "Intraday Momentum"
 
     def apply(self, stock: Stock) -> bool:
@@ -80,8 +81,8 @@ class IntradayRangeCriterion:
 
     max_range_position: float = 0.8
 
-    @property
-    def name(self) -> str:
+    @override
+    def __str__(self) -> str:
         return "Intraday Range Position"
 
     def apply(self, stock: Stock) -> bool:
@@ -105,8 +106,8 @@ class ConsecutiveUpDaysCriterion:
 
     max_consecutive_up: int = 4
 
-    @property
-    def name(self) -> str:
+    @override
+    def __str__(self) -> str:
         return "Consecutive Up Days Check"
 
     def apply(self, stock: Stock) -> bool:

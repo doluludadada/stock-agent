@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import override
 
 import icontract
 
@@ -9,8 +10,8 @@ from a_domain.model.market.stock import Stock
 class BollingerPositionCriterion:
     """Passes when the current price is above the middle band, the band's moving average."""
 
-    @property
-    def name(self) -> str:
+    @override
+    def __str__(self) -> str:
         return "Bollinger Above Middle"
 
     def apply(self, stock: Stock) -> bool:
@@ -34,8 +35,8 @@ class BollingerThresholdCriterion:
 
     max_percent_b: float = 0.9
 
-    @property
-    def name(self) -> str:
+    @override
+    def __str__(self) -> str:
         return f"Bollinger %B < {self.max_percent_b}"
 
     def apply(self, stock: Stock) -> bool:
@@ -52,8 +53,8 @@ class BollingerSqueezeCriterion:
 
     max_bandwidth: float = 0.1
 
-    @property
-    def name(self) -> str:
+    @override
+    def __str__(self) -> str:
         return f"Bollinger Squeeze < {self.max_bandwidth}"
 
     def apply(self, stock: Stock) -> bool:

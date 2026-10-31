@@ -11,6 +11,7 @@ from a_domain.model.market.stock import Stock
 from a_domain.model.trading.stock_watchlist import StockWatchlist
 from a_domain.types.enums import WatchlistType
 from b_application.config.app_config import AppConfig
+from b_application.config.market_data_config import MarketHoursConfig
 from b_application.config.trading_config import WatchlistConfig
 from b_application.use_cases.trade.watch_stocks import WatchStocks
 from c_infrastructure.database.db_connector import DatabaseConnector
@@ -28,7 +29,7 @@ class SilentLogger:
 
 class SettableClock(TaiwanMarketClock):
     def __init__(self) -> None:
-        super().__init__()
+        super().__init__(MarketHoursConfig())
         self.current = FRIDAY_EVENING
 
     def now(self) -> datetime:

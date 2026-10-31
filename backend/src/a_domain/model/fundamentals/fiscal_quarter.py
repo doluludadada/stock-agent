@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, timedelta
+from typing import override
 
 from icontract import invariant
 
@@ -23,9 +24,16 @@ class FiscalQuarter:
     quarter: int
 
     @classmethod
-    def latest_ended(cls, day: date) -> FiscalQuarter:
-        """The last quarter that ended before `day`: 2026-10-30 is 2026Q3, 2026-10-01 is 2026Q3, 2026-09-30 is 2026Q2."""
-        return cls(day.year, (day.month - 1) // 3 + 1).previous()
+    def filing_candidates(cls, day: date) -> tuple[FiscalQuarter, FiscalQuarter]:
+        """
+        Newest first: the last quarter that ended before `day`, which may still be being filed, and the one before it.
+        On 2026-10-30 and 2026-10-01 they are 2026Q3 and 2026Q2; on 2026-09-30 they are 2026Q2 and 2026Q1.
+
+        Two suffice: each quarter's filing deadline falls on or before the end of the next quarter, so while one
+        quarter is being filed, the quarter before it is complete.
+        """
+        latest = cls(day.year, (day.month - 1) // 3 + 1).previous()
+        return (latest, latest.previous())
 
     def previous(self) -> FiscalQuarter:
         if self.quarter == 1:
@@ -52,5 +60,6 @@ class FiscalQuarter:
 
         return (self, FiscalQuarter(self.year - 1, 4), FiscalQuarter(self.year - 1, self.quarter))
 
+    @override
     def __str__(self) -> str:
         return f"{self.year}Q{self.quarter}"

@@ -1,4 +1,4 @@
-# backend/src/c_infrastructure/database/repositories/watchlist_repository.py
+from typing import override
 
 from sqlalchemy import or_
 from sqlmodel import col, select
@@ -18,6 +18,7 @@ class WatchlistRepository(IWatchlistRepository):
         self._logger = logger
         self._market_clock = market_clock
 
+    @override
     async def get_active(self) -> list[WatchlistEntry]:
         now = self._market_clock.now()
 
@@ -26,8 +27,14 @@ class WatchlistRepository(IWatchlistRepository):
             result = await session.execute(statement)
             rows = result.scalars().all()
 
-        return [self._to_entry(row) for row in rows]
+        return [
+            WatchlistEntry(
+                stock_id=row.stock_id, watchlist_type=WatchlistType(row.type), created_at=row.created_at, expires_at=row.expires_at
+            )
+            for row in rows
+        ]
 
+    @override
     async def save(self, entries: list[WatchlistEntry]) -> None:
         if not entries:
             return
@@ -43,8 +50,3 @@ class WatchlistRepository(IWatchlistRepository):
             await session.commit()
 
         self._logger.debug(f"Saved {len(entries)} watchlist entries.")
-
-    def _to_entry(self, row: WatchlistDTO) -> WatchlistEntry:
-        return WatchlistEntry(
-            stock_id=row.stock_id, watchlist_type=WatchlistType(row.type), created_at=row.created_at, expires_at=row.expires_at
-        )

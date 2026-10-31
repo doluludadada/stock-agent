@@ -22,6 +22,7 @@ from a_domain.model.system.stats import SystemStats
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.types.enums import ExecutionProvider, OrderMode, Workflow
 from b_application.config.app_config import AppConfig
+from b_application.config.market_data_config import MarketHoursConfig
 from b_application.pipeline import Pipeline
 from b_application.schemas.pipeline_status import PipelineStatus
 from b_application.use_cases.ship.run_history import RunHistory
@@ -53,6 +54,7 @@ def run_status(workflow: Workflow = Workflow.INTRADAY) -> PipelineStatus:
 
 class MovableClock(TaiwanMarketClock):
     def __init__(self, now: datetime) -> None:
+        super().__init__(MarketHoursConfig())
         self.current = now
 
     def now(self) -> datetime:

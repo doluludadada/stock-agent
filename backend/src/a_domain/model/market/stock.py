@@ -30,7 +30,7 @@ class Stock(SQLModel):
     ohlcv: list[Ohlcv] = Field(default_factory=list)
     realtime_bar: Ohlcv | None = None
     """
-    The latest intraday quote, set by MarketDataCollector.refresh_realtime. It is the only price an
+    The latest intraday quote, set by RealtimeQuoteFeed. It is the only price an
     order should use: current_price prefers it, and OrderRule refuses a decision whose quote is older
     than freshness.realtime_max_lag_minutes. Daily `ohlcv` stays the input of technical analysis.
     """
@@ -44,6 +44,12 @@ class Stock(SQLModel):
     composite_score: int | None = None
 
     watchlist_types: set[WatchlistType] = Field(default_factory=set)
+
+    def load_history(self, bars: list[Ohlcv]) -> None:
+        """New daily history. The indicators and the technical report came from the old one, so they are cleared."""
+        self.ohlcv = list(bars)
+        self.indicators = TechnicalIndicators()
+        self.technical_report = None
 
     # -------------------------------- Shortcuts --------------------------------- #
     @property

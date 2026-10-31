@@ -6,8 +6,7 @@ from typing import Literal, Self
 from pydantic import model_validator
 from sqlmodel import Field, SQLModel
 
-from a_domain.rules.trading.cost import TradeCost
-from a_domain.rules.trading.tick import TickRule
+from a_domain.model.trading.trade_cost import TradeCost
 from a_domain.types.enums import OrderStatus, OrderType, RejectReason, TimeInForce, TradeAction
 from a_domain.types.errors import IllegalOrderTransition
 from a_domain.types.ids import DecisionId, OrderId, RunId, new_order_id
@@ -67,14 +66,21 @@ class Order(SQLModel):
         if (self.order_type == OrderType.LIMIT) != (self.limit_price is not None):
             raise ValueError("A LIMIT order needs a limit_price and a MARKET order must not have one")
 
-        if self.limit_price is not None and not TickRule.is_tick(self.stock_id, self.limit_price):
-            raise ValueError(f"limit_price {self.limit_price!r} is not an exchange tick for {self.stock_id}")
-
         return self
 
     @property
     def remaining_quantity(self) -> int:
         return self.quantity - self.filled_quantity
+
+    @property
+    def summary(self) -> str:
+        """One log line: the status, what was ordered and filled at what limit, the costs, and the reason when there is one."""
+        text = (
+            f"{self.status.value.upper()}: {self.action.value.upper()} {self.stock_id} "
+            f"filled {self.filled_quantity}/{self.quantity} @ {self.limit_price}, fee={self.fee}, tax={self.tax}"
+        )
+
+        return f"{text}, reason={self.reason}" if self.reason else text
 
     def submit(self, *, now: datetime) -> None:
         """The broker accepted the order."""
@@ -118,6 +124,11 @@ class Order(SQLModel):
 
     def fail(self, reason: str, *, now: datetime) -> None:
         self._move_to(OrderStatus.FAILED, now, reason)
+
+    def fail_if_open(self, reason: str, *, now: datetime) -> None:
+        """FAILS an order that is still PENDING or SUBMITTED; an order that already ended keeps its status."""
+        if ORDER_TRANSITIONS[self.status]:
+            self.fail(reason, now=now)
 
     def _check_move(self, status: OrderStatus) -> None:
         if status not in ORDER_TRANSITIONS[self.status]:

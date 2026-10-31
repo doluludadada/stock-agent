@@ -46,9 +46,9 @@ class Eps:
     def describe(self) -> str:
         """The only text form of an EPS. It never shows the number without its period."""
         return (
-            f"{self.value:,.2f} 元（{self.kind.label}，{self.period_label}，{self.basis.label}，"
-            f"{SOURCE_LABELS[self.source]}，取得 {self.fetched_at:%Y-%m-%d %H:%M}）"
+            f"{self.value:,.2f} TWD ({self.kind.label}, {self.period_label}, {self.basis.label}, "
+            f"{SOURCE_LABELS[self.source]}, fetched {self.fetched_at:%Y-%m-%d %H:%M})"
         )
 
 
-SOURCE_LABELS = {InformationSource.TWSE_MOPS: "公開資訊觀測站"}
+SOURCE_LABELS = {InformationSource.TWSE_MOPS: "MOPS"}

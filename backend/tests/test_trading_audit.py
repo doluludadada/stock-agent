@@ -145,16 +145,57 @@ async def test_a_decision_that_cannot_be_recorded_sends_no_order(tmp_path) -> No
     assert ((await stack.broker.get_account()).cash, (await stack.broker.get_account()).positions) == (1_000_000, [])
 
 
+class UnwritableOrders(TradingJournal):
+    """A journal that cannot save an order in the given statuses."""
+
+    def __init__(self, db, refused: set[OrderStatus]) -> None:
+        super().__init__(db=db)
+        self.refused = refused
+
+    async def save_order(self, order: Order) -> None:
+        if order.status in self.refused:
+            raise OSError("disk full")
+
+        await super().save_order(order)
+
+
+async def test_an_order_whose_record_cannot_be_saved_never_reaches_the_broker(tmp_path) -> None:
+    stack = await open_stack(tmp_path)
+    stack = await open_stack(tmp_path, journal=UnwritableOrders(stack.db, refused={OrderStatus.PENDING}))
+
+    status = await stack.pipeline.buy_manually(analysed_stock())
+
+    [order] = status.orders
+    assert (order.status, order.filled_quantity) == (OrderStatus.FAILED, 0)
+    assert order.reason is not None and "could not be saved, so the order was not sent: disk full" in order.reason
+    assert status.stats.errors == ["Order record not saved: 2330, error=disk full"]
+    assert ((await stack.broker.get_account()).cash, (await stack.broker.get_account()).positions) == (1_000_000, [])
+
+
+async def test_a_broker_answer_that_cannot_be_recorded_is_a_run_error_and_the_fill_still_counts(tmp_path) -> None:
+    stack = await open_stack(tmp_path)
+    stack = await open_stack(tmp_path, journal=UnwritableOrders(stack.db, refused={OrderStatus.FILLED}))
+
+    status = await stack.pipeline.buy_manually(analysed_stock())
+
+    [order] = status.orders
+    assert (order.status, order.filled_quantity) == (OrderStatus.FILLED, 2000)
+    assert status.stats.errors == [f"Order {order.id} ended filled but its record still says PENDING: disk full"]
+    assert await recorded_orders(stack) == [(OrderStatus.PENDING, 0, None)]
+    assert [position.quantity for position in (await stack.broker.get_account()).positions] == [2000]
+
+
 async def test_a_decision_gets_one_order_however_often_it_is_executed(tmp_path) -> None:
     stack = await open_stack(tmp_path)
     stock = analysed_stock()
     stock.realtime_bar = stack.quotes.realtime["2330"]
-    signal = stack.config.decision_rule().entry_rule.decide_manual(stock, await stack.broker.get_account(), now=stack.clock.now())
+    signal = stack.config.manual_entry_rule().apply(stock, await stack.broker.get_account(), now=stack.clock.now())
 
-    async with stack.run_history.open(Workflow.MANUAL_BUY) as status:
+    async with stack.run_history.execute(Workflow.MANUAL_BUY) as status:
         await stack.journal.save_signals(status.stats.run_id, [signal])
-        await stack.order_execution.execute([signal], status)
-        await stack.order_execution.execute([signal], status)
+        status.signals.append(signal)
+        await stack.pipeline._execute_orders(status)
+        await stack.pipeline._execute_orders(status)
 
     assert [order.status for order in status.orders] == [OrderStatus.FILLED]
     assert [position.quantity for position in (await stack.broker.get_account()).positions] == [2000]
@@ -190,7 +231,7 @@ async def test_a_run_is_recorded_when_it_starts_and_when_it_aborts(tmp_path) -> 
     stack = await open_stack(tmp_path)
 
     with pytest.raises(RuntimeError):
-        async with stack.run_history.open(Workflow.INTRADAY) as status:
+        async with stack.run_history.execute(Workflow.INTRADAY) as status:
             async with stack.db.get_session() as session:
                 started = await session.get(WorkflowRunDTO, status.stats.run_id)
                 assert started is not None and started.end_time is None

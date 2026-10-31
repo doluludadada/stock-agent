@@ -40,7 +40,7 @@ async def test_recent_runs_come_newest_first_up_to_the_limit(tmp_path) -> None:
     for _ in range(3):
         stack.clock.current += timedelta(minutes=1)
 
-        async with stack.run_history.open(Workflow.INTRADAY) as status:
+        async with stack.run_history.execute(Workflow.INTRADAY) as status:
             run_ids.append(status.stats.run_id)
 
     assert [run.run_id for run in await stack.journal.recent_runs(limit=2)] == [run_ids[2], run_ids[1]]

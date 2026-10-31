@@ -1,3 +1,5 @@
+from typing import Any, override
+
 import httpx
 from icontract import require
 
@@ -14,46 +16,38 @@ class TavilySearchAdapter(IWebSearchProvider):
 
     @require(lambda config: bool(config.tavily.api_key), "Missing tavily_api_key in configuration.")
     def __init__(self, config: AppConfig, logger: ILoggingProvider) -> None:
-        self._config = config
+        self._search_url = config.sources.ai.tavily_search_url
         self._logger = logger
-
-        timeout = getattr(self._config, "ai_model_connection_timeout", 30)
-        self._client = httpx.AsyncClient(timeout=httpx.Timeout(timeout))
-
-    async def search(self, query: str, limit: int = 3) -> list[WebSearchResult]:
-        payload: dict = {
-            "api_key": self._config.tavily.api_key,
-            "query": query,
-            "max_results": limit,
-            "search_depth": self._config.tavily.search_depth,  # "basic" | "advanced"
+        self._client = httpx.AsyncClient(timeout=httpx.Timeout(config.tavily.connection_timeout))
+        self._search_options: dict[str, Any] = {
+            "api_key": config.tavily.api_key,
+            "search_depth": config.tavily.search_depth,
             "include_answer": False,
             "include_raw_content": False,
         }
 
-        allowed = self._config.behavior.web_search_allowed_domains
-        excluded = self._config.behavior.web_search_excluded_domains
+        if config.behavior.web_search_allowed_domains:
+            self._search_options["include_domains"] = list(config.behavior.web_search_allowed_domains)
 
-        if allowed:
-            payload["include_domains"] = list(allowed)
-        if excluded:
-            payload["exclude_domains"] = list(excluded)
+        if config.behavior.web_search_excluded_domains:
+            self._search_options["exclude_domains"] = list(config.behavior.web_search_excluded_domains)
+
+    @override
+    async def search(self, query: str, limit: int = 3) -> list[WebSearchResult]:
+        payload = {"query": query, "max_results": limit, **self._search_options}
 
         try:
-            resp = await self._client.post(self._config.sources.ai.tavily_search_url, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
+            response = await self._client.post(self._search_url, json=payload)
+            response.raise_for_status()
 
-            results: list[WebSearchResult] = []
-            for item in (data.get("results") or [])[:limit]:
-                results.append(
-                    WebSearchResult(
-                        title=(item.get("title") or "").strip(),
-                        url=(item.get("url") or "").strip(),
-                        content=(item.get("content") or item.get("snippet") or "").strip(),
-                    )
+            return [
+                WebSearchResult(
+                    title=(item.get("title") or "").strip(),
+                    url=(item.get("url") or "").strip(),
+                    content=(item.get("content") or item.get("snippet") or "").strip(),
                 )
-            return results
-
+                for item in (response.json().get("results") or [])[:limit]
+            ]
         except Exception as error:
             self._logger.error(f"[TavilySearchAdapter] search failed: {error}")
             return []

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import override
 
 import icontract
 
@@ -6,25 +7,27 @@ from a_domain.model.market.stock import Stock
 
 
 @icontract.invariant(lambda self: self.min_daily_volume >= 0)
+@icontract.invariant(lambda self: self.period > 0)
 @dataclass(frozen=True)
 class LiquidityCriterion:
     """
-    Passes when the average volume of the latest five daily bars reaches `min_daily_volume`.
+    Passes when the average volume of the latest `period` daily bars reaches `min_daily_volume`.
 
     Volume is in shares, as the OHLCV provider reports it, not in 1,000-share lots.
     """
 
     min_daily_volume: int = 500
+    period: int = 5
 
-    @property
-    def name(self) -> str:
+    @override
+    def __str__(self) -> str:
         return "Liquidity Check"
 
     def apply(self, stock: Stock) -> bool:
         if not stock.ohlcv:
             return False
 
-        recent_volumes = [bar.volume for bar in stock.ohlcv[-5:]]
+        recent_volumes = [bar.volume for bar in stock.ohlcv[-self.period :]]
         average_volume = sum(recent_volumes) / len(recent_volumes)
 
         return average_volume >= self.min_daily_volume
@@ -37,8 +40,8 @@ class MinimumPriceCriterion:
 
     min_price: float = 15.0
 
-    @property
-    def name(self) -> str:
+    @override
+    def __str__(self) -> str:
         return "Minimum Price Check"
 
     def apply(self, stock: Stock) -> bool:
@@ -61,8 +64,8 @@ class VolumeExpansionCriterion:
     min_ratio: float = 1.0
     period: int = 5
 
-    @property
-    def name(self) -> str:
+    @override
+    def __str__(self) -> str:
         return f"Volume Expansion >= {self.min_ratio}x vs MA_{self.period}"
 
     def apply(self, stock: Stock) -> bool:
@@ -81,8 +84,8 @@ class VolumeExpansionCriterion:
 class ObvTrendCriterion:
     """Passes when on-balance volume is above its moving average, meaning volume has favoured up days."""
 
-    @property
-    def name(self) -> str:
+    @override
+    def __str__(self) -> str:
         return "OBV Trend"
 
     def apply(self, stock: Stock) -> bool:

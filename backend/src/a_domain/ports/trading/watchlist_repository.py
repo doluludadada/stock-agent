@@ -1,5 +1,3 @@
-# backend/src/a_domain/ports/trading/watchlist_repository.py
-
 from typing import Protocol
 
 from a_domain.model.trading.watchlist_entry import WatchlistEntry

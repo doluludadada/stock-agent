@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta
 
+from a_domain.model.indicators.indicator_parameters import IndicatorParameters
 from a_domain.model.market.ohlcv import Ohlcv
-from a_domain.rules.technical.calculation import IndicatorParameters, TechnicalIndicatorCalculator
+from a_domain.rules.technical.calculation import TechnicalIndicatorCalculator
 
 
 def test_calculator_uses_configurable_indicator_periods() -> None:
@@ -21,7 +22,7 @@ def test_calculator_uses_configurable_indicator_periods() -> None:
         mfi_period=7,
     )
 
-    indicators = TechnicalIndicatorCalculator(parameters).calculate(_sample_bars(40))
+    indicators = TechnicalIndicatorCalculator(parameters).apply(_sample_bars(40))
 
     assert indicators.rsi is not None
     assert indicators.rsi.period == 7
@@ -60,7 +61,7 @@ def test_calculator_uses_configurable_indicator_periods() -> None:
 def test_calculator_omits_indicators_without_enough_history() -> None:
     parameters = IndicatorParameters(rsi_period=14, macd_fast=12, macd_slow=26, macd_signal=9)
 
-    indicators = TechnicalIndicatorCalculator(parameters).calculate(_sample_bars(5))
+    indicators = TechnicalIndicatorCalculator(parameters).apply(_sample_bars(5))
 
     assert indicators.rsi is None
     assert indicators.macd is None

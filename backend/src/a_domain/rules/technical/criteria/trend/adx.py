@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import override
 
 import icontract
 
@@ -21,8 +22,8 @@ class AdxTrendCriterion:
     max_adx: float = 50.0
     require_direction: bool = True
 
-    @property
-    def name(self) -> str:
+    @override
+    def __str__(self) -> str:
         if self.require_direction:
             return f"ADX Trend {self.min_adx}-{self.max_adx} with Bullish Direction"
 

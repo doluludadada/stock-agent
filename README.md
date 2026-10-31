@@ -44,7 +44,7 @@ Menu behavior:
 | 6 | Scan Undervalued Stocks | Screens every listed and OTC stock at a target P/E and minimum undervaluation, optionally confirms the matches with the active technical strategy, and can ask the AI to explain the top matches. | Never. No watchlist write either. |
 | 7 | Account History | Shows cash, positions with unrealized PnL at the latest quote, the equity curve since the first fill, and the account as of a date you enter. | Never submits orders. |
 
-Every BUY or SELL decision ends as one row in the `orders` table with its run id and decision id: REJECTED with the reason when a gate refuses it (order mode, market closed, a quote older than `freshness.realtime_max_lag_minutes`). IOC orders trade only in continuous trading, 09:00 to 13:25 on weekdays; the opening call auction (08:30-09:00) and the closing call auction (13:25-13:30) take ROD only, so an order then is REJECTED as `MARKET_CLOSED`, otherwise what the broker did with it, including the fee, the tax and, for a SELL, the realized PnL. Orders are LIMIT at the decision's price and IOC. The limit is a valid exchange tick (`TickRule`, the TWSE/TPEx tick table): a quote off the tick grid rounds up for a BUY and down for a SELL, and sizing prices a BUY at that limit. One run decides best composite score first, a tie going to the lower stock id, and sizes each BUY against the cash the run's earlier BUYs left, their fees included, so a run never commits more than the account's cash; when it runs out, the lower-scored stocks get HOLD. Fees and tax come from `market` in `config/appsetting.yaml`: a SELL pays the transaction tax `tax_rate` (0.3%) on a stock and `etf_tax_rate` (0.1%) on an ETF, which is a code starting with `00`.
+Every BUY or SELL decision ends as one row in the `orders` table with its run id and decision id: REJECTED with the reason when a gate refuses it (order mode, market closed, a quote older than `freshness.realtime_max_lag_minutes`). IOC orders trade only in continuous trading, 09:00 to 13:25 on weekdays; the opening call auction (08:30-09:00) and the closing call auction (13:25-13:30) take ROD only, so an order then is REJECTED as `MARKET_CLOSED`, otherwise what the broker did with it, including the fee, the tax and, for a SELL, the realized PnL. Orders are LIMIT at the decision's price and IOC. The limit is a valid exchange tick (`LimitPriceRule`, with the TWSE/TPEx tick table in `market.stock_ticks` and `market.etf_ticks`): a quote off the tick grid rounds up for a BUY and down for a SELL, and sizing prices a BUY at that limit. One run decides best composite score first, a tie going to the lower stock id, and sizes each BUY against the cash the run's earlier BUYs left, their fees included, so a run never commits more than the account's cash; when it runs out, the lower-scored stocks get HOLD. Fees and tax come from `market` in `config/appsetting.yaml`: a SELL pays the transaction tax `tax_rate` (0.3%) on a stock and `etf_tax_rate` (0.1%) on an ETF, which is a code starting with `00`.
 
 ### Specific Stock Flow
 
@@ -106,13 +106,13 @@ flowchart TD
     WF --> DAY[Run Intraday Trading]
     WF --> ONE[Analyse Specific Stocks]
 
-    FULL --> MS1[MarketScanner: universe + OHLCV + indicators]
+    FULL --> MS1[MarketScanner: universe, MarketDataCollector: daily OHLCV]
     BUZZ --> BS[BuzzScanner: social candidates]
-    BUZZ --> MS2[MarketScanner: candidate OHLCV + indicators]
-    DAY --> LOAD[Held positions + active watchlist]
-    LOAD --> MS3[MarketScanner: candidate OHLCV + indicators]
-    ONE --> STOCK[Load requested stock IDs]
-    STOCK --> MS4[MarketScanner: requested OHLCV + indicators]
+    BUZZ --> MS2[MarketDataCollector: candidate daily OHLCV]
+    DAY --> LOAD[IntradayCandidates: held positions + active watchlist]
+    LOAD --> MS3[RealtimeQuoteFeed + MarketDataCollector: quotes and daily OHLCV]
+    ONE --> STOCK[StockLookup: requested stock IDs]
+    STOCK --> MS4[MarketDataCollector: requested daily OHLCV]
 
     MS1 --> TF1[TechnicalFilter -> TECHNICAL watchlist]
     MS2 --> TF2[TechnicalFilter -> BUZZ watchlist]
@@ -141,7 +141,7 @@ Important distinction:
 
 - `AnalysisPipeline` only runs news feed and AI analysis.
 - `TradingWorkflow` decides which use cases run and whether signals, reporting, watchlist persistence, or order execution should happen.
-- `MarketScanner` currently does both candidate loading and OHLCV plus indicator enrichment. There is no separate market-data use case right now.
+- `MarketScanner` loads the universe, `StockLookup` the requested stock IDs and `IntradayCandidates` the held and watched stocks. `MarketDataCollector` loads daily OHLCV, `RealtimeQuoteFeed` loads the realtime quotes that price orders, and `TechnicalFilter` calculates the strategy's indicators and applies its rules.
 
 ## Architecture
 
@@ -273,6 +273,5 @@ Tables are created with `create_all`, which never changes an existing table. At 
 ## Known Cleanup Areas
 
 - Split manual watchlist addition and manual BUY override into clearer use cases.
-- Decide whether `MarketScanner` should stay responsible for both universe loading and market-data enrichment.
 - Keep `PipelineContext.all_stocks` as a list. Dedupe by `stock_id`; do not convert it to `set`.
 - Keep README, CLI text, workflow behavior, and tests aligned whenever a workflow changes.

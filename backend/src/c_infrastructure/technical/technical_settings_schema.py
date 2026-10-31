@@ -7,8 +7,10 @@ from typing import Annotated, Any, ClassVar, Literal, Self, get_args
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from pydantic_core import InitErrorDetails, PydanticCustomError
 
+from a_domain.model.analysis.technical_rule import TechnicalRule
+from a_domain.model.analysis.technical_scoring import TechnicalScoring
 from a_domain.model.analysis.technical_settings import TechnicalSettings
-from a_domain.rules.technical.calculation.parameters import IndicatorParameters
+from a_domain.model.indicators.indicator_parameters import IndicatorParameters
 from a_domain.rules.technical.criteria.base import TechnicalCriterion
 from a_domain.rules.technical.criteria.momentum import (
     MacdBullishCriterion,
@@ -35,21 +37,22 @@ from a_domain.rules.technical.criteria.volume import (
     ObvTrendCriterion,
     VolumeExpansionCriterion,
 )
-from a_domain.rules.technical.strategy import TechnicalRule, TechnicalScoring, TechnicalStrategy
+from a_domain.rules.technical.strategy import TechnicalStrategy
 from a_domain.types.enums import RuleEffect
 
 
 class StrictSchema(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
+    @staticmethod
+    def field_error(loc: tuple[str | int, ...], message: str, value: Any) -> InitErrorDetails:
+        return InitErrorDetails(
+            type=PydanticCustomError("technical_settings", "{message}", {"message": message}), loc=loc, input=value
+        )
 
-def raise_field_errors(model: BaseModel, errors: list[InitErrorDetails]) -> None:
-    if errors:
-        raise ValidationError.from_exception_data(type(model).__name__, errors)
-
-
-def field_error(loc: tuple[str | int, ...], message: str, value: Any) -> InitErrorDetails:
-    return InitErrorDetails(type=PydanticCustomError("technical_settings", message), loc=loc, input=value)
+    def raise_field_errors(self, errors: list[InitErrorDetails]) -> None:
+        if errors:
+            raise ValidationError.from_exception_data(type(self).__name__, errors)
 
 
 class BaseTechnicalRuleSchema(StrictSchema):
@@ -64,7 +67,9 @@ class BaseTechnicalRuleSchema(StrictSchema):
     price_ma_fields: ClassVar[tuple[str, ...]] = ()
     volume_ma_fields: ClassVar[tuple[str, ...]] = ()
 
-    type: str
+    type: Any
+    """Each rule schema narrows it to its own literal. Declared here so every saved rule lists `type` first."""
+
     effect: RuleEffect
 
     def to_domain(self) -> TechnicalRule:
@@ -86,7 +91,7 @@ class RsiRangeRuleSchema(BaseTechnicalRuleSchema):
     @model_validator(mode="after")
     def validate_range(self) -> Self:
         if self.min_rsi > self.max_rsi:
-            raise_field_errors(self, [field_error(("max_rsi",), "max_rsi must be >= min_rsi", self.max_rsi)])
+            self.raise_field_errors([self.field_error(("max_rsi",), "max_rsi must be >= min_rsi", self.max_rsi)])
 
         return self
 
@@ -127,7 +132,7 @@ class AdxTrendRuleSchema(BaseTechnicalRuleSchema):
     @model_validator(mode="after")
     def validate_range(self) -> Self:
         if self.min_adx > self.max_adx:
-            raise_field_errors(self, [field_error(("max_adx",), "max_adx must be >= min_adx", self.max_adx)])
+            self.raise_field_errors([self.field_error(("max_adx",), "max_adx must be >= min_adx", self.max_adx)])
 
         return self
 
@@ -143,7 +148,7 @@ class GoldenCrossRuleSchema(BaseTechnicalRuleSchema):
     @model_validator(mode="after")
     def validate_periods(self) -> Self:
         if self.fast >= self.slow:
-            raise_field_errors(self, [field_error(("slow",), "slow must be greater than fast", self.slow)])
+            self.raise_field_errors([self.field_error(("slow",), "slow must be greater than fast", self.slow)])
 
         return self
 
@@ -158,7 +163,7 @@ class MaAlignmentRuleSchema(BaseTechnicalRuleSchema):
     @model_validator(mode="after")
     def validate_periods(self) -> Self:
         if self.fast >= self.slow:
-            raise_field_errors(self, [field_error(("slow",), "slow must be greater than fast", self.slow)])
+            self.raise_field_errors([self.field_error(("slow",), "slow must be greater than fast", self.slow)])
 
         return self
 
@@ -184,10 +189,10 @@ class AtrRangeRuleSchema(BaseTechnicalRuleSchema):
     @model_validator(mode="after")
     def validate_range(self) -> Self:
         if self.min_atr_pct is None and self.max_atr_pct is None:
-            raise_field_errors(self, [field_error(("max_atr_pct",), "Set min_atr_pct, max_atr_pct, or both", None)])
+            self.raise_field_errors([self.field_error(("max_atr_pct",), "Set min_atr_pct, max_atr_pct, or both", None)])
 
         if self.min_atr_pct is not None and self.max_atr_pct is not None and self.min_atr_pct > self.max_atr_pct:
-            raise_field_errors(self, [field_error(("max_atr_pct",), "max_atr_pct must be >= min_atr_pct", self.max_atr_pct)])
+            self.raise_field_errors([self.field_error(("max_atr_pct",), "max_atr_pct must be >= min_atr_pct", self.max_atr_pct)])
 
         return self
 
@@ -224,6 +229,7 @@ class LiquidityRuleSchema(BaseTechnicalRuleSchema):
     criterion = LiquidityCriterion
     type: Literal["liquidity"] = "liquidity"
     min_daily_volume: int = Field(default=LiquidityCriterion.min_daily_volume, ge=0)
+    period: int = Field(default=LiquidityCriterion.period, gt=0)
 
 
 class MinimumPriceRuleSchema(BaseTechnicalRuleSchema):
@@ -271,11 +277,6 @@ RULE_SCHEMA_BY_CRITERION: dict[Callable[..., TechnicalCriterion], type[BaseTechn
 }
 
 
-def rule_document(rule: TechnicalRule) -> dict[str, Any]:
-    schema = RULE_SCHEMA_BY_CRITERION[type(rule.criterion)]
-    return {"type": schema.model_fields["type"].default, "effect": rule.effect, **vars(rule.criterion)}
-
-
 # ---------------------------------------------------------------------------- #
 #                              Strategy Settings                               #
 # ---------------------------------------------------------------------------- #
@@ -310,15 +311,15 @@ class IndicatorParametersSchema(StrictSchema):
         errors: list[InitErrorDetails] = []
 
         if self.macd_slow <= self.macd_fast:
-            errors.append(field_error(("macd_slow",), "macd_slow must be greater than macd_fast", self.macd_slow))
+            errors.append(self.field_error(("macd_slow",), "macd_slow must be greater than macd_fast", self.macd_slow))
 
         if self.ma_mid <= self.ma_short:
-            errors.append(field_error(("ma_mid",), "ma_mid must be greater than ma_short", self.ma_mid))
+            errors.append(self.field_error(("ma_mid",), "ma_mid must be greater than ma_short", self.ma_mid))
 
         if self.ma_long <= self.ma_mid:
-            errors.append(field_error(("ma_long",), "ma_long must be greater than ma_mid", self.ma_long))
+            errors.append(self.field_error(("ma_long",), "ma_long must be greater than ma_mid", self.ma_long))
 
-        raise_field_errors(self, errors)
+        self.raise_field_errors(errors)
         return self
 
     def to_domain(self) -> IndicatorParameters:
@@ -363,9 +364,9 @@ class TechnicalStrategySchema(StrictSchema):
                         message = (
                             f"{kind}_{period} is not calculated by this strategy's indicators. Calculated {kind} periods: {calculated}"
                         )
-                        errors.append(field_error(("rules", index, rule.type, field), message, period))
+                        errors.append(self.field_error(("rules", index, rule.type, field), message, period))
 
-        raise_field_errors(self, errors)
+        self.raise_field_errors(errors)
         return self
 
     def to_domain(self, strategy_id: str) -> TechnicalStrategy:
@@ -375,21 +376,6 @@ class TechnicalStrategySchema(StrictSchema):
             scoring=self.scoring.to_domain(),
             rules=tuple(rule.to_domain() for rule in self.rules),
         )
-
-
-def inherit_defaults(defaults: Any, strategy: Any) -> Any:
-    if not isinstance(defaults, dict) or not isinstance(strategy, dict):
-        return strategy
-
-    inherited = dict(strategy)
-    for section in ("indicators", "scoring"):
-        default_values = defaults.get(section) or {}
-        values = strategy.get(section) or {}
-
-        if isinstance(default_values, dict) and isinstance(values, dict):
-            inherited[section] = {**default_values, **values}
-
-    return inherited
 
 
 class TechnicalSettingsSchema(StrictSchema):
@@ -412,22 +398,42 @@ class TechnicalSettingsSchema(StrictSchema):
             return data
 
         defaults = data.get("defaults") or {}
-        strategies = {strategy_id: inherit_defaults(defaults, strategy) for strategy_id, strategy in data["strategies"].items()}
+        strategies = {strategy_id: cls.inherit_defaults(defaults, strategy) for strategy_id, strategy in data["strategies"].items()}
         return {**data, "strategies": strategies}
+
+    @staticmethod
+    def inherit_defaults(defaults: Any, strategy: Any) -> Any:
+        if not isinstance(defaults, dict) or not isinstance(strategy, dict):
+            return strategy
+
+        inherited = dict(strategy)
+        for section in ("indicators", "scoring"):
+            default_values = defaults.get(section) or {}
+            values = strategy.get(section) or {}
+
+            if isinstance(default_values, dict) and isinstance(values, dict):
+                inherited[section] = {**default_values, **values}
+
+        return inherited
+
+    @staticmethod
+    def rule_document(rule: TechnicalRule) -> dict[str, Any]:
+        schema = RULE_SCHEMA_BY_CRITERION[type(rule.criterion)]
+        return {"type": schema.model_fields["type"].default, "effect": rule.effect, **vars(rule.criterion)}
 
     @model_validator(mode="after")
     def validate_strategy_ids(self) -> Self:
         errors: list[InitErrorDetails] = [
-            field_error(("strategies", strategy_id), "Technical strategy ID must not be blank", strategy_id)
+            self.field_error(("strategies", strategy_id), "Technical strategy ID must not be blank", strategy_id)
             for strategy_id in self.strategies
             if not strategy_id.strip()
         ]
 
         for field, strategy_id in (("active_strategy_id", self.active_strategy_id), ("buzz_strategy_id", self.buzz_strategy_id)):
             if strategy_id not in self.strategies:
-                errors.append(field_error((field,), f"Technical strategy not found: {strategy_id}", strategy_id))
+                errors.append(self.field_error((field,), f"Technical strategy not found: {strategy_id}", strategy_id))
 
-        raise_field_errors(self, errors)
+        self.raise_field_errors(errors)
         return self
 
     def to_domain(self) -> TechnicalSettings:
@@ -447,7 +453,7 @@ class TechnicalSettingsSchema(StrictSchema):
                     strategy.strategy_id: {
                         "indicators": asdict(strategy.indicators),
                         "scoring": asdict(strategy.scoring),
-                        "rules": [rule_document(rule) for rule in strategy.rules],
+                        "rules": [cls.rule_document(rule) for rule in strategy.rules],
                     }
                     for strategy in settings.strategies
                 },

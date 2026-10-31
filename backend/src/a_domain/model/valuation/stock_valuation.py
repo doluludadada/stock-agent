@@ -10,7 +10,7 @@ from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.model.valuation.pe_not_applicable import PeNotApplicable
 from a_domain.model.valuation.pe_ratio import PeRatio
-from a_domain.rules.collect.freshness import DailyCloseFreshnessRule
+from a_domain.rules.collect.freshness import DailyCloseFreshnessRule, MissedSessionsRule
 from a_domain.types.enums import PeNotApplicableReason
 
 type PeOutcome = PeRatio | PeNotApplicable
@@ -27,6 +27,8 @@ class StockValuation:
     stock: Stock
     close: Ohlcv | None
     last_closed_session: date
+    max_missed_sessions: int
+    """How many weekday sessions may close after the close's session before the close is stale."""
 
     @property
     def eps(self) -> Eps | EpsUnavailable:
@@ -34,7 +36,9 @@ class StockValuation:
 
     @property
     def close_is_fresh(self) -> bool:
-        return self.close is not None and DailyCloseFreshnessRule().is_fresh(self.close.ts.date(), self.last_closed_session)
+        return self.close is not None and DailyCloseFreshnessRule(self.max_missed_sessions).apply(
+            self.close.ts.date(), self.last_closed_session
+        )
 
     @property
     def current_pe(self) -> PeOutcome:
@@ -57,15 +61,15 @@ class StockValuation:
     @property
     def price_text(self) -> str:
         if self.close is None:
-            return "無有效收盤價"
+            return "no valid close"
 
-        return f"{self.close.close:,.2f} 元（{self.close.ts:%Y-%m-%d} 收盤，交易所公告）"
+        return f"{self.close.close:,.2f} TWD ({self.close.ts:%Y-%m-%d} close, published by the exchange)"
 
     @property
     def pe_text(self) -> str:
         match self.current_pe:
             case PeRatio() as pe:
-                return f"{pe.value:.2f} 倍"
+                return f"{pe.value:.2f}x"
             case PeNotApplicable(reason=reason):
                 return reason.label
 
@@ -78,21 +82,24 @@ class StockValuation:
             warnings.append(eps.describe())
         else:
             warnings.extend(
-                f"{quarter} 財報尚未納入（申報期限 {quarter.filing_deadline}；公司尚未申報或資料未能取得），"
-                f"本次使用至 {eps.period_end} 的近四季 EPS"
+                f"{quarter} filings are not included (filing deadline {quarter.filing_deadline}; the company has not "
+                f"filed yet or the data could not be fetched), so this run uses the TTM EPS through {eps.period_end}"
                 for quarter in eps.newer_quarters
             )
 
             if eps.value == 0:
-                warnings.append("近四季 EPS 為 0，無法計算本益比，不使用本益比估值")
+                warnings.append("The TTM EPS is 0, so the P/E cannot be computed and no P/E valuation is made")
             elif eps.value < 0:
-                warnings.append(f"近四季 EPS 為 {eps.value:.2f}（虧損），本益比不適用，不計算合理價")
+                warnings.append(f"The TTM EPS is {eps.value:.2f} (a loss), so the P/E does not apply and no fair price is computed")
 
         if self.close is None:
-            warnings.append("無有效收盤價：最近交易日無成交或交易所資料缺漏")
+            warnings.append("No valid close: no trade in the latest session, or the exchange data is missing")
         elif not self.close_is_fresh:
             session = self.close.ts.date()
-            missed = DailyCloseFreshnessRule().missed_sessions(session, self.last_closed_session)
-            warnings.append(f"股價過期：收盤日 {session}，其後已有 {missed} 個交易日收盤（最近收盤交易日 {self.last_closed_session}）")
+            missed = MissedSessionsRule().apply(session, self.last_closed_session)
+            warnings.append(
+                f"Stale price: closed on {session}, and {missed} sessions have closed since "
+                f"(last closed session {self.last_closed_session})"
+            )
 
         return tuple(warnings)

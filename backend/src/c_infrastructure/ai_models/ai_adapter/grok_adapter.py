@@ -1,7 +1,6 @@
-import asyncio
 import time
-from functools import cached_property
-from typing import Any
+from datetime import UTC, datetime
+from typing import Any, override
 
 import httpx
 from icontract import require
@@ -14,62 +13,42 @@ from c_infrastructure.ai_models.base import BaseAIAdapter
 
 
 class GrokAdapter(BaseAIAdapter):
+    """xAI Grok through its OpenAI-compatible API, with live search and inline citations when the settings turn them on."""
+
     @require(lambda config: bool(config.ai.grok_api_key), "Missing grok_api_key in configuration.")
     def __init__(self, config: AppConfig, logger: ILoggingProvider, model_name: str) -> None:
         super().__init__(config, logger, model_name)
-
-    @cached_property
-    def _client(self) -> AsyncOpenAI:
-        self._logger.debug("Initializing Grok client (xAI)...")
-        return AsyncOpenAI(
-            api_key=self._config.ai.grok_api_key,
-            base_url=self._config.sources.ai.grok_base_url,
-            timeout=httpx.Timeout(self._config.ai.connection_timeout),
+        self._client = AsyncOpenAI(
+            api_key=config.ai.grok_api_key,
+            base_url=config.sources.ai.grok_base_url,
+            timeout=httpx.Timeout(config.ai.connection_timeout),
         )
+        self._request_options: dict[str, Any] = {"model": model_name, "temperature": config.ai.temperature, "stream": True}
 
-    async def _call_api(self, messages: tuple[Message, ...]) -> str:
-        api_messages = self._convert_to_api_format(messages)
-        tools: list[dict[str, Any]] = []
+        if config.behavior.enable_web_search or config.behavior.enable_x_search:
+            self._request_options["tools"] = [{"type": "live_search"}]
 
-        if self._config.behavior.enable_web_search or self._config.behavior.enable_x_search:
-            tools.append({"type": "live_search"})
+        if config.behavior.enable_inline_citations:
+            self._request_options["extra_body"] = {"include": ["inline_citations"]}
 
-        extra_body: dict[str, Any] = {}
-
-        if self._config.behavior.enable_inline_citations:
-            extra_body["include"] = ["inline_citations"]
+    @override
+    async def generate_reply(self, messages: tuple[Message, ...]) -> Message:
+        """The model's streamed reply. An API or network failure raises RuntimeError."""
+        messages_option = [{"role": message.role.value, "content": message.content} for message in messages]
+        request: dict[str, Any] = {"messages": messages_option, **self._request_options}
+        started_at = time.perf_counter()
+        self._logger.debug(f"Calling Grok chat completions: model={self._model_name}, messages={len(messages)}, stream=True")
 
         try:
-            params: dict[str, Any] = {"model": self._model_name, "messages": api_messages, "temperature": 0.7, "stream": True}
-
-            # In the OpenAI SDK, tools are a top-level parameter
-            if tools:
-                params["tools"] = tools
-
-            if extra_body:
-                params["extra_body"] = extra_body
-
-            started_at = time.perf_counter()
-            self._logger.debug(f"Calling Grok chat completions: model={self._model_name}, messages={len(api_messages)}, stream=True")
-            stream = await self._client.chat.completions.create(**params)
+            stream = await self._client.chat.completions.create(**request)
             self._logger.debug(f"Grok stream opened after {time.perf_counter() - started_at:.1f}s")
+            content = ""
 
-            full_content = ""
-            first_content_seen = False
             async for chunk in stream:
-                if not chunk.choices:
-                    continue
-                content_delta = chunk.choices[0].delta.content or ""
-                if content_delta and not first_content_seen:
-                    first_content_seen = True
+                delta = (chunk.choices[0].delta.content or "") if chunk.choices else ""
+                if delta and not content:
                     self._logger.debug(f"Grok first content token after {time.perf_counter() - started_at:.1f}s")
-                full_content += content_delta
-
-            self._logger.debug(f"Grok stream completed after {time.perf_counter() - started_at:.1f}s; chars={len(full_content)}")
-            return full_content
-
-        except asyncio.CancelledError:
-            raise
+                content += delta
         except (OpenAIError, httpx.HTTPError) as error:
             self._logger.error(f"Grok API error for model {self._model_name}: {error}")
             raise RuntimeError(f"Grok API request failed for model {self._model_name}: {error}") from error
@@ -77,13 +56,6 @@ class GrokAdapter(BaseAIAdapter):
             self._logger.exception(f"Unexpected error in Grok adapter for model {self._model_name}: {error}")
             raise
 
-    def _convert_to_api_format(self, messages: tuple[Message, ...]):
-        api_messages = []
-        for message in messages:
-            role = "assistant"
-            if message.role == MessageRole.SYSTEM:
-                role = "system"
-            elif message.role == MessageRole.USER:
-                role = "user"
-            api_messages.append({"role": role, "content": message.content})
-        return api_messages
+        self._logger.debug(f"Grok stream completed after {time.perf_counter() - started_at:.1f}s; chars={len(content)}")
+
+        return Message(role=MessageRole.ASSISTANT, content=content, timestamp=datetime.now(UTC))

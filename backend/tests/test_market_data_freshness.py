@@ -5,9 +5,10 @@ from trading_stack import SilentLogger, run_status
 
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
-from a_domain.rules.technical.calculation import IndicatorParameters
 from b_application.config.app_config import AppConfig
+from b_application.config.market_data_config import MarketHoursConfig
 from b_application.use_cases.collect.market_data_collector import MarketDataCollector
+from b_application.use_cases.collect.realtime_quote_feed import RealtimeQuoteFeed
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
 
 pytestmark = pytest.mark.asyncio
@@ -38,11 +39,23 @@ class QuoteFeed:
         return {stock.stock_id: bar for stock in stocks}
 
 
-def collector(feed: QuoteFeed, tmp_path) -> MarketDataCollector:
+def freshness_config(tmp_path) -> AppConfig:
     config = AppConfig(project_root=tmp_path)
     config.freshness.realtime_max_lag_minutes = 15
     config.freshness.history_max_lag_days = 10
-    return MarketDataCollector(ohlcv_provider=feed, market_clock=ClockAt(), config=config, logger=SilentLogger())
+    return config
+
+
+def collector(feed: QuoteFeed, tmp_path) -> MarketDataCollector:
+    return MarketDataCollector(
+        ohlcv_provider=feed, market_clock=ClockAt(MarketHoursConfig()), config=freshness_config(tmp_path), logger=SilentLogger()
+    )
+
+
+def quote_feed(feed: QuoteFeed, tmp_path) -> RealtimeQuoteFeed:
+    return RealtimeQuoteFeed(
+        quote_provider=feed, market_clock=ClockAt(MarketHoursConfig()), config=freshness_config(tmp_path), logger=SilentLogger()
+    )
 
 
 @pytest.mark.parametrize(("days_old", "blocked"), [(10, 0), (11, 1)])
@@ -52,7 +65,7 @@ async def test_daily_history_older_than_the_history_limit_is_not_analysed(tmp_pa
 
     stock = Stock(stock_id="2330")
 
-    await collector(feed, tmp_path).execute([stock], status, IndicatorParameters())
+    await collector(feed, tmp_path).execute([stock], status)
 
     assert status.stats.stale_market_data_count == blocked
     assert bool(stock.ohlcv) is not bool(blocked)
@@ -63,7 +76,7 @@ async def test_realtime_quotes_use_the_minute_limit_not_the_day_limit(tmp_path, 
     status = run_status()
     feed = QuoteFeed(daily_close_at=NOW, quote_at=NOW - timedelta(minutes=minutes_old))
 
-    await collector(feed, tmp_path).refresh_realtime([Stock(stock_id="2330")], status)
+    await quote_feed(feed, tmp_path).execute([Stock(stock_id="2330")], status)
 
     assert ("2330" in status.stale_stock_ids) is stale
 
@@ -74,7 +87,44 @@ async def test_history_without_the_last_settled_session_is_a_run_error(tmp_path,
     feed = QuoteFeed(daily_close_at=datetime.combine(last_session, time(13, 30), TAIWAN_TIMEZONE), quote_at=NOW)
     stocks = [Stock(stock_id="2330"), Stock(stock_id="2317")]
 
-    await collector(feed, tmp_path).execute(stocks, status, IndicatorParameters())
+    await collector(feed, tmp_path).execute(stocks, status)
 
     assert status.stats.errors == errors
     assert all(stock.ohlcv for stock in stocks)
+
+
+class FailingQuoteFeed:
+    def __init__(self) -> None:
+        self.requests: list[list[str]] = []
+
+    async def fetch_realtime_bars(self, stocks: list[Stock]) -> dict[str, Ohlcv]:
+        self.requests.append([stock.stock_id for stock in stocks])
+        raise ConnectionError("MIS unreachable")
+
+
+async def test_a_failed_quote_fetch_blocks_every_asked_stock_once(tmp_path) -> None:
+    status = run_status()
+    feed = FailingQuoteFeed()
+    stocks = [Stock(stock_id="2330"), Stock(stock_id="2317"), Stock(stock_id="2330")]
+
+    await quote_feed(feed, tmp_path).execute(stocks, status)
+    await quote_feed(feed, tmp_path).execute(stocks, status)
+
+    assert feed.requests == [["2330", "2317"], ["2330", "2317"]]
+    assert status.stale_stock_ids == {"2330", "2317"}
+    assert status.stats.stale_market_data_count == 2
+    assert status.stats.errors == ["Failed to fetch realtime market data: MIS unreachable"] * 2
+
+
+async def test_a_fresh_quote_is_not_asked_for_again_and_clears_the_stale_mark(tmp_path) -> None:
+    status = run_status()
+    fresh = Stock(stock_id="2330", realtime_bar=Ohlcv(ts=NOW, close=100))
+    stale = Stock(stock_id="2317", realtime_bar=Ohlcv(ts=NOW - timedelta(minutes=30), close=100))
+    status.stale_stock_ids = {"2317"}
+    feed = QuoteFeed(daily_close_at=NOW, quote_at=NOW)
+
+    await quote_feed(feed, tmp_path).execute([fresh, stale], status)
+
+    assert fresh.realtime_bar == Ohlcv(ts=NOW, close=100)
+    assert stale.realtime_bar is not None and stale.realtime_bar.close == 101
+    assert status.stale_stock_ids == set()

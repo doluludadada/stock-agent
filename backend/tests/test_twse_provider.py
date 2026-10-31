@@ -7,8 +7,10 @@ import httpx
 import pytest
 
 from a_domain.types.enums import MarketType
+from b_application.config.market_data_config import MarketDataConfig, MarketHoursConfig
 from b_application.config.sources_config import SourcesConfig
 from c_infrastructure.market.twse_provider import TaiwanStockProvider
+from c_infrastructure.system.market_clock import TaiwanMarketClock
 
 SOURCES = SourcesConfig()
 
@@ -45,7 +47,7 @@ def requests(monkeypatch, payloads: dict[str, list[dict[str, str]]]) -> list[htt
 
 def make_provider() -> TaiwanStockProvider:
     logger = SimpleNamespace(debug=lambda message: None, success=lambda message: None, error=lambda message: None)
-    return TaiwanStockProvider(SOURCES.exchange, cast(Any, logger))
+    return TaiwanStockProvider(SOURCES.exchange, TaiwanMarketClock(MarketHoursConfig()), MarketDataConfig(), cast(Any, logger))
 
 
 @pytest.mark.asyncio

@@ -20,13 +20,14 @@ class WatchStocks:
         self._watchlist_repository = watchlist_repository
         self._market_clock = market_clock
         self._automatic_expiry_sessions = config.watchlist.automatic_expiry_sessions
+        self._watchlist_rule = WatchlistRule()
         self._logger = logger
 
     async def execute(self, stocks: list[Stock], watchlist_type: WatchlistType) -> WatchlistAddition:
         active_entries = await self._watchlist_repository.get_active()
         now = self._market_clock.now()
         automatic_expires_at = self._market_clock.session_close_after(now, self._automatic_expiry_sessions)
-        addition = WatchlistRule.add(active_entries, stocks, watchlist_type, now, automatic_expires_at)
+        addition = self._watchlist_rule.apply(active_entries, stocks, watchlist_type, now, automatic_expires_at)
 
         await self._watchlist_repository.save(addition.entries)
 

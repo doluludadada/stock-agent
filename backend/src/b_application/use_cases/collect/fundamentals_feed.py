@@ -2,7 +2,9 @@ from a_domain.model.market.stock import Stock
 from a_domain.ports.market.fundamentals_provider import IFundamentalsProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
+from a_domain.rules.fundamentals.filing_warning import FilingWarningRule
 from a_domain.rules.fundamentals.trailing_eps import TrailingEpsRule
+from a_domain.rules.fundamentals.trailing_eps_quarters import TrailingEpsQuartersRule
 from b_application.schemas.pipeline_status import PipelineStatus
 
 
@@ -17,33 +19,25 @@ class FundamentalsFeed:
         self._fundamentals_provider = fundamentals_provider
         self._market_clock = market_clock
         self._logger = logger
+        self._trailing_eps_quarters = TrailingEpsQuartersRule()
+        self._trailing_eps = TrailingEpsRule()
+        self._filing_warnings = FilingWarningRule()
 
     async def execute(self, stocks: list[Stock], status: PipelineStatus) -> None:
         if not stocks:
             return
 
-        rule = TrailingEpsRule.as_of(self._market_clock.today())
-        filings = await self._fundamentals_provider.fetch_cumulative_eps(rule.required_quarters)
+        today = self._market_clock.today()
+        quarters = self._trailing_eps_quarters.apply(today)
+        filings = await self._fundamentals_provider.fetch_cumulative_eps(quarters)
         industries = await self._fundamentals_provider.fetch_industries()
 
-        for quarter in sorted(filings):
-            filing = filings[quarter]
-
-            if filing is None:
-                message = f"MOPS {quarter} 財報資料取得失敗，需要此季的股票 EPS 將標示為資料不足或非最新"
-            elif filing.refresh_failed:
-                message = (
-                    f"MOPS {quarter} 財報更新失敗，沿用 {filing.fetched_at:%Y-%m-%d %H:%M} 取得的資料，"
-                    "其後申報的公司 EPS 將標示為資料不足或非最新"
-                )
-            else:
-                continue
-
-            self._logger.warning(message)
-            status.stats.add_error(message)
+        for warning in self._filing_warnings.apply(filings):
+            self._logger.warning(warning)
+            status.stats.add_error(warning)
 
         for stock in stocks:
-            stock.eps = rule.evaluate(stock.stock_id, filings)
+            stock.eps = self._trailing_eps.apply(stock.stock_id, filings, today)
             stock.industry = industries.get(stock.stock_id, stock.industry)
 
-        self._logger.info(f"Fundamentals loaded for {len(stocks)} stocks. Quarters={sorted(map(str, rule.required_quarters))}.")
+        self._logger.info(f"Fundamentals loaded for {len(stocks)} stocks. Quarters={sorted(map(str, quarters))}.")

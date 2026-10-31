@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from uuid import UUID, uuid4
@@ -14,5 +15,14 @@ class Conversation:
     selected_model_name: str | None = None
     messages: tuple[Message, ...] = field(default_factory=tuple)
 
-    def clear_history(self, *, now: datetime):
+    def add_messages(self, messages: Iterable[Message], *, now: datetime) -> Conversation:
+        """The conversation with these messages added at its end. Without messages it is unchanged."""
+        added = tuple(messages)
+
+        if not added:
+            return self
+
+        return replace(self, messages=self.messages + added, updated_at=now)
+
+    def clear_history(self, *, now: datetime) -> Conversation:
         return replace(self, messages=tuple(), updated_at=now)

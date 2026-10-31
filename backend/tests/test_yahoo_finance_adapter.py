@@ -10,8 +10,9 @@ from support.fakes import RecordingLogger
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.types.enums import MarketType
+from b_application.config.market_data_config import MarketDataConfig, MarketHoursConfig
 from c_infrastructure.market.yahoo_finance_adapter import YahooFinanceProvider
-from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
+from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
 
 NAN = math.nan
 PRICE_COLUMNS = ["Open", "High", "Low", "Close", "Adj Close", "Volume"]
@@ -48,7 +49,11 @@ def yahoo(monkeypatch) -> SimpleNamespace:
 
 
 def provider(batch_size: int = 50) -> YahooFinanceProvider:
-    return YahooFinanceProvider(RecordingLogger(), batch_size=batch_size, delay_seconds=0)
+    return YahooFinanceProvider(
+        TaiwanMarketClock(MarketHoursConfig()),
+        MarketDataConfig(history_batch_size=batch_size, history_batch_delay_seconds=0),
+        RecordingLogger(),
+    )
 
 
 def assert_requested(call: dict, tickers: list[str], **params) -> None:

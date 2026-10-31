@@ -8,7 +8,7 @@ from a_domain.types.enums import EpsUnavailableReason
 
 @dataclass(frozen=True)
 class EpsUnavailable:
-    """Missing EPS. It is never 0, and the report shows 資料不足 with the reason."""
+    """Missing EPS. It is never 0, and the report shows "Insufficient data" with the reason."""
 
     reason: EpsUnavailableReason
     quarter: FiscalQuarter | None = None
@@ -16,10 +16,13 @@ class EpsUnavailable:
     def describe(self) -> str:
         match self.reason:
             case EpsUnavailableReason.NOT_LOADED:
-                return "資料不足：未載入財報資料"
+                return "Insufficient data: no financial statements were loaded"
             case EpsUnavailableReason.NOT_REPORTED:
-                return f"資料不足：自 {self.quarter} 起無此代號的財報（ETF、DR、新上市或未申報）"
+                return (
+                    f"Insufficient data: no filing for this code since {self.quarter} "
+                    "(an ETF, a DR, a new listing or a company that has not filed)"
+                )
             case EpsUnavailableReason.INCOMPLETE_HISTORY:
-                return f"資料不足：缺少 {self.quarter} 累計 EPS，無法計算近四季 EPS"
+                return f"Insufficient data: the cumulative EPS for {self.quarter} is missing, so the TTM EPS cannot be computed"
             case EpsUnavailableReason.SOURCE_FAILED:
-                return f"資料不足：{self.quarter} 財報資料取得失敗"
+                return f"Insufficient data: the {self.quarter} filings could not be fetched"

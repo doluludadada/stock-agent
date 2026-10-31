@@ -9,7 +9,7 @@ from b_application.schemas.pipeline_status import PipelineStatus
 
 class ManualSignal:
     """
-    Use Case: Decides and records the user's confirmed BUY of one stock with EntryRule.decide_manual, which skips the
+    Use Case: Decides and records the user's confirmed BUY of one stock with ManualEntryRule, which skips the
     buy threshold but never the sizing. When there is no price, the decision cannot be recorded, or it sizes to no
     share, status.manual_buy_refusal says why and no orderable decision reaches the run's signals.
     """
@@ -17,7 +17,7 @@ class ManualSignal:
     def __init__(self, journal: ITradingJournal, market_clock: IMarketClock, config: AppConfig, logger: ILoggingProvider) -> None:
         self._journal = journal
         self._market_clock = market_clock
-        self._entry_rule = config.decision_rule().entry_rule
+        self._entry_rule = config.manual_entry_rule()
         self._logger = logger
 
     async def execute(self, stock: Stock, status: PipelineStatus) -> None:
@@ -26,7 +26,7 @@ class ManualSignal:
             self._logger.warning(f"Manual BUY {stock.stock_id} not placed: {status.manual_buy_refusal}")
             return
 
-        signal = self._entry_rule.decide_manual(stock, status.account, now=self._market_clock.now())
+        signal = self._entry_rule.apply(stock, status.account, now=self._market_clock.now())
 
         try:
             await self._journal.save_signals(status.stats.run_id, [signal])

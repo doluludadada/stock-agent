@@ -5,6 +5,8 @@ from dataclasses import dataclass
 
 from a_domain.model.valuation.target_pe import TargetPe
 
+MIN_UNDERVALUATION_REQUIREMENT = "The minimum undervaluation must be a finite number greater than or equal to 0"
+
 
 @dataclass(frozen=True)
 class ScanCriteria:
@@ -14,4 +16,4 @@ class ScanCriteria:
 
     def __post_init__(self) -> None:
         if not math.isfinite(self.min_undervaluation) or self.min_undervaluation < 0:
-            raise ValueError("最低低估幅度必須是大於或等於 0 的有限數字")
+            raise ValueError(MIN_UNDERVALUATION_REQUIREMENT)

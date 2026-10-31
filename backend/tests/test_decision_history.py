@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
+import chromadb
 import pytest
 from trading_stack import MONDAY_10_00, MovableClock, run_status
 
@@ -10,10 +11,9 @@ from a_domain.model.trading.signal import TradeSignal
 from a_domain.types.enums import AiAnalysisFocus, MessageRole, SignalSource, TradeAction, Workflow
 from b_application.config.ai_config import PromptsConfig
 from b_application.config.app_config import AppConfig
-from b_application.config.chat_config import DbConfig
 from b_application.use_cases.process.ai_analyser import AiAnalyser
 from b_application.use_cases.ship.decision_memory import DecisionMemory
-from c_infrastructure.database.chroma.chroma_repository import ChromaRepositoryAdapter
+from c_infrastructure.database.chroma.knowledge_repository import ChromaKnowledgeRepository
 
 
 class SilentLogger:
@@ -49,12 +49,11 @@ def make_signal(stock_id: str, action: TradeAction, score: int, reason: str, hou
 
 
 @pytest.fixture
-def knowledge_repository(tmp_path: Path) -> ChromaRepositoryAdapter:
-    config = AppConfig(project_root=tmp_path, db=DbConfig(chroma_persist_path=str(tmp_path / "chroma")))
-    return ChromaRepositoryAdapter(config=config, logger=SilentLogger())
+def knowledge_repository(tmp_path: Path) -> ChromaKnowledgeRepository:
+    return ChromaKnowledgeRepository(chromadb.PersistentClient(path=str(tmp_path / "chroma")), SilentLogger())
 
 
-async def remember(repository: ChromaRepositoryAdapter, *signals: TradeSignal) -> None:
+async def remember(repository: ChromaKnowledgeRepository, *signals: TradeSignal) -> None:
     status = run_status(Workflow.FULL_CYCLE)
     status.signals = list(signals)
     status.stocks_cache = {signal.stock_id: Stock(stock_id=signal.stock_id) for signal in signals}
@@ -62,7 +61,7 @@ async def remember(repository: ChromaRepositoryAdapter, *signals: TradeSignal) -
 
 
 class FailingFor2317:
-    def __init__(self, repository: ChromaRepositoryAdapter) -> None:
+    def __init__(self, repository: ChromaKnowledgeRepository) -> None:
         self._repository = repository
 
     async def save_decision(self, stock: Stock, signal: TradeSignal) -> None:
@@ -73,7 +72,7 @@ class FailingFor2317:
 
 
 @pytest.mark.asyncio
-async def test_one_failed_save_does_not_stop_the_other_decisions(knowledge_repository: ChromaRepositoryAdapter) -> None:
+async def test_one_failed_save_does_not_stop_the_other_decisions(knowledge_repository: ChromaKnowledgeRepository) -> None:
     signals = [make_signal(stock_id, TradeAction.HOLD, 50, "hold", hour=1) for stock_id in ("2317", "2330")]
     status = run_status(Workflow.FULL_CYCLE)
     status.signals = signals
@@ -86,7 +85,9 @@ async def test_one_failed_save_does_not_stop_the_other_decisions(knowledge_repos
 
 
 @pytest.mark.asyncio
-async def test_decision_history_returns_only_that_stocks_decisions_newest_first(knowledge_repository: ChromaRepositoryAdapter) -> None:
+async def test_decision_history_returns_only_that_stocks_decisions_newest_first(
+    knowledge_repository: ChromaKnowledgeRepository,
+) -> None:
     await remember(
         knowledge_repository,
         make_signal("2330", TradeAction.HOLD, 55, "Waiting for the 2330 earnings call", hour=1),
@@ -109,7 +110,7 @@ async def test_decision_history_returns_only_that_stocks_decisions_newest_first(
 
 @pytest.mark.asyncio
 async def test_decision_history_is_limited_and_empty_for_a_stock_without_decisions(
-    knowledge_repository: ChromaRepositoryAdapter,
+    knowledge_repository: ChromaKnowledgeRepository,
 ) -> None:
     await remember(knowledge_repository, *(make_signal("2330", TradeAction.HOLD, 50 + hour, "hold", hour=hour) for hour in range(5)))
 
@@ -122,7 +123,7 @@ async def test_decision_history_is_limited_and_empty_for_a_stock_without_decisio
 
 
 @pytest.mark.asyncio
-async def test_ai_analysis_prompt_carries_the_analysed_stocks_own_history(knowledge_repository: ChromaRepositoryAdapter) -> None:
+async def test_ai_analysis_prompt_carries_the_analysed_stocks_own_history(knowledge_repository: ChromaKnowledgeRepository) -> None:
     await remember(
         knowledge_repository,
         make_signal("2330", TradeAction.BUY, 85, "Strong revenue growth", hour=1),

@@ -7,8 +7,10 @@ from a_domain.model.fundamentals.eps_unavailable import EpsUnavailable
 from a_domain.model.fundamentals.fiscal_quarter import FiscalQuarter
 from a_domain.model.fundamentals.quarter_eps import QuarterEps
 from a_domain.model.market.stock import Stock
-from a_domain.rules.collect.freshness import DailyCloseFreshnessRule
+from a_domain.rules.collect.freshness import DailyCloseFreshnessRule, MissedSessionsRule
+from a_domain.rules.fundamentals.filing_warning import FilingWarningRule
 from a_domain.rules.fundamentals.trailing_eps import TrailingEpsRule
+from a_domain.rules.fundamentals.trailing_eps_quarters import TrailingEpsQuartersRule
 from a_domain.types.enums import EpsKind, EpsUnavailableReason
 
 FETCHED_AT = datetime(2026, 10, 30, 18, 6)
@@ -23,7 +25,8 @@ MOPS_CUMULATIVE_EPS = {
     Q(2025, 2): {"2330": 29.31, "1101": 0.07, "1232": 3.93},
 }
 
-RULE = TrailingEpsRule.as_of(date(2026, 10, 30))
+RULE = TrailingEpsRule()
+TODAY = date(2026, 10, 30)
 
 
 def filings(**overrides: dict[str, float] | None) -> dict[FiscalQuarter, QuarterEps | None]:
@@ -37,19 +40,19 @@ def filings(**overrides: dict[str, float] | None) -> dict[FiscalQuarter, Quarter
 
 
 def test_window_on_2026_10_30_is_the_quarter_being_filed_and_the_one_before() -> None:
-    assert RULE.candidates == (Q(2026, 3), Q(2026, 2))
-    assert RULE.required_quarters == {Q(2026, 3), Q(2026, 2), Q(2025, 4), Q(2025, 3), Q(2025, 2)}
+    assert FiscalQuarter.filing_candidates(TODAY) == (Q(2026, 3), Q(2026, 2))
+    assert TrailingEpsQuartersRule().apply(TODAY) == {Q(2026, 3), Q(2026, 2), Q(2025, 4), Q(2025, 3), Q(2025, 2)}
 
 
 def test_window_in_january_uses_the_annual_report_being_filed() -> None:
-    rule = TrailingEpsRule.as_of(date(2027, 1, 15))
+    january = date(2027, 1, 15)
 
-    assert rule.candidates == (Q(2026, 4), Q(2026, 3))
-    assert rule.required_quarters == {Q(2026, 4), Q(2026, 3), Q(2025, 4), Q(2025, 3)}
+    assert FiscalQuarter.filing_candidates(january) == (Q(2026, 4), Q(2026, 3))
+    assert TrailingEpsQuartersRule().apply(january) == {Q(2026, 4), Q(2026, 3), Q(2025, 4), Q(2025, 3)}
 
 
 def test_ttm_for_a_q2_filer_adds_last_annual_and_removes_last_year_h1() -> None:
-    eps = RULE.evaluate("2330", filings())
+    eps = RULE.apply("2330", filings(), TODAY)
 
     assert isinstance(eps, Eps)
     assert eps.value == pytest.approx(49.33 + 66.26 - 29.31)
@@ -60,7 +63,7 @@ def test_ttm_for_a_q2_filer_adds_last_annual_and_removes_last_year_h1() -> None:
 
 
 def test_ttm_uses_the_newest_quarter_the_company_has_filed() -> None:
-    eps = RULE.evaluate("1232", filings())
+    eps = RULE.apply("1232", filings(), TODAY)
 
     assert isinstance(eps, Eps)
     assert eps.value == round(8.03 + 8.25 - 5.84, 2)
@@ -69,14 +72,13 @@ def test_ttm_uses_the_newest_quarter_the_company_has_filed() -> None:
 
 
 def test_loss_making_ttm_stays_negative() -> None:
-    eps = RULE.evaluate("1101", filings())
+    eps = RULE.apply("1101", filings(), TODAY)
 
     assert isinstance(eps, Eps)
     assert eps.value == round(0.38 - 1.60 - 0.07, 2) == -1.29
 
 
 def test_ttm_ending_in_q4_is_the_annual_report() -> None:
-    rule = TrailingEpsRule.as_of(date(2026, 2, 10))
     annual = {
         Q(2025, 4): QuarterEps(quarter=Q(2025, 4), cumulative_eps={"2330": 66.26}, fetched_at=FETCHED_AT),
         Q(2025, 3): QuarterEps(quarter=Q(2025, 3), cumulative_eps={}, fetched_at=FETCHED_AT),
@@ -84,7 +86,7 @@ def test_ttm_ending_in_q4_is_the_annual_report() -> None:
         Q(2024, 3): QuarterEps(quarter=Q(2024, 3), cumulative_eps={}, fetched_at=FETCHED_AT),
     }
 
-    eps = rule.evaluate("2330", annual)
+    eps = RULE.apply("2330", annual, date(2026, 2, 10))
 
     assert isinstance(eps, Eps)
     assert eps.value == 66.26
@@ -94,28 +96,28 @@ def test_ttm_ending_in_q4_is_the_annual_report() -> None:
 def test_ttm_that_nets_to_zero_is_exactly_zero() -> None:
     overrides = {"q2026_3": {"9999": 0.3}, "q2025_4": {"9999": 0.1}, "q2025_3": {"9999": 0.4}}
 
-    eps = RULE.evaluate("9999", filings(**overrides))
+    eps = RULE.apply("9999", filings(**overrides), TODAY)
 
     assert isinstance(eps, Eps)
     assert eps.value == 0
 
 
 def test_stock_without_any_filing_is_unavailable_not_zero() -> None:
-    assert RULE.evaluate("0050", filings()) == EpsUnavailable(EpsUnavailableReason.NOT_REPORTED, Q(2026, 2))
+    assert RULE.apply("0050", filings(), TODAY) == EpsUnavailable(EpsUnavailableReason.NOT_REPORTED, Q(2026, 2))
 
 
 def test_missing_prior_year_filing_is_incomplete_history() -> None:
     overrides = {"q2025_2": {"2330": 29.31}, "q2025_4": {"1101": -1.60}}
 
-    assert RULE.evaluate("2330", filings(**overrides)) == EpsUnavailable(EpsUnavailableReason.INCOMPLETE_HISTORY, Q(2025, 4))
+    assert RULE.apply("2330", filings(**overrides), TODAY) == EpsUnavailable(EpsUnavailableReason.INCOMPLETE_HISTORY, Q(2025, 4))
 
 
 def test_failed_prior_year_fetch_is_source_failed() -> None:
-    assert RULE.evaluate("2330", filings(q2025_2=None)) == EpsUnavailable(EpsUnavailableReason.SOURCE_FAILED, Q(2025, 2))
+    assert RULE.apply("2330", filings(q2025_2=None), TODAY) == EpsUnavailable(EpsUnavailableReason.SOURCE_FAILED, Q(2025, 2))
 
 
 def test_failed_fetch_of_the_quarter_being_filed_falls_back_and_says_so() -> None:
-    eps = RULE.evaluate("1232", filings(q2026_3=None))
+    eps = RULE.apply("1232", filings(q2026_3=None), TODAY)
 
     assert isinstance(eps, Eps)
     assert eps.period_end == Q(2026, 2)
@@ -124,16 +126,27 @@ def test_failed_fetch_of_the_quarter_being_filed_falls_back_and_says_so() -> Non
 
 
 def test_no_candidate_fetched_is_source_failed() -> None:
-    result = RULE.evaluate("2330", filings(q2026_3=None, q2026_2=None))
+    result = RULE.apply("2330", filings(q2026_3=None, q2026_2=None), TODAY)
 
     assert result == EpsUnavailable(EpsUnavailableReason.SOURCE_FAILED, Q(2026, 2))
 
 
 def test_eps_text_always_carries_its_period_kind_basis_and_source() -> None:
-    eps = RULE.evaluate("2330", filings())
+    eps = RULE.apply("2330", filings(), TODAY)
 
     assert isinstance(eps, Eps)
-    assert eps.describe() == "86.28 元（近四季 TTM，2025Q3–2026Q2，實際值，公開資訊觀測站，取得 2026-10-30 18:06）"
+    assert eps.describe() == "86.28 TWD (TTM, 2025Q3–2026Q2, actual, MOPS, fetched 2026-10-30 18:06)"
+
+
+def test_a_warning_names_each_failed_or_stale_quarter_oldest_first() -> None:
+    stale = QuarterEps(quarter=Q(2026, 3), cumulative_eps={"1232": 8.03}, fetched_at=FETCHED_AT, refresh_failed=True)
+    warnings = FilingWarningRule().apply({**filings(q2025_4=None), Q(2026, 3): stale})
+
+    assert len(warnings) == 2
+    assert warnings[0].startswith("MOPS 2025Q4 ")
+    assert warnings[1].startswith("MOPS 2026Q3 ")
+    assert "2026-10-30 18:06" in warnings[1]
+    assert FilingWarningRule().apply(filings()) == ()
 
 
 def test_quarter_is_final_a_week_after_the_latest_filing_deadline() -> None:
@@ -160,4 +173,22 @@ def test_stock_eps_defaults_to_unavailable_not_zero() -> None:
     ],
 )
 def test_daily_close_is_stale_after_two_missed_weekday_sessions(session: date, last_closed_session: date, fresh: bool) -> None:
-    assert DailyCloseFreshnessRule().is_fresh(session, last_closed_session) is fresh
+    assert DailyCloseFreshnessRule(max_missed_sessions=1).apply(session, last_closed_session) is fresh
+
+
+def test_the_missed_session_limit_is_the_rule_setting() -> None:
+    assert DailyCloseFreshnessRule(max_missed_sessions=2).apply(date(2026, 10, 29), date(2026, 11, 2))
+    assert not DailyCloseFreshnessRule(max_missed_sessions=0).apply(date(2026, 10, 29), date(2026, 10, 30))
+
+
+@pytest.mark.parametrize(
+    ("session", "last_closed_session", "missed"),
+    [
+        (date(2026, 10, 30), date(2026, 10, 30), 0),
+        (date(2026, 10, 29), date(2026, 10, 30), 1),
+        (date(2026, 10, 30), date(2026, 11, 2), 1),
+        (date(2026, 10, 28), date(2026, 11, 2), 3),
+    ],
+)
+def test_missed_sessions_count_weekdays_after_the_session(session: date, last_closed_session: date, missed: int) -> None:
+    assert MissedSessionsRule().apply(session, last_closed_session) == missed

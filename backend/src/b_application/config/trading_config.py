@@ -1,9 +1,11 @@
+from decimal import Decimal
 from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from a_domain.rules.trading.cost import TradingCostRule
+from a_domain.rules.trading.tick import LimitPriceRule, TickSizeRule
 from a_domain.types.enums import ExecutionProvider, OrderMode
 
 
@@ -20,6 +22,12 @@ class AnalysisConfig(BaseModel):
 
     risk_per_trade_pct: float = Field(default=0.02, ge=0.01, le=0.1)
     stop_loss_pct: float = Field(default=0.10, ge=0.01, le=0.5)
+
+    lot_size: int = Field(default=1, gt=0)
+    """A BUY quantity is a multiple of this many shares: 1 sizes odd lots, 1000 whole board lots."""
+
+    reason_item_limit: int = Field(default=3, gt=0)
+    """Most AI factors and soft technical failures a decision reason lists."""
 
     article_fetch_limit: int = Field(default=20, ge=1, le=100)
 
@@ -45,8 +53,37 @@ class MarketConfig(BaseModel):
 
     min_fee: int = Field(default=20, ge=0)
 
+    board_lot_shares: int = Field(default=1000, gt=0)
+    """Shares in one board lot, the exchange's trading unit. Fewer shares trade as an odd lot."""
+
+    stock_ticks: dict[Decimal, Decimal] = Field(
+        default_factory=lambda: {
+            Decimal(0): Decimal("0.01"),
+            Decimal(10): Decimal("0.05"),
+            Decimal(50): Decimal("0.1"),
+            Decimal(100): Decimal("0.5"),
+            Decimal(500): Decimal("1"),
+            Decimal(1000): Decimal("5"),
+        }
+    )
+    """A stock's price ticks: from each band's lowest price up, a limit price is a multiple of the band's tick."""
+
+    etf_ticks: dict[Decimal, Decimal] = Field(default_factory=lambda: {Decimal(0): Decimal("0.01"), Decimal(50): Decimal("0.05")})
+    """An ETF's price ticks, banded like stock_ticks."""
+
+    tick_float_tolerance: Decimal = Field(default=Decimal("0.01"), gt=0, lt=Decimal("0.5"))
+    """A quote this close to a tick, as a fraction of the tick, is that tick carried through a binary float."""
+
     def cost_rule(self) -> TradingCostRule:
         return TradingCostRule(fee_rate=self.fee_rate, tax_rate=self.tax_rate, etf_tax_rate=self.etf_tax_rate, min_fee=self.min_fee)
+
+    def limit_price_rule(self) -> LimitPriceRule:
+        tick_size_rule = TickSizeRule(
+            stock_ticks=tuple(sorted(self.stock_ticks.items(), reverse=True)),
+            etf_ticks=tuple(sorted(self.etf_ticks.items(), reverse=True)),
+        )
+
+        return LimitPriceRule(tick_size_rule=tick_size_rule, float_tolerance=self.tick_float_tolerance)
 
 
 class TradingConfig(BaseModel):
@@ -81,6 +118,12 @@ class ShioajiConfig(BaseSettings):
     model_config = SettingsConfigDict(env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore", env_prefix="SHIOAJI_")
 
     simulation: bool = True
+
+    poll_interval_seconds: float = Field(default=0.5, ge=0)
+    """Wait between two reads of an order's status at the broker."""
+
+    max_polls: int = Field(default=10, gt=0)
+    """Reads of an order's status before the adapter cancels it, and again after the cancel request."""
 
     api_key: SecretStr | None = Field(default=None, validation_alias="SHIOAJI_API_KEY")
     secret_key: SecretStr | None = Field(default=None, validation_alias="SHIOAJI_SECRET_KEY")

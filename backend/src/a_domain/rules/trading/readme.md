@@ -5,18 +5,36 @@ a_domain/rules/trading/
     reason.py
     sizing.py
     cost.py
+    tick.py
     order_rule.py
     valuation.py
 
-各自責任如下：
+Each rule makes one decision in `apply`:
 
-| 檔案              | Class               | 責任                                                                 |
-| --------------- | ------------------- | ------------------------------------------------------------------ |
-| `entry.py`      | `EntryRule`         | 沒持倉時，根據 buy threshold 決定 BUY / HOLD；手動 BUY 只略過 threshold，不略過 sizing |
-| `exit.py`       | `ExitRule`          | 有持倉時，根據 stop-loss / sell threshold 決定 SELL / HOLD                    |
-| `decision.py`   | `DecisionRule`      | 根據 position 是否存在，派給 Entry 或 Exit                                   |
-| `reason.py`     | `ReasonRule`        | 建立 readable reason 的 stateless helpers                              |
-| `sizing.py`     | `SizingRule`        | BUY quantity 計算：risk budget，並以含手續費後的現金為上限                           |
-| `cost.py`       | `TradingCostRule`   | 手續費（含最低手續費）與證交稅（只有 SELL）的唯一來源                                   |
-| `order_rule.py` | `OrderRule`         | 送單前的 gate（order mode、開盤、報價新鮮度）與訂單形狀（LIMIT、IOC）                      |
-| `valuation.py`  | `ValuationRule`     | 持倉市值、扣除賣出成本的未實現損益、資產曲線                                          |
+| File            | Rule                      | Decision                                                                                   |
+| --------------- | ------------------------- | ------------------------------------------------------------------------------------------ |
+| `entry.py`      | `EntryRule`               | BUY or HOLD for a stock not held (ADD or HOLD for a held one), at or above the buy threshold |
+|                 | `ManualEntryRule`         | The user's confirmed BUY: it skips the buy threshold, never the sizing                     |
+| `exit.py`       | `StopLossQuoteRule`       | Why a held stock's quote cannot price a stop-loss SELL now                                 |
+|                 | `StopLossRule`            | The emergency SELL of a position at or below its stop-loss price                           |
+|                 | `ExitRule`                | SELL or HOLD for a held stock: the stop-loss first, then the sell threshold                |
+| `decision.py`   | `DecisionSkipRule`        | Which watchlist stocks get no decision in this run, and why                                |
+|                 | `DecisionRule`            | The final decision on one stock: EntryRule or ExitRule, by whether a position exists       |
+|                 | `RunDecisionsRule`        | One run's decisions, best score first, each BUY sized against the cash left                |
+| `reason.py`     | `AnalysisSummaryRule`     | The technical verdict, cited AI factors and scores every reason ends with                  |
+|                 | `EntryReasonRule`         | The reason of a BUY or HOLD on a stock not held                                            |
+|                 | `ExitReasonRule`          | The reason of a SELL or HOLD on a held position                                            |
+| `sizing.py`     | `BuyCostRule`             | The cash a BUY can take: its quantity at the order's limit plus the fee                    |
+|                 | `SizingRule`              | The BUY quantity: the risk budget, capped by the cash after the fee                        |
+| `cost.py`       | `TradingCostRule`         | The broker fee (with its minimum) and the transaction tax (SELL only)                      |
+|                 | `AffordableQuantityRule`  | The largest lot-aligned BUY quantity the cash pays for, fee included                       |
+| `tick.py`       | `TickSizeRule`            | The exchange tick of a price                                                               |
+|                 | `LimitPriceRule`          | An order's limit price: the decided price as a tick, up for a BUY and down for a SELL      |
+| `order_rule.py` | `OrderGateRule`           | Why an order may not be sent now: order mode, continuous trading, quote age                |
+|                 | `OrderRule`               | The order for a decision: LIMIT IOC at its limit price, or REJECTED with the gate's reason |
+| `valuation.py`  | `ValuationRule`           | Positions marked to market, unrealized PnL net of the selling costs                        |
+|                 | `SnapshotValuationRule`   | A snapshot's account marked at a day's closes                                              |
+|                 | `EquityCurveRule`         | One equity point per trading day since the first snapshot                                  |
+|                 | `AccountAsOfRule`         | The account at the end of a day                                                            |
+|                 | `PriceHistoryStartRule`   | The first day of daily prices the account history needs                                    |
+|                 | `AccountHistoryRule`      | The account now, its equity curve and the account as of a day                              |

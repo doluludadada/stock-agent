@@ -18,6 +18,9 @@ class AiConfig(BaseSettings):
     groq_api_key: str | None = Field(default=None, validation_alias="GROQ_API_KEY")
 
     connection_timeout: int = Field(default=60, description="Timeout for AI model connections")
+    temperature: float = Field(default=0.7, ge=0, le=2)
+    """How freely the model words its reply: 0 always picks the likeliest words."""
+
     system_prompt: str | None = None
     rag_injection_prompt: str | None = None
     article_content_length: int = Field(default=500, ge=100)
@@ -47,6 +50,7 @@ class TavilyConfig(BaseSettings):
 
     api_key: str | None = Field(default=None, validation_alias="TAVILY_API_KEY")
     search_depth: str = "basic"
+    connection_timeout: int = Field(default=30, gt=0)
 
 
 class PromptsConfig(BaseModel):
@@ -56,3 +60,16 @@ class PromptsConfig(BaseModel):
     analysis_report_momentum: str = ""
     valuation_explanation: str = ""
     social_sentiment: str = ""
+
+
+class SentimentConfig(BaseModel):
+    """How the Buzz report tallies social sentiment. Report only: sentiment never changes signals or orders."""
+
+    min_confidence: float = Field(default=0.5, ge=0, le=1)
+    """A post classified with less confidence than this counts as unclear."""
+
+    min_opinions: int = Field(default=2, ge=1)
+    """With fewer bullish, bearish or neutral posts than this, the stock's consensus is unclear."""
+
+    consensus_share: float = Field(default=0.6, gt=0.5, le=1)
+    """The share of the opinions one stance needs to be the consensus. Above one half, so only one stance can reach it."""

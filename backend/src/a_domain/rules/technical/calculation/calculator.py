@@ -3,6 +3,7 @@ from collections.abc import Sequence
 from a_domain.model.indicators.adx import Adx
 from a_domain.model.indicators.atr import Atr
 from a_domain.model.indicators.bollinger_bands import BollingerBands
+from a_domain.model.indicators.indicator_parameters import IndicatorParameters
 from a_domain.model.indicators.macd import Macd
 from a_domain.model.indicators.mfi import Mfi
 from a_domain.model.indicators.moving_averages import MovingAverages
@@ -22,46 +23,40 @@ from a_domain.rules.technical.calculation.formulas import (
     latest_sma,
     latest_stochastic,
 )
-from a_domain.rules.technical.calculation.parameters import IndicatorParameters
 
 
 class TechnicalIndicatorCalculator:
     def __init__(self, indicators: IndicatorParameters):
         self._indicators = indicators
 
-    def calculate(self, data: Sequence[Ohlcv]) -> TechnicalIndicators:
+    def apply(self, data: Sequence[Ohlcv]) -> TechnicalIndicators:
         bars = sorted(data, key=lambda bar: bar.ts)
         if not bars:
             return TechnicalIndicators()
 
-        indicators = self._indicators
         closes = [bar.close for bar in bars]
         volumes = [float(bar.volume) for bar in bars]
 
-        rsi_value = latest_rsi(closes, indicators.rsi_period)
-        macd_values = latest_macd(closes, indicators.macd_fast, indicators.macd_slow, indicators.macd_signal)
-        bollinger_values = latest_bollinger(closes, indicators.bb_period, indicators.bb_std)
-        stochastic_values = latest_stochastic(bars, indicators.stoch_k, indicators.stoch_d)
-        adx_values = latest_adx(bars, indicators.adx_period)
-        atr_value = latest_atr(bars, indicators.atr_period)
-        obv_values = latest_obv(closes, volumes, indicators.ma_mid)
-        mfi_value = latest_mfi(bars, indicators.mfi_period)
-
-        ma = self._calculate_moving_averages(closes, volumes)
-
         return TechnicalIndicators(
-            rsi=Rsi(period=indicators.rsi_period, value=rsi_value) if rsi_value is not None else None,
-            macd=self._create_macd(macd_values),
-            ma=ma,
-            bollinger=self._create_bollinger(bollinger_values),
-            stochastic=self._create_stochastic(stochastic_values),
-            adx=self._create_adx(adx_values),
-            atr=self._create_atr(atr_value, closes[-1]),
-            obv=self._create_obv(obv_values),
-            mfi=Mfi(period=indicators.mfi_period, value=mfi_value) if mfi_value is not None else None,
+            rsi=self._create_rsi(closes),
+            macd=self._create_macd(closes),
+            ma=self._create_moving_averages(closes, volumes),
+            bollinger=self._create_bollinger(closes),
+            stochastic=self._create_stochastic(bars),
+            adx=self._create_adx(bars),
+            atr=self._create_atr(bars, closes[-1]),
+            obv=self._create_obv(closes, volumes),
+            mfi=self._create_mfi(bars),
         )
 
-    def _calculate_moving_averages(self, closes: Sequence[float], volumes: Sequence[float]) -> MovingAverages | None:
+    def _create_rsi(self, closes: Sequence[float]) -> Rsi | None:
+        value = latest_rsi(closes, self._indicators.rsi_period)
+        if value is None:
+            return None
+
+        return Rsi(period=self._indicators.rsi_period, value=value)
+
+    def _create_moving_averages(self, closes: Sequence[float], volumes: Sequence[float]) -> MovingAverages | None:
         indicators = self._indicators
         price_ma = {
             period: value
@@ -79,12 +74,13 @@ class TechnicalIndicatorCalculator:
 
         return MovingAverages(price_ma=price_ma, volume_ma=volume_ma)
 
-    def _create_macd(self, values: tuple[float, float, float] | None) -> Macd | None:
+    def _create_macd(self, closes: Sequence[float]) -> Macd | None:
+        indicators = self._indicators
+        values = latest_macd(closes, indicators.macd_fast, indicators.macd_slow, indicators.macd_signal)
         if values is None:
             return None
 
         line, signal, histogram = values
-        indicators = self._indicators
         return Macd(
             fast=indicators.macd_fast,
             slow=indicators.macd_slow,
@@ -94,12 +90,13 @@ class TechnicalIndicatorCalculator:
             histogram=histogram,
         )
 
-    def _create_bollinger(self, values: tuple[float, float, float, float, float] | None) -> BollingerBands | None:
+    def _create_bollinger(self, closes: Sequence[float]) -> BollingerBands | None:
+        indicators = self._indicators
+        values = latest_bollinger(closes, indicators.bb_period, indicators.bb_std)
         if values is None:
             return None
 
         upper, middle, lower, bandwidth, percent_b = values
-        indicators = self._indicators
         return BollingerBands(
             period=indicators.bb_period,
             std=indicators.bb_std,
@@ -110,30 +107,41 @@ class TechnicalIndicatorCalculator:
             percent_b=percent_b,
         )
 
-    def _create_stochastic(self, values: tuple[float, float] | None) -> Stochastic | None:
+    def _create_stochastic(self, bars: Sequence[Ohlcv]) -> Stochastic | None:
+        indicators = self._indicators
+        values = latest_stochastic(bars, indicators.stoch_k, indicators.stoch_d)
         if values is None:
             return None
 
         percent_k, percent_d = values
-        indicators = self._indicators
         return Stochastic(k_period=indicators.stoch_k, d_period=indicators.stoch_d, percent_k=percent_k, percent_d=percent_d)
 
-    def _create_adx(self, values: tuple[float, float, float] | None) -> Adx | None:
+    def _create_adx(self, bars: Sequence[Ohlcv]) -> Adx | None:
+        values = latest_adx(bars, self._indicators.adx_period)
         if values is None:
             return None
 
         adx, plus_di, minus_di = values
         return Adx(period=self._indicators.adx_period, adx=adx, plus_di=plus_di, minus_di=minus_di)
 
-    def _create_atr(self, value: float | None, latest_close: float) -> Atr | None:
+    def _create_atr(self, bars: Sequence[Ohlcv], latest_close: float) -> Atr | None:
+        value = latest_atr(bars, self._indicators.atr_period)
         if value is None or latest_close <= 0:
             return None
 
         return Atr(period=self._indicators.atr_period, value=value, percent=value / latest_close)
 
-    def _create_obv(self, values: tuple[float, float] | None) -> Obv | None:
+    def _create_obv(self, closes: Sequence[float], volumes: Sequence[float]) -> Obv | None:
+        values = latest_obv(closes, volumes, self._indicators.ma_mid)
         if values is None:
             return None
 
         value, moving_average = values
         return Obv(ma_period=self._indicators.ma_mid, value=value, moving_average=moving_average)
+
+    def _create_mfi(self, bars: Sequence[Ohlcv]) -> Mfi | None:
+        value = latest_mfi(bars, self._indicators.mfi_period)
+        if value is None:
+            return None
+
+        return Mfi(period=self._indicators.mfi_period, value=value)

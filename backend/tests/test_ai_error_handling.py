@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -7,6 +8,7 @@ from support.harness import build_harness, rising_history
 
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from b_application.config.sources_config import SourcesConfig
+from c_infrastructure.ai_models.ai_adapter import grok_adapter
 from c_infrastructure.ai_models.ai_adapter.grok_adapter import GrokAdapter
 from c_infrastructure.feed.news.cnyes_news_provider import CnyesNewsProvider
 
@@ -59,7 +61,7 @@ class FakeCnyesResponse:
     def __init__(self, status_code: int, payload: dict | None = None, text: str = "") -> None:
         self.status_code = status_code
         self._payload = payload or {}
-        self.text = text
+        self.text = json.dumps(payload) if payload is not None else text
         self.request = httpx.Request("GET", "https://api.cnyes.com/media/api/v1/search")
 
     def raise_for_status(self) -> None:
@@ -124,14 +126,14 @@ async def test_ai_analyser_records_provider_failure_without_counting_success() -
 
 
 @pytest.mark.asyncio
-async def test_grok_adapter_raises_on_http_failure() -> None:
+async def test_grok_adapter_raises_on_http_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     config = SimpleNamespace(
-        ai=SimpleNamespace(grok_api_key="test-key", connection_timeout=1),
+        ai=SimpleNamespace(grok_api_key="test-key", connection_timeout=1, temperature=0.7),
         sources=SOURCES,
         behavior=SimpleNamespace(enable_web_search=False, enable_x_search=False, enable_inline_citations=False),
     )
+    monkeypatch.setattr(grok_adapter, "AsyncOpenAI", lambda **options: FakeClient())
     adapter = GrokAdapter(config=cast(Any, config), logger=FakeLogger(), model_name="grok-test")
-    vars(adapter)["_client"] = FakeClient()
 
     with pytest.raises(RuntimeError, match="Grok API request failed"):
-        await adapter._call_api(())
+        await adapter.generate_reply(())

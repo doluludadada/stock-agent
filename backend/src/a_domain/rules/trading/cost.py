@@ -3,25 +3,8 @@ from dataclasses import dataclass
 
 from icontract import ensure, invariant, require
 
+from a_domain.model.trading.trade_cost import TradeCost
 from a_domain.types.enums import SecurityKind, TradeAction
-
-
-@dataclass(frozen=True)
-class TradeCost:
-    """What executing `gross` worth of shares costs. Fee and tax are whole NT dollars, rounded down."""
-
-    action: TradeAction
-    gross: float
-    fee: int
-    tax: int
-
-    @property
-    def net(self) -> float:
-        """Signed cash change: a BUY pays gross + fee, a SELL receives gross - fee - tax."""
-        if self.action == TradeAction.BUY:
-            return -(self.gross + self.fee)
-
-        return self.gross - self.fee - self.tax
 
 
 @invariant(lambda self: self.fee_rate >= 0 and self.tax_rate >= 0 and self.etf_tax_rate >= 0 and self.min_fee >= 0)
@@ -40,7 +23,7 @@ class TradingCostRule:
     @require(lambda action: action != TradeAction.HOLD, "HOLD has no cost")
     @require(lambda price: math.isfinite(price) and price > 0)
     @require(lambda quantity: quantity > 0)
-    def cost_of(self, action: TradeAction, stock_id: str, price: float, quantity: int) -> TradeCost:
+    def apply(self, action: TradeAction, stock_id: str, price: float, quantity: int) -> TradeCost:
         gross = price * quantity
         fee = max(self.min_fee, int(gross * self.fee_rate))
         tax_rate = self.etf_tax_rate if SecurityKind.of(stock_id) == SecurityKind.ETF else self.tax_rate
@@ -48,15 +31,21 @@ class TradingCostRule:
 
         return TradeCost(action=action, gross=gross, fee=fee, tax=tax)
 
+
+@dataclass(frozen=True)
+class AffordableQuantityRule:
+    """The largest lot-aligned BUY quantity whose gross plus fee fits in the cash."""
+
+    cost_rule: TradingCostRule
+
     @require(lambda price: math.isfinite(price) and price > 0)
     @require(lambda lot_size: lot_size > 0)
     @ensure(lambda result, lot_size: result >= 0 and result % lot_size == 0)
-    def max_buy_quantity(self, cash: float, stock_id: str, price: float, lot_size: int) -> int:
-        """Largest lot-aligned quantity whose gross plus fee fits in `cash`."""
+    def apply(self, cash: float, stock_id: str, price: float, lot_size: int) -> int:
         # The fee is rounded down, so up to one dollar more than cash / (price * (1 + fee_rate)) can still fit.
-        quantity = int((cash + 1) // (price * (1 + self.fee_rate))) // lot_size * lot_size
+        quantity = int((cash + 1) // (price * (1 + self.cost_rule.fee_rate))) // lot_size * lot_size
 
-        while quantity > 0 and -self.cost_of(TradeAction.BUY, stock_id, price, quantity).net > cash:
+        while quantity > 0 and -self.cost_rule.apply(TradeAction.BUY, stock_id, price, quantity).net > cash:
             quantity -= lot_size
 
         return max(quantity, 0)

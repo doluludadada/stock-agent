@@ -11,16 +11,17 @@ from rich.table import Table
 
 from a_domain.model.fundamentals.eps import SOURCE_LABELS, Eps
 from a_domain.model.market.stock import Stock
+from a_domain.model.trading.account_valuation import AccountValuation
+from a_domain.model.trading.equity_point import EquityPoint
 from a_domain.model.trading.watchlist_addition import WatchlistAddition
 from a_domain.model.valuation.market_valuation import MarketValuation
 from a_domain.model.valuation.pe_ratio import PeRatio
-from a_domain.model.valuation.scan_criteria import ScanCriteria
+from a_domain.model.valuation.scan_criteria import MIN_UNDERVALUATION_REQUIREMENT, ScanCriteria
 from a_domain.model.valuation.stock_valuation import StockValuation
-from a_domain.model.valuation.target_pe import TargetPe
+from a_domain.model.valuation.target_pe import TARGET_PE_REQUIREMENT, TargetPe
 from a_domain.model.valuation.valuation_explanation import LOW_PE_CAVEAT, ValuationExplanation
 from a_domain.model.valuation.valuation_report import LABEL, UNDERVALUATION_FORMULA
 from a_domain.model.valuation.valuation_scan import ValuationScan
-from a_domain.rules.trading.valuation import AccountValuation, EquityPoint
 from a_domain.types.enums import ExecutionProvider, OrderMode, ScanStep, WatchlistType
 from b_application.config.app_config import AppConfig
 from b_application.pipeline import Pipeline
@@ -650,7 +651,7 @@ def ask_target_pe() -> TargetPe | None:
         try:
             return TargetPe(float(raw_value))
         except ValueError:
-            console.print("[red]目標本益比必須是大於 0 的有限數字[/red]")
+            console.print(f"[red]{TARGET_PE_REQUIREMENT}[/red]")
 
 
 def ask_scan_criteria() -> ScanCriteria | None:
@@ -668,7 +669,7 @@ def ask_scan_criteria() -> ScanCriteria | None:
         try:
             return ScanCriteria(target_pe=target_pe, min_undervaluation=float(raw_value) / 100)
         except ValueError:
-            console.print("[red]最低低估幅度必須是大於或等於 0 的有限數字[/red]")
+            console.print(f"[red]{MIN_UNDERVALUATION_REQUIREMENT}[/red]")
 
 
 def print_market_reference(market: MarketValuation) -> None:

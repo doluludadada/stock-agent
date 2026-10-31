@@ -7,10 +7,12 @@ import yaml
 from icontract.errors import ViolationError
 from pydantic import ValidationError
 
+from a_domain.model.analysis.technical_rule import TechnicalRule
+from a_domain.model.analysis.technical_scoring import TechnicalScoring
 from a_domain.model.analysis.technical_settings import TechnicalSettings
-from a_domain.rules.technical.calculation.parameters import IndicatorParameters
+from a_domain.model.indicators.indicator_parameters import IndicatorParameters
 from a_domain.rules.technical.criteria.volume import ObvTrendCriterion
-from a_domain.rules.technical.strategy import TechnicalRule, TechnicalScoring, TechnicalStrategy
+from a_domain.rules.technical.strategy import TechnicalStrategy
 from a_domain.types.enums import RuleEffect
 from b_application.pipeline import Pipeline
 from c_infrastructure.technical.yaml_technical_settings_repository import YamlTechnicalSettingsRepository

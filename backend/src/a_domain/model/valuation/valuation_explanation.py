@@ -6,14 +6,18 @@ from a_domain.model.valuation.report_section import ReportSection
 from a_domain.model.valuation.valuation_report import ValuationReport
 
 NOT_INVESTMENT_ADVICE = (
-    "本報告僅為基於指定本益比的估值試算與資料整理，不構成投資建議；估值結果取決於所設定的本益比假設，並非客觀真實價值。"
+    "This report is only a valuation estimate based on a specified P/E and a summary of the data. It is not investment "
+    "advice. The result depends on the assumed P/E and is not an objective true value."
 )
 
 
-LOW_PE_CAVEAT = "低本益比可能反映獲利成長下降、一次性收益墊高 EPS 或市場與產業風險；低本益比本身不是買進訊號。"
+LOW_PE_CAVEAT = (
+    "A low P/E can reflect falling earnings growth, one-off gains that inflate EPS, or market and industry risk; "
+    "a low P/E alone is not a buy signal."
+)
 
 
-AI_NOT_PROVIDED = "（AI 未提供）"
+AI_NOT_PROVIDED = "(not provided by the AI)"
 
 
 @dataclass(frozen=True)
@@ -42,15 +46,15 @@ class ValuationExplanation:
         warnings = list(report.valuation.warnings)
 
         if not report.stock.articles:
-            warnings.append("未取得相關新聞，AI 解釋僅依據估值數字")
+            warnings.append("No related news was found, so the AI explanation relies on the valuation numbers only")
 
-        warnings.extend(f"AI：{gap}" for gap in self.data_gaps)
+        warnings.extend(f"AI: {gap}" for gap in self.data_gaps)
 
         return (
             *report.fact_sections(),
-            ReportSection("可能支持較高本益比的因素", self.higher_pe_factors or (AI_NOT_PROVIDED,)),
-            ReportSection("可能導致本益比下修的風險", risks),
-            ReportSection("資料不足警告", tuple(warnings) or ("無",)),
-            ReportSection("非投資建議聲明", (NOT_INVESTMENT_ADVICE,)),
-            ReportSection("AI 摘要", (self.summary or AI_NOT_PROVIDED,)),
+            ReportSection("Factors that may support a higher P/E", self.higher_pe_factors or (AI_NOT_PROVIDED,)),
+            ReportSection("Risks that may lower the P/E", risks),
+            ReportSection("Insufficient data warnings", tuple(warnings) or ("none",)),
+            ReportSection("Not investment advice", (NOT_INVESTMENT_ADVICE,)),
+            ReportSection("AI summary", (self.summary or AI_NOT_PROVIDED,)),
         )

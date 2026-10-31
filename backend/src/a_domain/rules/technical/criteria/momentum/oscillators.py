@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import override
 
 import icontract
 
@@ -11,8 +12,8 @@ class RsiRangeCriterion:
     min_rsi: float = 0.0
     max_rsi: float = 100.0
 
-    @property
-    def name(self) -> str:
+    @override
+    def __str__(self) -> str:
         return f"RSI Range {self.min_rsi}-{self.max_rsi}"
 
     def apply(self, stock: Stock) -> bool:
@@ -27,8 +28,8 @@ class RsiRangeCriterion:
 class MfiThresholdCriterion:
     max_mfi: float = 80.0
 
-    @property
-    def name(self) -> str:
+    @override
+    def __str__(self) -> str:
         return f"MFI < {self.max_mfi}"
 
     def apply(self, stock: Stock) -> bool:

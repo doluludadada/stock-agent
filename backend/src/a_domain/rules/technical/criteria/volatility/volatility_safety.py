@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import override
 
 import icontract
 
@@ -12,8 +13,8 @@ class DailyRangeCriterion:
 
     max_daily_range_pct: float
 
-    @property
-    def name(self) -> str:
+    @override
+    def __str__(self) -> str:
         return "Daily Range Safety"
 
     def apply(self, stock: Stock) -> bool:
@@ -36,8 +37,8 @@ class AtrRangeCriterion:
     min_atr_pct: float | None = None
     max_atr_pct: float | None = None
 
-    @property
-    def name(self) -> str:
+    @override
+    def __str__(self) -> str:
         return "ATR Range"
 
     def apply(self, stock: Stock) -> bool:

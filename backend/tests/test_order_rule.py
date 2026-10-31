@@ -7,7 +7,7 @@ from a_domain.model.market.stock import Stock
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.rules.collect.freshness import DataFreshnessRule
 from a_domain.rules.trading.cost import TradingCostRule
-from a_domain.rules.trading.order_rule import OrderRule
+from a_domain.rules.trading.order_rule import OrderGateRule, OrderRule
 from a_domain.types.enums import (
     ExecutionProvider,
     OrderMode,
@@ -19,13 +19,22 @@ from a_domain.types.enums import (
     TradingPhase,
 )
 from a_domain.types.ids import new_run_id
+from b_application.config.trading_config import MarketConfig
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 
 NOW = datetime(2026, 10, 19, 10, 20, tzinfo=TAIWAN_TIMEZONE)
 COSTS = TradingCostRule(fee_rate=0.001425, tax_rate=0.003, etf_tax_rate=0.001, min_fee=20)
-RULE = OrderRule(
-    order_mode=OrderMode.MOCK_ONLY, execution_provider=ExecutionProvider.MOCK, price_freshness=DataFreshnessRule(timedelta(minutes=15))
-)
+LIMIT_PRICE = MarketConfig().limit_price_rule()
+
+
+def order_rule(order_mode: OrderMode = OrderMode.MOCK_ONLY, provider: ExecutionProvider = ExecutionProvider.MOCK) -> OrderRule:
+    gate_rule = OrderGateRule(
+        order_mode=order_mode, execution_provider=provider, price_freshness=DataFreshnessRule(timedelta(minutes=15))
+    )
+    return OrderRule(gate_rule=gate_rule, limit_price_rule=LIMIT_PRICE)
+
+
+RULE = order_rule()
 
 
 def signal_at(quoted_at: datetime, price: float = 100, action: TradeAction = TradeAction.BUY) -> TradeSignal:
@@ -45,7 +54,7 @@ def test_a_fresh_decision_becomes_a_pending_ioc_limit_order_at_its_price() -> No
     signal = buy_signal(quoted_at=NOW - timedelta(minutes=15))
     run_id = new_run_id()
 
-    order = RULE.order_for(signal, run_id, now=NOW, phase=TradingPhase.CONTINUOUS)
+    order = RULE.apply(signal, run_id, now=NOW, phase=TradingPhase.CONTINUOUS)
 
     assert (order.status, order.order_type, order.time_in_force) == (OrderStatus.PENDING, OrderType.LIMIT, TimeInForce.IOC)
     assert (order.limit_price, order.quantity, order.run_id, order.decision_id) == (100, 1000, run_id, signal.decision_id)
@@ -66,9 +75,9 @@ def test_a_fresh_decision_becomes_a_pending_ioc_limit_order_at_its_price() -> No
 def test_each_gate_rejects_with_its_reason(
     order_mode: OrderMode, provider: ExecutionProvider, phase: TradingPhase, quote_age: int, reason: str
 ) -> None:
-    rule = OrderRule(order_mode=order_mode, execution_provider=provider, price_freshness=DataFreshnessRule(timedelta(minutes=15)))
+    rule = order_rule(order_mode, provider)
 
-    order = rule.order_for(buy_signal(quoted_at=NOW - timedelta(minutes=quote_age)), new_run_id(), now=NOW, phase=phase)
+    order = rule.apply(buy_signal(quoted_at=NOW - timedelta(minutes=quote_age)), new_run_id(), now=NOW, phase=phase)
 
     assert order.status == OrderStatus.REJECTED
     assert order.reason is not None and order.reason.startswith(f"{reason}: ")
@@ -77,10 +86,10 @@ def test_each_gate_rejects_with_its_reason(
 def test_a_quote_fresh_when_fetched_is_refused_once_it_aged_past_the_limit() -> None:
     signal = buy_signal(quoted_at=datetime(2026, 10, 19, 9, 59, tzinfo=TAIWAN_TIMEZONE))
 
-    assert RULE.order_for(
+    assert RULE.apply(
         signal, new_run_id(), now=signal.price_observed_at + timedelta(minutes=1), phase=TradingPhase.CONTINUOUS
     ).status == (OrderStatus.PENDING)
-    assert RULE.order_for(signal, new_run_id(), now=NOW, phase=TradingPhase.CONTINUOUS).reason == (
+    assert RULE.apply(signal, new_run_id(), now=NOW, phase=TradingPhase.CONTINUOUS).reason == (
         "STALE_PRICE: price 100.00 was quoted at 2026-10-19 09:59, 21 min before 10:20; the limit is 15 min"
     )
 
@@ -93,9 +102,9 @@ def test_a_quote_fresh_when_fetched_is_refused_once_it_aged_past_the_limit() -> 
 def test_an_order_priced_from_a_float32_quote_takes_an_exchange_fill_at_that_price(
     action: TradeAction, yahoo_quote: float, exchange_price: float
 ) -> None:
-    order = RULE.order_for(signal_at(NOW, yahoo_quote, action), new_run_id(), now=NOW, phase=TradingPhase.CONTINUOUS)
+    order = RULE.apply(signal_at(NOW, yahoo_quote, action), new_run_id(), now=NOW, phase=TradingPhase.CONTINUOUS)
 
     order.submit(now=NOW)
-    order.fill(1000, exchange_price, COSTS.cost_of(action, "2330", exchange_price, 1000), now=NOW)
+    order.fill(1000, exchange_price, COSTS.apply(action, "2330", exchange_price, 1000), now=NOW)
 
     assert (order.status, repr(order.limit_price)) == (OrderStatus.FILLED, repr(exchange_price))

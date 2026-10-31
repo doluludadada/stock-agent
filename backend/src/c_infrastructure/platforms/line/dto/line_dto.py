@@ -1,4 +1,14 @@
+from enum import StrEnum
+
 from pydantic import BaseModel
+
+
+class LineEventType(StrEnum):
+    MESSAGE = "message"
+
+
+class LineMessageType(StrEnum):
+    TEXT = "text"
 
 
 class LineMessage(BaseModel):

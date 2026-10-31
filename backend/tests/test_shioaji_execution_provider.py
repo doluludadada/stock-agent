@@ -12,7 +12,7 @@ from a_domain.types.enums import OrderStatus, OrderType, TimeInForce, TradeActio
 from a_domain.types.ids import new_decision_id, new_run_id
 from b_application.config.app_config import AppConfig
 from b_application.config.trading_config import ShioajiConfig
-from c_infrastructure.trading.shioaji.execution_provider import ORDER_STATUS, ShioajiExecutionProvider, log_in
+from c_infrastructure.trading.shioaji.execution_provider import ORDER_STATUS, ShioajiExecutionProvider
 
 NOW = datetime(2026, 10, 19, 10, 0, tzinfo=UTC)
 
@@ -26,7 +26,14 @@ def provider(client: FakeShioaji) -> ShioajiExecutionProvider:
     if client.stock_account is None:
         client.stock_account = client.account_at_login
 
-    return ShioajiExecutionProvider(client=client, config=CONFIG, logger=SilentLogger(), poll_interval_seconds=0, max_polls=3)
+    return unconnected(client, simulation=True)
+
+
+def unconnected(client: FakeShioaji, simulation: bool) -> ShioajiExecutionProvider:
+    """An adapter whose client has not logged in yet: connect() logs it in."""
+    config = CONFIG.model_copy(update={"shioaji": credentials(simulation)})
+
+    return ShioajiExecutionProvider(client=client, config=config, logger=SilentLogger())
 
 
 def order(
@@ -57,6 +64,8 @@ def sent(client: FakeShioaji) -> list[tuple]:
 def credentials(simulation: bool) -> ShioajiConfig:
     return ShioajiConfig(
         simulation=simulation,
+        poll_interval_seconds=0,
+        max_polls=3,
         SHIOAJI_API_KEY="key",
         SHIOAJI_SECRET_KEY="secret",
         SHIOAJI_CA_PATH="/certs/Sinopac.pfx",
@@ -86,7 +95,7 @@ async def test_a_whole_lot_buy_is_one_board_lot_limit_order_on_the_logged_in_acc
     )
     assert (broker_order.account, broker_order.custom_field) == (client.stock_account, f"{placing.id.hex[:5]}0")
     assert (placed.status, placed.filled_quantity, placed.average_filled_price) == (OrderStatus.FILLED, 2000, 101.5)
-    cost = COSTS.cost_of(TradeAction.BUY, "2330", 101.5, 2000)
+    cost = COSTS.apply(TradeAction.BUY, "2330", 101.5, 2000)
     assert (placed.fee, placed.tax) == (cost.fee, cost.tax)
 
 
@@ -97,7 +106,7 @@ async def test_fewer_than_1000_shares_are_one_intraday_odd_lot_order_in_shares()
 
     assert sent(client) == [(StockOrderLot.IntradayOdd, 500, BrokerTimeInForce.IOC, 99.0)]
     assert client.placed[0].order.action == Action.Sell
-    cost = COSTS.cost_of(TradeAction.SELL, "2330", 99.0, 500)
+    cost = COSTS.apply(TradeAction.SELL, "2330", 99.0, 500)
     assert (placed.status, placed.filled_quantity, placed.tax) == (OrderStatus.FILLED, 500, cost.tax)
     assert placed.realized_pnl == pytest.approx(cost.net - 500 * 90.0)
 
@@ -113,7 +122,7 @@ async def test_a_mixed_quantity_is_split_into_a_board_lot_order_and_an_odd_lot_o
         (StockOrderLot.IntradayOdd, 500, BrokerTimeInForce.IOC, 100.0),
     ]
     assert [trade.order.custom_field for trade in client.placed] == [f"{placing.id.hex[:5]}0", f"{placing.id.hex[:5]}1"]
-    lots, odd = COSTS.cost_of(TradeAction.BUY, "2330", 100.0, 2000), COSTS.cost_of(TradeAction.BUY, "2330", 100.0, 500)
+    lots, odd = COSTS.apply(TradeAction.BUY, "2330", 100.0, 2000), COSTS.apply(TradeAction.BUY, "2330", 100.0, 500)
     assert (placed.status, placed.filled_quantity, placed.fee) == (OrderStatus.FILLED, 2500, lots.fee + odd.fee)
 
 
@@ -214,7 +223,7 @@ async def test_a_partial_fill_is_recorded_before_the_ioc_remainder_is_cancelled(
 
     placed = await provider(client).place_order(order(quantity=3000))
 
-    cost = COSTS.cost_of(TradeAction.BUY, "2330", 100.0, 1000)
+    cost = COSTS.apply(TradeAction.BUY, "2330", 100.0, 1000)
     assert (placed.status, placed.filled_quantity, placed.fee, client.cancelled) == (OrderStatus.CANCELLED, 1000, cost.fee, [])
 
 
@@ -318,7 +327,7 @@ async def test_get_account_refuses_a_balance_the_broker_reports_as_an_error() ->
 async def test_simulation_login_uses_the_api_key_pair_and_no_ca() -> None:
     client = FakeShioaji()
 
-    log_in(client, credentials(simulation=True))
+    await unconnected(client, simulation=True).connect()
 
     assert ([(login["api_key"], login["secret_key"]) for login in client.logins], client.ca_activations) == ([("key", "secret")], [])
     assert client.stock_account is client.account_at_login
@@ -327,7 +336,7 @@ async def test_simulation_login_uses_the_api_key_pair_and_no_ca() -> None:
 async def test_production_login_activates_the_ca() -> None:
     client = FakeShioaji(simulation=False)
 
-    log_in(client, credentials(simulation=False))
+    await unconnected(client, simulation=False).connect()
 
     assert client.ca_activations == [{"ca_path": "/certs/Sinopac.pfx", "ca_passwd": "ca-password", "person_id": "A123456789"}]
 
@@ -343,7 +352,7 @@ async def test_production_login_activates_the_ca() -> None:
 )
 async def test_a_failed_login_or_ca_activation_raises_saying_what_failed(client: FakeShioaji, message: str) -> None:
     with pytest.raises(Exception, match=message):
-        log_in(client, credentials(simulation=False))
+        await unconnected(client, simulation=False).connect()
 
 
 async def test_production_refuses_an_account_that_has_not_signed_the_api_agreement() -> None:
@@ -351,7 +360,7 @@ async def test_production_refuses_an_account_that_has_not_signed_the_api_agreeme
     client.account_at_login = client.account_at_login.model_copy(update={"signed": False})
 
     with pytest.raises(RuntimeError, match="has not signed"):
-        log_in(client, credentials(simulation=False))
+        await unconnected(client, simulation=False).connect()
 
 
 async def test_a_second_buy_is_refused_when_todays_first_fill_used_the_cash() -> None:

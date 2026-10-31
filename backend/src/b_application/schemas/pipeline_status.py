@@ -15,7 +15,7 @@ from a_domain.types.enums import ExecutionProvider, OrderMode, Workflow
 @dataclass
 class PipelineStatus:
     """
-    Runtime state for one workflow run. RunHistory.open creates it; `stats` is the run record.
+    Runtime state for one workflow run. RunHistory.execute creates it; `stats` is the run record.
     A read-only valuation step gets one from for_valuation() instead, which is never recorded.
     """
 
@@ -112,6 +112,13 @@ class PipelineStatus:
                 workflow=Workflow.VALUATION, execution_provider=ExecutionProvider.MOCK, order_mode=OrderMode.DISABLED, start_time=now
             )
         )
+
+    def mark_stale(self, stock_id: str) -> None:
+        """Adds the stock to stale_stock_ids. Each stock counts once toward stats.stale_market_data_count."""
+        if stock_id not in self.stale_stock_ids:
+            self.stats.stale_market_data_count += 1
+
+        self.stale_stock_ids.add(stock_id)
 
     def require_manual_buy_order(self) -> Order:
         """The order OrderExecution made for an unrefused manual BUY. It raises when the run refused the BUY instead."""

@@ -12,6 +12,8 @@ class TechnicalCriterion(Protocol):
     This is only for technical stock filters:
         Stock + calculated indicators -> pass / fail
 
+    `str(criterion)` is the name a technical report lists the criterion under.
+
     Do not use this for:
         - article quality rules
         - data freshness rules
@@ -19,8 +21,5 @@ class TechnicalCriterion(Protocol):
         - sizing rules
         - entry / exit decision rules
     """
-
-    @property
-    def name(self) -> str: ...
 
     def apply(self, stock: Stock) -> bool: ...

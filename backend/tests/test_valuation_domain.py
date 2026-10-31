@@ -16,7 +16,7 @@ from a_domain.model.valuation.pe_not_applicable import PeNotApplicable
 from a_domain.model.valuation.pe_ratio import PeRatio
 from a_domain.model.valuation.scan_criteria import ScanCriteria
 from a_domain.model.valuation.stock_valuation import StockValuation
-from a_domain.model.valuation.target_pe import TargetPe
+from a_domain.model.valuation.target_pe import TARGET_PE_REQUIREMENT, TargetPe
 from a_domain.model.valuation.valuation_explanation import LOW_PE_CAVEAT, NOT_INVESTMENT_ADVICE, ValuationExplanation
 from a_domain.model.valuation.valuation_report import ValuationReport
 from a_domain.types.enums import (
@@ -35,17 +35,17 @@ LAST_CLOSED_SESSION = date(2026, 10, 30)
 SPREAD = 0.2
 
 US_107_SECTIONS = [
-    "目前股價",
-    "EPS 與財報期間",
-    "目前本益比",
-    "目標本益比",
-    "推算合理股價（基於指定本益比的估值）",
-    "高估／低估幅度",
-    "可能支持較高本益比的因素",
-    "可能導致本益比下修的風險",
-    "資料不足警告",
-    "非投資建議聲明",
-    "AI 摘要",
+    "Current price",
+    "EPS and reporting period",
+    "Current P/E",
+    "Target P/E",
+    "Fair price (Valuation based on a specified P/E)",
+    "Overvaluation / undervaluation",
+    "Factors that may support a higher P/E",
+    "Risks that may lower the P/E",
+    "Insufficient data warnings",
+    "Not investment advice",
+    "AI summary",
 ]
 
 
@@ -74,7 +74,7 @@ def valuation(
     if price is not None:
         close = Ohlcv(ts=datetime.combine(session, time(13, 30), TAIPEI), open=price, high=price, low=price, close=price, volume=1)
 
-    return StockValuation(stock=stock, close=close, last_closed_session=LAST_CLOSED_SESSION)
+    return StockValuation(stock=stock, close=close, last_closed_session=LAST_CLOSED_SESSION, max_missed_sessions=1)
 
 
 def market(*valuations: StockValuation) -> MarketValuation:
@@ -88,21 +88,21 @@ def test_current_pe_is_price_over_ttm_eps() -> None:
 
     assert isinstance(pe, PeRatio)
     assert pe.value == pytest.approx(2415.0 / 86.28)
-    assert valuation("2330", 86.28, 2415.0).pe_text == "27.99 倍"
+    assert valuation("2330", 86.28, 2415.0).pe_text == "27.99x"
 
 
 @pytest.mark.parametrize(
     ("eps", "price", "reason", "label"),
     [
-        (0.0, 50.0, PeNotApplicableReason.EPS_ZERO, "無法計算"),
-        (-1.29, 28.2, PeNotApplicableReason.EPS_NEGATIVE, "虧損，本益比不適用"),
+        (0.0, 50.0, PeNotApplicableReason.EPS_ZERO, "cannot be computed"),
+        (-1.29, 28.2, PeNotApplicableReason.EPS_NEGATIVE, "loss-making, P/E not applicable"),
         (
             EpsUnavailable(EpsUnavailableReason.NOT_REPORTED, FiscalQuarter(2026, 2)),
             107.25,
             PeNotApplicableReason.EPS_UNAVAILABLE,
-            "資料不足",
+            "insufficient data",
         ),
-        (3.0, None, PeNotApplicableReason.INVALID_PRICE, "無有效股價"),
+        (3.0, None, PeNotApplicableReason.INVALID_PRICE, "no valid price"),
     ],
 )
 def test_current_pe_outcomes_are_a_closed_set(
@@ -132,12 +132,12 @@ def test_report_text_shows_every_scenario_with_its_assumption() -> None:
     report = ValuationReport.appraise(valuation("2330", 86.28, 2415.0), TargetPe(25), SPREAD)
     sections = {section.title: section.lines for section in report.fact_sections()}
 
-    assert sections["推算合理股價（基於指定本益比的估值）"] == (
-        "保守 1,725.60 元｜本益比 20.00 倍｜假設：基準 × (1 − 20%)，依設定 valuation.scenario_spread",
-        "基準 2,157.00 元｜本益比 25.00 倍｜假設：使用者輸入的目標本益比",
-        "樂觀 2,588.40 元｜本益比 30.00 倍｜假設：基準 × (1 + 20%)，依設定 valuation.scenario_spread",
+    assert sections["Fair price (Valuation based on a specified P/E)"] == (
+        "Conservative 1,725.60 TWD | P/E 20.00x | assumption: base × (1 − 20%), from the valuation.scenario_spread setting",
+        "Base 2,157.00 TWD | P/E 25.00x | assumption: the target P/E the user entered",
+        "Optimistic 2,588.40 TWD | P/E 30.00x | assumption: base × (1 + 20%), from the valuation.scenario_spread setting",
     )
-    assert sections["高估／低估幅度"][1] == "基準 價差 -258.00 元，高估 10.7%"
+    assert sections["Overvaluation / undervaluation"][1] == "Base gap -258.00 TWD, overvalued by 10.7%"
 
 
 @pytest.mark.parametrize("eps", [0.0, -1.29, EpsUnavailable(EpsUnavailableReason.SOURCE_FAILED, FiscalQuarter(2026, 3))])
@@ -147,8 +147,8 @@ def test_no_fair_price_when_eps_is_not_positive_or_missing(eps: float | EpsUnava
 
     assert isinstance(report.fair_value, PeNotApplicable)
     assert report.undervaluation is None
-    assert sections["推算合理股價（基於指定本益比的估值）"][0].startswith("不適用")
-    assert sections["高估／低估幅度"] == ("不適用",)
+    assert sections["Fair price (Valuation based on a specified P/E)"][0].startswith("Not applicable")
+    assert sections["Overvaluation / undervaluation"] == ("Not applicable",)
 
 
 def test_a_computable_pe_needs_a_target() -> None:
@@ -158,7 +158,7 @@ def test_a_computable_pe_needs_a_target() -> None:
 
 @pytest.mark.parametrize("value", [0.0, -5.0, math.nan, math.inf])
 def test_target_pe_must_be_finite_and_positive(value: float) -> None:
-    with pytest.raises(ValueError, match="目標本益比"):
+    with pytest.raises(ValueError, match=TARGET_PE_REQUIREMENT):
         TargetPe(value)
 
 
@@ -244,7 +244,7 @@ def test_stale_close_is_valued_but_warned() -> None:
 
     assert isinstance(item.current_pe, PeRatio)
     assert not item.close_is_fresh
-    assert any(warning.startswith("股價過期：收盤日 2026-10-28") for warning in item.warnings)
+    assert any(warning.startswith("Stale price: closed on 2026-10-28") for warning in item.warnings)
 
 
 def explanation(report: ValuationReport) -> ValuationExplanation:
@@ -270,7 +270,7 @@ def explanation(report: ValuationReport) -> ValuationExplanation:
 def test_every_report_lists_all_us_107_items(eps: float | EpsUnavailable, target: TargetPe | None) -> None:
     report = ValuationReport.appraise(valuation("2330", eps, 2415.0), target, SPREAD)
 
-    for item in (explanation(report), ValuationExplanation.without_ai(report, "AI 解釋無法取得")):
+    for item in (explanation(report), ValuationExplanation.without_ai(report, "AI explanation unavailable")):
         sections = item.sections()
 
         assert [section.title for section in sections] == US_107_SECTIONS
@@ -287,14 +287,14 @@ def test_missing_eps_report_says_data_is_insufficient() -> None:
         ).sections()
     }
 
-    assert sections["EPS 與財報期間"][0].startswith("資料不足")
-    assert sections["目前本益比"] == ("資料不足",)
-    assert sections["資料不足警告"][0].startswith("資料不足")
+    assert sections["EPS and reporting period"][0].startswith("Insufficient data")
+    assert sections["Current P/E"] == ("insufficient data",)
+    assert sections["Insufficient data warnings"][0].startswith("Insufficient data")
 
 
 def test_undervalued_report_carries_the_low_pe_caveat() -> None:
     cheap = ValuationReport.appraise(valuation("1111", 5.0, 40.0), TargetPe(12), SPREAD)
     expensive = ValuationReport.appraise(valuation("2330", 86.28, 2415.0), TargetPe(25), SPREAD)
 
-    assert LOW_PE_CAVEAT in dict((s.title, s.lines) for s in explanation(cheap).sections())["可能導致本益比下修的風險"]
-    assert LOW_PE_CAVEAT not in dict((s.title, s.lines) for s in explanation(expensive).sections())["可能導致本益比下修的風險"]
+    assert LOW_PE_CAVEAT in dict((s.title, s.lines) for s in explanation(cheap).sections())["Risks that may lower the P/E"]
+    assert LOW_PE_CAVEAT not in dict((s.title, s.lines) for s in explanation(expensive).sections())["Risks that may lower the P/E"]

@@ -1,6 +1,7 @@
 # backend/src/a_domain/rules/technical/criteria/trend/moving_average.py
 
 from dataclasses import dataclass
+from typing import override
 
 import icontract
 
@@ -13,8 +14,8 @@ from a_domain.rules.technical.calculation.formulas import latest_sma
 class PriceAboveMaCriterion:
     period: int
 
-    @property
-    def name(self) -> str:
+    @override
+    def __str__(self) -> str:
         return f"Price Above MA_{self.period}"
 
     def apply(self, stock: Stock) -> bool:
@@ -36,8 +37,8 @@ class MaAlignmentCriterion:
     fast: int = 20
     slow: int = 60
 
-    @property
-    def name(self) -> str:
+    @override
+    def __str__(self) -> str:
         return f"MA_{self.fast} > MA_{self.slow} Alignment"
 
     def apply(self, stock: Stock) -> bool:
@@ -62,8 +63,8 @@ class GoldenCrossCriterion:
     slow: int = 60
     max_cross_margin: float = 0.03
 
-    @property
-    def name(self) -> str:
+    @override
+    def __str__(self) -> str:
         return "Golden Cross"
 
     def apply(self, stock: Stock) -> bool:

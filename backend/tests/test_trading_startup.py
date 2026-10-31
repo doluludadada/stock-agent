@@ -3,12 +3,12 @@ from itertools import product
 from pathlib import Path
 
 import pytest
+import shioaji
 from rich.console import Console
 from shioaji.error import TokenError
 from support.fake_shioaji import FakeShioaji
 from trading_stack import SilentLogger
 
-import c_infrastructure.trading.shioaji.execution_provider as shioaji_adapter
 from a_domain.types.enums import ExecutionProvider, OrderMode, SystemEnvironment
 from b_application.config.app_config import AppConfig
 from b_application.config.trading_config import ShioajiConfig, TradingConfig
@@ -60,7 +60,7 @@ def trading_config(
 async def test_each_environment_provider_and_order_mode_either_starts_or_is_refused(
     monkeypatch, environment: SystemEnvironment, provider: ExecutionProvider, mode: OrderMode
 ) -> None:
-    monkeypatch.setattr(shioaji_adapter, "Shioaji", FakeShioaji)
+    monkeypatch.setattr(shioaji, "Shioaji", FakeShioaji)
     config = trading_config(environment, provider, mode, **ALL_CREDENTIALS)
 
     if (environment, provider, mode) not in STARTS:
@@ -92,7 +92,7 @@ async def test_shioaji_without_its_credentials_refuses_to_start_and_names_them(
 
 
 async def test_simulation_starts_without_a_ca_certificate(monkeypatch) -> None:
-    monkeypatch.setattr(shioaji_adapter, "Shioaji", FakeShioaji)
+    monkeypatch.setattr(shioaji, "Shioaji", FakeShioaji)
     config = trading_config(LIVE, SHIOAJI, OrderMode.LIVE, SHIOAJI_API_KEY="key", SHIOAJI_SECRET_KEY="secret")
 
     validate_trading_environment(config)
@@ -101,9 +101,7 @@ async def test_simulation_starts_without_a_ca_certificate(monkeypatch) -> None:
 
 
 async def test_a_failed_shioaji_login_stops_startup_with_the_broker_reason(monkeypatch) -> None:
-    monkeypatch.setattr(
-        shioaji_adapter, "Shioaji", lambda simulation: FakeShioaji(simulation, login_error=TokenError(401, "bad api key"))
-    )
+    monkeypatch.setattr(shioaji, "Shioaji", lambda simulation: FakeShioaji(simulation, login_error=TokenError(401, "bad api key")))
     config = trading_config(LIVE, SHIOAJI, OrderMode.LIVE, simulation=False, **ALL_CREDENTIALS)
 
     with pytest.raises(TradingSetupError, match="Shioaji production login failed: TokenError: StatusCode: 401, Detail: bad api key"):

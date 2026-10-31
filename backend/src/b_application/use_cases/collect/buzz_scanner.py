@@ -1,8 +1,3 @@
-# backend/src/b_application/use_cases/collect/buzz_scanner.py
-
-from collections import defaultdict
-
-from a_domain.model.market.article import Article
 from a_domain.model.market.stock import Stock
 from a_domain.ports.market.social_media_provider import ISocialMediaProvider
 from a_domain.ports.market.stock_provider import IStockProvider
@@ -30,22 +25,17 @@ class BuzzScanner:
     async def execute(self, status: PipelineStatus) -> None:
         self._logger.info("Scanning social media for buzz...")
         articles = await self._social_media_provider.fetch_social_articles(limit=self._article_limit)
+
         if not articles:
             self._logger.info("No buzz articles found.")
             return
 
         self._social_media_provider.save_social_media_data(articles)
-        articles_by_stock: dict[str, list[Article]] = defaultdict(list)
-        for article in articles:
-            articles_by_stock[article.stock_id].append(article)
-
         buzz_stocks: list[Stock] = []
-        for stock_id, stock_articles in articles_by_stock.items():
-            engagement = sum(article.engagement for article in stock_articles)
-            if not self._criteria.is_trending(mention_count=len(stock_articles), engagement=engagement):
-                continue
 
+        for stock_id, stock_articles in self._criteria.apply(articles).items():
             stock = status.stocks_cache.get(stock_id) or await self._stock_provider.get_by_id(stock_id)
+
             if stock is None:
                 self._logger.warning(f"Buzz stock not found: {stock_id}")
                 continue
@@ -55,6 +45,6 @@ class BuzzScanner:
             buzz_stocks.append(stock)
 
         status.buzz_stocks = buzz_stocks
-        status.stats.buzz_scanned = len(articles_by_stock)
+        status.stats.buzz_scanned = len({article.stock_id for article in articles})
         status.stats.buzz_qualified = len(buzz_stocks)
         self._logger.info(f"Buzz candidates: {status.stats.buzz_scanned} -> {status.stats.buzz_qualified}")

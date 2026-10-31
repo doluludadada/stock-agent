@@ -27,6 +27,7 @@ def stock_with_volumes(volumes: list[int], volume_ma: dict[int, float]) -> Stock
         (LiquidityCriterion(min_daily_volume=500), stock_with_volumes([], {}), False),
         (LiquidityCriterion(min_daily_volume=500), stock_with_volumes([9000, 400, 400, 400, 400, 400], {}), False),
         (LiquidityCriterion(min_daily_volume=500), stock_with_volumes([600, 400], {}), True),
+        (LiquidityCriterion(min_daily_volume=500, period=6), stock_with_volumes([9000, 400, 400, 400, 400, 400], {}), True),
     ],
 )
 def test_volume_criteria(criterion: TechnicalCriterion, stock: Stock, passed: bool) -> None:

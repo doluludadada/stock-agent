@@ -8,9 +8,10 @@ import pytest
 from a_domain.model.fundamentals.fiscal_quarter import FiscalQuarter
 from a_domain.model.fundamentals.quarter_eps import QuarterEps
 from a_domain.types.enums import MarketType
+from b_application.config.market_data_config import MarketHoursConfig
 from b_application.config.sources_config import SourcesConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
-from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider, parse_cumulative_eps
+from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
 
 SOURCES = SourcesConfig()
@@ -30,7 +31,7 @@ class SilentLogger:
 
 class MovableClock(TaiwanMarketClock):
     def __init__(self) -> None:
-        super().__init__()
+        super().__init__(MarketHoursConfig())
         self.current = datetime(2026, 10, 30, 18, 0, tzinfo=TAIWAN_TIMEZONE)
 
     def now(self) -> datetime:
@@ -61,14 +62,19 @@ async def build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[MopsFu
     clock = MovableClock()
     provider = MopsFundamentalsProvider(db=db, market_clock=clock, mops=SOURCES.mops, logger=SilentLogger())
     mops = FakeMops()
-    monkeypatch.setattr(provider, "_download", mops.download)
+    monkeypatch.setattr(provider, "download", mops.download)
     return provider, mops, clock
+
+
+def parser() -> MopsFundamentalsProvider:
+    """Parsing reads no database and no clock."""
+    return MopsFundamentalsProvider(db=cast(Any, None), market_clock=MovableClock(), mops=SOURCES.mops, logger=SilentLogger())
 
 
 def test_parser_reads_every_industry_table_of_a_real_page() -> None:
     html = (FIXTURES / "mops_t163sb04_sii_115_02.html").read_text(encoding="utf-8")
 
-    assert parse_cumulative_eps(html, SOURCES.mops) == {
+    assert parser().parse_cumulative_eps(html) == {
         "2801": 0.94,
         "2855": 6.96,
         "1101": 0.38,
@@ -83,11 +89,11 @@ def test_parser_reads_every_industry_table_of_a_real_page() -> None:
 def test_parser_reads_an_unpublished_season_as_no_filings_yet() -> None:
     html = (FIXTURES / "mops_t163sb04_sii_115_04_unpublished.html").read_text(encoding="utf-8")
 
-    assert parse_cumulative_eps(html, SOURCES.mops) == {}
+    assert parser().parse_cumulative_eps(html) == {}
 
 
 def test_parser_rejects_a_page_it_does_not_recognise() -> None:
-    assert parse_cumulative_eps("<html><body>系統忙碌中，請稍後再試</body></html>", SOURCES.mops) is None
+    assert parser().parse_cumulative_eps("<html><body>系統忙碌中，請稍後再試</body></html>") is None
 
 
 @pytest.mark.asyncio
@@ -169,3 +175,29 @@ async def test_empty_page_for_a_final_quarter_is_a_failure_and_is_not_cached(tmp
     final = filings[FINAL]
     assert isinstance(final, QuarterEps)
     assert final.cumulative_eps == {"2330": 66.26, "6488": 20.10}
+
+
+@pytest.mark.asyncio
+async def test_industries_merge_every_market_and_refetch_a_market_only_once_its_list_is_a_day_old(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    provider, _, clock = await build(tmp_path, monkeypatch)
+    feeds: dict[MarketType, dict[str, str] | None] = {MarketType.TWSE: {"2330": "半導體業"}, MarketType.TPEX: None}
+    requests: list[MarketType] = []
+
+    async def fetch_market_industries(market: MarketType) -> dict[str, str] | None:
+        requests.append(market)
+        return feeds[market]
+
+    monkeypatch.setattr(provider, "fetch_market_industries", fetch_market_industries)
+
+    assert await provider.fetch_industries() == {"2330": "半導體業"}
+
+    feeds[MarketType.TPEX] = {"6488": "半導體業"}
+    clock.current += timedelta(hours=1)
+    assert await provider.fetch_industries() == {"2330": "半導體業", "6488": "半導體業"}
+
+    feeds[MarketType.TWSE] = None
+    clock.current += timedelta(hours=24)
+    assert await provider.fetch_industries() == {"2330": "半導體業", "6488": "半導體業"}
+    assert requests == [MarketType.TWSE, MarketType.TPEX, MarketType.TPEX, MarketType.TWSE, MarketType.TPEX]

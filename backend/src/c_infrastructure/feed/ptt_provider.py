@@ -1,208 +1,69 @@
-# backend/src/c_infrastructure/feed/ptt_provider.py
-# Current source: :contentReference[oaicite:4]{index=4}
-
 import re
+from collections.abc import Mapping
 from datetime import UTC, date, datetime, timedelta
-from typing import TypedDict
+from typing import ClassVar, override
 
 import httpx
 from bs4 import BeautifulSoup, Tag
 
 from a_domain.model.market.article import Article
+from a_domain.model.market.post_listing import PostListing
 from a_domain.ports.market.social_media_provider import ISocialMediaProvider
 from a_domain.ports.market.stock_provider import IStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.types.enums import ContentType, InformationSource
 from b_application.config.app_config import AppConfig
-from b_application.config.sources_config import PttSources
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
-
-
-class PttListing(TypedDict):
-    title: str
-    url: str
-    published_date: date
-
-
-# ---------------------------------- parsing ---------------------------------- #
-
-
-class PttParser:
-    RE_TICKER_TITLE = re.compile(r"(\d{4})")
-
-    def __init__(self, ptt: PttSources, max_body_length: int) -> None:
-        self._ptt = ptt
-        self._ticker_label = re.compile(ptt.ticker_label_pattern)
-        self._ticker_parenthesized = re.compile(ptt.ticker_parenthesized_pattern)
-        self._max_body_length = max_body_length
-
-    def parse_listing(self, row: Tag) -> PttListing | None:
-        anchor = row.find("a")
-        if anchor is None:
-            return None
-
-        href = anchor.get("href", "")
-        if not isinstance(href, str) or not href:
-            return None
-
-        published_date = datetime.now().date()
-        date_element = row.find("div", class_="date")
-        if isinstance(date_element, Tag):
-            parts = date_element.get_text(strip=True).split("/")
-            try:
-                month, day = int(parts[0]), int(parts[1])
-                year = published_date.year if month <= published_date.month else published_date.year - 1
-                published_date = date(year, month, day)
-            except ValueError:
-                pass
-            except IndexError:
-                pass
-
-        return PttListing(title=anchor.get_text(strip=True), url=self._ptt.base_url + href, published_date=published_date)
-
-    def parse_article(self, html: str, listing: PttListing, stock_universe: set[str]) -> Article | None:
-        main_content = BeautifulSoup(html, "html.parser").find("div", id="main-content")
-        if not isinstance(main_content, Tag):
-            return None
-
-        body_text = main_content.get_text(separator="\n", strip=True)
-        stock_id = self.extract_stock_id(body_text, listing["title"])
-        if stock_id is None or stock_id not in stock_universe:
-            return None
-
-        push_count, boo_count, arrow_count = self.count_engagement(main_content)
-        content = self.clean_content(main_content)
-        if not content:
-            return None
-
-        content = f"[{push_count}{self._ptt.push_tag} {boo_count}{self._ptt.boo_tag} {arrow_count}{self._ptt.arrow_tag}]\n{content}"
-        content = content[: self._max_body_length]
-
-        return Article(
-            stock_id=stock_id,
-            source=InformationSource.PTT_STOCK,
-            title=listing["title"],
-            content=content,
-            url=listing["url"],
-            content_type=ContentType.ANALYSIS,
-            published_at=datetime.combine(listing["published_date"], datetime.min.time(), tzinfo=TAIWAN_TIMEZONE),
-            fetched_at=datetime.now(UTC),
-            engagement=push_count + boo_count + arrow_count,
-            raw_metadata={"push": push_count, "boo": boo_count, "arrow": arrow_count},
-        )
-
-    def extract_stock_id(self, body: str, title: str) -> str | None:
-        template_match = self._ticker_label.search(body)
-        if template_match:
-            return template_match.group(1)
-
-        for stock_id in self._ticker_parenthesized.findall(body):
-            if not stock_id.startswith("0"):
-                return stock_id
-
-        title_match = self.RE_TICKER_TITLE.search(title)
-        return title_match.group(1) if title_match else None
-
-    def count_engagement(self, main_content: Tag) -> tuple[int, int, int]:
-        push_count = 0
-        boo_count = 0
-        arrow_count = 0
-
-        for push_element in main_content.find_all("div", class_="push"):
-            tag_element = push_element.find("span", class_="push-tag")
-            if tag_element is None:
-                continue
-
-            push_tag = tag_element.get_text().strip()
-            if push_tag == self._ptt.push_tag:
-                push_count += 1
-            elif push_tag == self._ptt.boo_tag:
-                boo_count += 1
-            elif push_tag == self._ptt.arrow_tag:
-                arrow_count += 1
-
-        return push_count, boo_count, arrow_count
-
-    def clean_content(self, main_content: Tag) -> str:
-        for class_name in ("push", "article-metaline", "article-metaline-right"):
-            for element in main_content.find_all("div", class_=class_name):
-                element.decompose()
-
-        lines: list[str] = []
-        for raw_line in main_content.get_text(separator="\n", strip=True).split("\n"):
-            line = raw_line.strip()
-            if not line:
-                continue
-
-            if line.startswith("※"):
-                continue
-
-            if self._ptt.posting_reminder_marker in line or "ctrl+y" in line.lower():
-                continue
-
-            lines.append(line)
-
-        return "\n".join(lines).strip()
-
-    def previous_page_url(self, page: BeautifulSoup) -> str | None:
-        paging = page.find("div", class_="btn-group-paging")
-        if paging is None:
-            return None
-
-        for anchor in paging.find_all("a"):
-            if self._ptt.previous_page_label not in anchor.get_text():
-                continue
-
-            href = anchor.get("href", "")
-            if isinstance(href, str) and href:
-                return self._ptt.base_url + href
-
-        return None
 
 
 class PttProvider(ISocialMediaProvider):
     """
-    PTT Stock Board Scraper — search endpoint approach.
-
-    Hits /bbs/Stock/search?q=<tag> and paginates backwards until the date
-    cutoff is reached or enough articles are collected.
+    PTT Stock board scraper. Searches /bbs/Stock/search?q=<tag> and pages back until the date cutoff
+    is reached or enough articles are collected.
     """
 
-    MAX_PAGES = 30
-    MAX_BODY_LEN = 3000
-
-    HEADERS = {"User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"), "Cookie": "over18=1"}
+    MAX_PAGES: ClassVar[int] = 30
+    MAX_BODY_LEN: ClassVar[int] = 3000
+    TITLE_TICKER: ClassVar[re.Pattern[str]] = re.compile(r"(\d{4})")
+    HEADERS: ClassVar[dict[str, str]] = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Cookie": "over18=1",
+    }
 
     def __init__(self, config: AppConfig, logger: ILoggingProvider, stock_provider: IStockProvider) -> None:
         self._config = config
+        self._ptt = config.sources.ptt
         self._logger = logger
         self._stock_provider = stock_provider
-        self._stock_universe: set[str] | None = None
+        self._stock_ids: set[str] | None = None
         self._search_url = config.sources.ptt.base_url + config.sources.ptt.search_path
-        self._parser = PttParser(config.sources.ptt, max_body_length=self.MAX_BODY_LEN)
+        self._ticker_label = re.compile(config.sources.ptt.ticker_label_pattern)
+        self._ticker_parenthesized = re.compile(config.sources.ptt.ticker_parenthesized_pattern)
+        self._client = httpx.AsyncClient(timeout=15.0, headers=self.HEADERS, follow_redirects=True, verify=False)
 
-    # ── public ────────────────────────────────────────────────────── #
-
+    @override
     async def fetch_social_articles(self, limit: int) -> list[Article]:
         self._logger.info("Scanning PTT Stock board...")
-        stock_universe = await self._get_stock_universe()
-        lookback_days = self._config.collect_rules.ptt_lookback_days
-        cutoff = datetime.now().date() - timedelta(days=lookback_days)
+
+        if self._stock_ids is None:
+            self._logger.debug("Loading TWSE/TPEX universe...")
+            self._stock_ids = {stock.stock_id for stock in await self._stock_provider.get_all()}
+
+        since = datetime.now().date() - timedelta(days=self._config.collect_rules.ptt_lookback_days)
         articles: list[Article] = []
 
-        async with httpx.AsyncClient(timeout=15.0, headers=self.HEADERS, follow_redirects=True, verify=False) as http_client:
-            for tag in self._config.collect_rules.ptt_tags:
-                remaining_limit = limit - len(articles)
-                if remaining_limit <= 0:
-                    break
+        for tag in self._config.collect_rules.ptt_tags:
+            if len(articles) >= limit:
+                break
 
-                articles.extend(await self._fetch_tag_articles(http_client, tag, stock_universe, cutoff, remaining_limit))
+            articles.extend(await self.fetch_tag_articles(tag, self._stock_ids, since, limit - len(articles)))
 
         unique_articles = {article.url or str(article.id): article for article in articles}
         result = list(unique_articles.values())[:limit]
         self._logger.info(f"PTT scan complete. {len(result)} unique articles.")
         return result
 
+    @override
     def save_social_media_data(self, articles: list[Article]) -> None:
         if not articles:
             return
@@ -210,11 +71,12 @@ class PttProvider(ISocialMediaProvider):
         current_time = datetime.now()
         archive_directory = self._config.project_root / self._config.folder.buzz_archive_dir / current_time.strftime("%Y-%m-%d")
         archive_directory.mkdir(parents=True, exist_ok=True)
-        archive_path = archive_directory / (f"ptt_buzz_{current_time.strftime('%H%M%S')}.md")
+        archive_path = archive_directory / f"ptt_buzz_{current_time.strftime('%H%M%S')}.md"
 
         try:
             with archive_path.open("w", encoding="utf-8") as archive_file:
                 archive_file.write(f"# PTT Buzz — {current_time:%Y-%m-%d %H:%M}\n\n")
+
                 for index, article in enumerate(articles, 1):
                     archive_file.write(
                         f"## [{index}] {article.stock_id}: {article.title}\n"
@@ -226,71 +88,157 @@ class PttProvider(ISocialMediaProvider):
         except OSError as error:
             self._logger.error(f"Buzz archive write failed: {error}")
 
-    # --------------------------------- scraping --------------------------------- #
-
-    async def _fetch_tag_articles(
-        self, http_client: httpx.AsyncClient, tag: str, stock_universe: set[str], cutoff: date, limit: int
-    ) -> list[Article]:
+    @override
+    async def fetch_tag_articles(self, tag: str, stock_ids: set[str], since: date, limit: int) -> list[Article]:
         articles: list[Article] = []
-        next_url: str | None = None
+        url, params = self._search_url, {"q": tag}
 
         for _ in range(self.MAX_PAGES):
-            url = next_url or self._search_url
-            params = None if next_url else {"q": tag}
-            page_html = await self._fetch_html(http_client, url, params)
-            if page_html is None:
+            page = await self.fetch_page(url, params)
+
+            if page is None:
                 break
 
-            page = BeautifulSoup(page_html, "html.parser")
-            reached_cutoff = False
+            listings = self.parse_listings(page)
 
-            for row in page.find_all("div", class_="r-ent"):
-                if not isinstance(row, Tag):
-                    continue
+            for listing in (listing for listing in listings if listing.posted_on >= since):
+                article_page = await self.fetch_page(listing.url)
+                article = None if article_page is None else self.parse_article(article_page, listing, stock_ids)
 
-                listing = self._parser.parse_listing(row)
-                if listing is None:
-                    continue
-
-                if listing["published_date"] < cutoff:
-                    reached_cutoff = True
-                    continue
-
-                article_html = await self._fetch_html(http_client, listing["url"])
-                if article_html is None:
-                    continue
-
-                article = self._parser.parse_article(article_html, listing, stock_universe)
                 if article is not None:
                     articles.append(article)
 
                 if len(articles) >= limit:
-                    break
+                    return articles
 
-            if reached_cutoff or len(articles) >= limit:
+            next_url = self.previous_page_url(page)
+
+            if next_url is None or any(listing.posted_on < since for listing in listings):
                 break
 
-            next_url = self._parser.previous_page_url(page)
-            if next_url is None:
-                break
+            url, params = next_url, None
 
         return articles
 
-    async def _fetch_html(self, http_client: httpx.AsyncClient, url: str, params: dict[str, str] | None = None) -> str | None:
+    @override
+    async def fetch_page(self, url: str, params: Mapping[str, str] | None = None) -> str | None:
         try:
-            response = await http_client.get(url, params=params)
+            response = await self._client.get(url, params=params)
             response.raise_for_status()
             return response.text
         except httpx.HTTPError as error:
             self._logger.warning(f"PTT request failed: {error}")
             return None
 
-    async def _get_stock_universe(self) -> set[str]:
-        if self._stock_universe is not None:
-            return self._stock_universe
+    @override
+    def parse_listings(self, page: str) -> list[PostListing]:
+        today = datetime.now().date()
+        listings: list[PostListing] = []
 
-        self._logger.debug("Loading TWSE/TPEX universe...")
-        stocks = await self._stock_provider.get_all()
-        self._stock_universe = {stock.stock_id for stock in stocks}
+        for row in BeautifulSoup(page, "html.parser").select("div.r-ent"):
+            anchor = row.find("a")
+            href = anchor.get("href", "") if isinstance(anchor, Tag) else ""
 
-        return self._stock_universe
+            if not isinstance(anchor, Tag) or not isinstance(href, str) or not href:
+                continue
+
+            date_element = row.find("div", class_="date")
+            month_day = date_element.get_text(strip=True) if isinstance(date_element, Tag) else ""
+            posted_on = today
+
+            try:
+                month, day = (int(part) for part in month_day.split("/")[:2])
+                posted_on = date(today.year if month <= today.month else today.year - 1, month, day)
+            except ValueError:
+                pass
+
+            listings.append(PostListing(title=anchor.get_text(strip=True), url=self._ptt.base_url + href, posted_on=posted_on))
+
+        return listings
+
+    @override
+    def previous_page_url(self, page: str) -> str | None:
+        paging = BeautifulSoup(page, "html.parser").find("div", class_="btn-group-paging")
+
+        if not isinstance(paging, Tag):
+            return None
+
+        for anchor in paging.find_all("a"):
+            href = anchor.get("href", "")
+
+            if self._ptt.previous_page_label in anchor.get_text() and isinstance(href, str) and href:
+                return self._ptt.base_url + href
+
+        return None
+
+    @override
+    def parse_article(self, page: str, listing: PostListing, stock_ids: set[str]) -> Article | None:
+        main_content = BeautifulSoup(page, "html.parser").find("div", id="main-content")
+
+        if not isinstance(main_content, Tag):
+            return None
+
+        stock_id = self.extract_stock_id(main_content.get_text(separator="\n", strip=True), listing.title)
+
+        if stock_id is None or stock_id not in stock_ids:
+            return None
+
+        reactions = [
+            tag.get_text().strip()
+            for push in main_content.find_all("div", class_="push")
+            if (tag := push.find("span", class_="push-tag"))
+        ]
+
+        for element in main_content.find_all("div", class_=["push", "article-metaline", "article-metaline-right"]):
+            element.decompose()
+
+        return self.to_article(stock_id, listing, reactions, main_content.get_text(separator="\n", strip=True))
+
+    @override
+    def to_article(self, stock_id: str, listing: PostListing, reactions: list[str], text: str) -> Article | None:
+        content = self.clean_content(text)
+
+        if not content:
+            return None
+
+        push_count, boo_count, arrow_count = (
+            reactions.count(tag) for tag in (self._ptt.push_tag, self._ptt.boo_tag, self._ptt.arrow_tag)
+        )
+        reaction_header = f"[{push_count}{self._ptt.push_tag} {boo_count}{self._ptt.boo_tag} {arrow_count}{self._ptt.arrow_tag}]"
+
+        return Article(
+            stock_id=stock_id,
+            source=InformationSource.PTT_STOCK,
+            title=listing.title,
+            content=f"{reaction_header}\n{content}"[: self.MAX_BODY_LEN],
+            url=listing.url,
+            content_type=ContentType.ANALYSIS,
+            published_at=datetime.combine(listing.posted_on, datetime.min.time(), tzinfo=TAIWAN_TIMEZONE),
+            fetched_at=datetime.now(UTC),
+            engagement=push_count + boo_count + arrow_count,
+            raw_metadata={"push": push_count, "boo": boo_count, "arrow": arrow_count},
+        )
+
+    @override
+    def extract_stock_id(self, body: str, title: str) -> str | None:
+        template_match = self._ticker_label.search(body)
+
+        if template_match:
+            return template_match.group(1)
+
+        for stock_id in self._ticker_parenthesized.findall(body):
+            if not stock_id.startswith("0"):
+                return stock_id
+
+        title_match = self.TITLE_TICKER.search(title)
+        return title_match.group(1) if title_match else None
+
+    @override
+    def clean_content(self, text: str) -> str:
+        lines = [line.strip() for line in text.split("\n")]
+        kept = [
+            line
+            for line in lines
+            if line and not line.startswith("※") and self._ptt.posting_reminder_marker not in line and "ctrl+y" not in line.lower()
+        ]
+        return "\n".join(kept).strip()

@@ -41,3 +41,37 @@ async def test_a_reset_command_clears_the_conversation_without_asking_the_ai() -
     assert harness.conversations.conversations["U1"].messages == ()
     assert harness.ai.chat_conversations == []
     assert len(harness.chat_platform.sent) == 1 and harness.chat_platform.sent[0][0] == "U1"
+
+
+async def test_a_reply_with_no_text_left_after_formatting_asks_the_user_again() -> None:
+    harness = build_harness()
+    harness.ai.chat_reply = "```\nprint('only code')\n```"
+
+    await harness.runtime.pipeline.reply_to_chat("U1", "show me code")
+
+    assert harness.chat_platform.sent == [("U1", "Could you ask me again?🤔")]
+
+
+async def test_a_long_paragraph_is_sent_in_parts_no_longer_than_the_limit() -> None:
+    harness = build_harness()
+    reply = " ".join(f"word{index}" for index in range(120))
+    harness.ai.chat_reply = reply
+
+    await harness.runtime.pipeline.reply_to_chat("U1", "tell me everything")
+
+    parts = [content for _, content in harness.chat_platform.sent]
+    assert len(parts) > 1
+    assert all(len(part) <= harness.config.sources.line.max_message_length for part in parts)
+    assert " ".join(parts) == reply
+
+
+async def test_a_long_paragraph_is_cut_after_its_last_sentence_ending_and_then_at_the_limit() -> None:
+    harness = build_harness()
+    limit = harness.config.sources.line.max_message_length
+    first_sentence = "A" * (limit - 100) + "。"
+    unbroken = "B" * (limit + 50)
+    harness.ai.chat_reply = first_sentence + unbroken
+
+    await harness.runtime.pipeline.reply_to_chat("U1", "tell me everything")
+
+    assert [content for _, content in harness.chat_platform.sent] == [first_sentence, "B" * limit, "B" * 50]

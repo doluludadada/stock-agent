@@ -11,8 +11,9 @@ from trading_stack import SilentLogger
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.types.enums import MarketType
+from b_application.config.market_data_config import MarketDataConfig
 from b_application.config.sources_config import SourcesConfig
-from c_infrastructure.market.mis_quote_provider import MisQuoteProvider, parse_quotes
+from c_infrastructure.market.mis_quote_provider import MisQuoteProvider
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 
 SOURCES = SourcesConfig()
@@ -30,7 +31,7 @@ def traded_at(hour: int, minute: int, second: int) -> datetime:
 
 
 def test_each_quote_is_the_session_so_far_closing_at_the_last_trade_at_its_trade_time() -> None:
-    assert parse_quotes(SAVED_RESPONSE) == {
+    assert provider().parse_quotes(SAVED_RESPONSE) == {
         "2330": Ohlcv(ts=traded_at(13, 30, 0), open=2380.0, high=2380.0, low=2360.0, close=2370.0, volume=29_562_000),
         "6488": Ohlcv(ts=traded_at(13, 30, 0), open=775.0, high=779.0, low=741.0, close=756.0, volume=8_913_000),
         "1233": Ohlcv(ts=traded_at(13, 1, 26), open=28.2, high=28.2, low=28.2, close=28.2, volume=2_000),
@@ -39,7 +40,7 @@ def test_each_quote_is_the_session_so_far_closing_at_the_last_trade_at_its_trade
 
 
 def test_a_stock_without_a_trade_this_session_has_no_quote() -> None:
-    quotes = parse_quotes(SAVED_RESPONSE)
+    quotes = provider().parse_quotes(SAVED_RESPONSE)
 
     assert "1470" not in quotes
     assert "" not in quotes
@@ -47,7 +48,7 @@ def test_a_stock_without_a_trade_this_session_has_no_quote() -> None:
 
 def test_a_refused_request_is_an_error_not_an_empty_answer() -> None:
     with pytest.raises(ValueError, match="9999"):
-        parse_quotes({"rtcode": "9999", "rtmessage": "參數不足"})
+        provider().parse_quotes({"rtcode": "9999", "rtmessage": "參數不足"})
 
 
 @pytest.fixture
@@ -68,7 +69,9 @@ def channels_requested(monkeypatch) -> list[list[str]]:
 
 
 def provider(request_interval_seconds: float = 0.0) -> MisQuoteProvider:
-    return MisQuoteProvider(SOURCES.exchange, SilentLogger(), request_interval_seconds=request_interval_seconds)
+    return MisQuoteProvider(
+        SOURCES.exchange, MarketDataConfig(quote_request_interval_seconds=request_interval_seconds), SilentLogger()
+    )
 
 
 @pytest.mark.asyncio

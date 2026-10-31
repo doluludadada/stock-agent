@@ -1,10 +1,11 @@
-from collections.abc import Mapping
+from collections.abc import Iterable
 from datetime import datetime
 from typing import Self
 from uuid import UUID, uuid4
 
 from sqlmodel import Field, SQLModel
 
+from a_domain.model.market.stock import Stock
 from a_domain.model.trading.account import Account
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.position_snapshot import PositionSnapshot
@@ -30,8 +31,9 @@ class AccountSnapshot(SQLModel):
         return self.cash + self.market_value
 
     @classmethod
-    def after_fill(cls, order: Order, account: Account, latest_prices: Mapping[str, float], taken_at: datetime) -> Self:
-        """The filled stock is marked at its fill price, others at the run's latest price, else at their average cost."""
+    def after_fill(cls, order: Order, account: Account, stocks: Iterable[Stock], taken_at: datetime) -> Self:
+        """The filled stock is marked at its fill price, others at the run's latest price of `stocks`, else at their average cost."""
+        latest_prices = {stock.stock_id: stock.current_price for stock in stocks if stock.current_price}
         marks = {**latest_prices, order.stock_id: order.average_filled_price or order.limit_price}
 
         return cls(

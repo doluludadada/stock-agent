@@ -11,10 +11,12 @@ from a_domain.model.valuation.stock_valuation import StockValuation
 from a_domain.model.valuation.target_pe import TargetPe
 from a_domain.model.valuation.valuation_scenario import ValuationScenario
 
-LABEL = "基於指定本益比的估值"
+LABEL = "Valuation based on a specified P/E"
 
 
-UNDERVALUATION_FORMULA = "低估幅度 = (合理價 − 目前股價) ÷ 目前股價；正值為低估，負值為高估"
+UNDERVALUATION_FORMULA = (
+    "Undervaluation = (fair price − current price) ÷ current price; positive is undervalued, negative is overvalued"
+)
 
 
 @dataclass(frozen=True)
@@ -58,40 +60,42 @@ class ValuationReport:
         valuation = self.valuation
 
         return (
-            ReportSection("目前股價", (valuation.price_text,)),
-            ReportSection("EPS 與財報期間", (valuation.eps.describe(),)),
-            ReportSection("目前本益比", (valuation.pe_text,)),
-            ReportSection("目標本益比", (self._target_text(),)),
-            ReportSection(f"推算合理股價（{LABEL}）", self._fair_price_lines()),
-            ReportSection("高估／低估幅度", self._gap_lines()),
+            ReportSection("Current price", (valuation.price_text,)),
+            ReportSection("EPS and reporting period", (valuation.eps.describe(),)),
+            ReportSection("Current P/E", (valuation.pe_text,)),
+            ReportSection("Target P/E", (self._target_text(),)),
+            ReportSection(f"Fair price ({LABEL})", self._fair_price_lines()),
+            ReportSection("Overvaluation / undervaluation", self._gap_lines()),
         )
 
     def _target_text(self) -> str:
         if isinstance(self.fair_value, FairPriceRange):
-            return f"{self.fair_value.base.target_pe:.2f} 倍（使用者輸入，只用於本次分析）"
+            return f"{self.fair_value.base.target_pe:.2f}x (user input, used for this analysis only)"
 
         reason = self.fair_value.reason.label
 
         if self.target_pe is None:
-            return f"未設定（{reason}）"
+            return f"not set ({reason})"
 
-        return f"{self.target_pe.value:.2f} 倍（使用者輸入；本股{reason}，不套用）"
+        return f"{self.target_pe.value:.2f}x (user input; not applied: {reason})"
 
     def _fair_price_lines(self) -> tuple[str, ...]:
         if isinstance(self.fair_value, PeNotApplicable):
-            return (f"不適用：{self.fair_value.reason.label}（EPS ≤ 0 或資料不足時不使用本益比模型）",)
+            return (
+                f"Not applicable: {self.fair_value.reason.label} (the P/E model is not used when EPS ≤ 0 or data is insufficient)",
+            )
 
         return tuple(
-            f"{scenario.name.label} {scenario.fair_price:,.2f} 元｜本益比 {scenario.target_pe:.2f} 倍｜假設：{scenario.assumption}"
+            f"{scenario.name.label} {scenario.fair_price:,.2f} TWD | P/E {scenario.target_pe:.2f}x | assumption: {scenario.assumption}"
             for scenario in self.fair_value
         )
 
     def _gap_lines(self) -> tuple[str, ...]:
         if isinstance(self.fair_value, PeNotApplicable):
-            return ("不適用",)
+            return ("Not applicable",)
 
         lines = [
-            f"{scenario.name.label} 價差 {scenario.gap:+,.2f} 元，{_over_or_under(scenario.undervaluation)}"
+            f"{scenario.name.label} gap {scenario.gap:+,.2f} TWD, {_over_or_under(scenario.undervaluation)}"
             for scenario in self.fair_value
         ]
 
@@ -100,9 +104,9 @@ class ValuationReport:
 
 def _over_or_under(undervaluation: float) -> str:
     if undervaluation > 0:
-        return f"低估 {undervaluation:.1%}"
+        return f"undervalued by {undervaluation:.1%}"
 
     if undervaluation < 0:
-        return f"高估 {-undervaluation:.1%}"
+        return f"overvalued by {-undervaluation:.1%}"
 
-    return "股價等於合理價"
+    return "the price equals the fair price"

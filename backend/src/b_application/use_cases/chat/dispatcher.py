@@ -17,10 +17,10 @@ class Dispatcher:
             self._logger.warning("No messages to dispatch.")
             return
 
-        count = 0
-        for msg in messages:
-            success = await self._platform_provider.send_message(user_id, msg)
-            if success:
-                count += 1
+        sent_count = 0
 
-        self._logger.success(f"Dispatched {count}/{len(messages)} messages to user_id: {user_id}")
+        for message in messages:
+            if await self._platform_provider.send_message(user_id, message):
+                sent_count += 1
+
+        self._logger.success(f"Dispatched {sent_count}/{len(messages)} messages to user_id: {user_id}")

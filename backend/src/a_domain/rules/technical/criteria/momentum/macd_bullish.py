@@ -1,6 +1,7 @@
 # backend/src/a_domain/rules/technical/criteria/momentum/macd_bullish.py
 
 from dataclasses import dataclass
+from typing import override
 
 from a_domain.model.market.stock import Stock
 
@@ -17,8 +18,8 @@ class MacdBullishCriterion:
     require_positive: bool = False
     require_histogram_positive: bool = False
 
-    @property
-    def name(self) -> str:
+    @override
+    def __str__(self) -> str:
         checks: list[str] = []
 
         if self.require_above_signal:

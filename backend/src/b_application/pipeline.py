@@ -8,6 +8,7 @@ from a_domain.model.valuation.valuation_explanation import ValuationExplanation
 from a_domain.model.valuation.valuation_report import ValuationReport
 from a_domain.model.valuation.valuation_scan import ValuationScan
 from a_domain.ports.analysis.technical_settings_repository import ITechnicalSettingsRepository
+from a_domain.ports.chat.conversation_repository import IConversationRepository
 from a_domain.ports.market.stock_provider import IStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
@@ -17,12 +18,14 @@ from b_application.schemas.pipeline_status import PipelineStatus
 from b_application.use_cases.chat.ai_processor import AiProcessor
 from b_application.use_cases.chat.context_loader import ContextLoader
 from b_application.use_cases.chat.dispatcher import Dispatcher
-from b_application.use_cases.chat.state_manager import StateManager
 from b_application.use_cases.collect.buzz_scanner import BuzzScanner
 from b_application.use_cases.collect.fundamentals_feed import FundamentalsFeed
+from b_application.use_cases.collect.intraday_candidates import IntradayCandidates
 from b_application.use_cases.collect.market_data_collector import MarketDataCollector
 from b_application.use_cases.collect.market_scanner import MarketScanner
 from b_application.use_cases.collect.news_feed import NewsFeed
+from b_application.use_cases.collect.realtime_quote_feed import RealtimeQuoteFeed
+from b_application.use_cases.collect.stock_lookup import StockLookup
 from b_application.use_cases.process.ai_analyser import AiAnalyser
 from b_application.use_cases.process.composite_scorer import CompositeScorer
 from b_application.use_cases.process.sentiment_analyser import SentimentAnalyser
@@ -36,13 +39,18 @@ from b_application.use_cases.trade.account_loader import AccountLoader
 from b_application.use_cases.trade.account_risk_check import AccountRiskCheck
 from b_application.use_cases.trade.manual_signal import ManualSignal
 from b_application.use_cases.trade.order_execution import OrderExecution
+from b_application.use_cases.trade.order_outcome import OrderOutcome
+from b_application.use_cases.trade.order_preparation import OrderPreparation
 from b_application.use_cases.trade.watch_stocks import WatchStocks
 
 
 @dataclass(slots=True)
 class CollectSteps:
     market_scanner: MarketScanner
+    stock_lookup: StockLookup
+    intraday_candidates: IntradayCandidates
     data_collector: MarketDataCollector
+    realtime_quote_feed: RealtimeQuoteFeed
     buzz_scanner: BuzzScanner
     news_feed: NewsFeed
 
@@ -64,7 +72,9 @@ class TradingSteps:
     signals: Signals
     manual_signal: ManualSignal
     decision_memory: DecisionMemory
+    order_preparation: OrderPreparation
     order_execution: OrderExecution
+    order_outcome: OrderOutcome
     reporting: Reporting
 
 
@@ -72,7 +82,7 @@ class TradingSteps:
 class ChatSteps:
     context_loader: ContextLoader
     ai_processor: AiProcessor
-    state_manager: StateManager
+    conversation_repository: IConversationRepository
     dispatcher: Dispatcher
     reset_commands: frozenset[str]
     market_clock: IMarketClock
@@ -95,6 +105,7 @@ class ValuationSteps:
     technical_settings_repository: ITechnicalSettingsRepository
     market_clock: IMarketClock
     scenario_spread: float
+    close_max_missed_sessions: int
 
 
 @dataclass(slots=True)
@@ -105,7 +116,7 @@ class Pipeline:
     Technical settings are loaded once at the beginning of each trading workflow. The loaded snapshot remains
     fixed until that workflow completes.
 
-    Each trading workflow runs inside RunHistory.open, so it has one run id and a saved run record. The Web API
+    Each trading workflow runs inside RunHistory.execute, so it has one run id and a saved run record. The Web API
     starts Full Cycle and specific-stock analysis under a run id it already returned to its caller. The valuation
     workflows record no run and use only `valuation`.
     """
@@ -123,12 +134,12 @@ class Pipeline:
         settings = await self.technical_settings_repository.load()
         strategy = settings.active_strategy
 
-        async with self.trading.run_history.open(Workflow.FULL_CYCLE, run_id) as status:
+        async with self.trading.run_history.execute(Workflow.FULL_CYCLE, run_id) as status:
             self.logger.info(f"Starting full market cycle. Strategy={strategy.strategy_id}.")
 
             await self.trading.account_loader.execute(status)
             await self.collect.market_scanner.execute(status)
-            await self.collect.data_collector.execute(status.universe_stocks, status, strategy.indicators)
+            await self.collect.data_collector.execute(status.universe_stocks, status)
             status.survivors = await self.process.technical_filter.execute(status.universe_stocks, status, strategy)
             await self.collect.news_feed.execute(status.survivors, status)
             await self.process.ai_analyser.execute(status.survivors, status, AiAnalysisFocus.FUNDAMENTAL)
@@ -152,29 +163,29 @@ class Pipeline:
         settings = await self.technical_settings_repository.load()
         strategy = settings.buzz_strategy
 
-        async with self.trading.run_history.open(Workflow.BUZZ_SCAN) as status:
+        async with self.trading.run_history.execute(Workflow.BUZZ_SCAN) as status:
             self.logger.info(
                 f"Starting social buzz cycle. Strategy={strategy.strategy_id}, AI focus={AiAnalysisFocus.MOMENTUM.value}."
             )
 
             await self.trading.account_loader.execute(status)
-            await self.collect.data_collector.refresh_realtime(status.held_stocks, status)
+            await self.collect.realtime_quote_feed.execute(status.held_stocks, status)
             await self.trading.account_risk_check.execute(status)
-            await self.trading.order_execution.execute(status.signals, status)
+            await self._execute_orders(status)
             await self.collect.buzz_scanner.execute(status)
 
             status.stats.total_scanned = len(status.buzz_stocks)
 
-            await self.collect.data_collector.execute(status.buzz_stocks, status, strategy.indicators)
+            await self.collect.data_collector.execute(status.buzz_stocks, status)
             status.survivors = await self.process.technical_filter.execute(status.buzz_stocks, status, strategy)
             status.watchlist = (await self.trading.watch_stocks.execute(status.survivors, WatchlistType.BUZZ)).watchlist
             await self.collect.news_feed.execute(status.survivors, status)
             await self.process.ai_analyser.execute(status.survivors, status, AiAnalysisFocus.MOMENTUM)
             self.process.composite_scorer.execute(status.survivors)
-            await self.collect.data_collector.refresh_realtime(status.survivors, status)
+            await self.collect.realtime_quote_feed.execute(status.survivors, status)
             await self.trading.signals.execute(status.watchlist, status)
             await self.trading.decision_memory.execute(status)
-            await self.trading.order_execution.execute(status.signals, status)
+            await self._execute_orders(status)
             # Sentiment is report only, so it runs after every trading step.
             await self.process.sentiment_analyser.execute(status.buzz_stocks, status)
             await self.trading.reporting.execute(status)
@@ -193,20 +204,20 @@ class Pipeline:
         settings = await self.technical_settings_repository.load()
         strategy = settings.active_strategy
 
-        async with self.trading.run_history.open(Workflow.INTRADAY) as status:
+        async with self.trading.run_history.execute(Workflow.INTRADAY) as status:
             self.logger.info(f"Starting intraday trading cycle. Strategy={strategy.strategy_id}.")
 
             await self.trading.account_loader.execute(status)
-            candidates = await self.collect.market_scanner.load_intraday_candidates(status)
-            await self.collect.data_collector.refresh_realtime(candidates, status)
+            candidates = await self.collect.intraday_candidates.execute(status)
+            await self.collect.realtime_quote_feed.execute(candidates, status)
             await self.trading.account_risk_check.execute(status)
-            await self.trading.order_execution.execute(status.signals, status)
+            await self._execute_orders(status)
 
             status.stats.total_scanned = len(candidates)
             blocked_stock_ids = status.risk_blocked_stock_ids | status.stale_stock_ids
             analysis_candidates = [stock for stock in candidates if stock.stock_id not in blocked_stock_ids]
 
-            await self.collect.data_collector.execute(analysis_candidates, status, strategy.indicators)
+            await self.collect.data_collector.execute(analysis_candidates, status)
 
             technical_candidates = [stock for stock in analysis_candidates if stock.ohlcv]
 
@@ -219,11 +230,11 @@ class Pipeline:
             await self.process.ai_analyser.execute(decision_candidates, status, AiAnalysisFocus.FUNDAMENTAL)
             self.process.composite_scorer.execute(decision_candidates)
 
-            await self.collect.data_collector.refresh_realtime(decision_candidates, status)
+            await self.collect.realtime_quote_feed.execute(decision_candidates, status)
 
             await self.trading.signals.execute(StockWatchlist(willing_stocks=decision_candidates), status)
             await self.trading.decision_memory.execute(status)
-            await self.trading.order_execution.execute(status.signals, status)
+            await self._execute_orders(status)
             await self.trading.reporting.execute(status)
 
         self.logger.info("Intraday trading cycle completed.")
@@ -235,16 +246,16 @@ class Pipeline:
         settings = await self.technical_settings_repository.load()
         strategy = settings.active_strategy
 
-        async with self.trading.run_history.open(Workflow.SPECIFIC_STOCKS, run_id) as status:
+        async with self.trading.run_history.execute(Workflow.SPECIFIC_STOCKS, run_id) as status:
             self.logger.info(f"Starting specific-stock analysis: {stock_ids}")
 
-            status.manual_stocks = await self.collect.market_scanner.find_stocks_by_ids(stock_ids, status)
+            status.manual_stocks = await self.collect.stock_lookup.execute(stock_ids, status)
 
             if not status.manual_stocks:
                 self.logger.info("Specific-stock analysis completed. No requested stocks were loaded.")
                 return status
 
-            await self.collect.data_collector.execute(status.manual_stocks, status, strategy.indicators)
+            await self.collect.data_collector.execute(status.manual_stocks, status)
 
             status.survivors = await self.process.technical_filter.execute(status.manual_stocks, status, strategy)
 
@@ -266,7 +277,7 @@ class Pipeline:
 
         status.manual_buy_refusal says why no order was sent; otherwise status.orders holds the one order.
         """
-        async with self.trading.run_history.open(Workflow.MANUAL_BUY) as status:
+        async with self.trading.run_history.execute(Workflow.MANUAL_BUY) as status:
             status.manual_stocks = [stock]
             status.stocks_cache[stock.stock_id] = stock
 
@@ -276,14 +287,30 @@ class Pipeline:
                 return status
 
             await self.trading.account_loader.execute(status)
-            await self.collect.data_collector.refresh_realtime([stock], status)
+            await self.collect.realtime_quote_feed.execute([stock], status)
             await self.trading.manual_signal.execute(stock, status)
             await self.trading.decision_memory.execute(status)
-            await self.trading.order_execution.execute(status.signals, status)
+            await self._execute_orders(status)
 
         self.logger.info(f"Manual BUY {stock.stock_id} completed. Orders={len(status.orders)}.")
 
         return status
+
+    async def _execute_orders(self, status: PipelineStatus) -> None:
+        """
+        The order steps of the trading workflows: each BUY and SELL decision of the run that has no order yet, one at a
+        time in decision order, is gated and recorded right before it is sent (so OrderRule measures its quote's age at
+        submission), then sent, then taken into the run. Buzz and Intraday run it twice: right after the stop-loss
+        check, while those quotes are fresh, and at the end.
+        """
+        for signal in status.signals:
+            order = await self.trading.order_preparation.execute(signal, status)
+
+            if order is None:
+                continue
+
+            order = await self.trading.order_execution.execute(order, status)
+            await self.trading.order_outcome.execute(order, status)
 
     async def load_market_valuation(self) -> MarketValuation:
         """Every listed and OTC stock with its official close, TTM EPS and industry: bulk sources, a few requests."""
@@ -297,6 +324,7 @@ class Pipeline:
             stocks=stocks,
             closes=closes,
             last_closed_session=self.valuation.market_clock.last_closed_session(),
+            max_missed_sessions=self.valuation.close_max_missed_sessions,
             scenario_spread=self.valuation.scenario_spread,
             source_warnings=tuple(status.stats.errors),
         )
@@ -307,7 +335,7 @@ class Pipeline:
         status = PipelineStatus.for_valuation(self.valuation.market_clock.now())
         stocks = [report.stock for report in scan.survivors]
 
-        await self.valuation.data_collector.execute(stocks, status, strategy.indicators)
+        await self.valuation.data_collector.execute(stocks, status)
         await self.valuation.technical_filter.execute([stock for stock in stocks if stock.ohlcv], status, strategy)
 
         return scan.after_technical_step(strategy.strategy_id)
@@ -325,15 +353,14 @@ class Pipeline:
         now = self.chat.market_clock.now()
 
         if content.strip() in self.chat.reset_commands:
-            await self.chat.state_manager.reset_conversation(conversation)
-            reset_reply = Message(role=MessageRole.ASSISTANT, content="✨ 記憶已清除！我們重新開始吧。", timestamp=now)
+            await self.chat.conversation_repository.save(conversation.clear_history(now=now))
+            self.logger.info(f"Conversation memory cleared for user_id: {user_id}")
+            reset_reply = Message(role=MessageRole.ASSISTANT, content="✨ Memory cleared. Let's start over.", timestamp=now)
             await self.chat.dispatcher.execute(user_id, (reset_reply,))
             return
 
-        conversation = self.chat.state_manager.update_state(
-            conversation, [Message(role=MessageRole.USER, content=content, timestamp=now)]
-        )
+        conversation = conversation.add_messages([Message(role=MessageRole.USER, content=content, timestamp=now)], now=now)
         replies = await self.chat.ai_processor.execute(conversation)
 
-        await self.chat.state_manager.save(self.chat.state_manager.update_state(conversation, list(replies)))
+        await self.chat.conversation_repository.save(conversation.add_messages(replies, now=self.chat.market_clock.now()))
         await self.chat.dispatcher.execute(user_id, replies)

@@ -2,7 +2,7 @@ from datetime import timedelta
 
 from pydantic import BaseModel, Field
 
-from a_domain.rules.collect.freshness import DataFreshnessRule
+from a_domain.rules.collect.freshness import DataFreshnessRule, MissingSessionRule, RealtimeQuoteRule
 
 
 class FolderConfig(BaseModel):
@@ -40,14 +40,25 @@ class FreshnessConfig(BaseModel):
     Realtime quotes price orders, so their limit is minutes. Daily history feeds technical
     analysis, so its limit is calendar days and must cover weekends and market holidays.
     The official closes that price a P/E valuation follow DailyCloseFreshnessRule instead: it tolerates
-    only the exchanges' publication lag, which is a fact about the source, not a setting.
+    only the exchanges' publication lag, daily_close_max_missed_sessions weekday sessions.
     """
 
     realtime_max_lag_minutes: int = Field(default=15, gt=0)
     history_max_lag_days: int = Field(default=10, gt=0)
+    missing_session_listed_stocks: int = Field(default=10, gt=0)
+    """The most stock ids the run error for histories without the last settled session names."""
+
+    daily_close_max_missed_sessions: int = Field(default=1, ge=0)
+    """Weekday sessions that may close after an official close's session before that close is stale."""
 
     def realtime_rule(self) -> DataFreshnessRule:
         return DataFreshnessRule(max_lag=timedelta(minutes=self.realtime_max_lag_minutes))
 
+    def realtime_quote_rule(self) -> RealtimeQuoteRule:
+        return RealtimeQuoteRule(freshness=self.realtime_rule())
+
     def history_rule(self) -> DataFreshnessRule:
         return DataFreshnessRule(max_lag=timedelta(days=self.history_max_lag_days))
+
+    def missing_session_rule(self) -> MissingSessionRule:
+        return MissingSessionRule(listed_stock_limit=self.missing_session_listed_stocks)

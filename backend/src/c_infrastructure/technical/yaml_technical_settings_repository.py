@@ -4,7 +4,7 @@ import os
 import tempfile
 from collections.abc import Hashable
 from pathlib import Path
-from typing import Any
+from typing import Any, override
 
 import yaml
 from pydantic import ValidationError
@@ -17,6 +17,7 @@ from c_infrastructure.technical.technical_settings_schema import TechnicalSettin
 class UniqueKeyLoader(yaml.SafeLoader):
     """Safe loader that rejects a repeated key, such as two strategies with one ID. PyYAML keeps the last one silently."""
 
+    @override
     def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict[Any, Any]:
         keys: set[Hashable] = set()
 
@@ -52,6 +53,7 @@ class YamlTechnicalSettingsRepository(ITechnicalSettingsRepository):
         self._template_path = template_path
         self._saved_path = template_path.with_name(f"{template_path.stem}.local{template_path.suffix}")
 
+    @override
     async def load(self) -> TechnicalSettings:
         settings_path = self._saved_path if self._saved_path.exists() else self._template_path
 
@@ -64,6 +66,7 @@ class YamlTechnicalSettingsRepository(ITechnicalSettingsRepository):
             error.add_note(f"Technical settings file: {settings_path}")
             raise
 
+    @override
     async def save(self, settings: TechnicalSettings) -> None:
         document = TechnicalSettingsSchema.from_domain(settings).to_document()
         content = f"# Saved technical settings. Delete this file to use {self._template_path.name} again.\n\n" + yaml.safe_dump(
@@ -83,5 +86,6 @@ class YamlTechnicalSettingsRepository(ITechnicalSettingsRepository):
         finally:
             temporary_path.unlink(missing_ok=True)
 
+    @override
     async def reset(self) -> None:
         self._saved_path.unlink(missing_ok=True)

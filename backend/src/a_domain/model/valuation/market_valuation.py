@@ -37,11 +37,17 @@ class MarketValuation:
         stocks: list[Stock],
         closes: Mapping[str, Ohlcv],
         last_closed_session: date,
+        max_missed_sessions: int,
         scenario_spread: float,
         source_warnings: tuple[str, ...],
     ) -> MarketValuation:
         valuations = {
-            stock.stock_id: StockValuation(stock=stock, close=closes.get(stock.stock_id), last_closed_session=last_closed_session)
+            stock.stock_id: StockValuation(
+                stock=stock,
+                close=closes.get(stock.stock_id),
+                last_closed_session=last_closed_session,
+                max_missed_sessions=max_missed_sessions,
+            )
             for stock in stocks
         }
 
@@ -95,7 +101,10 @@ def _valuation_elimination(report: ValuationReport, criteria: ScanCriteria) -> t
     undervaluation = report.fair_value.base.undervaluation
 
     if undervaluation < criteria.min_undervaluation:
-        return EliminationReason.BELOW_MIN_UNDERVALUATION, f"低估幅度 {undervaluation:.1%} 未達 {criteria.min_undervaluation:.1%}"
+        return (
+            EliminationReason.BELOW_MIN_UNDERVALUATION,
+            f"undervaluation {undervaluation:.1%} is below {criteria.min_undervaluation:.1%}",
+        )
 
     return None, ""
 

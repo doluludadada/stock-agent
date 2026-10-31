@@ -1,58 +1,46 @@
 import re
-from datetime import datetime
+from typing import override
 
 from a_domain.model.chat.message import Message, MessageRole
 from a_domain.ports.chat.chat_styler_provider import IChatStylerProvider
 
 
 class ChatStylerService(IChatStylerProvider):
-    _MAX_MESSAGE_LENGTH = 400
-    _SPLIT_DELIMITERS = r"\n\n+"
-
-    def __init__(self, sentence_endings: str) -> None:
+    def __init__(self, sentence_endings: str, max_message_length: int) -> None:
         self._sentence_endings = sentence_endings
+        self._max_message_length = max_message_length
 
+    @override
     def format_response(self, message: Message) -> tuple[Message, ...]:
-        content = self._remove_markdown(message.content)
+        """
+        Plain-text chat messages from an AI reply: markdown emphasis, headings and code blocks are removed, each paragraph
+        is its own message, and a paragraph longer than the limit is cut after its last sentence ending, else at its last
+        space, else at the limit. Every cut moves forward, so any paragraph ends.
+        """
+        text = re.sub(r"\*\*(.*?)\*\*|\*(.*?)\*", r"\1\2", message.content)
+        text = re.sub(r"^#+\s*", "", text, flags=re.MULTILINE)
+        text = re.sub(r"```.*?```", "", text, flags=re.DOTALL).strip()
+        parts: list[str] = []
 
-        raw_chunks = re.split(self._SPLIT_DELIMITERS, content)
+        for paragraph in re.split(r"\n\n+", text):
+            remaining = paragraph.strip()
 
-        final_messages = []
-        for chunk in raw_chunks:
-            trimmed_chunk = chunk.strip()
-            if not trimmed_chunk:
-                continue
+            while len(remaining) > self._max_message_length:
+                split_at = max(remaining.rfind(ending, 0, self._max_message_length) for ending in self._sentence_endings) + 1
 
-            if len(trimmed_chunk) > self._MAX_MESSAGE_LENGTH:
-                final_messages.extend(self._force_split_long_text(trimmed_chunk, message.timestamp))
-            else:
-                final_messages.append(Message(role=MessageRole.ASSISTANT, content=trimmed_chunk, timestamp=message.timestamp))
+                if split_at == 0:
+                    split_at = remaining.rfind(" ", 0, self._max_message_length)
 
-        if not final_messages:
+                if split_at == -1:
+                    split_at = self._max_message_length
+
+                parts.append(remaining[:split_at].strip())
+                remaining = remaining[split_at:].strip()
+
+            if remaining:
+                parts.append(remaining)
+
+        if not parts:
             return (Message(role=MessageRole.ASSISTANT, content="Could you ask me again?🤔", timestamp=message.timestamp),)
 
-        return tuple(final_messages)
-
-    def _remove_markdown(self, text: str) -> str:
-        text = re.sub(r"\*\*(.*?)\*\*|\*(.*?)\*", r"\1\2", text)
-        text = re.sub(r"^#+\s*", "", text, flags=re.MULTILINE)
-        text = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
-        return text.strip()
-
-    def _force_split_long_text(self, text: str, timestamp: datetime) -> list[Message]:
-        parts = []
-        while len(text) > self._MAX_MESSAGE_LENGTH:
-            split_at = max(text.rfind(ending, 0, self._MAX_MESSAGE_LENGTH) for ending in self._sentence_endings)
-
-            if split_at == -1:
-                split_at = text.rfind(" ", 0, self._MAX_MESSAGE_LENGTH)
-
-            if split_at == -1:
-                split_at = self._MAX_MESSAGE_LENGTH
-
-            parts.append(Message(role=MessageRole.ASSISTANT, content=text[:split_at].strip(), timestamp=timestamp))
-            text = text[split_at:].strip()
-
-        if text:
-            parts.append(Message(role=MessageRole.ASSISTANT, content=text, timestamp=timestamp))
-        return parts
+        return tuple(Message(role=MessageRole.ASSISTANT, content=part, timestamp=message.timestamp) for part in parts)

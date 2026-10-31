@@ -19,6 +19,10 @@ class IMarketClock(Protocol):
 
     def to_trading_date(self, value: datetime) -> date: ...
 
+    def session_close(self, session: date) -> datetime:
+        """When that day's session closes, in the exchange's zone. A daily bar is stamped with it."""
+        ...
+
     def history_window(self, lookback_days: int) -> tuple[datetime, datetime]: ...
 
     def session_close_after(self, value: datetime, sessions: int) -> datetime:

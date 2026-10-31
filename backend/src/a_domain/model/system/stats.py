@@ -47,5 +47,8 @@ class SystemStats(SQLModel):
     def log(self, message: str, *, now: datetime) -> None:
         self.execution_log.append(f"[{now:%H:%M:%S}] {message}")
 
-    def add_error(self, error: str) -> None:
+    def add_error(self, error: str) -> str:
+        """Records an error of the run and returns it, so the caller can log the same text."""
         self.errors.append(error)
+
+        return error

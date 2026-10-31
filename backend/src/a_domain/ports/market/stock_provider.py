@@ -12,10 +12,8 @@ class IStockProvider(Protocol):
     Workflows fill those objects with prices, articles and reports, so nothing one workflow
     writes may reach the Stock objects that a later call returns.
 
-    NOTE: This is intentionally kept separate from IPriceProvider.
-    This design ensures flexibility for future expansions (e.g., US Market),
-    where fetching the list of S&P 500 components might come from one API,
-    while fetching historical OHLCV prices comes from another.
+    It is separate from IOhlcvProvider because a market's stock list and its prices can come from different
+    sources: for the US market, the S&P 500 components from one API and their daily bars from another.
     """
 
     async def get_all(self) -> list[Stock]: ...

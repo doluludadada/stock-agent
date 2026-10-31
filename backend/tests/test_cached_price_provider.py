@@ -10,6 +10,7 @@ from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.types.enums import TradingPhase
 from b_application.config.app_config import AppConfig
+from b_application.config.market_data_config import MarketDataConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.market.cached_price_provider import CachedPriceProvider
 
@@ -62,7 +63,14 @@ def at(day: date, hour: int, minute: int = 0) -> datetime:
 
 
 def cache_over(yahoo: ScriptedYahoo, db: DatabaseConnector, clock: MovableClock) -> CachedPriceProvider:
-    return CachedPriceProvider(history_provider=yahoo, quote_provider=QuoteFeed(), db=db, logger=SilentLogger(), market_clock=clock)
+    return CachedPriceProvider(
+        history_provider=yahoo,
+        quote_provider=QuoteFeed(),
+        db=db,
+        market_data=MarketDataConfig(),
+        logger=SilentLogger(),
+        market_clock=clock,
+    )
 
 
 async def last_bars(cache: CachedPriceProvider, clock: MovableClock, *stock_ids: str) -> dict[str, tuple[str, float]]:
@@ -81,7 +89,14 @@ async def db(tmp_path):
 async def test_history_holds_settled_sessions_and_is_refetched_when_a_newer_one_settles(db: DatabaseConnector) -> None:
     clock = MovableClock(MONDAY_10_00 + timedelta(days=1))
     yahoo = CountingYahoo(clock)
-    cache = CachedPriceProvider(history_provider=yahoo, quote_provider=QuoteFeed(), db=db, logger=SilentLogger(), market_clock=clock)
+    cache = CachedPriceProvider(
+        history_provider=yahoo,
+        quote_provider=QuoteFeed(),
+        db=db,
+        market_data=MarketDataConfig(),
+        logger=SilentLogger(),
+        market_clock=clock,
+    )
     seen = []
 
     for moment in ["Tue 10:00", "Tue 11:00", "Tue 14:00", "Tue 15:00", "Sat 10:00", "Sat 12:00"]:
@@ -107,7 +122,12 @@ async def test_realtime_quotes_come_from_the_quote_source_and_are_never_cached(d
     clock = MovableClock(MONDAY_10_00)
     quotes = QuoteFeed(realtime={"2330": bar(MONDAY_10_00, 101)})
     cache = CachedPriceProvider(
-        history_provider=CountingYahoo(clock), quote_provider=quotes, db=db, logger=SilentLogger(), market_clock=clock
+        history_provider=CountingYahoo(clock),
+        quote_provider=quotes,
+        db=db,
+        market_data=MarketDataConfig(),
+        logger=SilentLogger(),
+        market_clock=clock,
     )
 
     first = await cache.fetch_realtime_bars([Stock(stock_id="2330")])

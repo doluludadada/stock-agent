@@ -30,7 +30,7 @@ class NewsFeed:
             try:
                 news = await self._news_provider.fetch_news(stock_id=stock.stock_id, limit=self._article_fetch_limit)
 
-                accepted_news = [article for article in news if self._quality.is_high_quality(article)]
+                accepted_news = [article for article in news if self._quality.apply(article)]
 
                 stock.articles.extend(accepted_news)
 

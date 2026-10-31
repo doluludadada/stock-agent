@@ -1,15 +1,13 @@
-from datetime import UTC, datetime
+from decimal import Decimal
 
 import pytest
 
-from a_domain.model.trading.order import Order
-from a_domain.rules.trading.tick import TickRule
-from a_domain.types.enums import OrderType, TimeInForce, TradeAction
-from a_domain.types.ids import new_decision_id, new_run_id
-
-NOW = datetime(2026, 10, 19, 10, 0, tzinfo=UTC)
+from a_domain.types.enums import TradeAction
+from b_application.config.trading_config import MarketConfig
+from c_infrastructure.system.config_loader import load_settings
 
 BUY, SELL = TradeAction.BUY, TradeAction.SELL
+LIMIT_PRICE = load_settings().market.limit_price_rule()
 
 
 @pytest.mark.parametrize(
@@ -31,7 +29,7 @@ BUY, SELL = TradeAction.BUY, TradeAction.SELL
 def test_an_off_tick_price_rounds_up_for_a_buy_and_down_for_a_sell_on_its_band(
     stock_id: str, price: float, buy_limit: float, sell_limit: float
 ) -> None:
-    assert (TickRule.limit_price(BUY, stock_id, price), TickRule.limit_price(SELL, stock_id, price)) == (buy_limit, sell_limit)
+    assert (LIMIT_PRICE.apply(BUY, stock_id, price), LIMIT_PRICE.apply(SELL, stock_id, price)) == (buy_limit, sell_limit)
 
 
 @pytest.mark.parametrize(
@@ -39,7 +37,7 @@ def test_an_off_tick_price_rounds_up_for_a_buy_and_down_for_a_sell_on_its_band(
     [("2330", 9.99), ("2330", 28.35), ("2330", 99.9), ("2330", 100.5), ("2330", 595.0), ("2330", 1085.0), ("0050", 28.37)],
 )
 def test_a_price_on_the_tick_grid_is_the_limit_for_both_sides(stock_id: str, price: float) -> None:
-    assert TickRule.limit_price(BUY, stock_id, price) == TickRule.limit_price(SELL, stock_id, price) == price
+    assert LIMIT_PRICE.apply(BUY, stock_id, price) == LIMIT_PRICE.apply(SELL, stock_id, price) == price
 
 
 @pytest.mark.parametrize(
@@ -47,29 +45,22 @@ def test_a_price_on_the_tick_grid_is_the_limit_for_both_sides(stock_id: str, pri
     [(28.350000381469727, "28.35"), (28.399999618530273, "28.4"), (99.9000015258789, "99.9"), (9.989999771118164, "9.99")],
 )
 def test_a_float32_quote_is_the_tick_it_stands_for_on_both_sides(quote: float, tick: str) -> None:
-    assert repr(TickRule.limit_price(BUY, "2330", quote)) == repr(TickRule.limit_price(SELL, "2330", quote)) == tick
+    assert repr(LIMIT_PRICE.apply(BUY, "2330", quote)) == repr(LIMIT_PRICE.apply(SELL, "2330", quote)) == tick
 
 
-def limit_order(stock_id: str, limit_price: float) -> Order:
-    return Order(
-        run_id=new_run_id(),
-        decision_id=new_decision_id(),
-        stock_id=stock_id,
-        action=BUY,
-        order_type=OrderType.LIMIT,
-        quantity=1000,
-        limit_price=limit_price,
-        time_in_force=TimeInForce.IOC,
-        created_at=NOW,
-        updated_at=NOW,
-    )
+@pytest.mark.parametrize("stock_id", ["2330", "0050"])
+def test_no_price_gives_a_limit_off_the_exchange_grid(stock_id: str) -> None:
+    exchange_ticks = [(Decimal(1000), "5"), (Decimal(500), "1"), (Decimal(100), "0.5"), (Decimal(50), "0.1"), (Decimal(10), "0.05")]
+    if stock_id == "0050":
+        exchange_ticks = [(Decimal(50), "0.05")]
+
+    for cents in range(1, 120_000, 7):
+        for action in (BUY, SELL):
+            limit = Decimal(repr(LIMIT_PRICE.apply(action, stock_id, cents / 100)))
+            tick = next((Decimal(tick) for lowest, tick in exchange_ticks if limit >= lowest), Decimal("0.01"))
+
+            assert limit % tick == 0, f"{action} {stock_id} at {cents / 100} gave {limit}, off the {tick} grid"
 
 
-def test_an_order_cannot_carry_a_limit_price_off_the_tick_grid() -> None:
-    with pytest.raises(ValueError, match="not an exchange tick"):
-        limit_order("2330", 28.37)
-
-    with pytest.raises(ValueError, match="not an exchange tick"):
-        limit_order("2330", 28.350000381469727)
-
-    assert limit_order("0050", 28.37).limit_price == 28.37
+def test_the_shipped_tick_table_is_the_default_one() -> None:
+    assert load_settings().market.limit_price_rule() == MarketConfig().limit_price_rule()

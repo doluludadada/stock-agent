@@ -23,12 +23,14 @@ class FairPriceRange:
     @require(lambda spread: 0 < spread < 1)
     def of(cls, pe: PeRatio, target: TargetPe, spread: float) -> FairPriceRange:
         def around_base(name: ScenarioName, factor: float, sign: str) -> ValuationScenario:
-            assumption = f"基準 × (1 {sign} {spread:.0%})，依設定 valuation.scenario_spread"
+            assumption = f"base × (1 {sign} {spread:.0%}), from the valuation.scenario_spread setting"
             return ValuationScenario(name=name, target_pe=target.value * factor, assumption=assumption, pe=pe)
 
         return cls(
             conservative=around_base(ScenarioName.CONSERVATIVE, 1 - spread, "−"),
-            base=ValuationScenario(name=ScenarioName.BASE, target_pe=target.value, assumption="使用者輸入的目標本益比", pe=pe),
+            base=ValuationScenario(
+                name=ScenarioName.BASE, target_pe=target.value, assumption="the target P/E the user entered", pe=pe
+            ),
             optimistic=around_base(ScenarioName.OPTIMISTIC, 1 + spread, "+"),
         )
 

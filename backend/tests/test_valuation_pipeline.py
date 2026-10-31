@@ -13,7 +13,7 @@ from a_domain.model.fundamentals.fiscal_quarter import FiscalQuarter
 from a_domain.model.valuation.pe_not_applicable import PeNotApplicable
 from a_domain.model.valuation.pe_ratio import PeRatio
 from a_domain.model.valuation.scan_criteria import ScanCriteria
-from a_domain.model.valuation.target_pe import TargetPe
+from a_domain.model.valuation.target_pe import TARGET_PE_REQUIREMENT, TargetPe
 from a_domain.model.valuation.valuation_explanation import NOT_INVESTMENT_ADVICE
 from a_domain.model.valuation.valuation_report import LABEL
 from a_domain.rules.ai.prompt import LOW_PE_RULE
@@ -102,7 +102,8 @@ async def test_a_quarter_whose_refresh_failed_is_reported_with_the_age_of_the_pa
 
     assert isinstance(market.find("1232").eps, Eps)
     assert market.source_warnings == (
-        "MOPS 2026Q3 財報更新失敗，沿用 2026-10-19 18:00 取得的資料，其後申報的公司 EPS 將標示為資料不足或非最新",
+        "MOPS 2026Q3 filings could not be refreshed, so the data fetched at 2026-10-19 18:00 is used; the EPS of a company "
+        "that filed after that shows insufficient data or comes from an older quarter",
     )
 
 
@@ -122,8 +123,8 @@ async def test_numbers_come_from_the_domain_and_never_from_the_ai() -> None:
     explanation = await harness.runtime.pipeline.explain_valuation(market.appraise(market.find("2330"), TargetPe(25)))
 
     prompt = harness.ai.calls[0].prompt
-    assert "27.99 倍" in prompt
-    assert "基準 2,157.00 元" in prompt
+    assert "27.99x" in prompt
+    assert "Base 2,157.00 TWD" in prompt
     assert harness.news.requested == ["2330"]
     printed = "\n".join(line for section in explanation.sections() for line in section.lines)
     assert "先進製程需求強勁" in printed
@@ -141,9 +142,9 @@ async def test_loss_making_stock_never_asks_the_ai_for_a_fair_price() -> None:
     await harness.runtime.pipeline.explain_valuation(market.appraise(market.find("1101"), TargetPe(25)))
 
     prompt = harness.ai.calls[0].prompt
-    assert "No fair price was computed because: 虧損，本益比不適用" in prompt
-    assert "不適用：虧損，本益比不適用" in prompt
-    assert "基準 " not in prompt
+    assert "No fair price was computed because: loss-making, P/E not applicable" in prompt
+    assert "Not applicable: loss-making, P/E not applicable" in prompt
+    assert "Base " not in prompt
 
 
 @pytest.mark.asyncio
@@ -156,7 +157,7 @@ async def test_failed_ai_call_still_yields_every_report_item() -> None:
 
     sections = {section.title: section.lines for section in explanation.sections()}
     assert len(sections) == 11
-    assert any("AI 解釋無法取得" in line for line in sections["資料不足警告"])
+    assert any("AI explanation unavailable" in line for line in sections["Insufficient data warnings"])
 
 
 @pytest.mark.asyncio
@@ -218,14 +219,14 @@ async def test_menu_5_reports_each_stock_and_rejects_invalid_targets(monkeypatch
 
     printed = output.getvalue()
     assert [question.split(" (")[0] for question in asked] == ["Enter stock IDs separated by space or comma"] + ["Target P/E"] * 4
-    assert printed.count("目標本益比必須是大於 0 的有限數字") == 3
+    assert printed.count(TARGET_PE_REQUIREMENT) == 3
     assert "Stock not found: 9999" in printed
     assert [call.stock_id for call in harness.ai.calls] == ["2330", "1101", "0050"]
     assert printed.count(LABEL) >= 3
-    assert "86.28 元（近四季 TTM，2025Q3–2026Q2，實際值，公開資訊觀測站" in printed
-    assert "2,415.00 元（2026-10-29 收盤，交易所公告）" in printed
-    assert "虧損，本益比不適用" in printed
-    assert "資料不足" in printed
+    assert "86.28 TWD (TTM, 2025Q3–2026Q2, actual, MOPS" in printed
+    assert "2,415.00 TWD (2026-10-29 close, published by the exchange)" in printed
+    assert "loss-making, P/E not applicable" in printed
+    assert "Insufficient data" in printed
     assert printed.count(NOT_INVESTMENT_ADVICE) == 3
 
 
@@ -250,7 +251,7 @@ async def test_menu_6_scans_confirms_technically_and_explains_the_survivor(monke
     printed = output.getvalue()
     assert "Market median P/E for reference" in printed
     assert "Scanned 5 -> passed 3" in printed
-    assert "Eliminated at valuation: EPS ≤ 0 1 | EPS 資料不足 1" in printed
+    assert "Eliminated at valuation: EPS ≤ 0 1 | insufficient EPS data 1" in printed
     assert "Two-step screen: valuation -> technical (trend)" in printed
     assert "Passed both steps: 1" in printed
     assert [call.stock_id for call in harness.ai.calls] == ["2330"]

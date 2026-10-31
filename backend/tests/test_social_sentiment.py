@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
+from pydantic import ValidationError
 from support.harness import build_harness, rising_history
 from trading_stack import run_status
 
@@ -12,15 +13,22 @@ from a_domain.model.analysis.social_sentiment import SocialSentiment
 from a_domain.model.chat.message import Message
 from a_domain.model.market.article import Article
 from a_domain.model.market.stock import Stock
+from a_domain.rules.sentiment import SentimentConsensusRule, SocialSentimentRule
 from a_domain.types.enums import InformationSource, MessageRole, SentimentConsensus, SentimentLabel, TradeAction, Workflow
-from b_application.config.ai_config import PromptsConfig
+from b_application.config.ai_config import PromptsConfig, SentimentConfig
 from b_application.config.app_config import AppConfig
 from b_application.use_cases.process.sentiment_analyser import SentimentAnalyser
 from c_infrastructure.ai_models.sentiment_classifier import AiSentimentClassifier
 from c_infrastructure.database.db_connector import DatabaseConnector
+from c_infrastructure.database.repositories.sentiment_repository import SentimentRepository
 
 BULLISH, BEARISH, NEUTRAL, UNCLEAR = SentimentLabel.BULLISH, SentimentLabel.BEARISH, SentimentLabel.NEUTRAL, SentimentLabel.UNCLEAR
 SRC = Path(__file__).resolve().parents[1] / "src"
+SHIPPED = AppConfig(project_root=Path(".")).sentiment
+SENTIMENT_RULE = SocialSentimentRule(
+    min_confidence=SHIPPED.min_confidence,
+    consensus_rule=SentimentConsensusRule(min_opinions=SHIPPED.min_opinions, consensus_share=SHIPPED.consensus_share),
+)
 
 
 class SilentLogger:
@@ -49,7 +57,7 @@ def make_post(text: str, url: str | None = None, source: InformationSource = Inf
 
 
 def tally(*labels: SentimentLabel, confidence: float = 0.9) -> SocialSentiment:
-    return SocialSentiment.tally([SentimentClassification(label, confidence) for label in labels], posts=len(labels))
+    return SENTIMENT_RULE.apply([SentimentClassification(label, confidence) for label in labels], posts=len(labels))
 
 
 @pytest.mark.parametrize(
@@ -69,8 +77,39 @@ def test_stock_level_consensus(labels: list[SentimentLabel], expected: Sentiment
     assert tally(*labels).consensus == expected
 
 
+class TwoBullsOneBear:
+    async def classify(self, stock_id: str, articles: list[Article]) -> list[SentimentClassification]:
+        return [SentimentClassification(BULLISH, 0.9), SentimentClassification(BULLISH, 0.9), SentimentClassification(BEARISH, 0.9)]
+
+
+@pytest.mark.parametrize(
+    ("settings", "expected"),
+    [
+        (SentimentConfig(), SentimentConsensus.BULLISH),
+        (SentimentConfig(consensus_share=0.75), SentimentConsensus.DISAGREEMENT),
+        (SentimentConfig(min_opinions=4), SentimentConsensus.UNCLEAR),
+        (SentimentConfig(min_confidence=0.95), SentimentConsensus.UNCLEAR),
+    ],
+)
+@pytest.mark.asyncio
+async def test_the_sentiment_settings_decide_the_consensus(settings: SentimentConfig, expected: SentimentConsensus) -> None:
+    config = AppConfig(project_root=Path("."), sentiment=settings)
+    stock = Stock(stock_id="2330", articles=[make_post("Up"), make_post("Up more"), make_post("Down")])
+    status = run_status(Workflow.BUZZ_SCAN)
+
+    await SentimentAnalyser(classifier=TwoBullsOneBear(), config=config, logger=SilentLogger()).execute([stock], status)
+
+    assert status.sentiment_by_stock_id["2330"].consensus == expected
+
+
+@pytest.mark.parametrize("consensus_share", [0.5, 1.1])
+def test_a_consensus_share_that_two_stances_could_reach_is_refused(consensus_share: float) -> None:
+    with pytest.raises(ValidationError):
+        SentimentConfig(consensus_share=consensus_share)
+
+
 def test_ratios_are_shares_of_opinions_and_low_confidence_counts_as_unclear() -> None:
-    sentiment = SocialSentiment.tally(
+    sentiment = SENTIMENT_RULE.apply(
         [
             SentimentClassification(BULLISH, 0.9),
             SentimentClassification(BULLISH, 0.8),
@@ -97,7 +136,7 @@ async def db(tmp_path: Path) -> AsyncIterator[DatabaseConnector]:
 
 def make_classifier(ai_provider: ScriptedAiProvider, db: DatabaseConnector) -> AiSentimentClassifier:
     config = AppConfig(project_root=Path("."), prompts=PromptsConfig(social_sentiment="Stock {stock_id}\n{posts_text}"))
-    return AiSentimentClassifier(ai_provider=ai_provider, db=db, config=config, logger=SilentLogger())
+    return AiSentimentClassifier(ai_provider, SentimentRepository(db), config, SilentLogger())
 
 
 @pytest.mark.asyncio
@@ -168,7 +207,8 @@ async def test_sentiment_reads_only_social_posts_and_records_a_failed_stock() ->
     classifier = FakeClassifier(failing_stock_ids={"2603"})
     status = run_status(Workflow.BUZZ_SCAN)
 
-    await SentimentAnalyser(classifier=classifier, logger=SilentLogger()).execute([ok, broken], status)
+    analyser = SentimentAnalyser(classifier=classifier, config=AppConfig(project_root=Path(".")), logger=SilentLogger())
+    await analyser.execute([ok, broken], status)
 
     assert classifier.classified_sources == [InformationSource.PTT_STOCK, InformationSource.PTT_STOCK]
     assert status.sentiment_by_stock_id["2330"].consensus == SentimentConsensus.BULLISH

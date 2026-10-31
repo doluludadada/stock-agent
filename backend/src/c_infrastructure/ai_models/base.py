@@ -1,44 +1,27 @@
-from abc import ABC, abstractmethod
-from datetime import UTC, datetime
+from abc import ABC
+from datetime import datetime
+from typing import override
 
-from a_domain.model.chat.message import Message, MessageRole
 from a_domain.ports.ai.ai_provider import IAiProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from b_application.config.app_config import AppConfig
 
 
 class BaseAIAdapter(IAiProvider, ABC):
-    """
-    An abstract base class for AI model adapters.
-    """
+    """What every AI model adapter shares: its settings, its model name, and where it saves raw replies."""
 
     def __init__(self, config: AppConfig, logger: ILoggingProvider, model_name: str):
         self._config = config
         self._logger = logger
         self._model_name = model_name
 
-    @abstractmethod
-    async def _call_api(self, messages: tuple[Message, ...]) -> str: ...
-
-    async def generate_reply(self, messages: tuple[Message, ...]) -> Message:
-        """Orchestrates the reply generation process (Template Method)."""
-        self._logger.debug(f"[{self.__class__.__name__}] Generating reply with model: {self._model_name}")
-        self._logger.trace(f"[{self.__class__.__name__}] Sending {len(messages)} messages to model.")
-
-        reply_content = await self._call_api(messages)
-        self._logger.success(f"[{self.__class__.__name__}] Successfully received reply from model: {self._model_name}")
-        return Message(role=MessageRole.ASSISTANT, content=reply_content, timestamp=datetime.now(UTC))
-
+    @override
     def save_response(self, stock_id: str, content: str) -> None:
         """Saves the raw AI response to the filesystem for inspection."""
         try:
-            base_dir = self._config.project_root / self._config.folder.ai_response_dir
-            stock_dir = base_dir / stock_id
+            stock_dir = self._config.project_root / self._config.folder.ai_response_dir / stock_id
             stock_dir.mkdir(parents=True, exist_ok=True)
-
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"report_{timestamp}.md"
-            file_path = stock_dir / filename
+            file_path = stock_dir / f"report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
 
             with open(file_path, "w", encoding="utf-8") as file:
                 file.write(content)

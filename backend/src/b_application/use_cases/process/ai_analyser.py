@@ -1,5 +1,3 @@
-# backend/src/b_application/use_cases/process/ai_analyser.py
-
 from a_domain.model.chat.message import Message
 from a_domain.model.market.stock import Stock
 from a_domain.ports.ai.ai_provider import IAiProvider
@@ -49,7 +47,7 @@ class AiAnalyser:
             try:
                 stock.ai_report = None
                 historical_context = await self._knowledge_repository.find_decision_history(stock.stock_id)
-                prompt = self._prompt_builder.build(stock=stock, historical_context=historical_context, focus=focus)
+                prompt = self._prompt_builder.apply(stock=stock, historical_context=historical_context, focus=focus)
                 message = Message(role=MessageRole.USER, content=prompt, timestamp=self._market_clock.now())
                 response = await self._ai_provider.generate_reply(messages=(message,))
                 self._ai_provider.save_response(stock.stock_id, response.content)

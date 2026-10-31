@@ -1,7 +1,9 @@
 import asyncio
 import time
 from collections.abc import Collection
+from dataclasses import replace
 from datetime import date, datetime, timedelta
+from typing import override
 
 import httpx
 from bs4 import BeautifulSoup
@@ -18,209 +20,214 @@ from c_infrastructure.database.models.quarter_eps_dto import QuarterEpsDTO
 from c_infrastructure.market.twse_provider import ROC_YEAR_OFFSET
 
 
-def parse_cumulative_eps(html: str, mops: MopsSources) -> dict[str, float] | None:
-    """
-    Cumulative basic EPS per company from one ajax_t163sb04 page.
-
-    {} when the season has no filings yet. None for a page that is neither (an error or throttle page), or a table
-    missing the company-id or EPS header, so a format change fails the quarter instead of returning partial data.
-    """
-    tables = BeautifulSoup(html, "lxml").find_all("table", class_="hasBorder")
-
-    if not tables:
-        return {} if mops.no_data_marker in html else None
-
-    result: dict[str, float] = {}
-
-    for table in tables:
-        rows = table.find_all("tr")
-        header = [_cell_text(cell) for cell in rows[0].find_all("th")] if rows else []
-        eps_index = next((index for index, name in enumerate(header) if name.startswith(mops.eps_header_prefix)), None)
-
-        if mops.company_id_header not in header or eps_index is None:
-            return None
-
-        id_index = header.index(mops.company_id_header)
-
-        for row in rows[1:]:
-            cells = [_cell_text(cell) for cell in row.find_all("td")]
-
-            if len(cells) != len(header):
-                continue
-
-            try:
-                result[cells[id_index]] = float(cells[eps_index].replace(",", ""))
-            except ValueError:
-                continue
-
-    return result
-
-
-def _cell_text(cell) -> str:
-    # Headers wrap with <br> inside the column name, so all whitespace goes.
-    return "".join(cell.get_text().split())
-
-
 class MopsFundamentalsProvider(IFundamentalsProvider):
     """
     Cumulative EPS from the MOPS bulk income statements (one page per market and quarter), cached in SQLite.
     Industry from the MOPS income-statement summaries on the TWSE and TPEX OpenAPI, cached in memory.
 
     A quarter's cached page is final, and never fetched again, once it was fetched after the quarter's last filing
-    deadline plus grace and is not empty. Any other page is reused for PROVISIONAL_MAX_AGE.
+    deadline plus grace and is not empty. Any other page is reused for `provisional_page_max_age_hours`.
     """
-
-    TYPEK = {MarketType.TWSE: "sii", MarketType.TPEX: "otc"}
-    PROVISIONAL_MAX_AGE = timedelta(hours=6)
-    INDUSTRY_MAX_AGE = timedelta(hours=24)
-    REQUEST_INTERVAL_SECONDS = 2.0
-    TIMEOUT_SECONDS = 60.0
 
     def __init__(self, db: DatabaseConnector, market_clock: IMarketClock, mops: MopsSources, logger: ILoggingProvider) -> None:
         self._db = db
         self._mops = mops
+        self._market_codes = {MarketType.TWSE: mops.twse_market_code, MarketType.TPEX: mops.tpex_market_code}
         self._industry_sources = {
             MarketType.TWSE: (mops.twse_industries_url, mops.twse_industry_company_field),
             MarketType.TPEX: (mops.tpex_industries_url, mops.tpex_industry_company_field),
         }
+        self._provisional_page_max_age = timedelta(hours=mops.provisional_page_max_age_hours)
+        self._industry_max_age = timedelta(hours=mops.industry_max_age_hours)
         self._clock = market_clock
         self._logger = logger
         self._last_request_at: float | None = None
         self._industries: dict[MarketType, dict[str, str]] = {}
         self._industries_fetched_at: dict[MarketType, datetime] = {}
 
+    @override
     async def fetch_cumulative_eps(self, quarters: Collection[FiscalQuarter]) -> EpsFilings:
         today = self._clock.today()
         filings: dict[FiscalQuarter, QuarterEps | None] = {}
 
         for quarter in sorted(quarters, reverse=True):
-            pages = [await self._page(market, quarter, today) for market in self.TYPEK]
-            present = [page for page, _ in pages if page is not None]
+            pages = [await self.fetch_page(market, quarter, today) for market in self._market_codes]
+            present = [page for page in pages if page is not None]
 
             if len(present) < len(pages):
                 filings[quarter] = None
                 continue
 
-            cumulative_eps = {company: eps for page in present for company, eps in page.cumulative_eps.items()}
-            # Eps shows when its filings were fetched as Taiwan wall-clock time.
-            fetched_at = self._clock.to_market_datetime(min(page.fetched_at for page in present))
-            refresh_failed = any(failed for _, failed in pages)
             filings[quarter] = QuarterEps(
-                quarter=quarter, cumulative_eps=cumulative_eps, fetched_at=fetched_at, refresh_failed=refresh_failed
+                quarter=quarter,
+                cumulative_eps={company: eps for page in present for company, eps in page.cumulative_eps.items()},
+                # Eps shows when its filings were fetched as Taiwan wall-clock time.
+                fetched_at=self._clock.to_market_datetime(min(page.fetched_at for page in present)),
+                refresh_failed=any(page.refresh_failed for page in present),
             )
 
         return filings
 
-    async def fetch_industries(self) -> dict[str, str]:
-        now = self._clock.now()
-        stale = [
-            market
-            for market in self._industry_sources
-            if market not in self._industries_fetched_at or now - self._industries_fetched_at[market] >= self.INDUSTRY_MAX_AGE
-        ]
-
-        if stale:
-            async with httpx.AsyncClient(timeout=self.TIMEOUT_SECONDS) as client:
-                for market in stale:
-                    url, id_field = self._industry_sources[market]
-
-                    try:
-                        response = await client.get(url)
-                        response.raise_for_status()
-                        self._industries[market] = {
-                            str(row[id_field]).strip(): str(row[self._mops.industry_field]).strip()
-                            for row in response.json()
-                            if row.get(id_field) and row.get(self._mops.industry_field)
-                        }
-                        self._industries_fetched_at[market] = now
-                    except Exception as error:
-                        self._logger.warning(f"MOPS industries for {market.value} unavailable: {error}")
-
-        industries: dict[str, str] = {}
-
-        for market_industries in self._industries.values():
-            industries.update(market_industries)
-
-        return industries
-
-    async def _page(self, market: MarketType, quarter: FiscalQuarter, today: date) -> tuple[QuarterEpsDTO | None, bool]:
-        """The market's page for the quarter, if any, and whether it is an old page served because its refresh failed."""
-        label = f"MOPS {quarter} {self.TYPEK[market]}"
-        cached = await self._load(market, quarter)
+    @override
+    async def fetch_page(self, market: MarketType, quarter: FiscalQuarter, today: date) -> QuarterEps | None:
+        label = f"MOPS {quarter} {self._market_codes[market]}"
+        cached = await self.load_page(market, quarter)
         now = self._clock.now()
 
-        if cached is not None and self._is_reusable(cached, quarter, now):
+        if cached is not None and self.is_reusable(cached, now):
             self._logger.debug(f"{label}: cached page, {len(cached.cumulative_eps)} companies")
-            return cached, False
+            return cached
 
-        cumulative_eps = await self._download(market, quarter)
+        cumulative_eps = await self.download(market, quarter)
 
         if cumulative_eps == {} and quarter.is_final_on(today):
             self._logger.warning(f"{label}: empty page for a quarter whose filing deadline has passed; not cached")
             cumulative_eps = None
 
-        if cumulative_eps is None:
-            if cached is not None:
-                fetched_at = self._clock.to_market_datetime(cached.fetched_at)
-                self._logger.warning(f"{label}: refresh failed, using the page fetched at {fetched_at:%Y-%m-%d %H:%M}")
+        if cumulative_eps is not None:
+            page = QuarterEps(quarter=quarter, cumulative_eps=cumulative_eps, fetched_at=now)
+            await self.save_page(market, page)
+            self._logger.info(f"{label}: fetched {len(cumulative_eps)} companies")
+            return page
 
-            return cached, cached is not None
+        if cached is None:
+            return None
 
-        page = QuarterEpsDTO(
-            market=market.value, year=quarter.year, quarter=quarter.quarter, fetched_at=now, cumulative_eps=cumulative_eps
-        )
-        await self._save(page)
-        self._logger.info(f"{label}: fetched {len(cumulative_eps)} companies")
+        fetched_at = self._clock.to_market_datetime(cached.fetched_at)
+        self._logger.warning(f"{label}: refresh failed, using the page fetched at {fetched_at:%Y-%m-%d %H:%M}")
 
-        return page, False
+        return replace(cached, refresh_failed=True)
 
-    def _is_reusable(self, page: QuarterEpsDTO, quarter: FiscalQuarter, now: datetime) -> bool:
-        if page.cumulative_eps and quarter.is_final_on(self._clock.to_trading_date(page.fetched_at)):
+    @override
+    def is_reusable(self, page: QuarterEps, now: datetime) -> bool:
+        if page.cumulative_eps and page.quarter.is_final_on(self._clock.to_trading_date(page.fetched_at)):
             return True
 
-        return now - page.fetched_at < self.PROVISIONAL_MAX_AGE
+        return now - page.fetched_at < self._provisional_page_max_age
 
-    async def _download(self, market: MarketType, quarter: FiscalQuarter) -> dict[str, float] | None:
-        form = {
-            "encodeURIComponent": "1",
-            "step": "1",
-            "firstin": "1",
-            "off": "1",
-            "isQuery": "Y",
-            "TYPEK": self.TYPEK[market],
+    @override
+    async def download(self, market: MarketType, quarter: FiscalQuarter) -> dict[str, float] | None:
+        label = f"MOPS {quarter} {self._market_codes[market]}"
+        quarter_fields = {
+            "TYPEK": self._market_codes[market],
             "year": str(quarter.year - ROC_YEAR_OFFSET),
             "season": f"{quarter.quarter:02d}",
         }
 
-        await self._wait_for_request_slot()
+        await self.wait_for_request_slot()
 
         try:
-            async with httpx.AsyncClient(timeout=self.TIMEOUT_SECONDS) as client:
-                response = await client.post(self._mops.eps_url, data=form)
+            async with httpx.AsyncClient(timeout=self._mops.timeout_seconds) as client:
+                response = await client.post(self._mops.eps_url, data={**self._mops.eps_form_fields, **quarter_fields})
                 response.raise_for_status()
         except Exception as error:
-            self._logger.warning(f"MOPS {quarter} {self.TYPEK[market]}: request failed: {error}")
+            self._logger.warning(f"{label}: request failed: {error}")
             return None
 
-        cumulative_eps = parse_cumulative_eps(response.text, self._mops)
+        cumulative_eps = self.parse_cumulative_eps(response.text)
 
         if cumulative_eps is None:
-            self._logger.warning(f"MOPS {quarter} {self.TYPEK[market]}: unrecognised page ({len(response.text)} bytes)")
+            self._logger.warning(f"{label}: unrecognised page ({len(response.text)} bytes)")
 
         return cumulative_eps
 
-    async def _wait_for_request_slot(self) -> None:
-        # A cold load sends ten requests to a shared public service, so they go one at a time, spaced apart.
+    @override
+    def parse_cumulative_eps(self, html: str) -> dict[str, float] | None:
+        tables = BeautifulSoup(html, "lxml").find_all("table", class_="hasBorder")
+
+        if not tables:
+            return {} if self._mops.no_data_marker in html else None
+
+        result: dict[str, float] = {}
+
+        for table in tables:
+            # Row 0 names the columns in <th> cells, wrapped with <br> inside a name, so every cell drops all whitespace.
+            rows = [
+                ["".join(cell.get_text().split()) for cell in row.find_all("td" if index else "th")]
+                for index, row in enumerate(table.find_all("tr"))
+            ]
+            table_eps = self.parse_eps_table(rows)
+
+            if table_eps is None:
+                return None
+
+            result.update(table_eps)
+
+        return result
+
+    @override
+    def parse_eps_table(self, rows: list[list[str]]) -> dict[str, float] | None:
+        header = rows[0] if rows else []
+        eps_index = next((index for index, name in enumerate(header) if name.startswith(self._mops.eps_header_prefix)), None)
+
+        if self._mops.company_id_header not in header or eps_index is None:
+            return None
+
+        id_index = header.index(self._mops.company_id_header)
+        cumulative_eps: dict[str, float] = {}
+
+        for cells in rows[1:]:
+            if len(cells) != len(header):
+                continue
+
+            try:
+                cumulative_eps[cells[id_index]] = float(cells[eps_index].replace(",", ""))
+            except ValueError:
+                continue
+
+        return cumulative_eps
+
+    @override
+    async def wait_for_request_slot(self) -> None:
         if self._last_request_at is not None:
-            await asyncio.sleep(max(0.0, self.REQUEST_INTERVAL_SECONDS - (time.monotonic() - self._last_request_at)))
+            await asyncio.sleep(max(0.0, self._mops.request_interval_seconds - (time.monotonic() - self._last_request_at)))
 
         self._last_request_at = time.monotonic()
 
-    async def _load(self, market: MarketType, quarter: FiscalQuarter) -> QuarterEpsDTO | None:
+    @override
+    async def load_page(self, market: MarketType, quarter: FiscalQuarter) -> QuarterEps | None:
         async with self._db.get_session() as session:
-            return await session.get(QuarterEpsDTO, (market.value, quarter.year, quarter.quarter))
+            page = await session.get(QuarterEpsDTO, (market.value, quarter.year, quarter.quarter))
+            return page.to_domain() if page is not None else None
 
-    async def _save(self, page: QuarterEpsDTO) -> None:
+    @override
+    async def save_page(self, market: MarketType, page: QuarterEps) -> None:
         async with self._db.get_session() as session:
-            await session.merge(page)
+            await session.merge(QuarterEpsDTO.from_domain(market, page))
             await session.commit()
+
+    @override
+    async def fetch_industries(self) -> dict[str, str]:
+        now = self._clock.now()
+
+        for market in self._industry_sources:
+            fetched_at = self._industries_fetched_at.get(market)
+
+            if fetched_at is not None and now - fetched_at < self._industry_max_age:
+                continue
+
+            industries = await self.fetch_market_industries(market)
+
+            if industries is not None:
+                self._industries[market] = industries
+                self._industries_fetched_at[market] = now
+
+        return {stock_id: industry for industries in self._industries.values() for stock_id, industry in industries.items()}
+
+    @override
+    async def fetch_market_industries(self, market: MarketType) -> dict[str, str] | None:
+        url, id_field = self._industry_sources[market]
+        industry_field = self._mops.industry_field
+
+        try:
+            async with httpx.AsyncClient(timeout=self._mops.timeout_seconds) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                return {
+                    str(row[id_field]).strip(): str(row[industry_field]).strip()
+                    for row in response.json()
+                    if row.get(id_field) and row.get(industry_field)
+                }
+        except Exception as error:
+            self._logger.warning(f"MOPS industries for {market.value} unavailable: {error}")
+            return None
