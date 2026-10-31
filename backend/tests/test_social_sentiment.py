@@ -6,6 +6,7 @@ import pytest
 import pytest_asyncio
 from pydantic import ValidationError
 from support.harness import build_harness, rising_history
+from support.settings import shipped_config
 from trading_stack import run_status
 
 from a_domain.model.analysis.sentiment_classification import SentimentClassification
@@ -16,7 +17,6 @@ from a_domain.model.market.stock import Stock
 from a_domain.rules.sentiment import SentimentConsensusRule, SocialSentimentRule
 from a_domain.types.enums import InformationSource, MessageRole, SentimentConsensus, SentimentLabel, TradeAction, Workflow
 from b_application.config.ai_config import PromptsConfig, SentimentConfig
-from b_application.config.app_config import AppConfig
 from b_application.use_cases.process.sentiment_analyser import SentimentAnalyser
 from c_infrastructure.ai_models.sentiment_classifier import AiSentimentClassifier
 from c_infrastructure.database.db_connector import DatabaseConnector
@@ -24,7 +24,7 @@ from c_infrastructure.database.repositories.sentiment_repository import Sentimen
 
 BULLISH, BEARISH, NEUTRAL, UNCLEAR = SentimentLabel.BULLISH, SentimentLabel.BEARISH, SentimentLabel.NEUTRAL, SentimentLabel.UNCLEAR
 SRC = Path(__file__).resolve().parents[1] / "src"
-SHIPPED = AppConfig(project_root=Path(".")).sentiment
+SHIPPED = shipped_config().sentiment
 SENTIMENT_RULE = SocialSentimentRule(
     min_confidence=SHIPPED.min_confidence,
     consensus_rule=SentimentConsensusRule(min_opinions=SHIPPED.min_opinions, consensus_share=SHIPPED.consensus_share),
@@ -93,7 +93,7 @@ class TwoBullsOneBear:
 )
 @pytest.mark.asyncio
 async def test_the_sentiment_settings_decide_the_consensus(settings: SentimentConfig, expected: SentimentConsensus) -> None:
-    config = AppConfig(project_root=Path("."), sentiment=settings)
+    config = shipped_config().model_copy(update={"sentiment": settings})
     stock = Stock(stock_id="2330", articles=[make_post("Up"), make_post("Up more"), make_post("Down")])
     status = run_status(Workflow.BUZZ_SCAN)
 
@@ -128,14 +128,14 @@ def test_ratios_are_shares_of_opinions_and_low_confidence_counts_as_unclear() ->
 
 @pytest_asyncio.fixture
 async def db(tmp_path: Path) -> AsyncIterator[DatabaseConnector]:
-    connector = DatabaseConnector(config=AppConfig(project_root=tmp_path), logger=SilentLogger())
+    connector = DatabaseConnector(config=shipped_config(tmp_path), logger=SilentLogger())
     await connector.init_db()
     yield connector
     await connector.close()
 
 
 def make_classifier(ai_provider: ScriptedAiProvider, db: DatabaseConnector) -> AiSentimentClassifier:
-    config = AppConfig(project_root=Path("."), prompts=PromptsConfig(social_sentiment="Stock {stock_id}\n{posts_text}"))
+    config = shipped_config().model_copy(update={"prompts": PromptsConfig(social_sentiment="Stock {stock_id}\n{posts_text}")})
     return AiSentimentClassifier(ai_provider, SentimentRepository(db), config, SilentLogger())
 
 
@@ -207,7 +207,7 @@ async def test_sentiment_reads_only_social_posts_and_records_a_failed_stock() ->
     classifier = FakeClassifier(failing_stock_ids={"2603"})
     status = run_status(Workflow.BUZZ_SCAN)
 
-    analyser = SentimentAnalyser(classifier=classifier, config=AppConfig(project_root=Path(".")), logger=SilentLogger())
+    analyser = SentimentAnalyser(classifier=classifier, config=shipped_config(), logger=SilentLogger())
     await analyser.execute([ok, broken], status)
 
     assert classifier.classified_sources == [InformationSource.PTT_STOCK, InformationSource.PTT_STOCK]

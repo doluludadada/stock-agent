@@ -6,8 +6,8 @@ from a_domain.model.trading.broker_order_report import BrokerOrderReport
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.position import Position
 from a_domain.rules.trading.cost import TradingCostRule
-from a_domain.rules.trading.execution import BrokerOutcomeRule, FillRule, LotSplitRule
-from a_domain.types.enums import LotKind, OrderStatus, OrderType, TimeInForce, TradeAction
+from a_domain.rules.trading.execution import BrokerOutcomeRule, FillRule, LotSplitRule, OrderAcceptanceRule
+from a_domain.types.enums import LotKind, OrderStatus, OrderType, RejectReason, TimeInForce, TradeAction
 from a_domain.types.ids import new_decision_id, new_run_id
 
 NOW = datetime(2026, 10, 19, 10, 0, tzinfo=UTC)
@@ -43,6 +43,28 @@ def report(status: OrderStatus, ordered: int = 1000, dealt: int = 0, reported: i
         fill_price=100.0 if dealt else None,
         description=f"{status} {ordered}",
     )
+
+
+@pytest.mark.parametrize(
+    ("order_type", "limit_price", "time_in_force", "refusal"),
+    [
+        (OrderType.LIMIT, 100, TimeInForce.IOC, None),
+        (OrderType.LIMIT, 100, TimeInForce.FOK, None),
+        (
+            OrderType.LIMIT,
+            100,
+            TimeInForce.ROD,
+            (RejectReason.UNSUPPORTED_TIME_IN_FORCE, "ROD would leave a working order at the broker that the app does not track"),
+        ),
+        (OrderType.MARKET, None, TimeInForce.IOC, (RejectReason.UNSUPPORTED_ORDER_TYPE, "the app sends LIMIT orders only")),
+    ],
+)
+def test_a_broker_takes_only_limit_orders_that_leave_nothing_working(
+    order_type: OrderType, limit_price: float | None, time_in_force: TimeInForce, refusal: tuple[RejectReason, str] | None
+) -> None:
+    placing = new_order().model_copy(update={"order_type": order_type, "limit_price": limit_price, "time_in_force": time_in_force})
+
+    assert OrderAcceptanceRule().apply(placing) == refusal
 
 
 @pytest.mark.parametrize(

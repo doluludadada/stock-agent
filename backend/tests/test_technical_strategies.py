@@ -9,7 +9,6 @@ below is transcribed from the factory and thresholds that technical.yaml replace
 `git show 9052216^:config/appsetting.yaml`.
 """
 
-import ast
 import asyncio
 import shutil
 from datetime import datetime, timedelta
@@ -65,7 +64,6 @@ from a_domain.types.enums import RuleEffect
 from c_infrastructure.technical.yaml_technical_settings_repository import YamlTechnicalSettingsRepository
 
 TEMPLATE_PATH = Path(__file__).resolve().parents[2] / "config" / "technical.yaml"
-SRC = Path(__file__).resolve().parents[1] / "src"
 
 PRE_MIGRATION_DEFAULT_THRESHOLDS = {
     "rsi_healthy_min": 50.0,
@@ -609,19 +607,3 @@ async def test_the_app_runs_exactly_the_strategies_its_technical_settings_define
     settings = await YamlTechnicalSettingsRepository(template).load()
 
     assert {strategy.strategy_id for strategy in settings.strategies} == set(document["strategies"])
-
-
-def test_only_the_technical_settings_schema_builds_strategies_and_their_rules() -> None:
-    schema = "c_infrastructure/technical/technical_settings_schema.py"
-    builders = {
-        path.relative_to(SRC).as_posix()
-        for path in SRC.rglob("*.py")
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
-        if isinstance(node, ast.Call)
-        and getattr(node.func, "id", getattr(node.func, "attr", None)) in {"TechnicalStrategy", "TechnicalRule"}
-    }
-
-    assert builders == {schema}, (
-        f"A strategy and its rules come from config/technical.yaml through {schema}. "
-        f"Move the strategy that {sorted(builders - {schema})} builds into technical.yaml."
-    )

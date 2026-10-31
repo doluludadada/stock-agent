@@ -7,6 +7,8 @@ from a_domain.model.trading.equity_point import EquityPoint
 
 @dataclass(frozen=True)
 class AccountHistoryReport:
+    """What menu 7 and GET /v1/account/history show. AccountHistory builds it from the valuation rules' answers."""
+
     current: AccountValuation
     """The account now, each position marked at its latest quote (realtime, else the last daily close)."""
 

@@ -9,7 +9,27 @@ from a_domain.model.trading.order import Order
 from a_domain.model.trading.position import Position
 from a_domain.model.trading.trade_cost import TradeCost
 from a_domain.rules.trading.cost import TradingCostRule
-from a_domain.types.enums import LotKind, OrderStatus, RejectReason, TradeAction
+from a_domain.types.enums import LotKind, OrderStatus, OrderType, RejectReason, TimeInForce, TradeAction
+
+
+@dataclass(frozen=True)
+class OrderAcceptanceRule:
+    """
+    Why a broker adapter refuses an order before the broker sees it, whichever broker it is, or None. The app tracks no
+    working orders, so it sends only LIMIT orders whose unfilled part ends at once: IOC or FOK, never ROD.
+    """
+
+    def apply(self, order: Order) -> tuple[RejectReason, str] | None:
+        if order.order_type != OrderType.LIMIT or order.limit_price is None:
+            return RejectReason.UNSUPPORTED_ORDER_TYPE, "the app sends LIMIT orders only"
+
+        if order.time_in_force not in {TimeInForce.IOC, TimeInForce.FOK}:
+            return (
+                RejectReason.UNSUPPORTED_TIME_IN_FORCE,
+                f"{order.time_in_force.name} would leave a working order at the broker that the app does not track",
+            )
+
+        return None
 
 
 @dataclass(frozen=True)

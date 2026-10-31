@@ -9,34 +9,46 @@ from a_domain.model.trading.account import Account
 from a_domain.model.trading.position import Position
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.rules.trading.entry import EntryRule
-from a_domain.rules.trading.exit import ExitRule
+from a_domain.rules.trading.exit import BlockedStockRule, ExitRule
 from a_domain.rules.trading.sizing import BuyCostRule
-from a_domain.types.enums import TradeAction
+from a_domain.types.enums import SkipReason, TradeAction
 
 
 @dataclass(frozen=True)
 class DecisionSkipRule:
     """
-    The watchlist stocks that get no trading decision in this run, in watchlist order, each with why: the stop-loss
-    check already sold it, its realtime quote is stale, or it has no composite score or no price.
+    Why a watchlist stock gets no trading decision in this run, or None: BlockedStockRule blocks it, or it has no
+    composite score or no price.
     """
 
-    def apply(
-        self, stocks: Sequence[Stock], risk_blocked_stock_ids: AbstractSet[str], stale_stock_ids: AbstractSet[str]
-    ) -> dict[str, str]:
-        skipped: dict[str, str] = {}
+    blocked_rule: BlockedStockRule
 
-        for stock in stocks:
-            if stock.stock_id in risk_blocked_stock_ids:
-                skipped[stock.stock_id] = "Risk blocked"
-            elif stock.stock_id in stale_stock_ids:
-                skipped[stock.stock_id] = "Market data is stale"
-            elif stock.composite_score is None:
-                skipped[stock.stock_id] = "Composite score unavailable"
-            elif stock.current_price is None:
-                skipped[stock.stock_id] = "No price"
+    def apply(self, stock: Stock, risk_blocked_stock_ids: AbstractSet[str], stale_stock_ids: AbstractSet[str]) -> SkipReason | None:
+        blocked = self.blocked_rule.apply(stock, risk_blocked_stock_ids, stale_stock_ids)
 
-        return skipped
+        if blocked is not None:
+            return blocked
+
+        if stock.composite_score is None:
+            return SkipReason.NO_COMPOSITE_SCORE
+
+        if stock.current_price is None:
+            return SkipReason.NO_PRICE
+
+        return None
+
+
+@dataclass(frozen=True)
+class DecisionCandidatesRule:
+    """
+    The stocks Intraday decides on, each once: every technical survivor, then every other held stock that got a
+    technical verdict, so a position that fails the strategy still has its exit decided.
+    """
+
+    def apply(self, technical_candidates: Sequence[Stock], survivors: Sequence[Stock], account: Account) -> list[Stock]:
+        held = [stock for stock in technical_candidates if account.position_for(stock.stock_id) is not None]
+
+        return list({stock.stock_id: stock for stock in [*survivors, *held]}.values())
 
 
 @dataclass(frozen=True)

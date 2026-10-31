@@ -34,7 +34,8 @@ Every legal status change. SUBMITTED -> SUBMITTED is a partial fill that leaves 
 class Order(SQLModel):
     """
     The app's record of one order: the decision it executes, what went to (or was refused before)
-    the broker, and how it ended. OrderExecution saves it in the `orders` table whichever provider ran it.
+    the broker, and how it ended. OrderPreparation saves it in the `orders` table before it is sent, and OrderExecution
+    saves the broker's answer, whichever provider ran it.
     """
 
     id: OrderId = Field(default_factory=new_order_id)
@@ -71,6 +72,11 @@ class Order(SQLModel):
     @property
     def remaining_quantity(self) -> int:
         return self.quantity - self.filled_quantity
+
+    @property
+    def is_open(self) -> bool:
+        """PENDING or SUBMITTED: ORDER_TRANSITIONS still lists a move out of the order's status."""
+        return bool(ORDER_TRANSITIONS[self.status])
 
     @property
     def summary(self) -> str:
@@ -126,8 +132,8 @@ class Order(SQLModel):
         self._move_to(OrderStatus.FAILED, now, reason)
 
     def fail_if_open(self, reason: str, *, now: datetime) -> None:
-        """FAILS an order that is still PENDING or SUBMITTED; an order that already ended keeps its status."""
-        if ORDER_TRANSITIONS[self.status]:
+        """FAILS an order that is still open; an order that already ended keeps its status."""
+        if self.is_open:
             self.fail(reason, now=now)
 
     def _check_move(self, status: OrderStatus) -> None:

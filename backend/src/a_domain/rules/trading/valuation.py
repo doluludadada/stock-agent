@@ -1,11 +1,10 @@
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.account import Account
-from a_domain.model.trading.account_history_report import AccountHistoryReport
 from a_domain.model.trading.account_snapshot import AccountSnapshot
 from a_domain.model.trading.account_valuation import AccountValuation
 from a_domain.model.trading.equity_point import EquityPoint
@@ -109,7 +108,10 @@ class EquityCurveRule:
 
 @dataclass(frozen=True)
 class AccountAsOfRule:
-    """The account as it stood at the end of `day`: its last snapshot on or before that day, marked at that day's closes."""
+    """
+    The account as it stood at the end of `day`: its last snapshot on or before that day, marked at that day's closes.
+    None when no day is asked or no fill happened on or before it.
+    """
 
     snapshot_valuation_rule: SnapshotValuationRule
 
@@ -117,9 +119,12 @@ class AccountAsOfRule:
         self,
         snapshots: Sequence[AccountSnapshot],
         daily_bars: Mapping[str, Sequence[Ohlcv]],
-        day: date,
+        day: date | None,
         trading_date: Callable[[datetime], date],
     ) -> tuple[AccountSnapshot, AccountValuation] | None:
+        if day is None:
+            return None
+
         earlier = [snapshot for snapshot in snapshots if trading_date(snapshot.taken_at) <= day]
 
         if not earlier:
@@ -131,44 +136,25 @@ class AccountAsOfRule:
 
 @dataclass(frozen=True)
 class PriceHistoryStartRule:
-    """The first day of daily prices the account history needs: `history_days` before today, or the first snapshot's day if earlier."""
+    """
+    Where the daily prices the account history needs start: midnight, in `now`'s zone, of the day `history_days`
+    before the trading day of `now`, or of the first snapshot's day if earlier.
+    """
 
     history_days: int
 
-    def apply(self, today: date, snapshots: Sequence[AccountSnapshot], trading_date: Callable[[datetime], date]) -> date:
-        first_day = today - timedelta(days=self.history_days)
+    def apply(self, now: datetime, snapshots: Sequence[AccountSnapshot], trading_date: Callable[[datetime], date]) -> datetime:
+        first_day = trading_date(now) - timedelta(days=self.history_days)
 
-        if not snapshots:
-            return first_day
+        if snapshots:
+            first_day = min(first_day, trading_date(snapshots[0].taken_at))
 
-        return min(first_day, trading_date(snapshots[0].taken_at))
+        return datetime.combine(first_day, time.min, tzinfo=now.tzinfo)
 
 
 @dataclass(frozen=True)
-class AccountHistoryRule:
-    """
-    The account history: the account now, each position marked at its latest quote (realtime, else the last daily
-    close); one equity point per trading day since the first snapshot; and the account at the end of `as_of`, if asked.
-    """
+class LatestMarkRule:
+    """Each stock's latest price: its realtime quote, else its last daily close. A stock with neither has no mark."""
 
-    valuation_rule: ValuationRule
-    equity_curve_rule: EquityCurveRule
-    as_of_rule: AccountAsOfRule
-
-    def apply(
-        self,
-        account: Account,
-        snapshots: Sequence[AccountSnapshot],
-        daily_bars: Mapping[str, Sequence[Ohlcv]],
-        realtime_bars: Mapping[str, Ohlcv],
-        as_of: date | None,
-        trading_date: Callable[[datetime], date],
-    ) -> AccountHistoryReport:
-        marks = {stock_id: bars[-1] for stock_id, bars in daily_bars.items() if bars} | dict(realtime_bars)
-
-        return AccountHistoryReport(
-            current=self.valuation_rule.apply(account.cash, account.positions, marks),
-            equity_curve=self.equity_curve_rule.apply(snapshots, daily_bars, trading_date),
-            as_of=None if as_of is None else self.as_of_rule.apply(snapshots, daily_bars, as_of, trading_date),
-            live_stock_ids=frozenset(realtime_bars),
-        )
+    def apply(self, daily_bars: Mapping[str, Sequence[Ohlcv]], realtime_bars: Mapping[str, Ohlcv]) -> dict[str, Ohlcv]:
+        return {stock_id: bars[-1] for stock_id, bars in daily_bars.items() if bars} | dict(realtime_bars)

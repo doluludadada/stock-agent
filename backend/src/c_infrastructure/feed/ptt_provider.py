@@ -1,7 +1,7 @@
 import re
 from collections.abc import Mapping
 from datetime import UTC, date, datetime, timedelta
-from typing import ClassVar, override
+from typing import override
 
 import httpx
 from bs4 import BeautifulSoup, Tag
@@ -22,12 +22,6 @@ class PttProvider(ISocialMediaProvider):
     is reached or enough articles are collected.
     """
 
-    TITLE_TICKER: ClassVar[re.Pattern[str]] = re.compile(r"(\d{4})")
-    HEADERS: ClassVar[dict[str, str]] = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Cookie": "over18=1",
-    }
-
     def __init__(self, config: AppConfig, logger: ILoggingProvider, stock_provider: IStockProvider) -> None:
         self._config = config
         self._ptt = config.sources.ptt
@@ -37,7 +31,9 @@ class PttProvider(ISocialMediaProvider):
         self._search_url = config.sources.ptt.base_url + config.sources.ptt.search_path
         self._ticker_label = re.compile(config.sources.ptt.ticker_label_pattern)
         self._ticker_parenthesized = re.compile(config.sources.ptt.ticker_parenthesized_pattern)
-        self._client = httpx.AsyncClient(timeout=config.sources.ptt.timeout_seconds, headers=self.HEADERS, follow_redirects=True)
+        self._title_ticker = re.compile(config.sources.ptt.title_ticker_pattern)
+        headers = {"User-Agent": config.sources.ptt.user_agent, "Cookie": config.sources.ptt.cookie}
+        self._client = httpx.AsyncClient(timeout=config.sources.ptt.timeout_seconds, headers=headers, follow_redirects=True)
 
     @override
     async def fetch_social_articles(self, limit: int) -> list[Article]:
@@ -228,7 +224,7 @@ class PttProvider(ISocialMediaProvider):
             if not stock_id.startswith("0"):
                 return stock_id
 
-        title_match = self.TITLE_TICKER.search(title)
+        title_match = self._title_ticker.search(title)
         return title_match.group(1) if title_match else None
 
     @override

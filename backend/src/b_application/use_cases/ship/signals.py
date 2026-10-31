@@ -3,6 +3,7 @@ from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.trading_journal import ITradingJournal
 from a_domain.rules.trading.decision import DecisionSkipRule
+from a_domain.rules.trading.exit import BlockedStockRule
 from b_application.config.app_config import AppConfig
 from b_application.schemas.pipeline_status import PipelineStatus
 
@@ -17,16 +18,17 @@ class Signals:
     def __init__(self, journal: ITradingJournal, market_clock: IMarketClock, config: AppConfig, logger: ILoggingProvider) -> None:
         self._journal = journal
         self._market_clock = market_clock
-        self._skip_rule = DecisionSkipRule()
+        self._skip_rule = DecisionSkipRule(blocked_rule=BlockedStockRule())
         self._decisions_rule = config.run_decisions_rule()
         self._logger = logger
 
     async def execute(self, watchlist: StockWatchlist, status: PipelineStatus) -> None:
         self._logger.info(f"Generating signals for {len(watchlist.willing_stocks)} watchlist stocks.")
-        skipped = self._skip_rule.apply(watchlist.willing_stocks, status.risk_blocked_stock_ids, status.stale_stock_ids)
-        candidates = [stock for stock in watchlist.willing_stocks if stock.stock_id not in skipped]
+        sold, stale = status.risk_blocked_stock_ids, status.stale_stock_ids
+        skips = {stock.stock_id: skip for stock in watchlist.willing_stocks if (skip := self._skip_rule.apply(stock, sold, stale))}
+        candidates = [stock for stock in watchlist.willing_stocks if stock.stock_id not in skips]
 
-        for stock_id, skip in skipped.items():
+        for stock_id, skip in skips.items():
             self._logger.warning(f"Signal skipped. {skip}: {stock_id}")
 
         try:

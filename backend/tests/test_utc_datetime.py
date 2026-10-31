@@ -12,12 +12,12 @@ import pytest_asyncio
 from sqlalchemy import DateTime
 from sqlalchemy.exc import StatementError
 from sqlmodel import SQLModel
+from support.settings import shipped_config
 from trading_stack import MONDAY_10_00, MovableClock, SilentLogger
 
 import c_infrastructure.database.models
 from a_domain.model.trading.watchlist_entry import WatchlistEntry
 from a_domain.types.enums import WatchlistType
-from b_application.config.app_config import AppConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.repositories.watchlist_repository import WatchlistRepository
 from c_infrastructure.database.utc_datetime import UtcDateTime
@@ -27,7 +27,7 @@ pytestmark = pytest.mark.asyncio
 
 @pytest_asyncio.fixture
 async def db(tmp_path: Path) -> AsyncIterator[DatabaseConnector]:
-    connector = DatabaseConnector(config=AppConfig(project_root=tmp_path), logger=SilentLogger())
+    connector = DatabaseConnector(config=shipped_config(tmp_path), logger=SilentLogger())
     await connector.init_db()
     yield connector
     await connector.close()

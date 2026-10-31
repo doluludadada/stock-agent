@@ -99,12 +99,13 @@ class PipelineStatus:
 
     orders: list[Order] = field(default_factory=list)
     """
-    One order per orderable decision OrderExecution handled, sent or refused.
+    One order per orderable decision of the run, sent or refused: OrderPreparation adds one it refused or could not
+    record, OrderOutcome one the broker answered.
     """
 
     manual_buy_refusal: str | None = None
     """
-    Why the confirmed manual BUY of this run sent no order. Unset when OrderExecution made its order.
+    Why the confirmed manual BUY of this run sent no order. Unset when OrderPreparation made its order.
     """
 
     @classmethod
@@ -134,7 +135,7 @@ class PipelineStatus:
         self.stale_stock_ids.add(stock_id)
 
     def require_manual_buy_order(self) -> Order:
-        """The order OrderExecution made for an unrefused manual BUY. It raises when the run refused the BUY instead."""
+        """The order OrderPreparation made for an unrefused manual BUY. It raises when the run refused the BUY instead."""
         if self.manual_buy_refusal is not None or len(self.orders) != 1:
             raise ValueError(f"the manual BUY run has no single order: refusal={self.manual_buy_refusal!r}, orders={len(self.orders)}")
 

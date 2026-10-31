@@ -33,6 +33,7 @@ from a_domain.types.enums import (
 TAIPEI = timezone(timedelta(hours=8))
 LAST_CLOSED_SESSION = date(2026, 10, 30)
 SPREAD = 0.2
+MAX_EXPLANATIONS = 3
 
 US_107_SECTIONS = [
     "Current price",
@@ -79,7 +80,10 @@ def valuation(
 
 def market(*valuations: StockValuation) -> MarketValuation:
     return MarketValuation(
-        valuations={item.stock.stock_id: item for item in valuations}, last_closed_session=LAST_CLOSED_SESSION, scenario_spread=SPREAD
+        valuations={item.stock.stock_id: item for item in valuations},
+        last_closed_session=LAST_CLOSED_SESSION,
+        max_missed_sessions=1,
+        scenario_spread=SPREAD,
     )
 
 
@@ -181,7 +185,7 @@ def scan_market() -> MarketValuation:
 
 
 def test_screen_keeps_undervalued_stocks_sorted_and_records_why_others_left() -> None:
-    scan = scan_market().screen(ScanCriteria(target_pe=TargetPe(12), min_undervaluation=0.2))
+    scan = scan_market().screen(ScanCriteria(target_pe=TargetPe(12), min_undervaluation=0.2), MAX_EXPLANATIONS)
 
     assert [report.stock.stock_id for report in scan.survivors] == ["1111", "2222"]
     assert [report.undervaluation for report in scan.survivors] == pytest.approx([(5 * 12 - 40) / 40, (2 * 12 - 20) / 20])
@@ -196,7 +200,7 @@ def test_screen_keeps_undervalued_stocks_sorted_and_records_why_others_left() ->
 
 
 def test_technical_step_eliminates_hard_failures_and_missing_history_only() -> None:
-    scan = scan_market().screen(ScanCriteria(target_pe=TargetPe(12), min_undervaluation=0.0))
+    scan = scan_market().screen(ScanCriteria(target_pe=TargetPe(12), min_undervaluation=0.0), MAX_EXPLANATIONS)
     reports = {report.stock.stock_id: report for report in scan.survivors}
     assert set(reports) == {"1111", "2222"}
 
@@ -217,7 +221,7 @@ def test_technical_step_eliminates_hard_failures_and_missing_history_only() -> N
 
 
 def test_technical_step_without_price_history_eliminates_at_the_technical_step() -> None:
-    scan = scan_market().screen(ScanCriteria(target_pe=TargetPe(12), min_undervaluation=0.2))
+    scan = scan_market().screen(ScanCriteria(target_pe=TargetPe(12), min_undervaluation=0.2), MAX_EXPLANATIONS)
 
     confirmed = scan.after_technical_step("moderate")
 

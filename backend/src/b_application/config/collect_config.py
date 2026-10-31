@@ -12,17 +12,17 @@ class FolderConfig(BaseModel):
 
 
 class CollectRulesConfig(BaseModel):
-    """Rules for collecting and filtering data."""
+    """Rules for collecting and filtering data. Every value comes from the `collect_rules` section of config/appsetting.yaml."""
 
-    spam_keywords: set[str] = Field(default_factory=set)
-    financial_keywords: set[str] = Field(default_factory=set)
+    spam_keywords: set[str]
+    financial_keywords: set[str]
 
-    buzz_min_mentions: int = Field(default=20, ge=0)
-    buzz_min_engagement: int = Field(default=100, ge=0)
-    social_article_limit: int = Field(default=100, ge=1, le=1000)
+    buzz_min_mentions: int = Field(ge=0)
+    buzz_min_engagement: int = Field(ge=0)
+    social_article_limit: int = Field(ge=1, le=1000)
 
-    ptt_lookback_days: int = Field(default=5, ge=1, le=30)
-    ptt_tags: list[str] = Field(default_factory=list)
+    ptt_lookback_days: int = Field(ge=1, le=30)
+    ptt_tags: list[str]
 
 
 class QualityFiltersConfig(BaseModel):

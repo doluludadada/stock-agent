@@ -13,12 +13,12 @@ class LineConfig(BaseSettings):
 
 
 class DbConfig(BaseSettings):
-    """Database configuration for RAG and application data."""
+    """Database settings for RAG and application data: credentials from the environment, the rest from config/appsetting.yaml."""
 
     model_config = SettingsConfigDict(env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore")
 
-    chroma_persist_path: str = "chroma_db"
-    reset_commands: set[str] = Field(default={"clear"})
+    chroma_persist_path: str
+    reset_commands: set[str]
 
     user: str | None = Field(default=None, validation_alias="DB_USER")
     password: str | None = Field(default=None, validation_alias="DB_PASSWORD")

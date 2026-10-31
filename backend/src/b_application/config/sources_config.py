@@ -44,7 +44,7 @@ class MopsSources(BaseModel):
 
 
 class PttSources(BaseModel):
-    """The PTT Stock board: where its search lives, the markers its pages use, and how much of it is read."""
+    """The PTT Stock board: where its search lives, the markers its pages use, how much of it is read, and the headers sent."""
 
     base_url: str
     search_path: str
@@ -56,6 +56,9 @@ class PttSources(BaseModel):
 
     ticker_parenthesized_pattern: str
     """A regex whose first group is a stock id in full-width or ASCII parentheses."""
+
+    title_ticker_pattern: str
+    """A regex whose first group is the stock id in a post's title, used when the body names none."""
 
     posting_reminder_marker: str
     previous_page_label: str
@@ -69,9 +72,13 @@ class PttSources(BaseModel):
     archive_excerpt_length: int
     """How many characters of each article the buzz archive quotes."""
 
+    user_agent: str
+    cookie: str
+    """The Cookie header every request sends."""
+
 
 class NewsSources(BaseModel):
-    """The cnyes news API and article pages, the Yahoo Taiwan stock news pages, and how long each may take."""
+    """The cnyes news API and article pages, the Yahoo Taiwan stock news pages, how long each may take and the User-Agent it gets."""
 
     cnyes_api_url: str
     cnyes_article_url: str
@@ -84,6 +91,9 @@ class NewsSources(BaseModel):
 
     yahoo_short_paragraph_length: int
     """Without a caas-body, an article's text is its paragraphs longer than this many characters."""
+
+    cnyes_user_agent: str
+    yahoo_user_agent: str
 
 
 class AiSources(BaseModel):

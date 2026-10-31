@@ -13,6 +13,7 @@ from support.fakes import (
     FakeWatchlistRepository,
 )
 from support.harness import harness_config, harness_settings
+from support.settings import shipped_config
 
 from a_domain.model.analysis.ai_analysis_report import AiAnalysisReport
 from a_domain.model.analysis.technical_report import TechnicalReport
@@ -124,7 +125,7 @@ class TradingStack:
 
 
 async def open_stack(tmp_path: Path, configure=lambda config: None, journal: TradingJournal | None = None) -> TradingStack:
-    config = AppConfig(project_root=tmp_path, prompts=harness_config().prompts)
+    config = shipped_config(tmp_path).model_copy(update={"prompts": harness_config().prompts})
     configure(config)
     logger = SilentLogger()
     db = DatabaseConnector(config=config, logger=logger)

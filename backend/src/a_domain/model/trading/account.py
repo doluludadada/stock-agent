@@ -22,6 +22,11 @@ class Account(SQLModel):
     cash: float = Field(default=0, ge=0)
     positions: list[Position] = Field(default_factory=list)
 
+    @property
+    def stock_ids(self) -> frozenset[str]:
+        """The ids of the stocks this account holds."""
+        return frozenset(position.stock_id for position in self.positions)
+
     def can_afford(self, amount: float) -> bool:
         if not math.isfinite(amount) or amount < 0:
             raise ValueError("Amount must be a finite non-negative number")

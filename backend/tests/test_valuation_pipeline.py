@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta
 
 import pytest
 from rich.console import Console
-from support.harness import CliHarness, build_harness, falling_history, rising_history
+from support.harness import CliHarness, build_harness, falling_history, harness_config, rising_history
 
 from a_domain.model.fundamentals.eps import Eps
 from a_domain.model.fundamentals.eps_unavailable import EpsUnavailable
@@ -18,6 +18,7 @@ from a_domain.model.valuation.valuation_explanation import NOT_INVESTMENT_ADVICE
 from a_domain.model.valuation.valuation_report import LABEL
 from a_domain.rules.ai.prompt import LOW_PE_RULE
 from a_domain.types.enums import EliminationReason, EpsUnavailableReason, PeNotApplicableReason, WatchlistType
+from b_application.config.app_config import AppConfig
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 from d_presentation.cli import terminal
 
@@ -36,9 +37,9 @@ CLOSES = {"2330": 2415.0, "1101": 28.2, "1232": 150.0, "2603": 60.0, "0050": 107
 INDUSTRIES = {"2330": "半導體業", "1101": "水泥工業", "1232": "食品工業", "2603": "航運業"}
 
 
-def market_harness(now: datetime = AFTER_CLOSE_FRIDAY) -> CliHarness:
+def market_harness(now: datetime = AFTER_CLOSE_FRIDAY, config: AppConfig | None = None) -> CliHarness:
     """2330 trends up, 2603 trends down, 1232 has no daily history, 1101 lost money, 0050 files no EPS."""
-    harness = build_harness(now=now)
+    harness = build_harness(now=now, config=config)
     history = {
         "2330": rising_history(2415.0, THURSDAY),
         "2603": falling_history(60.0, THURSDAY),
@@ -165,7 +166,7 @@ async def test_scan_then_technical_step_records_where_each_stock_left() -> None:
     harness = market_harness()
     market = await harness.runtime.pipeline.load_market_valuation()
 
-    strict = market.screen(ScanCriteria(target_pe=TargetPe(20), min_undervaluation=0.0))
+    strict = harness.runtime.pipeline.screen_valuation(market, ScanCriteria(target_pe=TargetPe(20), min_undervaluation=0.0))
     assert [report.stock.stock_id for report in strict.survivors] == ["2603", "1232"]
     assert {elimination.report.stock.stock_id: elimination.reason for elimination in strict.eliminations} == {
         "2330": EliminationReason.BELOW_MIN_UNDERVALUATION,
@@ -174,7 +175,7 @@ async def test_scan_then_technical_step_records_where_each_stock_left() -> None:
     }
 
     confirmed = await harness.runtime.pipeline.confirm_valuation_technical(
-        market.screen(ScanCriteria(target_pe=TargetPe(30), min_undervaluation=0.0))
+        harness.runtime.pipeline.screen_valuation(market, ScanCriteria(target_pe=TargetPe(30), min_undervaluation=0.0))
     )
 
     assert [report.stock.stock_id for report in confirmed.survivors] == ["2330"]
@@ -192,7 +193,7 @@ async def test_technical_step_drops_daily_history_older_than_the_history_limit()
     market = await harness.runtime.pipeline.load_market_valuation()
 
     confirmed = await harness.runtime.pipeline.confirm_valuation_technical(
-        market.screen(ScanCriteria(target_pe=TargetPe(30), min_undervaluation=0.0))
+        harness.runtime.pipeline.screen_valuation(market, ScanCriteria(target_pe=TargetPe(30), min_undervaluation=0.0))
     )
 
     assert [report.stock.stock_id for report in confirmed.survivors] == []
@@ -203,7 +204,7 @@ async def test_technical_step_drops_daily_history_older_than_the_history_limit()
 async def test_undervalued_stock_prompt_asks_the_ai_to_explain_low_pe_causes() -> None:
     harness = market_harness()
     market = await harness.runtime.pipeline.load_market_valuation()
-    scan = market.screen(ScanCriteria(target_pe=TargetPe(20), min_undervaluation=0.0))
+    scan = harness.runtime.pipeline.screen_valuation(market, ScanCriteria(target_pe=TargetPe(20), min_undervaluation=0.0))
 
     await harness.runtime.pipeline.explain_valuation(scan.survivors[0])
 
@@ -231,6 +232,17 @@ async def test_menu_5_reports_each_stock_and_rejects_invalid_targets(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_menu_5_asks_no_target_when_no_chosen_stock_has_a_computable_pe(monkeypatch: pytest.MonkeyPatch) -> None:
+    harness = market_harness()
+    capture_cli_output(monkeypatch)
+
+    asked = await harness.run_valuation_menu("5", answers=["1101 0050"])
+
+    assert [question.split(" (")[0] for question in asked] == ["Enter stock IDs separated by space or comma"]
+    assert [call.stock_id for call in harness.ai.calls] == ["1101", "0050"]
+
+
+@pytest.mark.asyncio
 async def test_menu_5_blank_target_cancels_before_any_ai_call(monkeypatch: pytest.MonkeyPatch) -> None:
     harness = market_harness()
     output = capture_cli_output(monkeypatch)
@@ -255,6 +267,31 @@ async def test_menu_6_scans_confirms_technically_and_explains_the_survivor(monke
     assert "Two-step screen: valuation -> technical (trend)" in printed
     assert "Passed both steps: 1" in printed
     assert [call.stock_id for call in harness.ai.calls] == ["2330"]
+
+
+@pytest.mark.asyncio
+async def test_menu_6_offers_the_ai_only_the_configured_number_of_top_stocks(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = harness_config()
+    config.valuation.max_scan_explanations = 2
+    harness = market_harness(config=config)
+    capture_cli_output(monkeypatch)
+
+    asked = await harness.run_valuation_menu("6", answers=["30", "0"], confirm=[False, True])
+
+    assert asked[-1] == "Explain the top 2 stocks with AI (2 AI calls)?"
+    assert [call.stock_id for call in harness.ai.calls] == ["2603", "1232"]
+
+
+@pytest.mark.asyncio
+async def test_menu_6_says_how_many_missed_sessions_make_a_close_stale_from_the_setting(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = harness_config()
+    config.freshness.daily_close_max_missed_sessions = 2
+    harness = market_harness(config=config)
+    output = capture_cli_output(monkeypatch)
+
+    await harness.run_valuation_menu("6", answers=[""])
+
+    assert "A close is stale once 3 or more weekday sessions have closed after it" in output.getvalue()
 
 
 @pytest.mark.asyncio

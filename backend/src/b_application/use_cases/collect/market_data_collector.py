@@ -8,7 +8,7 @@ from b_application.schemas.pipeline_status import PipelineStatus
 
 class MarketDataCollector:
     """
-    Loads each stock's daily history, the input of technical analysis.
+    Loads each stock's daily history, the input of technical analysis, and returns the stocks that have one.
 
     History older than the history freshness limit is dropped, so that stock is not analysed. Realtime quotes,
     which price orders, are RealtimeQuoteFeed's job.
@@ -24,15 +24,14 @@ class MarketDataCollector:
         self._missing_session = config.freshness.missing_session_rule()
         self._logger = logger
 
-    async def execute(self, stocks: list[Stock], status: PipelineStatus) -> None:
+    async def execute(self, stocks: list[Stock], status: PipelineStatus) -> list[Stock]:
         self._logger.info(f"Fetching OHLCV data for {len(stocks)} stocks.")
 
         try:
             history = await self._ohlcv_provider.fetch_history(stocks, *self._market_clock.history_window(self._lookback_days))
         except Exception as error:
-            self._logger.error(f"Failed to fetch market data: {error}")
-            status.stats.add_error(f"Failed to fetch market data: {error}")
-            return
+            self._logger.error(status.stats.add_error(f"Failed to fetch market data: {error}"))
+            return [stock for stock in stocks if stock.ohlcv]
 
         for stock in stocks:
             stock.load_history(history.get(stock.stock_id, []))
@@ -54,3 +53,4 @@ class MarketDataCollector:
             status.stats.add_error(missing_session)
 
         self._logger.success(f"Collected market data for {len(last_sessions)}/{len(stocks)} stocks.")
+        return [stock for stock in stocks if stock.ohlcv]

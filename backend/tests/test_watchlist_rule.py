@@ -8,12 +8,12 @@ import pytest_asyncio
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from support.harness import build_harness, falling_history, rising_history
+from support.settings import shipped_config
 
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.stock_watchlist import StockWatchlist
 from a_domain.model.trading.watchlist_entry import WatchlistEntry
 from a_domain.types.enums import WatchlistType
-from b_application.config.app_config import AppConfig
 from b_application.config.market_data_config import MarketHoursConfig
 from b_application.config.trading_config import WatchlistConfig
 from b_application.use_cases.trade.watch_stocks import WatchStocks
@@ -46,7 +46,9 @@ class Watchlist:
     def __init__(self, db: DatabaseConnector, automatic_expiry_sessions: int = 1) -> None:
         self.clock = SettableClock()
         self.repository = WatchlistRepository(db=db, logger=SilentLogger(), market_clock=self.clock)
-        config = AppConfig(project_root=Path("."), watchlist=WatchlistConfig(automatic_expiry_sessions=automatic_expiry_sessions))
+        config = shipped_config().model_copy(
+            update={"watchlist": WatchlistConfig(automatic_expiry_sessions=automatic_expiry_sessions)}
+        )
         self.watch_stocks = WatchStocks(self.repository, self.clock, config, SilentLogger())
 
     async def add(self, watchlist_type: WatchlistType, *stock_ids: str):
@@ -69,7 +71,7 @@ class Watchlist:
 
 @pytest_asyncio.fixture
 async def database(tmp_path: Path) -> AsyncIterator[DatabaseConnector]:
-    db = DatabaseConnector(config=AppConfig(project_root=tmp_path), logger=SilentLogger())
+    db = DatabaseConnector(config=shipped_config(tmp_path), logger=SilentLogger())
     await db.init_db()
     yield db
     await db.close()

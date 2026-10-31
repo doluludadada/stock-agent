@@ -28,6 +28,9 @@ class MarketValuation:
 
     valuations: Mapping[str, StockValuation]
     last_closed_session: date
+    max_missed_sessions: int
+    """How many weekday sessions may close after a close's session before the close is stale."""
+
     scenario_spread: float
     source_warnings: tuple[str, ...] = ()
 
@@ -51,7 +54,7 @@ class MarketValuation:
             for stock in stocks
         }
 
-        return cls(valuations, last_closed_session, scenario_spread, source_warnings)
+        return cls(valuations, last_closed_session, max_missed_sessions, scenario_spread, source_warnings)
 
     def find(self, stock_id: str) -> StockValuation | None:
         return self.valuations.get(stock_id)
@@ -74,8 +77,11 @@ class MarketValuation:
 
         return PeMedian(value=statistics.median(values), sample_size=len(values))
 
-    def screen(self, criteria: ScanCriteria) -> ValuationScan:
-        """The undervalued scan's valuation step. The first failing check eliminates a stock."""
+    def screen(self, criteria: ScanCriteria, max_explanations: int) -> ValuationScan:
+        """
+        The undervalued scan's valuation step. The first failing check eliminates a stock. The scan offers at most
+        `max_explanations` of its top survivors for an AI explanation.
+        """
         survivors: list[ValuationReport] = []
         eliminations: list[ScanElimination] = []
 
@@ -88,7 +94,12 @@ class MarketValuation:
             else:
                 eliminations.append(ScanElimination(report=report, reason=reason, detail=detail))
 
-        return ValuationScan(criteria=criteria, survivors=ValuationScan.by_undervaluation(survivors), eliminations=tuple(eliminations))
+        return ValuationScan(
+            criteria=criteria,
+            survivors=ValuationScan.by_undervaluation(survivors),
+            eliminations=tuple(eliminations),
+            max_explanations=max_explanations,
+        )
 
 
 def _valuation_elimination(report: ValuationReport, criteria: ScanCriteria) -> tuple[EliminationReason | None, str]:

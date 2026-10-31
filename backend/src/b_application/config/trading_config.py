@@ -11,26 +11,26 @@ from a_domain.types.enums import ExecutionProvider, OrderMode
 
 
 class AnalysisConfig(BaseModel):
-    """Cross-analysis weighting and trading parameters."""
+    """Cross-analysis weighting and trading parameters. Every value comes from the `analysis` section of config/appsetting.yaml."""
 
-    lookback_days: int = Field(default=120, ge=30)
+    lookback_days: int = Field(ge=30)
 
-    technical_weight: float = Field(default=0.5, ge=0, le=1)
-    ai_weight: float = Field(default=0.5, ge=0, le=1)
+    technical_weight: float = Field(ge=0, le=1)
+    ai_weight: float = Field(ge=0, le=1)
 
-    min_combined_score_buy: int = Field(default=70, ge=0, le=100)
-    max_combined_score_sell: int = Field(default=30, ge=0, le=100)
+    min_combined_score_buy: int = Field(ge=0, le=100)
+    max_combined_score_sell: int = Field(ge=0, le=100)
 
-    risk_per_trade_pct: float = Field(default=0.02, ge=0.01, le=0.1)
-    stop_loss_pct: float = Field(default=0.10, ge=0.01, le=0.5)
+    risk_per_trade_pct: float = Field(ge=0.01, le=0.1)
+    stop_loss_pct: float = Field(ge=0.01, le=0.5)
 
-    lot_size: int = Field(default=1, gt=0)
+    lot_size: int = Field(gt=0)
     """A BUY quantity is a multiple of this many shares: 1 sizes odd lots, 1000 whole board lots."""
 
-    reason_item_limit: int = Field(default=3, gt=0)
+    reason_item_limit: int = Field(gt=0)
     """Most AI factors and soft technical failures a decision reason lists."""
 
-    article_fetch_limit: int = Field(default=20, ge=1, le=100)
+    article_fetch_limit: int = Field(ge=1, le=100)
 
     @model_validator(mode="after")
     def validate_weights(self) -> Self:
@@ -43,39 +43,30 @@ class AnalysisConfig(BaseModel):
 
 
 class MarketConfig(BaseModel):
-    """Universal market trading rules and friction costs."""
+    """Universal market trading rules and friction costs. Every value comes from the `market` section of config/appsetting.yaml."""
 
-    fee_rate: float = Field(default=0.001425, ge=0)
-    tax_rate: float = Field(default=0.003, ge=0)
+    fee_rate: float = Field(ge=0)
+    tax_rate: float = Field(ge=0)
     """Securities transaction tax on a stock SELL."""
 
-    etf_tax_rate: float = Field(default=0.001, ge=0)
+    etf_tax_rate: float = Field(ge=0)
     """Securities transaction tax on an ETF SELL (codes starting with 00)."""
 
-    bond_etf_tax_exempt_until: date = date(2026, 12, 31)
+    bond_etf_tax_exempt_until: date
     """The last trading date on which a bond ETF SELL (a 00 code ending in B) pays no transaction tax; after it, etf_tax_rate."""
 
-    min_fee: int = Field(default=20, ge=0)
+    min_fee: int = Field(ge=0)
 
-    board_lot_shares: int = Field(default=1000, gt=0)
+    board_lot_shares: int = Field(gt=0)
     """Shares in one board lot, the exchange's trading unit. Fewer shares trade as an odd lot."""
 
-    stock_ticks: dict[Decimal, Decimal] = Field(
-        default_factory=lambda: {
-            Decimal(0): Decimal("0.01"),
-            Decimal(10): Decimal("0.05"),
-            Decimal(50): Decimal("0.1"),
-            Decimal(100): Decimal("0.5"),
-            Decimal(500): Decimal("1"),
-            Decimal(1000): Decimal("5"),
-        }
-    )
+    stock_ticks: dict[Decimal, Decimal]
     """A stock's price ticks: from each band's lowest price up, a limit price is a multiple of the band's tick."""
 
-    etf_ticks: dict[Decimal, Decimal] = Field(default_factory=lambda: {Decimal(0): Decimal("0.01"), Decimal(50): Decimal("0.05")})
+    etf_ticks: dict[Decimal, Decimal]
     """An ETF's price ticks, banded like stock_ticks."""
 
-    tick_float_tolerance: Decimal = Field(default=Decimal("0.01"), gt=0, lt=Decimal("0.5"))
+    tick_float_tolerance: Decimal = Field(gt=0, lt=Decimal("0.5"))
     """A quote this close to a tick, as a fraction of the tick, is that tick carried through a binary float."""
 
     def cost_rule(self) -> TradingCostRule:
@@ -129,10 +120,10 @@ class ShioajiConfig(BaseSettings):
 
     simulation: bool = True
 
-    poll_interval_seconds: float = Field(default=0.5, ge=0)
-    """Wait between two reads of an order's status at the broker."""
+    poll_interval_seconds: float = Field(ge=0)
+    """Wait between two reads of an order's status at the broker. It comes from config/appsetting.yaml, like max_polls."""
 
-    max_polls: int = Field(default=10, gt=0)
+    max_polls: int = Field(gt=0)
     """Reads of an order's status before the adapter cancels it, and again after the cancel request."""
 
     api_key: SecretStr | None = Field(default=None, validation_alias="SHIOAJI_API_KEY")

@@ -1,13 +1,12 @@
 import json
 from datetime import UTC, datetime
-from pathlib import Path
 
 import httpx
 import pytest
+from support.settings import shipped_config
 
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.types.enums import SignalSource, TradeAction
-from b_application.config.app_config import AppConfig
 from b_application.config.chat_config import LineConfig
 from c_infrastructure.platforms.line import line_notification_adapter
 from c_infrastructure.platforms.line.line_notification_adapter import LineNotificationAdapter
@@ -52,7 +51,7 @@ def line_api(monkeypatch: pytest.MonkeyPatch) -> list[httpx.Request]:
 
 
 def adapter(token: str | None = "line-token") -> LineNotificationAdapter:
-    config = AppConfig(project_root=Path("."), line=LineConfig(LINE_CHANNEL_ACCESS_TOKEN=token))
+    config = shipped_config().model_copy(update={"line": LineConfig(LINE_CHANNEL_ACCESS_TOKEN=token)})
     return LineNotificationAdapter(config=config, logger=SilentLogger())
 
 
@@ -60,7 +59,7 @@ async def test_a_signal_alert_is_multicast_to_every_recipient(line_api: list[htt
     assert await adapter().send_signal_alert(signal(TradeAction.SELL), ["U1", "U2"]) is True
 
     [request] = line_api
-    assert str(request.url) == AppConfig(project_root=Path(".")).sources.line.multicast_url
+    assert str(request.url) == shipped_config().sources.line.multicast_url
     assert request.headers["Authorization"] == "Bearer line-token"
     body = json.loads(request.content)
     assert body["to"] == ["U1", "U2"]

@@ -5,12 +5,12 @@ from shioaji.constant import Action, OrderType as BrokerTimeInForce, Status, Sto
 from shioaji.error import TimeoutError as ShioajiTimeoutError, TokenError
 from shioaji.position import AccountBalance
 from support.fake_shioaji import FakeShioaji, Report, position
+from support.settings import shipped_config
 from trading_stack import SilentLogger
 
 from a_domain.model.trading.order import Order
 from a_domain.types.enums import OrderStatus, OrderType, TimeInForce, TradeAction
 from a_domain.types.ids import new_decision_id, new_run_id
-from b_application.config.app_config import AppConfig
 from b_application.config.trading_config import ShioajiConfig
 from c_infrastructure.trading.shioaji.execution_provider import ORDER_STATUS, ShioajiExecutionProvider
 
@@ -18,7 +18,7 @@ NOW = datetime(2026, 10, 19, 10, 0, tzinfo=UTC)
 
 pytestmark = pytest.mark.asyncio
 
-CONFIG = AppConfig(project_root=".")
+CONFIG = shipped_config()
 COSTS = CONFIG.market.cost_rule()
 
 

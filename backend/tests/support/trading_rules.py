@@ -8,12 +8,12 @@ from a_domain.rules.trading.entry import EntryRule
 from a_domain.rules.trading.exit import ExitRule, StopLossRule
 from a_domain.rules.trading.reason import AnalysisSummaryRule, EntryReasonRule, ExitReasonRule
 from a_domain.rules.trading.sizing import BuyCostRule, SizingRule
-from b_application.config.trading_config import MarketConfig
+from support.settings import shipped_config
 
 COSTS = TradingCostRule(
     fee_rate=0.001425, tax_rate=0.003, etf_tax_rate=0.001, min_fee=20, bond_etf_tax_exempt_until=date(2026, 12, 31)
 )
-LIMIT_PRICE = MarketConfig().limit_price_rule()
+LIMIT_PRICE = shipped_config().market.limit_price_rule()
 SUMMARY = AnalysisSummaryRule(item_limit=3)
 ENTRY_REASON = EntryReasonRule(item_limit=3, summary_rule=SUMMARY)
 EXIT_REASON = ExitReasonRule(item_limit=3, summary_rule=SUMMARY)

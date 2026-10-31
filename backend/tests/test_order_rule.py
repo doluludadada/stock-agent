@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta
 
 import pytest
+from support.settings import shipped_config
 
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
@@ -19,14 +20,13 @@ from a_domain.types.enums import (
     TradingPhase,
 )
 from a_domain.types.ids import new_run_id
-from b_application.config.trading_config import MarketConfig
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 
 NOW = datetime(2026, 10, 19, 10, 20, tzinfo=TAIWAN_TIMEZONE)
 COSTS = TradingCostRule(
     fee_rate=0.001425, tax_rate=0.003, etf_tax_rate=0.001, min_fee=20, bond_etf_tax_exempt_until=date(2026, 12, 31)
 )
-LIMIT_PRICE = MarketConfig().limit_price_rule()
+LIMIT_PRICE = shipped_config().market.limit_price_rule()
 
 
 def order_rule(order_mode: OrderMode = OrderMode.MOCK_ONLY, provider: ExecutionProvider = ExecutionProvider.MOCK) -> OrderRule:

@@ -226,7 +226,7 @@ async def test_a_broker_answer_that_cannot_be_recorded_is_a_run_error_and_the_fi
     assert [position.quantity for position in (await stack.broker.get_account()).positions] == [2000]
 
 
-async def test_a_decision_gets_one_order_however_often_it_is_executed(tmp_path) -> None:
+async def test_a_decision_gets_one_order_however_often_its_orders_are_sent(tmp_path) -> None:
     stack = await open_stack(tmp_path)
     stock = analysed_stock()
     stock.realtime_bar = stack.quotes.realtime["2330"]
@@ -236,8 +236,8 @@ async def test_a_decision_gets_one_order_however_often_it_is_executed(tmp_path) 
     async with stack.run_history.execute(Workflow.MANUAL_BUY) as status:
         await stack.journal.save_signals(status.stats.run_id, [signal])
         status.signals.append(signal)
-        await stack.pipeline._execute_orders(status)
-        await stack.pipeline._execute_orders(status)
+        await stack.pipeline.send_orders(status)
+        await stack.pipeline.send_orders(status)
 
     assert [order.status for order in status.orders] == [OrderStatus.FILLED]
     assert [position.quantity for position in (await stack.broker.get_account()).positions] == [2000]

@@ -1,6 +1,7 @@
 from datetime import date, datetime, time, timedelta
 
 import pytest
+from support.settings import shipped_config
 from trading_stack import SilentLogger, run_status
 
 from a_domain.model.market.ohlcv import Ohlcv
@@ -40,7 +41,7 @@ class QuoteFeed:
 
 
 def freshness_config(tmp_path) -> AppConfig:
-    config = AppConfig(project_root=tmp_path)
+    config = shipped_config(tmp_path)
     config.freshness.realtime_max_lag_minutes = 15
     config.freshness.history_max_lag_days = 10
     return config

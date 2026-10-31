@@ -1,12 +1,11 @@
 from datetime import UTC, datetime
-from pathlib import Path
 
 import httpx
 import pytest
+from support.settings import shipped_config
 
 from a_domain.model.market.article import Article
 from a_domain.types.enums import InformationSource
-from b_application.config.app_config import AppConfig
 from b_application.config.sources_config import SourcesConfig
 from c_infrastructure.feed.news.yahoo_tw_news_provider import YahooTwNewsProvider
 from c_infrastructure.feed.news_provider import NewsProvider
@@ -47,7 +46,7 @@ class ScriptedSource:
 
 
 def provider(*sources: ScriptedSource) -> NewsProvider:
-    return NewsProvider(sources, AppConfig(project_root=Path(".")), SilentLogger())
+    return NewsProvider(sources, shipped_config(), SilentLogger())
 
 
 @pytest.mark.asyncio

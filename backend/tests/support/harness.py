@@ -64,6 +64,7 @@ from support.fakes import (
     RecordingExecutionProvider,
     RecordingLogger,
 )
+from support.settings import shipped_config
 
 MARKET_OPEN = datetime(2026, 10, 19, 10, 0, tzinfo=TAIWAN_TIMEZONE)
 MARKET_CLOSED = datetime(2026, 10, 19, 14, 0, tzinfo=TAIWAN_TIMEZONE)
@@ -91,16 +92,17 @@ def harness_settings() -> TechnicalSettings:
 
 
 def harness_config() -> AppConfig:
-    return AppConfig(
-        project_root=Path(__file__).resolve().parents[3],
-        environment=SystemEnvironment.DEV,
-        prompts=PromptsConfig(
-            analysis_report_fundamental=PROMPT_TEMPLATES[AiAnalysisFocus.FUNDAMENTAL],
-            analysis_report_momentum=PROMPT_TEMPLATES[AiAnalysisFocus.MOMENTUM],
-            valuation_explanation=VALUATION_PROMPT_TEMPLATE,
-        ),
-        trading=TradingConfig(execution_provider=ExecutionProvider.MOCK, order_mode=OrderMode.MOCK_ONLY),
-        notifications=NotificationConfig(enabled=False),
+    return shipped_config(Path(__file__).resolve().parents[3]).model_copy(
+        update={
+            "environment": SystemEnvironment.DEV,
+            "prompts": PromptsConfig(
+                analysis_report_fundamental=PROMPT_TEMPLATES[AiAnalysisFocus.FUNDAMENTAL],
+                analysis_report_momentum=PROMPT_TEMPLATES[AiAnalysisFocus.MOMENTUM],
+                valuation_explanation=VALUATION_PROMPT_TEMPLATE,
+            ),
+            "trading": TradingConfig(execution_provider=ExecutionProvider.MOCK, order_mode=OrderMode.MOCK_ONLY),
+            "notifications": NotificationConfig(enabled=False),
+        }
     )
 
 

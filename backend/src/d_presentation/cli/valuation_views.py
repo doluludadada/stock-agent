@@ -1,6 +1,6 @@
 """
-Menus 5 and 6: P/E valuation of chosen stocks and the undervalued scan. They read only `runtime.config` and the
-Pipeline's valuation workflows, which reach no order, signal or watchlist write. The order-gate check reads this module.
+Menus 5 and 6: P/E valuation of chosen stocks and the undervalued scan. They read only the Pipeline's valuation
+workflows, which decide what to value and reach no order, signal or watchlist write. The order-gate check reads this module.
 """
 
 import math
@@ -11,7 +11,6 @@ from rich.table import Table
 
 from a_domain.model.fundamentals.eps import SOURCE_LABELS, Eps
 from a_domain.model.valuation.market_valuation import MarketValuation
-from a_domain.model.valuation.pe_ratio import PeRatio
 from a_domain.model.valuation.scan_criteria import ScanCriteria
 from a_domain.model.valuation.stock_valuation import StockValuation
 from a_domain.model.valuation.target_pe import TargetPe
@@ -38,7 +37,7 @@ async def value_specific_stocks(runtime: Runtime) -> None:
         return
 
     print_valuation_facts(valuations, market)
-    needs_target = any(isinstance(item.current_pe, PeRatio) for item in valuations)
+    needs_target = runtime.pipeline.needs_target_pe(valuations)
     target_pe = ask_target_pe() if needs_target else None
 
     if needs_target and target_pe is None:
@@ -47,8 +46,8 @@ async def value_specific_stocks(runtime: Runtime) -> None:
 
     terminal.console.print(f"Asking the AI to explain: {', '.join(item.stock.stock_id for item in valuations)}")
 
-    for item in valuations:
-        print_valuation_explanation(await runtime.pipeline.explain_valuation(market.appraise(item, target_pe)))
+    for report in runtime.pipeline.appraise_valuations(market, valuations, target_pe):
+        print_valuation_explanation(await runtime.pipeline.explain_valuation(report))
 
 
 async def scan_undervalued_stocks(runtime: Runtime) -> None:
@@ -65,7 +64,7 @@ async def scan_undervalued_stocks(runtime: Runtime) -> None:
         terminal.console.print("[yellow]Scan cancelled.[/yellow]")
         return
 
-    scan = market.screen(criteria)
+    scan = runtime.pipeline.screen_valuation(market, criteria)
     print_valuation_step(scan)
 
     if not scan.survivors:
@@ -76,10 +75,10 @@ async def scan_undervalued_stocks(runtime: Runtime) -> None:
         scan = await runtime.pipeline.confirm_valuation_technical(scan)
         print_technical_step(scan)
 
-    limit = min(len(scan.survivors), runtime.config.valuation.max_scan_explanations)
+    candidates = scan.explanation_candidates
 
-    if limit and terminal.confirm(f"Explain the top {limit} stocks with AI ({limit} AI calls)?"):
-        for report in scan.survivors[:limit]:
+    if candidates and terminal.confirm(f"Explain the top {len(candidates)} stocks with AI ({len(candidates)} AI calls)?"):
+        for report in candidates:
             print_valuation_explanation(await runtime.pipeline.explain_valuation(report))
 
 
@@ -154,8 +153,8 @@ def print_market_reference(market: MarketValuation) -> None:
 
     terminal.console.print(f"Market median P/E for reference: {median_text}")
     terminal.console.print(
-        f"Last closed session: {market.last_closed_session}. A close is stale once two or more weekday sessions "
-        "have closed after it; stale closes are excluded from the scan."
+        f"Last closed session: {market.last_closed_session}. A close is stale once {market.max_missed_sessions + 1} or more "
+        "weekday sessions have closed after it; stale closes are excluded from the scan."
     )
 
 

@@ -1,15 +1,18 @@
-"""Every HTTPS client that reads TWSE, TPEX, MOPS, MIS, cnyes, Yahoo or PTT data verifies the server's certificate."""
+"""
+Every HTTPS client that reads TWSE, TPEX, MOPS, MIS, cnyes, Yahoo or PTT data verifies the server's certificate, and
+the news and PTT clients send the headers the `sources` settings name.
+"""
 
 from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
+from support.settings import shipped_config
 from trading_stack import MONDAY_10_00, MovableClock, SilentLogger, StockDirectory
 
 from a_domain.model.fundamentals.fiscal_quarter import FiscalQuarter
 from a_domain.model.market.stock import Stock
-from b_application.config.app_config import AppConfig
 from b_application.config.market_data_config import MarketDataConfig, MarketHoursConfig
 from b_application.config.sources_config import SourcesConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
@@ -48,7 +51,7 @@ def clients(monkeypatch) -> list[dict[str, Any]]:
 
 
 async def test_exchange_clients_keep_certificate_verification_on(clients: list[dict[str, Any]], tmp_path: Path) -> None:
-    db = DatabaseConnector(config=AppConfig(project_root=tmp_path), logger=SilentLogger())
+    db = DatabaseConnector(config=shipped_config(tmp_path), logger=SilentLogger())
     await db.init_db()
     unspaced = SOURCES.mops.model_copy(update={"request_interval_seconds": 0.0})
     mops = MopsFundamentalsProvider(db=db, market_clock=MovableClock(MONDAY_10_00), mops=unspaced, logger=SilentLogger())
@@ -73,7 +76,20 @@ async def test_exchange_clients_keep_certificate_verification_on(clients: list[d
 async def test_news_and_ptt_clients_keep_certificate_verification_on(clients: list[dict[str, Any]], tmp_path: Path) -> None:
     CnyesNewsProvider(SOURCES.news, SilentLogger())
     YahooTwNewsProvider(SOURCES.news, SilentLogger())
-    PttProvider(config=AppConfig(project_root=tmp_path), logger=SilentLogger(), stock_provider=StockDirectory())
+    PttProvider(config=shipped_config(tmp_path), logger=SilentLogger(), stock_provider=StockDirectory())
 
     assert len(clients) == 3
     assert [client.get("verify", True) for client in clients] == [True] * 3
+
+
+async def test_news_and_ptt_clients_send_the_headers_their_settings_name(clients: list[dict[str, Any]], tmp_path: Path) -> None:
+    config = shipped_config(tmp_path)
+    CnyesNewsProvider(SOURCES.news, SilentLogger())
+    YahooTwNewsProvider(SOURCES.news, SilentLogger())
+    PttProvider(config=config, logger=SilentLogger(), stock_provider=StockDirectory())
+
+    assert [client["headers"] for client in clients] == [
+        {"Accept": "application/json", "User-Agent": SOURCES.news.cnyes_user_agent},
+        {"User-Agent": SOURCES.news.yahoo_user_agent},
+        {"User-Agent": config.sources.ptt.user_agent, "Cookie": config.sources.ptt.cookie},
+    ]

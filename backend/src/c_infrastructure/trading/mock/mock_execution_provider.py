@@ -8,8 +8,8 @@ from a_domain.model.trading.order import Order
 from a_domain.model.trading.position import Position
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.trading.execution_provider import ISimulatedExecutionProvider
-from a_domain.rules.trading.execution import FillRule
-from a_domain.types.enums import OrderStatus, OrderType, RejectReason, TimeInForce, TradeAction
+from a_domain.rules.trading.execution import FillRule, OrderAcceptanceRule
+from a_domain.types.enums import RejectReason, TimeInForce, TradeAction
 from b_application.config.app_config import AppConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.mock_trading_dto import MockCash, MockPosition
@@ -26,17 +26,17 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
     calls it, so the book is seeded on first use.
 
     Fill model: there is no market feed. The limit price is taken as the market price
-    (OrderExecution prices orders from a fresh quote), and the simulated market fills at most
+    (OrderRule prices orders from a fresh quote), and the simulated market fills at most
     `mock_trading.max_fill_quantity` shares per order at that price (unset: any quantity).
     Fees, tax and realized PnL come from FillRule.
 
-    Before acceptance (REJECTED): a MARKET order, ROD, a BUY without cash for the whole quantity plus
-    fee, a SELL of shares the account does not hold.
+    Before acceptance (REJECTED): what OrderAcceptanceRule refuses (a MARKET order, ROD), a BUY without
+    cash for the whole quantity plus fee, a SELL of shares the account does not hold.
     After acceptance, by time in force:
     - IOC fills what the market can take now and cancels the remainder.
     - FOK fills the whole quantity now, or cancels all of it.
-    - ROD is rejected: its remainder would stay working until the close, but nothing could ever
-      fill it (no feed) and nothing in the app reconciles working orders.
+    ROD never gets here: its remainder would stay working until the close, but nothing could ever
+    fill it (no feed) and nothing in the app reconciles working orders.
     An unexpected exception FAILS the order and leaves the book untouched.
     """
 
@@ -48,6 +48,7 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
         self._max_fill_quantity = config.mock_trading.max_fill_quantity
         self._cost_rule = config.market.cost_rule()
         self._fill_rule = FillRule(cost_rule=self._cost_rule)
+        self._acceptance_rule = OrderAcceptanceRule()
 
     @override
     async def connect(self) -> None:
@@ -84,7 +85,7 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
                 self._logger.info(f"Mock order cancelled. {order.stock_id}: {order.reason}")
 
         except Exception as error:
-            if order.status not in {OrderStatus.PENDING, OrderStatus.SUBMITTED}:
+            if not order.is_open:
                 raise
 
             order.fail(f"{type(error).__name__}: {error}", now=now)
@@ -108,16 +109,7 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
 
     @override
     def refusal_for(self, order: Order, account: Account) -> tuple[RejectReason, str] | None:
-        if order.order_type != OrderType.LIMIT or order.limit_price is None:
-            return RejectReason.UNSUPPORTED_ORDER_TYPE, "the mock fills LIMIT orders only"
-
-        if order.time_in_force == TimeInForce.ROD:
-            return (
-                RejectReason.UNSUPPORTED_TIME_IN_FORCE,
-                "the mock accepts IOC and FOK only; a ROD remainder would stay working forever",
-            )
-
-        return account.refusal_for(order, self._cost_rule)
+        return self._acceptance_rule.apply(order) or account.refusal_for(order, self._cost_rule)
 
     @override
     async def fill(self, order: Order, account: Account, now: datetime) -> None:

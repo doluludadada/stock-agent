@@ -21,7 +21,7 @@ class CnyesNewsProvider(INewsSource):
         self._base_url = news.cnyes_api_url
         self._article_url = news.cnyes_article_url
         self._client = httpx.AsyncClient(
-            timeout=news.cnyes_timeout_seconds, headers={"Accept": "application/json", "User-Agent": "Mozilla/5.0"}
+            timeout=news.cnyes_timeout_seconds, headers={"Accept": "application/json", "User-Agent": news.cnyes_user_agent}
         )
 
     @override

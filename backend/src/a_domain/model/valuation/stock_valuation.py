@@ -41,6 +41,11 @@ class StockValuation:
         )
 
     @property
+    def needs_target_pe(self) -> bool:
+        """Its P/E is computable, so valuing it needs the user's target P/E. Otherwise it has no fair price to compute."""
+        return isinstance(self.current_pe, PeRatio)
+
+    @property
     def current_pe(self) -> PeOutcome:
         eps = self.eps
 

@@ -68,10 +68,10 @@ class SignalSource(StrEnum):
 
 class OrderType(StrEnum):
     MARKET = auto()
-    """Executes at whatever price the market gives. OrderExecution never sends it; the mock rejects it."""
+    """Executes at whatever price the market gives. OrderRule never makes one, and OrderAcceptanceRule refuses it."""
 
     LIMIT = auto()
-    """Executes at the limit price or better. OrderExecution prices every order at its signal's fresh quote."""
+    """Executes at the limit price or better. OrderRule prices every order at its decision's fresh quote."""
 
 
 class OrderStatus(StrEnum):
@@ -101,6 +101,22 @@ class RejectReason(StrEnum):
     """The real broker refused the order before it worked (its own checks or the exchange's); the detail quotes the broker."""
 
 
+class SkipReason(StrEnum):
+    """Why a stock gets no stop-loss check or no trading decision in this run. Each value is the text the log shows."""
+
+    RISK_BLOCKED = "Risk blocked"
+    """This run's stop-loss check already sold it."""
+
+    STALE_QUOTE = "Market data is stale"
+    """Its realtime quote was missing or too old when fetched."""
+
+    NO_COMPOSITE_SCORE = "Composite score unavailable"
+    NO_PRICE = "No price"
+
+    NO_REALTIME_BAR = "Realtime bar unavailable"
+    """A stop-loss SELL is priced from a realtime quote only, never from a daily close."""
+
+
 class TradingPhase(StrEnum):
     """Where the exchange's trading day stands. Only CONTINUOUS trading takes the IOC orders the app sends."""
 
@@ -123,7 +139,7 @@ class TimeInForce(StrEnum):
     """Rest of Day: the unfilled part keeps working until the session closes."""
 
     IOC = auto()
-    """Immediate or Cancel: fill what is available now, cancel the rest. What OrderExecution sends."""
+    """Immediate or Cancel: fill what is available now, cancel the rest. OrderRule gives it to every order."""
 
     FOK = auto()
     """Fill or Kill: fill the whole quantity now or cancel all of it."""

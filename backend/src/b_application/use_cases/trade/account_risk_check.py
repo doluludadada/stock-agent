@@ -1,7 +1,7 @@
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.trading_journal import ITradingJournal
-from a_domain.rules.trading.exit import StopLossQuoteRule
+from a_domain.rules.trading.exit import BlockedStockRule, StopLossQuoteRule
 from b_application.config.app_config import AppConfig
 from b_application.schemas.pipeline_status import PipelineStatus
 
@@ -20,7 +20,7 @@ class AccountRiskCheck:
     def __init__(self, journal: ITradingJournal, market_clock: IMarketClock, config: AppConfig, logger: ILoggingProvider) -> None:
         self._journal = journal
         self._market_clock = market_clock
-        self._quote_rule = StopLossQuoteRule()
+        self._quote_rule = StopLossQuoteRule(blocked_rule=BlockedStockRule())
         self._stop_loss_rule = config.stop_loss_rule()
         self._logger = logger
 
@@ -31,7 +31,7 @@ class AccountRiskCheck:
 
         for stock in status.held_stocks:
             position = status.account.position_for(stock.stock_id)
-            skip = self._quote_rule.apply(stock, status.stale_stock_ids)
+            skip = self._quote_rule.apply(stock, status.risk_blocked_stock_ids, status.stale_stock_ids)
 
             if skip is not None:
                 self._logger.warning(f"Risk check skipped. {skip}: {stock.stock_id}")

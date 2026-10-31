@@ -17,8 +17,8 @@ from a_domain.model.trading.order import Order
 from a_domain.model.trading.position import Position
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.trading.execution_provider import IBrokerExecutionProvider
-from a_domain.rules.trading.execution import BrokerOutcomeRule, FillRule, LotSplitRule
-from a_domain.types.enums import LotKind, OrderStatus, OrderType, RejectReason, TimeInForce, TradeAction
+from a_domain.rules.trading.execution import BrokerOutcomeRule, FillRule, LotSplitRule, OrderAcceptanceRule
+from a_domain.types.enums import LotKind, OrderStatus, RejectReason, TimeInForce, TradeAction
 from b_application.config.app_config import AppConfig
 
 BROKER = "Shioaji"
@@ -33,8 +33,8 @@ BROKER_TIME_IN_FORCE: Mapping[TimeInForce, BrokerTimeInForce] = {
     TimeInForce.FOK: BrokerTimeInForce.FOK,
 }
 """
-The board-lot part's time in force. An ROD order is refused: its remainder would keep working after place_order returns,
-and the app tracks no working orders.
+The board-lot part's time in force. OrderAcceptanceRule refuses an ROD order before it is sent: its remainder would keep
+working after place_order returns, and the app tracks no working orders.
 """
 
 ODD_LOT_TIME_IN_FORCE = BrokerTimeInForce.ROD
@@ -75,8 +75,8 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
     limit price. FOK is refused for a quantity with odd shares, because an ROD odd-lot part cannot fill or fail with
     the whole quantity.
 
-    Before sending, the account must cover the order (Account.refusal_for, with the cash that `cash` reads).
-    A stock Shioaji has no contract for is refused first.
+    Before sending, the order must be one the app sends (OrderAcceptanceRule) and the account must cover it
+    (Account.refusal_for, with the cash that `cash` reads). A stock Shioaji has no contract for is refused first.
 
     After sending, the adapter refreshes each broker order until ORDER_STATUS says it is done. One still
     working after the polls is cancelled and refreshed again; BrokerOutcomeRule then gives the domain order
@@ -98,6 +98,7 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
         self._fill_rule = FillRule(cost_rule=self._cost_rule)
         self._lot_split_rule = LotSplitRule(board_lot_shares=config.market.board_lot_shares)
         self._outcome_rule = BrokerOutcomeRule(broker=BROKER)
+        self._acceptance_rule = OrderAcceptanceRule()
         self._shares_per_unit = {StockOrderLot.Common: config.market.board_lot_shares, StockOrderLot.IntradayOdd: 1}
         self._poll_interval_seconds = config.shioaji.poll_interval_seconds
         self._max_polls = config.shioaji.max_polls
@@ -181,7 +182,7 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
             self._outcome_rule.apply(order, reports, datetime.now(UTC))
 
         except Exception as error:
-            if order.status not in {OrderStatus.PENDING, OrderStatus.SUBMITTED}:
+            if not order.is_open:
                 raise
 
             order.fail(f"{type(error).__name__}: {error}", now=datetime.now(UTC))
@@ -191,14 +192,10 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
 
     @override
     def refusal_for(self, order: Order, account: Account) -> tuple[RejectReason, str] | None:
-        if order.order_type != OrderType.LIMIT or order.limit_price is None:
-            return RejectReason.UNSUPPORTED_ORDER_TYPE, "the Shioaji adapter sends LIMIT orders only"
+        refusal = self._acceptance_rule.apply(order)
 
-        if order.time_in_force not in BROKER_TIME_IN_FORCE:
-            return (
-                RejectReason.UNSUPPORTED_TIME_IN_FORCE,
-                f"{order.time_in_force.name} would leave a working order at the broker that the app does not track",
-            )
+        if refusal is not None:
+            return refusal
 
         parts = self._lot_split_rule.apply(order.quantity)
 

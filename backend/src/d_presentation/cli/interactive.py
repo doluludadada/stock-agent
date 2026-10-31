@@ -26,7 +26,10 @@ class MenuOption:
     """The option's view. It returns the trading workflow's status, which the menu summarizes, or None."""
 
     may_submit_orders: bool = False
-    """The menu adds a line saying what the current order mode does with this option's orders."""
+    """
+    The option can send an order to the broker (menu 4 only for a BUY the user confirms). The menu adds a line saying
+    what the current order mode does with its orders, and a real broker's warning names it.
+    """
 
 
 MENU = {
@@ -56,6 +59,7 @@ MENU = {
         title="Analyse Specific Stocks",
         description=("Show the complete stock report.", "Allow manual watchlist addition.", "Allow explicit manual BUY override."),
         run=trading_views.analyse_specific_stocks,
+        may_submit_orders=True,
     ),
     "5": MenuOption(
         title="Value Specific Stocks",
@@ -159,8 +163,9 @@ def print_trading_setup(config: AppConfig) -> None:
         return
 
     server = "SIMULATION (paper trading)" if config.shioaji.simulation else "PRODUCTION: REAL ACCOUNT, REAL MONEY"
+    order_menus = ", ".join(key for key, option in MENU.items() if option.may_submit_orders)
     orders = (
-        "menus 2 and 3 and a confirmed manual BUY send orders to the broker"
+        f"menus {order_menus} send orders to the broker"
         if config.trading.order_mode == OrderMode.LIVE
         else "no order is sent; cash and positions are read from the broker"
     )

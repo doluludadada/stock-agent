@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine
 from sqlmodel import SQLModel
+from support.settings import shipped_config
 from trading_stack import SilentLogger
 
 import c_infrastructure.database.models.mock_trading_dto
@@ -16,7 +17,6 @@ import c_infrastructure.database.models.ohlcv_dto
 import c_infrastructure.database.models.quarter_eps_dto
 import c_infrastructure.database.models.trading_journal_dto
 import c_infrastructure.database.models.watchlist_dto  # noqa: F401  (each import registers its tables on SQLModel.metadata)
-from b_application.config.app_config import AppConfig
 from c_infrastructure.database.db_connector import DatabaseConnector, OutdatedDatabaseError
 from c_infrastructure.database.models.schema_version_dto import SCHEMA_VERSION
 
@@ -47,7 +47,7 @@ def sqlite_layout(path: Path) -> dict[str, list[str]]:
 
 
 async def init_db(project_root: Path) -> None:
-    connector = DatabaseConnector(config=AppConfig(project_root=project_root), logger=SilentLogger())
+    connector = DatabaseConnector(config=shipped_config(project_root), logger=SilentLogger())
 
     try:
         await connector.init_db()

@@ -8,22 +8,43 @@ from a_domain.model.market.stock import Stock
 from a_domain.model.trading.position import Position
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.rules.trading.reason import ExitReasonRule
-from a_domain.types.enums import SignalSource, TradeAction
+from a_domain.types.enums import SignalSource, SkipReason, TradeAction
+
+
+@dataclass(frozen=True)
+class BlockedStockRule:
+    """
+    Why this run may not act on a stock any more, or None: the run's stop-loss check already sold it, or its realtime
+    quote was missing or too old when fetched (RealtimeQuoteFeed marked it stale).
+    """
+
+    def apply(self, stock: Stock, risk_blocked_stock_ids: AbstractSet[str], stale_stock_ids: AbstractSet[str]) -> SkipReason | None:
+        if stock.stock_id in risk_blocked_stock_ids:
+            return SkipReason.RISK_BLOCKED
+
+        if stock.stock_id in stale_stock_ids:
+            return SkipReason.STALE_QUOTE
+
+        return None
 
 
 @dataclass(frozen=True)
 class StopLossQuoteRule:
     """
-    Why a held stock's quote cannot price a stop-loss SELL now, or None: the realtime quote was stale when fetched, or
-    there is none. A daily close never prices a stop-loss SELL.
+    Why a held stock gets no stop-loss check now, or None: BlockedStockRule blocks it, or it has no realtime quote. A
+    daily close never prices a stop-loss SELL.
     """
 
-    def apply(self, stock: Stock, stale_stock_ids: AbstractSet[str]) -> str | None:
-        if stock.stock_id in stale_stock_ids:
-            return "Market data is stale"
+    blocked_rule: BlockedStockRule
+
+    def apply(self, stock: Stock, risk_blocked_stock_ids: AbstractSet[str], stale_stock_ids: AbstractSet[str]) -> SkipReason | None:
+        blocked = self.blocked_rule.apply(stock, risk_blocked_stock_ids, stale_stock_ids)
+
+        if blocked is not None:
+            return blocked
 
         if stock.realtime_bar is None:
-            return "Realtime bar unavailable"
+            return SkipReason.NO_REALTIME_BAR
 
         return None
 

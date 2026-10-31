@@ -2,17 +2,17 @@
 
 import json
 from datetime import UTC, datetime
-from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
 import pytest
 from openai import APIConnectionError
+from support.settings import shipped_config
 
 from a_domain.model.chat.message import Message
 from a_domain.model.chat.web_search_result import WebSearchResult
 from a_domain.types.enums import MessageRole
-from b_application.config.ai_config import AiConfig, BehaviorConfig, TavilyConfig
+from b_application.config.ai_config import TavilyConfig
 from b_application.config.app_config import AppConfig
 from c_infrastructure.ai_models.ai_adapter import groq_adapter, openai_adapter
 from c_infrastructure.ai_models.ai_adapter.groq_adapter import GroqAIAdapter
@@ -83,7 +83,9 @@ def openai_client(monkeypatch: pytest.MonkeyPatch) -> type[RecordingOpenAI]:
 
 
 def config() -> AppConfig:
-    return AppConfig(project_root=Path("."), ai=AiConfig(OPENAI_API_KEY="openai-key", GROQ_API_KEY="groq-key", temperature=0.3))
+    shipped = shipped_config()
+    keys = {"openai_api_key": "openai-key", "groq_api_key": "groq-key", "temperature": 0.3}
+    return shipped.model_copy(update={"ai": shipped.ai.model_copy(update=keys)})
 
 
 @pytest.mark.parametrize("adapter_class", [OpenAIAdapter, GroqAIAdapter])
@@ -145,7 +147,7 @@ class FakeWebSearch:
 
 
 def web_search_adapter(ai_provider: FakeAiProvider, search: FakeWebSearch) -> WebSearchAiAdapter:
-    behavior = BehaviorConfig(web_search_triggers=frozenset({"news"}), web_search_max_results=2)
+    behavior = shipped_config().behavior.model_copy(update={"web_search_triggers": frozenset({"news"}), "web_search_max_results": 2})
     return WebSearchAiAdapter(
         ai_provider=ai_provider,
         web_search_provider=search,
@@ -200,9 +202,10 @@ async def test_tavily_sends_the_configured_search_and_reads_at_most_limit_result
 
     real_client = httpx.AsyncClient
     monkeypatch.setattr(tavily_provider.httpx, "AsyncClient", lambda **options: real_client(transport=httpx.MockTransport(answer)))
-    behavior = BehaviorConfig(web_search_allowed_domains={"cnyes.com"})
-    config = AppConfig(
-        project_root=Path("."), tavily=TavilyConfig(TAVILY_API_KEY="tavily-key", search_depth="advanced"), behavior=behavior
+    shipped = shipped_config()
+    behavior = shipped.behavior.model_copy(update={"web_search_allowed_domains": {"cnyes.com"}})
+    config = shipped.model_copy(
+        update={"tavily": TavilyConfig(TAVILY_API_KEY="tavily-key", search_depth="advanced"), "behavior": behavior}
     )
 
     results = await TavilySearchAdapter(config=config, logger=SilentLogger()).search("2330 news", limit=2)

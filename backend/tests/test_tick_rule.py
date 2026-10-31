@@ -3,7 +3,6 @@ from decimal import Decimal
 import pytest
 
 from a_domain.types.enums import TradeAction
-from b_application.config.trading_config import MarketConfig
 from d_presentation.dependencies import load_settings
 
 BUY, SELL = TradeAction.BUY, TradeAction.SELL
@@ -61,7 +60,3 @@ def test_no_price_gives_a_limit_off_the_exchange_grid(stock_id: str) -> None:
             tick = next((Decimal(tick) for lowest, tick in exchange_ticks if limit >= lowest), Decimal("0.01"))
 
             assert limit % tick == 0, f"{action} {stock_id} at {cents / 100} gave {limit}, off the {tick} grid"
-
-
-def test_the_shipped_tick_table_is_the_default_one() -> None:
-    assert load_settings().market.limit_price_rule() == MarketConfig().limit_price_rule()

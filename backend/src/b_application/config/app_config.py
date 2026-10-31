@@ -29,33 +29,36 @@ from b_application.config.valuation_config import ValuationConfig
 
 
 class AppConfig(BaseSettings):
-    """Application and infrastructure configuration."""
+    """
+    Application and infrastructure configuration. A section with no default here comes only from config/appsetting.yaml:
+    load_settings passes it, and tests read it through tests/support/settings.py.
+    """
 
     model_config = SettingsConfigDict(env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore", frozen=False)
 
     project_root: Path
     environment: SystemEnvironment = SystemEnvironment.DEV
 
-    ai: AiConfig = Field(default_factory=AiConfig)
+    ai: AiConfig
     line: LineConfig = Field(default_factory=LineConfig)
     api: ApiConfig = Field(default_factory=ApiConfig)
-    behavior: BehaviorConfig = Field(default_factory=BehaviorConfig)
-    db: DbConfig = Field(default_factory=DbConfig)
+    behavior: BehaviorConfig
+    db: DbConfig
     folder: FolderConfig = Field(default_factory=FolderConfig)
     tavily: TavilyConfig = Field(default_factory=TavilyConfig)
-    analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
+    analysis: AnalysisConfig
     notifications: NotificationConfig = Field(default_factory=NotificationConfig)
     prompts: PromptsConfig = Field(default_factory=PromptsConfig)
     sentiment: SentimentConfig = Field(default_factory=SentimentConfig)
-    collect_rules: CollectRulesConfig = Field(default_factory=CollectRulesConfig)
+    collect_rules: CollectRulesConfig
     quality: QualityFiltersConfig = Field(default_factory=QualityFiltersConfig)
-    market: MarketConfig = Field(default_factory=MarketConfig)
+    market: MarketConfig
     freshness: FreshnessConfig = Field(default_factory=FreshnessConfig)
     market_hours: MarketHoursConfig = Field(default_factory=MarketHoursConfig)
     market_data: MarketDataConfig = Field(default_factory=MarketDataConfig)
     trading: TradingConfig = Field(default_factory=TradingConfig)
     mock_trading: MockTradingConfig = Field(default_factory=MockTradingConfig)
-    shioaji: ShioajiConfig = Field(default_factory=ShioajiConfig)
+    shioaji: ShioajiConfig
     watchlist: WatchlistConfig = Field(default_factory=WatchlistConfig)
     valuation: ValuationConfig = Field(default_factory=ValuationConfig)
     sources: SourcesConfig = Field(default_factory=SourcesConfig.from_appsetting)

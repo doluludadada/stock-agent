@@ -1,9 +1,13 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from a_domain.model.chat.message import Message
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.stock_watchlist import StockWatchlist
 from a_domain.model.valuation.market_valuation import MarketValuation
+from a_domain.model.valuation.scan_criteria import ScanCriteria
+from a_domain.model.valuation.stock_valuation import StockValuation
+from a_domain.model.valuation.target_pe import TargetPe
 from a_domain.model.valuation.valuation_explanation import ValuationExplanation
 from a_domain.model.valuation.valuation_report import ValuationReport
 from a_domain.model.valuation.valuation_scan import ValuationScan
@@ -38,6 +42,8 @@ from b_application.use_cases.ship.signals import Signals
 from b_application.use_cases.trade.account_equity import AccountEquity
 from b_application.use_cases.trade.account_loader import AccountLoader
 from b_application.use_cases.trade.account_risk_check import AccountRiskCheck
+from b_application.use_cases.trade.analysis_candidates import AnalysisCandidates
+from b_application.use_cases.trade.decision_candidates import DecisionCandidates
 from b_application.use_cases.trade.manual_signal import ManualSignal
 from b_application.use_cases.trade.order_execution import OrderExecution
 from b_application.use_cases.trade.order_outcome import OrderOutcome
@@ -70,6 +76,8 @@ class TradingSteps:
     account_loader: AccountLoader
     account_equity: AccountEquity
     account_risk_check: AccountRiskCheck
+    analysis_candidates: AnalysisCandidates
+    decision_candidates: DecisionCandidates
     watch_stocks: WatchStocks
     signals: Signals
     manual_signal: ManualSignal
@@ -108,12 +116,14 @@ class ValuationSteps:
     market_clock: IMarketClock
     scenario_spread: float
     close_max_missed_sessions: int
+    max_scan_explanations: int
 
 
 @dataclass(slots=True)
 class Pipeline:
     """
-    Exposes the operations used by the CLI, the Web API and the LINE webhook. Each public method is one workflow.
+    Exposes the operations used by the CLI, the Web API and the LINE webhook. Each public method is one workflow;
+    send_orders is the one the trading workflows run as their order step.
 
     Technical settings are loaded once at the beginning of each trading workflow. The loaded snapshot remains
     fixed until that workflow completes.
@@ -171,7 +181,7 @@ class Pipeline:
             await self.collect.realtime_quote_feed.execute(status.held_stocks, status)
             self.trading.account_equity.execute(status)
             await self.trading.account_risk_check.execute(status)
-            await self._execute_orders(status)
+            await self.send_orders(status)
             await self.collect.buzz_scanner.execute(status)
             status.stats.total_scanned = len(status.buzz_stocks)
             await self.collect.data_collector.execute(status.buzz_stocks, status)
@@ -183,7 +193,7 @@ class Pipeline:
             await self.collect.realtime_quote_feed.execute(status.survivors, status)
             await self.trading.signals.execute(status.watchlist, status)
             await self.trading.decision_memory.execute(status)
-            await self._execute_orders(status)
+            await self.send_orders(status)
             await self.process.sentiment_analyser.execute(status.buzz_stocks, status)
             await self.trading.reporting.execute(status)
         self.logger.info(
@@ -203,22 +213,19 @@ class Pipeline:
             await self.collect.realtime_quote_feed.execute(candidates, status)
             self.trading.account_equity.execute(status)
             await self.trading.account_risk_check.execute(status)
-            await self._execute_orders(status)
+            await self.send_orders(status)
             status.stats.total_scanned = len(candidates)
-            blocked_stock_ids = status.risk_blocked_stock_ids | status.stale_stock_ids
-            analysis_candidates = [stock for stock in candidates if stock.stock_id not in blocked_stock_ids]
-            await self.collect.data_collector.execute(analysis_candidates, status)
-            technical_candidates = [stock for stock in analysis_candidates if stock.ohlcv]
+            analysis_candidates = self.trading.analysis_candidates.execute(candidates, status)
+            technical_candidates = await self.collect.data_collector.execute(analysis_candidates, status)
             status.survivors = await self.process.technical_filter.execute(technical_candidates, status, strategy)
-            held_candidates = [stock for stock in technical_candidates if status.account.position_for(stock.stock_id) is not None]
-            decision_candidates = list({stock.stock_id: stock for stock in [*status.survivors, *held_candidates]}.values())
+            decision_candidates = self.trading.decision_candidates.execute(technical_candidates, status)
             await self.collect.news_feed.execute(decision_candidates, status)
             await self.process.ai_analyser.execute(decision_candidates, status, AiAnalysisFocus.FUNDAMENTAL)
             self.process.composite_scorer.execute(decision_candidates)
             await self.collect.realtime_quote_feed.execute(decision_candidates, status)
             await self.trading.signals.execute(StockWatchlist(willing_stocks=decision_candidates), status)
             await self.trading.decision_memory.execute(status)
-            await self._execute_orders(status)
+            await self.send_orders(status)
             await self.trading.reporting.execute(status)
 
         self.logger.info("Intraday trading cycle completed.")
@@ -274,18 +281,18 @@ class Pipeline:
             self.trading.account_equity.execute(status)
             await self.trading.manual_signal.execute(stock, status)
             await self.trading.decision_memory.execute(status)
-            await self._execute_orders(status)
+            await self.send_orders(status)
 
         self.logger.info(f"Manual BUY {stock.stock_id} completed. Orders={len(status.orders)}.")
 
         return status
 
-    async def _execute_orders(self, status: PipelineStatus) -> None:
+    async def send_orders(self, status: PipelineStatus) -> None:
         """
-        The order steps of the trading workflows: each BUY and SELL decision of the run that has no order yet, one at a
-        time in decision order, is gated and recorded right before it is sent (so OrderRule measures its quote's age at
-        submission), then sent, then taken into the run. Buzz and Intraday run it twice: right after the stop-loss
-        check, while those quotes are fresh, and at the end.
+        The order workflow that Buzz, Intraday and manual BUY share, inside their run: each BUY and SELL decision of the
+        run that has no order yet, one at a time in decision order, is gated and recorded right before it is sent (so
+        OrderRule measures its quote's age at submission), then sent, then taken into the run. Buzz and Intraday run it
+        twice: right after the stop-loss check, while those quotes are fresh, and at the end.
         """
         for signal in status.signals:
             order = await self.trading.order_preparation.execute(signal, status)
@@ -312,6 +319,20 @@ class Pipeline:
             scenario_spread=self.valuation.scenario_spread,
             source_warnings=tuple(status.stats.errors),
         )
+
+    def needs_target_pe(self, valuations: Sequence[StockValuation]) -> bool:
+        """Menu 5 asks for a target P/E only when one of the chosen stocks has a computable P/E."""
+        return any(valuation.needs_target_pe for valuation in valuations)
+
+    def appraise_valuations(
+        self, market: MarketValuation, valuations: Sequence[StockValuation], target_pe: TargetPe | None
+    ) -> list[ValuationReport]:
+        """Menu 5's chosen stocks, each valued at the user's target P/E, in the order chosen."""
+        return [market.appraise(valuation, target_pe) for valuation in valuations]
+
+    def screen_valuation(self, market: MarketValuation, criteria: ScanCriteria) -> ValuationScan:
+        """The undervalued scan's valuation step at the user's criteria. It offers at most max_scan_explanations stocks to the AI."""
+        return market.screen(criteria, self.valuation.max_scan_explanations)
 
     async def confirm_valuation_technical(self, scan: ValuationScan) -> ValuationScan:
         """The undervalued scan's second step: the active technical strategy, applied exactly as the trading workflows apply it."""

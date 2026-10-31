@@ -22,6 +22,9 @@ class ValuationScan:
     criteria: ScanCriteria
     survivors: tuple[ValuationReport, ...]
     eliminations: tuple[ScanElimination, ...]
+    max_explanations: int
+    """How many of the top survivors the scan offers for an AI explanation: each is one AI call."""
+
     technical_strategy_id: str | None = None
 
     @staticmethod
@@ -47,6 +50,11 @@ class ValuationScan:
                 survivors.append(report)
 
         return replace(self, survivors=tuple(survivors), eliminations=tuple(eliminations), technical_strategy_id=strategy_id)
+
+    @property
+    def explanation_candidates(self) -> tuple[ValuationReport, ...]:
+        """The most undervalued survivors, at most `max_explanations` of them."""
+        return self.survivors[: self.max_explanations]
 
     @property
     def valuation_survivors(self) -> tuple[ValuationReport, ...]:

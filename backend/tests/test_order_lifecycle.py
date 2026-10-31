@@ -95,6 +95,18 @@ def test_every_status_change_is_legal_only_if_the_lifecycle_allows_it(source: Or
     assert order.status == source
 
 
+@pytest.mark.parametrize("status", list(OrderStatus))
+def test_only_a_pending_or_submitted_order_is_open_and_only_an_open_order_fails_late(status: OrderStatus) -> None:
+    order = order_in(status)
+    is_open = status in {OrderStatus.PENDING, OrderStatus.SUBMITTED}
+
+    assert order.is_open is is_open
+
+    order.fail_if_open("broker call failed", now=NOW)
+
+    assert order.status == (OrderStatus.FAILED if is_open else status)
+
+
 def test_nothing_moves_an_order_back_to_pending() -> None:
     assert not any(OrderStatus.PENDING in {target for source, target in LEGAL if source == status} for status in OrderStatus)
 

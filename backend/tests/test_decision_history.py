@@ -3,6 +3,7 @@ from pathlib import Path
 
 import chromadb
 import pytest
+from support.settings import shipped_config
 from trading_stack import MONDAY_10_00, MovableClock, run_status
 
 from a_domain.model.chat.message import Message
@@ -10,7 +11,6 @@ from a_domain.model.market.stock import Stock
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.types.enums import AiAnalysisFocus, MessageRole, SignalSource, TradeAction, Workflow
 from b_application.config.ai_config import PromptsConfig
-from b_application.config.app_config import AppConfig
 from b_application.use_cases.process.ai_analyser import AiAnalyser
 from b_application.use_cases.ship.decision_memory import DecisionMemory
 from c_infrastructure.database.chroma.knowledge_repository import ChromaKnowledgeRepository
@@ -130,8 +130,8 @@ async def test_ai_analysis_prompt_carries_the_analysed_stocks_own_history(knowle
         make_signal("2317", TradeAction.SELL, 25, "Margin pressure", hour=2),
     )
     template = "Analyse {stock_id}: {articles_text}"
-    config = AppConfig(
-        project_root=Path("."), prompts=PromptsConfig(analysis_report_fundamental=template, analysis_report_momentum=template)
+    config = shipped_config().model_copy(
+        update={"prompts": PromptsConfig(analysis_report_fundamental=template, analysis_report_momentum=template)}
     )
     ai_provider = PromptRecordingAiProvider()
     analyser = AiAnalyser(

@@ -26,6 +26,11 @@ How the rules measure:
   c_infrastructure/database/models/), enums, exceptions and value holders (`BaseModel`, `SQLModel`,
   `BaseSettings`, `TypedDict`, `NamedTuple`, `@dataclass`, and their subclasses).
 - FACTORY-ONLY treats a called name that starts with an upper-case letter as a class.
+- PRESENTATION-DECIDES-NOTHING checks d_presentation except dependencies.py. A setting read is an attribute chain
+  on a name or attribute called `config`, such as `runtime.config.line.channel_secret`. The chain must equal or
+  extend an entry of PRESENTATION_SETTINGS for the file's folder; a file in no listed folder may read none. Every
+  class in d_presentation/web/schemas.py must define no method.
+- STRATEGY-FROM-SETTINGS treats a call whose called name is TechnicalStrategy or TechnicalRule as building one.
 - STORY-ID looks for `US-<number>`, any to-do marker and `#<number>` in comments and docstrings.
 - HARDCODED-URL ignores docstrings.
 - PYRIGHT (with --pyright) counts pyright errors, using `[tool.pyright]` from the current folder.
@@ -85,6 +90,17 @@ BUILTIN_EXCEPTIONS = frozenset(
 )
 FACTORY_MODULE = PurePosixPath("d_presentation/dependencies.py")
 FACTORY_TARGETS = ("c_infrastructure", "b_application.use_cases", "b_application.pipeline")
+PRESENTATION_SETTINGS = {
+    # The LINE webhook checks each request's signature with the channel secret.
+    "d_presentation/web": frozenset({"line.channel_secret"}),
+    # The menu prints the trading setup, so the user sees whether an order would reach a real account.
+    "d_presentation/cli": frozenset(
+        {"environment", "trading.execution_provider", "trading.order_mode", "mock_trading.account_id", "shioaji.simulation"}
+    ),
+}
+RESPONSE_MODULE = PurePosixPath("d_presentation/web/schemas.py")
+STRATEGY_CLASSES = frozenset({"TechnicalStrategy", "TechnicalRule"})
+STRATEGY_BUILDER = PurePosixPath("c_infrastructure/technical/technical_settings_schema.py")
 STORY_ID = re.compile(r"\bUS-\d+|\bTODO\b|(?<![\w&])#\d+\b")
 TYPE_IGNORE = re.compile(r"#\s*(?:type|pyright)\s*:\s*ignore\b")
 CJK = re.compile(
@@ -479,6 +495,52 @@ def dotted(expression: ast.expr) -> list[str] | None:
     return None
 
 
+def check_presentation_decides_nothing(files: Sequence[SourceFile]) -> Iterator[Finding]:
+    for source in files:
+        if not source.under("d_presentation") or source.module == FACTORY_MODULE:
+            continue
+        for line, module, names in imports(source):
+            if any(is_within(candidate, "a_domain.rules") for candidate in [module, *(f"{module}.{name}" for name in names)]):
+                yield source.path, line, f"imports {module}; the presentation calls the use case or workflow that runs the rule"
+        yield from setting_read_findings(source)
+        if source.module == RESPONSE_MODULE:
+            for node in all_classes(source.tree):
+                for method in methods(node):
+                    yield (
+                        source.path,
+                        method.lineno,
+                        f"response {node.name} defines {method.name}; a response maps fields and computes nothing",
+                    )
+
+
+def setting_read_findings(source: SourceFile) -> Iterator[Finding]:
+    allowed = next((paths for folder, paths in PRESENTATION_SETTINGS.items() if source.under(folder)), frozenset())
+    parents = {child: node for node in ast.walk(source.tree) for child in ast.iter_child_nodes(node)}
+    for node in ast.walk(source.tree):
+        if not isinstance(node, ast.Attribute) or name_of(node.value) != "config":
+            continue
+        path = setting_path(node, parents)
+        if not any(path == entry or path.startswith(f"{entry}.") for entry in allowed):
+            yield source.path, node.lineno, f"reads the setting {path}; a business setting reaches its rule through dependencies.py"
+
+
+def setting_path(node: ast.Attribute, parents: dict[ast.AST, ast.AST]) -> str:
+    path = [node.attr]
+    while isinstance(parent := parents.get(node), ast.Attribute) and parent.value is node:
+        path.append(parent.attr)
+        node = parent
+    return ".".join(path)
+
+
+def check_strategy_from_settings(files: Sequence[SourceFile]) -> Iterator[Finding]:
+    for source in files:
+        if source.module == STRATEGY_BUILDER:
+            continue
+        for node in ast.walk(source.tree):
+            if isinstance(node, ast.Call) and (name := name_of(node.func)) in STRATEGY_CLASSES:
+                yield source.path, node.lineno, f"builds {name}; strategies come from config/technical.yaml through {STRATEGY_BUILDER}"
+
+
 def function_length(function: FunctionNode) -> int:
     length = (function.end_lineno or function.lineno) - function.lineno + 1
     if docstring := docstring_of(function):
@@ -607,6 +669,8 @@ RULES: dict[str, Callable[[Sequence[SourceFile]], Iterator[Finding]]] = {
     "SETTINGS-LOCATION": check_settings_location,
     "INFRA-OVERRIDE": check_infra_override,
     "FACTORY-ONLY": check_factory_only,
+    "PRESENTATION-DECIDES-NOTHING": check_presentation_decides_nothing,
+    "STRATEGY-FROM-SETTINGS": check_strategy_from_settings,
     "FUNC-LENGTH": check_func_length,
     "COMPLEXITY": check_complexity,
     "NAMES": check_names,

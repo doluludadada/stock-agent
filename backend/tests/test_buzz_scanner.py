@@ -3,6 +3,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from support.settings import shipped_config
 from trading_stack import run_status
 
 from a_domain.model.market.article import Article
@@ -11,7 +12,6 @@ from a_domain.model.market.post_listing import PostListing
 from a_domain.model.market.stock import Stock
 from a_domain.types.enums import InformationSource, Workflow
 from b_application.config.app_config import AppConfig
-from b_application.config.collect_config import CollectRulesConfig
 from b_application.config.market_data_config import MarketDataConfig, MarketHoursConfig
 from b_application.config.sources_config import SourcesConfig
 from b_application.schemas.pipeline_status import PipelineStatus
@@ -57,9 +57,9 @@ def make_post(stock_id: str, engagement: int = 0) -> Article:
 
 
 def make_config(min_mentions: int, min_engagement: int) -> AppConfig:
-    return AppConfig(
-        project_root=Path("."), collect_rules=CollectRulesConfig(buzz_min_mentions=min_mentions, buzz_min_engagement=min_engagement)
-    )
+    shipped = shipped_config()
+    thresholds = {"buzz_min_mentions": min_mentions, "buzz_min_engagement": min_engagement}
+    return shipped.model_copy(update={"collect_rules": shipped.collect_rules.model_copy(update=thresholds)})
 
 
 async def make_stock_provider(monkeypatch: pytest.MonkeyPatch, stock_ids: list[str]) -> TaiwanStockProvider:
@@ -141,7 +141,7 @@ def test_ptt_post_engagement_counts_every_push_boo_and_arrow() -> None:
       <div class="push"><span class="push-tag">→ </span><span>u4</span></div>
     </div>
     """
-    ptt = PttProvider(config=AppConfig(project_root=Path(".")), logger=SilentLogger(), stock_provider=FakeStockList())
+    ptt = PttProvider(config=shipped_config(), logger=SilentLogger(), stock_provider=FakeStockList())
     listing = PostListing(title="[標的] 2330 台積電 多", url="https://www.ptt.cc/bbs/Stock/M.1.html", posted_on=date(2026, 10, 30))
 
     article = ptt.parse_article(html, listing, stock_ids={"2330"})
@@ -182,7 +182,9 @@ class PttBoard:
 @pytest.mark.asyncio
 async def test_ptt_pages_back_through_the_search_until_a_post_is_older_than_the_lookback(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(httpx, "AsyncClient", PttBoard)
-    config = AppConfig(project_root=Path("."), collect_rules=CollectRulesConfig(ptt_tags=["[標的]"], ptt_lookback_days=14))
+    shipped = shipped_config()
+    collect_rules = shipped.collect_rules.model_copy(update={"ptt_tags": ["[標的]"], "ptt_lookback_days": 14})
+    config = shipped.model_copy(update={"collect_rules": collect_rules})
     ptt = PttProvider(config=config, logger=SilentLogger(), stock_provider=FakeStockList())
 
     articles = await ptt.fetch_social_articles(limit=10)
@@ -192,7 +194,7 @@ async def test_ptt_pages_back_through_the_search_until_a_post_is_older_than_the_
 
 
 def test_a_ptt_article_is_cut_to_3000_characters() -> None:
-    ptt = PttProvider(config=AppConfig(project_root=Path(".")), logger=SilentLogger(), stock_provider=FakeStockList())
+    ptt = PttProvider(config=shipped_config(), logger=SilentLogger(), stock_provider=FakeStockList())
     listing = PostListing(title="[標的] 2330 台積電 多", url="https://www.ptt.cc/bbs/Stock/M.1.html", posted_on=date(2026, 10, 30))
 
     article = ptt.parse_article(f'<div id="main-content">股票代碼：2330\n{"長" * 4000}</div>', listing, stock_ids={"2330"})
@@ -225,7 +227,7 @@ class EndlessPttBoard:
 @pytest.mark.asyncio
 async def test_ptt_reads_at_most_30_search_pages_for_one_tag(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(httpx, "AsyncClient", EndlessPttBoard)
-    ptt = PttProvider(config=AppConfig(project_root=Path(".")), logger=SilentLogger(), stock_provider=FakeStockList())
+    ptt = PttProvider(config=shipped_config(), logger=SilentLogger(), stock_provider=FakeStockList())
 
     articles = await ptt.fetch_tag_articles("[閒聊]", {"2330"}, datetime.now().date() - timedelta(days=14), limit=10)
 
@@ -234,7 +236,7 @@ async def test_ptt_reads_at_most_30_search_pages_for_one_tag(monkeypatch: pytest
 
 
 def test_the_buzz_archive_quotes_the_first_500_characters_of_each_post(tmp_path: Path) -> None:
-    ptt = PttProvider(config=AppConfig(project_root=tmp_path), logger=SilentLogger(), stock_provider=FakeStockList())
+    ptt = PttProvider(config=shipped_config(tmp_path), logger=SilentLogger(), stock_provider=FakeStockList())
     post = make_post("2330").model_copy(update={"content": "a" * 500 + "b" * 100})
 
     ptt.save_social_media_data([post])
@@ -242,3 +244,13 @@ def test_the_buzz_archive_quotes_the_first_500_characters_of_each_post(tmp_path:
     archive = next(tmp_path.rglob("ptt_buzz_*.md")).read_text(encoding="utf-8")
     assert f"> {'a' * 500}\n" in archive
     assert "a" * 500 + "b" not in archive
+
+
+@pytest.mark.parametrize(
+    ("title", "stock_id"),
+    [("[標的] 2330 台積電 多", "2330"), ("[新聞] 台積電 2330A", "2330"), ("[標的] 123 多", None), ("[閒聊] 台積電", None)],
+)
+def test_a_post_whose_body_names_no_stock_takes_its_stock_id_from_the_title(title: str, stock_id: str | None) -> None:
+    ptt = PttProvider(config=shipped_config(), logger=SilentLogger(), stock_provider=FakeStockList())
+
+    assert ptt.extract_stock_id("A post with no ticker line.", title) == stock_id

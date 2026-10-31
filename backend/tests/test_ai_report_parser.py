@@ -1,6 +1,5 @@
-from pathlib import Path
-
 import pytest
+from support.settings import shipped_config
 from trading_stack import MONDAY_10_00, MovableClock, run_status
 
 from a_domain.model.analysis.technical_report import TechnicalReport
@@ -39,8 +38,8 @@ class NoHistory:
 
 def make_config() -> AppConfig:
     template = "Analyse {stock_id}: {articles_text}"
-    return AppConfig(
-        project_root=Path("."), prompts=PromptsConfig(analysis_report_fundamental=template, analysis_report_momentum=template)
+    return shipped_config().model_copy(
+        update={"prompts": PromptsConfig(analysis_report_fundamental=template, analysis_report_momentum=template)}
     )
 
 

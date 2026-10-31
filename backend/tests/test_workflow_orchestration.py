@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 
 import pytest
+from pydantic import SecretStr
 from support.harness import (
     FRESH,
     MARKET_CLOSED,
@@ -28,7 +29,7 @@ from a_domain.types.enums import (
 )
 from a_domain.types.ids import new_run_id
 from b_application.config.app_config import AppConfig
-from b_application.config.trading_config import AnalysisConfig, ShioajiConfig, TradingConfig
+from b_application.config.trading_config import TradingConfig
 
 
 def stock_ids(stocks: list[Stock]) -> list[str]:
@@ -200,6 +201,32 @@ async def test_a_held_position_at_its_quote_counts_toward_the_equity_each_buy_ri
 
 
 @pytest.mark.asyncio
+async def test_intraday_analyses_unblocked_candidates_with_history_and_decides_on_survivors_and_held_stocks() -> None:
+    harness = build_harness()
+    harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
+    harness.list_stock("2317", rising_history(100.0), realtime_price=100.0, realtime_age=STALE)
+    harness.list_stock("3008", [], realtime_price=100.0)
+    harness.list_stock("2454", falling_history(100.0), realtime_price=100.0)
+    harness.list_stock("1101", falling_history(100.0), realtime_price=100.0)
+    harness.list_stock("2603", rising_history(100.0), realtime_price=100.0)
+    harness.hold("2330", quantity=1000, average_cost=120.0)
+    harness.hold("3008", quantity=1000, average_cost=95.0)
+    harness.hold("1101", quantity=1000, average_cost=95.0)
+    for stock_id in ("2317", "2454", "2603"):
+        harness.watch(stock_id, WatchlistType.TECHNICAL)
+
+    status = await harness.run_menu("3")
+
+    assert (status.stats.total_scanned, status.risk_blocked_stock_ids, status.stale_stock_ids) == (6, {"2330"}, {"2317"})
+    assert sorted(harness.prices.history_requests) == ["1101", "2454", "2603", "3008"], (
+        "a stop-loss sale and a stale quote are not analysed"
+    )
+    assert [stock.stock_id for stock in status.survivors] == ["2603"], "a stock without daily history gets no technical verdict"
+    assert sorted(harness.ai.analysed_stock_ids) == ["1101", "2603"], "a held stock that fails the strategy, not one without history"
+    assert sorted(signal.stock_id for signal in harness.journal.signals) == ["1101", "2330", "2603"]
+
+
+@pytest.mark.asyncio
 async def test_intraday_places_no_order_for_a_stale_quote() -> None:
     harness = build_harness()
     harness.list_stock("2330", rising_history(100.0), realtime_price=100.0, realtime_age=FRESH)
@@ -275,7 +302,7 @@ async def test_intraday_records_each_decision_and_the_brokers_answer_to_its_orde
 @pytest.mark.asyncio
 async def test_intraday_buys_holds_and_sells_manually_watched_stocks_on_their_composite_score() -> None:
     config = harness_config()
-    config.analysis = AnalysisConfig(min_combined_score_buy=70, max_combined_score_sell=50)
+    config.analysis = config.analysis.model_copy(update={"min_combined_score_buy": 70, "max_combined_score_sell": 50})
     harness = build_harness(config=config)
     for stock_id, ai_score in {"2317": 90, "2454": 40, "2330": 10}.items():
         harness.list_stock(stock_id, rising_history(100.0), realtime_price=100.0)
@@ -441,7 +468,9 @@ async def test_buzz_and_intraday_send_an_order_only_when_the_order_mode_allows_i
     config = harness_config()
     config.environment = environment
     config.trading = TradingConfig(execution_provider=provider, order_mode=mode)
-    config.shioaji = ShioajiConfig(_env_file=None, simulation=True, SHIOAJI_API_KEY="key", SHIOAJI_SECRET_KEY="secret")
+    config.shioaji = config.shioaji.model_copy(
+        update={"simulation": True, "api_key": SecretStr("key"), "secret_key": SecretStr("secret")}
+    )
     harness = wanted_by_every_workflow(config)
 
     await harness.run_menu(menu)

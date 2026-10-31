@@ -1,6 +1,5 @@
 import io
 from itertools import product
-from pathlib import Path
 from typing import get_args
 
 import pytest
@@ -9,6 +8,7 @@ from pydantic import BaseModel
 from rich.console import Console
 from shioaji.error import TokenError
 from support.fake_shioaji import FakeShioaji
+from support.settings import shipped_config
 from trading_stack import SilentLogger
 
 from a_domain.types.enums import ExecutionProvider, OrderMode, SystemEnvironment
@@ -46,13 +46,21 @@ ALL_CREDENTIALS = {
 }
 
 
+SHIOAJI_POLLING = shipped_config().shioaji.model_dump(include={"poll_interval_seconds", "max_polls"})
+
+
+def shioaji_from_environment(**values: object) -> ShioajiConfig:
+    """A Shioaji section read from the process environment, not .env, with the shipped order polling."""
+    return ShioajiConfig(_env_file=None, **SHIOAJI_POLLING, **values)
+
+
 def trading_config(
     environment: SystemEnvironment, provider: ExecutionProvider, mode: OrderMode, simulation: bool = True, **credentials: str | None
 ) -> AppConfig:
-    config = AppConfig(project_root=Path("."))
+    config = shipped_config()
     config.environment = environment
     config.trading = TradingConfig(execution_provider=provider, order_mode=mode)
-    config.shioaji = ShioajiConfig(_env_file=None, simulation=simulation, **{**dict.fromkeys(ALL_CREDENTIALS), **credentials})
+    config.shioaji = shioaji_from_environment(simulation=simulation, **{**dict.fromkeys(ALL_CREDENTIALS), **credentials})
 
     return config
 
@@ -112,11 +120,11 @@ async def test_a_failed_shioaji_login_stops_startup_with_the_broker_reason(monke
 async def test_the_mock_broker_in_mock_only_mode_is_the_default() -> None:
     shipped = load_settings()
 
-    assert (AppConfig(project_root=Path(".")).trading, shipped.trading) == (
+    assert (TradingConfig(), shipped.trading) == (
         TradingConfig(execution_provider=MOCK, order_mode=OrderMode.MOCK_ONLY),
         TradingConfig(execution_provider=MOCK, order_mode=OrderMode.MOCK_ONLY),
     )
-    assert (ShioajiConfig(_env_file=None).simulation, shipped.shioaji.simulation) == (True, True)
+    assert (shioaji_from_environment().simulation, shipped.shioaji.simulation) == (True, True)
 
 
 @pytest.fixture
@@ -129,13 +137,13 @@ def screen(monkeypatch) -> io.StringIO:
 @pytest.mark.parametrize(
     ("simulation", "mode", "server", "orders"),
     [
+        (True, OrderMode.LIVE, "SHIOAJI SIMULATION (paper trading)", "Orders LIVE: menus 2, 3, 4 send orders to the broker"),
         (
-            True,
+            False,
             OrderMode.LIVE,
-            "SHIOAJI SIMULATION (paper trading)",
-            "Orders LIVE: menus 2 and 3 and a confirmed manual BUY send orders",
+            "SHIOAJI PRODUCTION: REAL ACCOUNT, REAL MONEY",
+            "Orders LIVE: menus 2, 3, 4 send orders to the broker",
         ),
-        (False, OrderMode.LIVE, "SHIOAJI PRODUCTION: REAL ACCOUNT, REAL MONEY", "Orders LIVE: menus 2 and 3"),
         (False, OrderMode.DISABLED, "SHIOAJI PRODUCTION: REAL ACCOUNT, REAL MONEY", "Orders DISABLED: no order is sent"),
     ],
 )
@@ -171,7 +179,7 @@ def menu_entry(output: str, title: str) -> list[str]:
         (LIVE, SHIOAJI, OrderMode.LIVE, "May submit orders to the SHIOAJI broker (order mode LIVE)."),
     ],
 )
-async def test_menus_2_and_3_say_they_may_submit_orders_under_the_current_order_mode(
+async def test_menus_2_3_and_4_say_they_may_submit_orders_under_the_current_order_mode(
     screen: io.StringIO, environment: SystemEnvironment, provider: ExecutionProvider, mode: OrderMode, orders: str
 ) -> None:
     interactive.print_menu(trading_config(environment, provider, mode, **ALL_CREDENTIALS))
@@ -179,15 +187,16 @@ async def test_menus_2_and_3_say_they_may_submit_orders_under_the_current_order_
     output = screen.getvalue()
     assert orders in menu_entry(output, "[2] Scan Social Buzz")
     assert orders in menu_entry(output, "[3] Run Intraday Trading")
+    assert orders in menu_entry(output, "[4] Analyse Specific Stocks"), "a confirmed manual BUY sends an order"
     assert not any("submit orders" in line for line in menu_entry(output, "[1] Run Full Cycle"))
 
 
 async def test_only_shioaji_simulation_in_the_environment_can_turn_simulation_off(monkeypatch) -> None:
     monkeypatch.setenv("SIMULATION", "false")
-    unrelated = ShioajiConfig(_env_file=None).simulation
+    unrelated = shioaji_from_environment().simulation
     monkeypatch.setenv("SHIOAJI_SIMULATION", "false")
 
-    assert (unrelated, ShioajiConfig(_env_file=None).simulation) == (True, False)
+    assert (unrelated, shioaji_from_environment().simulation) == (True, False)
 
 
 BOOLEAN_SETTINGS = {

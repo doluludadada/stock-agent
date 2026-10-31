@@ -4,12 +4,12 @@ from datetime import date, datetime, time, timedelta
 
 import pytest
 import pytest_asyncio
+from support.settings import shipped_config
 from trading_stack import MONDAY_10_00, MovableClock, QuoteFeed, SilentLogger, bar
 
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.types.enums import TradingPhase
-from b_application.config.app_config import AppConfig
 from b_application.config.market_data_config import MarketDataConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.market.cached_price_provider import CachedPriceProvider
@@ -80,7 +80,7 @@ async def last_bars(cache: CachedPriceProvider, clock: MovableClock, *stock_ids:
 
 @pytest_asyncio.fixture
 async def db(tmp_path):
-    connector = DatabaseConnector(config=AppConfig(project_root=tmp_path), logger=SilentLogger())
+    connector = DatabaseConnector(config=shipped_config(tmp_path), logger=SilentLogger())
     await connector.init_db()
     yield connector
     await connector.close()

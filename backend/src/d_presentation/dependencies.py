@@ -51,6 +51,8 @@ from b_application.use_cases.trade.account_equity import AccountEquity
 from b_application.use_cases.trade.account_history import AccountHistory
 from b_application.use_cases.trade.account_loader import AccountLoader
 from b_application.use_cases.trade.account_risk_check import AccountRiskCheck
+from b_application.use_cases.trade.analysis_candidates import AnalysisCandidates
+from b_application.use_cases.trade.decision_candidates import DecisionCandidates
 from b_application.use_cases.trade.manual_signal import ManualSignal
 from b_application.use_cases.trade.order_execution import OrderExecution
 from b_application.use_cases.trade.order_outcome import OrderOutcome
@@ -387,6 +389,8 @@ def build_trading_steps(
         account_loader=AccountLoader(execution_provider=broker, stock_provider=dependencies.stock_provider, logger=logger),
         account_equity=AccountEquity(config=config, logger=logger),
         account_risk_check=AccountRiskCheck(dependencies.journal, market_clock, config, logger),
+        analysis_candidates=AnalysisCandidates(),
+        decision_candidates=DecisionCandidates(),
         watch_stocks=WatchStocks(dependencies.watchlist_repository, market_clock, config, logger),
         signals=Signals(dependencies.journal, market_clock, config, logger),
         manual_signal=ManualSignal(dependencies.journal, market_clock, config, logger),
@@ -435,6 +439,7 @@ def build_valuation_steps(
         market_clock=market_clock,
         scenario_spread=config.valuation.scenario_spread,
         close_max_missed_sessions=config.freshness.daily_close_max_missed_sessions,
+        max_scan_explanations=config.valuation.max_scan_explanations,
     )
 
 

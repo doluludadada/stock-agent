@@ -18,8 +18,9 @@ class YahooTwNewsProvider(INewsSource):
     def __init__(self, news: NewsSources, logger: ILoggingProvider):
         self._news = news
         self._logger = logger
-        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        self._client = httpx.AsyncClient(timeout=news.yahoo_timeout_seconds, headers={"User-Agent": user_agent}, follow_redirects=True)
+        self._client = httpx.AsyncClient(
+            timeout=news.yahoo_timeout_seconds, headers={"User-Agent": news.yahoo_user_agent}, follow_redirects=True
+        )
 
     @override
     async def fetch_news(self, stock_id: str, limit: int) -> list[Article]:

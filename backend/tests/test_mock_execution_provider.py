@@ -1,12 +1,12 @@
 from datetime import UTC, date, datetime
 
 import pytest
+from support.settings import shipped_config
 from trading_stack import SilentLogger
 
 from a_domain.model.trading.order import Order
 from a_domain.types.enums import OrderStatus, OrderType, TimeInForce, TradeAction
 from a_domain.types.ids import new_decision_id, new_run_id
-from b_application.config.app_config import AppConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.trading.mock.mock_execution_provider import MockExecutionProvider
 
@@ -22,7 +22,7 @@ async def open_broker(
     create_tables: bool = True,
     bond_etf_tax_exempt_until: date = date(2026, 12, 31),
 ):
-    config = AppConfig(project_root=tmp_path)
+    config = shipped_config(tmp_path)
     config.mock_trading.initial_cash = initial_cash
     config.mock_trading.max_fill_quantity = max_fill_quantity
     config.market.bond_etf_tax_exempt_until = bond_etf_tax_exempt_until
