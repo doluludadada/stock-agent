@@ -88,8 +88,6 @@ class RunSummary(Response):
     total_scanned: int
     buzz_scanned: int
     buzz_qualified: int
-    news_scanned: int
-    total_skipped: int
     passed_technical: int
     ai_analysed: int
     signals_generated: int

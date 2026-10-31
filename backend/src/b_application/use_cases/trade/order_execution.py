@@ -7,7 +7,7 @@ from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.execution_provider import IExecutionProvider
 from a_domain.ports.trading.trading_journal import ITradingJournal
 from a_domain.types.enums import OrderStatus, TradeAction
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
 from b_application.schemas.pipeline_status import PipelineStatus
 from b_application.use_cases.trade.account_loader import AccountLoader
 
@@ -60,7 +60,9 @@ class OrderExecution:
 
             except Exception as error:
                 if order.status == OrderStatus.PENDING:
-                    order.fail(f"the order record could not be saved, so the order was not sent: {error}")
+                    order.fail(
+                        f"the order record could not be saved, so the order was not sent: {error}", now=self._market_clock.now()
+                    )
 
                 status.orders.append(order)
                 self.record_error(status, f"Order record not saved: {order.stock_id}, error={error}")
@@ -99,14 +101,17 @@ class OrderExecution:
 
         except asyncio.CancelledError:
             if order.status in {OrderStatus.PENDING, OrderStatus.SUBMITTED}:
-                order.fail("the run was cancelled during the broker call, so the broker may hold this order: check it")
+                order.fail(
+                    "the run was cancelled during the broker call, so the broker may hold this order: check it",
+                    now=self._market_clock.now(),
+                )
 
             await self.record(order, status)
             raise
 
         except Exception as error:
             if order.status in {OrderStatus.PENDING, OrderStatus.SUBMITTED}:
-                order.fail(f"broker call failed: {type(error).__name__}: {error}")
+                order.fail(f"broker call failed: {type(error).__name__}: {error}", now=self._market_clock.now())
 
         await self.record(order, status)
 

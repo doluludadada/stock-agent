@@ -1,3 +1,4 @@
+from datetime import timedelta
 from uuid import uuid4
 
 import pytest
@@ -14,7 +15,7 @@ async def test_a_run_reads_back_with_its_decision_and_its_order(tmp_path) -> Non
     stack = await open_stack(tmp_path)
     stock = analysed_stock()
 
-    order = await stack.manual_buy.execute(stock)
+    order = (await stack.pipeline.buy_manually(stock)).require_manual_buy_order()
 
     assert isinstance(order, Order) and order.status == OrderStatus.FILLED
     run = await stack.journal.find_run(order.run_id)
@@ -37,6 +38,8 @@ async def test_recent_runs_come_newest_first_up_to_the_limit(tmp_path) -> None:
     run_ids = []
 
     for _ in range(3):
+        stack.clock.current += timedelta(minutes=1)
+
         async with stack.run_history.open(Workflow.INTRADAY) as status:
             run_ids.append(status.stats.run_id)
 
@@ -45,7 +48,7 @@ async def test_recent_runs_come_newest_first_up_to_the_limit(tmp_path) -> None:
 
 async def test_an_unknown_run_has_no_record_decisions_or_orders(tmp_path) -> None:
     stack = await open_stack(tmp_path)
-    await stack.manual_buy.execute(analysed_stock())
+    await stack.pipeline.buy_manually(analysed_stock())
     unknown = RunId(uuid4())
 
     assert (

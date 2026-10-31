@@ -2,7 +2,8 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from a_domain.model.indicators.technical_indicators import MovingAverages, TechnicalIndicators
+from a_domain.model.indicators.moving_averages import MovingAverages
+from a_domain.model.indicators.technical_indicators import TechnicalIndicators
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.rules.technical.criteria.base import TechnicalCriterion

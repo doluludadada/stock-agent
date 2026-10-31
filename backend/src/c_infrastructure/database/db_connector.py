@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlmodel import SQLModel
 
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
 
 
 class OutdatedDatabaseError(RuntimeError):
@@ -99,9 +99,9 @@ class DatabaseConnector:
         async with self._session_factory() as session:
             try:
                 yield session
-            except Exception as e:
+            except Exception as error:
                 await session.rollback()
-                self._logger.error(f"Database session rollback due to error: {e}")
+                self._logger.error(f"Database session rollback due to error: {error}")
                 raise
             finally:
                 await session.close()

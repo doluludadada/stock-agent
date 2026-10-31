@@ -1,17 +1,15 @@
 from collections.abc import Sequence
 
-from a_domain.model.indicators.technical_indicators import (
-    Adx,
-    Atr,
-    BollingerBands,
-    Macd,
-    Mfi,
-    MovingAverages,
-    Obv,
-    Rsi,
-    Stochastic,
-    TechnicalIndicators,
-)
+from a_domain.model.indicators.adx import Adx
+from a_domain.model.indicators.atr import Atr
+from a_domain.model.indicators.bollinger_bands import BollingerBands
+from a_domain.model.indicators.macd import Macd
+from a_domain.model.indicators.mfi import Mfi
+from a_domain.model.indicators.moving_averages import MovingAverages
+from a_domain.model.indicators.obv import Obv
+from a_domain.model.indicators.rsi import Rsi
+from a_domain.model.indicators.stochastic import Stochastic
+from a_domain.model.indicators.technical_indicators import TechnicalIndicators
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.rules.technical.calculation.formulas import (
     latest_adx,
@@ -116,9 +114,9 @@ class TechnicalIndicatorCalculator:
         if values is None:
             return None
 
-        k, d = values
+        percent_k, percent_d = values
         indicators = self._indicators
-        return Stochastic(k_period=indicators.stoch_k, d_period=indicators.stoch_d, k=k, d=d)
+        return Stochastic(k_period=indicators.stoch_k, d_period=indicators.stoch_d, percent_k=percent_k, percent_d=percent_d)
 
     def _create_adx(self, values: tuple[float, float, float] | None) -> Adx | None:
         if values is None:

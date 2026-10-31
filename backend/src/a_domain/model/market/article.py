@@ -16,6 +16,6 @@ class Article(SQLModel):
     author: str | None = None  # Author
     content_type: ContentType = Field(default=ContentType.DISCUSSION)  # Type
     published_at: datetime  # Published
-    fetched_at: datetime = Field(default_factory=datetime.now)  # Fetched
+    fetched_at: datetime  # Fetched
     engagement: int = Field(default=0, ge=0)  # Reactions and replies counted by the source platform
     raw_metadata: dict | None = Field(default=None)  # Metadata

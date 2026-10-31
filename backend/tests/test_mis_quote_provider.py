@@ -11,8 +11,11 @@ from trading_stack import SilentLogger
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.types.enums import MarketType
+from b_application.config.sources_config import SourcesConfig
 from c_infrastructure.market.mis_quote_provider import MisQuoteProvider, parse_quotes
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
+
+SOURCES = SourcesConfig()
 
 # getStockInfo.jsp as served on Saturday 2026-10-31 02:40 Taipei, holding the final quotes of the 2026-10-30 session.
 # 2330 (TWSE) and 6488 (TPEX) last traded in the 13:30 closing auction. 1233 (TWSE) and 1240 (TPEX) last traded earlier,
@@ -55,7 +58,7 @@ def channels_requested(monkeypatch) -> list[list[str]]:
 
     def answer(request: httpx.Request) -> httpx.Response:
         query = parse_qs(request.url.query.decode())
-        assert str(request.url).split("?")[0] == MisQuoteProvider.URL
+        assert str(request.url).split("?")[0] == SOURCES.exchange.mis_quotes_url
         assert (query["json"], query["delay"]) == (["1"], ["0"])
         requested.append(query["ex_ch"][0].split("|"))
         return httpx.Response(200, json=SAVED_RESPONSE)
@@ -65,7 +68,7 @@ def channels_requested(monkeypatch) -> list[list[str]]:
 
 
 def provider(request_interval_seconds: float = 0.0) -> MisQuoteProvider:
-    return MisQuoteProvider(SilentLogger(), request_interval_seconds=request_interval_seconds)
+    return MisQuoteProvider(SOURCES.exchange, SilentLogger(), request_interval_seconds=request_interval_seconds)
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,6 @@
 import math
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Literal, Self
 
 from pydantic import model_validator
@@ -9,6 +9,7 @@ from sqlmodel import Field, SQLModel
 from a_domain.rules.trading.cost import TradeCost
 from a_domain.rules.trading.tick import TickRule
 from a_domain.types.enums import OrderStatus, OrderType, RejectReason, TimeInForce, TradeAction
+from a_domain.types.errors import IllegalOrderTransition
 from a_domain.types.ids import DecisionId, OrderId, RunId, new_order_id
 
 ORDER_TRANSITIONS: Mapping[OrderStatus, frozenset[OrderStatus]] = {
@@ -29,10 +30,6 @@ Every legal status change. SUBMITTED -> SUBMITTED is a partial fill that leaves 
 - REJECTED: refused by a business or validation rule before acceptance (gate refused, invalid order, insufficient cash or shares).
 - FAILED: a technical error (exception, broker unreachable), whatever state the order was in.
 """
-
-
-class IllegalOrderTransition(ValueError):
-    pass
 
 
 class Order(SQLModel):
@@ -62,8 +59,8 @@ class Order(SQLModel):
     realized_pnl: float | None = None
     """SELL only: proceeds net of fee and tax minus the cost basis (buy fees included) of the shares sold."""
 
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime
+    updated_at: datetime
 
     @model_validator(mode="after")
     def _price_matches_order_type(self) -> Self:
@@ -79,11 +76,11 @@ class Order(SQLModel):
     def remaining_quantity(self) -> int:
         return self.quantity - self.filled_quantity
 
-    def submit(self) -> None:
+    def submit(self, *, now: datetime) -> None:
         """The broker accepted the order."""
-        self._move_to(OrderStatus.SUBMITTED)
+        self._move_to(OrderStatus.SUBMITTED, now)
 
-    def fill(self, quantity: int, price: float, cost: TradeCost, realized_pnl: float | None = None) -> None:
+    def fill(self, quantity: int, price: float, cost: TradeCost, realized_pnl: float | None = None, *, now: datetime) -> None:
         """Records one execution. The order becomes FILLED when nothing remains, otherwise it keeps working."""
         self._check_move(OrderStatus.FILLED)
 
@@ -103,7 +100,7 @@ class Order(SQLModel):
             raise ValueError("SELL fill price cannot be below limit_price")
 
         filled_quantity = self.filled_quantity + quantity
-        self._move_to(OrderStatus.FILLED if filled_quantity == self.quantity else OrderStatus.SUBMITTED)
+        self._move_to(OrderStatus.FILLED if filled_quantity == self.quantity else OrderStatus.SUBMITTED, now)
 
         self.average_filled_price = ((self.average_filled_price or 0) * self.filled_quantity + price * quantity) / filled_quantity
         self.filled_quantity = filled_quantity
@@ -113,20 +110,20 @@ class Order(SQLModel):
         if realized_pnl is not None:
             self.realized_pnl = (self.realized_pnl or 0) + realized_pnl
 
-    def cancel(self, reason: str) -> None:
-        self._move_to(OrderStatus.CANCELLED, reason)
+    def cancel(self, reason: str, *, now: datetime) -> None:
+        self._move_to(OrderStatus.CANCELLED, now, reason)
 
-    def reject(self, reason: RejectReason, detail: str) -> None:
-        self._move_to(OrderStatus.REJECTED, f"{reason.name}: {detail}")
+    def reject(self, reason: RejectReason, detail: str, *, now: datetime) -> None:
+        self._move_to(OrderStatus.REJECTED, now, f"{reason.name}: {detail}")
 
-    def fail(self, reason: str) -> None:
-        self._move_to(OrderStatus.FAILED, reason)
+    def fail(self, reason: str, *, now: datetime) -> None:
+        self._move_to(OrderStatus.FAILED, now, reason)
 
     def _check_move(self, status: OrderStatus) -> None:
         if status not in ORDER_TRANSITIONS[self.status]:
             raise IllegalOrderTransition(f"Cannot move order from {self.status} to {status}")
 
-    def _move_to(self, status: OrderStatus, reason: str | None = None) -> None:
+    def _move_to(self, status: OrderStatus, now: datetime, reason: str | None = None) -> None:
         self._check_move(status)
 
         if status in {OrderStatus.CANCELLED, OrderStatus.REJECTED, OrderStatus.FAILED} and not (reason and reason.strip()):
@@ -134,4 +131,4 @@ class Order(SQLModel):
 
         self.status = status
         self.reason = reason
-        self.updated_at = datetime.now(UTC)
+        self.updated_at = now

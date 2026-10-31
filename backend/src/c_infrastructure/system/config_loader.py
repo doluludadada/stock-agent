@@ -4,7 +4,7 @@ from pathlib import Path
 
 import yaml
 
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
 
 
 def load_settings() -> AppConfig:

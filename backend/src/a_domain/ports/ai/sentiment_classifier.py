@@ -1,6 +1,6 @@
 from typing import Protocol
 
-from a_domain.model.analysis.social_sentiment import SentimentClassification
+from a_domain.model.analysis.sentiment_classification import SentimentClassification
 from a_domain.model.market.article import Article
 
 

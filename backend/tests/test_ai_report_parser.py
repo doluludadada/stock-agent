@@ -1,14 +1,16 @@
 from pathlib import Path
 
 import pytest
-from trading_stack import run_status
+from trading_stack import MONDAY_10_00, MovableClock, run_status
 
 from a_domain.model.analysis.technical_report import TechnicalReport
 from a_domain.model.chat.message import Message
 from a_domain.model.market.stock import Stock
-from a_domain.rules.ai.parser import AiReportParseError, parse_ai_report
+from a_domain.rules.ai.parser import parse_ai_report
 from a_domain.types.enums import AiAnalysisFocus, MessageRole, Workflow
-from b_application.schemas.config import AppConfig, PromptsConfig
+from a_domain.types.errors import AiReportParseError
+from b_application.config.ai_config import PromptsConfig
+from b_application.config.app_config import AppConfig
 from b_application.schemas.pipeline_status import PipelineStatus
 from b_application.use_cases.process.ai_analyser import AiAnalyser
 from b_application.use_cases.process.composite_scorer import CompositeScorer
@@ -24,7 +26,7 @@ class ScriptedAiProvider:
         self._reply = reply
 
     async def generate_reply(self, messages: tuple[Message, ...]) -> Message:
-        return Message(role=MessageRole.ASSISTANT, content=self._reply)
+        return Message(role=MessageRole.ASSISTANT, content=self._reply, timestamp=messages[-1].timestamp)
 
     def save_response(self, stock_id: str, content: str) -> None:
         return None
@@ -47,7 +49,11 @@ async def analyse_and_score(reply: str) -> tuple[Stock, PipelineStatus]:
     status = run_status(Workflow.SPECIFIC_STOCKS)
     config = make_config()
     analyser = AiAnalyser(
-        ai_provider=ScriptedAiProvider(reply), knowledge_repository=NoHistory(), config=config, logger=SilentLogger()
+        ai_provider=ScriptedAiProvider(reply),
+        knowledge_repository=NoHistory(),
+        config=config,
+        logger=SilentLogger(),
+        market_clock=MovableClock(MONDAY_10_00),
     )
 
     await analyser.execute([stock], status, AiAnalysisFocus.FUNDAMENTAL)

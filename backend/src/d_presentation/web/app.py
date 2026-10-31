@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 
-from d_presentation.container import Runtime
+from d_presentation.dependencies import Runtime
 from d_presentation.web.routers.api_v1 import router as api_v1_router
 from d_presentation.web.workflow_runs import WorkflowRuns
 
@@ -51,7 +51,7 @@ def create_app(open_runtime: Callable[[], AbstractAsyncContextManager[Runtime]])
 
     @app.get("/ui/settings", include_in_schema=False)
     async def settings_page() -> FileResponse:
-        """US-303: edits the indicator parameters through PUT /v1/technical-settings, which validates them."""
+        """The technical settings page: it edits the indicator parameters through PUT /v1/technical-settings, which validates them."""
         return FileResponse(SETTINGS_PAGE, media_type="text/html")
 
     return app

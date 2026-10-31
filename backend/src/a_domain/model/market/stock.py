@@ -4,11 +4,12 @@ from sqlmodel import Field, SQLModel
 
 from a_domain.model.analysis.ai_analysis_report import AiAnalysisReport
 from a_domain.model.analysis.technical_report import TechnicalReport
-from a_domain.model.fundamentals.eps import Eps, EpsUnavailable, EpsUnavailableReason
+from a_domain.model.fundamentals.eps import Eps
+from a_domain.model.fundamentals.eps_unavailable import EpsUnavailable
 from a_domain.model.indicators.technical_indicators import TechnicalIndicators
 from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
-from a_domain.types.enums import MarketType, WatchlistType
+from a_domain.types.enums import EpsUnavailableReason, MarketType, WatchlistType
 
 
 class Stock(SQLModel):

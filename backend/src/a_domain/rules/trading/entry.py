@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 
 from icontract import ensure, invariant, require
 
@@ -29,7 +30,7 @@ class EntryRule:
     @require(lambda stock: stock.current_price is not None, "Entry decision requires a valid current price")
     @ensure(lambda result: result.quantity >= 0, "BUY signal quantity must be non-negative")
     @ensure(lambda result: result.action != TradeAction.BUY or result.quantity > 0, "BUY signal must have positive quantity")
-    def decide(self, stock: Stock, account: Account, position: Position | None = None) -> TradeSignal:
+    def decide(self, stock: Stock, account: Account, position: Position | None = None, *, now: datetime) -> TradeSignal:
         current_price = stock.current_price
         composite_score = stock.composite_score
 
@@ -59,12 +60,13 @@ class EntryRule:
             score=composite_score,
             reason=reason,
             quantity=quantity,
+            now=now,
         )
 
     @require(lambda stock: stock.current_price is not None, "Manual BUY requires a current price")
     @require(lambda stock: stock.composite_score is not None, "Manual BUY requires a composite score")
     @ensure(lambda result: result.source == SignalSource.MANUAL)
-    def decide_manual(self, stock: Stock, account: Account) -> TradeSignal:
+    def decide_manual(self, stock: Stock, account: Account, *, now: datetime) -> TradeSignal:
         """The user's BUY: skips the buy threshold, never the sizing."""
         current_price = stock.current_price
         composite_score = stock.composite_score
@@ -88,4 +90,5 @@ class EntryRule:
             score=composite_score,
             reason=reason,
             quantity=quantity,
+            now=now,
         )

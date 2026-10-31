@@ -10,10 +10,11 @@ import pytest
 from support.harness import CliHarness, build_harness, falling_history, harness_settings, rising_history
 
 from a_domain.types.enums import ExecutionProvider, SystemEnvironment, TradeAction, WatchlistType
-from b_application.schemas.config import ApiConfig, AppConfig
+from b_application.config.api_config import ApiConfig
+from b_application.config.app_config import AppConfig
 from c_infrastructure.technical.technical_settings_schema import TechnicalSettingsSchema
-from d_presentation import container
-from d_presentation.container import TradingSetupError, open_runtime
+from d_presentation import dependencies
+from d_presentation.dependencies import TradingSetupError, open_runtime
 from d_presentation.web.app import create_app
 
 pytestmark = pytest.mark.asyncio
@@ -447,7 +448,7 @@ async def test_the_api_refuses_to_start_on_the_trading_setups_the_cli_refuses(mo
     unsafe = AppConfig(project_root=Path("."))
     unsafe.environment = SystemEnvironment.DEV
     unsafe.trading.execution_provider = ExecutionProvider.SHIOAJI
-    monkeypatch.setattr(container, "load_settings", lambda: unsafe)
+    monkeypatch.setattr(dependencies, "load_settings", lambda: unsafe)
     app = create_app(open_runtime)
 
     with pytest.raises(TradingSetupError, match="DEV environment requires MockExecutionProvider"):

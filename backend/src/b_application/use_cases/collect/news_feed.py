@@ -2,7 +2,7 @@ from a_domain.model.market.stock import Stock
 from a_domain.ports.market.news_provider import INewsProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.rules.collect import ArticleQualityRule
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
 from b_application.schemas.pipeline_status import PipelineStatus
 
 

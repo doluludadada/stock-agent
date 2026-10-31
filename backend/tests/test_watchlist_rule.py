@@ -8,9 +8,10 @@ from pydantic import ValidationError
 from support.harness import build_harness, falling_history, rising_history
 
 from a_domain.model.market.stock import Stock
-from a_domain.model.trading.watchlist import StockWatchlist
+from a_domain.model.trading.stock_watchlist import StockWatchlist
 from a_domain.types.enums import WatchlistType
-from b_application.schemas.config import AppConfig, WatchlistConfig
+from b_application.config.app_config import AppConfig
+from b_application.config.trading_config import WatchlistConfig
 from b_application.use_cases.trade.watch_stocks import WatchStocks
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.repositories.watchlist_repository import WatchlistRepository

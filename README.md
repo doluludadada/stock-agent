@@ -150,9 +150,9 @@ The code follows the existing Clean Architecture split:
 | Layer | Path | Responsibility |
 | --- | --- | --- |
 | Domain | `backend/src/a_domain` | Models, ports, enums, pure rules. No application, infrastructure, or presentation imports. |
-| Application | `backend/src/b_application` | Use cases, workflow orchestration, pipeline context, config schemas, factories. |
+| Application | `backend/src/b_application` | Use cases, the one `Pipeline` with every workflow, the pipeline status, and the settings classes in `b_application/config/`. |
 | Infrastructure | `backend/src/c_infrastructure` | Database, market data, AI adapters, feed providers, LINE platform, mock trading. |
-| Presentation | `backend/src/d_presentation` | CLI, Web API, the one composition root both use (`container.py`), desktop entry points. |
+| Presentation | `backend/src/d_presentation` | CLI, Web API, the one composition root both use (`dependencies.py`). |
 
 Application use cases coordinate work. Domain rules own business decisions. Infrastructure implements ports.
 
@@ -162,7 +162,7 @@ Main files:
 
 | File | Purpose |
 | --- | --- |
-| `config/appsetting.yaml` | Active model, logging, analysis weights, thresholds, folders, mock account, indicator periods. |
+| `config/appsetting.yaml` | Active model, logging, analysis weights, thresholds, folders, mock account, indicator periods, and under `sources` every outside endpoint (TWSE, TPEX, MOPS, PTT, news, AI, LINE) with the text formats their pages use. The settings classes are in `backend/src/b_application/config/`. |
 | `config/strategies.yaml` | Technical screening thresholds for `conservative`, `moderate`, `aggressive`, `buzz`, and `nightly`. |
 | `config/instructions.yaml` | AI report prompts and RAG injection prompts. |
 | `.env` | API keys, optional database credentials and the Shioaji credentials. |
@@ -235,7 +235,7 @@ docker compose up --build
 
 ## Web API
 
-The API runs on the same runtime as the CLI: `backend/src/d_presentation/container.py` builds it once at startup, with the same trading-setup checks, so the API refuses to start on any setup the CLI refuses. The OpenAPI page is at `/docs`.
+The API runs on the same runtime as the CLI: `backend/src/d_presentation/dependencies.py` builds it once at startup, with the same trading-setup checks, so the API refuses to start on any setup the CLI refuses. The OpenAPI page is at `/docs`.
 
 No endpoint places, cancels or modifies an order. The API starts only Full Cycle and specific-stock analysis, which never reach order execution, and it has no manual BUY.
 

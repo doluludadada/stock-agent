@@ -1,11 +1,9 @@
 import json
 
 from a_domain.model.analysis.ai_analysis_report import AiAnalysisReport
-from a_domain.model.valuation.valuation import ValuationExplanation, ValuationReport
-
-
-class AiReportParseError(ValueError):
-    """The model response holds no usable report, so the stock gets no AI score."""
+from a_domain.model.valuation.valuation_explanation import ValuationExplanation
+from a_domain.model.valuation.valuation_report import ValuationReport
+from a_domain.types.errors import AiReportParseError
 
 
 def parse_ai_report(raw_response: str) -> AiAnalysisReport:

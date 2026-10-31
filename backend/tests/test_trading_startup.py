@@ -10,12 +10,13 @@ from trading_stack import SilentLogger
 
 import c_infrastructure.trading.shioaji.execution_provider as shioaji_adapter
 from a_domain.types.enums import ExecutionProvider, OrderMode, SystemEnvironment
-from b_application.schemas.config import AppConfig, ShioajiConfig, TradingConfig
+from b_application.config.app_config import AppConfig
+from b_application.config.trading_config import ShioajiConfig, TradingConfig
 from c_infrastructure.system.config_loader import load_settings
 from c_infrastructure.trading.mock.mock_execution_provider import MockExecutionProvider
 from c_infrastructure.trading.shioaji.execution_provider import ShioajiExecutionProvider
 from d_presentation.cli import interactive
-from d_presentation.container import TradingSetupError, create_execution_provider, validate_trading_environment
+from d_presentation.dependencies import TradingSetupError, create_execution_provider, validate_trading_environment
 
 pytestmark = pytest.mark.asyncio
 
@@ -33,7 +34,7 @@ STARTS = {
     (LIVE, SHIOAJI, OrderMode.DISABLED),
     (LIVE, SHIOAJI, OrderMode.LIVE),
 }
-"""US-009 and US-301: DEV never touches a real broker, mock_only needs the mock, live needs environment live and Shioaji."""
+"""DEV never touches a real broker, mock_only needs the mock, live needs environment live and Shioaji."""
 
 ALL_CREDENTIALS = {
     "SHIOAJI_API_KEY": "key",

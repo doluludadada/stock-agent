@@ -17,18 +17,16 @@ from pathlib import Path
 import pytest
 
 from a_domain.model.analysis.technical_settings import TechnicalSettings
-from a_domain.model.indicators.technical_indicators import (
-    Adx,
-    Atr,
-    BollingerBands,
-    Macd,
-    Mfi,
-    MovingAverages,
-    Obv,
-    Rsi,
-    Stochastic,
-    TechnicalIndicators,
-)
+from a_domain.model.indicators.adx import Adx
+from a_domain.model.indicators.atr import Atr
+from a_domain.model.indicators.bollinger_bands import BollingerBands
+from a_domain.model.indicators.macd import Macd
+from a_domain.model.indicators.mfi import Mfi
+from a_domain.model.indicators.moving_averages import MovingAverages
+from a_domain.model.indicators.obv import Obv
+from a_domain.model.indicators.rsi import Rsi
+from a_domain.model.indicators.stochastic import Stochastic
+from a_domain.model.indicators.technical_indicators import TechnicalIndicators
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.rules.technical.calculation.parameters import IndicatorParameters
@@ -347,7 +345,7 @@ def make_stock(
             bollinger=BollingerBands(
                 period=20, std=2.0, upper=ma20 * 1.1, middle=ma20, lower=ma20 * 0.9, bandwidth=0.2, percent_b=percent_b
             ),
-            stochastic=Stochastic(k_period=9, d_period=3, k=stochastic_k, d=stochastic_d),
+            stochastic=Stochastic(k_period=9, d_period=3, percent_k=stochastic_k, percent_d=stochastic_d),
             adx=Adx(period=14, adx=25, plus_di=30, minus_di=15),
             atr=Atr(period=14, value=price * 0.03, percent=0.03),
             obv=Obv(ma_period=20, value=5000, moving_average=4000),

@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlmodel import Field, SQLModel
 
@@ -19,7 +19,7 @@ class SystemStats(SQLModel):
     workflow: Workflow
     execution_provider: ExecutionProvider
     order_mode: OrderMode
-    start_time: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    start_time: datetime
     end_time: datetime | None = None
 
     total_scanned: int = 0
@@ -27,8 +27,6 @@ class SystemStats(SQLModel):
     buzz_scanned: int = 0
     buzz_qualified: int = 0
 
-    news_scanned: int = 0
-    total_skipped: int = 0
     passed_technical: int = 0
     ai_analysed: int = 0
     signals_generated: int = 0
@@ -40,19 +38,14 @@ class SystemStats(SQLModel):
     execution_log: list[str] = Field(default_factory=list)
 
     @property
-    def duration_seconds(self) -> float:
-        end = self.end_time or datetime.now(UTC)
-        return (end - self.start_time).total_seconds()
-
-    @property
     def total_errors(self) -> int:
         return len(self.errors)
 
-    def finish(self) -> None:
-        self.end_time = datetime.now(UTC)
+    def finish(self, *, now: datetime) -> None:
+        self.end_time = now
 
-    def log(self, message: str) -> None:
-        self.execution_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
+    def log(self, message: str, *, now: datetime) -> None:
+        self.execution_log.append(f"[{now:%H:%M:%S}] {message}")
 
     def add_error(self, error: str) -> None:
         self.errors.append(error)

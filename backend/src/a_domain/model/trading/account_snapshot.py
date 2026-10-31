@@ -7,20 +7,8 @@ from sqlmodel import Field, SQLModel
 
 from a_domain.model.trading.account import Account
 from a_domain.model.trading.order import Order
+from a_domain.model.trading.position_snapshot import PositionSnapshot
 from a_domain.types.ids import OrderId, RunId
-
-
-class PositionSnapshot(SQLModel):
-    """One position at snapshot time, marked at the latest price the run knew for it."""
-
-    stock_id: str
-    quantity: int = Field(gt=0)
-    average_cost: float = Field(gt=0)
-    mark_price: float = Field(gt=0)
-
-    @property
-    def market_value(self) -> float:
-        return self.quantity * self.mark_price
 
 
 class AccountSnapshot(SQLModel):

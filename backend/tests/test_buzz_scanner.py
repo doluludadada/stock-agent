@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -8,11 +8,15 @@ from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.types.enums import InformationSource, Workflow
-from b_application.schemas.config import AppConfig, CollectRulesConfig
+from b_application.config.app_config import AppConfig
+from b_application.config.collect_config import CollectRulesConfig
+from b_application.config.sources_config import SourcesConfig
 from b_application.schemas.pipeline_status import PipelineStatus
 from b_application.use_cases.collect.buzz_scanner import BuzzScanner
 from c_infrastructure.feed.ptt_provider import PttListing, PttParser
 from c_infrastructure.market.twse_provider import TaiwanStockProvider
+
+SOURCES = SourcesConfig()
 
 
 class SilentLogger:
@@ -37,7 +41,8 @@ def make_post(stock_id: str, engagement: int = 0) -> Article:
         source=InformationSource.PTT_STOCK,
         title=f"[標的] {stock_id}",
         content="discussion",
-        published_at=datetime(2026, 10, 30),
+        published_at=datetime(2026, 10, 30, tzinfo=UTC),
+        fetched_at=datetime(2026, 10, 30, tzinfo=UTC),
         engagement=engagement,
     )
 
@@ -49,7 +54,7 @@ def make_config(min_mentions: int, min_engagement: int) -> AppConfig:
 
 
 async def make_stock_provider(monkeypatch: pytest.MonkeyPatch, stock_ids: list[str]) -> TaiwanStockProvider:
-    provider = TaiwanStockProvider(logger=SilentLogger())
+    provider = TaiwanStockProvider(exchange=SOURCES.exchange, logger=SilentLogger())
 
     async def fetch_from_api() -> tuple[list[Stock], dict[str, Ohlcv]]:
         return [Stock(stock_id=stock_id) for stock_id in stock_ids], {}
@@ -122,7 +127,7 @@ def test_ptt_post_engagement_counts_every_push_boo_and_arrow() -> None:
       <div class="push"><span class="push-tag">→ </span><span>u4</span></div>
     </div>
     """
-    parser = PttParser(base_url="https://www.ptt.cc", max_body_length=3000)
+    parser = PttParser(SOURCES.ptt, max_body_length=3000)
     listing = PttListing(title="[標的] 2330 台積電 多", url="https://www.ptt.cc/bbs/Stock/M.1.html", published_date=date(2026, 10, 30))
 
     article = parser.parse_article(html, listing, stock_universe={"2330"})

@@ -7,7 +7,7 @@ from openai.types.chat import ChatCompletionAssistantMessageParam, ChatCompletio
 
 from a_domain.model.chat.message import Message, MessageRole
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
 from c_infrastructure.ai_models.base import BaseAIAdapter
 
 
@@ -35,8 +35,8 @@ class OpenAIAdapter(BaseAIAdapter):
                 full_content += content_delta
 
             return full_content
-        except OpenAIError as e:
-            self._logger.error(f"OpenAI API error for model {self._model_name}: {e}")
+        except OpenAIError as error:
+            self._logger.error(f"OpenAI API error for model {self._model_name}: {error}")
             return "I'm sorry, I'm having trouble connecting to OpenAI right now. Please try again in a moment."
 
     def _convert_to_api_format(

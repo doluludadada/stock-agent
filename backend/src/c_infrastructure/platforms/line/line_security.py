@@ -2,18 +2,17 @@ import base64
 import hashlib
 import hmac
 
-from icontract import require
-
 from a_domain.ports.system.logging_provider import ILoggingProvider
 
 
 class LineSecurityService:
     """Handles LINE webhook signature validation."""
 
-    @require(lambda channel_secret: bool(channel_secret), "LINE channel secret is required for security validation.")
     def __init__(self, channel_secret: str | None, logger: ILoggingProvider):
-        # We can safely type ignore here because we required it to be truthy
-        self._channel_secret_bytes = channel_secret.encode("utf-8")  # type: ignore
+        if not channel_secret:
+            raise ValueError("LINE channel secret is required for security validation.")
+
+        self._channel_secret_bytes = channel_secret.encode("utf-8")
         self._logger = logger
 
     def verify_signature(self, request_body: bytes, signature: str | None) -> bool:
@@ -30,6 +29,6 @@ class LineSecurityService:
             else:
                 self._logger.warning(f"Invalid signature. Expected: {expected_signature}, Got: {signature}")
                 return False
-        except Exception as e:
-            self._logger.error(f"An exception occurred during signature validation: {e}")
+        except Exception as error:
+            self._logger.error(f"An exception occurred during signature validation: {error}")
             return False

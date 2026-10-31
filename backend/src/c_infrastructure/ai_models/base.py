@@ -1,10 +1,10 @@
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import UTC, datetime
 
 from a_domain.model.chat.message import Message, MessageRole
 from a_domain.ports.ai.ai_provider import IAiProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
 
 
 class BaseAIAdapter(IAiProvider, ABC):
@@ -27,7 +27,7 @@ class BaseAIAdapter(IAiProvider, ABC):
 
         reply_content = await self._call_api(messages)
         self._logger.success(f"[{self.__class__.__name__}] Successfully received reply from model: {self._model_name}")
-        return Message(role=MessageRole.ASSISTANT, content=reply_content)
+        return Message(role=MessageRole.ASSISTANT, content=reply_content, timestamp=datetime.now(UTC))
 
     def save_response(self, stock_id: str, content: str) -> None:
         """Saves the raw AI response to the filesystem for inspection."""
@@ -40,9 +40,9 @@ class BaseAIAdapter(IAiProvider, ABC):
             filename = f"report_{timestamp}.md"
             file_path = stock_dir / filename
 
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write(content)
+            with open(file_path, "w", encoding="utf-8") as file:
+                file.write(content)
 
             self._logger.debug(f"[{self.__class__.__name__}] Saved AI response for {stock_id} to {file_path}")
-        except Exception as e:
-            self._logger.error(f"[{self.__class__.__name__}] Failed to save AI response for {stock_id}: {e}")
+        except Exception as error:
+            self._logger.error(f"[{self.__class__.__name__}] Failed to save AI response for {stock_id}: {error}")

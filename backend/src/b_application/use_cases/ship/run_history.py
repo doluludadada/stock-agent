@@ -3,10 +3,11 @@ from contextlib import asynccontextmanager
 
 from a_domain.model.system.stats import SystemStats
 from a_domain.ports.system.logging_provider import ILoggingProvider
+from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.trading_journal import ITradingJournal
 from a_domain.types.enums import Workflow
 from a_domain.types.ids import RunId, new_run_id
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
 from b_application.schemas.pipeline_status import PipelineStatus
 
 
@@ -20,8 +21,9 @@ class RunHistory:
     A caller that must name the run before it starts (the Web API answers with the run id at once) passes that id.
     """
 
-    def __init__(self, journal: ITradingJournal, config: AppConfig, logger: ILoggingProvider) -> None:
+    def __init__(self, journal: ITradingJournal, market_clock: IMarketClock, config: AppConfig, logger: ILoggingProvider) -> None:
         self._journal = journal
+        self._market_clock = market_clock
         self._config = config
         self._logger = logger
 
@@ -32,6 +34,7 @@ class RunHistory:
             workflow=workflow,
             execution_provider=self._config.trading.execution_provider,
             order_mode=self._config.trading.order_mode,
+            start_time=self._market_clock.now(),
         )
         await self._save(stats)
 
@@ -43,7 +46,7 @@ class RunHistory:
             raise
 
         finally:
-            stats.finish()
+            stats.finish(now=self._market_clock.now())
             await self._save(stats)
 
     async def _save(self, stats: SystemStats) -> None:

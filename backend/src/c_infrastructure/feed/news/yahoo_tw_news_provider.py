@@ -8,10 +8,12 @@ from bs4 import BeautifulSoup
 from a_domain.model.market.article import Article
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.types.enums import ContentType, InformationSource
+from b_application.config.sources_config import NewsSources
 
 
 class YahooTwNewsProvider:
-    def __init__(self, logger: ILoggingProvider):
+    def __init__(self, news: NewsSources, logger: ILoggingProvider):
+        self._news = news
         self._logger = logger
         self._headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"  # noqa: E501
@@ -32,14 +34,14 @@ class YahooTwNewsProvider:
 
             # Fallback if caas-body is missing
             paragraphs = soup.find_all("p")
-            return "\n".join([p.get_text(strip=True) for p in paragraphs if len(p.get_text(strip=True)) > 20])
-        except Exception as e:
-            self._logger.debug(f"Failed to fetch Yahoo body for {url}: {e}")
+            return "\n".join([paragraph.get_text(strip=True) for paragraph in paragraphs if len(paragraph.get_text(strip=True)) > 20])
+        except Exception as error:
+            self._logger.debug(f"Failed to fetch Yahoo body for {url}: {error}")
             return ""
 
     async def fetch_news(self, stock_id: str, limit: int) -> list[Article]:
         self._logger.debug(f"Fetching Yahoo TW News for {stock_id}...")
-        url = f"https://tw.stock.yahoo.com/quote/{stock_id}/news"
+        url = f"{self._news.yahoo_quote_url}{stock_id}/news"
 
         async with httpx.AsyncClient(timeout=15.0, headers=self._headers, follow_redirects=True, verify=False) as client:
             try:
@@ -75,7 +77,7 @@ class YahooTwNewsProvider:
                     if not title or len(title) < 5:
                         continue
 
-                    full_url = href_str if href_str.startswith("http") else f"https://tw.stock.yahoo.com{href_str}"
+                    full_url = href_str if href_str.startswith("http") else f"{self._news.yahoo_base_url}{href_str}"
                     pending_articles.append({"title": title, "url": full_url})
 
                 # 3. Concurrently fetch the article bodies
@@ -104,6 +106,6 @@ class YahooTwNewsProvider:
                 self._logger.info(f"Successfully scraped {len(articles)} articles with content for {stock_id} from Yahoo.")
                 return articles
 
-            except Exception as e:
-                self._logger.error(f"Unexpected error parsing Yahoo News for {stock_id}: {e}")
+            except Exception as error:
+                self._logger.error(f"Unexpected error parsing Yahoo News for {stock_id}: {error}")
                 return []

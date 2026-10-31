@@ -3,7 +3,7 @@
 from a_domain.model.market.stock import Stock
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.rules.scoring.composite import CompositeScoreRule
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
 
 
 class CompositeScorer:

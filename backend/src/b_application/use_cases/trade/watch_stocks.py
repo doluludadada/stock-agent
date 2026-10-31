@@ -1,11 +1,11 @@
 from a_domain.model.market.stock import Stock
-from a_domain.model.trading.watchlist import WatchlistAddition
+from a_domain.model.trading.watchlist_addition import WatchlistAddition
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
 from a_domain.rules.watchlist import WatchlistRule
 from a_domain.types.enums import WatchlistType
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
 
 
 class WatchStocks:

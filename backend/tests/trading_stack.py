@@ -2,6 +2,18 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from support.fakes import (
+    FakeAiProvider,
+    FakeConversationRepository,
+    FakeFundamentalsProvider,
+    FakeNewsProvider,
+    FakeSentimentClassifier,
+    FakeSocialMediaProvider,
+    FakeTechnicalSettingsRepository,
+    FakeWatchlistRepository,
+)
+from support.harness import harness_config, harness_settings
+
 from a_domain.model.analysis.ai_analysis_report import AiAnalysisReport
 from a_domain.model.analysis.technical_report import TechnicalReport
 from a_domain.model.market.ohlcv import Ohlcv
@@ -9,19 +21,17 @@ from a_domain.model.market.stock import Stock
 from a_domain.model.system.stats import SystemStats
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.types.enums import ExecutionProvider, OrderMode, Workflow
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
+from b_application.pipeline import Pipeline
 from b_application.schemas.pipeline_status import PipelineStatus
-from b_application.use_cases.collect.market_data_collector import MarketDataCollector
-from b_application.use_cases.ship.decision_memory import DecisionMemory
 from b_application.use_cases.ship.run_history import RunHistory
 from b_application.use_cases.trade.account_history import AccountHistory
-from b_application.use_cases.trade.account_loader import AccountLoader
-from b_application.use_cases.trade.manual_buy import ManualBuy
 from b_application.use_cases.trade.order_execution import OrderExecution
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.repositories.trading_journal import TradingJournal
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
 from c_infrastructure.trading.mock.mock_execution_provider import MockExecutionProvider
+from d_presentation.dependencies import ProviderDependencies, compose_runtime
 
 MONDAY_10_00 = datetime(2026, 10, 19, 10, 0, tzinfo=TAIWAN_TIMEZONE)
 
@@ -35,7 +45,9 @@ class SilentLogger:
 
 def run_status(workflow: Workflow = Workflow.INTRADAY) -> PipelineStatus:
     return PipelineStatus(
-        stats=SystemStats(workflow=workflow, execution_provider=ExecutionProvider.MOCK, order_mode=OrderMode.MOCK_ONLY)
+        stats=SystemStats(
+            workflow=workflow, execution_provider=ExecutionProvider.MOCK, order_mode=OrderMode.MOCK_ONLY, start_time=MONDAY_10_00
+        )
     )
 
 
@@ -94,7 +106,7 @@ def analysed_stock(stock_id: str = "2330", composite_score: int | None = 90) -> 
 
 @dataclass
 class TradingStack:
-    """The real manual-BUY path on a real SQLite file: ManualBuy, OrderExecution, the mock broker and the journal."""
+    """The real runtime on a real SQLite file: the manual-BUY workflow, OrderExecution, the mock broker and the journal."""
 
     config: AppConfig
     db: DatabaseConnector
@@ -102,14 +114,14 @@ class TradingStack:
     quotes: QuoteFeed
     journal: TradingJournal
     broker: MockExecutionProvider
+    pipeline: Pipeline
     run_history: RunHistory
     order_execution: OrderExecution
-    manual_buy: ManualBuy
     account_history: AccountHistory
 
 
 async def open_stack(tmp_path: Path, configure=lambda config: None, journal: TradingJournal | None = None) -> TradingStack:
-    config = AppConfig(project_root=tmp_path)
+    config = AppConfig(project_root=tmp_path, prompts=harness_config().prompts)
     configure(config)
     logger = SilentLogger()
     db = DatabaseConnector(config=config, logger=logger)
@@ -121,32 +133,35 @@ async def open_stack(tmp_path: Path, configure=lambda config: None, journal: Tra
     broker = MockExecutionProvider(db=db, config=config, logger=logger)
     stocks = StockDirectory()
 
-    run_history = RunHistory(journal=journal, config=config, logger=logger)
-    account_loader = AccountLoader(
-        execution_provider=broker, stock_provider=stocks, journal=journal, market_clock=clock, logger=logger
-    )
-    collector = MarketDataCollector(ohlcv_provider=quotes, market_clock=clock, config=config, logger=logger)
-    order_execution = OrderExecution(
-        execution_provider=broker, journal=journal, account_loader=account_loader, market_clock=clock, config=config, logger=logger
-    )
-    manual_buy = ManualBuy(
-        run_history=run_history,
-        account_loader=account_loader,
-        market_data_collector=collector,
-        journal=journal,
-        decision_memory=DecisionMemory(knowledge_repository=ForgetfulKnowledge(), logger=logger),
-        order_execution=order_execution,
-        config=config,
-        logger=logger,
-    )
-    account_history = AccountHistory(
-        execution_provider=broker,
-        journal=journal,
+    dependencies = ProviderDependencies(
         stock_provider=stocks,
-        ohlcv_provider=quotes,
-        market_clock=clock,
-        config=config,
-        logger=logger,
+        price_provider=quotes,
+        fundamentals_provider=FakeFundamentalsProvider(),
+        news_provider=FakeNewsProvider(),
+        social_media_provider=FakeSocialMediaProvider(),
+        ai_provider=FakeAiProvider(),
+        sentiment_classifier=FakeSentimentClassifier(),
+        knowledge_repository=ForgetfulKnowledge(),
+        conversation_repository=FakeConversationRepository(),
+        journal=journal,
+        watchlist_repository=FakeWatchlistRepository(clock),
+        technical_settings_repository=FakeTechnicalSettingsRepository(harness_settings()),
+        execution_provider=broker,
+        notification_provider=None,
+        platform_provider=None,
     )
+    runtime = compose_runtime(config, logger, clock, dependencies)
+    trading = runtime.pipeline.trading
 
-    return TradingStack(config, db, clock, quotes, journal, broker, run_history, order_execution, manual_buy, account_history)
+    return TradingStack(
+        config,
+        db,
+        clock,
+        quotes,
+        journal,
+        broker,
+        runtime.pipeline,
+        trading.run_history,
+        trading.order_execution,
+        runtime.account_history,
+    )

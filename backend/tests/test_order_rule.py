@@ -34,7 +34,7 @@ def signal_at(quoted_at: datetime, price: float = 100, action: TradeAction = Tra
         realtime_bar=Ohlcv(ts=quoted_at, open=price, high=price, low=price, close=price, volume=10),
         composite_score=90,
     )
-    return TradeSignal.of(stock, action=action, source=SignalSource.COMBINED, score=90, reason="test", quantity=1000)
+    return TradeSignal.of(stock, action=action, source=SignalSource.COMBINED, score=90, reason="test", quantity=1000, now=quoted_at)
 
 
 def buy_signal(quoted_at: datetime) -> TradeSignal:
@@ -95,7 +95,7 @@ def test_an_order_priced_from_a_float32_quote_takes_an_exchange_fill_at_that_pri
 ) -> None:
     order = RULE.order_for(signal_at(NOW, yahoo_quote, action), new_run_id(), now=NOW, phase=TradingPhase.CONTINUOUS)
 
-    order.submit()
-    order.fill(1000, exchange_price, COSTS.cost_of(action, "2330", exchange_price, 1000))
+    order.submit(now=NOW)
+    order.fill(1000, exchange_price, COSTS.cost_of(action, "2330", exchange_price, 1000), now=NOW)
 
     assert (order.status, repr(order.limit_price)) == (OrderStatus.FILLED, repr(exchange_price))

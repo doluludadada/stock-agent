@@ -1,9 +1,10 @@
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.ports.system.logging_provider import ILoggingProvider
+from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.trading_journal import ITradingJournal
 from a_domain.types.enums import TradeAction
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
 from b_application.schemas.pipeline_status import PipelineStatus
 
 
@@ -18,8 +19,9 @@ class AccountRiskCheck:
     It does not fetch market data or run score-based trading decisions.
     """
 
-    def __init__(self, journal: ITradingJournal, config: AppConfig, logger: ILoggingProvider) -> None:
+    def __init__(self, journal: ITradingJournal, market_clock: IMarketClock, config: AppConfig, logger: ILoggingProvider) -> None:
         self._journal = journal
+        self._market_clock = market_clock
         self._exit_rule = config.decision_rule().exit_rule
         self._logger = logger
 
@@ -37,7 +39,7 @@ class AccountRiskCheck:
             if position is None:
                 continue
 
-            signal = self._exit_rule.decide_stop_loss_only(stock=stock, position=position)
+            signal = self._exit_rule.decide_stop_loss_only(stock=stock, position=position, now=self._market_clock.now())
 
             if signal.action == TradeAction.SELL:
                 await self.record_stop_loss(signal, status)

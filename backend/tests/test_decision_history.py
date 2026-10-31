@@ -2,13 +2,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from trading_stack import run_status
+from trading_stack import MONDAY_10_00, MovableClock, run_status
 
 from a_domain.model.chat.message import Message
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.types.enums import AiAnalysisFocus, MessageRole, SignalSource, TradeAction, Workflow
-from b_application.schemas.config import AppConfig, DbConfig, PromptsConfig
+from b_application.config.ai_config import PromptsConfig
+from b_application.config.app_config import AppConfig
+from b_application.config.chat_config import DbConfig
 from b_application.use_cases.process.ai_analyser import AiAnalyser
 from b_application.use_cases.ship.decision_memory import DecisionMemory
 from c_infrastructure.database.chroma.chroma_repository import ChromaRepositoryAdapter
@@ -25,7 +27,7 @@ class PromptRecordingAiProvider:
 
     async def generate_reply(self, messages: tuple[Message, ...]) -> Message:
         self.prompts.append(messages[-1].content)
-        return Message(role=MessageRole.ASSISTANT, content='{"confidence_score": 50}')
+        return Message(role=MessageRole.ASSISTANT, content='{"confidence_score": 50}', timestamp=messages[-1].timestamp)
 
     def save_response(self, stock_id: str, content: str) -> None:
         return None
@@ -131,7 +133,13 @@ async def test_ai_analysis_prompt_carries_the_analysed_stocks_own_history(knowle
         project_root=Path("."), prompts=PromptsConfig(analysis_report_fundamental=template, analysis_report_momentum=template)
     )
     ai_provider = PromptRecordingAiProvider()
-    analyser = AiAnalyser(ai_provider=ai_provider, knowledge_repository=knowledge_repository, config=config, logger=SilentLogger())
+    analyser = AiAnalyser(
+        ai_provider=ai_provider,
+        knowledge_repository=knowledge_repository,
+        config=config,
+        logger=SilentLogger(),
+        market_clock=MovableClock(MONDAY_10_00),
+    )
 
     await analyser.execute([Stock(stock_id="2330")], run_status(Workflow.FULL_CYCLE), AiAnalysisFocus.FUNDAMENTAL)
 

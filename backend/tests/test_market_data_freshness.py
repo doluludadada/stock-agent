@@ -6,7 +6,7 @@ from trading_stack import SilentLogger, run_status
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.rules.technical.calculation import IndicatorParameters
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
 from b_application.use_cases.collect.market_data_collector import MarketDataCollector
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
 

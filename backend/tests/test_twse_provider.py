@@ -7,15 +7,20 @@ import httpx
 import pytest
 
 from a_domain.types.enums import MarketType
+from b_application.config.sources_config import SourcesConfig
 from c_infrastructure.market.twse_provider import TaiwanStockProvider
+
+SOURCES = SourcesConfig()
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
 # Trimmed real responses: STOCK_DAY_ALL as served on 2026-10-30 (session 2026-10-29) and the TPEX close quotes
 # for 2026-10-30. 1213 and 1538 (TWSE) and 2035 (TPEX) did not trade in the regular session.
 PAYLOADS = {
-    TaiwanStockProvider.TWSE_URL: json.loads((FIXTURES / "twse_stock_day_all.json").read_text(encoding="utf-8")),
-    TaiwanStockProvider.TPEX_URL: json.loads((FIXTURES / "tpex_mainboard_daily_close_quotes.json").read_text(encoding="utf-8")),
+    SOURCES.exchange.twse_daily_quotes_url: json.loads((FIXTURES / "twse_stock_day_all.json").read_text(encoding="utf-8")),
+    SOURCES.exchange.tpex_daily_quotes_url: json.loads(
+        (FIXTURES / "tpex_mainboard_daily_close_quotes.json").read_text(encoding="utf-8")
+    ),
 }
 
 
@@ -40,7 +45,7 @@ def requests(monkeypatch, payloads: dict[str, list[dict[str, str]]]) -> list[htt
 
 def make_provider() -> TaiwanStockProvider:
     logger = SimpleNamespace(debug=lambda message: None, success=lambda message: None, error=lambda message: None)
-    return TaiwanStockProvider(cast(Any, logger))
+    return TaiwanStockProvider(SOURCES.exchange, cast(Any, logger))
 
 
 @pytest.mark.asyncio
@@ -82,7 +87,7 @@ async def test_stocks_without_a_regular_session_trade_have_no_close(requests: li
 
 @pytest.mark.asyncio
 async def test_a_zero_close_is_no_close(payloads: dict[str, list[dict[str, str]]], requests: list[httpx.Request]) -> None:
-    tsmc = next(row for row in payloads[TaiwanStockProvider.TWSE_URL] if row["Code"] == "2330")
+    tsmc = next(row for row in payloads[SOURCES.exchange.twse_daily_quotes_url] if row["Code"] == "2330")
     tsmc["ClosingPrice"] = "0.00"
 
     closes = await make_provider().get_latest_closes()

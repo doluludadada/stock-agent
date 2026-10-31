@@ -17,6 +17,6 @@ class AiProcessor:
             raw_response = await self._ai_provider.generate_reply(messages=conversation.messages)
             styled_messages = self._chat_styler_provider.format_response(raw_response)
             return styled_messages
-        except Exception as e:
-            self._logger.error(f"Error during AI processing: {e}")
+        except Exception as error:
+            self._logger.error(f"Error during AI processing: {error}")
             return ()

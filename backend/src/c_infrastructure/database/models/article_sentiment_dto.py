@@ -5,6 +5,7 @@ from sqlalchemy import Column, String
 from sqlmodel import Field, SQLModel
 
 from a_domain.types.enums import SentimentLabel
+from c_infrastructure.database.utc_datetime import UtcDateTime
 
 
 class ArticleSentimentDTO(SQLModel, table=True):
@@ -16,4 +17,4 @@ class ArticleSentimentDTO(SQLModel, table=True):
     article_url: str = Field(primary_key=True)
     label: SentimentLabel = Field(sa_column=Column(String, nullable=False))
     confidence: float
-    classified_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    classified_at: datetime = Field(default_factory=lambda: datetime.now(UTC), sa_type=UtcDateTime)

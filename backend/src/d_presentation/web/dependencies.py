@@ -4,7 +4,7 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from d_presentation.container import Runtime
+from d_presentation.dependencies import Runtime
 from d_presentation.web.workflow_runs import WorkflowRuns
 
 bearer = HTTPBearer(auto_error=False, description="The value of API_TOKEN. Reads need no token.")

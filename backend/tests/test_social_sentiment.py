@@ -1,5 +1,5 @@
 from collections.abc import AsyncIterator
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -7,12 +7,14 @@ import pytest_asyncio
 from support.harness import build_harness, rising_history
 from trading_stack import run_status
 
-from a_domain.model.analysis.social_sentiment import SentimentClassification, SocialSentiment
+from a_domain.model.analysis.sentiment_classification import SentimentClassification
+from a_domain.model.analysis.social_sentiment import SocialSentiment
 from a_domain.model.chat.message import Message
 from a_domain.model.market.article import Article
 from a_domain.model.market.stock import Stock
 from a_domain.types.enums import InformationSource, MessageRole, SentimentConsensus, SentimentLabel, TradeAction, Workflow
-from b_application.schemas.config import AppConfig, PromptsConfig
+from b_application.config.ai_config import PromptsConfig
+from b_application.config.app_config import AppConfig
 from b_application.use_cases.process.sentiment_analyser import SentimentAnalyser
 from c_infrastructure.ai_models.sentiment_classifier import AiSentimentClassifier
 from c_infrastructure.database.db_connector import DatabaseConnector
@@ -33,14 +35,17 @@ class ScriptedAiProvider:
 
     async def generate_reply(self, messages: tuple[Message, ...]) -> Message:
         self.prompts.append(messages[-1].content)
-        return Message(role=MessageRole.ASSISTANT, content=self._replies.pop(0))
+        return Message(role=MessageRole.ASSISTANT, content=self._replies.pop(0), timestamp=messages[-1].timestamp)
 
     def save_response(self, stock_id: str, content: str) -> None:
         return None
 
 
 def make_post(text: str, url: str | None = None, source: InformationSource = InformationSource.PTT_STOCK) -> Article:
-    return Article(stock_id="2330", source=source, title=f"[標的] {text}", content=text, url=url, published_at=datetime(2026, 10, 30))
+    posted_at = datetime(2026, 10, 30, tzinfo=UTC)
+    return Article(
+        stock_id="2330", source=source, title=f"[標的] {text}", content=text, url=url, published_at=posted_at, fetched_at=posted_at
+    )
 
 
 def tally(*labels: SentimentLabel, confidence: float = 0.9) -> SocialSentiment:
@@ -213,5 +218,5 @@ def test_trading_code_never_reads_sentiment() -> None:
 
     assert len(files) > 10
     assert offenders == [], (
-        f"US-011 sentiment is report only and must not feed trading. Remove the sentiment reference from {offenders}."
+        f"Social sentiment is report only and must not feed trading. Remove the sentiment reference from {offenders}."
     )

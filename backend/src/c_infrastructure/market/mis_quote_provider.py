@@ -10,6 +10,7 @@ from a_domain.model.market.stock import Stock
 from a_domain.ports.market.price_provider import IRealtimeQuoteProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.types.enums import MarketType
+from b_application.config.sources_config import ExchangeSources
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 
 SHARES_PER_LOT = 1000
@@ -65,16 +66,16 @@ def _number(text: Any) -> float | None:
 class MisQuoteProvider(IRealtimeQuoteProvider):
     """Last trades of TWSE and TPEX stocks from the exchange's market information system (MIS), a few seconds behind."""
 
-    URL = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp"
     # 100 channels per request are answered; 200 are refused with rtcode 9999.
     BATCH_SIZE = 50
     TIMEOUT_SECONDS = 10.0
 
-    def __init__(self, logger: ILoggingProvider, request_interval_seconds: float = 5.0) -> None:
+    def __init__(self, exchange: ExchangeSources, logger: ILoggingProvider, request_interval_seconds: float = 5.0) -> None:
         """
         request_interval_seconds: the API asks clients to wait its userDelay (5000 ms) between requests, and faster
         polling is reported to get the address blocked, so requests go one at a time at least this far apart.
         """
+        self._url = exchange.mis_quotes_url
         self._logger = logger
         self._request_interval_seconds = request_interval_seconds
         self._last_request_at: float | None = None
@@ -92,7 +93,7 @@ class MisQuoteProvider(IRealtimeQuoteProvider):
             for offset in range(0, len(channels), self.BATCH_SIZE):
                 await self._wait_for_request_slot()
                 params = {"ex_ch": "|".join(channels[offset : offset + self.BATCH_SIZE]), "json": "1", "delay": "0"}
-                response = await client.get(self.URL, params=params)
+                response = await client.get(self._url, params=params)
                 response.raise_for_status()
                 quotes.update(parse_quotes(response.json()))
 

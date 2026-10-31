@@ -2,7 +2,7 @@ from a_domain.ports.ai.ai_provider import IAiProvider
 from a_domain.ports.chat.web_search_provider import IWebSearchProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.types.enums import AiProvider
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
 from c_infrastructure.ai_models.ai_adapter.gemini_adapter import GeminiAIAdapter
 from c_infrastructure.ai_models.ai_adapter.grok_adapter import GrokAdapter
 from c_infrastructure.ai_models.ai_adapter.groq_adapter import GroqAIAdapter
@@ -20,9 +20,9 @@ class AiAdapterFactory:
         self._web_search_provider = web_search_provider
         self._logger.trace(f"AI Adapter Factory initialised. Active model provider: {self._config.ai.active_model.value}")  # noqa: E501
 
-    def create_adapter(self, *, override_provider: AiProvider | None = None, override_model_name: str | None = None) -> IAiProvider:
-        provider = override_provider or self._config.ai.active_model
-        model_name = override_model_name or self._config.ai.available_models.get(provider)
+    def create_adapter(self) -> IAiProvider:
+        provider = self._config.ai.active_model
+        model_name = self._config.ai.available_models.get(provider)
 
         if model_name is None:
             raise ValueError(f"No model id resolved for provider {provider!s}. Configure available_models or enable remote catalogue.")

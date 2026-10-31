@@ -5,11 +5,15 @@ from typing import Any, cast
 
 import pytest
 
-from a_domain.model.fundamentals.eps import FiscalQuarter, QuarterEps
+from a_domain.model.fundamentals.fiscal_quarter import FiscalQuarter
+from a_domain.model.fundamentals.quarter_eps import QuarterEps
 from a_domain.types.enums import MarketType
+from b_application.config.sources_config import SourcesConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider, parse_cumulative_eps
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
+
+SOURCES = SourcesConfig()
 
 FIXTURES = Path(__file__).parent / "fixtures"
 Q = FiscalQuarter
@@ -55,7 +59,7 @@ async def build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[MopsFu
     db = DatabaseConnector(config=cast(Any, config), logger=SilentLogger())
     await db.init_db()
     clock = MovableClock()
-    provider = MopsFundamentalsProvider(db=db, market_clock=clock, logger=SilentLogger())
+    provider = MopsFundamentalsProvider(db=db, market_clock=clock, mops=SOURCES.mops, logger=SilentLogger())
     mops = FakeMops()
     monkeypatch.setattr(provider, "_download", mops.download)
     return provider, mops, clock
@@ -64,7 +68,7 @@ async def build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[MopsFu
 def test_parser_reads_every_industry_table_of_a_real_page() -> None:
     html = (FIXTURES / "mops_t163sb04_sii_115_02.html").read_text(encoding="utf-8")
 
-    assert parse_cumulative_eps(html) == {
+    assert parse_cumulative_eps(html, SOURCES.mops) == {
         "2801": 0.94,
         "2855": 6.96,
         "1101": 0.38,
@@ -79,11 +83,11 @@ def test_parser_reads_every_industry_table_of_a_real_page() -> None:
 def test_parser_reads_an_unpublished_season_as_no_filings_yet() -> None:
     html = (FIXTURES / "mops_t163sb04_sii_115_04_unpublished.html").read_text(encoding="utf-8")
 
-    assert parse_cumulative_eps(html) == {}
+    assert parse_cumulative_eps(html, SOURCES.mops) == {}
 
 
 def test_parser_rejects_a_page_it_does_not_recognise() -> None:
-    assert parse_cumulative_eps("<html><body>系統忙碌中，請稍後再試</body></html>") is None
+    assert parse_cumulative_eps("<html><body>系統忙碌中，請稍後再試</body></html>", SOURCES.mops) is None
 
 
 @pytest.mark.asyncio

@@ -7,7 +7,7 @@ from a_domain.model.chat.ai_model import AIModel
 from a_domain.ports.chat.model_catalog_repository import IModelCatalogRepository
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.types.enums import AiProvider
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
 
 
 class ModelsCatalog(IModelCatalogRepository):
@@ -19,7 +19,7 @@ class ModelsCatalog(IModelCatalogRepository):
             AsyncOpenAI(api_key=self._config.ai.openai_api_key, timeout=self._timeout) if self._config.ai.openai_api_key else None
         )
         self._xai_client = (
-            AsyncOpenAI(api_key=self._config.ai.grok_api_key, base_url="https://api.x.ai/v1", timeout=self._timeout)
+            AsyncOpenAI(api_key=self._config.ai.grok_api_key, base_url=self._config.sources.ai.grok_base_url, timeout=self._timeout)
             if self._config.ai.grok_api_key
             else None
         )
@@ -34,11 +34,11 @@ class ModelsCatalog(IModelCatalogRepository):
             models = tuple(AIModel(provider=AiProvider.OPENAI, name=model.id) for model in response.data if "gpt" in model.id)
             self._logger.info(f"Found {len(models)} compatible models from OpenAI.")
             return models
-        except OpenAIError as e:
-            self._logger.error(f"OpenAI API error while listing models: {e}")
+        except OpenAIError as error:
+            self._logger.error(f"OpenAI API error while listing models: {error}")
             return tuple()
-        except Exception as e:
-            self._logger.critical(f"Unexpected error fetching OpenAI models: {e}")
+        except Exception as error:
+            self._logger.critical(f"Unexpected error fetching OpenAI models: {error}")
             return tuple()
 
     async def _fetch_grok_models(self) -> tuple[AIModel, ...]:
@@ -51,11 +51,11 @@ class ModelsCatalog(IModelCatalogRepository):
             models = tuple(AIModel(provider=AiProvider.GROK, name=model.id) for model in response.data)
             self._logger.info(f"Found {len(models)} models from Grok (X.ai).")
             return models
-        except OpenAIError as e:
-            self._logger.error(f"Grok API error while listing models: {e}")
+        except OpenAIError as error:
+            self._logger.error(f"Grok API error while listing models: {error}")
             return tuple()
-        except Exception as e:
-            self._logger.critical(f"Unexpected error fetching Grok models: {e}")
+        except Exception as error:
+            self._logger.critical(f"Unexpected error fetching Grok models: {error}")
             return tuple()
 
     async def list_chat_models(self) -> tuple[AIModel, ...]:
@@ -75,6 +75,6 @@ class ModelsCatalog(IModelCatalogRepository):
                 self._logger.error(f"A task failed during model fetching: {result}")
             elif isinstance(result, tuple):
                 all_models.extend(result)
-        sorted_models = sorted(all_models, key=lambda m: (m.provider.value, m.name))
+        sorted_models = sorted(all_models, key=lambda model: (model.provider.value, model.name))
         self._logger.success(f"Total unique models fetched from all providers: {len(sorted_models)}")
         return tuple(sorted_models)

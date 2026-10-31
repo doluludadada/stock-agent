@@ -11,29 +11,25 @@ from rich.table import Table
 
 from a_domain.model.fundamentals.eps import SOURCE_LABELS, Eps
 from a_domain.model.market.stock import Stock
-from a_domain.model.trading.watchlist import WatchlistAddition
-from a_domain.model.valuation.scan import MarketValuation, ScanCriteria, ScanStep, ValuationScan
-from a_domain.model.valuation.valuation import (
-    LABEL,
-    LOW_PE_CAVEAT,
-    UNDERVALUATION_FORMULA,
-    PeRatio,
-    StockValuation,
-    TargetPe,
-    ValuationExplanation,
-)
+from a_domain.model.trading.watchlist_addition import WatchlistAddition
+from a_domain.model.valuation.market_valuation import MarketValuation
+from a_domain.model.valuation.pe_ratio import PeRatio
+from a_domain.model.valuation.scan_criteria import ScanCriteria
+from a_domain.model.valuation.stock_valuation import StockValuation
+from a_domain.model.valuation.target_pe import TargetPe
+from a_domain.model.valuation.valuation_explanation import LOW_PE_CAVEAT, ValuationExplanation
+from a_domain.model.valuation.valuation_report import LABEL, UNDERVALUATION_FORMULA
+from a_domain.model.valuation.valuation_scan import ValuationScan
 from a_domain.rules.trading.valuation import AccountValuation, EquityPoint
-from a_domain.types.enums import ExecutionProvider, OrderMode, WatchlistType
+from a_domain.types.enums import ExecutionProvider, OrderMode, ScanStep, WatchlistType
+from b_application.config.app_config import AppConfig
 from b_application.pipeline import Pipeline
-from b_application.schemas.config import AppConfig
 from b_application.schemas.pipeline_status import PipelineStatus
 from b_application.use_cases.trade.account_history import AccountHistory
-from b_application.use_cases.trade.manual_buy import ManualBuy, ManualBuyRefusal, ManualBuyResult
 from b_application.use_cases.trade.watch_stocks import WatchStocks
-from b_application.valuation_pipeline import ValuationPipeline
 from c_infrastructure.database.db_connector import OutdatedDatabaseError
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
-from d_presentation.container import TradingSetupError, open_runtime
+from d_presentation.dependencies import TradingSetupError, open_runtime
 
 console = Console()
 
@@ -51,13 +47,12 @@ async def interactive_menu() -> None:
                     break
 
                 if choice in VALUATION_MENU_CHOICES:
-                    await execute_valuation_choice(choice=choice, valuation=runtime.valuation, config=runtime.config)
+                    await execute_valuation_choice(choice=choice, pipeline=runtime.pipeline, config=runtime.config)
                 else:
                     context = await execute_menu_choice(
                         choice=choice,
                         pipeline=runtime.pipeline,
                         watch_stocks=runtime.watch_stocks,
-                        manual_buy=runtime.manual_buy,
                         account_history=runtime.account_history,
                     )
 
@@ -95,7 +90,7 @@ def ask_user(question: str, choices: list[str] | None = None) -> str | None:
 
 
 async def execute_menu_choice(
-    choice: str, pipeline: Pipeline, watch_stocks: WatchStocks, manual_buy: ManualBuy, account_history: AccountHistory
+    choice: str, pipeline: Pipeline, watch_stocks: WatchStocks, account_history: AccountHistory
 ) -> PipelineStatus | None:
     if choice == "1":
         return await pipeline.run_full_cycle()
@@ -107,7 +102,7 @@ async def execute_menu_choice(
         return await run_intraday(pipeline)
 
     if choice == "4":
-        return await run_specific_stock_flow(pipeline=pipeline, watch_stocks=watch_stocks, manual_buy=manual_buy)
+        return await run_specific_stock_flow(pipeline=pipeline, watch_stocks=watch_stocks)
 
     if choice == "7":
         await run_account_history(account_history)
@@ -241,7 +236,7 @@ def print_menu(config: AppConfig) -> None:
     console.print("\n[0] Exit")
 
 
-async def run_specific_stock_flow(pipeline: Pipeline, watch_stocks: WatchStocks, manual_buy: ManualBuy) -> PipelineStatus | None:
+async def run_specific_stock_flow(pipeline: Pipeline, watch_stocks: WatchStocks) -> PipelineStatus | None:
     raw_symbols = ask_stock_ids()
 
     if raw_symbols is None:
@@ -259,7 +254,7 @@ async def run_specific_stock_flow(pipeline: Pipeline, watch_stocks: WatchStocks,
 
     await offer_manual_watchlist(stocks=context.manual_stocks, watch_stocks=watch_stocks)
 
-    await offer_manual_buy(stocks=context.manual_stocks, manual_buy=manual_buy)
+    await offer_manual_buy(stocks=context.manual_stocks, pipeline=pipeline)
 
     return context
 
@@ -287,15 +282,14 @@ async def offer_manual_watchlist(stocks: list[Stock], watch_stocks: WatchStocks)
     print_watchlist_result(addition)
 
 
-async def offer_manual_buy(stocks: list[Stock], manual_buy: ManualBuy) -> None:
+async def offer_manual_buy(stocks: list[Stock], pipeline: Pipeline) -> None:
     for stock in stocks:
         confirmed = Confirm.ask(f"BUY {stock.stock_id} now using manual override?", default=False)
 
         if not confirmed:
             continue
 
-        result = await manual_buy.execute(stock)
-        print_manual_buy_result(result)
+        print_manual_buy_result(stock.stock_id, await pipeline.buy_manually(stock))
 
 
 def print_watchlist_result(addition: WatchlistAddition) -> None:
@@ -306,11 +300,12 @@ def print_watchlist_result(addition: WatchlistAddition) -> None:
         console.print(f"[yellow]Already present on manual watchlist: {', '.join(addition.already_present_stock_ids)}[/yellow]")
 
 
-def print_manual_buy_result(result: ManualBuyResult) -> None:
-    if isinstance(result, ManualBuyRefusal):
-        console.print(f"[yellow]Manual BUY not placed: {result.stock_id} | {result.reason}[/yellow]")
+def print_manual_buy_result(stock_id: str, status: PipelineStatus) -> None:
+    if status.manual_buy_refusal is not None:
+        console.print(f"[yellow]Manual BUY not placed: {stock_id} | {status.manual_buy_refusal}[/yellow]")
         return
 
+    result = status.require_manual_buy_order()
     style = "green" if result.filled_quantity else "red"
     console.print(
         f"[{style}]Manual BUY result: {result.stock_id} | {result.status.value.upper()} | "
@@ -538,21 +533,21 @@ def add_stock_report_row(table: Table, stock: Stock) -> None:
     )
 
 
-async def execute_valuation_choice(choice: str, valuation: ValuationPipeline, config: AppConfig) -> None:
-    """Menus 5 and 6 receive only the read-only ValuationPipeline: no order or watchlist write is in scope."""
+async def execute_valuation_choice(choice: str, pipeline: Pipeline, config: AppConfig) -> None:
+    """Menus 5 and 6 call only the Pipeline's valuation workflows, which reach no order, signal or watchlist write."""
     try:
         if choice == "5":
-            await run_valuation_flow(valuation)
+            await run_valuation_flow(pipeline)
 
         if choice == "6":
-            await run_undervalued_scan(valuation, config.valuation.max_scan_explanations)
+            await run_undervalued_scan(pipeline, config.valuation.max_scan_explanations)
 
     except EOFError:
         # Ctrl-D at a y/n prompt. Text prompts go through ask_user, which already turns Ctrl-C and Ctrl-D into a cancel.
         console.print("\n[yellow]Valuation cancelled.[/yellow]")
 
 
-async def run_valuation_flow(valuation: ValuationPipeline) -> None:
+async def run_valuation_flow(pipeline: Pipeline) -> None:
     raw_symbols = ask_stock_ids()
 
     if raw_symbols is None:
@@ -564,7 +559,7 @@ async def run_valuation_flow(valuation: ValuationPipeline) -> None:
         console.print("[yellow]No stock IDs entered.[/yellow]")
         return
 
-    market = await load_market(valuation)
+    market = await load_market(pipeline)
     valuations = find_valuations(market, stock_ids)
 
     if not valuations:
@@ -585,11 +580,11 @@ async def run_valuation_flow(valuation: ValuationPipeline) -> None:
     console.print(f"Asking the AI to explain: {', '.join(item.stock.stock_id for item in valuations)}")
 
     for item in valuations:
-        print_valuation_explanation(await valuation.explain(market.appraise(item, target_pe)))
+        print_valuation_explanation(await pipeline.explain_valuation(market.appraise(item, target_pe)))
 
 
-async def run_undervalued_scan(valuation: ValuationPipeline, max_explanations: int) -> None:
-    market = await load_market(valuation)
+async def run_undervalued_scan(pipeline: Pipeline, max_explanations: int) -> None:
+    market = await load_market(pipeline)
 
     if not market.valuations:
         console.print("[yellow]No stocks loaded.[/yellow]")
@@ -610,19 +605,19 @@ async def run_undervalued_scan(valuation: ValuationPipeline, max_explanations: i
 
     if Confirm.ask(f"Confirm {len(scan.survivors)} matches with the active technical strategy?", default=False):
         console.print("Loading daily history for the matches...")
-        scan = await valuation.confirm_technical(scan)
+        scan = await pipeline.confirm_valuation_technical(scan)
         print_technical_step(scan)
 
     limit = min(len(scan.survivors), max_explanations)
 
     if limit and Confirm.ask(f"Explain the top {limit} stocks with AI ({limit} AI calls)?", default=False):
         for report in scan.survivors[:limit]:
-            print_valuation_explanation(await valuation.explain(report))
+            print_valuation_explanation(await pipeline.explain_valuation(report))
 
 
-async def load_market(valuation: ValuationPipeline) -> MarketValuation:
+async def load_market(pipeline: Pipeline) -> MarketValuation:
     console.print("Loading listed stocks, official closes and EPS filings (TWSE, TPEX, MOPS)...")
-    market = await valuation.load_market()
+    market = await pipeline.load_market_valuation()
 
     for warning in market.source_warnings:
         console.print(f"[yellow]{warning}[/yellow]")
@@ -823,9 +818,6 @@ def format_optional_int(value: int | None) -> str:
 def format_datetime(value: datetime | None) -> str:
     if value is None:
         return "-"
-
-    if value.tzinfo is None:
-        return f"{value:%Y-%m-%d %H:%M}"
 
     return f"{value.astimezone(TAIWAN_TIMEZONE):%Y-%m-%d %H:%M}"
 

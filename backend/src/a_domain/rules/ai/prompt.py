@@ -6,7 +6,8 @@ from icontract import ensure, invariant
 
 from a_domain.model.market.article import Article
 from a_domain.model.market.stock import Stock
-from a_domain.model.valuation.valuation import PeNotApplicable, ValuationReport
+from a_domain.model.valuation.pe_not_applicable import PeNotApplicable
+from a_domain.model.valuation.valuation_report import ValuationReport
 from a_domain.types.enums import AiAnalysisFocus
 
 

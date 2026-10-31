@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col, select
 
@@ -7,7 +9,7 @@ from a_domain.model.trading.position import Position
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.trading.execution_provider import IExecutionProvider
 from a_domain.types.enums import OrderStatus, OrderType, RejectReason, TimeInForce, TradeAction
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.mock_trading_dto import MockCash, MockPosition
 from c_infrastructure.trading.mock.constants import MockLogMessage
@@ -46,6 +48,8 @@ class MockExecutionProvider(IExecutionProvider):
         self._cost_rule = config.market.cost_rule()
 
     async def place_order(self, order: Order) -> Order:
+        now = datetime.now(UTC)
+
         try:
             await self._ensure_account()
 
@@ -57,18 +61,18 @@ class MockExecutionProvider(IExecutionProvider):
                 refusal = self._refusal(order, account)
 
                 if refusal is not None:
-                    order.reject(*refusal)
+                    order.reject(*refusal, now=now)
                     self._logger.warning(f"{MockLogMessage.ORDER_REJECTED} {order.action} {order.stock_id}: {order.reason}")
                     return order
 
-                order.submit()
-                await self._execute(session, order, account, cash, position_row)
+                order.submit(now=now)
+                await self._execute(session, order, account, cash, position_row, now)
 
         except Exception as error:
             if order.status not in {OrderStatus.PENDING, OrderStatus.SUBMITTED}:
                 raise
 
-            order.fail(f"{type(error).__name__}: {error}")
+            order.fail(f"{type(error).__name__}: {error}", now=now)
             self._logger.error(f"{MockLogMessage.ORDER_FAILED} {order.stock_id}: {order.reason}")
 
         return order
@@ -104,7 +108,7 @@ class MockExecutionProvider(IExecutionProvider):
         return available
 
     async def _execute(
-        self, session: AsyncSession, order: Order, account: Account, cash: MockCash, position_row: MockPosition | None
+        self, session: AsyncSession, order: Order, account: Account, cash: MockCash, position_row: MockPosition | None, now: datetime
     ) -> None:
         quantity = self._fill_quantity(order)
         price = order.limit_price
@@ -120,8 +124,8 @@ class MockExecutionProvider(IExecutionProvider):
                 realized_pnl = position.profit_on_sale(quantity, cost.net) if position else None
                 account.sell(order.stock_id, quantity, cash_delta=cost.net)
 
-            await self._save_book(session, account, cash, position_row, order.stock_id)
-            order.fill(quantity, price, cost, realized_pnl)
+            await self._save_book(session, account, cash, position_row, order.stock_id, now)
+            order.fill(quantity, price, cost, realized_pnl, now=now)
 
             self._logger.success(
                 f"{MockLogMessage.ORDER_FILLED} {order.action} {order.stock_id} x {quantity} @ {price} "
@@ -129,11 +133,13 @@ class MockExecutionProvider(IExecutionProvider):
             )
 
         if order.remaining_quantity > 0:
-            order.cancel(f"{order.time_in_force.name} unfilled: the market filled {order.filled_quantity} of {order.quantity}")
+            order.cancel(
+                f"{order.time_in_force.name} unfilled: the market filled {order.filled_quantity} of {order.quantity}", now=now
+            )
             self._logger.info(f"{MockLogMessage.ORDER_CANCELLED} {order.stock_id}: {order.reason}")
 
     async def _save_book(
-        self, session: AsyncSession, account: Account, cash: MockCash, position_row: MockPosition | None, stock_id: str
+        self, session: AsyncSession, account: Account, cash: MockCash, position_row: MockPosition | None, stock_id: str, now: datetime
     ) -> None:
         position = account.position_for(stock_id)
 
@@ -150,10 +156,10 @@ class MockExecutionProvider(IExecutionProvider):
         elif position is not None and position_row is not None:
             position_row.quantity = position.quantity
             position_row.average_cost = position.average_cost
-            position_row.updated_at = position.updated_at
+            position_row.updated_at = now
 
         cash.current_cash = account.cash
-        cash.updated_at = account.updated_at
+        cash.updated_at = now
         await session.commit()
 
     async def _ensure_account(self) -> None:
@@ -179,10 +185,4 @@ class MockExecutionProvider(IExecutionProvider):
         return result.scalar_one_or_none()
 
     def _to_position(self, row: MockPosition) -> Position:
-        return Position(
-            stock_id=row.stock_id,
-            quantity=row.quantity,
-            average_cost=row.average_cost,
-            opened_at=row.opened_at,
-            updated_at=row.updated_at,
-        )
+        return Position(stock_id=row.stock_id, quantity=row.quantity, average_cost=row.average_cost, opened_at=row.opened_at)

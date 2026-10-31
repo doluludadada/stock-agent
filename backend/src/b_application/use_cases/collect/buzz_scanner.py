@@ -8,7 +8,7 @@ from a_domain.ports.market.social_media_provider import ISocialMediaProvider
 from a_domain.ports.market.stock_provider import IStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.rules.collect import SocialBuzzCriteria
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
 from b_application.schemas.pipeline_status import PipelineStatus
 
 

@@ -2,10 +2,14 @@ from datetime import date, datetime
 
 import pytest
 
-from a_domain.model.fundamentals.eps import Eps, EpsKind, EpsUnavailable, EpsUnavailableReason, FiscalQuarter, QuarterEps
+from a_domain.model.fundamentals.eps import Eps
+from a_domain.model.fundamentals.eps_unavailable import EpsUnavailable
+from a_domain.model.fundamentals.fiscal_quarter import FiscalQuarter
+from a_domain.model.fundamentals.quarter_eps import QuarterEps
 from a_domain.model.market.stock import Stock
 from a_domain.rules.collect.freshness import DailyCloseFreshnessRule
 from a_domain.rules.fundamentals.trailing_eps import TrailingEpsRule
+from a_domain.types.enums import EpsKind, EpsUnavailableReason
 
 FETCHED_AT = datetime(2026, 10, 30, 18, 6)
 Q = FiscalQuarter

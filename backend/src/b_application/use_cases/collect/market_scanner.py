@@ -1,5 +1,5 @@
 from a_domain.model.market.stock import Stock
-from a_domain.model.trading.watchlist import StockWatchlist
+from a_domain.model.trading.stock_watchlist import StockWatchlist
 from a_domain.ports.market.stock_provider import IStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository

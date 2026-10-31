@@ -90,16 +90,6 @@ class ReasonRule:
         return " | ".join(parts)
 
     @staticmethod
-    def build(stock: Stock) -> str:
-        """
-        Backward-compatible method.
-
-        Existing code may still call ReasonRule.build(stock).
-        Treat it as entry reason until old callers are removed.
-        """
-        return ReasonRule.build_entry(stock)
-
-    @staticmethod
     def build_technical_summary(stock: Stock) -> str:
         """
         Summarizes technical result.

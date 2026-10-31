@@ -43,9 +43,6 @@ class TaiwanMarketClock(IMarketClock):
 
     @override
     def to_market_datetime(self, value: datetime) -> datetime:
-        if value.tzinfo is None:
-            return value.replace(tzinfo=TAIWAN_TIMEZONE)
-
         return value.astimezone(TAIWAN_TIMEZONE)
 
     @override

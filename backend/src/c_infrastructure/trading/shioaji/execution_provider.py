@@ -1,6 +1,7 @@
 import asyncio
 import math
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Self
 
 from shioaji import Shioaji
@@ -14,7 +15,8 @@ from a_domain.model.trading.position import Position
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.trading.execution_provider import IExecutionProvider
 from a_domain.types.enums import OrderStatus, OrderType, RejectReason, TimeInForce, TradeAction
-from b_application.schemas.config import AppConfig, ShioajiConfig
+from b_application.config.app_config import AppConfig
+from b_application.config.trading_config import ShioajiConfig
 
 SHARES_PER_UNIT: Mapping[StockOrderLot, int] = {StockOrderLot.Common: 1000, StockOrderLot.IntradayOdd: 1}
 """Shares in one unit of a Shioaji order quantity: a board lot is 1000 shares, an intraday odd-lot order counts shares."""
@@ -172,7 +174,7 @@ class ShioajiExecutionProvider(IExecutionProvider):
             refusal = self._refusal(order, account, contract)
 
             if refusal is not None:
-                order.reject(*refusal)
+                order.reject(*refusal, now=datetime.now(UTC))
                 self._logger.warning(f"Shioaji order not sent: {order.action} {order.stock_id}: {order.reason}")
                 return order
 
@@ -192,7 +194,7 @@ class ShioajiExecutionProvider(IExecutionProvider):
             if order.status not in {OrderStatus.PENDING, OrderStatus.SUBMITTED}:
                 raise
 
-            order.fail(f"{type(error).__name__}: {error}")
+            order.fail(f"{type(error).__name__}: {error}", now=datetime.now(UTC))
             self._logger.error(f"Shioaji order failed: {order.stock_id}: {order.reason}")
 
         return order
@@ -336,16 +338,19 @@ class ShioajiExecutionProvider(IExecutionProvider):
         cost = self._cost_rule.cost_of(order.action, order.stock_id, price, quantity)
         realized_pnl = held.profit_on_sale(quantity, cost.net) if order.action == TradeAction.SELL and held else None
 
-        if order.status == OrderStatus.PENDING:
-            order.submit()
+        now = datetime.now(UTC)
 
-        order.fill(quantity, price, cost, realized_pnl)
+        if order.status == OrderStatus.PENDING:
+            order.submit(now=now)
+
+        order.fill(quantity, price, cost, realized_pnl, now=now)
 
     def _close(self, order: Order, trades: list[Trade]) -> None:
         """Gives the domain order its final status once every broker order it was split into is accounted for."""
         if order.status == OrderStatus.FILLED:
             return
 
+        now = datetime.now(UTC)
         statuses = [ORDER_STATUS[trade.status.status] for trade in trades]
         summary = "; ".join(describe(trade) for trade in trades)
         deals_missing = [
@@ -356,13 +361,15 @@ class ShioajiExecutionProvider(IExecutionProvider):
         ]
 
         if not all(is_done(trade) for trade in trades):
-            order.fail(f"still working at the broker after a cancel request, check Shioaji: {summary}")
+            order.fail(f"still working at the broker after a cancel request, check Shioaji: {summary}", now=now)
 
         elif OrderStatus.FAILED in statuses or deals_missing:
-            order.fail(f"unexplained broker result: {summary}")
+            order.fail(f"unexplained broker result: {summary}", now=now)
 
         elif order.filled_quantity == 0 and all(status == OrderStatus.REJECTED for status in statuses):
-            order.reject(RejectReason.BROKER_REFUSED, summary)
+            order.reject(RejectReason.BROKER_REFUSED, summary, now=now)
 
         else:
-            order.cancel(f"{order.time_in_force.name} unfilled: filled {order.filled_quantity} of {order.quantity}; {summary}")
+            order.cancel(
+                f"{order.time_in_force.name} unfilled: filled {order.filled_quantity} of {order.quantity}; {summary}", now=now
+            )

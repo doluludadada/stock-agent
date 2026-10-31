@@ -57,21 +57,24 @@ class OrderRule:
             time_in_force=TimeInForce.IOC,
             quantity=signal.quantity,
             limit_price=TickRule.limit_price(signal.action, signal.stock_id, signal.price_at_signal),
+            created_at=now,
+            updated_at=now,
         )
 
         if self.order_mode == OrderMode.DISABLED:
-            order.reject(RejectReason.ORDER_MODE_DISABLED, "trading.order_mode is disabled")
+            order.reject(RejectReason.ORDER_MODE_DISABLED, "trading.order_mode is disabled", now=now)
 
         elif self.order_mode == OrderMode.MOCK_ONLY and self.execution_provider != ExecutionProvider.MOCK:
-            order.reject(RejectReason.ORDER_MODE_MISMATCH, f"mock_only order mode cannot use {self.execution_provider.value}")
+            order.reject(RejectReason.ORDER_MODE_MISMATCH, f"mock_only order mode cannot use {self.execution_provider.value}", now=now)
 
         elif self.order_mode == OrderMode.LIVE and self.execution_provider == ExecutionProvider.MOCK:
-            order.reject(RejectReason.ORDER_MODE_MISMATCH, "live order mode cannot use the mock execution provider")
+            order.reject(RejectReason.ORDER_MODE_MISMATCH, "live order mode cannot use the mock execution provider", now=now)
 
         elif phase != TradingPhase.CONTINUOUS:
             order.reject(
                 RejectReason.MARKET_CLOSED,
                 f"{now:%a %Y-%m-%d %H:%M} falls in the market's {phase} phase; IOC orders trade only in continuous trading",
+                now=now,
             )
 
         elif not self.price_freshness.is_fresh(signal.price_observed_at, now):
@@ -81,6 +84,7 @@ class OrderRule:
                 RejectReason.STALE_PRICE,
                 f"price {signal.price_at_signal:.2f} was quoted at {signal.price_observed_at:%Y-%m-%d %H:%M}, "
                 f"{age_minutes} min before {now:%H:%M}; the limit is {limit_minutes} min",
+                now=now,
             )
 
         return order

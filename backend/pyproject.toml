@@ -1,18 +1,16 @@
 [project]
 name = "stock-agent"
 version = "0.1.0"
-description = "A friendly AI chat assistant for WhatsApp and Line"
+description = "Taiwan stock screening, P/E valuation and mock trading agent with a CLI, a Web API and a LINE chatbot"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "chromadb>=1.3.5",
     "fastapi>=0.121.0",
     "google-generativeai>=0.8.5",
-    "flet[all]>=0.28.3",
     "httpx>=0.28.1",
     "loguru>=0.7.3",
     "openai>=2.7.1",
-    "psutil>=7.1.3",
     "pydantic>=2.12.3",
     "pydantic-settings>=2.11.0",
     "pyyaml>=6.0.3",
@@ -68,6 +66,8 @@ include = ["src"]
 pythonVersion = "3.14"
 typeCheckingMode = "standard"
 reportImplicitOverride = "error"
+# SQLModel declares __tablename__ as a declared_attr, so every table DTO that names its table would trip this rule.
+executionEnvironments = [{ root = "src/c_infrastructure/database/models", extraPaths = ["src"], reportIncompatibleVariableOverride = "none" }]
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "tools"]

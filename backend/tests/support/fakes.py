@@ -8,13 +8,15 @@ import json
 import re
 from collections.abc import Collection
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
-from a_domain.model.analysis.social_sentiment import SentimentClassification
+from a_domain.model.analysis.sentiment_classification import SentimentClassification
 from a_domain.model.analysis.technical_settings import TechnicalSettings
+from a_domain.model.chat.conversation import Conversation
 from a_domain.model.chat.message import Message
-from a_domain.model.fundamentals.eps import EpsFilings, FiscalQuarter, QuarterEps
+from a_domain.model.fundamentals.fiscal_quarter import FiscalQuarter
+from a_domain.model.fundamentals.quarter_eps import EpsFilings, QuarterEps
 from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
@@ -24,7 +26,7 @@ from a_domain.model.trading.account_snapshot import AccountSnapshot
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.position import Position
 from a_domain.model.trading.signal import TradeSignal
-from a_domain.model.trading.watchlist import WatchlistEntry
+from a_domain.model.trading.watchlist_entry import WatchlistEntry
 from a_domain.rules.trading.cost import TradingCostRule
 from a_domain.types.enums import AiAnalysisFocus, MessageRole, SentimentLabel, TradeAction, WatchlistType
 from a_domain.types.ids import DecisionId, RunId
@@ -191,9 +193,16 @@ class FakeAiProvider:
         self.valuation_replies: dict[str, dict] = {}
         self.failures: dict[str, Exception] = {}
         self.calls: list[AiCall] = []
+        self.chat_reply: str | None = None
+        self.chat_conversations: list[tuple[Message, ...]] = []
 
     async def generate_reply(self, messages: tuple[Message, ...]) -> Message:
         header = PROMPT_HEADER.match(messages[-1].content)
+
+        if header is None and self.chat_reply is not None:
+            self.chat_conversations.append(messages)
+            return Message(role=MessageRole.ASSISTANT, content=self.chat_reply, timestamp=messages[-1].timestamp)
+
         assert header is not None, f"prompt does not start with a known template header: {messages[-1].content!r}"
         kind, stock_id = header.group(1), header.group(2)
         focus = None if kind == "valuation explanation" else AiAnalysisFocus(kind.split()[0])
@@ -212,7 +221,7 @@ class FakeAiProvider:
                     "summary": f"fake valuation explanation of {stock_id}",
                 },
             )
-            return Message(role=MessageRole.ASSISTANT, content=json.dumps(reply))
+            return Message(role=MessageRole.ASSISTANT, content=json.dumps(reply), timestamp=messages[-1].timestamp)
 
         report = {
             "confidence_score": self.scores.get(stock_id, self.default_score),
@@ -220,7 +229,7 @@ class FakeAiProvider:
             "bullish_factors": [],
             "bearish_factors": [],
         }
-        return Message(role=MessageRole.ASSISTANT, content=json.dumps(report))
+        return Message(role=MessageRole.ASSISTANT, content=json.dumps(report), timestamp=messages[-1].timestamp)
 
     def save_response(self, stock_id: str, content: str) -> None:
         return None
@@ -239,6 +248,27 @@ class FakeKnowledgeRepository:
 
     async def save_decision(self, stock: Stock, signal: TradeSignal) -> None:
         self.decisions.append((stock.stock_id, signal))
+
+
+class FakeConversationRepository:
+    def __init__(self) -> None:
+        self.conversations: dict[str, Conversation] = {}
+
+    async def get_conversation_by_user_id(self, user_id: str) -> Conversation | None:
+        return self.conversations.get(user_id)
+
+    async def save(self, conversation: Conversation) -> bool:
+        self.conversations[conversation.user_id] = conversation
+        return True
+
+
+class RecordingChatPlatform:
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, str]] = []
+
+    async def send_message(self, user_id: str, message: Message) -> bool:
+        self.sent.append((user_id, message.content))
+        return True
 
 
 @dataclass
@@ -300,9 +330,6 @@ class FakeWatchlistRepository:
         for entry in entries:
             self.entries[(entry.stock_id, entry.watchlist_type)] = entry
 
-    async def remove(self, stock_id: str) -> None:
-        self.entries = {key: entry for key, entry in self.entries.items() if entry.stock_id != stock_id}
-
 
 class FakeSentimentClassifier:
     """Labels every post with the label set for its stock and records which posts each stock sent."""
@@ -334,8 +361,8 @@ class RecordingExecutionProvider:
         held = next((position for position in self.positions if position.stock_id == order.stock_id), None)
         realized_pnl = held.profit_on_sale(order.quantity, cost.net) if order.action == TradeAction.SELL and held else None
 
-        order.submit()
-        order.fill(order.quantity, order.limit_price, cost, realized_pnl)
+        order.submit(now=datetime.now(UTC))
+        order.fill(order.quantity, order.limit_price, cost, realized_pnl, now=datetime.now(UTC))
         return order
 
     async def get_account(self) -> Account:

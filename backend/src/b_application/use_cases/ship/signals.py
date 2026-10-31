@@ -1,8 +1,9 @@
 from a_domain.model.market.stock import Stock
-from a_domain.model.trading.watchlist import StockWatchlist
+from a_domain.model.trading.stock_watchlist import StockWatchlist
 from a_domain.ports.system.logging_provider import ILoggingProvider
+from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.trading_journal import ITradingJournal
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
 from b_application.schemas.pipeline_status import PipelineStatus
 
 
@@ -12,8 +13,9 @@ class Signals:
     decisions reach the run's signals, in decision order: best composite score first.
     """
 
-    def __init__(self, journal: ITradingJournal, config: AppConfig, logger: ILoggingProvider) -> None:
+    def __init__(self, journal: ITradingJournal, market_clock: IMarketClock, config: AppConfig, logger: ILoggingProvider) -> None:
         self._journal = journal
+        self._market_clock = market_clock
         self._decision_rule = config.decision_rule()
         self._logger = logger
 
@@ -23,7 +25,7 @@ class Signals:
         candidates = [stock for stock in watchlist.willing_stocks if self.is_decidable(stock, status)]
 
         try:
-            generated_signals = self._decision_rule.decide_run(candidates, status.account)
+            generated_signals = self._decision_rule.decide_run(candidates, status.account, now=self._market_clock.now())
 
         except Exception as error:
             message = f"Signal generation failed, so this run decides on none of {len(candidates)} stocks: {error}"

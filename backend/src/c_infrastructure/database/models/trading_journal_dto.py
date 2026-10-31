@@ -6,25 +6,24 @@ from sqlalchemy import JSON, Column
 from sqlmodel import Field, SQLModel
 
 from a_domain.types.enums import ExecutionProvider, OrderMode, OrderStatus, OrderType, SignalSource, TimeInForce, TradeAction, Workflow
+from c_infrastructure.database.utc_datetime import UtcDateTime
 
 
 class WorkflowRunDTO(SQLModel, table=True):
     """One workflow run (SystemStats). end_time stays empty when the run never finished."""
 
-    __tablename__: ClassVar[str] = "workflow_runs"  # pyright: ignore[reportIncompatibleVariableOverride]
+    __tablename__: ClassVar[str] = "workflow_runs"
 
     run_id: UUID = Field(primary_key=True)
     workflow: Workflow
     execution_provider: ExecutionProvider
     order_mode: OrderMode
-    start_time: datetime
-    end_time: datetime | None = None
+    start_time: datetime = Field(sa_type=UtcDateTime)
+    end_time: datetime | None = Field(default=None, sa_type=UtcDateTime)
 
     total_scanned: int
     buzz_scanned: int
     buzz_qualified: int
-    news_scanned: int
-    total_skipped: int
     passed_technical: int
     ai_analysed: int
     signals_generated: int
@@ -39,7 +38,7 @@ class WorkflowRunDTO(SQLModel, table=True):
 class TradeSignalDTO(SQLModel, table=True):
     """One decision (TradeSignal) with its evidence and the run that made it."""
 
-    __tablename__: ClassVar[str] = "trade_signals"  # pyright: ignore[reportIncompatibleVariableOverride]
+    __tablename__: ClassVar[str] = "trade_signals"
 
     decision_id: UUID = Field(primary_key=True)
     run_id: UUID = Field(index=True)
@@ -51,11 +50,11 @@ class TradeSignalDTO(SQLModel, table=True):
     reason: str
     quantity: int
     stop_loss_price: float | None = None
-    generated_at: datetime
+    generated_at: datetime = Field(sa_type=UtcDateTime)
 
     price_at_signal: float
-    price_observed_at: datetime
-    history_until: datetime | None = None
+    price_observed_at: datetime = Field(sa_type=UtcDateTime)
+    history_until: datetime | None = Field(default=None, sa_type=UtcDateTime)
     technical_report: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     ai_report: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
 
@@ -63,7 +62,7 @@ class TradeSignalDTO(SQLModel, table=True):
 class OrderDTO(SQLModel, table=True):
     """The app's order record (Order). One row per decision, whichever execution provider ran it."""
 
-    __tablename__: ClassVar[str] = "orders"  # pyright: ignore[reportIncompatibleVariableOverride]
+    __tablename__: ClassVar[str] = "orders"
 
     id: UUID = Field(primary_key=True)
     run_id: UUID = Field(index=True)
@@ -85,17 +84,17 @@ class OrderDTO(SQLModel, table=True):
     tax: int
     realized_pnl: float | None = None
 
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime = Field(sa_type=UtcDateTime)
+    updated_at: datetime = Field(sa_type=UtcDateTime)
 
 
 class AccountSnapshotDTO(SQLModel, table=True):
     """Cash and positions right after the fill of `order_id`."""
 
-    __tablename__: ClassVar[str] = "account_snapshots"  # pyright: ignore[reportIncompatibleVariableOverride]
+    __tablename__: ClassVar[str] = "account_snapshots"
 
     snapshot_id: UUID = Field(primary_key=True)
-    taken_at: datetime = Field(index=True)
+    taken_at: datetime = Field(index=True, sa_type=UtcDateTime)
     run_id: UUID = Field(index=True)
     order_id: UUID = Field(index=True)
     cash: float

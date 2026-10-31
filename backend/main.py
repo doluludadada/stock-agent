@@ -2,7 +2,7 @@ import os
 
 import uvicorn
 
-from d_presentation.container import open_runtime
+from d_presentation.dependencies import open_runtime
 from d_presentation.web.app import create_app
 
 app = create_app(open_runtime)

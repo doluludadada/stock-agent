@@ -1,9 +1,13 @@
+from datetime import UTC, datetime
+
 import pytest
 
 from a_domain.model.trading.order import Order
 from a_domain.rules.trading.tick import TickRule
 from a_domain.types.enums import OrderType, TimeInForce, TradeAction
 from a_domain.types.ids import new_decision_id, new_run_id
+
+NOW = datetime(2026, 10, 19, 10, 0, tzinfo=UTC)
 
 BUY, SELL = TradeAction.BUY, TradeAction.SELL
 
@@ -56,6 +60,8 @@ def limit_order(stock_id: str, limit_price: float) -> Order:
         quantity=1000,
         limit_price=limit_price,
         time_in_force=TimeInForce.IOC,
+        created_at=NOW,
+        updated_at=NOW,
     )
 
 

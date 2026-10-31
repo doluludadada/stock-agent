@@ -1,7 +1,7 @@
 """Builds the runtime the way open_runtime() does, with only the ports replaced by fakes.
 
 Every use case, domain rule and the Pipeline come from the real compose_runtime()
-in container.py, so a test written against CliHarness survives changes to
+in dependencies.py, so a test written against CliHarness survives changes to
 use-case constructors.
 """
 
@@ -14,12 +14,12 @@ from unittest.mock import patch
 from rich.prompt import Confirm, Prompt
 
 from a_domain.model.analysis.technical_settings import TechnicalSettings
-from a_domain.model.fundamentals.eps import FiscalQuarter
+from a_domain.model.fundamentals.fiscal_quarter import FiscalQuarter
 from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.position import Position
-from a_domain.model.trading.watchlist import WatchlistEntry
+from a_domain.model.trading.watchlist_entry import WatchlistEntry
 from a_domain.rules.technical.calculation import IndicatorParameters
 from a_domain.rules.technical.criteria.trend import PriceAboveMaCriterion
 from a_domain.rules.technical.criteria.volume.volume import MinimumPriceCriterion
@@ -33,15 +33,19 @@ from a_domain.types.enums import (
     SystemEnvironment,
     WatchlistType,
 )
-from b_application.schemas.config import AppConfig, NotificationConfig, PromptsConfig, TradingConfig
+from b_application.config.ai_config import PromptsConfig
+from b_application.config.app_config import AppConfig
+from b_application.config.chat_config import NotificationConfig
+from b_application.config.trading_config import TradingConfig
 from b_application.schemas.pipeline_status import PipelineStatus
 from c_infrastructure.system.market_clock import TAIWAN_SESSION_CLOSE, TAIWAN_TIMEZONE
 from d_presentation.cli import interactive
-from d_presentation.container import ProviderDependencies, Runtime, compose_runtime, validate_trading_environment
+from d_presentation.dependencies import ProviderDependencies, Runtime, compose_runtime, validate_trading_environment
 from support.fakes import (
     PROMPT_TEMPLATES,
     VALUATION_PROMPT_TEMPLATE,
     FakeAiProvider,
+    FakeConversationRepository,
     FakeFundamentalsProvider,
     FakeKnowledgeRepository,
     FakeMarketClock,
@@ -53,6 +57,7 @@ from support.fakes import (
     FakeTechnicalSettingsRepository,
     FakeTradingJournal,
     FakeWatchlistRepository,
+    RecordingChatPlatform,
     RecordingExecutionProvider,
     RecordingLogger,
 )
@@ -130,6 +135,8 @@ class CliHarness:
     ai: FakeAiProvider
     sentiment: FakeSentimentClassifier
     knowledge: FakeKnowledgeRepository
+    conversations: FakeConversationRepository
+    chat_platform: RecordingChatPlatform
     journal: FakeTradingJournal
     watchlist: FakeWatchlistRepository
     broker: RecordingExecutionProvider
@@ -185,6 +192,7 @@ class CliHarness:
                 title=f"{title} {stock_id}",
                 content=f"discussion {index} about {stock_id}",
                 published_at=self.clock.now() - timedelta(hours=1),
+                fetched_at=self.clock.now(),
                 engagement=engagement if index == 0 else 0,
             )
             for index in range(mentions)
@@ -232,7 +240,6 @@ class CliHarness:
                 choice=choice,
                 pipeline=self.runtime.pipeline,
                 watch_stocks=self.runtime.watch_stocks,
-                manual_buy=self.runtime.manual_buy,
                 account_history=self.runtime.account_history,
             )
 
@@ -256,7 +263,7 @@ class CliHarness:
             return remaining_confirms.pop(0)
 
         with patch.object(Prompt, "ask", answer_prompt), patch.object(Confirm, "ask", answer_confirm):
-            await interactive.execute_valuation_choice(choice=choice, valuation=self.runtime.valuation, config=self.config)
+            await interactive.execute_valuation_choice(choice=choice, pipeline=self.runtime.pipeline, config=self.config)
 
         assert not remaining_answers and not remaining_confirms, f"menu {choice} left answers unused"
         return asked
@@ -278,6 +285,8 @@ def build_harness(
     ai = FakeAiProvider()
     sentiment = FakeSentimentClassifier()
     knowledge = FakeKnowledgeRepository()
+    conversations = FakeConversationRepository()
+    chat_platform = RecordingChatPlatform()
     journal = FakeTradingJournal()
     watchlist = FakeWatchlistRepository(clock)
     technical_settings = FakeTechnicalSettingsRepository(settings or harness_settings())
@@ -292,11 +301,13 @@ def build_harness(
         ai_provider=ai,
         sentiment_classifier=sentiment,
         knowledge_repository=knowledge,
+        conversation_repository=conversations,
         journal=journal,
         watchlist_repository=watchlist,
         technical_settings_repository=technical_settings,
         execution_provider=broker,
         notification_provider=None,
+        platform_provider=chat_platform,
     )
     return CliHarness(
         config=config,
@@ -309,6 +320,8 @@ def build_harness(
         ai=ai,
         sentiment=sentiment,
         knowledge=knowledge,
+        conversations=conversations,
+        chat_platform=chat_platform,
         journal=journal,
         watchlist=watchlist,
         broker=broker,

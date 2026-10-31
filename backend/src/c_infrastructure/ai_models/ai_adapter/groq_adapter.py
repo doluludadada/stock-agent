@@ -15,7 +15,7 @@ from openai.types.chat import ChatCompletionAssistantMessageParam, ChatCompletio
 from a_domain.model.chat.message import Message, MessageRole
 from a_domain.ports.chat.web_search_provider import IWebSearchProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
 from c_infrastructure.ai_models.base import BaseAIAdapter
 
 
@@ -23,8 +23,6 @@ class GroqAIAdapter(BaseAIAdapter):
     """
     Groq (GroqCloud) adapter via OpenAI-compatible API.
     """
-
-    groq_base_url = "https://api.groq.com/openai/v1"
 
     @require(lambda config: bool(config.ai.groq_api_key), "Missing groq_api_key in configuration.")
     def __init__(
@@ -43,7 +41,7 @@ class GroqAIAdapter(BaseAIAdapter):
         self._logger.debug("Initialising AsyncOpenAI client...")
         return AsyncOpenAI(
             api_key=self._config.ai.groq_api_key,
-            base_url=self.groq_base_url,
+            base_url=self._config.sources.ai.groq_base_url,
             timeout=httpx.Timeout(self._config.ai.connection_timeout),
         )
 
@@ -55,16 +53,15 @@ class GroqAIAdapter(BaseAIAdapter):
             try:
                 search_results = await self._enrich_with_search(messages)
                 if search_results and self._config.ai.rag_injection_prompt:
-                    rag_instruction = {
-                        "role": "system",
-                        "content": self._config.ai.rag_injection_prompt.format(search_results=search_results),
-                    }
+                    rag_instruction = ChatCompletionSystemMessageParam(
+                        role="system", content=self._config.ai.rag_injection_prompt.format(search_results=search_results)
+                    )
                     if api_messages and api_messages[-1]["role"] == "user":
-                        api_messages.insert(-1, rag_instruction)  # type: ignore
+                        api_messages.insert(-1, rag_instruction)
                     else:
-                        api_messages.append(rag_instruction)  # type: ignore
-            except Exception as e:
-                self._logger.error(f"Search enrichment failed, proceeding without: {e}")
+                        api_messages.append(rag_instruction)
+            except Exception as error:
+                self._logger.error(f"Search enrichment failed, proceeding without: {error}")
 
         # LLM call — always runs regardless of search outcome
         try:
@@ -80,11 +77,11 @@ class GroqAIAdapter(BaseAIAdapter):
             return full_content
         except asyncio.CancelledError:
             raise
-        except (OpenAIError, httpx.HTTPError) as e:
-            self._logger.error(f"GROQ API error for model {self._model_name}: {e}")
+        except (OpenAIError, httpx.HTTPError) as error:
+            self._logger.error(f"GROQ API error for model {self._model_name}: {error}")
             return "I'm sorry, I'm having trouble connecting right now. Please try again in a moment."
-        except Exception as e:
-            self._logger.error(f"Unexpected error calling GROQ ({self._model_name}): {e}")
+        except Exception as error:
+            self._logger.error(f"Unexpected error calling GROQ ({self._model_name}): {error}")
             return "I'm sorry, something went wrong. Please try again."
 
     async def _enrich_with_search(self, messages: tuple[Message, ...]) -> str:
@@ -121,21 +118,7 @@ class GroqAIAdapter(BaseAIAdapter):
         for msg in reversed(messages):
             if msg.role == MessageRole.USER:
                 content = msg.content.lower()
-                search_triggers = {
-                    "latest",
-                    "recent",
-                    "news",
-                    "current",
-                    "today",
-                    "stock",
-                    "weather",
-                    "時事",
-                    "今天",
-                    "最新",
-                    "新聞",
-                    "查詢",
-                }
-                return any(t in content for t in search_triggers)
+                return any(trigger in content for trigger in self._config.behavior.web_search_triggers)
 
         return False
 

@@ -10,8 +10,7 @@ from icontract import require
 from a_domain.model.chat.message import Message
 from a_domain.ports.chat.platform_provider import IPlatformProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from b_application.schemas.config import AppConfig
-from c_infrastructure.platforms.line.line_constants import PUSH_MESSAGE_URL
+from b_application.config.app_config import AppConfig
 
 
 class LinePlatformAdapter(IPlatformProvider):
@@ -23,7 +22,7 @@ class LinePlatformAdapter(IPlatformProvider):
         self._channel_access_token = config.line.channel_access_token
         self._timeout = config.ai.connection_timeout
         self._logger = logger
-        self._base_url = PUSH_MESSAGE_URL
+        self._base_url = config.sources.line.push_url
 
     async def send_message(self, user_id: str, message: Message) -> bool:
         headers = {"Authorization": f"Bearer {self._channel_access_token}", "Content-Type": "application/json"}
@@ -43,9 +42,9 @@ class LinePlatformAdapter(IPlatformProvider):
                         f"Failed to send LINE message to user_id: {user_id}. Status: {resp.status_code}, Response: {resp.text}"
                     )
                     return False
-            except httpx.RequestError as e:
-                self._logger.error(f"An HTTP error occurred while sending message to LINE for user {user_id}: {e}")
+            except httpx.RequestError as error:
+                self._logger.error(f"An HTTP error occurred while sending message to LINE for user {user_id}: {error}")
                 return False
-            except Exception as e:
-                self._logger.critical(f"An unexpected error occurred during LINE message sending for user {user_id}: {e}")
+            except Exception as error:
+                self._logger.critical(f"An unexpected error occurred during LINE message sending for user {user_id}: {error}")
                 return False

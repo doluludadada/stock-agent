@@ -1,15 +1,16 @@
 import json
+from datetime import UTC, datetime
 
 from sqlmodel import col, select
 
-from a_domain.model.analysis.social_sentiment import SentimentClassification
+from a_domain.model.analysis.sentiment_classification import SentimentClassification
 from a_domain.model.chat.message import Message
 from a_domain.model.market.article import Article
 from a_domain.ports.ai.ai_provider import IAiProvider
 from a_domain.ports.ai.sentiment_classifier import ISentimentClassifier
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.types.enums import MessageRole, SentimentLabel
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.article_sentiment_dto import ArticleSentimentDTO
 
@@ -42,7 +43,7 @@ class AiSentimentClassifier(ISentimentClassifier):
             return list(cached.values())
 
         reply = await self._ai_provider.generate_reply(
-            messages=(Message(role=MessageRole.USER, content=self._build_prompt(stock_id, uncached)),)
+            messages=(Message(role=MessageRole.USER, content=self._build_prompt(stock_id, uncached), timestamp=datetime.now(UTC)),)
         )
         fresh = self._parse_reply(reply.content, uncached)
 

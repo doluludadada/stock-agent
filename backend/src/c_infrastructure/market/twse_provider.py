@@ -8,6 +8,7 @@ from a_domain.model.market.stock import Stock
 from a_domain.ports.market.stock_provider import IStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.types.enums import MarketType
+from b_application.config.sources_config import ExchangeSources
 from c_infrastructure.system.market_clock import TAIWAN_SESSION_CLOSE, TAIWAN_TIMEZONE
 
 ROC_YEAR_OFFSET = 1911
@@ -52,11 +53,10 @@ class TaiwanStockProvider(IStockProvider):
     so handing out the cached instances would carry one workflow's data into the next.
     """
 
-    TWSE_URL = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
-    TPEX_URL = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes"
     CACHE_TTL = timedelta(hours=6)
 
-    def __init__(self, logger: ILoggingProvider):
+    def __init__(self, exchange: ExchangeSources, logger: ILoggingProvider):
+        self._exchange = exchange
         self._logger = logger
         self._cache: list[Stock] = []
         self._closes: dict[str, Ohlcv] = {}
@@ -92,8 +92,8 @@ class TaiwanStockProvider(IStockProvider):
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
-                self._logger.debug("Fetching TWSE (上市) stocks...")
-                twse_resp = await client.get(self.TWSE_URL)
+                self._logger.debug("Fetching TWSE listed stocks...")
+                twse_resp = await client.get(self._exchange.twse_daily_quotes_url)
                 twse_resp.raise_for_status()
 
                 for item in twse_resp.json():
@@ -102,8 +102,8 @@ class TaiwanStockProvider(IStockProvider):
                         if (close := parse_daily_close(item, TWSE_BAR_FIELDS)) is not None:
                             closes[item["Code"]] = close
 
-                self._logger.debug("Fetching TPEX (上櫃) stocks...")
-                tpex_resp = await client.get(self.TPEX_URL)
+                self._logger.debug("Fetching TPEX OTC stocks...")
+                tpex_resp = await client.get(self._exchange.tpex_daily_quotes_url)
                 tpex_resp.raise_for_status()
                 for item in tpex_resp.json():
                     if len(item.get("SecuritiesCompanyCode", "")) == 4:
@@ -120,6 +120,6 @@ class TaiwanStockProvider(IStockProvider):
                 self._logger.success(f"Successfully loaded {len(stocks)} stocks and {len(closes)} daily closes from API.")
                 return stocks, closes
 
-            except Exception as e:
-                self._logger.error(f"Failed to fetch stock list: {e}")
+            except Exception as error:
+                self._logger.error(f"Failed to fetch stock list: {error}")
                 return [], {}

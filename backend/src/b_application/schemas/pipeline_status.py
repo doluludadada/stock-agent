@@ -1,4 +1,6 @@
 from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Self
 
 from a_domain.model.analysis.social_sentiment import SocialSentiment
 from a_domain.model.market.stock import Stock
@@ -6,14 +8,15 @@ from a_domain.model.system.stats import SystemStats
 from a_domain.model.trading.account import Account
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.signal import TradeSignal
-from a_domain.model.trading.watchlist import StockWatchlist
+from a_domain.model.trading.stock_watchlist import StockWatchlist
+from a_domain.types.enums import ExecutionProvider, OrderMode, Workflow
 
 
 @dataclass
 class PipelineStatus:
     """
     Runtime state for one workflow run. RunHistory.open creates it; `stats` is the run record.
-    A read-only valuation step gets one from valuation_status() instead, which is never recorded.
+    A read-only valuation step gets one from for_valuation() instead, which is never recorded.
     """
 
     stats: SystemStats
@@ -92,3 +95,27 @@ class PipelineStatus:
     """
     One order per orderable decision OrderExecution handled, sent or refused.
     """
+
+    manual_buy_refusal: str | None = None
+    """
+    Why the confirmed manual BUY of this run sent no order. Unset when OrderExecution made its order.
+    """
+
+    @classmethod
+    def for_valuation(cls, now: datetime) -> Self:
+        """
+        Collects one valuation step's counters and errors for the shared collect and process use cases.
+        Valuation records no run and sends no order, so the run identity is fixed to values that cannot order.
+        """
+        return cls(
+            stats=SystemStats(
+                workflow=Workflow.VALUATION, execution_provider=ExecutionProvider.MOCK, order_mode=OrderMode.DISABLED, start_time=now
+            )
+        )
+
+    def require_manual_buy_order(self) -> Order:
+        """The order OrderExecution made for an unrefused manual BUY. It raises when the run refused the BUY instead."""
+        if self.manual_buy_refusal is not None or len(self.orders) != 1:
+            raise ValueError(f"the manual BUY run has no single order: refusal={self.manual_buy_refusal!r}, orders={len(self.orders)}")
+
+        return self.orders[0]

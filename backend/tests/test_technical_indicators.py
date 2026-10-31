@@ -3,7 +3,7 @@ import math
 import pytest
 from icontract.errors import ViolationError
 
-from a_domain.model.indicators.technical_indicators import MovingAverages
+from a_domain.model.indicators.moving_averages import MovingAverages
 
 
 @pytest.mark.parametrize(

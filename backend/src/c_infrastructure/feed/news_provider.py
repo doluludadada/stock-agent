@@ -3,7 +3,7 @@ from datetime import datetime
 from a_domain.model.market.article import Article
 from a_domain.ports.market.news_provider import INewsProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
 from c_infrastructure.feed.news.cnyes_news_provider import CnyesNewsProvider
 from c_infrastructure.feed.news.yahoo_tw_news_provider import YahooTwNewsProvider
 
@@ -12,8 +12,8 @@ class NewsProvider(INewsProvider):
     def __init__(self, config: AppConfig, logger: ILoggingProvider):
         self._config = config
         self._logger = logger
-        self._yahoo = YahooTwNewsProvider(logger)
-        self._cnyes = CnyesNewsProvider(logger)
+        self._yahoo = YahooTwNewsProvider(config.sources.news, logger)
+        self._cnyes = CnyesNewsProvider(config.sources.news, logger)
 
     async def fetch_news(self, stock_id: str, limit: int = 10) -> list[Article]:
         self._logger.debug(f"Fetching live news for {stock_id} from multiple sources...")
@@ -60,21 +60,21 @@ class NewsProvider(INewsProvider):
         file_path = archive_dir / file_name
 
         try:
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write(f"# Market News: {stock_id}\n")
-                f.write(f"**Generated at:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(f"**Total Articles:** {len(articles)}\n\n")
-                f.write("---\n\n")
+            with open(file_path, "w", encoding="utf-8") as file:
+                file.write(f"# Market News: {stock_id}\n")
+                file.write(f"**Generated at:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                file.write(f"**Total Articles:** {len(articles)}\n\n")
+                file.write("---\n\n")
 
                 for i, article in enumerate(articles, 1):
                     pub_time = article.published_at.strftime("%Y-%m-%d %H:%M")
-                    f.write(f"## [{i}] {article.title}\n")
-                    f.write(f"- **Source:** {article.source.value}\n")
-                    f.write(f"- **Published:** {pub_time}\n")
-                    f.write(f"- **URL:** [Link]({article.url})\n\n")
-                    f.write(f"**Content Snippet:**\n> {article.content}\n\n")
-                    f.write("---\n\n")
+                    file.write(f"## [{i}] {article.title}\n")
+                    file.write(f"- **Source:** {article.source.value}\n")
+                    file.write(f"- **Published:** {pub_time}\n")
+                    file.write(f"- **URL:** [Link]({article.url})\n\n")
+                    file.write(f"**Content Snippet:**\n> {article.content}\n\n")
+                    file.write("---\n\n")
 
             self._logger.trace(f"Saved news archive to {file_path}")
-        except Exception as e:
-            self._logger.warning(f"Failed to save news archive for {stock_id}: {e}")
+        except Exception as error:
+            self._logger.warning(f"Failed to save news archive for {stock_id}: {error}")

@@ -2,7 +2,7 @@
 
 from typing import Protocol
 
-from a_domain.model.trading.watchlist import WatchlistEntry
+from a_domain.model.trading.watchlist_entry import WatchlistEntry
 
 
 class IWatchlistRepository(Protocol):
@@ -13,5 +13,3 @@ class IWatchlistRepository(Protocol):
     async def save(self, entries: list[WatchlistEntry]) -> None:
         """Inserts or replaces each entry by (stock_id, watchlist_type)."""
         ...
-
-    async def remove(self, stock_id: str) -> None: ...

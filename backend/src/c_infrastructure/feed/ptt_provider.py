@@ -2,7 +2,7 @@
 # Current source: :contentReference[oaicite:4]{index=4}
 
 import re
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import TypedDict
 
 import httpx
@@ -13,7 +13,9 @@ from a_domain.ports.market.social_media_provider import ISocialMediaProvider
 from a_domain.ports.market.stock_provider import IStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.types.enums import ContentType, InformationSource
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
+from b_application.config.sources_config import PttSources
+from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 
 
 class PttListing(TypedDict):
@@ -26,12 +28,12 @@ class PttListing(TypedDict):
 
 
 class PttParser:
-    RE_TICKER_TEMPLATE = re.compile(r"股票代碼[^:：]*[:：]\s*(\d{4})")
-    RE_TICKER_PARENS = re.compile(r"[（(](\d{4})[)）]")
     RE_TICKER_TITLE = re.compile(r"(\d{4})")
 
-    def __init__(self, base_url: str, max_body_length: int) -> None:
-        self._base_url = base_url
+    def __init__(self, ptt: PttSources, max_body_length: int) -> None:
+        self._ptt = ptt
+        self._ticker_label = re.compile(ptt.ticker_label_pattern)
+        self._ticker_parenthesized = re.compile(ptt.ticker_parenthesized_pattern)
         self._max_body_length = max_body_length
 
     def parse_listing(self, row: Tag) -> PttListing | None:
@@ -56,7 +58,7 @@ class PttParser:
             except IndexError:
                 pass
 
-        return PttListing(title=anchor.get_text(strip=True), url=self._base_url + href, published_date=published_date)
+        return PttListing(title=anchor.get_text(strip=True), url=self._ptt.base_url + href, published_date=published_date)
 
     def parse_article(self, html: str, listing: PttListing, stock_universe: set[str]) -> Article | None:
         main_content = BeautifulSoup(html, "html.parser").find("div", id="main-content")
@@ -73,7 +75,7 @@ class PttParser:
         if not content:
             return None
 
-        content = f"[{push_count}推 {boo_count}噓 {arrow_count}→]\n{content}"
+        content = f"[{push_count}{self._ptt.push_tag} {boo_count}{self._ptt.boo_tag} {arrow_count}{self._ptt.arrow_tag}]\n{content}"
         content = content[: self._max_body_length]
 
         return Article(
@@ -83,17 +85,18 @@ class PttParser:
             content=content,
             url=listing["url"],
             content_type=ContentType.ANALYSIS,
-            published_at=datetime.combine(listing["published_date"], datetime.min.time()),
+            published_at=datetime.combine(listing["published_date"], datetime.min.time(), tzinfo=TAIWAN_TIMEZONE),
+            fetched_at=datetime.now(UTC),
             engagement=push_count + boo_count + arrow_count,
             raw_metadata={"push": push_count, "boo": boo_count, "arrow": arrow_count},
         )
 
     def extract_stock_id(self, body: str, title: str) -> str | None:
-        template_match = self.RE_TICKER_TEMPLATE.search(body)
+        template_match = self._ticker_label.search(body)
         if template_match:
             return template_match.group(1)
 
-        for stock_id in self.RE_TICKER_PARENS.findall(body):
+        for stock_id in self._ticker_parenthesized.findall(body):
             if not stock_id.startswith("0"):
                 return stock_id
 
@@ -111,11 +114,11 @@ class PttParser:
                 continue
 
             push_tag = tag_element.get_text().strip()
-            if push_tag == "推":
+            if push_tag == self._ptt.push_tag:
                 push_count += 1
-            elif push_tag == "噓":
+            elif push_tag == self._ptt.boo_tag:
                 boo_count += 1
-            elif push_tag == "→":
+            elif push_tag == self._ptt.arrow_tag:
                 arrow_count += 1
 
         return push_count, boo_count, arrow_count
@@ -134,7 +137,7 @@ class PttParser:
             if line.startswith("※"):
                 continue
 
-            if "發文提醒" in line or "ctrl+y" in line.lower():
+            if self._ptt.posting_reminder_marker in line or "ctrl+y" in line.lower():
                 continue
 
             lines.append(line)
@@ -147,12 +150,12 @@ class PttParser:
             return None
 
         for anchor in paging.find_all("a"):
-            if "上頁" not in anchor.get_text():
+            if self._ptt.previous_page_label not in anchor.get_text():
                 continue
 
             href = anchor.get("href", "")
             if isinstance(href, str) and href:
-                return self._base_url + href
+                return self._ptt.base_url + href
 
         return None
 
@@ -165,8 +168,6 @@ class PttProvider(ISocialMediaProvider):
     cutoff is reached or enough articles are collected.
     """
 
-    BASE_URL = "https://www.ptt.cc"
-    SEARCH_URL = f"{BASE_URL}/bbs/Stock/search"
     MAX_PAGES = 30
     MAX_BODY_LEN = 3000
 
@@ -177,7 +178,8 @@ class PttProvider(ISocialMediaProvider):
         self._logger = logger
         self._stock_provider = stock_provider
         self._stock_universe: set[str] | None = None
-        self._parser = PttParser(base_url=self.BASE_URL, max_body_length=self.MAX_BODY_LEN)
+        self._search_url = config.sources.ptt.base_url + config.sources.ptt.search_path
+        self._parser = PttParser(config.sources.ptt, max_body_length=self.MAX_BODY_LEN)
 
     # ── public ────────────────────────────────────────────────────── #
 
@@ -233,7 +235,7 @@ class PttProvider(ISocialMediaProvider):
         next_url: str | None = None
 
         for _ in range(self.MAX_PAGES):
-            url = next_url or self.SEARCH_URL
+            url = next_url or self._search_url
             params = None if next_url else {"q": tag}
             page_html = await self._fetch_html(http_client, url, params)
             if page_html is None:

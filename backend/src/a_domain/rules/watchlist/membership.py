@@ -1,7 +1,8 @@
 from datetime import datetime
 
 from a_domain.model.market.stock import Stock
-from a_domain.model.trading.watchlist import WatchlistAddition, WatchlistEntry
+from a_domain.model.trading.watchlist_addition import WatchlistAddition
+from a_domain.model.trading.watchlist_entry import WatchlistEntry
 from a_domain.types.enums import WatchlistType
 
 

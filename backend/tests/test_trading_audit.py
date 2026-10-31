@@ -9,7 +9,6 @@ from a_domain.model.analysis.ai_analysis_report import AiAnalysisReport
 from a_domain.model.analysis.technical_report import TechnicalReport
 from a_domain.model.trading.order import Order
 from a_domain.types.enums import OrderMode, OrderStatus, SignalSource, TradeAction, Workflow
-from b_application.use_cases.trade.manual_buy import ManualBuyRefusal
 from c_infrastructure.database.models.trading_journal_dto import AccountSnapshotDTO, OrderDTO, TradeSignalDTO, WorkflowRunDTO
 from c_infrastructure.database.repositories.trading_journal import TradingJournal
 
@@ -25,7 +24,7 @@ async def test_an_order_row_traces_back_to_its_price_reports_signal_run_and_resu
     stack = await open_stack(tmp_path)
     stock = analysed_stock()
 
-    await stack.manual_buy.execute(stock)
+    await stack.pipeline.buy_manually(stock)
 
     async with stack.db.get_session() as session:
         order_row = (await session.execute(select(OrderDTO))).scalar_one()
@@ -58,7 +57,7 @@ async def test_an_order_row_traces_back_to_its_price_reports_signal_run_and_resu
 async def test_a_filled_manual_buy_returns_the_filled_order(tmp_path) -> None:
     stack = await open_stack(tmp_path)
 
-    result = await stack.manual_buy.execute(analysed_stock())
+    result = (await stack.pipeline.buy_manually(analysed_stock())).require_manual_buy_order()
 
     assert isinstance(result, Order)
     assert (result.status, result.filled_quantity, result.fee) == (OrderStatus.FILLED, 2000, 285)
@@ -78,7 +77,7 @@ async def test_a_refused_manual_buy_is_a_recorded_rejected_order_with_its_reason
     if setup == "stale_price":
         stack.quotes.realtime["2330"] = bar(MONDAY_10_00 - timedelta(minutes=30), 100)
 
-    result = await stack.manual_buy.execute(analysed_stock())
+    result = (await stack.pipeline.buy_manually(analysed_stock())).require_manual_buy_order()
 
     assert isinstance(result, Order)
     assert result.status == OrderStatus.REJECTED and result.reason is not None and result.reason.startswith(reason)
@@ -107,7 +106,7 @@ async def test_only_continuous_trading_takes_the_apps_ioc_orders(
     stack.clock.current = MONDAY_10_00.replace(hour=hour, minute=minute)
     stack.quotes.realtime["2330"] = bar(stack.clock.current - timedelta(minutes=1), 100)
 
-    result = await stack.manual_buy.execute(analysed_stock())
+    result = (await stack.pipeline.buy_manually(analysed_stock())).require_manual_buy_order()
 
     assert isinstance(result, Order)
     assert result.status == status
@@ -123,10 +122,9 @@ async def test_a_manual_buy_that_cannot_become_an_order_says_why(
 ) -> None:
     stack = await open_stack(tmp_path, configure=lambda config: setattr(config.mock_trading, "initial_cash", initial_cash))
 
-    result = await stack.manual_buy.execute(analysed_stock(composite_score=composite_score))
+    status = await stack.pipeline.buy_manually(analysed_stock(composite_score=composite_score))
 
-    assert isinstance(result, ManualBuyRefusal)
-    assert result.reason.startswith(reason)
+    assert status.manual_buy_refusal is not None and status.manual_buy_refusal.startswith(reason)
 
     async with stack.db.get_session() as session:
         assert (await session.execute(select(OrderDTO))).first() is None
@@ -141,9 +139,9 @@ async def test_a_decision_that_cannot_be_recorded_sends_no_order(tmp_path) -> No
     stack = await open_stack(tmp_path)
     stack = await open_stack(tmp_path, journal=UnwritableSignals(db=stack.db))
 
-    result = await stack.manual_buy.execute(analysed_stock())
+    status = await stack.pipeline.buy_manually(analysed_stock())
 
-    assert isinstance(result, ManualBuyRefusal) and "disk full" in result.reason
+    assert status.manual_buy_refusal is not None and "disk full" in status.manual_buy_refusal
     assert ((await stack.broker.get_account()).cash, (await stack.broker.get_account()).positions) == (1_000_000, [])
 
 
@@ -151,7 +149,7 @@ async def test_a_decision_gets_one_order_however_often_it_is_executed(tmp_path) 
     stack = await open_stack(tmp_path)
     stock = analysed_stock()
     stock.realtime_bar = stack.quotes.realtime["2330"]
-    signal = stack.config.decision_rule().entry_rule.decide_manual(stock, await stack.broker.get_account())
+    signal = stack.config.decision_rule().entry_rule.decide_manual(stock, await stack.broker.get_account(), now=stack.clock.now())
 
     async with stack.run_history.open(Workflow.MANUAL_BUY) as status:
         await stack.journal.save_signals(status.stats.run_id, [signal])
@@ -183,7 +181,7 @@ async def test_the_order_is_recorded_pending_before_the_broker_sees_it(tmp_path)
     broker = BrokerThatChecksTheRecord(stack)
     stack.order_execution._execution_provider = broker
 
-    await stack.manual_buy.execute(analysed_stock())
+    await stack.pipeline.buy_manually(analysed_stock())
 
     assert broker.recorded_before_sending == [OrderStatus.PENDING]
 
@@ -226,7 +224,7 @@ class SlowBroker:
 async def cancel_during_the_broker_call(stack, cancels: int) -> None:
     broker = SlowBroker(stack)
     stack.order_execution._execution_provider = broker
-    run = asyncio.create_task(stack.manual_buy.execute(analysed_stock()))
+    run = asyncio.create_task(stack.pipeline.buy_manually(analysed_stock()))
     await broker.called.wait()
 
     for _ in range(cancels):

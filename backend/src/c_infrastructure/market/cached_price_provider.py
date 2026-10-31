@@ -1,6 +1,6 @@
 # backend/src/c_infrastructure/market/cached_price_provider.py
 
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, tzinfo
 
 from sqlmodel import col, select
 
@@ -51,7 +51,8 @@ class CachedPriceProvider(IOhlcvProvider):
         # bar keeps changing until it settles; caching either would freeze a provisional price as that day's close.
         last_settled_session = min(end_day, self._clock.last_settled_session())
         cached = self._settled_sessions(
-            await self._load_cached_bars(stock_ids=stock_ids, start_day=start_day, end_day=end_day), last_settled_session
+            await self._load_cached_bars(stock_ids=stock_ids, start_day=start_day, end_day=end_day, zone=now.tzinfo),
+            last_settled_session,
         )
         behind = [
             stock
@@ -68,7 +69,7 @@ class CachedPriceProvider(IOhlcvProvider):
             for stock in behind
             if (fetch := fetches.get(stock.stock_id)) is None
             or fetch.settled_session < last_settled_session
-            or now - self._clock.to_market_datetime(fetch.fetched_at) >= self.RETRY_INTERVAL
+            or now - fetch.fetched_at >= self.RETRY_INTERVAL
         ]
 
         if len(due) < len(behind):
@@ -90,13 +91,15 @@ class CachedPriceProvider(IOhlcvProvider):
 
         return cached | fresh
 
-    async def _load_cached_bars(self, stock_ids: list[str], start_day: date, end_day: date) -> dict[str, list[Ohlcv]]:
+    async def _load_cached_bars(
+        self, stock_ids: list[str], start_day: date, end_day: date, zone: tzinfo | None
+    ) -> dict[str, list[Ohlcv]]:
         async with self._db.get_session() as session:
             stmt = (
                 select(OhlcvDTO)
                 .where(col(OhlcvDTO.stock_id).in_(stock_ids))
-                .where(col(OhlcvDTO.ts) >= datetime.combine(start_day, time.min))
-                .where(col(OhlcvDTO.ts) <= datetime.combine(end_day, time.max))
+                .where(col(OhlcvDTO.ts) >= datetime.combine(start_day, time.min, tzinfo=zone))
+                .where(col(OhlcvDTO.ts) <= datetime.combine(end_day, time.max, tzinfo=zone))
                 .order_by(col(OhlcvDTO.stock_id), col(OhlcvDTO.ts))
             )
 
@@ -106,9 +109,7 @@ class CachedPriceProvider(IOhlcvProvider):
         bars_by_stock: dict[str, list[Ohlcv]] = {}
 
         for record in records:
-            bar = Ohlcv.model_validate(record)
-            bar.ts = self._clock.to_market_datetime(bar.ts)
-            bars_by_stock.setdefault(record.stock_id, []).append(bar)
+            bars_by_stock.setdefault(record.stock_id, []).append(Ohlcv.model_validate(record))
 
         return bars_by_stock
 

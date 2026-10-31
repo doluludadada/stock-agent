@@ -5,15 +5,16 @@ from pydantic import model_validator
 from sqlmodel import Field, SQLModel
 
 from a_domain.model.market.ohlcv import Ohlcv
+from c_infrastructure.database.utc_datetime import UtcDateTime
 
 
 class OhlcvDTO(Ohlcv, table=True):
     """One cached daily bar. A bar is stamped at its session's close, so (stock_id, ts) is one row per stock and session."""
 
-    __tablename__: ClassVar[str] = "ohlcv_data"  # pyright: ignore[reportIncompatibleVariableOverride]
+    __tablename__: ClassVar[str] = "ohlcv_data"
 
     stock_id: str = Field(primary_key=True)
-    ts: datetime = Field(primary_key=True, description="Timestamp of the candle")
+    ts: datetime = Field(primary_key=True, sa_type=UtcDateTime, description="Timestamp of the candle")
 
     @model_validator(mode="after")
     def _check_invariants(self) -> OhlcvDTO:
@@ -30,8 +31,8 @@ class OhlcvDTO(Ohlcv, table=True):
 class OhlcvFetchDTO(SQLModel, table=True):
     """The last time the history source was asked for one stock's daily bars, and the last settled session at that time."""
 
-    __tablename__: ClassVar[str] = "ohlcv_fetches"  # pyright: ignore[reportIncompatibleVariableOverride]
+    __tablename__: ClassVar[str] = "ohlcv_fetches"
 
     stock_id: str = Field(primary_key=True)
-    fetched_at: datetime
+    fetched_at: datetime = Field(sa_type=UtcDateTime)
     settled_session: date

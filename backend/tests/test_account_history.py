@@ -11,7 +11,7 @@ TUESDAY_CLOSE = MONDAY_CLOSE + timedelta(days=1)
 
 async def bought_2000_on_monday(tmp_path):
     stack = await open_stack(tmp_path)
-    await stack.manual_buy.execute(analysed_stock())
+    await stack.pipeline.buy_manually(analysed_stock())
 
     stack.clock.current = MONDAY_10_00 + timedelta(days=1, hours=1)
     stack.quotes.daily["2330"] = [bar(MONDAY_CLOSE, 100), bar(TUESDAY_CLOSE, 110)]

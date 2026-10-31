@@ -3,7 +3,7 @@
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.notification_provider import INotificationProvider
 from a_domain.types.enums import TradeAction
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
 from b_application.schemas.pipeline_status import PipelineStatus
 
 
@@ -51,7 +51,7 @@ class Reporting:
                 else:
                     self._logger.warning(f"Notification skipped or failed: {signal.action.value} {signal.stock_id}")
 
-            except Exception as e:
-                error_message = f"Notification failed for {signal.stock_id}: {e}"
+            except Exception as error:
+                error_message = f"Notification failed for {signal.stock_id}: {error}"
                 self._logger.error(error_message)
                 status.stats.add_error(error_message)

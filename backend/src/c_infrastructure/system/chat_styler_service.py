@@ -1,4 +1,5 @@
 import re
+from datetime import datetime
 
 from a_domain.model.chat.message import Message, MessageRole
 from a_domain.ports.chat.chat_styler_provider import IChatStylerProvider
@@ -7,6 +8,9 @@ from a_domain.ports.chat.chat_styler_provider import IChatStylerProvider
 class ChatStylerService(IChatStylerProvider):
     _MAX_MESSAGE_LENGTH = 400
     _SPLIT_DELIMITERS = r"\n\n+"
+
+    def __init__(self, sentence_endings: str) -> None:
+        self._sentence_endings = sentence_endings
 
     def format_response(self, message: Message) -> tuple[Message, ...]:
         content = self._remove_markdown(message.content)
@@ -20,12 +24,12 @@ class ChatStylerService(IChatStylerProvider):
                 continue
 
             if len(trimmed_chunk) > self._MAX_MESSAGE_LENGTH:
-                final_messages.extend(self._force_split_long_text(trimmed_chunk))
+                final_messages.extend(self._force_split_long_text(trimmed_chunk, message.timestamp))
             else:
-                final_messages.append(Message(role=MessageRole.ASSISTANT, content=trimmed_chunk))
+                final_messages.append(Message(role=MessageRole.ASSISTANT, content=trimmed_chunk, timestamp=message.timestamp))
 
         if not final_messages:
-            return (Message(role=MessageRole.ASSISTANT, content="Could you ask me again?🤔"),)
+            return (Message(role=MessageRole.ASSISTANT, content="Could you ask me again?🤔", timestamp=message.timestamp),)
 
         return tuple(final_messages)
 
@@ -35,19 +39,10 @@ class ChatStylerService(IChatStylerProvider):
         text = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
         return text.strip()
 
-    def _force_split_long_text(self, text: str) -> list[Message]:
+    def _force_split_long_text(self, text: str, timestamp: datetime) -> list[Message]:
         parts = []
         while len(text) > self._MAX_MESSAGE_LENGTH:
-            possible_splits = [
-                text.rfind("。", 0, self._MAX_MESSAGE_LENGTH),
-                text.rfind(".", 0, self._MAX_MESSAGE_LENGTH),
-                text.rfind("！", 0, self._MAX_MESSAGE_LENGTH),
-                text.rfind("!", 0, self._MAX_MESSAGE_LENGTH),
-                text.rfind("？", 0, self._MAX_MESSAGE_LENGTH),
-                text.rfind("?", 0, self._MAX_MESSAGE_LENGTH),
-            ]
-
-            split_at = max(possible_splits)
+            split_at = max(text.rfind(ending, 0, self._MAX_MESSAGE_LENGTH) for ending in self._sentence_endings)
 
             if split_at == -1:
                 split_at = text.rfind(" ", 0, self._MAX_MESSAGE_LENGTH)
@@ -55,9 +50,9 @@ class ChatStylerService(IChatStylerProvider):
             if split_at == -1:
                 split_at = self._MAX_MESSAGE_LENGTH
 
-            parts.append(Message(role=MessageRole.ASSISTANT, content=text[:split_at].strip()))
+            parts.append(Message(role=MessageRole.ASSISTANT, content=text[:split_at].strip(), timestamp=timestamp))
             text = text[split_at:].strip()
 
         if text:
-            parts.append(Message(role=MessageRole.ASSISTANT, content=text))
+            parts.append(Message(role=MessageRole.ASSISTANT, content=text, timestamp=timestamp))
         return parts

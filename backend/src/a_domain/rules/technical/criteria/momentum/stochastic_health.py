@@ -36,7 +36,7 @@ class StochasticHealthCriterion:
         if stochastic is None:
             return False
 
-        if self.max_k is not None and stochastic.k >= self.max_k:
+        if self.max_k is not None and stochastic.percent_k >= self.max_k:
             return False
 
-        return not self.require_k_above_d or stochastic.k > stochastic.d
+        return not self.require_k_above_d or stochastic.percent_k > stochastic.percent_d

@@ -8,12 +8,14 @@ from bs4 import BeautifulSoup
 from a_domain.model.market.article import Article
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.types.enums import ContentType, InformationSource
+from b_application.config.sources_config import NewsSources
 
 
 class CnyesNewsProvider:
-    def __init__(self, logger: ILoggingProvider):
+    def __init__(self, news: NewsSources, logger: ILoggingProvider):
         self._logger = logger
-        self._base_url = "https://api.cnyes.com/media/api/v1"
+        self._base_url = news.cnyes_api_url
+        self._article_url = news.cnyes_article_url
         self._headers = {"Accept": "application/json", "User-Agent": "Mozilla/5.0"}
 
     async def fetch_news(self, stock_id: str, limit: int) -> list[Article]:
@@ -55,7 +57,7 @@ class CnyesNewsProvider:
                                 source=InformationSource.NEWS_MEDIA,
                                 title=title,
                                 content=content,
-                                url=f"https://news.cnyes.com/news/id/{news_id}",
+                                url=f"{self._article_url}{news_id}",
                                 content_type=ContentType.REPORT,
                                 published_at=published_at,
                                 fetched_at=datetime.now(UTC),
@@ -71,16 +73,16 @@ class CnyesNewsProvider:
                     if articles:
                         self._logger.info(f"Successfully fetched {len(articles)} Cnyes articles for {stock_id}.")
                         return articles[:limit]
-                except httpx.HTTPStatusError as e:
-                    status_code = e.response.status_code
+                except httpx.HTTPStatusError as error:
+                    status_code = error.response.status_code
                     if status_code >= 500:
                         self._logger.warning(f"Cnyes endpoint unavailable for {stock_id} (HTTP {status_code}); trying next source.")
                     else:
-                        self._logger.error(f"Cnyes rejected request for {stock_id} (HTTP {status_code}): {e}")
-                except httpx.RequestError as e:
-                    self._logger.warning(f"Cnyes request failed for {stock_id}: {e}")
-                except Exception as e:
-                    self._logger.error(f"Unexpected error parsing Cnyes response for {stock_id}: {e}")
+                        self._logger.error(f"Cnyes rejected request for {stock_id} (HTTP {status_code}): {error}")
+                except httpx.RequestError as error:
+                    self._logger.warning(f"Cnyes request failed for {stock_id}: {error}")
+                except Exception as error:
+                    self._logger.error(f"Unexpected error parsing Cnyes response for {stock_id}: {error}")
 
         self._logger.warning(f"No Cnyes articles found for {stock_id}.")
         return []
@@ -89,8 +91,8 @@ class CnyesNewsProvider:
         try:
             resp = await client.get(url)
             resp.raise_for_status()
-        except httpx.HTTPError as e:
-            self._logger.debug(f"Failed to fetch Cnyes body for {url}: {e!r}")
+        except httpx.HTTPError as error:
+            self._logger.debug(f"Failed to fetch Cnyes body for {url}: {error!r}")
             return ""
 
         body = BeautifulSoup(resp.text, "html.parser").select_one("#article-container")

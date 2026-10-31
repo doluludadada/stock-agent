@@ -6,8 +6,11 @@ import pytest
 from support.harness import build_harness, rising_history
 
 from a_domain.ports.system.logging_provider import ILoggingProvider
+from b_application.config.sources_config import SourcesConfig
 from c_infrastructure.ai_models.ai_adapter.grok_adapter import GrokAdapter
 from c_infrastructure.feed.news.cnyes_news_provider import CnyesNewsProvider
+
+SOURCES = SourcesConfig()
 
 
 class FakeLogger(ILoggingProvider):
@@ -91,7 +94,7 @@ class SymbolNewsCnyesClient:
 async def test_cnyes_fetches_symbol_news(monkeypatch) -> None:
     monkeypatch.setattr(httpx, "AsyncClient", SymbolNewsCnyesClient)
     logger = FakeLogger()
-    provider = CnyesNewsProvider(logger)
+    provider = CnyesNewsProvider(SOURCES.news, logger)
 
     articles = await provider.fetch_news("2486", limit=10)
 
@@ -124,6 +127,7 @@ async def test_ai_analyser_records_provider_failure_without_counting_success() -
 async def test_grok_adapter_raises_on_http_failure() -> None:
     config = SimpleNamespace(
         ai=SimpleNamespace(grok_api_key="test-key", connection_timeout=1),
+        sources=SOURCES,
         behavior=SimpleNamespace(enable_web_search=False, enable_x_search=False, enable_inline_citations=False),
     )
     adapter = GrokAdapter(config=cast(Any, config), logger=FakeLogger(), model_name="grok-test")

@@ -33,7 +33,7 @@ def scored(stock_id: str, composite_score: int, price: float = 100) -> Stock:
 def test_when_cash_runs_out_the_higher_score_wins_and_a_tie_goes_to_the_lower_stock_id() -> None:
     # At 10% risk and a 10% stop a BUY wants all the cash: 998 x 100 + fee 142 = 99,942 of 100,000 leaves 58.
     signals = rule(risk_per_trade_pct=0.10).decide_run(
-        [scored("2603", 85), scored("2330", 95), scored("1101", 95)], Account(cash=100_000)
+        [scored("2603", 85), scored("2330", 95), scored("1101", 95)], Account(cash=100_000), now=QUOTED_AT
     )
 
     assert [(signal.stock_id, signal.action, signal.quantity) for signal in signals] == [
@@ -46,7 +46,7 @@ def test_when_cash_runs_out_the_higher_score_wins_and_a_tie_goes_to_the_lower_st
 def test_a_runs_buys_never_commit_more_than_the_cash_whatever_the_order_they_arrive_in() -> None:
     stocks = [scored(f"{1101 + index}", 80 + index, price=28.37 + index) for index in range(8)]
 
-    signals = rule(risk_per_trade_pct=0.05).decide_run(stocks, Account(cash=1_000_000))
+    signals = rule(risk_per_trade_pct=0.05).decide_run(stocks, Account(cash=1_000_000), now=QUOTED_AT)
 
     # The most a BUY can cost is its quantity at the order's limit, the next 0.05 tick up, plus the fee.
     committed = sum(

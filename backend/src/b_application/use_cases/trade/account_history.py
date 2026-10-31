@@ -11,7 +11,7 @@ from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.execution_provider import IExecutionProvider
 from a_domain.ports.trading.trading_journal import ITradingJournal
 from a_domain.rules.trading.valuation import AccountValuation, EquityPoint, ValuationRule
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
 
 
 @dataclass(frozen=True)

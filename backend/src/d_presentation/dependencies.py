@@ -6,6 +6,7 @@ from a_domain.ports.ai.ai_provider import IAiProvider
 from a_domain.ports.ai.sentiment_classifier import ISentimentClassifier
 from a_domain.ports.analysis.technical_settings_repository import ITechnicalSettingsRepository
 from a_domain.ports.chat.conversation_repository import IConversationRepository
+from a_domain.ports.chat.platform_provider import IPlatformProvider
 from a_domain.ports.market.fundamentals_provider import IFundamentalsProvider
 from a_domain.ports.market.stock_provider import IStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
@@ -13,10 +14,13 @@ from a_domain.ports.system.notification_provider import INotificationProvider
 from a_domain.ports.trading.execution_provider import IExecutionProvider
 from a_domain.ports.trading.trading_journal import ITradingJournal
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
-from a_domain.rules.ai.prompt import ValuationPromptBuilder
 from a_domain.types.enums import ExecutionProvider, OrderMode, SystemEnvironment
-from b_application.pipeline import Pipeline
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
+from b_application.pipeline import ChatSteps, CollectSteps, Pipeline, ProcessSteps, TradingSteps, ValuationSteps
+from b_application.use_cases.chat.ai_processor import AiProcessor
+from b_application.use_cases.chat.context_loader import ContextLoader
+from b_application.use_cases.chat.dispatcher import Dispatcher
+from b_application.use_cases.chat.state_manager import StateManager
 from b_application.use_cases.collect.buzz_scanner import BuzzScanner
 from b_application.use_cases.collect.fundamentals_feed import FundamentalsFeed
 from b_application.use_cases.collect.market_data_collector import MarketDataCollector
@@ -26,6 +30,7 @@ from b_application.use_cases.process.ai_analyser import AiAnalyser
 from b_application.use_cases.process.composite_scorer import CompositeScorer
 from b_application.use_cases.process.sentiment_analyser import SentimentAnalyser
 from b_application.use_cases.process.technical_filter import TechnicalFilter
+from b_application.use_cases.process.valuation_explainer import ValuationExplainer
 from b_application.use_cases.ship.decision_memory import DecisionMemory
 from b_application.use_cases.ship.reporting import Reporting
 from b_application.use_cases.ship.run_history import RunHistory
@@ -33,10 +38,9 @@ from b_application.use_cases.ship.signals import Signals
 from b_application.use_cases.trade.account_history import AccountHistory
 from b_application.use_cases.trade.account_loader import AccountLoader
 from b_application.use_cases.trade.account_risk_check import AccountRiskCheck
-from b_application.use_cases.trade.manual_buy import ManualBuy
+from b_application.use_cases.trade.manual_signal import ManualSignal
 from b_application.use_cases.trade.order_execution import OrderExecution
 from b_application.use_cases.trade.watch_stocks import WatchStocks
-from b_application.valuation_pipeline import ValuationPipeline
 from c_infrastructure.ai_models.factory import AiAdapterFactory
 from c_infrastructure.ai_models.sentiment_classifier import AiSentimentClassifier
 from c_infrastructure.database.chroma.chroma_repository import ChromaRepositoryAdapter
@@ -51,7 +55,11 @@ from c_infrastructure.market.mis_quote_provider import MisQuoteProvider
 from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider
 from c_infrastructure.market.twse_provider import TaiwanStockProvider
 from c_infrastructure.market.yahoo_finance_adapter import YahooFinanceProvider
+from c_infrastructure.platforms.line.line_adapter import LinePlatformAdapter
+from c_infrastructure.platforms.line.line_handler import LineWebhookHandler
 from c_infrastructure.platforms.line.line_notification_adapter import LineNotificationAdapter
+from c_infrastructure.platforms.line.line_security import LineSecurityService
+from c_infrastructure.system.chat_styler_service import ChatStylerService
 from c_infrastructure.system.config_loader import load_settings
 from c_infrastructure.system.logger_service import LoggerService
 from c_infrastructure.system.market_clock import TaiwanMarketClock
@@ -67,16 +75,12 @@ class Runtime:
     """
 
     pipeline: Pipeline
-    valuation: ValuationPipeline
     watch_stocks: WatchStocks
-    manual_buy: ManualBuy
     account_history: AccountHistory
     stock_provider: IStockProvider
     journal: ITradingJournal
     watchlist_repository: IWatchlistRepository
     technical_settings_repository: ITechnicalSettingsRepository
-    ai_provider: IAiProvider
-    conversation_repository: IConversationRepository
     config: AppConfig
     logger: ILoggingProvider
 
@@ -91,41 +95,13 @@ class ProviderDependencies:
     ai_provider: IAiProvider
     sentiment_classifier: ISentimentClassifier
     knowledge_repository: ChromaRepositoryAdapter
+    conversation_repository: IConversationRepository
     journal: ITradingJournal
     watchlist_repository: WatchlistRepository
     technical_settings_repository: ITechnicalSettingsRepository
     execution_provider: IExecutionProvider
     notification_provider: INotificationProvider | None
-
-
-@dataclass(slots=True)
-class CollectUseCases:
-    market_scanner: MarketScanner
-    data_collector: MarketDataCollector
-    buzz_scanner: BuzzScanner
-    news_feed: NewsFeed
-
-
-@dataclass(slots=True)
-class ProcessUseCases:
-    ai_analyser: AiAnalyser
-    technical_filter: TechnicalFilter
-    composite_scorer: CompositeScorer
-    sentiment_analyser: SentimentAnalyser
-
-
-@dataclass(slots=True)
-class TradingUseCases:
-    account_loader: AccountLoader
-    account_risk_check: AccountRiskCheck
-    watch_stocks: WatchStocks
-    manual_buy: ManualBuy
-    account_history: AccountHistory
-    signals: Signals
-    decision_memory: DecisionMemory
-    order_execution: OrderExecution
-    reporting: Reporting
-    run_history: RunHistory
+    platform_provider: IPlatformProvider | None
 
 
 class TradingSetupError(RuntimeError):
@@ -193,6 +169,14 @@ async def create_execution_provider(config: AppConfig, db: DatabaseConnector, lo
     return provider
 
 
+def create_platform_provider(config: AppConfig, logger: ILoggingProvider) -> IPlatformProvider | None:
+    """The LINE chat platform, or None while LINE_CHANNEL_ACCESS_TOKEN is unset: the adapter refuses to build without it."""
+    if not config.line.channel_access_token:
+        return None
+
+    return LinePlatformAdapter(config=config, logger=logger)
+
+
 def create_notification_provider(config: AppConfig, logger: ILoggingProvider) -> INotificationProvider | None:
     if not config.notifications.enabled:
         return None
@@ -203,12 +187,12 @@ def create_notification_provider(config: AppConfig, logger: ILoggingProvider) ->
 async def build_provider_dependencies(
     config: AppConfig, db: DatabaseConnector, logger: ILoggingProvider, market_clock: TaiwanMarketClock
 ) -> ProviderDependencies:
-    stock_provider = TaiwanStockProvider(logger=logger)
+    stock_provider = TaiwanStockProvider(exchange=config.sources.exchange, logger=logger)
     yahoo_provider = YahooFinanceProvider(logger=logger)
 
     price_provider = CachedPriceProvider(
         history_provider=yahoo_provider,
-        quote_provider=MisQuoteProvider(logger=logger),
+        quote_provider=MisQuoteProvider(exchange=config.sources.exchange, logger=logger),
         db=db,
         logger=logger,
         market_clock=market_clock,
@@ -223,23 +207,25 @@ async def build_provider_dependencies(
     return ProviderDependencies(
         stock_provider=stock_provider,
         price_provider=price_provider,
-        fundamentals_provider=MopsFundamentalsProvider(db=db, market_clock=market_clock, logger=logger),
+        fundamentals_provider=MopsFundamentalsProvider(db=db, market_clock=market_clock, mops=config.sources.mops, logger=logger),
         news_provider=NewsProvider(config=config, logger=logger),
         social_media_provider=PttProvider(config=config, logger=logger, stock_provider=stock_provider),
         ai_provider=ai_provider,
         sentiment_classifier=AiSentimentClassifier(ai_provider=ai_provider, db=db, config=config, logger=logger),
         knowledge_repository=knowledge_repository,
+        conversation_repository=knowledge_repository,
         journal=TradingJournal(db=db),
         watchlist_repository=WatchlistRepository(db=db, logger=logger, market_clock=market_clock),
         technical_settings_repository=YamlTechnicalSettingsRepository(technical_path),
         execution_provider=await create_execution_provider(config, db, logger),
         notification_provider=create_notification_provider(config, logger),
+        platform_provider=create_platform_provider(config, logger),
     )
 
 
-def build_collect_use_cases(
+def build_collect_steps(
     config: AppConfig, logger: ILoggingProvider, market_clock: TaiwanMarketClock, dependencies: ProviderDependencies
-) -> CollectUseCases:
+) -> CollectSteps:
     market_scanner = MarketScanner(
         stock_provider=dependencies.stock_provider, watchlist_repository=dependencies.watchlist_repository, logger=logger
     )
@@ -257,15 +243,21 @@ def build_collect_use_cases(
 
     news_feed = NewsFeed(news_provider=dependencies.news_provider, config=config, logger=logger)
 
-    return CollectUseCases(market_scanner, data_collector, buzz_scanner, news_feed)
+    return CollectSteps(market_scanner, data_collector, buzz_scanner, news_feed)
 
 
-def build_process_use_cases(config: AppConfig, logger: ILoggingProvider, dependencies: ProviderDependencies) -> ProcessUseCases:
+def build_process_steps(
+    config: AppConfig, logger: ILoggingProvider, market_clock: TaiwanMarketClock, dependencies: ProviderDependencies
+) -> ProcessSteps:
     ai_analyser = AiAnalyser(
-        ai_provider=dependencies.ai_provider, knowledge_repository=dependencies.knowledge_repository, config=config, logger=logger
+        ai_provider=dependencies.ai_provider,
+        knowledge_repository=dependencies.knowledge_repository,
+        market_clock=market_clock,
+        config=config,
+        logger=logger,
     )
 
-    return ProcessUseCases(
+    return ProcessSteps(
         ai_analyser=ai_analyser,
         technical_filter=TechnicalFilter(logger=logger),
         composite_scorer=CompositeScorer(config=config, logger=logger),
@@ -273,15 +265,9 @@ def build_process_use_cases(config: AppConfig, logger: ILoggingProvider, depende
     )
 
 
-def build_trading_use_cases(
-    config: AppConfig,
-    logger: ILoggingProvider,
-    market_clock: TaiwanMarketClock,
-    dependencies: ProviderDependencies,
-    data_collector: MarketDataCollector,
-) -> TradingUseCases:
-    run_history = RunHistory(journal=dependencies.journal, config=config, logger=logger)
-
+def build_trading_steps(
+    config: AppConfig, logger: ILoggingProvider, market_clock: TaiwanMarketClock, dependencies: ProviderDependencies
+) -> TradingSteps:
     account_loader = AccountLoader(
         execution_provider=dependencies.execution_provider,
         stock_provider=dependencies.stock_provider,
@@ -289,8 +275,6 @@ def build_trading_use_cases(
         market_clock=market_clock,
         logger=logger,
     )
-
-    decision_memory = DecisionMemory(knowledge_repository=dependencies.knowledge_repository, logger=logger)
 
     order_execution = OrderExecution(
         execution_provider=dependencies.execution_provider,
@@ -301,18 +285,63 @@ def build_trading_use_cases(
         logger=logger,
     )
 
-    manual_buy = ManualBuy(
-        run_history=run_history,
+    return TradingSteps(
+        run_history=RunHistory(journal=dependencies.journal, market_clock=market_clock, config=config, logger=logger),
         account_loader=account_loader,
-        market_data_collector=data_collector,
-        journal=dependencies.journal,
-        decision_memory=decision_memory,
+        account_risk_check=AccountRiskCheck(dependencies.journal, market_clock, config, logger),
+        watch_stocks=WatchStocks(dependencies.watchlist_repository, market_clock, config, logger),
+        signals=Signals(dependencies.journal, market_clock, config, logger),
+        manual_signal=ManualSignal(dependencies.journal, market_clock, config, logger),
+        decision_memory=DecisionMemory(knowledge_repository=dependencies.knowledge_repository, logger=logger),
         order_execution=order_execution,
-        config=config,
-        logger=logger,
+        reporting=Reporting(dependencies.notification_provider, config, logger),
     )
 
-    account_history = AccountHistory(
+
+def build_chat_steps(
+    config: AppConfig, logger: ILoggingProvider, market_clock: TaiwanMarketClock, dependencies: ProviderDependencies
+) -> ChatSteps:
+    chat_styler = ChatStylerService(config.sources.line.sentence_endings)
+
+    return ChatSteps(
+        context_loader=ContextLoader(
+            repository=dependencies.conversation_repository, market_clock=market_clock, config=config, logger=logger
+        ),
+        ai_processor=AiProcessor(ai_provider=dependencies.ai_provider, chat_styler_provider=chat_styler, logger=logger),
+        state_manager=StateManager(repository=dependencies.conversation_repository, market_clock=market_clock, logger=logger),
+        dispatcher=Dispatcher(platform_provider=dependencies.platform_provider, logger=logger),
+        reset_commands=frozenset(config.db.reset_commands),
+        market_clock=market_clock,
+    )
+
+
+def build_valuation_steps(
+    config: AppConfig,
+    logger: ILoggingProvider,
+    market_clock: TaiwanMarketClock,
+    dependencies: ProviderDependencies,
+    collect: CollectSteps,
+    process: ProcessSteps,
+) -> ValuationSteps:
+    """Menus 5 and 6. It takes no TradingSteps: valuation never reaches orders, signals or the watchlist."""
+    return ValuationSteps(
+        stock_provider=dependencies.stock_provider,
+        fundamentals_feed=FundamentalsFeed(dependencies.fundamentals_provider, market_clock, logger),
+        data_collector=collect.data_collector,
+        technical_filter=process.technical_filter,
+        news_feed=collect.news_feed,
+        valuation_explainer=ValuationExplainer(dependencies.ai_provider, market_clock, config, logger),
+        technical_settings_repository=dependencies.technical_settings_repository,
+        market_clock=market_clock,
+        scenario_spread=config.valuation.scenario_spread,
+    )
+
+
+def build_account_history(
+    config: AppConfig, logger: ILoggingProvider, market_clock: TaiwanMarketClock, dependencies: ProviderDependencies
+) -> AccountHistory:
+    """Menu 7 and the account endpoint call it directly: one read-only operation, not a workflow."""
+    return AccountHistory(
         execution_provider=dependencies.execution_provider,
         journal=dependencies.journal,
         stock_provider=dependencies.stock_provider,
@@ -322,101 +351,42 @@ def build_trading_use_cases(
         logger=logger,
     )
 
-    return TradingUseCases(
-        account_loader=account_loader,
-        account_risk_check=AccountRiskCheck(dependencies.journal, config, logger),
-        watch_stocks=WatchStocks(dependencies.watchlist_repository, market_clock, config, logger),
-        manual_buy=manual_buy,
-        account_history=account_history,
-        signals=Signals(dependencies.journal, config, logger),
-        decision_memory=decision_memory,
-        order_execution=order_execution,
-        reporting=Reporting(dependencies.notification_provider, config, logger),
-        run_history=run_history,
-    )
-
-
-def build_pipeline(
-    collect: CollectUseCases,
-    process: ProcessUseCases,
-    trading: TradingUseCases,
-    technical_settings_repository: ITechnicalSettingsRepository,
-    logger: ILoggingProvider,
-) -> Pipeline:
-    return Pipeline(
-        account_loader=trading.account_loader,
-        account_risk_check=trading.account_risk_check,
-        market_scanner=collect.market_scanner,
-        data_collector=collect.data_collector,
-        buzz_scanner=collect.buzz_scanner,
-        news=collect.news_feed,
-        ai=process.ai_analyser,
-        technical_filter=process.technical_filter,
-        composite_scorer=process.composite_scorer,
-        sentiment=process.sentiment_analyser,
-        watch_stocks=trading.watch_stocks,
-        signals=trading.signals,
-        decision_memory=trading.decision_memory,
-        order_execution=trading.order_execution,
-        reporting=trading.reporting,
-        run_history=trading.run_history,
-        technical_settings_repository=technical_settings_repository,
-        logger=logger,
-    )
-
-
-def build_valuation_pipeline(
-    config: AppConfig,
-    logger: ILoggingProvider,
-    market_clock: TaiwanMarketClock,
-    dependencies: ProviderDependencies,
-    collect: CollectUseCases,
-    process: ProcessUseCases,
-) -> ValuationPipeline:
-    """Menus 5 and 6. It takes no TradingUseCases: valuation never reaches orders, signals or the watchlist."""
-    prompt_builder = ValuationPromptBuilder(
-        template=config.prompts.valuation_explanation,
-        max_articles=config.analysis.article_fetch_limit,
-        max_content_length=config.ai.article_content_length,
-    )
-
-    return ValuationPipeline(
-        stock_provider=dependencies.stock_provider,
-        fundamentals=FundamentalsFeed(dependencies.fundamentals_provider, market_clock, logger),
-        data_collector=collect.data_collector,
-        technical_filter=process.technical_filter,
-        news=collect.news_feed,
-        ai_provider=dependencies.ai_provider,
-        prompt_builder=prompt_builder,
-        technical_settings_repository=dependencies.technical_settings_repository,
-        market_clock=market_clock,
-        scenario_spread=config.valuation.scenario_spread,
-        logger=logger,
-    )
-
 
 def compose_runtime(
     config: AppConfig, logger: ILoggingProvider, market_clock: TaiwanMarketClock, dependencies: ProviderDependencies
 ) -> Runtime:
-    collect = build_collect_use_cases(config, logger, market_clock, dependencies)
-    process = build_process_use_cases(config, logger, dependencies)
-    trading = build_trading_use_cases(config, logger, market_clock, dependencies, collect.data_collector)
+    collect = build_collect_steps(config, logger, market_clock, dependencies)
+    process = build_process_steps(config, logger, market_clock, dependencies)
+    trading = build_trading_steps(config, logger, market_clock, dependencies)
+
+    pipeline = Pipeline(
+        collect=collect,
+        process=process,
+        trading=trading,
+        chat=build_chat_steps(config, logger, market_clock, dependencies),
+        valuation=build_valuation_steps(config, logger, market_clock, dependencies, collect, process),
+        technical_settings_repository=dependencies.technical_settings_repository,
+        logger=logger,
+    )
 
     return Runtime(
-        pipeline=build_pipeline(collect, process, trading, dependencies.technical_settings_repository, logger),
-        valuation=build_valuation_pipeline(config, logger, market_clock, dependencies, collect, process),
+        pipeline=pipeline,
         watch_stocks=trading.watch_stocks,
-        manual_buy=trading.manual_buy,
-        account_history=trading.account_history,
+        account_history=build_account_history(config, logger, market_clock, dependencies),
         stock_provider=dependencies.stock_provider,
         journal=dependencies.journal,
         watchlist_repository=dependencies.watchlist_repository,
         technical_settings_repository=dependencies.technical_settings_repository,
-        ai_provider=dependencies.ai_provider,
-        conversation_repository=dependencies.knowledge_repository,
         config=config,
         logger=logger,
     )
+
+
+def create_line_webhook_handler(runtime: Runtime) -> LineWebhookHandler:
+    """Built per request: the signature check refuses to build without LINE_CHANNEL_SECRET, and only the webhook needs it."""
+    security_service = LineSecurityService(channel_secret=runtime.config.line.channel_secret, logger=runtime.logger)
+
+    return LineWebhookHandler(security_service=security_service, pipeline=runtime.pipeline)
 
 
 @asynccontextmanager

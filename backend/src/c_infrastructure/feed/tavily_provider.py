@@ -4,7 +4,7 @@ from icontract import require
 from a_domain.model.chat.web_search_result import WebSearchResult
 from a_domain.ports.chat.web_search_provider import IWebSearchProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
 
 
 class TavilySearchAdapter(IWebSearchProvider):
@@ -39,7 +39,7 @@ class TavilySearchAdapter(IWebSearchProvider):
             payload["exclude_domains"] = list(excluded)
 
         try:
-            resp = await self._client.post("https://api.tavily.com/search", json=payload)
+            resp = await self._client.post(self._config.sources.ai.tavily_search_url, json=payload)
             resp.raise_for_status()
             data = resp.json()
 
@@ -54,6 +54,6 @@ class TavilySearchAdapter(IWebSearchProvider):
                 )
             return results
 
-        except Exception as e:
-            self._logger.error(f"[TavilySearchAdapter] search failed: {e}")
+        except Exception as error:
+            self._logger.error(f"[TavilySearchAdapter] search failed: {error}")
             return []

@@ -23,16 +23,9 @@ class MessageRole(StrEnum):
     ASSISTANT = auto()
 
 
-class DatabaseProvider(StrEnum):
-    MEMORY = auto()
-    CHROMA = auto()
-
-
 class MarketType(StrEnum):
     TWSE = auto()
     TPEX = auto()
-    NASDAQ = auto()
-    NYSE = auto()
 
 
 class SecurityKind(StrEnum):
@@ -210,3 +203,115 @@ class RuleEffect(StrEnum):
     BLOCK_ON_FAIL = auto()
     REDUCE_SCORE_ON_FAIL = auto()
     INCREASE_SCORE_ON_PASS = auto()
+
+
+class EpsKind(StrEnum):
+    SINGLE_QUARTER = auto()
+    CUMULATIVE = auto()
+    ANNUAL = auto()
+    TRAILING_TWELVE_MONTHS = auto()
+
+    @property
+    def label(self) -> str:
+        return EPS_KIND_LABELS[self]
+
+
+EPS_KIND_LABELS = {
+    EpsKind.SINGLE_QUARTER: "單季",
+    EpsKind.CUMULATIVE: "累計",
+    EpsKind.ANNUAL: "年度",
+    EpsKind.TRAILING_TWELVE_MONTHS: "近四季 TTM",
+}
+
+
+class EpsBasis(StrEnum):
+    ACTUAL = auto()
+    ESTIMATE = auto()
+
+    @property
+    def label(self) -> str:
+        return "實際值" if self == EpsBasis.ACTUAL else "預估值"
+
+
+class EpsUnavailableReason(StrEnum):
+    NOT_LOADED = auto()
+    """The workflow did not load fundamentals for this stock."""
+
+    NOT_REPORTED = auto()
+    """No filing in any candidate quarter: an ETF, a DR, a new listing or a suspended filer."""
+
+    INCOMPLETE_HISTORY = auto()
+    """The TTM needs a prior-year filing the company does not have."""
+
+    SOURCE_FAILED = auto()
+    """A quarter the TTM needs could not be fetched."""
+
+
+class ScanStep(StrEnum):
+    VALUATION = auto()
+    TECHNICAL = auto()
+
+    @property
+    def label(self) -> str:
+        return "估值" if self == ScanStep.VALUATION else "技術面"
+
+
+class EliminationReason(StrEnum):
+    EPS_UNAVAILABLE = auto()
+    EPS_NOT_POSITIVE = auto()
+    PRICE_MISSING = auto()
+    PRICE_STALE = auto()
+    BELOW_MIN_UNDERVALUATION = auto()
+    NO_PRICE_HISTORY = auto()
+    TECHNICAL_HARD_FAILURE = auto()
+
+    @property
+    def step(self) -> ScanStep:
+        if self in (EliminationReason.NO_PRICE_HISTORY, EliminationReason.TECHNICAL_HARD_FAILURE):
+            return ScanStep.TECHNICAL
+
+        return ScanStep.VALUATION
+
+    @property
+    def label(self) -> str:
+        return ELIMINATION_LABELS[self]
+
+
+ELIMINATION_LABELS = {
+    EliminationReason.EPS_UNAVAILABLE: "EPS 資料不足",
+    EliminationReason.EPS_NOT_POSITIVE: "EPS ≤ 0",
+    EliminationReason.PRICE_MISSING: "無有效股價",
+    EliminationReason.PRICE_STALE: "股價過期",
+    EliminationReason.BELOW_MIN_UNDERVALUATION: "低估幅度未達條件",
+    EliminationReason.NO_PRICE_HISTORY: "無可用日線資料（缺漏或已過期），無法執行技術策略",
+    EliminationReason.TECHNICAL_HARD_FAILURE: "技術面 hard failure",
+}
+
+
+class PeNotApplicableReason(StrEnum):
+    EPS_UNAVAILABLE = auto()
+    EPS_ZERO = auto()
+    EPS_NEGATIVE = auto()
+    INVALID_PRICE = auto()
+
+    @property
+    def label(self) -> str:
+        return PE_NOT_APPLICABLE_LABELS[self]
+
+
+PE_NOT_APPLICABLE_LABELS = {
+    PeNotApplicableReason.EPS_UNAVAILABLE: "資料不足",
+    PeNotApplicableReason.EPS_ZERO: "無法計算",
+    PeNotApplicableReason.EPS_NEGATIVE: "虧損，本益比不適用",
+    PeNotApplicableReason.INVALID_PRICE: "無有效股價",
+}
+
+
+class ScenarioName(StrEnum):
+    CONSERVATIVE = auto()
+    BASE = auto()
+    OPTIMISTIC = auto()
+
+    @property
+    def label(self) -> str:
+        return {ScenarioName.CONSERVATIVE: "保守", ScenarioName.BASE: "基準", ScenarioName.OPTIMISTIC: "樂觀"}[self]

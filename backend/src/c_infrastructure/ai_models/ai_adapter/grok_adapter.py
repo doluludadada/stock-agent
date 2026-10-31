@@ -9,7 +9,7 @@ from openai import AsyncOpenAI, OpenAIError
 
 from a_domain.model.chat.message import Message, MessageRole
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
 from c_infrastructure.ai_models.base import BaseAIAdapter
 
 
@@ -23,7 +23,7 @@ class GrokAdapter(BaseAIAdapter):
         self._logger.debug("Initializing Grok client (xAI)...")
         return AsyncOpenAI(
             api_key=self._config.ai.grok_api_key,
-            base_url="https://api.x.ai/v1",
+            base_url=self._config.sources.ai.grok_base_url,
             timeout=httpx.Timeout(self._config.ai.connection_timeout),
         )
 
@@ -70,11 +70,11 @@ class GrokAdapter(BaseAIAdapter):
 
         except asyncio.CancelledError:
             raise
-        except (OpenAIError, httpx.HTTPError) as e:
-            self._logger.error(f"Grok API error for model {self._model_name}: {e}")
-            raise RuntimeError(f"Grok API request failed for model {self._model_name}: {e}") from e
-        except Exception as e:
-            self._logger.exception(f"Unexpected error in Grok adapter for model {self._model_name}: {e}")
+        except (OpenAIError, httpx.HTTPError) as error:
+            self._logger.error(f"Grok API error for model {self._model_name}: {error}")
+            raise RuntimeError(f"Grok API request failed for model {self._model_name}: {error}") from error
+        except Exception as error:
+            self._logger.exception(f"Unexpected error in Grok adapter for model {self._model_name}: {error}")
             raise
 
     def _convert_to_api_format(self, messages: tuple[Message, ...]):

@@ -4,15 +4,13 @@ import httpx
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.notification_provider import INotificationProvider
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
 
 
 class LineNotificationAdapter(INotificationProvider):
     """
     Pushes trading signals to LINE users via the Messaging API.
     """
-
-    MULTICAST_URL = "https://api.line.me/v2/bot/message/multicast"
 
     def __init__(self, config: AppConfig, logger: ILoggingProvider):
         self._config = config
@@ -47,13 +45,13 @@ class LineNotificationAdapter(INotificationProvider):
 
         async with httpx.AsyncClient(timeout=10.0) as client:
             try:
-                resp = await client.post(self.MULTICAST_URL, headers=headers, json=payload)
+                resp = await client.post(self._config.sources.line.multicast_url, headers=headers, json=payload)
                 resp.raise_for_status()
                 self._logger.success(f"Successfully sent LINE alert for {signal.stock_id} to {len(recipients)} users.")
                 return True
-            except httpx.HTTPStatusError as e:
-                self._logger.error(f"Failed to send LINE alert. Status: {e.response.status_code}, Body: {e.response.text}")
+            except httpx.HTTPStatusError as error:
+                self._logger.error(f"Failed to send LINE alert. Status: {error.response.status_code}, Body: {error.response.text}")
                 return False
-            except Exception as e:
-                self._logger.error(f"Unexpected error sending LINE alert: {e}")
+            except Exception as error:
+                self._logger.error(f"Unexpected error sending LINE alert: {error}")
                 return False

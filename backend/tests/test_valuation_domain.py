@@ -5,24 +5,30 @@ import pytest
 from icontract import ViolationError
 
 from a_domain.model.analysis.technical_report import TechnicalReport
-from a_domain.model.fundamentals.eps import Eps, EpsBasis, EpsKind, EpsUnavailable, EpsUnavailableReason, FiscalQuarter
+from a_domain.model.fundamentals.eps import Eps
+from a_domain.model.fundamentals.eps_unavailable import EpsUnavailable
+from a_domain.model.fundamentals.fiscal_quarter import FiscalQuarter
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
-from a_domain.model.valuation.scan import EliminationReason, MarketValuation, ScanCriteria, ScanStep
-from a_domain.model.valuation.valuation import (
-    LOW_PE_CAVEAT,
-    NOT_INVESTMENT_ADVICE,
-    FairPriceRange,
-    PeNotApplicable,
+from a_domain.model.valuation.fair_price_range import FairPriceRange
+from a_domain.model.valuation.market_valuation import MarketValuation
+from a_domain.model.valuation.pe_not_applicable import PeNotApplicable
+from a_domain.model.valuation.pe_ratio import PeRatio
+from a_domain.model.valuation.scan_criteria import ScanCriteria
+from a_domain.model.valuation.stock_valuation import StockValuation
+from a_domain.model.valuation.target_pe import TargetPe
+from a_domain.model.valuation.valuation_explanation import LOW_PE_CAVEAT, NOT_INVESTMENT_ADVICE, ValuationExplanation
+from a_domain.model.valuation.valuation_report import ValuationReport
+from a_domain.types.enums import (
+    EliminationReason,
+    EpsBasis,
+    EpsKind,
+    EpsUnavailableReason,
+    InformationSource,
     PeNotApplicableReason,
-    PeRatio,
+    ScanStep,
     ScenarioName,
-    StockValuation,
-    TargetPe,
-    ValuationExplanation,
-    ValuationReport,
 )
-from a_domain.types.enums import InformationSource
 
 TAIPEI = timezone(timedelta(hours=8))
 LAST_CLOSED_SESSION = date(2026, 10, 30)

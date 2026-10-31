@@ -8,7 +8,7 @@ from a_domain.model.trading.signal import TradeSignal
 from a_domain.ports.ai.knowledge_repository import IKnowledgeRepository
 from a_domain.ports.chat.conversation_repository import IConversationRepository
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
 from c_infrastructure.database.chroma.mapper import ConversationMapper
 from c_infrastructure.database.chroma.schema import ChromaCollection, ChromaResultKey
 

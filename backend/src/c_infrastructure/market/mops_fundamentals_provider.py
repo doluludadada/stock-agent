@@ -6,21 +6,19 @@ from datetime import date, datetime, timedelta
 import httpx
 from bs4 import BeautifulSoup
 
-from a_domain.model.fundamentals.eps import EpsFilings, FiscalQuarter, QuarterEps
+from a_domain.model.fundamentals.fiscal_quarter import FiscalQuarter
+from a_domain.model.fundamentals.quarter_eps import EpsFilings, QuarterEps
 from a_domain.ports.market.fundamentals_provider import IFundamentalsProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.types.enums import MarketType
+from b_application.config.sources_config import MopsSources
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.quarter_eps_dto import QuarterEpsDTO
 from c_infrastructure.market.twse_provider import ROC_YEAR_OFFSET
 
-COMPANY_ID_HEADER = "公司代號"
-EPS_HEADER_PREFIX = "基本每股盈餘"
-NO_DATA_MARKER = "查詢無資料"
 
-
-def parse_cumulative_eps(html: str) -> dict[str, float] | None:
+def parse_cumulative_eps(html: str, mops: MopsSources) -> dict[str, float] | None:
     """
     Cumulative basic EPS per company from one ajax_t163sb04 page.
 
@@ -30,19 +28,19 @@ def parse_cumulative_eps(html: str) -> dict[str, float] | None:
     tables = BeautifulSoup(html, "lxml").find_all("table", class_="hasBorder")
 
     if not tables:
-        return {} if NO_DATA_MARKER in html else None
+        return {} if mops.no_data_marker in html else None
 
     result: dict[str, float] = {}
 
     for table in tables:
         rows = table.find_all("tr")
         header = [_cell_text(cell) for cell in rows[0].find_all("th")] if rows else []
-        eps_index = next((index for index, name in enumerate(header) if name.startswith(EPS_HEADER_PREFIX)), None)
+        eps_index = next((index for index, name in enumerate(header) if name.startswith(mops.eps_header_prefix)), None)
 
-        if COMPANY_ID_HEADER not in header or eps_index is None:
+        if mops.company_id_header not in header or eps_index is None:
             return None
 
-        id_index = header.index(COMPANY_ID_HEADER)
+        id_index = header.index(mops.company_id_header)
 
         for row in rows[1:]:
             cells = [_cell_text(cell) for cell in row.find_all("td")]
@@ -59,32 +57,32 @@ def parse_cumulative_eps(html: str) -> dict[str, float] | None:
 
 
 def _cell_text(cell) -> str:
-    # Headers wrap with <br> ("公司<br>代號"), so all whitespace goes.
+    # Headers wrap with <br> inside the column name, so all whitespace goes.
     return "".join(cell.get_text().split())
 
 
 class MopsFundamentalsProvider(IFundamentalsProvider):
     """
     Cumulative EPS from the MOPS bulk income statements (one page per market and quarter), cached in SQLite.
-    Industry (產業別) from the MOPS income-statement summaries on the TWSE and TPEX OpenAPI, cached in memory.
+    Industry from the MOPS income-statement summaries on the TWSE and TPEX OpenAPI, cached in memory.
 
     A quarter's cached page is final, and never fetched again, once it was fetched after the quarter's last filing
     deadline plus grace and is not empty. Any other page is reused for PROVISIONAL_MAX_AGE.
     """
 
-    EPS_URL = "https://mopsov.twse.com.tw/mops/web/ajax_t163sb04"
     TYPEK = {MarketType.TWSE: "sii", MarketType.TPEX: "otc"}
-    INDUSTRY_SOURCES = {
-        MarketType.TWSE: ("https://openapi.twse.com.tw/v1/opendata/t187ap14_L", "公司代號"),
-        MarketType.TPEX: ("https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap14_O", "SecuritiesCompanyCode"),
-    }
     PROVISIONAL_MAX_AGE = timedelta(hours=6)
     INDUSTRY_MAX_AGE = timedelta(hours=24)
     REQUEST_INTERVAL_SECONDS = 2.0
     TIMEOUT_SECONDS = 60.0
 
-    def __init__(self, db: DatabaseConnector, market_clock: IMarketClock, logger: ILoggingProvider) -> None:
+    def __init__(self, db: DatabaseConnector, market_clock: IMarketClock, mops: MopsSources, logger: ILoggingProvider) -> None:
         self._db = db
+        self._mops = mops
+        self._industry_sources = {
+            MarketType.TWSE: (mops.twse_industries_url, mops.twse_industry_company_field),
+            MarketType.TPEX: (mops.tpex_industries_url, mops.tpex_industry_company_field),
+        }
         self._clock = market_clock
         self._logger = logger
         self._last_request_at: float | None = None
@@ -104,7 +102,8 @@ class MopsFundamentalsProvider(IFundamentalsProvider):
                 continue
 
             cumulative_eps = {company: eps for page in present for company, eps in page.cumulative_eps.items()}
-            fetched_at = min(self._clock.to_market_datetime(page.fetched_at) for page in present)
+            # Eps shows when its filings were fetched as Taiwan wall-clock time.
+            fetched_at = self._clock.to_market_datetime(min(page.fetched_at for page in present))
             refresh_failed = any(failed for _, failed in pages)
             filings[quarter] = QuarterEps(
                 quarter=quarter, cumulative_eps=cumulative_eps, fetched_at=fetched_at, refresh_failed=refresh_failed
@@ -116,22 +115,22 @@ class MopsFundamentalsProvider(IFundamentalsProvider):
         now = self._clock.now()
         stale = [
             market
-            for market in self.INDUSTRY_SOURCES
+            for market in self._industry_sources
             if market not in self._industries_fetched_at or now - self._industries_fetched_at[market] >= self.INDUSTRY_MAX_AGE
         ]
 
         if stale:
             async with httpx.AsyncClient(timeout=self.TIMEOUT_SECONDS) as client:
                 for market in stale:
-                    url, id_field = self.INDUSTRY_SOURCES[market]
+                    url, id_field = self._industry_sources[market]
 
                     try:
                         response = await client.get(url)
                         response.raise_for_status()
                         self._industries[market] = {
-                            str(row[id_field]).strip(): str(row["產業別"]).strip()
+                            str(row[id_field]).strip(): str(row[self._mops.industry_field]).strip()
                             for row in response.json()
-                            if row.get(id_field) and row.get("產業別")
+                            if row.get(id_field) and row.get(self._mops.industry_field)
                         }
                         self._industries_fetched_at[market] = now
                     except Exception as error:
@@ -162,7 +161,8 @@ class MopsFundamentalsProvider(IFundamentalsProvider):
 
         if cumulative_eps is None:
             if cached is not None:
-                self._logger.warning(f"{label}: refresh failed, using the page fetched at {cached.fetched_at:%Y-%m-%d %H:%M}")
+                fetched_at = self._clock.to_market_datetime(cached.fetched_at)
+                self._logger.warning(f"{label}: refresh failed, using the page fetched at {fetched_at:%Y-%m-%d %H:%M}")
 
             return cached, cached is not None
 
@@ -175,12 +175,10 @@ class MopsFundamentalsProvider(IFundamentalsProvider):
         return page, False
 
     def _is_reusable(self, page: QuarterEpsDTO, quarter: FiscalQuarter, now: datetime) -> bool:
-        fetched_at = self._clock.to_market_datetime(page.fetched_at)
-
-        if page.cumulative_eps and quarter.is_final_on(fetched_at.date()):
+        if page.cumulative_eps and quarter.is_final_on(self._clock.to_trading_date(page.fetched_at)):
             return True
 
-        return now - fetched_at < self.PROVISIONAL_MAX_AGE
+        return now - page.fetched_at < self.PROVISIONAL_MAX_AGE
 
     async def _download(self, market: MarketType, quarter: FiscalQuarter) -> dict[str, float] | None:
         form = {
@@ -198,13 +196,13 @@ class MopsFundamentalsProvider(IFundamentalsProvider):
 
         try:
             async with httpx.AsyncClient(timeout=self.TIMEOUT_SECONDS) as client:
-                response = await client.post(self.EPS_URL, data=form)
+                response = await client.post(self._mops.eps_url, data=form)
                 response.raise_for_status()
         except Exception as error:
             self._logger.warning(f"MOPS {quarter} {self.TYPEK[market]}: request failed: {error}")
             return None
 
-        cumulative_eps = parse_cumulative_eps(response.text)
+        cumulative_eps = parse_cumulative_eps(response.text, self._mops)
 
         if cumulative_eps is None:
             self._logger.warning(f"MOPS {quarter} {self.TYPEK[market]}: unrecognised page ({len(response.text)} bytes)")

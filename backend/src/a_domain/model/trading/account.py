@@ -1,5 +1,4 @@
 import math
-from datetime import datetime
 
 from icontract import require
 from sqlmodel import Field, SQLModel
@@ -23,8 +22,6 @@ class Account(SQLModel):
 
     cash: float = Field(default=0, ge=0)
     positions: list[Position] = Field(default_factory=list)
-
-    updated_at: datetime = Field(default_factory=datetime.now)
 
     def can_afford(self, amount: float) -> bool:
         if not math.isfinite(amount) or amount < 0:
@@ -90,7 +87,6 @@ class Account(SQLModel):
             position.add(quantity=quantity, price=total_cost / quantity)
 
         self.cash -= total_cost
-        self.updated_at = datetime.now()
 
         return position
 
@@ -119,6 +115,5 @@ class Account(SQLModel):
             position.reduce(quantity)
 
         self.cash += cash_delta
-        self.updated_at = datetime.now()
 
         return remaining_quantity

@@ -105,8 +105,8 @@ def latest_stochastic(bars: Sequence[Ohlcv], k_period: int, d_period: int) -> tu
         highest_high = max(bar.high for bar in window)
         lowest_low = min(bar.low for bar in window)
         price_range = highest_high - lowest_low
-        k = 50.0 if price_range == 0 else ((bars[end].close - lowest_low) / price_range) * 100
-        k_values.append(max(0.0, min(100.0, k)))
+        percent_k = 50.0 if price_range == 0 else ((bars[end].close - lowest_low) / price_range) * 100
+        k_values.append(max(0.0, min(100.0, percent_k)))
 
     if len(k_values) < d_period:
         return None

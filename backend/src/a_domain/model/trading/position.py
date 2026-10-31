@@ -13,8 +13,6 @@ class Position(SQLModel):
 
     opened_at: datetime | None = None
 
-    updated_at: datetime = Field(default_factory=datetime.now)
-
     @property
     def cost_basis(self) -> float:
         return self.quantity * self.average_cost
@@ -39,7 +37,6 @@ class Position(SQLModel):
         total_quantity = self.quantity + quantity
         self.average_cost = (self.cost_basis + quantity * price) / total_quantity
         self.quantity = total_quantity
-        self.updated_at = datetime.now()
 
     def remaining_after_sell(self, quantity: int) -> int:
         if not self.can_cover(quantity):
@@ -54,4 +51,3 @@ class Position(SQLModel):
             raise ValueError("Cannot reduce an active position to zero")
 
         self.quantity = remaining_quantity
-        self.updated_at = datetime.now()

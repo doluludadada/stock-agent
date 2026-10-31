@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Self
 
 from pydantic import model_validator
@@ -29,7 +29,7 @@ class TradeSignal(SQLModel):
     reason: str
     quantity: int = Field(default=0, ge=0)
     stop_loss_price: float | None = Field(default=None)
-    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    generated_at: datetime
 
     price_at_signal: float = Field(gt=0)
     price_observed_at: datetime
@@ -52,6 +52,7 @@ class TradeSignal(SQLModel):
     def of(
         cls,
         stock: Stock,
+        now: datetime,
         action: TradeAction,
         source: SignalSource,
         score: int,
@@ -59,10 +60,8 @@ class TradeSignal(SQLModel):
         quantity: int = 0,
         stop_loss_price: float | None = None,
     ) -> Self:
-        """Decides on `stock` as it is now: its current quote prices the signal and its reports become the evidence."""
-        price = stock.current_price
-        observed_at = stock.latest_market_data_at
-
+        """Decides on `stock` at `now`: its current quote prices the signal and its reports become the evidence."""
+        price, observed_at = stock.current_price, stock.latest_market_data_at
         if price is None or observed_at is None:
             raise ValueError(f"Signal for {stock.stock_id} needs a current price")
 
@@ -74,6 +73,7 @@ class TradeSignal(SQLModel):
             reason=reason,
             quantity=quantity,
             stop_loss_price=stop_loss_price,
+            generated_at=now,
             price_at_signal=price,
             price_observed_at=observed_at,
             history_until=stock.today.ts if stock.today else None,

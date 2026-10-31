@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 
 from icontract import ensure, invariant, require
 
@@ -31,8 +32,8 @@ class ExitRule:
     @require(lambda stock: stock.current_price is not None, "Exit decision requires a valid current price")
     @require(lambda position: position.quantity > 0, "Exit decision requires a positive position quantity")
     @ensure(lambda result: result.action != TradeAction.SELL or result.quantity > 0, "SELL signal must have positive quantity")
-    def decide(self, stock: Stock, position: Position) -> TradeSignal:
-        stop_loss_signal = self.decide_stop_loss_only(stock, position)
+    def decide(self, stock: Stock, position: Position, *, now: datetime) -> TradeSignal:
+        stop_loss_signal = self.decide_stop_loss_only(stock, position, now=now)
 
         if stop_loss_signal.action == TradeAction.SELL:
             return stop_loss_signal
@@ -59,11 +60,12 @@ class ExitRule:
             score=composite_score,
             reason=reason,
             quantity=position.quantity if should_sell else 0,
+            now=now,
         )
 
     @require(lambda stock: stock.current_price is not None, "Exit decision requires a valid current price")
     @require(lambda position: position.quantity > 0, "Exit decision requires a positive position quantity")
-    def decide_stop_loss_only(self, stock: Stock, position: Position) -> TradeSignal:
+    def decide_stop_loss_only(self, stock: Stock, position: Position, *, now: datetime) -> TradeSignal:
         current_price = stock.current_price
 
         if current_price is None:
@@ -84,6 +86,7 @@ class ExitRule:
             reason=reason,
             quantity=position.quantity if should_sell else 0,
             stop_loss_price=stop_loss_price,
+            now=now,
         )
 
     @require(lambda average_cost: average_cost > 0)

@@ -4,11 +4,15 @@ from a_domain.ports.system.logging_provider import ILoggingProvider
 
 
 class Dispatcher:
-    def __init__(self, platform_provider: IPlatformProvider, logger: ILoggingProvider):
+    def __init__(self, platform_provider: IPlatformProvider | None, logger: ILoggingProvider):
         self._platform_provider = platform_provider
         self._logger = logger
 
     async def execute(self, user_id: str, messages: tuple[Message, ...]) -> None:
+        if self._platform_provider is None:
+            self._logger.warning(f"No chat platform is configured, so {len(messages)} messages to {user_id} were not sent.")
+            return
+
         if not messages:
             self._logger.warning("No messages to dispatch.")
             return

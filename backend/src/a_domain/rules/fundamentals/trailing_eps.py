@@ -1,17 +1,11 @@
 from dataclasses import dataclass
 from datetime import date
 
-from a_domain.model.fundamentals.eps import (
-    Eps,
-    EpsBasis,
-    EpsFilings,
-    EpsKind,
-    EpsUnavailable,
-    EpsUnavailableReason,
-    FiscalQuarter,
-    QuarterEps,
-)
-from a_domain.types.enums import InformationSource
+from a_domain.model.fundamentals.eps import Eps
+from a_domain.model.fundamentals.eps_unavailable import EpsUnavailable
+from a_domain.model.fundamentals.fiscal_quarter import FiscalQuarter
+from a_domain.model.fundamentals.quarter_eps import EpsFilings, QuarterEps
+from a_domain.types.enums import EpsBasis, EpsKind, EpsUnavailableReason, InformationSource
 
 
 @dataclass(frozen=True)

@@ -9,7 +9,7 @@ from trading_stack import MONDAY_10_00, MovableClock, QuoteFeed, SilentLogger, b
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.types.enums import TradingPhase
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.market.cached_price_provider import CachedPriceProvider
 
@@ -133,7 +133,7 @@ async def test_a_refetched_session_replaces_its_bar_and_stays_one_row(db: Databa
     assert [(one.ts, one.close) for one in history["2330"]] == [(monday, 101), (tuesday, 102)]
     with sqlite3.connect(tmp_path / "stock_agent.db") as connection:
         rows = connection.execute("SELECT ts, close FROM ohlcv_data ORDER BY ts").fetchall()
-    assert rows == [("2026-10-19 13:30:00.000000", 101.0), ("2026-10-20 13:30:00.000000", 102.0)]
+    assert rows == [("2026-10-19 05:30:00.000000", 101.0), ("2026-10-20 05:30:00.000000", 102.0)]
 
 
 async def test_a_close_fetched_before_yahoo_settles_it_is_not_cached_as_final(db: DatabaseConnector) -> None:

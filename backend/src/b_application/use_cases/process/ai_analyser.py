@@ -5,10 +5,11 @@ from a_domain.model.market.stock import Stock
 from a_domain.ports.ai.ai_provider import IAiProvider
 from a_domain.ports.ai.knowledge_repository import IKnowledgeRepository
 from a_domain.ports.system.logging_provider import ILoggingProvider
+from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.rules.ai.parser import parse_ai_report
 from a_domain.rules.ai.prompt import AiReportPromptBuilder
 from a_domain.types.enums import AiAnalysisFocus, MessageRole
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
 from b_application.schemas.pipeline_status import PipelineStatus
 
 
@@ -22,9 +23,15 @@ class AiAnalyser:
     """
 
     def __init__(
-        self, ai_provider: IAiProvider, knowledge_repository: IKnowledgeRepository, config: AppConfig, logger: ILoggingProvider
+        self,
+        ai_provider: IAiProvider,
+        knowledge_repository: IKnowledgeRepository,
+        market_clock: IMarketClock,
+        config: AppConfig,
+        logger: ILoggingProvider,
     ) -> None:
         self._ai_provider = ai_provider
+        self._market_clock = market_clock
         self._knowledge_repository = knowledge_repository
         self._logger = logger
         self._prompt_builder = AiReportPromptBuilder(
@@ -43,7 +50,8 @@ class AiAnalyser:
                 stock.ai_report = None
                 historical_context = await self._knowledge_repository.find_decision_history(stock.stock_id)
                 prompt = self._prompt_builder.build(stock=stock, historical_context=historical_context, focus=focus)
-                response = await self._ai_provider.generate_reply(messages=(Message(role=MessageRole.USER, content=prompt),))
+                message = Message(role=MessageRole.USER, content=prompt, timestamp=self._market_clock.now())
+                response = await self._ai_provider.generate_reply(messages=(message,))
                 self._ai_provider.save_response(stock.stock_id, response.content)
                 stock.ai_report = parse_ai_report(response.content)
                 analysed_count += 1

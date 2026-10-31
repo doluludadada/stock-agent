@@ -1,7 +1,8 @@
 from collections.abc import Collection
 from typing import Protocol
 
-from a_domain.model.fundamentals.eps import EpsFilings, FiscalQuarter
+from a_domain.model.fundamentals.fiscal_quarter import FiscalQuarter
+from a_domain.model.fundamentals.quarter_eps import EpsFilings
 
 
 class IFundamentalsProvider(Protocol):
@@ -16,5 +17,5 @@ class IFundamentalsProvider(Protocol):
     async def fetch_cumulative_eps(self, quarters: Collection[FiscalQuarter]) -> EpsFilings: ...
 
     async def fetch_industries(self) -> dict[str, str]:
-        """stock_id -> industry (產業別)."""
+        """stock_id -> industry name, as MOPS reports it."""
         ...

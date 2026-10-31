@@ -7,7 +7,7 @@ from a_domain.ports.market.price_provider import IOhlcvProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.rules.technical.calculation import IndicatorParameters, TechnicalIndicatorCalculator
-from b_application.schemas.config import AppConfig
+from b_application.config.app_config import AppConfig
 from b_application.schemas.pipeline_status import PipelineStatus
 
 
@@ -96,7 +96,7 @@ class MarketDataCollector:
                 message = (
                     f"Technical analysis blocked: {stock.stock_id}, stale daily history: last bar {last_trading_date.isoformat()}"
                 )
-                status.stats.log(message)
+                status.stats.log(message, now=self._market_clock.now())
                 self._logger.warning(message)
                 stock.ohlcv = []
                 return False
@@ -159,5 +159,5 @@ class MarketDataCollector:
 
         status.stale_stock_ids.add(stock.stock_id)
         message = f"Market data blocked: {stock.stock_id}, {reason}"
-        status.stats.log(message)
+        status.stats.log(message, now=self._market_clock.now())
         self._logger.warning(message)

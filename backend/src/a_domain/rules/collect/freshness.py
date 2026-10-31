@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 import icontract
 
@@ -17,10 +17,6 @@ class DataFreshnessRule:
     max_lag: timedelta
 
     def age(self, observed_at: date, now: date) -> timedelta:
-        if isinstance(observed_at, datetime) and isinstance(now, datetime) and observed_at.tzinfo is None:
-            # The price cache stores bars as naive exchange-local time.
-            observed_at = observed_at.replace(tzinfo=now.tzinfo)
-
         return now - observed_at
 
     def is_fresh(self, observed_at: date, now: date) -> bool:

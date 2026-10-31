@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 import pytest
 from icontract.errors import ViolationError
 
@@ -13,6 +15,8 @@ from a_domain.rules.trading.sizing import SizingRule
 from a_domain.types.enums import OrderStatus, OrderType, TimeInForce, TradeAction
 from a_domain.types.ids import new_decision_id, new_run_id
 
+NOW = datetime(2026, 10, 19, 10, 0, tzinfo=UTC)
+
 COSTS = TradingCostRule(fee_rate=0.001425, tax_rate=0.003, etf_tax_rate=0.001, min_fee=20)
 
 
@@ -26,6 +30,8 @@ def limit_order(action: TradeAction = TradeAction.BUY) -> Order:
         time_in_force=TimeInForce.IOC,
         quantity=1,
         limit_price=100,
+        created_at=NOW,
+        updated_at=NOW,
     )
 
 
@@ -68,7 +74,7 @@ def test_composite_rule_rejects_zero_total_weight() -> None:
 def test_order_submit_moves_pending_order_to_submitted() -> None:
     order = limit_order()
 
-    order.submit()
+    order.submit(now=NOW)
 
     assert order.status == OrderStatus.SUBMITTED
     assert order.reason is None
@@ -81,12 +87,12 @@ def test_order_rejects_hold_submission() -> None:
 
 def test_order_fill_applies_limit_price_rules() -> None:
     order = limit_order()
-    order.submit()
+    order.submit(now=NOW)
 
     with pytest.raises(ValueError, match="BUY fill price cannot exceed limit_price"):
-        order.fill(1, 101, COSTS.cost_of(TradeAction.BUY, "2330", 101, 1))
+        order.fill(1, 101, COSTS.cost_of(TradeAction.BUY, "2330", 101, 1), now=NOW)
 
-    order.fill(1, 99, COSTS.cost_of(TradeAction.BUY, "2330", 99, 1))
+    order.fill(1, 99, COSTS.cost_of(TradeAction.BUY, "2330", 99, 1), now=NOW)
 
     assert order.status == OrderStatus.FILLED
     assert order.average_filled_price == 99
@@ -96,7 +102,7 @@ def test_order_requires_reason_for_terminal_failures() -> None:
     order = limit_order()
 
     with pytest.raises(ValueError, match="Failed order requires a reason"):
-        order.fail(" ")
+        order.fail(" ", now=NOW)
 
 
 def test_position_add_recalculates_average_cost() -> None:

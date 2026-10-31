@@ -32,9 +32,8 @@ class FundamentalsFeed:
             if filing is None:
                 message = f"MOPS {quarter} 財報資料取得失敗，需要此季的股票 EPS 將標示為資料不足或非最新"
             elif filing.refresh_failed:
-                fetched_at = self._market_clock.to_market_datetime(filing.fetched_at)
                 message = (
-                    f"MOPS {quarter} 財報更新失敗，沿用 {fetched_at:%Y-%m-%d %H:%M} 取得的資料，"
+                    f"MOPS {quarter} 財報更新失敗，沿用 {filing.fetched_at:%Y-%m-%d %H:%M} 取得的資料，"
                     "其後申報的公司 EPS 將標示為資料不足或非最新"
                 )
             else:
