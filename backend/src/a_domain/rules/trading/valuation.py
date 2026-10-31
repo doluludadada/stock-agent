@@ -1,8 +1,9 @@
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 from a_domain.model.market.ohlcv import Ohlcv
+from a_domain.model.market.stock import Stock
 from a_domain.model.trading.account import Account
 from a_domain.model.trading.account_history_report import AccountHistoryReport
 from a_domain.model.trading.account_snapshot import AccountSnapshot
@@ -28,12 +29,27 @@ class ValuationRule:
             unrealized_pnl = 0.0
 
             if mark is not None:
-                proceeds = self.cost_rule.apply(TradeAction.SELL, position.stock_id, mark.close, position.quantity).net
+                proceeds = self.cost_rule.apply(TradeAction.SELL, position.stock_id, mark.close, position.quantity, now=mark.ts).net
                 unrealized_pnl = position.profit_on_sale(position.quantity, proceeds)
 
             valuations.append(PositionValuation(position=position, mark=mark, unrealized_pnl=unrealized_pnl))
 
         return AccountValuation(cash=cash, positions=valuations)
+
+
+@dataclass(frozen=True)
+class EquityRule:
+    """
+    The equity a run sizes its BUYs on: the cash plus each position at the latest price the run has for it (its realtime
+    quote, else its last daily close, else its average cost), marked by ValuationRule as menu 7 marks it.
+    """
+
+    valuation_rule: ValuationRule
+
+    def apply(self, account: Account, stocks: Iterable[Stock]) -> float:
+        marks = {stock.stock_id: bar for stock in stocks if (bar := stock.latest_bar) is not None}
+
+        return self.valuation_rule.apply(account.cash, account.positions, marks).equity
 
 
 @dataclass(frozen=True)

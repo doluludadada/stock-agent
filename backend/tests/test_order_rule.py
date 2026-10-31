@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 
@@ -23,7 +23,9 @@ from b_application.config.trading_config import MarketConfig
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 
 NOW = datetime(2026, 10, 19, 10, 20, tzinfo=TAIWAN_TIMEZONE)
-COSTS = TradingCostRule(fee_rate=0.001425, tax_rate=0.003, etf_tax_rate=0.001, min_fee=20)
+COSTS = TradingCostRule(
+    fee_rate=0.001425, tax_rate=0.003, etf_tax_rate=0.001, min_fee=20, bond_etf_tax_exempt_until=date(2026, 12, 31)
+)
 LIMIT_PRICE = MarketConfig().limit_price_rule()
 
 
@@ -105,6 +107,6 @@ def test_an_order_priced_from_a_float32_quote_takes_an_exchange_fill_at_that_pri
     order = RULE.apply(signal_at(NOW, yahoo_quote, action), new_run_id(), now=NOW, phase=TradingPhase.CONTINUOUS)
 
     order.submit(now=NOW)
-    order.fill(1000, exchange_price, COSTS.apply(action, "2330", exchange_price, 1000), now=NOW)
+    order.fill(1000, exchange_price, COSTS.apply(action, "2330", exchange_price, 1000, now=NOW), now=NOW)
 
     assert (order.status, repr(order.limit_price)) == (OrderStatus.FILLED, repr(exchange_price))

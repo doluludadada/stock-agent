@@ -32,7 +32,16 @@ BROKER_TIME_IN_FORCE: Mapping[TimeInForce, BrokerTimeInForce] = {
     TimeInForce.IOC: BrokerTimeInForce.IOC,
     TimeInForce.FOK: BrokerTimeInForce.FOK,
 }
-"""ROD is not sent: its remainder would keep working after place_order returns, and the app tracks no working orders."""
+"""
+The board-lot part's time in force. An ROD order is refused: its remainder would keep working after place_order returns,
+and the app tracks no working orders.
+"""
+
+ODD_LOT_TIME_IN_FORCE = BrokerTimeInForce.ROD
+"""
+TWSE and TPEx take intraday odd-lot orders as ROD only. The adapter cancels an odd-lot part still working after its
+polls, as it does a board-lot part, so no part is left working.
+"""
 
 ORDER_STATUS: Mapping[Status, OrderStatus] = {
     Status.PendingSubmit: OrderStatus.PENDING,
@@ -61,9 +70,10 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
     The Sinopac broker through the Shioaji client, simulation or production as `shioaji.simulation` says.
 
     The client is synchronous, so every call runs in a worker thread. Quantities are shares in the domain:
-    LotSplitRule splits them into the whole lots, sent as a board-lot order, and the rest, sent as an intraday
-    odd-lot order, both LIMIT at the order's limit price with its time in force (IOC or FOK). FOK is refused
-    for a quantity that needs both, because the two broker orders cannot fill or fail together.
+    LotSplitRule splits them into the whole lots, sent as a board-lot order with the order's time in force (IOC or
+    FOK), and the rest, sent as an intraday odd-lot order with ODD_LOT_TIME_IN_FORCE (ROD), both LIMIT at the order's
+    limit price. FOK is refused for a quantity with odd shares, because an ROD odd-lot part cannot fill or fail with
+    the whole quantity.
 
     Before sending, the account must cover the order (Account.refusal_for, with the cash that `cash` reads).
     A stock Shioaji has no contract for is refused first.
@@ -190,10 +200,12 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
                 f"{order.time_in_force.name} would leave a working order at the broker that the app does not track",
             )
 
-        if order.time_in_force == TimeInForce.FOK and len(self._lot_split_rule.apply(order.quantity)) > 1:
+        parts = self._lot_split_rule.apply(order.quantity)
+
+        if order.time_in_force == TimeInForce.FOK and any(lot == LotKind.ODD_LOT for lot, _ in parts):
             return (
                 RejectReason.UNSUPPORTED_TIME_IN_FORCE,
-                f"FOK cannot cover {order.quantity} shares: whole lots and odd shares are separate broker orders",
+                f"FOK cannot cover {order.quantity} shares: the exchange takes intraday odd lots as ROD only",
             )
 
         return account.refusal_for(order, self._cost_rule)
@@ -227,8 +239,9 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
             and trade.order.action == Action.Buy
             and sum(deal.quantity for deal in trade.status.deals or []) > 0
         ]
+        now = datetime.now(UTC)
         bought_today = math.fsum(
-            -self._cost_rule.apply(TradeAction.BUY, report.stock_id, report.fill_price, report.dealt_shares).net
+            -self._cost_rule.apply(TradeAction.BUY, report.stock_id, report.fill_price, report.dealt_shares, now=now).net
             for report in dealt_buys
             if report.fill_price is not None
         )
@@ -250,8 +263,8 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
             self._logger.info(f"Shioaji order {trade.order.custom_field}: {report.description}")
 
             if report.fill_price is not None:
-                cost, realized_pnl = self._fill_rule.apply(order, report.dealt_shares, report.fill_price, held)
                 now = datetime.now(UTC)
+                cost, realized_pnl = self._fill_rule.apply(order, report.dealt_shares, report.fill_price, held, now=now)
                 # The first fill submits the order; a later part's fill finds it SUBMITTED, which may stay SUBMITTED.
                 order.submit(now=now)
                 order.fill(report.dealt_shares, report.fill_price, cost, realized_pnl, now=now)
@@ -264,8 +277,9 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
     @override
     async def place(self, contract: StockContract, order: Order, lot: LotKind, shares: int, index: int) -> Trade:
         """
-        One LIMIT exchange order for `shares` of `order` at its limit price and time in force, tagged
-        `order.id.hex[:5] + index`. If place_order raises (a timeout), the order is looked up by its tag before giving up.
+        One LIMIT exchange order for `shares` of `order` at its limit price, tagged `order.id.hex[:5] + index`: a board-lot
+        part with the order's time in force, an odd-lot part ROD. If place_order raises (a timeout), the order is looked up
+        by its tag before giving up.
         """
         if order.limit_price is None:
             raise ValueError(f"order {order.id} has no limit price to send")
@@ -275,7 +289,7 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
             quantity=shares // self._shares_per_unit[BROKER_LOT[lot]],
             action=BROKER_ACTION[order.action],
             price_type=StockPriceType.LMT,
-            order_type=BROKER_TIME_IN_FORCE[order.time_in_force],
+            order_type=BROKER_TIME_IN_FORCE[order.time_in_force] if lot == LotKind.BOARD_LOT else ODD_LOT_TIME_IN_FORCE,
             order_lot=BROKER_LOT[lot],
             order_cond=StockOrderCond.Cash,
             account=self._client.stock_account,
@@ -371,8 +385,8 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
 
         unit = "lots" if broker_order.order_lot == StockOrderLot.Common else "shares"
         text = (
-            f"{broker_order.order_lot.value} {broker_order.quantity} {unit} {trade.status.status.value}, "
-            f"dealt {dealt_units * shares_per_unit} shares"
+            f"{broker_order.order_lot.value} {broker_order.quantity} {unit} {broker_order.order_type.value} "
+            f"{trade.status.status.value}, dealt {dealt_units * shares_per_unit} shares"
         )
 
         return BrokerOrderReport(

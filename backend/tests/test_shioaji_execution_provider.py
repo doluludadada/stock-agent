@@ -95,23 +95,23 @@ async def test_a_whole_lot_buy_is_one_board_lot_limit_order_on_the_logged_in_acc
     )
     assert (broker_order.account, broker_order.custom_field) == (client.stock_account, f"{placing.id.hex[:5]}0")
     assert (placed.status, placed.filled_quantity, placed.average_filled_price) == (OrderStatus.FILLED, 2000, 101.5)
-    cost = COSTS.apply(TradeAction.BUY, "2330", 101.5, 2000)
+    cost = COSTS.apply(TradeAction.BUY, "2330", 101.5, 2000, now=NOW)
     assert (placed.fee, placed.tax) == (cost.fee, cost.tax)
 
 
-async def test_fewer_than_1000_shares_are_one_intraday_odd_lot_order_in_shares() -> None:
+async def test_fewer_than_1000_shares_are_one_intraday_odd_lot_rod_order_in_shares() -> None:
     client = FakeShioaji(holdings=[position("2330", 500, 90.0)])
 
     placed = await provider(client).place_order(order(TradeAction.SELL, quantity=500, price=99.0))
 
-    assert sent(client) == [(StockOrderLot.IntradayOdd, 500, BrokerTimeInForce.IOC, 99.0)]
+    assert sent(client) == [(StockOrderLot.IntradayOdd, 500, BrokerTimeInForce.ROD, 99.0)]
     assert client.placed[0].order.action == Action.Sell
-    cost = COSTS.apply(TradeAction.SELL, "2330", 99.0, 500)
+    cost = COSTS.apply(TradeAction.SELL, "2330", 99.0, 500, now=NOW)
     assert (placed.status, placed.filled_quantity, placed.tax) == (OrderStatus.FILLED, 500, cost.tax)
     assert placed.realized_pnl == pytest.approx(cost.net - 500 * 90.0)
 
 
-async def test_a_mixed_quantity_is_split_into_a_board_lot_order_and_an_odd_lot_order() -> None:
+async def test_a_mixed_quantity_is_split_into_a_board_lot_ioc_order_and_an_odd_lot_rod_order() -> None:
     client = FakeShioaji()
     placing = order(quantity=2500, price=100.0)
 
@@ -119,10 +119,10 @@ async def test_a_mixed_quantity_is_split_into_a_board_lot_order_and_an_odd_lot_o
 
     assert sent(client) == [
         (StockOrderLot.Common, 2, BrokerTimeInForce.IOC, 100.0),
-        (StockOrderLot.IntradayOdd, 500, BrokerTimeInForce.IOC, 100.0),
+        (StockOrderLot.IntradayOdd, 500, BrokerTimeInForce.ROD, 100.0),
     ]
     assert [trade.order.custom_field for trade in client.placed] == [f"{placing.id.hex[:5]}0", f"{placing.id.hex[:5]}1"]
-    lots, odd = COSTS.apply(TradeAction.BUY, "2330", 100.0, 2000), COSTS.apply(TradeAction.BUY, "2330", 100.0, 500)
+    lots, odd = COSTS.apply(TradeAction.BUY, "2330", 100.0, 2000, now=NOW), COSTS.apply(TradeAction.BUY, "2330", 100.0, 500, now=NOW)
     assert (placed.status, placed.filled_quantity, placed.fee) == (OrderStatus.FILLED, 2500, lots.fee + odd.fee)
 
 
@@ -139,6 +139,7 @@ async def test_fok_is_sent_as_fok() -> None:
     [
         (order(time_in_force=TimeInForce.ROD), "UNSUPPORTED_TIME_IN_FORCE: ROD would leave a working order"),
         (order(quantity=1500, time_in_force=TimeInForce.FOK), "UNSUPPORTED_TIME_IN_FORCE: FOK cannot cover 1500 shares"),
+        (order(quantity=500, time_in_force=TimeInForce.FOK), "UNSUPPORTED_TIME_IN_FORCE: FOK cannot cover 500 shares"),
         (order(price=None), "UNSUPPORTED_ORDER_TYPE"),
         (order(stock_id="9999"), "BROKER_REFUSED: Shioaji has no stock contract 9999"),
         (order(TradeAction.SELL), "POSITION_NOT_FOUND"),
@@ -183,15 +184,15 @@ async def test_every_shioaji_status_has_a_domain_status() -> None:
             Report(Status.Cancelled),
             OrderStatus.CANCELLED,
             0,
-            "IOC unfilled: filled 0 of 1000; Common 1 lots Cancelled, dealt 0 shares",
+            "IOC unfilled: filled 0 of 1000; Common 1 lots IOC Cancelled, dealt 0 shares",
         ),
         (
             Report(Status.Failed, msg="price out of range"),
             OrderStatus.REJECTED,
             0,
-            "BROKER_REFUSED: Common 1 lots Failed, dealt 0 shares (price out of range)",
+            "BROKER_REFUSED: Common 1 lots IOC Failed, dealt 0 shares (price out of range)",
         ),
-        (Report(Status.Inactive), OrderStatus.FAILED, 0, "unexplained broker result: Common 1 lots Inactive, dealt 0 shares"),
+        (Report(Status.Inactive), OrderStatus.FAILED, 0, "unexplained broker result: Common 1 lots IOC Inactive, dealt 0 shares"),
     ],
 )
 async def test_each_final_shioaji_status_ends_the_domain_order(
@@ -223,7 +224,7 @@ async def test_a_partial_fill_is_recorded_before_the_ioc_remainder_is_cancelled(
 
     placed = await provider(client).place_order(order(quantity=3000))
 
-    cost = COSTS.apply(TradeAction.BUY, "2330", 100.0, 1000)
+    cost = COSTS.apply(TradeAction.BUY, "2330", 100.0, 1000, now=NOW)
     assert (placed.status, placed.filled_quantity, placed.fee, client.cancelled) == (OrderStatus.CANCELLED, 1000, cost.fee, [])
 
 
@@ -263,12 +264,49 @@ async def test_deals_at_the_limit_price_fill_even_where_their_float_average_roun
 
 
 async def test_when_the_odd_lot_part_is_refused_the_board_lot_fill_stands_and_the_order_is_cancelled() -> None:
-    client = FakeShioaji(scripts={StockOrderLot.IntradayOdd: [Report(Status.Failed, msg="odd lots accept ROD only")]})
+    client = FakeShioaji(scripts={StockOrderLot.IntradayOdd: [Report(Status.Failed, msg="price out of range")]})
 
     placed = await provider(client).place_order(order(quantity=1500))
 
     assert (placed.status, placed.filled_quantity) == (OrderStatus.CANCELLED, 1000)
-    assert placed.reason is not None and "IntradayOdd 500 shares Failed, dealt 0 shares (odd lots accept ROD only)" in placed.reason
+    assert placed.reason is not None and "IntradayOdd 500 shares ROD Failed, dealt 0 shares (price out of range)" in placed.reason
+
+
+async def test_an_odd_lot_rod_part_still_working_after_the_polls_is_cancelled_and_the_order_says_so() -> None:
+    client = FakeShioaji(scripts={StockOrderLot.IntradayOdd: [Report(Status.Submitted)]})
+
+    placed = await provider(client).place_order(order(quantity=1500))
+
+    [board_lot, odd_lot] = client.placed
+    assert client.cancelled == [odd_lot]
+    assert (odd_lot.order.order_type, odd_lot.status.status) == (BrokerTimeInForce.ROD, Status.Cancelled)
+    cost = COSTS.apply(TradeAction.BUY, "2330", 100.0, 1000, now=NOW)
+    assert (placed.status, placed.filled_quantity, placed.fee) == (OrderStatus.CANCELLED, 1000, cost.fee)
+    assert placed.reason == (
+        "IOC unfilled: filled 1000 of 1500; Common 1 lots IOC Filled, dealt 1000 shares; "
+        "IntradayOdd 500 shares ROD Cancelled, dealt 0 shares"
+    )
+
+
+async def test_an_odd_lot_rod_part_partly_dealt_before_its_cancel_records_what_it_dealt() -> None:
+    client = FakeShioaji(scripts={StockOrderLot.IntradayOdd: [Report(Status.PartFilled, ((100.0, 200),))]})
+
+    placed = await provider(client).place_order(order(quantity=1500))
+
+    lots, odd = COSTS.apply(TradeAction.BUY, "2330", 100.0, 1000, now=NOW), COSTS.apply(TradeAction.BUY, "2330", 100.0, 200, now=NOW)
+    assert (placed.status, placed.filled_quantity, placed.fee) == (OrderStatus.CANCELLED, 1200, lots.fee + odd.fee)
+    assert placed.reason is not None and placed.reason.endswith("IntradayOdd 500 shares ROD Cancelled, dealt 200 shares")
+
+
+async def test_an_odd_lot_rod_part_the_broker_keeps_working_after_the_cancel_fails_the_order() -> None:
+    client = FakeShioaji(scripts={StockOrderLot.IntradayOdd: [Report(Status.Submitted)]}, honours_cancel=False)
+
+    placed = await provider(client).place_order(order(quantity=500))
+
+    assert (placed.status, placed.filled_quantity, client.cancelled) == (OrderStatus.FAILED, 0, client.placed)
+    assert placed.reason == (
+        "still working at the broker after a cancel request, check Shioaji: IntradayOdd 500 shares ROD Submitted, dealt 0 shares"
+    )
 
 
 async def test_when_every_part_is_refused_the_order_is_rejected_by_the_broker() -> None:
@@ -277,7 +315,7 @@ async def test_when_every_part_is_refused_the_order_is_rejected_by_the_broker() 
     placed = await provider(client).place_order(order(quantity=1500))
 
     assert (placed.status, placed.filled_quantity, len(client.placed)) == (OrderStatus.REJECTED, 0, 2)
-    assert placed.reason is not None and placed.reason.startswith("BROKER_REFUSED: Common 1 lots Failed")
+    assert placed.reason is not None and placed.reason.startswith("BROKER_REFUSED: Common 1 lots IOC Failed")
 
 
 async def test_a_timed_out_place_order_is_found_by_its_tag_and_settled() -> None:

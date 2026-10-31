@@ -61,18 +61,17 @@ class Stock(SQLModel):
         return self.ohlcv[-2] if len(self.ohlcv) >= 2 else None
 
     @property
-    def current_price(self) -> float | None:
-        if self.realtime_bar is not None:
-            return self.realtime_bar.close
+    def latest_bar(self) -> Ohlcv | None:
+        """The latest price this stock has: its realtime quote, else its last daily bar."""
+        return self.realtime_bar or self.today
 
-        return self.today.close if self.today else None
+    @property
+    def current_price(self) -> float | None:
+        return self.latest_bar.close if self.latest_bar else None
 
     @property
     def latest_market_data_at(self) -> datetime | None:
-        if self.realtime_bar is not None:
-            return self.realtime_bar.ts
-
-        return self.today.ts if self.today else None
+        return self.latest_bar.ts if self.latest_bar else None
 
     @property
     def current_volume(self) -> int | None:

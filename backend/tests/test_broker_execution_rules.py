@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -12,7 +12,9 @@ from a_domain.types.ids import new_decision_id, new_run_id
 
 NOW = datetime(2026, 10, 19, 10, 0, tzinfo=UTC)
 
-COSTS = TradingCostRule(fee_rate=0.001425, tax_rate=0.003, etf_tax_rate=0.001, min_fee=20)
+COSTS = TradingCostRule(
+    fee_rate=0.001425, tax_rate=0.003, etf_tax_rate=0.001, min_fee=20, bond_etf_tax_exempt_until=date(2026, 12, 31)
+)
 OUTCOME = BrokerOutcomeRule(broker="Shioaji")
 
 
@@ -88,10 +90,10 @@ def test_deals_are_missing_when_they_fall_short_of_the_broker_count_or_of_a_fill
 
 def test_a_buy_fill_costs_gross_plus_fee_and_realizes_nothing() -> None:
     cost, realized_pnl = FillRule(cost_rule=COSTS).apply(
-        new_order(), 1000, 100, Position(stock_id="2330", quantity=500, average_cost=90)
+        new_order(), 1000, 100, Position(stock_id="2330", quantity=500, average_cost=90), now=NOW
     )
 
-    assert (cost, realized_pnl) == (COSTS.apply(TradeAction.BUY, "2330", 100, 1000), None)
+    assert (cost, realized_pnl) == (COSTS.apply(TradeAction.BUY, "2330", 100, 1000, now=NOW), None)
 
 
 @pytest.mark.parametrize(
@@ -100,7 +102,7 @@ def test_a_buy_fill_costs_gross_plus_fee_and_realizes_nothing() -> None:
 def test_a_sell_fill_realizes_its_net_proceeds_less_the_cost_basis_of_held_shares(
     held: Position | None, realized_pnl: float | None
 ) -> None:
-    cost, realized = FillRule(cost_rule=COSTS).apply(new_order(TradeAction.SELL, 1000), 1000, 100, held)
+    cost, realized = FillRule(cost_rule=COSTS).apply(new_order(TradeAction.SELL, 1000), 1000, 100, held, now=NOW)
 
     assert (cost.net, realized) == (99_558, realized_pnl)
 
@@ -108,7 +110,7 @@ def test_a_sell_fill_realizes_its_net_proceeds_less_the_cost_basis_of_held_share
 def test_a_filled_order_keeps_its_status() -> None:
     order = new_order(quantity=1000)
     order.submit(now=NOW)
-    order.fill(1000, 100, COSTS.apply(TradeAction.BUY, "2330", 100, 1000), now=NOW)
+    order.fill(1000, 100, COSTS.apply(TradeAction.BUY, "2330", 100, 1000, now=NOW), now=NOW)
 
     OUTCOME.apply(order, [report(OrderStatus.FILLED, dealt=1000)], NOW)
 
@@ -155,7 +157,7 @@ def test_the_parts_reports_give_an_unfilled_order_its_final_status(
 def test_a_partly_filled_order_is_cancelled_with_what_filled() -> None:
     order = new_order()
     order.submit(now=NOW)
-    order.fill(1000, 100, COSTS.apply(TradeAction.BUY, "2330", 100, 1000), now=NOW)
+    order.fill(1000, 100, COSTS.apply(TradeAction.BUY, "2330", 100, 1000, now=NOW), now=NOW)
 
     OUTCOME.apply(order, [report(OrderStatus.FILLED, dealt=1000), report(OrderStatus.REJECTED, 500)], NOW)
 

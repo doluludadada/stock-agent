@@ -34,11 +34,17 @@ class SecurityKind(StrEnum):
     STOCK = auto()
 
     ETF = auto()
-    """Exchange-traded fund. Taiwan ETF codes start with 00: 0050, 00878, 006208, 00679B."""
+    """Exchange-traded fund. Taiwan ETF codes start with 00: 0050, 00878, 006208."""
+
+    BOND_ETF = auto()
+    """An ETF that holds bonds: a 00 code ending in B, such as 00679B. It trades on the ETF tick grid."""
 
     @classmethod
     def of(cls, stock_id: str) -> SecurityKind:
-        return cls.ETF if stock_id.startswith("00") else cls.STOCK
+        if not stock_id.startswith("00"):
+            return cls.STOCK
+
+        return cls.BOND_ETF if stock_id.endswith("B") else cls.ETF
 
 
 class TradeAction(StrEnum):

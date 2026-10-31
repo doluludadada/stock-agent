@@ -120,6 +120,7 @@ class TradingStack:
     run_history: RunHistory
     order_execution: OrderExecution
     account_history: AccountHistory
+    watchlist: FakeWatchlistRepository
 
 
 async def open_stack(tmp_path: Path, configure=lambda config: None, journal: TradingJournal | None = None) -> TradingStack:
@@ -134,6 +135,7 @@ async def open_stack(tmp_path: Path, configure=lambda config: None, journal: Tra
     journal = journal or TradingJournal(db=db)
     broker = MockExecutionProvider(db=db, config=config, logger=logger)
     stocks = StockDirectory()
+    watchlist = FakeWatchlistRepository(clock)
 
     dependencies = ProviderDependencies(
         stock_provider=stocks,
@@ -146,7 +148,7 @@ async def open_stack(tmp_path: Path, configure=lambda config: None, journal: Tra
         knowledge_repository=ForgetfulKnowledge(),
         conversation_repository=FakeConversationRepository(),
         journal=journal,
-        watchlist_repository=FakeWatchlistRepository(clock),
+        watchlist_repository=watchlist,
         technical_settings_repository=FakeTechnicalSettingsRepository(harness_settings()),
         execution_provider=broker,
         notification_provider=None,
@@ -166,4 +168,5 @@ async def open_stack(tmp_path: Path, configure=lambda config: None, journal: Tra
         trading.run_history,
         trading.order_execution,
         runtime.account_history,
+        watchlist,
     )

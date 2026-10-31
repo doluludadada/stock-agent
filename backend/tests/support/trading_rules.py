@@ -1,5 +1,7 @@
 """Trading rules built from explicit numbers, for tests that probe settings outside what appsetting.yaml allows."""
 
+from datetime import date
+
 from a_domain.rules.trading.cost import AffordableQuantityRule, TradingCostRule
 from a_domain.rules.trading.decision import DecisionRule, RunDecisionsRule
 from a_domain.rules.trading.entry import EntryRule
@@ -8,7 +10,9 @@ from a_domain.rules.trading.reason import AnalysisSummaryRule, EntryReasonRule, 
 from a_domain.rules.trading.sizing import BuyCostRule, SizingRule
 from b_application.config.trading_config import MarketConfig
 
-COSTS = TradingCostRule(fee_rate=0.001425, tax_rate=0.003, etf_tax_rate=0.001, min_fee=20)
+COSTS = TradingCostRule(
+    fee_rate=0.001425, tax_rate=0.003, etf_tax_rate=0.001, min_fee=20, bond_etf_tax_exempt_until=date(2026, 12, 31)
+)
 LIMIT_PRICE = MarketConfig().limit_price_rule()
 SUMMARY = AnalysisSummaryRule(item_limit=3)
 ENTRY_REASON = EntryReasonRule(item_limit=3, summary_rule=SUMMARY)

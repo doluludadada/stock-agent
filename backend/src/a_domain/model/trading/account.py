@@ -44,7 +44,7 @@ class Account(SQLModel):
             raise ValueError("Only a priced (LIMIT) order has a known cost")
 
         if order.action == TradeAction.BUY:
-            needed = -cost_rule.apply(TradeAction.BUY, order.stock_id, order.limit_price, order.quantity).net
+            needed = -cost_rule.apply(TradeAction.BUY, order.stock_id, order.limit_price, order.quantity, now=order.created_at).net
 
             if not self.can_afford(needed):
                 return RejectReason.INSUFFICIENT_CASH, f"needs {needed:,.0f} including fee, cash is {self.cash:,.0f}"

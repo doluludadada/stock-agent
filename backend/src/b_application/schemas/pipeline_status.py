@@ -29,6 +29,12 @@ class PipelineStatus:
     Cash and positions from the execution provider: loaded at the start of the run, re-read after every fill.
     """
 
+    equity: float | None = None
+    """
+    The account's cash plus each position at the run's latest price for it, fixed by AccountEquity before the run's
+    first decision and kept for the whole run. Every BUY's risk budget is analysis.risk_per_trade_pct of it.
+    """
+
     universe_stocks: list[Stock] = field(default_factory=list)
     """
     Stocks loaded by a full-market scan.
@@ -112,6 +118,13 @@ class PipelineStatus:
                 workflow=Workflow.VALUATION, execution_provider=ExecutionProvider.MOCK, order_mode=OrderMode.DISABLED, start_time=now
             )
         )
+
+    def require_equity(self) -> float:
+        """The run's equity. Raises when no AccountEquity step fixed it before a decision needed it."""
+        if self.equity is None:
+            raise RuntimeError("the run's equity was not fixed before its first decision")
+
+        return self.equity
 
     def mark_stale(self, stock_id: str) -> None:
         """Adds the stock to stale_stock_ids. Each stock counts once toward stats.stale_market_data_count."""

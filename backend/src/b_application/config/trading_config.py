@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 from typing import Self
 
@@ -51,6 +52,9 @@ class MarketConfig(BaseModel):
     etf_tax_rate: float = Field(default=0.001, ge=0)
     """Securities transaction tax on an ETF SELL (codes starting with 00)."""
 
+    bond_etf_tax_exempt_until: date = date(2026, 12, 31)
+    """The last trading date on which a bond ETF SELL (a 00 code ending in B) pays no transaction tax; after it, etf_tax_rate."""
+
     min_fee: int = Field(default=20, ge=0)
 
     board_lot_shares: int = Field(default=1000, gt=0)
@@ -75,7 +79,13 @@ class MarketConfig(BaseModel):
     """A quote this close to a tick, as a fraction of the tick, is that tick carried through a binary float."""
 
     def cost_rule(self) -> TradingCostRule:
-        return TradingCostRule(fee_rate=self.fee_rate, tax_rate=self.tax_rate, etf_tax_rate=self.etf_tax_rate, min_fee=self.min_fee)
+        return TradingCostRule(
+            fee_rate=self.fee_rate,
+            tax_rate=self.tax_rate,
+            etf_tax_rate=self.etf_tax_rate,
+            min_fee=self.min_fee,
+            bond_etf_tax_exempt_until=self.bond_etf_tax_exempt_until,
+        )
 
     def limit_price_rule(self) -> LimitPriceRule:
         tick_size_rule = TickSizeRule(

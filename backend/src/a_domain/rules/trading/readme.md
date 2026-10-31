@@ -20,12 +20,12 @@ Each rule makes one decision in `apply`:
 |                 | `ExitRule`                | SELL or HOLD for a held stock: the stop-loss first, then the sell threshold                |
 | `decision.py`   | `DecisionSkipRule`        | Which watchlist stocks get no decision in this run, and why                                |
 |                 | `DecisionRule`            | The final decision on one stock: EntryRule or ExitRule, by whether a position exists       |
-|                 | `RunDecisionsRule`        | One run's decisions, best score first, each BUY sized against the cash left                |
+|                 | `RunDecisionsRule`        | One run's decisions, best score first, each BUY sized on the equity and the cash left      |
 | `reason.py`     | `AnalysisSummaryRule`     | The technical verdict, cited AI factors and scores every reason ends with                  |
 |                 | `EntryReasonRule`         | The reason of a BUY or HOLD on a stock not held                                            |
 |                 | `ExitReasonRule`          | The reason of a SELL or HOLD on a held position                                            |
 | `sizing.py`     | `BuyCostRule`             | The cash a BUY can take: its quantity at the order's limit plus the fee                    |
-|                 | `SizingRule`              | The BUY quantity: the risk budget, capped by the cash after the fee                        |
+|                 | `SizingRule`              | The BUY quantity: the risk budget on the equity, capped by the cash after the fee          |
 | `cost.py`       | `TradingCostRule`         | The broker fee (with its minimum) and the transaction tax (SELL only)                      |
 |                 | `AffordableQuantityRule`  | The largest lot-aligned BUY quantity the cash pays for, fee included                       |
 | `tick.py`       | `TickSizeRule`            | The exchange tick of a price                                                               |
@@ -33,6 +33,7 @@ Each rule makes one decision in `apply`:
 | `order_rule.py` | `OrderGateRule`           | Why an order may not be sent now: order mode, continuous trading, quote age                |
 |                 | `OrderRule`               | The order for a decision: LIMIT IOC at its limit price, or REJECTED with the gate's reason |
 | `valuation.py`  | `ValuationRule`           | Positions marked to market, unrealized PnL net of the selling costs                        |
+|                 | `EquityRule`              | The equity a run sizes its BUYs on: cash plus positions at the run's latest prices         |
 |                 | `SnapshotValuationRule`   | A snapshot's account marked at a day's closes                                              |
 |                 | `EquityCurveRule`         | One equity point per trading day since the first snapshot                                  |
 |                 | `AccountAsOfRule`         | The account at the end of a day                                                            |

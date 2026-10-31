@@ -3,12 +3,16 @@ from datetime import UTC, timedelta
 
 import pytest
 from sqlmodel import col, select
-from trading_stack import MONDAY_10_00, analysed_stock, bar, open_stack
+from support.harness import rising_history
+from trading_stack import MONDAY_10_00, TradingStack, analysed_stock, bar, open_stack
 
 from a_domain.model.analysis.ai_analysis_report import AiAnalysisReport
 from a_domain.model.analysis.technical_report import TechnicalReport
+from a_domain.model.trading.account import Account
 from a_domain.model.trading.order import Order
-from a_domain.types.enums import OrderMode, OrderStatus, SignalSource, TradeAction, Workflow
+from a_domain.model.trading.position import Position
+from a_domain.model.trading.watchlist_entry import WatchlistEntry
+from a_domain.types.enums import OrderMode, OrderStatus, SignalSource, TradeAction, WatchlistType, Workflow
 from c_infrastructure.database.models.trading_journal_dto import AccountSnapshotDTO, OrderDTO, TradeSignalDTO, WorkflowRunDTO
 from c_infrastructure.database.repositories.trading_journal import TradingJournal
 
@@ -115,7 +119,7 @@ async def test_only_continuous_trading_takes_the_apps_ioc_orders(
 
 @pytest.mark.parametrize(
     ("initial_cash", "composite_score", "reason"),
-    [(50, 90, "Manual BUY not sized: cash 50 buys no share of 2330"), (1_000_000, None, "analysis incomplete")],
+    [(50, 90, "Manual BUY not sized: a 2% risk budget of equity 50, with cash 50 to pay"), (1_000_000, None, "analysis incomplete")],
 )
 async def test_a_manual_buy_that_cannot_become_an_order_says_why(
     tmp_path, initial_cash: float, composite_score: int | None, reason: str
@@ -128,6 +132,43 @@ async def test_a_manual_buy_that_cannot_become_an_order_says_why(
 
     async with stack.db.get_session() as session:
         assert (await session.execute(select(OrderDTO))).first() is None
+
+
+async def hold(stack: TradingStack, cash: float, *positions: Position) -> None:
+    await stack.broker.connect()
+    await stack.broker.save_account(Account(cash=cash, positions=list(positions)), MONDAY_10_00)
+
+
+async def test_a_manual_buy_risks_a_share_of_the_equity_with_an_unpriced_position_at_its_average_cost(tmp_path) -> None:
+    stack = await open_stack(tmp_path)
+    await hold(stack, 1_000_000, Position(stock_id="2603", quantity=1000, average_cost=50.0))
+
+    [order] = (await stack.pipeline.buy_manually(analysed_stock())).orders
+
+    # The run has no price for 2603, so equity is 1,000,000 + 1000 x 50; 2% of it over the 10 NT$ stop is 2100 shares.
+    assert (order.status, order.quantity) == (OrderStatus.FILLED, 2100)
+
+
+async def test_intraday_fixes_the_equity_before_its_stop_loss_sale_pays_fee_and_tax(tmp_path) -> None:
+    stack = await open_stack(tmp_path)
+    await hold(stack, 1_000_000, Position(stock_id="2330", quantity=1000, average_cost=100.0))
+    stack.quotes.realtime = {
+        stock_id: bar(MONDAY_10_00 - timedelta(minutes=1), price) for stock_id, price in [("2330", 85), ("2317", 100)]
+    }
+    stack.quotes.daily["2317"] = rising_history(100.0)
+    stack.watchlist.entries[("2317", WatchlistType.TECHNICAL)] = WatchlistEntry(
+        stock_id="2317", watchlist_type=WatchlistType.TECHNICAL, created_at=MONDAY_10_00, expires_at=None
+    )
+
+    status = await stack.pipeline.run_intraday()
+
+    # Equity is 1,000,000 + 1000 x 85 = 1,085,000 before the stop-loss sale, whose fee 121 and tax 255 leave 1,084,624 cash.
+    # 2% of the equity over the 10 NT$ stop is 2170 shares; 2% of that cash would be 2169.
+    assert [(order.stock_id, order.action, order.status, order.quantity) for order in status.orders] == [
+        ("2330", TradeAction.SELL, OrderStatus.FILLED, 1000),
+        ("2317", TradeAction.BUY, OrderStatus.FILLED, 2170),
+    ]
+    assert (await stack.broker.get_account()).cash == 1_084_624 - 217_000 - 309
 
 
 class UnwritableSignals(TradingJournal):
@@ -189,7 +230,8 @@ async def test_a_decision_gets_one_order_however_often_it_is_executed(tmp_path) 
     stack = await open_stack(tmp_path)
     stock = analysed_stock()
     stock.realtime_bar = stack.quotes.realtime["2330"]
-    signal = stack.config.manual_entry_rule().apply(stock, await stack.broker.get_account(), now=stack.clock.now())
+    account = await stack.broker.get_account()
+    signal = stack.config.manual_entry_rule().apply(stock, account, equity=account.cash, now=stack.clock.now())
 
     async with stack.run_history.execute(Workflow.MANUAL_BUY) as status:
         await stack.journal.save_signals(status.stats.run_id, [signal])

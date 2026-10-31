@@ -35,6 +35,7 @@ from b_application.use_cases.ship.decision_memory import DecisionMemory
 from b_application.use_cases.ship.reporting import Reporting
 from b_application.use_cases.ship.run_history import RunHistory
 from b_application.use_cases.ship.signals import Signals
+from b_application.use_cases.trade.account_equity import AccountEquity
 from b_application.use_cases.trade.account_loader import AccountLoader
 from b_application.use_cases.trade.account_risk_check import AccountRiskCheck
 from b_application.use_cases.trade.manual_signal import ManualSignal
@@ -67,6 +68,7 @@ class ProcessSteps:
 class TradingSteps:
     run_history: RunHistory
     account_loader: AccountLoader
+    account_equity: AccountEquity
     account_risk_check: AccountRiskCheck
     watch_stocks: WatchStocks
     signals: Signals
@@ -145,6 +147,7 @@ class Pipeline:
             await self.process.ai_analyser.execute(status.survivors, status, AiAnalysisFocus.FUNDAMENTAL)
             self.process.composite_scorer.execute(status.survivors)
             status.watchlist = (await self.trading.watch_stocks.execute(status.survivors, WatchlistType.TECHNICAL)).watchlist
+            self.trading.account_equity.execute(status)
             await self.trading.signals.execute(status.watchlist, status)
             await self.trading.decision_memory.execute(status)
             await self.trading.reporting.execute(status)
@@ -163,11 +166,10 @@ class Pipeline:
         strategy = (await self.technical_settings_repository.load()).buzz_strategy
 
         async with self.trading.run_history.execute(Workflow.BUZZ_SCAN) as status:
-            self.logger.info(
-                f"Starting social buzz cycle. Strategy={strategy.strategy_id}, AI focus={AiAnalysisFocus.MOMENTUM.value}."
-            )
+            self.logger.info(f"Starting social buzz cycle. Strategy={strategy.strategy_id}, AI focus={AiAnalysisFocus.MOMENTUM}.")
             await self.trading.account_loader.execute(status)
             await self.collect.realtime_quote_feed.execute(status.held_stocks, status)
+            self.trading.account_equity.execute(status)
             await self.trading.account_risk_check.execute(status)
             await self._execute_orders(status)
             await self.collect.buzz_scanner.execute(status)
@@ -199,6 +201,7 @@ class Pipeline:
             await self.trading.account_loader.execute(status)
             candidates = await self.collect.intraday_candidates.execute(status)
             await self.collect.realtime_quote_feed.execute(candidates, status)
+            self.trading.account_equity.execute(status)
             await self.trading.account_risk_check.execute(status)
             await self._execute_orders(status)
             status.stats.total_scanned = len(candidates)
@@ -268,6 +271,7 @@ class Pipeline:
 
             await self.trading.account_loader.execute(status)
             await self.collect.realtime_quote_feed.execute([stock], status)
+            self.trading.account_equity.execute(status)
             await self.trading.manual_signal.execute(stock, status)
             await self.trading.decision_memory.execute(status)
             await self._execute_orders(status)

@@ -109,6 +109,9 @@ market:
   # Securities transaction tax on a SELL: stocks, and ETFs (codes starting with 00).
   tax_rate: 0.003
   etf_tax_rate: 0.001
+  # A bond ETF (a 00 code ending in B, such as 00679B) sold on or before this trading date pays no transaction tax;
+  # after it, etf_tax_rate.
+  bond_etf_tax_exempt_until: 2026-12-31
   min_fee: 20
   # Shares in one board lot, the exchange's trading unit. Fewer shares trade as an intraday odd lot.
   board_lot_shares: 1000

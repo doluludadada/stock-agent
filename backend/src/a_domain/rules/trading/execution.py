@@ -34,14 +34,16 @@ class LotSplitRule:
 @dataclass(frozen=True)
 class FillRule:
     """
-    What one fill of an order settles: the fee and tax of its shares at its price (TradingCostRule) and, for a SELL of
-    shares the account holds, the realized PnL against their cost basis (Position.profit_on_sale).
+    What one fill of an order settles: the fee and tax of its shares at its price on the fill's date (TradingCostRule)
+    and, for a SELL of shares the account holds, the realized PnL against their cost basis (Position.profit_on_sale).
     """
 
     cost_rule: TradingCostRule
 
-    def apply(self, order: Order, quantity: int, price: float, held: Position | None) -> tuple[TradeCost, float | None]:
-        cost = self.cost_rule.apply(order.action, order.stock_id, price, quantity)
+    def apply(
+        self, order: Order, quantity: int, price: float, held: Position | None, *, now: datetime
+    ) -> tuple[TradeCost, float | None]:
+        cost = self.cost_rule.apply(order.action, order.stock_id, price, quantity, now=now)
 
         if order.action == TradeAction.SELL and held is not None:
             return cost, held.profit_on_sale(quantity, cost.net)

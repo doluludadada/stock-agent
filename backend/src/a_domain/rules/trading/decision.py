@@ -54,9 +54,9 @@ class DecisionRule:
 
     @ensure(lambda result: len(result.stock_id) > 0, "Signal must have a stock_id")
     @ensure(lambda result: result.quantity >= 0, "Signal quantity must be non-negative")
-    def apply(self, stock: Stock, account: Account, position: Position | None = None, *, now: datetime) -> TradeSignal:
+    def apply(self, stock: Stock, account: Account, position: Position | None = None, *, equity: float, now: datetime) -> TradeSignal:
         if position is None:
-            return self.entry_rule.apply(stock=stock, account=account, now=now)
+            return self.entry_rule.apply(stock=stock, account=account, equity=equity, now=now)
 
         exit_signal = self.exit_rule.apply(stock=stock, position=position, now=now)
 
@@ -66,15 +66,16 @@ class DecisionRule:
         if stock.is_eliminated:
             return exit_signal
 
-        return self.entry_rule.apply(stock=stock, account=account, position=position, now=now)
+        return self.entry_rule.apply(stock=stock, account=account, position=position, equity=equity, now=now)
 
 
 @dataclass(frozen=True)
 class RunDecisionsRule:
     """
-    One run's decisions, best composite score first and a tie to the lower stock id. Each decision sees the cash
-    the run's earlier BUYs left: their quantity at the order's limit plus the fee (BuyCostRule). So the BUYs of one
-    run never commit more than the account's cash, and when the cash runs out the better-scored stocks have it.
+    One run's decisions, best composite score first and a tie to the lower stock id. Every BUY takes its risk budget
+    from the same `equity`, fixed before the run's first decision, and is capped by the cash the run's earlier BUYs
+    left: their quantity at the order's limit plus the fee (BuyCostRule). So the BUYs of one run never commit more than
+    the account's cash, and when the cash runs out the better-scored stocks have it.
     """
 
     decision_rule: DecisionRule
@@ -82,16 +83,16 @@ class RunDecisionsRule:
 
     @require(lambda stocks: all(stock.composite_score is not None for stock in stocks), "Every stock needs a composite score")
     @require(lambda stocks: len({stock.stock_id for stock in stocks}) == len(stocks), "One decision per stock")
-    def apply(self, stocks: Sequence[Stock], account: Account, *, now: datetime) -> list[TradeSignal]:
+    def apply(self, stocks: Sequence[Stock], account: Account, equity: float, *, now: datetime) -> list[TradeSignal]:
         cash = account.cash
         signals: list[TradeSignal] = []
 
         for stock in sorted(stocks, key=lambda stock: (-(stock.composite_score or 0), stock.stock_id)):
             position = account.position_for(stock.stock_id)
-            signal = self.decision_rule.apply(stock, account.model_copy(update={"cash": cash}), position, now=now)
+            signal = self.decision_rule.apply(stock, account.model_copy(update={"cash": cash}), position, equity=equity, now=now)
 
             if signal.action == TradeAction.BUY:
-                cash -= self.buy_cost_rule.apply(signal.stock_id, signal.price_at_signal, signal.quantity)
+                cash -= self.buy_cost_rule.apply(signal.stock_id, signal.price_at_signal, signal.quantity, now=now)
 
             signals.append(signal)
 

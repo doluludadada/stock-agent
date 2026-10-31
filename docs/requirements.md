@@ -83,6 +83,9 @@ AI 應負責解釋與整理資料，而不是自行捏造 EPS、股價或財務�
 - CLI 在分析報告顯示後詢問使用者。
     
 - 只有通過技術篩選的 `survivors` 可以加入。
+
+    Owner note (2026-10-31): US-005 replaced this criterion. Any requested stock may be added to the `MANUAL`
+    watchlist by hand after its report, whether or not it passed the technical filter.
     
 - 使用者拒絕時不修改 watchlist。
     
@@ -346,6 +349,10 @@ Manual watchlist membership and Manual BUY remain independent actions.
 - Manual BUY remains a separate explicit user confirmation.
 - Automatic Full Cycle and Intraday workflows continue sending only
   `survivors` to News, AI, composite scoring, and automatic decisions.
+
+  Owner note (2026-10-31): Intraday still sends each held position that failed
+  the technical filter to News and AI, so every held position gets an exit
+  decision.
 - TechnicalFilter must not contain manual-mode or workflow-specific behavior.
 - AiAnalyser must not decide whether a stock is technically eligible. The
   calling workflow owns that decision.

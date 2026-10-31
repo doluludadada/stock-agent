@@ -155,7 +155,7 @@ async def test_intraday_loads_held_positions_and_active_watchlist() -> None:
 
 
 @pytest.mark.asyncio
-async def test_one_runs_buys_are_sized_best_score_first_against_the_cash_the_earlier_buys_left() -> None:
+async def test_one_runs_buys_risk_a_share_of_the_equity_best_score_first_until_the_cash_runs_out() -> None:
     harness = build_harness()
     ai_scores = {"1101": 92, "2317": 98, "2330": 88, "2454": 96, "2603": 90, "3008": 94}
 
@@ -166,11 +166,37 @@ async def test_one_runs_buys_are_sized_best_score_first_against_the_cash_the_ear
 
     await harness.run_menu("3")
 
-    # 2% of the cash not yet committed, over the 10 NT$ a share loses at the stop; each BUY commits 100 x shares + fee.
-    buys = [(signal.stock_id, signal.quantity) for signal in harness.journal.signals if signal.action == TradeAction.BUY]
-    assert buys == [("2317", 2000), ("2454", 1599), ("3008", 1279), ("1101", 1023), ("2603", 818), ("2330", 654)]
+    # 2% of the 1,000,000 equity over the 10 NT$ a share loses at the stop is 2000 shares, 200,285 with the fee.
+    # Four fit; the fifth gets what the 198,860 left pays for, fee included; the sixth gets none.
+    decisions = [(signal.stock_id, signal.action, signal.quantity) for signal in harness.journal.signals]
+    assert decisions == [
+        ("2317", TradeAction.BUY, 2000),
+        ("2454", TradeAction.BUY, 2000),
+        ("3008", TradeAction.BUY, 2000),
+        ("1101", TradeAction.BUY, 2000),
+        ("2603", TradeAction.BUY, 1985),
+        ("2330", TradeAction.HOLD, 0),
+    ]
+    buys = [(stock_id, quantity) for stock_id, action, quantity in decisions if action == TradeAction.BUY]
     assert [order.stock_id for order in harness.broker.placed] == [stock_id for stock_id, _ in buys]
-    assert sum(100 * quantity + max(20, int(100 * quantity * 0.001425)) for _, quantity in buys) == 738_348 <= 1_000_000
+    assert sum(100 * quantity + max(20, int(100 * quantity * 0.001425)) for _, quantity in buys) == 999_922 <= 1_000_000
+
+
+@pytest.mark.asyncio
+async def test_a_held_position_at_its_quote_counts_toward_the_equity_each_buy_risks_a_share_of() -> None:
+    harness = build_harness()
+    harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
+    harness.list_stock("2317", rising_history(100.0), realtime_price=100.0)
+    harness.hold("2330", quantity=1000, average_cost=95.0)
+    harness.watch("2317", WatchlistType.TECHNICAL)
+
+    await harness.run_menu("3")
+
+    # Equity is the 1,000,000 cash plus 1000 held shares at their 100 quote; 2% of it over the 10 NT$ stop is 2200 shares.
+    assert [(order.stock_id, order.action, order.quantity) for order in harness.broker.placed] == [
+        ("2317", TradeAction.BUY, 2200),
+        ("2330", TradeAction.BUY, 2200),
+    ]
 
 
 @pytest.mark.asyncio

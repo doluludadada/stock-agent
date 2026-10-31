@@ -22,7 +22,7 @@ def scored(stock_id: str, composite_score: int, price: float = 100) -> Stock:
 def test_when_cash_runs_out_the_higher_score_wins_and_a_tie_goes_to_the_lower_stock_id() -> None:
     # At 10% risk and a 10% stop a BUY wants all the cash: 998 x 100 + fee 142 = 99,942 of 100,000 leaves 58.
     signals = run_decisions_rule(risk_per_trade_pct=0.10).apply(
-        [scored("2603", 85), scored("2330", 95), scored("1101", 95)], Account(cash=100_000), now=QUOTED_AT
+        [scored("2603", 85), scored("2330", 95), scored("1101", 95)], Account(cash=100_000), equity=100_000, now=QUOTED_AT
     )
 
     assert [(signal.stock_id, signal.action, signal.quantity) for signal in signals] == [
@@ -35,14 +35,29 @@ def test_when_cash_runs_out_the_higher_score_wins_and_a_tie_goes_to_the_lower_st
 def test_a_runs_buys_never_commit_more_than_the_cash_whatever_the_order_they_arrive_in() -> None:
     stocks = [scored(f"{1101 + index}", 80 + index, price=28.37 + index) for index in range(8)]
 
-    signals = run_decisions_rule(risk_per_trade_pct=0.05).apply(stocks, Account(cash=1_000_000), now=QUOTED_AT)
+    # 1.25% of the equity over a 10% stop is about 125,000 a BUY, so the eighth one is capped by what the cash still pays for.
+    signals = run_decisions_rule(risk_per_trade_pct=0.0125).apply(stocks, Account(cash=1_000_000), equity=1_000_000, now=QUOTED_AT)
 
     # The most a BUY can cost is its quantity at the order's limit, the next 0.05 tick up, plus the fee.
     committed = sum(
-        -COSTS.apply(TradeAction.BUY, signal.stock_id, round(signal.price_at_signal + 0.03, 2), signal.quantity).net
+        -COSTS.apply(TradeAction.BUY, signal.stock_id, round(signal.price_at_signal + 0.03, 2), signal.quantity, now=QUOTED_AT).net
         for signal in signals
         if signal.action == TradeAction.BUY
     )
     assert [signal.stock_id for signal in signals] == [f"{1101 + index}" for index in reversed(range(8))]
     assert sum(signal.action == TradeAction.BUY for signal in signals) == 8
     assert committed <= 1_000_000
+
+
+def test_every_buy_of_a_run_risks_a_share_of_the_same_equity_and_the_cash_left_caps_it() -> None:
+    # 2% of 3,000,000 over the 10 NT$ stop is 6000 shares, 600,855 with the fee: the first fits the 1,000,000 cash,
+    # the second gets what the 399,145 left pays for, fee included, and the third gets none.
+    signals = run_decisions_rule(risk_per_trade_pct=0.02).apply(
+        [scored("1101", 95), scored("2330", 90), scored("2603", 85)], Account(cash=1_000_000), equity=3_000_000, now=QUOTED_AT
+    )
+
+    assert [(signal.stock_id, signal.action, signal.quantity) for signal in signals] == [
+        ("1101", TradeAction.BUY, 6000),
+        ("2330", TradeAction.BUY, 3985),
+        ("2603", TradeAction.HOLD, 0),
+    ]

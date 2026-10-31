@@ -19,7 +19,7 @@ class TickSizeRule:
     etf_ticks: tuple[tuple[Decimal, Decimal], ...]
 
     def apply(self, stock_id: str, price: Decimal) -> Decimal:
-        bands = self.etf_ticks if SecurityKind.of(stock_id) == SecurityKind.ETF else self.stock_ticks
+        bands = self.stock_ticks if SecurityKind.of(stock_id) == SecurityKind.STOCK else self.etf_ticks
 
         return next(tick for lowest, tick in bands if price >= lowest)
 

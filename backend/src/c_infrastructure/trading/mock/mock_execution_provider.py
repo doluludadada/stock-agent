@@ -128,7 +128,7 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
         if quantity == 0 or price is None:
             return
 
-        cost, realized_pnl = self._fill_rule.apply(order, quantity, price, account.position_for(order.stock_id))
+        cost, realized_pnl = self._fill_rule.apply(order, quantity, price, account.position_for(order.stock_id), now=now)
 
         if order.action == TradeAction.BUY:
             account.buy(order.stock_id, quantity, price=price, total_cost=-cost.net)

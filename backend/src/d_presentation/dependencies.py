@@ -47,6 +47,7 @@ from b_application.use_cases.ship.decision_memory import DecisionMemory
 from b_application.use_cases.ship.reporting import Reporting
 from b_application.use_cases.ship.run_history import RunHistory
 from b_application.use_cases.ship.signals import Signals
+from b_application.use_cases.trade.account_equity import AccountEquity
 from b_application.use_cases.trade.account_history import AccountHistory
 from b_application.use_cases.trade.account_loader import AccountLoader
 from b_application.use_cases.trade.account_risk_check import AccountRiskCheck
@@ -384,6 +385,7 @@ def build_trading_steps(
     return TradingSteps(
         run_history=RunHistory(journal=journal, market_clock=market_clock, config=config, logger=logger),
         account_loader=AccountLoader(execution_provider=broker, stock_provider=dependencies.stock_provider, logger=logger),
+        account_equity=AccountEquity(config=config, logger=logger),
         account_risk_check=AccountRiskCheck(dependencies.journal, market_clock, config, logger),
         watch_stocks=WatchStocks(dependencies.watchlist_repository, market_clock, config, logger),
         signals=Signals(dependencies.journal, market_clock, config, logger),

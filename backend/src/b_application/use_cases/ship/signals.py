@@ -9,8 +9,9 @@ from b_application.schemas.pipeline_status import PipelineStatus
 
 class Signals:
     """
-    Generates one run's trading decisions with RunDecisionsRule and records them. A stock DecisionSkipRule skips gets
-    no decision. Only recorded decisions reach the run's signals, in decision order: best composite score first.
+    Generates one run's trading decisions with RunDecisionsRule, every BUY sized on the run's equity, and records them.
+    A stock DecisionSkipRule skips gets no decision. Only recorded decisions reach the run's signals, in decision order:
+    best composite score first.
     """
 
     def __init__(self, journal: ITradingJournal, market_clock: IMarketClock, config: AppConfig, logger: ILoggingProvider) -> None:
@@ -29,7 +30,7 @@ class Signals:
             self._logger.warning(f"Signal skipped. {skip}: {stock_id}")
 
         try:
-            signals = self._decisions_rule.apply(candidates, status.account, now=self._market_clock.now())
+            signals = self._decisions_rule.apply(candidates, status.account, status.require_equity(), now=self._market_clock.now())
         except Exception as error:
             message = f"Signal generation failed, so this run decides on none of {len(candidates)} stocks: {error}"
             self._logger.error(status.stats.add_error(message))

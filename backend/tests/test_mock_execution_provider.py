@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 from trading_stack import SilentLogger
@@ -15,10 +15,17 @@ NOW = datetime(2026, 10, 19, 10, 0, tzinfo=UTC)
 pytestmark = pytest.mark.asyncio
 
 
-async def open_broker(tmp_path, initial_cash: float = 1_000_000, max_fill_quantity: int | None = None, create_tables: bool = True):
+async def open_broker(
+    tmp_path,
+    initial_cash: float = 1_000_000,
+    max_fill_quantity: int | None = None,
+    create_tables: bool = True,
+    bond_etf_tax_exempt_until: date = date(2026, 12, 31),
+):
     config = AppConfig(project_root=tmp_path)
     config.mock_trading.initial_cash = initial_cash
     config.mock_trading.max_fill_quantity = max_fill_quantity
+    config.market.bond_etf_tax_exempt_until = bond_etf_tax_exempt_until
     db = DatabaseConnector(config=config, logger=SilentLogger())
 
     if create_tables:
@@ -90,6 +97,18 @@ async def test_an_etf_sell_pays_the_etf_transaction_tax_from_the_config(tmp_path
 
     assert (sold.fee, sold.tax) == (156, 110)
     assert sold.realized_pnl == pytest.approx(110_000 - 156 - 110 - 100_142)
+    await db.close()
+
+
+@pytest.mark.parametrize(("exempt_until", "tax"), [(date(2099, 12, 31), 0), (date(2000, 1, 1), 110)])
+async def test_a_bond_etf_sell_pays_no_tax_until_the_configured_exemption_ends(tmp_path, exempt_until: date, tax: int) -> None:
+    db, broker = await open_broker(tmp_path, bond_etf_tax_exempt_until=exempt_until)
+    await broker.place_order(order(TradeAction.BUY, 1000, 100, stock_id="00679B"))
+
+    sold = await broker.place_order(order(TradeAction.SELL, 1000, 110, stock_id="00679B"))
+
+    assert (sold.status, sold.fee, sold.tax) == (OrderStatus.FILLED, 156, tax)
+    assert await cash(broker) == pytest.approx(1_000_000 - 100_142 + 110_000 - 156 - tax)
     await db.close()
 
 

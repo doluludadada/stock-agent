@@ -8,7 +8,7 @@ import json
 import re
 from collections.abc import Collection
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from uuid import UUID
 
 from a_domain.model.analysis.sentiment_classification import SentimentClassification
@@ -353,13 +353,15 @@ class RecordingExecutionProvider:
         self.cash = cash
         self.positions: list[Position] = []
         self.placed: list[Order] = []
-        self._cost_rule = cost_rule or TradingCostRule(fee_rate=0.001425, tax_rate=0.003, etf_tax_rate=0.001, min_fee=20)
+        self._cost_rule = cost_rule or TradingCostRule(
+            fee_rate=0.001425, tax_rate=0.003, etf_tax_rate=0.001, min_fee=20, bond_etf_tax_exempt_until=date(2026, 12, 31)
+        )
 
     async def place_order(self, order: Order) -> Order:
         self.placed.append(order.model_copy())
         assert order.limit_price is not None, "the app sends LIMIT orders only"
 
-        cost = self._cost_rule.apply(order.action, order.stock_id, order.limit_price, order.quantity)
+        cost = self._cost_rule.apply(order.action, order.stock_id, order.limit_price, order.quantity, now=datetime.now(UTC))
         held = next((position for position in self.positions if position.stock_id == order.stock_id), None)
         realized_pnl = held.profit_on_sale(order.quantity, cost.net) if order.action == TradeAction.SELL and held else None
 
