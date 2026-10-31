@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
+import httpx
 import pytest
 
 from a_domain.model.market.article import Article
@@ -86,3 +87,20 @@ def test_a_yahoo_news_page_lists_each_headline_once_with_its_full_url() -> None:
         ("TSMC raises its outlook", f"{SOURCES.news.yahoo_base_url}/news/tsmc-1.html"),
         ("TSMC capex grows", "https://tw.news.yahoo.com/news/tsmc-2.html"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_yahoo_article_without_caas_body_keeps_only_paragraphs_longer_than_20_characters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = f"<p>{'a' * 20}</p><p>{'b' * 21}</p>"
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kwargs: real_client(transport=httpx.MockTransport(lambda request: httpx.Response(200, text=page))),
+    )
+
+    body = await YahooTwNewsProvider(SOURCES.news, SilentLogger()).fetch_article_body("https://tw.stock.yahoo.com/news/a.html")
+
+    assert body == "b" * 21

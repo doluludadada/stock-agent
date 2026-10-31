@@ -19,7 +19,7 @@ class YahooTwNewsProvider(INewsSource):
         self._news = news
         self._logger = logger
         user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        self._client = httpx.AsyncClient(timeout=15.0, headers={"User-Agent": user_agent}, follow_redirects=True, verify=False)
+        self._client = httpx.AsyncClient(timeout=news.yahoo_timeout_seconds, headers={"User-Agent": user_agent}, follow_redirects=True)
 
     @override
     async def fetch_news(self, stock_id: str, limit: int) -> list[Article]:
@@ -51,7 +51,7 @@ class YahooTwNewsProvider(INewsSource):
 
     @override
     def parse_listing(self, stock_id: str, page: str) -> list[Article]:
-        """Each news link with a headline of at least 5 characters, once per URL. A URL's first link decides its headline."""
+        """Each news link with a headline of at least yahoo_min_headline_length characters, once per URL. Its first link names it."""
         links = BeautifulSoup(page, "lxml").find_all("a", href=lambda href: bool(href) and "/news/" in href and ".html" in href)
         headlines: dict[str, str] = {}
 
@@ -74,12 +74,12 @@ class YahooTwNewsProvider(INewsSource):
                 fetched_at=now,
             )
             for href, title in headlines.items()
-            if len(title) >= 5
+            if len(title) >= self._news.yahoo_min_headline_length
         ]
 
     @override
     async def fetch_article_body(self, url: str) -> str:
-        """Yahoo wraps an article's text in caas-body; without it, the page's paragraphs of more than 20 characters."""
+        """Yahoo wraps an article's text in caas-body; without it, the page's paragraphs longer than yahoo_short_paragraph_length."""
         try:
             response = await self._client.get(url)
 
@@ -93,7 +93,7 @@ class YahooTwNewsProvider(INewsSource):
                 return body.get_text(separator="\n", strip=True)
 
             paragraphs = [paragraph.get_text(strip=True) for paragraph in soup.find_all("p")]
-            return "\n".join(paragraph for paragraph in paragraphs if len(paragraph) > 20)
+            return "\n".join(paragraph for paragraph in paragraphs if len(paragraph) > self._news.yahoo_short_paragraph_length)
         except Exception as error:
             self._logger.debug(f"Failed to fetch Yahoo body for {url}: {error}")
             return ""

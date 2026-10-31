@@ -1,11 +1,11 @@
-"""Every HTTPS client that reads TWSE, TPEX, MOPS or MIS data verifies the server's certificate."""
+"""Every HTTPS client that reads TWSE, TPEX, MOPS, MIS, cnyes, Yahoo or PTT data verifies the server's certificate."""
 
 from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
-from trading_stack import MONDAY_10_00, MovableClock, SilentLogger
+from trading_stack import MONDAY_10_00, MovableClock, SilentLogger, StockDirectory
 
 from a_domain.model.fundamentals.fiscal_quarter import FiscalQuarter
 from a_domain.model.market.stock import Stock
@@ -13,6 +13,9 @@ from b_application.config.app_config import AppConfig
 from b_application.config.market_data_config import MarketDataConfig, MarketHoursConfig
 from b_application.config.sources_config import SourcesConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
+from c_infrastructure.feed.news.cnyes_news_provider import CnyesNewsProvider
+from c_infrastructure.feed.news.yahoo_tw_news_provider import YahooTwNewsProvider
+from c_infrastructure.feed.ptt_provider import PttProvider
 from c_infrastructure.market.mis_quote_provider import MisQuoteProvider
 from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider
 from c_infrastructure.market.twse_provider import TaiwanStockProvider
@@ -65,3 +68,12 @@ async def test_exchange_clients_keep_certificate_verification_on(clients: list[d
 
     assert len(clients) == 6
     assert [client.get("verify", True) for client in clients] == [True] * 6
+
+
+async def test_news_and_ptt_clients_keep_certificate_verification_on(clients: list[dict[str, Any]], tmp_path: Path) -> None:
+    CnyesNewsProvider(SOURCES.news, SilentLogger())
+    YahooTwNewsProvider(SOURCES.news, SilentLogger())
+    PttProvider(config=AppConfig(project_root=tmp_path), logger=SilentLogger(), stock_provider=StockDirectory())
+
+    assert len(clients) == 3
+    assert [client.get("verify", True) for client in clients] == [True] * 3

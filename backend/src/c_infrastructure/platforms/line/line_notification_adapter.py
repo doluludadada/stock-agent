@@ -18,6 +18,7 @@ class LineNotificationAdapter(INotificationProvider):
         self._logger = logger
         self._token = config.line.channel_access_token
         self._multicast_url = config.sources.line.multicast_url
+        self._timeout_seconds = config.sources.line.multicast_timeout_seconds
 
     @override
     async def send_signal_alert(self, signal: TradeSignal, recipients: list[str]) -> bool:
@@ -37,7 +38,7 @@ class LineNotificationAdapter(INotificationProvider):
         headers = {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"}
         payload = {"to": recipients, "messages": [{"type": "text", "text": alert}]}
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
             try:
                 response = await client.post(self._multicast_url, headers=headers, json=payload)
                 response.raise_for_status()

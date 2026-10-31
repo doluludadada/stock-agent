@@ -44,7 +44,7 @@ class MopsSources(BaseModel):
 
 
 class PttSources(BaseModel):
-    """The PTT Stock board: where its search lives and the markers its pages use."""
+    """The PTT Stock board: where its search lives, the markers its pages use, and how much of it is read."""
 
     base_url: str
     search_path: str
@@ -59,15 +59,31 @@ class PttSources(BaseModel):
 
     posting_reminder_marker: str
     previous_page_label: str
+    timeout_seconds: float
+    max_pages: int
+    """The most search pages read for one tag."""
+
+    max_body_length: int
+    """An article's text, its reactions line included, is cut to this many characters."""
+
+    archive_excerpt_length: int
+    """How many characters of each article the buzz archive quotes."""
 
 
 class NewsSources(BaseModel):
-    """The cnyes news API and article pages, and the Yahoo Taiwan stock news pages."""
+    """The cnyes news API and article pages, the Yahoo Taiwan stock news pages, and how long each may take."""
 
     cnyes_api_url: str
     cnyes_article_url: str
     yahoo_base_url: str
     yahoo_quote_url: str
+    cnyes_timeout_seconds: float
+    yahoo_timeout_seconds: float
+    yahoo_min_headline_length: int
+    """A Yahoo news link whose headline is shorter than this is not an article."""
+
+    yahoo_short_paragraph_length: int
+    """Without a caas-body, an article's text is its paragraphs longer than this many characters."""
 
 
 class AiSources(BaseModel):
@@ -83,6 +99,7 @@ class LineSources(BaseModel):
 
     push_url: str
     multicast_url: str
+    multicast_timeout_seconds: float
     sentence_endings: str
     max_message_length: int
 

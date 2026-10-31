@@ -22,8 +22,6 @@ class PttProvider(ISocialMediaProvider):
     is reached or enough articles are collected.
     """
 
-    MAX_PAGES: ClassVar[int] = 30
-    MAX_BODY_LEN: ClassVar[int] = 3000
     TITLE_TICKER: ClassVar[re.Pattern[str]] = re.compile(r"(\d{4})")
     HEADERS: ClassVar[dict[str, str]] = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -39,7 +37,7 @@ class PttProvider(ISocialMediaProvider):
         self._search_url = config.sources.ptt.base_url + config.sources.ptt.search_path
         self._ticker_label = re.compile(config.sources.ptt.ticker_label_pattern)
         self._ticker_parenthesized = re.compile(config.sources.ptt.ticker_parenthesized_pattern)
-        self._client = httpx.AsyncClient(timeout=15.0, headers=self.HEADERS, follow_redirects=True, verify=False)
+        self._client = httpx.AsyncClient(timeout=config.sources.ptt.timeout_seconds, headers=self.HEADERS, follow_redirects=True)
 
     @override
     async def fetch_social_articles(self, limit: int) -> list[Article]:
@@ -81,7 +79,7 @@ class PttProvider(ISocialMediaProvider):
                     archive_file.write(
                         f"## [{index}] {article.stock_id}: {article.title}\n"
                         f"- {article.source.value} | {article.url}\n\n"
-                        f"> {article.content[:500]}\n\n---\n\n"
+                        f"> {article.content[: self._ptt.archive_excerpt_length]}\n\n---\n\n"
                     )
 
             self._logger.trace(f"Buzz archive saved → {archive_path}")
@@ -93,7 +91,7 @@ class PttProvider(ISocialMediaProvider):
         articles: list[Article] = []
         url, params = self._search_url, {"q": tag}
 
-        for _ in range(self.MAX_PAGES):
+        for _ in range(self._ptt.max_pages):
             page = await self.fetch_page(url, params)
 
             if page is None:
@@ -210,7 +208,7 @@ class PttProvider(ISocialMediaProvider):
             stock_id=stock_id,
             source=InformationSource.PTT_STOCK,
             title=listing.title,
-            content=f"{reaction_header}\n{content}"[: self.MAX_BODY_LEN],
+            content=f"{reaction_header}\n{content}"[: self._ptt.max_body_length],
             url=listing.url,
             content_type=ContentType.ANALYSIS,
             published_at=datetime.combine(listing.posted_on, datetime.min.time(), tzinfo=TAIWAN_TIMEZONE),

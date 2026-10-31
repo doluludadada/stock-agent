@@ -220,11 +220,19 @@ sources:
     ticker_parenthesized_pattern: "[（(](\\d{4})[)）]"
     posting_reminder_marker: "發文提醒"
     previous_page_label: "上頁"
+    timeout_seconds: 15.0
+    max_pages: 30
+    max_body_length: 3000
+    archive_excerpt_length: 500
   news:
     cnyes_api_url: "https://api.cnyes.com/media/api/v1"
     cnyes_article_url: "https://news.cnyes.com/news/id/"
     yahoo_base_url: "https://tw.stock.yahoo.com"
     yahoo_quote_url: "https://tw.stock.yahoo.com/quote/"
+    cnyes_timeout_seconds: 10.0
+    yahoo_timeout_seconds: 15.0
+    yahoo_min_headline_length: 5
+    yahoo_short_paragraph_length: 20
   ai:
     grok_base_url: "https://api.x.ai/v1"
     groq_base_url: "https://api.groq.com/openai/v1"
@@ -232,5 +240,6 @@ sources:
   line:
     push_url: "https://api.line.me/v2/bot/message/push"
     multicast_url: "https://api.line.me/v2/bot/message/multicast"
+    multicast_timeout_seconds: 10.0
     sentence_endings: "。.！!？?"
     max_message_length: 400

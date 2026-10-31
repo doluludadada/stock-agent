@@ -189,3 +189,56 @@ async def test_ptt_pages_back_through_the_search_until_a_post_is_older_than_the_
 
     assert [article.url for article in articles] == [f"{SOURCES.ptt.base_url}/bbs/Stock/M.{post}.html" for post in (1, 2, 3)]
     assert f"{SOURCES.ptt.base_url}/bbs/Stock/M.4.html" not in PttBoard.requested
+
+
+def test_a_ptt_article_is_cut_to_3000_characters() -> None:
+    ptt = PttProvider(config=AppConfig(project_root=Path(".")), logger=SilentLogger(), stock_provider=FakeStockList())
+    listing = PostListing(title="[標的] 2330 台積電 多", url="https://www.ptt.cc/bbs/Stock/M.1.html", posted_on=date(2026, 10, 30))
+
+    article = ptt.parse_article(f'<div id="main-content">股票代碼：2330\n{"長" * 4000}</div>', listing, stock_ids={"2330"})
+
+    assert article is not None
+    assert len(article.content) == 3000
+
+
+class EndlessPttBoard:
+    """Stands in for httpx.AsyncClient on a PTT search that always has an older page with a fresh post on it."""
+
+    search_pages: int = 0
+
+    def __init__(self, *args, **kwargs) -> None:
+        EndlessPttBoard.search_pages = 0
+
+    async def get(self, url: str, params: dict | None = None) -> httpx.Response:
+        request = httpx.Request("GET", url)
+
+        if "/M." in url:
+            return httpx.Response(200, text='<div id="main-content">no ticker here</div>', request=request)
+
+        EndlessPttBoard.search_pages += 1
+        today = datetime.now().date()
+        paging = f'<div class="btn-group-paging"><a href="/bbs/Stock/search?page={EndlessPttBoard.search_pages + 1}">‹ 上頁</a></div>'
+        post = f'<div class="r-ent"><a href="/bbs/Stock/M.{EndlessPttBoard.search_pages}.html">[閒聊] chat</a>'
+        return httpx.Response(200, text=f'{paging}{post}<div class="date">{today.month}/{today.day:02d}</div></div>', request=request)
+
+
+@pytest.mark.asyncio
+async def test_ptt_reads_at_most_30_search_pages_for_one_tag(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(httpx, "AsyncClient", EndlessPttBoard)
+    ptt = PttProvider(config=AppConfig(project_root=Path(".")), logger=SilentLogger(), stock_provider=FakeStockList())
+
+    articles = await ptt.fetch_tag_articles("[閒聊]", {"2330"}, datetime.now().date() - timedelta(days=14), limit=10)
+
+    assert articles == []
+    assert EndlessPttBoard.search_pages == 30
+
+
+def test_the_buzz_archive_quotes_the_first_500_characters_of_each_post(tmp_path: Path) -> None:
+    ptt = PttProvider(config=AppConfig(project_root=tmp_path), logger=SilentLogger(), stock_provider=FakeStockList())
+    post = make_post("2330").model_copy(update={"content": "a" * 500 + "b" * 100})
+
+    ptt.save_social_media_data([post])
+
+    archive = next(tmp_path.rglob("ptt_buzz_*.md")).read_text(encoding="utf-8")
+    assert f"> {'a' * 500}\n" in archive
+    assert "a" * 500 + "b" not in archive
