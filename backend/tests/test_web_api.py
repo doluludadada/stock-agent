@@ -1,3 +1,4 @@
+import ast
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, nullcontext
@@ -458,3 +459,30 @@ async def test_the_api_refuses_to_start_on_the_trading_setups_the_cli_refuses(mo
     with pytest.raises(TradingSetupError, match="DEV environment requires MockExecutionProvider"):
         async with app.router.lifespan_context(app):
             pass
+
+
+WEB = Path(__file__).resolve().parents[1] / "src" / "d_presentation" / "web"
+
+
+async def test_the_api_passes_the_domains_answers_through_and_decides_nothing_itself() -> None:
+    modules = {path.relative_to(WEB).as_posix(): ast.parse(path.read_text(encoding="utf-8")) for path in WEB.rglob("*.py")}
+    nodes = [(name, node) for name, tree in modules.items() for node in ast.walk(tree)]
+
+    rule_imports = [
+        name for name, node in nodes if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("a_domain.rules")
+    ]
+    settings_read = {
+        node.attr
+        for _, node in nodes
+        if isinstance(node, ast.Attribute) and "config" in {getattr(node.value, "attr", None), getattr(node.value, "id", None)}
+    }
+    computing_responses = [
+        node.name
+        for node in ast.walk(modules["schemas.py"])
+        if isinstance(node, ast.ClassDef) and any(isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef) for item in node.body)
+    ]
+
+    assert {"schemas.py", "routers/runs.py", "routers/watchlist.py"} <= set(modules)
+    assert rule_imports == [], f"A router or response must not run a domain rule ({rule_imports}): call the use case that does."
+    assert settings_read == {"line"}, "Only the LINE webhook reads a setting (its channel secret). Thresholds belong to the domain."
+    assert computing_responses == [], f"Responses map domain fields and compute nothing: {computing_responses}"

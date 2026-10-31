@@ -39,10 +39,10 @@ Menu behavior:
 | 1 | Run Full Cycle | Scans the full market, builds a `TECHNICAL` watchlist, runs news and AI analysis, generates next-session signals. | Never submits orders. |
 | 2 | Scan Social Buzz | Finds discussed stocks, enriches market data, keeps technical survivors as `BUZZ`, analyses them, generates signals. | Submits only if market and order checks allow. |
 | 3 | Run Intraday Trading | Loads held positions and active watchlist, refreshes market data, revalidates technicals and AI, generates signals. | Submits only if market and order checks allow. |
-| 4 | Analyse Specific Stocks | Loads the requested stock IDs, runs technical and AI report generation, returns passing stocks as `MANUAL` watchlist candidates. | No automatic order. Manual BUY override requires confirmation. |
+| 4 | Analyse Specific Stocks | Loads the requested stock IDs and runs the technical filter, news and AI on every one of them, a technical failure included, then offers them all for the `MANUAL` watchlist. | No automatic order. Manual BUY override requires confirmation. |
 | 5 | Value Specific Stocks | Shows TTM EPS from MOPS filings, the exchange's official close and the current P/E, asks a target P/E, then prints three fair-price scenarios and an AI explanation built from those numbers. | Never. No watchlist write either. |
 | 6 | Scan Undervalued Stocks | Screens every listed and OTC stock at a target P/E and minimum undervaluation, optionally confirms the matches with the active technical strategy, and can ask the AI to explain the top matches. | Never. No watchlist write either. |
-| 7 | Account History | Shows cash, positions with unrealized PnL at the latest quote, the equity curve since the first fill, and the account as of a date you enter. | Never submits orders. |
+| 7 | Account History | Shows cash, positions with unrealized PnL at the latest quote, the equity curve since the first fill, and the account as of a date you enter. Warns about each position with no live quote, which is then priced at its last daily close, or at its average cost when no price came back. | Never submits orders. |
 
 Every BUY or SELL decision ends as one row in the `orders` table with its run id and decision id: REJECTED with the reason when a gate refuses it (order mode, market closed, a quote older than `freshness.realtime_max_lag_minutes`). IOC orders trade only in continuous trading, 09:00 to 13:25 on weekdays; the opening call auction (08:30-09:00) and the closing call auction (13:25-13:30) take ROD only, so an order then is REJECTED as `MARKET_CLOSED`, otherwise what the broker did with it, including the fee, the tax and, for a SELL, the realized PnL. Orders are LIMIT at the decision's price and IOC. The limit is a valid exchange tick (`LimitPriceRule`, with the TWSE/TPEx tick table in `market.stock_ticks` and `market.etf_ticks`): a quote off the tick grid rounds up for a BUY and down for a SELL, and sizing prices a BUY at that limit. One run decides best composite score first, a tie going to the lower stock id, and sizes each BUY against the cash the run's earlier BUYs left, their fees included, so a run never commits more than the account's cash; when it runs out, the lower-scored stocks get HOLD. Fees and tax come from `market` in `config/appsetting.yaml`: a SELL pays the transaction tax `tax_rate` (0.3%) on a stock and `etf_tax_rate` (0.1%) on an ETF, which is a code starting with `00`.
 
@@ -53,11 +53,11 @@ When you enter a stock such as `2330`, the app should only research that stock:
 1. Load the stock from the stock provider.
 2. Fetch OHLCV data and calculate indicators.
 3. Run the technical filter.
-4. Run news and AI analysis for technical survivors.
+4. Run news and AI analysis on the stock even when the technical filter failed it, so you see the whole report.
 5. Show the stock report.
-6. If it passes, expose a `MANUAL` watchlist candidate.
+6. Offer the stock for the `MANUAL` watchlist.
 
-Adding the stock to the watchlist is a separate manual confirmation. A manual BUY override is also separate. It is sized with fees included and still goes through `OrderExecution`, which checks the order mode, market-open status and the age of the quote. The CLI prints the order's status and reason, or why no order could be built.
+Adding the stock to the watchlist is a separate manual confirmation. A manual BUY override is also separate. It is sized with fees included and still goes through the same order steps, which check the order mode, market-open status and the age of the quote. The CLI prints the order's status and reason, or why no order could be built.
 
 ## What Counts As "Good"
 
@@ -74,14 +74,13 @@ Main thresholds live in `config/appsetting.yaml`:
 
 ```yaml
 analysis:
-  active_strategy: moderate
   technical_weight: 0.5
-  sentiment_weight: 0.5
+  ai_weight: 0.5
   min_combined_score_buy: 80
   max_combined_score_sell: 30
 ```
 
-Strategy-specific technical thresholds live in `config/strategies.yaml`.
+The technical strategies and which one each workflow uses (`active_strategy_id`, `buzz_strategy_id`) live in `config/technical.yaml`. That file is the template: the settings page and `PUT /v1/technical-settings` save to `config/technical.local.yaml` next to it, which wins while it exists, and deleting it resets to the template.
 
 ## Watchlist Types
 
@@ -99,7 +98,7 @@ A stock has one `watchlists` row per type, so it can be `TECHNICAL`, `BUZZ` and 
 
 ```mermaid
 flowchart TD
-    CLI[CLI Menu] --> WF[TradingWorkflow]
+    CLI[CLI Menu] --> WF[Pipeline]
 
     WF --> FULL[Run Full Cycle]
     WF --> BUZZ[Scan Social Buzz]
@@ -119,7 +118,7 @@ flowchart TD
     MS3 --> TF3[TechnicalFilter]
     MS4 --> TF4[TechnicalFilter -> MANUAL candidates]
 
-    TF1 --> AP[AnalysisPipeline: news + AI]
+    TF1 --> AP[NewsFeed + AiAnalyser + CompositeScorer]
     TF2 --> AP
     TF3 --> AP
     TF4 --> AP
@@ -132,15 +131,17 @@ flowchart TD
     DAY --> ORDERABLE
     ONE --> MANUAL[Manual confirmation only]
     MANUAL --> ORDERABLE
-    ORDERABLE --> ORDER[OrderExecution]
-    ORDER --> CLOCK[Market clock + signal checks]
-    CLOCK --> MOCK[MockExecutionProvider]
+    ORDERABLE --> PREP[OrderPreparation: gates and records the order]
+    PREP --> ORDER[OrderExecution: sends it]
+    ORDER --> MOCK[MockExecutionProvider]
+    MOCK --> OUT[OrderOutcome: takes the result into the run]
 ```
 
 Important distinction:
 
-- `AnalysisPipeline` only runs news feed and AI analysis.
-- `TradingWorkflow` decides which use cases run and whether signals, reporting, watchlist persistence, or order execution should happen.
+- `NewsFeed`, `AiAnalyser` and `CompositeScorer` only gather news, ask the AI and combine the scores.
+- `Pipeline` (`backend/src/b_application/pipeline.py`) holds every workflow as one method. Each method lists the use cases it runs, so it alone decides whether signals, reporting, watchlist writes or order steps happen.
+- The order steps run one decision at a time: `OrderPreparation` checks the order mode, the trading phase and the quote's age and records the order, `OrderExecution` sends it to the broker, and `OrderOutcome` records what the broker did.
 - `MarketScanner` loads the universe, `StockLookup` the requested stock IDs and `IntradayCandidates` the held and watched stocks. `MarketDataCollector` loads daily OHLCV, `RealtimeQuoteFeed` loads the realtime quotes that price orders, and `TechnicalFilter` calculates the strategy's indicators and applies its rules.
 
 ## Architecture
@@ -162,8 +163,8 @@ Main files:
 
 | File | Purpose |
 | --- | --- |
-| `config/appsetting.yaml` | Active model, logging, analysis weights, thresholds, folders, mock account, indicator periods, and under `sources` every outside endpoint (TWSE, TPEX, MOPS, PTT, news, AI, LINE) with the text formats their pages use. The settings classes are in `backend/src/b_application/config/`. |
-| `config/strategies.yaml` | Technical screening thresholds for `conservative`, `moderate`, `aggressive`, `buzz`, and `nightly`. |
+| `config/appsetting.yaml` | Active model, logging, analysis weights, thresholds, folders, mock account, indicator periods, and under `sources` every outside endpoint (TWSE, TPEX, MOPS, PTT, news, AI, LINE) with the text formats their pages use, their timeouts and how much of each page is read. The settings classes are in `backend/src/b_application/config/`. |
+| `config/technical.yaml` | The technical strategies, their indicator parameters and rules, and `active_strategy_id` and `buzz_strategy_id`. Saved edits go to `config/technical.local.yaml`. |
 | `config/instructions.yaml` | AI report prompts and RAG injection prompts. |
 | `.env` | API keys, optional database credentials and the Shioaji credentials. |
 
@@ -213,10 +214,13 @@ From `backend`:
 ```powershell
 uv sync --all-extras
 $env:PYTHONPATH = "src"
-uv run ruff check src tests
-uv run python -m compileall src tests
-uv run pytest
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest -q
+uv run python tools/architecture_check.py src --pyright
 ```
+
+`tools/architecture_check.py` checks the rules of `docs/clean_architecture_guide.md` (layer direction, one `apply` per domain rule, one `execute` per use case, `@override` on every adapter method, function length and complexity, no hard-coded URLs) and, with `--pyright`, counts pyright errors. It prints a count per rule and must end at `TOTAL 0`.
 
 Run the API:
 
@@ -247,7 +251,7 @@ No endpoint places, cancels or modifies an order. The API starts only Full Cycle
 | `GET /v1/runs/{run_id}/signals`, `.../orders` | The run's decisions and orders, with run id, decision id, status, reason, fee, tax and realized PnL. |
 | `GET /v1/watchlist`, `POST /v1/watchlist/manual` | Active entries with type and expiry; add listed stocks to the MANUAL watchlist. |
 | `GET`/`PUT /v1/technical-settings`, `POST /v1/technical-settings/reset`, `GET /v1/technical-settings/schema` | Read, save and reset the technical settings. The next workflow uses the saved ones. |
-| `GET /v1/account/history?as_of=YYYY-MM-DD` | Menu 7. |
+| `GET /v1/account/history?as_of=YYYY-MM-DD` | Menu 7. `live_stock_ids` lists the held stocks marked at a realtime quote. |
 | `GET /ui/settings` | A page that edits each strategy's indicator parameters through the endpoints above. |
 
 One workflow runs at a time; a second start answers 409. Every write needs `Authorization: Bearer <API_TOKEN>` and `"confirm": true` in the JSON body: 403 while `API_TOKEN` is unset, 401 without the token, 422 without the confirmation. Reads need no token, so do not expose the port beyond a network you trust.
@@ -272,6 +276,4 @@ Tables are created with `create_all`, which never changes an existing table. A n
 
 ## Known Cleanup Areas
 
-- Split manual watchlist addition and manual BUY override into clearer use cases.
-- Keep `PipelineContext.all_stocks` as a list. Dedupe by `stock_id`; do not convert it to `set`.
 - Keep README, CLI text, workflow behavior, and tests aligned whenever a workflow changes.

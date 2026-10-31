@@ -9,13 +9,16 @@ below is transcribed from the factory and thresholds that technical.yaml replace
 `git show 9052216^:config/appsetting.yaml`.
 """
 
+import ast
 import asyncio
 import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
+import yaml
 
+from a_domain.model.analysis.technical_rule import TechnicalRule
 from a_domain.model.analysis.technical_scoring import TechnicalScoring
 from a_domain.model.analysis.technical_settings import TechnicalSettings
 from a_domain.model.indicators.adx import Adx
@@ -62,6 +65,7 @@ from a_domain.types.enums import RuleEffect
 from c_infrastructure.technical.yaml_technical_settings_repository import YamlTechnicalSettingsRepository
 
 TEMPLATE_PATH = Path(__file__).resolve().parents[2] / "config" / "technical.yaml"
+SRC = Path(__file__).resolve().parents[1] / "src"
 
 PRE_MIGRATION_DEFAULT_THRESHOLDS = {
     "rsi_healthy_min": 50.0,
@@ -542,3 +546,82 @@ async def test_buzz_strategy_id_selects_the_buzz_mode(tmp_path: Path, strategy_i
     settings = await YamlTechnicalSettingsRepository(template).load()
 
     assert settings.buzz_strategy.strategy_id == strategy_id
+
+
+PRICED_AT_20 = Stock(stock_id="2330", ohlcv=[Ohlcv(ts=datetime(2026, 6, 1), open=20, high=20, low=20, close=20, volume=1000)])
+PASSES = MinimumPriceCriterion(10.0)
+FAILS = MinimumPriceCriterion(30.0)
+SCORING = TechnicalScoring(base_score=60, block_failure_penalty=20, failure_score_reduction=7, pass_score_increase=4)
+
+
+def strategy_of(scoring: TechnicalScoring, *rules: tuple[TechnicalCriterion, RuleEffect]) -> TechnicalStrategy:
+    return TechnicalStrategy(
+        strategy_id="scored",
+        indicators=IndicatorParameters(),
+        scoring=scoring,
+        rules=tuple(TechnicalRule(criterion=criterion, effect=effect) for criterion, effect in rules),
+    )
+
+
+@pytest.mark.parametrize(
+    ("rules", "score"),
+    [
+        ([(FAILS, RuleEffect.BLOCK_ON_FAIL)], 40),
+        ([(PASSES, RuleEffect.BLOCK_ON_FAIL)], 60),
+        ([(FAILS, RuleEffect.REDUCE_SCORE_ON_FAIL)], 53),
+        ([(PASSES, RuleEffect.REDUCE_SCORE_ON_FAIL)], 60),
+        ([(PASSES, RuleEffect.INCREASE_SCORE_ON_PASS)], 64),
+        ([(FAILS, RuleEffect.INCREASE_SCORE_ON_PASS)], 60),
+        (
+            [(FAILS, RuleEffect.BLOCK_ON_FAIL), (FAILS, RuleEffect.REDUCE_SCORE_ON_FAIL), (PASSES, RuleEffect.INCREASE_SCORE_ON_PASS)],
+            37,
+        ),
+    ],
+    ids=["hard-failure", "passed-block-rule", "soft-failure", "passed-reduce-rule", "bonus", "no-bonus", "one-of-each"],
+)
+def test_hard_failures_soft_failures_and_bonuses_move_the_score_by_their_scoring_points(
+    rules: list[tuple[TechnicalCriterion, RuleEffect]], score: int
+) -> None:
+    assert strategy_of(SCORING, *rules).apply(PRICED_AT_20).score == score
+
+
+@pytest.mark.parametrize(
+    ("scoring", "rules", "score"),
+    [
+        (TechnicalScoring(base_score=95, pass_score_increase=10), [(PASSES, RuleEffect.INCREASE_SCORE_ON_PASS)] * 2, 100),
+        (TechnicalScoring(base_score=10, block_failure_penalty=15), [(FAILS, RuleEffect.BLOCK_ON_FAIL)] * 2, 0),
+    ],
+    ids=["bonuses-past-100", "penalties-past-0"],
+)
+def test_the_score_stays_between_0_and_100_however_far_the_rules_push_it(
+    scoring: TechnicalScoring, rules: list[tuple[TechnicalCriterion, RuleEffect]], score: int
+) -> None:
+    assert strategy_of(scoring, *rules).apply(PRICED_AT_20).score == score
+
+
+@pytest.mark.asyncio
+async def test_the_app_runs_exactly_the_strategies_its_technical_settings_define(tmp_path: Path) -> None:
+    document = yaml.safe_load(TEMPLATE_PATH.read_text(encoding="utf-8"))
+    del document["strategies"]["nightly"]
+    template = tmp_path / "technical.yaml"
+    template.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+
+    settings = await YamlTechnicalSettingsRepository(template).load()
+
+    assert {strategy.strategy_id for strategy in settings.strategies} == set(document["strategies"])
+
+
+def test_only_the_technical_settings_schema_builds_strategies_and_their_rules() -> None:
+    schema = "c_infrastructure/technical/technical_settings_schema.py"
+    builders = {
+        path.relative_to(SRC).as_posix()
+        for path in SRC.rglob("*.py")
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "id", getattr(node.func, "attr", None)) in {"TechnicalStrategy", "TechnicalRule"}
+    }
+
+    assert builders == {schema}, (
+        f"A strategy and its rules come from config/technical.yaml through {schema}. "
+        f"Move the strategy that {sorted(builders - {schema})} builds into technical.yaml."
+    )

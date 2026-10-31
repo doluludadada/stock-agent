@@ -1,11 +1,34 @@
 from datetime import datetime, timedelta
 
 import pytest
-from support.harness import FRESH, MARKET_CLOSED, MARKET_OPEN, STALE, build_harness, falling_history, rising_history
+from support.harness import (
+    FRESH,
+    MARKET_CLOSED,
+    MARKET_OPEN,
+    STALE,
+    CliHarness,
+    build_harness,
+    falling_history,
+    harness_config,
+    rising_history,
+)
 
+from a_domain.model.market.article import Article
 from a_domain.model.market.stock import Stock
-from a_domain.types.enums import AiAnalysisFocus, SignalSource, TradeAction, WatchlistType
+from a_domain.types.enums import (
+    AiAnalysisFocus,
+    ExecutionProvider,
+    InformationSource,
+    OrderMode,
+    OrderStatus,
+    SignalSource,
+    SystemEnvironment,
+    TradeAction,
+    WatchlistType,
+)
 from a_domain.types.ids import new_run_id
+from b_application.config.app_config import AppConfig
+from b_application.config.trading_config import AnalysisConfig, ShioajiConfig, TradingConfig
 
 
 def stock_ids(stocks: list[Stock]) -> list[str]:
@@ -178,6 +201,91 @@ async def test_order_execution_skips_closed_market_orders(now: datetime, orders:
     assert status.stats.orders_submitted == len(orders)
 
 
+@pytest.mark.asyncio
+async def test_intraday_fetches_each_candidates_news_and_gives_it_to_the_ai() -> None:
+    harness = build_harness()
+    harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
+    harness.watch("2330", WatchlistType.TECHNICAL)
+    harness.news.articles["2330"] = [
+        Article(
+            stock_id="2330",
+            source=InformationSource.NEWS_MEDIA,
+            title="TSMC raises its full-year revenue outlook",
+            content="Revenue guidance rises on AI server demand. " * 6,
+            published_at=harness.clock.now() - timedelta(hours=2),
+            fetched_at=harness.clock.now(),
+        )
+    ]
+
+    await harness.run_menu("3")
+
+    assert harness.news.requested == ["2330"]
+    assert [(call.stock_id, "TSMC raises its full-year revenue outlook" in call.prompt) for call in harness.ai.calls] == [
+        ("2330", True)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_intraday_records_each_decision_and_the_brokers_answer_to_its_order() -> None:
+    harness = build_harness()
+    harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
+    harness.watch("2330", WatchlistType.TECHNICAL)
+
+    status = await harness.run_menu("3")
+
+    run_id = status.stats.run_id
+    [signal] = harness.journal.signals
+    [order] = harness.journal.orders.values()
+    assert (signal.stock_id, signal.action, harness.journal.signal_runs[signal.decision_id]) == ("2330", TradeAction.BUY, run_id)
+    assert (order.run_id, order.decision_id, order.status, order.filled_quantity) == (
+        run_id,
+        signal.decision_id,
+        OrderStatus.FILLED,
+        signal.quantity,
+    )
+    assert harness.journal.runs[run_id].orders_submitted == 1
+
+
+@pytest.mark.asyncio
+async def test_intraday_buys_holds_and_sells_manually_watched_stocks_on_their_composite_score() -> None:
+    config = harness_config()
+    config.analysis = AnalysisConfig(min_combined_score_buy=70, max_combined_score_sell=50)
+    harness = build_harness(config=config)
+    for stock_id, ai_score in {"2317": 90, "2454": 40, "2330": 10}.items():
+        harness.list_stock(stock_id, rising_history(100.0), realtime_price=100.0)
+        harness.watch(stock_id, WatchlistType.MANUAL)
+        harness.ai.scores[stock_id] = ai_score
+    harness.hold("2330", quantity=1000, average_cost=95.0)
+
+    await harness.run_menu("3")
+
+    # Composite = (technical 90 + AI) / 2, so 90 buys, 65 holds, and the held stock's 50 sells at the 50 sell threshold.
+    assert [(signal.stock_id, signal.action) for signal in harness.journal.signals] == [
+        ("2317", TradeAction.BUY),
+        ("2454", TradeAction.HOLD),
+        ("2330", TradeAction.SELL),
+    ]
+    assert [(order.stock_id, order.action) for order in harness.broker.placed] == [
+        ("2317", TradeAction.BUY),
+        ("2330", TradeAction.SELL),
+    ]
+    assert harness.broker.placed[-1].quantity == 1000
+
+
+@pytest.mark.parametrize("menu", ["1", "3"], ids=["full-cycle", "intraday"])
+@pytest.mark.asyncio
+async def test_an_automatic_buy_of_a_manually_watched_stock_is_a_combined_decision_never_a_manual_one(menu: str) -> None:
+    harness = build_harness()
+    harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
+    harness.watch("2330", WatchlistType.MANUAL)
+
+    await harness.run_menu(menu)
+
+    assert [(signal.stock_id, signal.action, signal.source) for signal in harness.journal.signals] == [
+        ("2330", TradeAction.BUY, SignalSource.COMBINED)
+    ]
+
+
 # ------------------------- Menu 4: Analyse Specific Stocks ------------------------ #
 
 
@@ -240,6 +348,22 @@ async def test_confirmed_manual_buy_sends_one_manual_signal_to_the_broker() -> N
     assert harness.watchlist.rows == []
 
 
+@pytest.mark.asyncio
+async def test_a_confirmed_manual_buy_is_sent_even_below_the_automatic_buy_threshold() -> None:
+    harness = build_harness()
+    harness.list_stock("2317", falling_history(100.0), realtime_price=98.0)
+    harness.ai.scores["2317"] = 10
+
+    status = await harness.run_menu("4", stock_ids="2317", buy={"2317"})
+
+    [analysed] = status.manual_stocks
+    assert analysed.composite_score is not None and analysed.composite_score < harness.config.analysis.min_combined_score_buy
+    assert [(signal.stock_id, signal.action, signal.source) for signal in harness.journal.signals] == [
+        ("2317", TradeAction.BUY, SignalSource.MANUAL)
+    ]
+    assert [(order.stock_id, order.action) for order in harness.broker.placed] == [("2317", TradeAction.BUY)]
+
+
 # ------------------------------ Caller-named run ids ------------------------------ #
 
 
@@ -255,3 +379,64 @@ async def test_a_workflow_started_under_a_named_run_id_records_under_it(workflow
     assert status.stats.run_id == run_id
     assert list(harness.journal.runs) == [run_id]
     assert {harness.journal.signal_runs[signal.decision_id] for signal in harness.journal.signals} <= {run_id}
+
+
+# --------------------------- Every workflow that decides -------------------------- #
+
+
+def wanted_by_every_workflow(config: AppConfig | None = None) -> CliHarness:
+    """2330 is listed, rising, on the TECHNICAL watchlist and trending, so menus 1, 2 and 3 each decide to BUY it."""
+    harness = build_harness(config=config)
+    harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
+    harness.watch("2330", WatchlistType.TECHNICAL)
+    harness.discuss("2330", mentions=1, engagement=harness.config.collect_rules.buzz_min_engagement)
+    return harness
+
+
+@pytest.mark.parametrize(
+    ("environment", "provider", "mode", "placed", "outcome"),
+    [
+        (SystemEnvironment.DEV, ExecutionProvider.MOCK, OrderMode.DISABLED, [], (OrderStatus.REJECTED, "ORDER_MODE_DISABLED")),
+        (SystemEnvironment.DEV, ExecutionProvider.MOCK, OrderMode.MOCK_ONLY, ["2330"], (OrderStatus.FILLED, "")),
+        (SystemEnvironment.LIVE, ExecutionProvider.SHIOAJI, OrderMode.LIVE, ["2330"], (OrderStatus.FILLED, "")),
+    ],
+    ids=["disabled", "mock-only", "live"],
+)
+@pytest.mark.parametrize("menu", ["2", "3"], ids=["buzz", "intraday"])
+@pytest.mark.asyncio
+async def test_buzz_and_intraday_send_an_order_only_when_the_order_mode_allows_it(
+    menu: str,
+    environment: SystemEnvironment,
+    provider: ExecutionProvider,
+    mode: OrderMode,
+    placed: list[str],
+    outcome: tuple[OrderStatus, str],
+) -> None:
+    config = harness_config()
+    config.environment = environment
+    config.trading = TradingConfig(execution_provider=provider, order_mode=mode)
+    config.shioaji = ShioajiConfig(_env_file=None, simulation=True, SHIOAJI_API_KEY="key", SHIOAJI_SECRET_KEY="secret")
+    harness = wanted_by_every_workflow(config)
+
+    await harness.run_menu(menu)
+
+    [order] = harness.journal.orders.values()
+    assert [order.stock_id for order in harness.broker.placed] == placed
+    assert (order.stock_id, order.status, (order.reason or "").split(":")[0]) == ("2330", *outcome)
+
+
+@pytest.mark.parametrize(
+    ("menu", "answers"),
+    [("1", {}), ("2", {}), ("3", {}), ("4", {"stock_ids": "2330", "buy": {"2330"}})],
+    ids=["full-cycle", "buzz", "intraday", "manual-buy"],
+)
+@pytest.mark.asyncio
+async def test_every_workflow_that_decides_hands_each_decision_to_the_knowledge_repository(menu: str, answers: dict) -> None:
+    harness = wanted_by_every_workflow()
+
+    await harness.run_menu(menu, **answers)
+
+    assert [(signal.stock_id, signal.action) for signal in harness.journal.signals] == [("2330", TradeAction.BUY)]
+    assert [(stock_id, signal.decision_id) for stock_id, signal in harness.knowledge.decisions] == [
+        (signal.stock_id, signal.decision_id) for signal in harness.journal.signals
+    ]

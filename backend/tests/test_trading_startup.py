@@ -1,9 +1,11 @@
 import io
 from itertools import product
 from pathlib import Path
+from typing import get_args
 
 import pytest
 import shioaji
+from pydantic import BaseModel
 from rich.console import Console
 from shioaji.error import TokenError
 from support.fake_shioaji import FakeShioaji
@@ -186,3 +188,33 @@ async def test_only_shioaji_simulation_in_the_environment_can_turn_simulation_of
     monkeypatch.setenv("SHIOAJI_SIMULATION", "false")
 
     assert (unrelated, ShioajiConfig(_env_file=None).simulation) == (True, False)
+
+
+BOOLEAN_SETTINGS = {
+    "behavior.enable_web_search",
+    "behavior.enable_x_search",
+    "behavior.enable_inline_citations",
+    "notifications.enabled",
+    "shioaji.simulation",
+}
+"""None of them sends or stops an order: the AI's web search, X search and inline citations, LINE notifications, Shioaji's server."""
+
+
+def boolean_settings(model: type[BaseModel], prefix: str = "") -> set[str]:
+    found: set[str] = set()
+
+    for name, field in model.model_fields.items():
+        for annotation in (field.annotation, *get_args(field.annotation)):
+            if annotation is bool:
+                found.add(prefix + name)
+            elif isinstance(annotation, type) and issubclass(annotation, BaseModel):
+                found |= boolean_settings(annotation, f"{prefix}{name}.")
+
+    return found
+
+
+async def test_the_order_mode_is_the_only_setting_that_turns_orders_on_or_off() -> None:
+    assert boolean_settings(AppConfig) == BOOLEAN_SETTINGS, (
+        "trading.order_mode alone decides whether a workflow may send an order. A new boolean setting must not "
+        "duplicate it: add an OrderMode value instead, or list the setting here if it switches something else."
+    )
