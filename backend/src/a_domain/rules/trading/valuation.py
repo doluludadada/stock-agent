@@ -154,4 +154,5 @@ class AccountHistoryRule:
             current=self.valuation_rule.apply(account.cash, account.positions, marks),
             equity_curve=self.equity_curve_rule.apply(snapshots, daily_bars, trading_date),
             as_of=None if as_of is None else self.as_of_rule.apply(snapshots, daily_bars, as_of, trading_date),
+            live_stock_ids=frozenset(realtime_bars),
         )

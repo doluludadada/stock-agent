@@ -14,3 +14,6 @@ class AccountHistoryReport:
 
     as_of: tuple[AccountSnapshot, AccountValuation] | None
     """The account at the end of the requested day, or None when no fill happened on or before it."""
+
+    live_stock_ids: frozenset[str]
+    """The held stocks `current` marks at a realtime quote. Any other position is at its last daily close or unpriced."""

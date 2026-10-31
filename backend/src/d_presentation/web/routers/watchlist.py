@@ -2,7 +2,7 @@ from fastapi import APIRouter
 from fastapi.exceptions import RequestValidationError
 
 from a_domain.types.enums import WatchlistType
-from d_presentation.web.dependencies import RuntimeDependency, WritePermission
+from d_presentation.dependencies import RuntimeDependency, WritePermission
 from d_presentation.web.schemas import StockIdsRequest, WatchlistAdditionResponse, WatchlistEntryResponse
 
 router = APIRouter(prefix="/watchlist", tags=["Watchlist"])

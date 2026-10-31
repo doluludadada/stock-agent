@@ -14,7 +14,7 @@ from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
 
-SOURCES = SourcesConfig()
+SOURCES = SourcesConfig.from_appsetting()
 
 FIXTURES = Path(__file__).parent / "fixtures"
 Q = FiscalQuarter

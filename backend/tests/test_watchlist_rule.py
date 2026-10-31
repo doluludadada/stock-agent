@@ -16,8 +16,8 @@ from b_application.config.trading_config import WatchlistConfig
 from b_application.use_cases.trade.watch_stocks import WatchStocks
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.repositories.watchlist_repository import WatchlistRepository
-from c_infrastructure.system.config_loader import load_settings
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
+from d_presentation.dependencies import load_settings
 
 FRIDAY_EVENING = datetime(2026, 10, 30, 18, 0, tzinfo=TAIWAN_TIMEZONE)
 

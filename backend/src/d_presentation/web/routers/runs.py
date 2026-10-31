@@ -1,22 +1,24 @@
-from typing import Annotated
+from collections.abc import Awaitable, Callable
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
 
 from a_domain.types.ids import RunId
-from d_presentation.web.dependencies import RuntimeDependency, WorkflowRunsDependency, WritePermission
+from b_application.schemas.pipeline_status import PipelineStatus
+from d_presentation.dependencies import RuntimeDependency, WorkflowRunsDependency, WritePermission
 from d_presentation.web.schemas import Confirmed, OrderResponse, RunAccepted, RunResponse, SignalResponse, StockIdsRequest
 from d_presentation.web.workflow_runs import RunInProgress, WorkflowRuns
 
 router = APIRouter(prefix="/runs", tags=["Workflow runs"])
 
-STARTED = {
+STARTED: dict[int | str, dict[str, Any]] = {
     status.HTTP_202_ACCEPTED: {"description": "The run started; poll GET /v1/runs/{run_id}."},
     status.HTTP_409_CONFLICT: {"description": "Another run started by this server is still running."},
 }
 
 
-def start(runs: WorkflowRuns, workflow) -> RunAccepted:
+def start(runs: WorkflowRuns, workflow: Callable[[RunId], Awaitable[PipelineStatus]]) -> RunAccepted:
     try:
         return RunAccepted(run_id=runs.start(workflow))
 

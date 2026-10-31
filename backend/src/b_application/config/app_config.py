@@ -58,7 +58,7 @@ class AppConfig(BaseSettings):
     shioaji: ShioajiConfig = Field(default_factory=ShioajiConfig)
     watchlist: WatchlistConfig = Field(default_factory=WatchlistConfig)
     valuation: ValuationConfig = Field(default_factory=ValuationConfig)
-    sources: SourcesConfig = Field(default_factory=SourcesConfig)
+    sources: SourcesConfig = Field(default_factory=SourcesConfig.from_appsetting)
 
     def sizing_rule(self) -> SizingRule:
         limit_price_rule = self.market.limit_price_rule()

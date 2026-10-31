@@ -16,7 +16,7 @@ from b_application.config.sources_config import SourcesConfig
 from c_infrastructure.market.mis_quote_provider import MisQuoteProvider
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 
-SOURCES = SourcesConfig()
+SOURCES = SourcesConfig.from_appsetting()
 
 # getStockInfo.jsp as served on Saturday 2026-10-31 02:40 Taipei, holding the final quotes of the 2026-10-30 session.
 # 2330 (TWSE) and 6488 (TPEX) last traded in the 13:30 closing auction. 1233 (TWSE) and 1240 (TPEX) last traded earlier,

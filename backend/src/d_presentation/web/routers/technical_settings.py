@@ -5,7 +5,7 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 
 from c_infrastructure.technical.technical_settings_schema import TechnicalSettingsSchema
-from d_presentation.web.dependencies import RuntimeDependency, WritePermission
+from d_presentation.dependencies import RuntimeDependency, WritePermission
 from d_presentation.web.schemas import Confirmed, TechnicalSettingsRequest
 
 router = APIRouter(prefix="/technical-settings", tags=["Technical settings"])

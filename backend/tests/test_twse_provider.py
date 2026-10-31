@@ -12,7 +12,7 @@ from b_application.config.sources_config import SourcesConfig
 from c_infrastructure.market.twse_provider import TaiwanStockProvider
 from c_infrastructure.system.market_clock import TaiwanMarketClock
 
-SOURCES = SourcesConfig()
+SOURCES = SourcesConfig.from_appsetting()
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

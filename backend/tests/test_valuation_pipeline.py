@@ -19,7 +19,7 @@ from a_domain.model.valuation.valuation_report import LABEL
 from a_domain.rules.ai.prompt import LOW_PE_RULE
 from a_domain.types.enums import EliminationReason, EpsUnavailableReason, PeNotApplicableReason, WatchlistType
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
-from d_presentation.cli import interactive
+from d_presentation.cli import terminal
 
 Q = FiscalQuarter
 AFTER_CLOSE_FRIDAY = datetime(2026, 10, 30, 19, 0, tzinfo=TAIWAN_TIMEZONE)
@@ -58,7 +58,7 @@ def market_harness(now: datetime = AFTER_CLOSE_FRIDAY) -> CliHarness:
 
 def capture_cli_output(monkeypatch: pytest.MonkeyPatch) -> io.StringIO:
     output = io.StringIO()
-    monkeypatch.setattr(interactive, "console", Console(file=output, width=400))
+    monkeypatch.setattr(terminal, "console", Console(file=output, width=400))
     return output
 
 

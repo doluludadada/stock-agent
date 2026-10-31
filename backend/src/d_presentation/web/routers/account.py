@@ -2,7 +2,7 @@ from datetime import date
 
 from fastapi import APIRouter
 
-from d_presentation.web.dependencies import RuntimeDependency
+from d_presentation.dependencies import RuntimeDependency
 from d_presentation.web.schemas import AccountAsOfResponse, AccountHistoryResponse, AccountValuationResponse, EquityPointResponse
 
 router = APIRouter(prefix="/account", tags=["Account"])
@@ -15,6 +15,7 @@ async def get_account_history(runtime: RuntimeDependency, as_of: date | None = N
 
     return AccountHistoryResponse(
         current=AccountValuationResponse.model_validate(report.current),
+        live_stock_ids=sorted(report.live_stock_ids),
         equity_curve=[EquityPointResponse.model_validate(point) for point in report.equity_curve],
         as_of=None
         if report.as_of is None

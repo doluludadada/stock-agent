@@ -2,7 +2,7 @@ import pytest
 
 from a_domain.rules.trading.cost import AffordableQuantityRule, TradingCostRule
 from a_domain.types.enums import TradeAction
-from c_infrastructure.system.config_loader import load_settings
+from d_presentation.dependencies import load_settings
 
 RULE = TradingCostRule(fee_rate=0.001425, tax_rate=0.003, etf_tax_rate=0.001, min_fee=20)
 

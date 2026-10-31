@@ -7,7 +7,7 @@ from fastapi import APIRouter, Header, HTTPException, Request, status
 from pydantic import ValidationError
 
 from c_infrastructure.platforms.line.dto.line_dto import LineEventType, LineMessageType, LineWebhookPayload
-from d_presentation.web.dependencies import RuntimeDependency
+from d_presentation.dependencies import RuntimeDependency
 
 router = APIRouter()
 

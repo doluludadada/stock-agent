@@ -5,9 +5,8 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 
-from d_presentation.dependencies import Runtime
+from d_presentation.dependencies import Runtime, create_workflow_runs
 from d_presentation.web.routers.api_v1 import router as api_v1_router
-from d_presentation.web.workflow_runs import WorkflowRuns
 
 SETTINGS_PAGE = Path(__file__).with_name("settings.html")
 
@@ -38,7 +37,7 @@ def create_app(open_runtime: Callable[[], AbstractAsyncContextManager[Runtime]])
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         async with open_runtime() as runtime:
             app.state.runtime = runtime
-            app.state.workflow_runs = workflow_runs = WorkflowRuns(runtime.logger)
+            app.state.workflow_runs = workflow_runs = create_workflow_runs(runtime)
 
             try:
                 yield

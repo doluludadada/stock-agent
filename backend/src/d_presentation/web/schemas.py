@@ -243,6 +243,9 @@ class AccountAsOfResponse(BaseModel):
 
 class AccountHistoryResponse(BaseModel):
     current: AccountValuationResponse
+    live_stock_ids: list[str]
+    """The held stocks `current` prices at a live quote. Any other position is at its last daily close, or unpriced."""
+
     equity_curve: list[EquityPointResponse]
     as_of: AccountAsOfResponse | None
     """None when as_of was not asked for, or no fill happened on or before it."""

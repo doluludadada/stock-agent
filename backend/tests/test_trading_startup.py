@@ -12,11 +12,10 @@ from trading_stack import SilentLogger
 from a_domain.types.enums import ExecutionProvider, OrderMode, SystemEnvironment
 from b_application.config.app_config import AppConfig
 from b_application.config.trading_config import ShioajiConfig, TradingConfig
-from c_infrastructure.system.config_loader import load_settings
 from c_infrastructure.trading.mock.mock_execution_provider import MockExecutionProvider
 from c_infrastructure.trading.shioaji.execution_provider import ShioajiExecutionProvider
-from d_presentation.cli import interactive
-from d_presentation.dependencies import TradingSetupError, create_execution_provider, validate_trading_environment
+from d_presentation.cli import interactive, terminal
+from d_presentation.dependencies import TradingSetupError, create_execution_provider, load_settings, validate_trading_environment
 
 pytestmark = pytest.mark.asyncio
 
@@ -121,7 +120,7 @@ async def test_the_mock_broker_in_mock_only_mode_is_the_default() -> None:
 @pytest.fixture
 def screen(monkeypatch) -> io.StringIO:
     output = io.StringIO()
-    monkeypatch.setattr(interactive, "console", Console(file=output, width=200))
+    monkeypatch.setattr(terminal, "console", Console(file=output, width=200))
     return output
 
 

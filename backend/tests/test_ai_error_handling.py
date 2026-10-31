@@ -12,7 +12,7 @@ from c_infrastructure.ai_models.ai_adapter import grok_adapter
 from c_infrastructure.ai_models.ai_adapter.grok_adapter import GrokAdapter
 from c_infrastructure.feed.news.cnyes_news_provider import CnyesNewsProvider
 
-SOURCES = SourcesConfig()
+SOURCES = SourcesConfig.from_appsetting()
 
 
 class FakeLogger(ILoggingProvider):

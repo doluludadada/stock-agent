@@ -4,7 +4,7 @@ import pytest
 
 from a_domain.types.enums import TradeAction
 from b_application.config.trading_config import MarketConfig
-from c_infrastructure.system.config_loader import load_settings
+from d_presentation.dependencies import load_settings
 
 BUY, SELL = TradeAction.BUY, TradeAction.SELL
 LIMIT_PRICE = load_settings().market.limit_price_rule()

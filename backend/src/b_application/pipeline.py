@@ -159,23 +159,19 @@ class Pipeline:
         return status
 
     async def run_buzz_scan(self) -> PipelineStatus:
-        """Runs short-term social momentum analysis."""
-        settings = await self.technical_settings_repository.load()
-        strategy = settings.buzz_strategy
+        """Runs short-term social momentum analysis. Sentiment is report only, so it runs after every trading step."""
+        strategy = (await self.technical_settings_repository.load()).buzz_strategy
 
         async with self.trading.run_history.execute(Workflow.BUZZ_SCAN) as status:
             self.logger.info(
                 f"Starting social buzz cycle. Strategy={strategy.strategy_id}, AI focus={AiAnalysisFocus.MOMENTUM.value}."
             )
-
             await self.trading.account_loader.execute(status)
             await self.collect.realtime_quote_feed.execute(status.held_stocks, status)
             await self.trading.account_risk_check.execute(status)
             await self._execute_orders(status)
             await self.collect.buzz_scanner.execute(status)
-
             status.stats.total_scanned = len(status.buzz_stocks)
-
             await self.collect.data_collector.execute(status.buzz_stocks, status)
             status.survivors = await self.process.technical_filter.execute(status.buzz_stocks, status, strategy)
             status.watchlist = (await self.trading.watch_stocks.execute(status.survivors, WatchlistType.BUZZ)).watchlist
@@ -186,59 +182,43 @@ class Pipeline:
             await self.trading.signals.execute(status.watchlist, status)
             await self.trading.decision_memory.execute(status)
             await self._execute_orders(status)
-            # Sentiment is report only, so it runs after every trading step.
             await self.process.sentiment_analyser.execute(status.buzz_stocks, status)
             await self.trading.reporting.execute(status)
-
         self.logger.info(
-            f"Social buzz cycle completed. "
-            f"Candidates={len(status.buzz_stocks)}, "
-            f"Qualified={len(status.survivors)}, "
+            f"Social buzz cycle completed. Candidates={len(status.buzz_stocks)}, Qualified={len(status.survivors)}, "
             f"Orders={status.stats.orders_submitted}."
         )
-
         return status
 
     async def run_intraday(self) -> PipelineStatus:
         """Revalidates held and watched stocks before order submission."""
-        settings = await self.technical_settings_repository.load()
-        strategy = settings.active_strategy
+        strategy = (await self.technical_settings_repository.load()).active_strategy
 
         async with self.trading.run_history.execute(Workflow.INTRADAY) as status:
             self.logger.info(f"Starting intraday trading cycle. Strategy={strategy.strategy_id}.")
-
             await self.trading.account_loader.execute(status)
             candidates = await self.collect.intraday_candidates.execute(status)
             await self.collect.realtime_quote_feed.execute(candidates, status)
             await self.trading.account_risk_check.execute(status)
             await self._execute_orders(status)
-
             status.stats.total_scanned = len(candidates)
             blocked_stock_ids = status.risk_blocked_stock_ids | status.stale_stock_ids
             analysis_candidates = [stock for stock in candidates if stock.stock_id not in blocked_stock_ids]
-
             await self.collect.data_collector.execute(analysis_candidates, status)
-
             technical_candidates = [stock for stock in analysis_candidates if stock.ohlcv]
-
             status.survivors = await self.process.technical_filter.execute(technical_candidates, status, strategy)
-
             held_candidates = [stock for stock in technical_candidates if status.account.position_for(stock.stock_id) is not None]
             decision_candidates = list({stock.stock_id: stock for stock in [*status.survivors, *held_candidates]}.values())
-
             await self.collect.news_feed.execute(decision_candidates, status)
             await self.process.ai_analyser.execute(decision_candidates, status, AiAnalysisFocus.FUNDAMENTAL)
             self.process.composite_scorer.execute(decision_candidates)
-
             await self.collect.realtime_quote_feed.execute(decision_candidates, status)
-
             await self.trading.signals.execute(StockWatchlist(willing_stocks=decision_candidates), status)
             await self.trading.decision_memory.execute(status)
             await self._execute_orders(status)
             await self.trading.reporting.execute(status)
 
         self.logger.info("Intraday trading cycle completed.")
-
         return status
 
     async def analyse_specific_stocks(self, stock_ids: list[str], run_id: RunId | None = None) -> PipelineStatus:

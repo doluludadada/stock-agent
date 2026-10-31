@@ -1,8 +1,14 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from pathlib import Path
+from secrets import compare_digest
+from typing import Annotated, Any
 
 import chromadb
+import yaml
+from fastapi import Depends, HTTPException, Request, status as http_status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from a_domain.ports.ai.ai_provider import IAiProvider
 from a_domain.ports.ai.knowledge_repository import IKnowledgeRepository
@@ -74,11 +80,11 @@ from c_infrastructure.market.yahoo_finance_adapter import YahooFinanceProvider
 from c_infrastructure.platforms.line.line_adapter import LinePlatformAdapter
 from c_infrastructure.platforms.line.line_notification_adapter import LineNotificationAdapter
 from c_infrastructure.system.chat_styler_service import ChatStylerService
-from c_infrastructure.system.config_loader import load_settings
 from c_infrastructure.system.logger_service import LoggerService
 from c_infrastructure.system.market_clock import TaiwanMarketClock
 from c_infrastructure.technical.yaml_technical_settings_repository import YamlTechnicalSettingsRepository
 from c_infrastructure.trading.mock.mock_execution_provider import MockExecutionProvider
+from d_presentation.web.workflow_runs import WorkflowRuns
 
 
 @dataclass(slots=True)
@@ -116,6 +122,49 @@ class ProviderDependencies:
     execution_provider: IExecutionProvider
     notification_provider: INotificationProvider | None
     platform_provider: IPlatformProvider | None
+
+
+def get_project_root() -> Path:
+    """The nearest folder above this file that holds the justfile or .git: config/, .env and stock_agent.db live there."""
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "justfile").exists() or (parent / ".git").exists():
+            return parent
+
+    raise FileNotFoundError("Could not find project root.")
+
+
+def load_yaml(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+
+    with path.open(encoding="utf-8") as config_file:
+        return yaml.safe_load(config_file) or {}
+
+
+def inject_prompt_settings(settings: dict[str, Any], instructions: dict[str, Any]) -> None:
+    """Copies the AI prompts of config/instructions.yaml into the ai and prompts sections of the settings."""
+    if not instructions:
+        return
+
+    ai_settings = settings.setdefault("ai", {})
+    ai_settings["system_prompt"] = instructions.get("system_prompt")
+    ai_settings["rag_injection_prompt"] = instructions.get("rag_injection_prompt")
+
+    prompts = settings.setdefault("prompts", {})
+    prompts["analysis_report_fundamental"] = instructions.get("ai_analysis_report_prompt_fundamental")
+    prompts["analysis_report_momentum"] = instructions.get("ai_analysis_report_prompt_momentum")
+    prompts["valuation_explanation"] = instructions.get("ai_valuation_explanation_prompt")
+    prompts["social_sentiment"] = instructions.get("social_sentiment_prompt")
+
+
+def load_settings() -> AppConfig:
+    """config/appsetting.yaml with the prompts of config/instructions.yaml. AppConfig reads the secrets from .env."""
+    project_root = get_project_root()
+    settings = load_yaml(project_root / "config" / "appsetting.yaml")
+
+    inject_prompt_settings(settings, load_yaml(project_root / "config" / "instructions.yaml"))
+
+    return AppConfig(project_root=project_root, **settings)
 
 
 class TradingSetupError(RuntimeError):
@@ -452,3 +501,42 @@ async def open_runtime() -> AsyncIterator[Runtime]:
 
     finally:
         await db.close()
+
+
+def create_workflow_runs(runtime: Runtime) -> WorkflowRuns:
+    """The Web API's background runs. The app's lifespan creates one per server, next to the runtime it opened."""
+    return WorkflowRuns(runtime.logger)
+
+
+bearer = HTTPBearer(auto_error=False, description="The value of API_TOKEN. Reads need no token.")
+
+
+def get_runtime(request: Request) -> Runtime:
+    """The runtime the app's lifespan built once at startup."""
+    return request.app.state.runtime
+
+
+def get_workflow_runs(request: Request) -> WorkflowRuns:
+    return request.app.state.workflow_runs
+
+
+RuntimeDependency = Annotated[Runtime, Depends(get_runtime)]
+WorkflowRunsDependency = Annotated[WorkflowRuns, Depends(get_workflow_runs)]
+
+
+def require_write_permission(
+    runtime: RuntimeDependency, credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]
+) -> None:
+    """Every write: 403 while API_TOKEN is unset, 401 without its bearer token. The body's `confirm: true` is checked after."""
+    token = runtime.config.api.token
+
+    if token is None:
+        raise HTTPException(http_status.HTTP_403_FORBIDDEN, "Writes are disabled. Set API_TOKEN to enable them.")
+
+    if credentials is None or not compare_digest(credentials.credentials.encode(), token.get_secret_value().encode()):
+        raise HTTPException(
+            http_status.HTTP_401_UNAUTHORIZED, "A valid bearer token is required.", headers={"WWW-Authenticate": "Bearer"}
+        )
+
+
+WritePermission = Depends(require_write_permission)

@@ -239,12 +239,7 @@ class CliHarness:
             raise AssertionError(f"menu {choice} asked an unexpected confirmation: {question!r}")
 
         with patch.object(Prompt, "ask", answer_prompt), patch.object(Confirm, "ask", answer_confirm):
-            return await interactive.execute_menu_choice(
-                choice=choice,
-                pipeline=self.runtime.pipeline,
-                watch_stocks=self.runtime.watch_stocks,
-                account_history=self.runtime.account_history,
-            )
+            return await interactive.run_menu_option(choice, self.runtime)
 
     async def run_valuation_menu(self, choice: str, *, answers: Iterable[str], confirm: Iterable[bool] = ()) -> list[str]:
         """
@@ -266,7 +261,7 @@ class CliHarness:
             return remaining_confirms.pop(0)
 
         with patch.object(Prompt, "ask", answer_prompt), patch.object(Confirm, "ask", answer_confirm):
-            await interactive.execute_valuation_choice(choice=choice, pipeline=self.runtime.pipeline, config=self.config)
+            assert await interactive.run_menu_option(choice, self.runtime) is None
 
         assert not remaining_answers and not remaining_confirms, f"menu {choice} left answers unused"
         return asked

@@ -342,14 +342,18 @@ async def test_the_settings_page_is_served() -> None:
 async def test_account_history_values_positions_at_their_latest_quote() -> None:
     harness = build_harness()
     harness.list_stock("2330", rising_history(110.0), realtime_price=112.0)
+    harness.list_stock("2317", rising_history(50.0))
     harness.hold("2330", quantity=1000, average_cost=100.0)
+    harness.hold("2317", quantity=1000, average_cost=40.0)
 
     async with serve(harness) as client:
         history = (await client.get("/v1/account/history", params={"as_of": "2026-10-19"})).json()
 
-    [held] = history["current"]["positions"]
-    assert (held["position"]["stock_id"], held["mark"]["close"], held["market_value"]) == ("2330", 112.0, 112_000.0)
-    assert history["current"]["equity"] == harness.broker.cash + 112_000.0
+    tsmc, hon_hai = history["current"]["positions"]
+    assert (tsmc["position"]["stock_id"], tsmc["mark"]["close"], tsmc["market_value"]) == ("2330", 112.0, 112_000.0)
+    assert (hon_hai["position"]["stock_id"], hon_hai["mark"]["close"]) == ("2317", 50.0)
+    assert history["live_stock_ids"] == ["2330"]
+    assert history["current"]["equity"] == harness.broker.cash + 112_000.0 + 50_000.0
     assert (history["equity_curve"], history["as_of"]) == ([], None)
     assert harness.broker.placed == []
 

@@ -1,4 +1,4 @@
-from typing import override
+from typing import Self, override
 
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict, YamlConfigSettingsSource
@@ -90,8 +90,8 @@ class LineSources(BaseModel):
 class SourcesConfig(BaseSettings):
     """
     Where each outside service lives and the text formats its pages use. The values live only in the `sources`
-    section of config/appsetting.yaml: load_settings passes that section, and an AppConfig built without it reads the
-    same section, found like the .env files from the working folder.
+    section of config/appsetting.yaml: load_settings passes that section, and an AppConfig built without it calls
+    from_appsetting, which reads the same section, found like the .env files from the working folder.
     """
 
     model_config = SettingsConfigDict(
@@ -116,3 +116,8 @@ class SourcesConfig(BaseSettings):
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         return (init_settings, YamlConfigSettingsSource(settings_cls))
+
+    @classmethod
+    def from_appsetting(cls) -> Self:
+        """The `sources` section alone. A call with no fields reads it too, but the type checker sees only required fields."""
+        return cls.model_validate(YamlConfigSettingsSource(cls)())
