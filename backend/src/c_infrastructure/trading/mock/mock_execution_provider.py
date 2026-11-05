@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from typing import override
 
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import col, select
+from sqlmodel import select
 
 from a_domain.model.trading.account import Account, Position
 from a_domain.model.trading.order import Order
@@ -17,7 +17,9 @@ from c_infrastructure.database.models.mock_trading_dto import MockCash, MockPosi
 
 class MockExecutionProvider(ISimulatedExecutionProvider):
     """
-    Database-backed broker simulator for DEV and TEST.
+    Database-backed broker simulator for DEV and TEST, one per owner, through a connector bound to that owner: the
+    owner's mock account is keyed by the owner's id, and the owner session keeps every read and write to its rows, so two
+    users' runs read and write disjoint rows.
 
     Its book is the account only: cash (mock_cash) and positions (mock_positions). It keeps no
     order table. The app records every order it sends in the `orders` table, the same audit trail
@@ -43,7 +45,6 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
     def __init__(self, db: DatabaseConnector, config: AppConfig, logger: ILoggingProvider) -> None:
         self._db = db
         self._logger = logger
-        self._account_id = config.mock_trading.account_id
         self._initial_cash = config.mock_trading.initial_cash
         self._max_fill_quantity = config.mock_trading.max_fill_quantity
         self._cost_rule = config.market.cost_rule()
@@ -51,16 +52,21 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
         self._acceptance_rule = OrderAcceptanceRule(cost_rule=self._cost_rule)
 
     @override
+    async def close(self) -> None:
+        """The mock broker holds no session: its book is in the database, which closes with the runtime."""
+        return None
+
+    @override
     async def connect(self) -> None:
         """
         Seeds the book with mock_trading.initial_cash the first time. Later calls find the account and change nothing;
         so does a call that loses the race to seed it, as two Web requests at once can.
         """
-        async with self._db.get_session() as session:
-            if await session.get(MockCash, self._account_id) is not None:
+        async with self._db.owner_session() as session:
+            if await session.get(MockCash, self._db.owner_id) is not None:
                 return
 
-            session.add(MockCash(account_id=self._account_id, current_cash=self._initial_cash, initial_cash=self._initial_cash))
+            session.add(MockCash(owner_id=self._db.owner_id, current_cash=self._initial_cash, initial_cash=self._initial_cash))
 
             try:
                 await session.commit()
@@ -105,15 +111,15 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
     async def get_account(self) -> Account:
         await self.connect()
 
-        async with self._db.get_session() as session:
-            cash = await session.get_one(MockCash, self._account_id)
-            result = await session.execute(select(MockPosition).where(col(MockPosition.account_id) == self._account_id))
+        async with self._db.owner_session() as session:
+            cash = await session.get_one(MockCash, self._db.owner_id)
+            result = await session.execute(select(MockPosition))
             positions = [
                 Position(stock_id=row.stock_id, quantity=row.quantity, average_cost=row.average_cost, opened_at=row.opened_at)
                 for row in result.scalars().all()
             ]
 
-        return Account(account_id=self._account_id, cash=cash.current_cash, positions=positions)
+        return Account(account_id=cash.owner_id, cash=cash.current_cash, positions=positions)
 
     @override
     def refusal_for(self, order: Order, account: Account) -> tuple[RejectReason, str] | None:
@@ -147,9 +153,9 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
         """Deletes the rows of positions no longer held, adds the new ones, and updates the ones whose shares or cost changed."""
         held = {position.stock_id: position for position in account.positions}
 
-        async with self._db.get_session() as session:
-            cash = await session.get_one(MockCash, self._account_id)
-            result = await session.execute(select(MockPosition).where(col(MockPosition.account_id) == self._account_id))
+        async with self._db.owner_session() as session:
+            cash = await session.get_one(MockCash, self._db.owner_id)
+            result = await session.execute(select(MockPosition))
             rows = {row.stock_id: row for row in result.scalars().all()}
 
             for stock_id in rows.keys() - held.keys():
@@ -161,7 +167,7 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
                 if row is None:
                     session.add(
                         MockPosition(
-                            account_id=self._account_id,
+                            owner_id=self._db.owner_id,
                             stock_id=stock_id,
                             quantity=position.quantity,
                             average_cost=position.average_cost,

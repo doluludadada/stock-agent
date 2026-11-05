@@ -1,11 +1,11 @@
 import { Star } from 'lucide-react'
-import { useState } from 'react'
+import { Link, useLocation } from 'react-router'
 import { toast } from 'sonner'
 import { useTranslation } from '@/i18n'
-import { useSession } from '@/shared/api'
+import { useIsSignedIn } from '@/shared/api'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
-import { UnlockDialog } from '@/shared/ui/unlock'
+import { useAuthLinks } from '@/shared/ui/require-sign-in'
 import { isManuallyWatched, useWatchlistChange, useWatchlistEntries } from './api'
 
 interface WatchButtonProps {
@@ -15,17 +15,28 @@ interface WatchButtonProps {
   className?: string
 }
 
-/** Toggles the stock on the MANUAL watchlist on the server; while locked it asks for the token first. */
+/** Toggles the stock on the user's MANUAL watchlist on the server; signed out, it leads to sign-in and back. */
 export function WatchButton({ code, label, variant = 'full', className }: WatchButtonProps) {
   const { t } = useTranslation('watchlist')
-  const { unlocked } = useSession('owner')
+  const signedIn = useIsSignedIn()
+  const links = useAuthLinks()
+  const location = useLocation()
   const entries = useWatchlistEntries()
   const change = useWatchlistChange()
-  const [unlocking, setUnlocking] = useState(false)
   const watched = isManuallyWatched(entries.data, code)
 
+  if (!signedIn && links) {
+    return (
+      <Button asChild variant={variant === 'icon' ? 'ghost' : 'outline'} size={variant === 'icon' ? 'icon' : 'default'} className={className}>
+        <Link to={links.signIn(`${location.pathname}${location.search}`)} aria-label={variant === 'icon' ? t('action.signInToWatch', { name: label }) : undefined}>
+          <Star aria-hidden className="size-4" />
+          {variant === 'full' && t('action.signInToWatch', { name: label })}
+        </Link>
+      </Button>
+    )
+  }
+
   const toggle = () => {
-    if (!unlocked) return setUnlocking(true)
     const action = watched ? 'remove' : 'add'
     change.mutate(
       { action, stockIds: [code] },
@@ -36,9 +47,8 @@ export function WatchButton({ code, label, variant = 'full', className }: WatchB
     )
   }
 
-  const text = t(watched ? 'action.remove' : 'action.add')
-  const button =
-    variant === 'icon' ? (
+  const text = t(watched ? 'action.watching' : 'action.add')
+  return variant === 'icon' ? (
       <Button
         type="button"
         variant="ghost"
@@ -64,10 +74,4 @@ export function WatchButton({ code, label, variant = 'full', className }: WatchB
         {text}
       </Button>
     )
-  return (
-    <>
-      {button}
-      <UnlockDialog scope="owner" open={unlocking} onOpenChange={setUnlocking} />
-    </>
-  )
 }

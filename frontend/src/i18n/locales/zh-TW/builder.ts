@@ -2,6 +2,7 @@ import type en from '../en/builder'
 import type { DictionaryShape } from '../../types'
 
 const builder: DictionaryShape<typeof en> = {
+  signIn: '登入後設計並儲存你的公式',
   backToLibrary: '策略庫',
   eyebrowNew: '新策略',
   eyebrowEdit: '編輯策略',
@@ -123,7 +124,7 @@ const builder: DictionaryShape<typeof en> = {
     refused: '這個策略沒有通過驗證，沒有儲存任何內容。',
     refusedTitle: '沒有通過的部分：',
     full: '策略數量已達上限，請先刪除一套。',
-    locked: '請先解鎖。',
+    notLoaded: '設定還沒載入完成，草稿仍保留，請稍候再儲存。',
     failed: '儲存沒有完成，草稿仍保留，請再試一次。',
     hintDirty: '有尚未儲存的變更。',
   },

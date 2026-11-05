@@ -4,6 +4,7 @@ from typing import Self
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from a_domain.rules.system.registration import RegistrationRule
 from a_domain.rules.trading.cost import AffordableQuantityRule
 from a_domain.rules.trading.decision import DecisionRule, RunDecisionsRule
 from a_domain.rules.trading.entry import EntryRule, ManualEntryRule
@@ -11,7 +12,8 @@ from a_domain.rules.trading.exit import ExitRule, StopLossRule
 from a_domain.rules.trading.order_rule import OrderGateRule, OrderRule
 from a_domain.rules.trading.reason import AnalysisSummaryRule, EntryReasonRule, ExitReasonRule
 from a_domain.rules.trading.sizing import BuyCostRule, SizingRule
-from a_domain.types.enums import DatabaseBackend, SettingsFile, SystemEnvironment
+from a_domain.types.enums import DatabaseBackend, ExecutionProvider, SettingsFile, SystemEnvironment
+from b_application.config.accounts_config import AccountsConfig
 from b_application.config.ai_config import AiConfig, BehaviorConfig, PromptsConfig, SentimentConfig, TavilyConfig
 from b_application.config.api_config import ApiConfig
 from b_application.config.chat_config import ChatConfig, LineConfig, NotificationConfig
@@ -74,10 +76,12 @@ class AppConfig(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore", frozen=False)
 
-    project_root: Path
+    project_root: Path = Field(exclude=True)
+    """Set by load_settings, never by a settings file: `exclude` marks a field the loader sets, and the key check refuses it."""
+
     environment: SystemEnvironment = SystemEnvironment.DEV
-    settings_revisions: dict[SettingsFile, str] = Field(default_factory=dict)
-    """The revision of each settings file this configuration was loaded from: what the running process uses."""
+    settings_revisions: dict[SettingsFile, str] = Field(default_factory=dict, exclude=True)
+    """The revision of each settings file this configuration was loaded from, set by load_settings like project_root."""
 
     ai: AiConfig
     line: LineConfig = Field(default_factory=LineConfig)
@@ -103,7 +107,8 @@ class AppConfig(BaseSettings):
     shioaji: ShioajiConfig
     watchlist: WatchlistConfig = Field(default_factory=WatchlistConfig)
     valuation: ValuationConfig
-    sources: SourcesConfig = Field(default_factory=SourcesConfig.from_appsetting)
+    accounts: AccountsConfig
+    sources: SourcesConfig
 
     def sizing_rule(self) -> SizingRule:
         return SizingRule(
@@ -153,3 +158,9 @@ class AppConfig(BaseSettings):
         )
 
         return OrderRule(gate_rule=gate_rule, limit_price_rule=self.market.limit_price_rule())
+
+    def registration_rule(self) -> RegistrationRule:
+        """The sign-up screen and the registration both ask it, so they never disagree."""
+        return RegistrationRule(
+            registration_open=self.accounts.registration_open, real_broker=self.trading.execution_provider != ExecutionProvider.MOCK
+        )

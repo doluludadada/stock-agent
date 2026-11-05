@@ -11,7 +11,7 @@ import { ErrorState } from '@/shared/ui/error-state'
 import { PageHeader } from '@/shared/ui/page-header'
 import { Skeleton } from '@/shared/ui/skeleton'
 import { StateBlock } from '@/shared/ui/state-block'
-import { RequireUnlock } from '@/shared/ui/unlock'
+import { RequireSignIn } from '@/shared/ui/require-sign-in'
 import { useBuiltInStrategies, useSaveStrategySettings, useStrategySettings } from '../api/queries'
 import { deletionRefusal, isRefusal, withSelection, withoutStrategy } from '../model/settings'
 import type { Strategy, StrategySettings } from '../model/types'
@@ -45,9 +45,9 @@ export function StrategyLibraryPage() {
           </h2>
           <p className="text-xs text-muted-foreground">{t('library.selectionNote')}</p>
         </div>
-        <RequireUnlock scope="owner" className="rounded-xl border">
+        <RequireSignIn layout="page" reason={t('signIn')}>
           <OwnerStrategies onView={setViewing} />
-        </RequireUnlock>
+        </RequireSignIn>
       </section>
       <StrategyRulesSheet strategy={viewing} onOpenChange={(open) => !open && setViewing(null)} />
     </div>
@@ -55,7 +55,8 @@ export function StrategyLibraryPage() {
 }
 
 function CardGrid({ children }: { children: ReactNode }) {
-  return <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{children}</div>
+  // A last card alone in its row of two takes the row, so a column of three never leaves half a row empty.
+  return <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 md:max-xl:[&>*:last-child:nth-child(odd)]:col-span-2">{children}</div>
 }
 
 function LoadingGrid() {

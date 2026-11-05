@@ -1,11 +1,10 @@
 import io
-from contextlib import nullcontext
 from unittest.mock import patch
 
 import pytest
 from rich.console import Console
 from rich.prompt import Confirm, Prompt
-from support.harness import MARKET_CLOSED, build_harness, falling_history, rising_history
+from support.harness import MARKET_CLOSED, build_harness, falling_history, open_harness_switch, rising_history, signs_in_then
 
 from a_domain.types.enums import OrderStatus
 from d_presentation.cli import interactive, terminal
@@ -58,9 +57,9 @@ async def test_account_history_shows_positions_and_never_places_an_order(screen:
 
 async def test_exit_from_the_menu_shuts_down_and_says_the_system_stopped(screen: io.StringIO, monkeypatch) -> None:
     harness = build_harness()
-    monkeypatch.setattr(interactive, "open_runtime", lambda: nullcontext(harness.runtime))
+    monkeypatch.setattr(interactive, "open_runtime_switch", lambda: open_harness_switch(harness))
 
-    with patch.object(Prompt, "ask", lambda *args, **kwargs: "0"):
+    with patch.object(Prompt, "ask", signs_in_then("0")):
         await interactive.interactive_menu()
 
     output = screen.getvalue()
@@ -86,12 +85,14 @@ async def test_account_history_warns_about_each_position_whose_price_is_not_a_li
 
 async def test_the_menu_accepts_exactly_the_options_it_prints(screen: io.StringIO, monkeypatch) -> None:
     harness = build_harness()
-    monkeypatch.setattr(interactive, "open_runtime", lambda: nullcontext(harness.runtime))
+    monkeypatch.setattr(interactive, "open_runtime_switch", lambda: open_harness_switch(harness))
     asked: list[list[str]] = []
 
     def answer(question: str, choices: list[str] | None = None, **kwargs) -> str:
-        asked.append(choices or [])
-        return "0"
+        if choices:
+            asked.append(choices)
+
+        return signs_in_then("0")(question, choices=choices, **kwargs)
 
     with patch.object(Prompt, "ask", answer):
         await interactive.interactive_menu()
@@ -105,7 +106,7 @@ async def test_specific_stock_analysis_during_a_listing_outage_says_so_and_retur
     harness = build_harness()
 
     with patch.object(Prompt, "ask", lambda *args, **kwargs: "2330"):
-        assert await interactive.run_menu_option("4", harness.runtime) is None
+        assert await interactive.run_menu_option("4", harness.runtime, harness.session()) is None
 
     assert "The TWSE and TPEX listings could not be loaded." in screen.getvalue()
     assert "Stock not found" not in screen.getvalue()
@@ -120,7 +121,7 @@ async def test_ctrl_d_at_a_yes_no_prompt_cancels_the_option_and_places_no_order(
         raise EOFError
 
     with patch.object(Prompt, "ask", lambda *args, **kwargs: "2317"), patch.object(Confirm, "ask", press_ctrl_d):
-        assert await interactive.run_menu_option("4", harness.runtime) is None
+        assert await interactive.run_menu_option("4", harness.runtime, harness.session()) is None
 
     assert "Analyse Specific Stocks cancelled." in screen.getvalue()
     assert harness.broker.placed == []

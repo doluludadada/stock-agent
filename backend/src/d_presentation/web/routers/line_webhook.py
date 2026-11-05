@@ -7,13 +7,15 @@ from fastapi import APIRouter, Header, HTTPException, Request, status
 from pydantic import ValidationError
 
 from c_infrastructure.platforms.line.dto.line_dto import LineEventType, LineMessageType, LineWebhookPayload
-from d_presentation.dependencies import RuntimeDependency
+from d_presentation.web.session import RuntimeDependency, SignedOutPipeline
 
 router = APIRouter()
 
 
 @router.post("")
-async def handle_line_webhook(request: Request, runtime: RuntimeDependency, x_line_signature: Annotated[str | None, Header()] = None):
+async def handle_line_webhook(
+    request: Request, runtime: RuntimeDependency, pipeline: SignedOutPipeline, x_line_signature: Annotated[str | None, Header()] = None
+):
     """Answers each text message in a LINE webhook call. A call without LINE's signature over its body is refused."""
     body = await request.body()
     channel_secret = runtime.config.line.channel_secret
@@ -36,6 +38,6 @@ async def handle_line_webhook(request: Request, runtime: RuntimeDependency, x_li
         message = event.message
 
         if event.type == LineEventType.MESSAGE and message and message.type == LineMessageType.TEXT and message.text:
-            await runtime.pipeline.reply_to_chat(user_id=event.source.userId, content=message.text)
+            await pipeline.reply_to_chat(user_id=event.source.userId, content=message.text)
 
     return {"status": "ok"}

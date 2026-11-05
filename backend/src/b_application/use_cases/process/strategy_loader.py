@@ -19,7 +19,6 @@ class StrategyLoader:
         self, technical_settings_repository: ITechnicalSettingsRepository, config: AppConfig, logger: ILoggingProvider
     ) -> None:
         self._technical_settings_repository = technical_settings_repository
-        self._owner_id = config.technical.owner_id
         self._initial_settings = config.technical.initial_settings
         self._built_in_strategies = {strategy.strategy_id: strategy for strategy in config.technical.built_in_strategies}
         self._logger = logger
@@ -33,9 +32,9 @@ class StrategyLoader:
             return strategy
 
         try:
-            settings = await self._technical_settings_repository.load(self._owner_id, self._initial_settings)
+            settings = await self._technical_settings_repository.load(self._initial_settings)
         except TechnicalSettingsConflictError:
-            settings = await self._technical_settings_repository.load(self._owner_id, self._initial_settings)
+            settings = await self._technical_settings_repository.load(self._initial_settings)
 
         strategy = settings.buzz_strategy if workflow == Workflow.BUZZ_SCAN else settings.active_strategy
         self._logger.info(f"Technical strategy for {workflow.value}: {strategy.strategy_id}, revision {settings.revision}.")

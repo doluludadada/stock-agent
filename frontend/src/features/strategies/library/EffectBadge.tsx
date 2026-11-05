@@ -7,7 +7,7 @@ const ICON = { block_on_fail: ShieldX, reduce_score_on_fail: ThumbsDown, increas
 const TONE = {
   block_on_fail: 'border-destructive/30 text-destructive',
   reduce_score_on_fail: 'border-gold/35 text-gold',
-  increase_score_on_pass: 'border-jade/35 text-jade',
+  increase_score_on_pass: 'border-brand/35 text-brand',
 } as const
 
 export function EffectBadge({ effect, className }: { effect: RuleEffect; className?: string }) {

@@ -5,13 +5,13 @@ from datetime import date
 from rich.table import Table
 
 from a_domain.model.trading.account import Account
+from b_application.pipeline import Pipeline
 from d_presentation.cli import terminal
-from d_presentation.dependencies import Runtime
 
 
-async def show_account_history(runtime: Runtime) -> None:
+async def show_account_history(pipeline: Pipeline) -> None:
     as_of = ask_as_of_date()
-    status = await runtime.pipeline.load_account_history(as_of)
+    status = await pipeline.load_account_history(as_of)
 
     print_account_value("Account Now", status.account)
     print_marks_not_live(status.account, status.live_stock_ids)

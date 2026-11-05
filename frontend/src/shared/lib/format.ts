@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { useLocale } from '@/i18n'
+import { useLocale, useTranslation } from '@/i18n'
 
 /** Locale-aware formatters. Every market date and time is read in Asia/Taipei. */
 export const MARKET_TIME_ZONE = 'Asia/Taipei'
@@ -55,8 +55,16 @@ export function formatSignedPercent(locale: string, ratio: number, fractionDigit
   }).format(ratio)
 }
 
+/** A board lot on TWSE and TPEx is 1,000 shares; Taiwan investors read a stock's volume in lots (張). */
+export const SHARES_PER_LOT = 1000
+
 export function formatCompact(locale: string, value: number): string {
   return numberFormat(locale, { notation: 'compact', maximumFractionDigits: 1 }).format(value)
+}
+
+/** Whole lots under ten thousand keep their digits and grouping; larger counts shorten to 萬 or K. */
+function formatLotCount(locale: string, lots: number): string {
+  return lots < 10_000 ? formatNumber(locale, Math.round(lots)) : formatCompact(locale, lots)
 }
 
 export function formatDate(locale: string, isoDate: string, style: 'short' | 'long' = 'short'): string {
@@ -82,6 +90,11 @@ export function formatDateTime(locale: string, isoDateTime: string): string {
   }).format(new Date(isoDateTime))
 }
 
+/** A moment's day and time in Taipei, short: 11/4 13:30. */
+export function formatMonthDayTime(locale: string, isoDateTime: string): string {
+  return dateFormat(locale, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(isoDateTime))
+}
+
 /** A bare trading date (YYYY-MM-DD) is noon in Taipei, so no time zone shifts it to another day. */
 function toMarketDate(iso: string): Date {
   return iso.length === 10 ? new Date(`${iso}T12:00:00+08:00`) : new Date(iso)
@@ -90,14 +103,19 @@ function toMarketDate(iso: string): Date {
 /** The formatters bound to the reader's locale. */
 export function useFormat() {
   const locale = useLocale()
+  const { t } = useTranslation()
   return useMemo(
     () => ({
       number: (value: number, fractionDigits?: number) => formatNumber(locale, value, fractionDigits),
       price: (value: number) => formatPrice(locale, value),
       compact: (value: number) => formatCompact(locale, value),
+      /** A stock's volume in shares, read in lots: "8,234張", "3.7萬張", "37K lots". */
+      lots: (shares: number) => t('units.lots', { value: formatLotCount(locale, shares / SHARES_PER_LOT) }),
       date: (isoDate: string, style?: 'short' | 'long') => formatDate(locale, isoDate, style),
       monthDay: (isoDate: string) => formatMonthDay(locale, isoDate),
+      /** The session a price closed, said where it is not the latest: "11/2 收盤". */
+      closeOn: (isoDate: string) => t('units.closeOn', { date: formatMonthDay(locale, isoDate) }),
     }),
-    [locale],
+    [locale, t],
   )
 }

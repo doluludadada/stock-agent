@@ -11,7 +11,8 @@ class MockCash(SQLModel, table=True):
 
     __tablename__: ClassVar[str] = "mock_cash"
 
-    account_id: str = Field(primary_key=True)
+    owner_id: str = Field(primary_key=True)
+    """The user whose mock account this is, and the account's id. The mock broker of each user reads and writes only its own."""
     current_cash: float = Field(ge=0)
     initial_cash: float = Field(ge=0)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), sa_type=UtcDateTime)
@@ -23,7 +24,7 @@ class MockPosition(SQLModel, table=True):
 
     __tablename__: ClassVar[str] = "mock_positions"
 
-    account_id: str = Field(primary_key=True)
+    owner_id: str = Field(primary_key=True)
     stock_id: str = Field(primary_key=True)
     quantity: int = Field(gt=0)
     average_cost: float = Field(gt=0)

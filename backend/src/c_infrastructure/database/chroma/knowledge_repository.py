@@ -7,23 +7,34 @@ from a_domain.model.market.stock import Stock
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.ports.ai.knowledge_repository import IKnowledgeRepository
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from c_infrastructure.database.chroma.schema import ChromaCollection, ChromaResultKey
+from a_domain.types.errors import SignInRequired
+from c_infrastructure.database.chroma.schema import ChromaResultKey
 
 # The embedding tokenizer warns on every later fork of the process unless its parallelism is set explicitly.
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 
 class ChromaKnowledgeRepository(IKnowledgeRepository):
-    """Trading decisions, one document per decision in the market knowledge collection, found again by stock id."""
+    """
+    One owner's trading decisions, one document per decision in the owner's own collection, found again by stock id. A
+    query cannot reach another owner's collection. dependencies.py names the owner's collection; None names none, for a
+    signed-out pipeline, whose every read and write raises SignInRequired before Chroma is asked.
+    """
 
-    def __init__(self, client: ClientAPI, logger: ILoggingProvider) -> None:
-        self._collection = client.get_or_create_collection(name=ChromaCollection.MARKET_KNOWLEDGE)
+    def __init__(self, client: ClientAPI, collection_name: str | None, logger: ILoggingProvider) -> None:
+        self._client = client
+        self._collection_name = collection_name
         self._logger = logger
 
     @override
     async def find_decision_history(self, stock_id: str, limit: int = 3) -> str:
+        if self._collection_name is None:
+            raise SignInRequired("Sign in first.")
+
+        collection = self._client.get_or_create_collection(name=self._collection_name)
+
         try:
-            result = self._collection.get(where={"stock_id": stock_id}, include=["documents", "metadatas"])
+            result = collection.get(where={"stock_id": stock_id}, include=["documents", "metadatas"])
         except Exception as error:
             self._logger.error(f"Decision history lookup failed for {stock_id}: {error}")
             return ""
@@ -48,7 +59,11 @@ class ChromaKnowledgeRepository(IKnowledgeRepository):
             **{name: score for name, score in scores.items() if score is not None},
         }
 
-        self._collection.upsert(ids=[str(signal.decision_id)], documents=[self.describe_decision(stock, signal)], metadatas=[metadata])
+        if self._collection_name is None:
+            raise SignInRequired("Sign in first.")
+
+        collection = self._client.get_or_create_collection(name=self._collection_name)
+        collection.upsert(ids=[str(signal.decision_id)], documents=[self.describe_decision(stock, signal)], metadatas=[metadata])
 
         self._logger.debug(f"RAG decision saved: {signal.action.value} {signal.stock_id}")
 

@@ -1,7 +1,7 @@
 """
-DatabaseConnector.init_db() against real SQLite files: it upgrades a database of an older schema version in place and
-keeps every row, and it refuses a database it cannot upgrade, by its table layout or by its schema version, and never
-changes it.
+DatabaseConnector.init_db() against real SQLite files: it refuses a database of another schema version, an older one
+included, or of another table layout, and never changes it. migrate() upgrades a database of an older version in place
+and keeps every row.
 """
 
 import sqlite3
@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine
 from sqlmodel import SQLModel
+from support.databases import SCHEMA_FIXTURES
 from support.settings import shipped_config
 from trading_stack import SilentLogger
 
@@ -18,7 +19,7 @@ import c_infrastructure.database.models.ohlcv_dto
 import c_infrastructure.database.models.quarter_eps_dto
 import c_infrastructure.database.models.trading_journal_dto
 import c_infrastructure.database.models.watchlist_dto  # noqa: F401  (each import registers its tables on SQLModel.metadata)
-from c_infrastructure.database.db_connector import DatabaseConnector, OutdatedDatabaseError
+from c_infrastructure.database.db_connector import DatabaseCommandError, DatabaseConnector, OutdatedDatabaseError
 from c_infrastructure.database.models.schema_version_dto import SCHEMA_VERSION
 
 pytestmark = pytest.mark.asyncio
@@ -51,6 +52,17 @@ async def init_db(project_root: Path) -> None:
     connector = DatabaseConnector(config=shipped_config(project_root), logger=SilentLogger())
 
     try:
+        await connector.init_db()
+    finally:
+        await connector.close()
+
+
+async def migrate_then_start(project_root: Path) -> None:
+    """`just db-migrate`, then a start."""
+    connector = DatabaseConnector(config=shipped_config(project_root), logger=SilentLogger())
+
+    try:
+        await connector.migrate()
         await connector.init_db()
     finally:
         await connector.close()
@@ -221,12 +233,12 @@ async def test_a_current_database_whose_table_changed_names_only_that_table(tmp_
 
 def version_1_database(path: Path) -> None:
     """
-    A database as schema version 1 left it, with rows: workflow_runs had no failure column, and a run stopped by an
-    exception kept it only as its "Run aborted: " error. The other tables hold a cached bar, a watchlist entry and cash.
+    A database as schema version 1 left it, with rows: version 2's tables without workflow_runs.failure, so a run stopped
+    by an exception kept it only as its "Run aborted: " error. The other tables hold a watchlist entry and cash.
     """
-    create_current_tables(path, schema_version=1)
-
     with sqlite3.connect(path) as connection:
+        connection.executescript((SCHEMA_FIXTURES / "version_2.sqlite.sql").read_text())
+        connection.execute("INSERT INTO schema_version (version) VALUES (1)")
         connection.execute("ALTER TABLE workflow_runs DROP COLUMN failure")
         for run_id, errors in [
             ("a1" * 16, '["Stock not found: 9999", "Run aborted: RuntimeError: Yahoo hung"]'),
@@ -260,7 +272,7 @@ async def test_a_version_1_database_is_upgraded_in_place_and_keeps_every_row(tmp
     version_1_database(db_path)
     before = table_rows(db_path)
 
-    await init_db(tmp_path)
+    await migrate_then_start(tmp_path)
 
     after = table_rows(db_path)
     current = tmp_path / "current"
@@ -268,10 +280,14 @@ async def test_a_version_1_database_is_upgraded_in_place_and_keeps_every_row(tmp
     await init_db(current)
     assert sqlite_layout(db_path) == sqlite_layout(current / "stock_agent.db")
     assert stored_schema_versions(db_path) == [SCHEMA_VERSION]
-    assert {table: rows for table, rows in after.items() if table not in {"schema_version", "workflow_runs"}} == {
-        table: rows for table, rows in before.items() if table not in {"schema_version", "workflow_runs"}
-    }
-    assert [{**row, "failure": None} for row in before["workflow_runs"]] == [
+    kept = set(before) - {"schema_version", "workflow_runs", "watchlists", "mock_cash"}
+    assert {table: after[table] for table in kept} == {table: before[table] for table in kept}
+    assert after["watchlists"] == [{"owner_id": "local", **row} for row in before["watchlists"]]
+    assert after["mock_cash"] == [
+        {"owner_id": "local", **{column: value for column, value in row.items() if column != "account_id"}}
+        for row in before["mock_cash"]
+    ]
+    assert [{**row, "failure": None, "owner_id": "local"} for row in before["workflow_runs"]] == [
         {**row, "failure": None} for row in after["workflow_runs"]
     ]
     assert [row["failure"] for row in after["workflow_runs"]] == ["RuntimeError: Yahoo hung", None, "CancelledError: "]
@@ -287,8 +303,8 @@ async def test_a_version_1_database_whose_table_changed_is_refused_and_the_upgra
 
     before = sqlite_layout(db_path), table_rows(db_path)
 
-    with pytest.raises(OutdatedDatabaseError) as refused:
-        await init_db(tmp_path)
+    with pytest.raises(DatabaseCommandError) as refused:
+        await migrate_then_start(tmp_path)
 
     assert named_tables(str(refused.value)) == ["ohlcv_data"]
     assert (sqlite_layout(db_path), table_rows(db_path)) == before

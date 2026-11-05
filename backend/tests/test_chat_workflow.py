@@ -14,7 +14,7 @@ async def test_a_chat_message_gets_the_ai_reply_and_the_conversation_remembers_b
     harness = build_harness()
     harness.ai.chat_reply = "**Hello** there\n\nTSMC reports next week"
 
-    await harness.runtime.pipeline.reply_to_chat("U1", "any news on 2330?")
+    await harness.pipeline.reply_to_chat("U1", "any news on 2330?")
 
     assert harness.chat_platform.sent == [("U1", "Hello there"), ("U1", "TSMC reports next week")]
     assert [message.content for message in harness.ai.chat_conversations[0]] == ["any news on 2330?"]
@@ -36,7 +36,7 @@ async def test_a_reset_command_clears_the_conversation_without_asking_the_ai() -
     )
     harness.conversations.conversations["U1"] = Conversation(user_id="U1", messages=earlier, created_at=now, updated_at=now)
 
-    await harness.runtime.pipeline.reply_to_chat("U1", " clear ")
+    await harness.pipeline.reply_to_chat("U1", " clear ")
 
     assert harness.conversations.conversations["U1"].messages == ()
     assert harness.ai.chat_conversations == []
@@ -47,7 +47,7 @@ async def test_a_reply_with_no_text_left_after_formatting_asks_the_user_again() 
     harness = build_harness()
     harness.ai.chat_reply = "```\nprint('only code')\n```"
 
-    await harness.runtime.pipeline.reply_to_chat("U1", "show me code")
+    await harness.pipeline.reply_to_chat("U1", "show me code")
 
     assert harness.chat_platform.sent == [("U1", "Could you ask me again?🤔")]
 
@@ -57,7 +57,7 @@ async def test_a_long_paragraph_is_sent_in_parts_no_longer_than_the_limit() -> N
     reply = " ".join(f"word{index}" for index in range(120))
     harness.ai.chat_reply = reply
 
-    await harness.runtime.pipeline.reply_to_chat("U1", "tell me everything")
+    await harness.pipeline.reply_to_chat("U1", "tell me everything")
 
     parts = [content for _, content in harness.chat_platform.sent]
     assert len(parts) > 1
@@ -72,6 +72,6 @@ async def test_a_long_paragraph_is_cut_after_its_last_sentence_ending_and_then_a
     unbroken = "B" * (limit + 50)
     harness.ai.chat_reply = first_sentence + unbroken
 
-    await harness.runtime.pipeline.reply_to_chat("U1", "tell me everything")
+    await harness.pipeline.reply_to_chat("U1", "tell me everything")
 
     assert [content for _, content in harness.chat_platform.sent] == [first_sentence, "B" * limit, "B" * 50]

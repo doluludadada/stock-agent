@@ -18,6 +18,7 @@ from a_domain.model.market.stock import Stock
 from a_domain.model.trading.account import Account, AccountSnapshot, Mark, Position
 from a_domain.types.enums import InformationSource
 from c_infrastructure.database.db_connector import DatabaseConnector
+from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
 from c_infrastructure.database.repositories.trading_journal import TradingJournal
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 
@@ -30,7 +31,7 @@ FILLED_AT = datetime(2026, 10, 19, 10, 0, tzinfo=TAIWAN_TIMEZONE)
 async def journal(tmp_path: Path) -> AsyncIterator[TradingJournal]:
     db = DatabaseConnector(config=shipped_config(tmp_path), logger=SilentLogger())
     await db.init_db()
-    yield TradingJournal(db=db)
+    yield TradingJournal(db.for_owner(LEGACY_OWNER_ID))
     await db.close()
 
 

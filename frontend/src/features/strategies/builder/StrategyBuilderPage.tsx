@@ -31,7 +31,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '@/shared/ui/sheet'
 import { Skeleton } from '@/shared/ui/skeleton'
 import { StateBlock } from '@/shared/ui/state-block'
-import { RequireUnlock } from '@/shared/ui/unlock'
+import { RequireSignIn } from '@/shared/ui/require-sign-in'
 import { useBuiltInStrategies, useStrategySettings } from '../api/queries'
 import { blankRule } from '../model/edit'
 import { QUICK_FILLS, quickFill, type QuickFillKind } from '../model/quick-fill'
@@ -48,10 +48,11 @@ interface StrategyBuilderPageProps {
 }
 
 export function StrategyBuilderPage({ mode }: StrategyBuilderPageProps) {
+  const { t } = useTranslation('builder')
   return (
-    <RequireUnlock scope="owner" className="rounded-xl border">
+    <RequireSignIn layout="page" reason={t('signIn')}>
       <BuilderSource mode={mode} />
-    </RequireUnlock>
+    </RequireSignIn>
   )
 }
 
@@ -180,8 +181,8 @@ function Builder({ initial, isNew }: { initial: Strategy; isNew: boolean }) {
       case 'full':
         toast.error(t('save.full'))
         return
-      case 'locked':
-        toast.error(t('save.locked'))
+      case 'notLoaded':
+        toast.error(t('save.notLoaded'))
         return
       case 'failed':
         toast.error(t('save.failed'))
@@ -275,7 +276,7 @@ function Builder({ initial, isNew }: { initial: Strategy; isNew: boolean }) {
         </aside>
       </div>
 
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t bg-background/90 p-3 backdrop-blur xl:hidden">
+      <div className="fixed inset-x-0 bottom-[calc(var(--tabbar-height)+env(safe-area-inset-bottom))] z-30 border-t bg-background/92 p-3 shadow-bar backdrop-blur-md md:bottom-0 md:left-(--rail-width) lg:left-(--sidebar-width) xl:hidden">
         <div className="mx-auto flex max-w-3xl items-center justify-between gap-3">
           <SaveStatus tone={statusTone} revision={revision} />
           <div className="flex items-center gap-2">
@@ -326,7 +327,7 @@ function SaveStatus({ tone, revision }: { tone: 'pending' | 'saved' | 'new'; rev
       className={cn(
         'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs',
         tone === 'pending' && 'border-gold/35 text-gold',
-        tone === 'saved' && 'border-jade/35 text-jade',
+        tone === 'saved' && 'border-brand/35 text-brand',
         tone === 'new' && 'text-muted-foreground',
       )}
     >
@@ -364,7 +365,7 @@ function QuickFillBar({
               {t('quickFill.target')}
             </Label>
             <Select value={target?.id ?? ''} onValueChange={(value) => onTarget(value as NodeId)}>
-              <SelectTrigger id="quick-fill-target" className="h-8 w-44">
+              <SelectTrigger id="quick-fill-target" className="w-44 md:h-8">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -438,9 +439,9 @@ function ScoringCard({
         </>
       }
       aside={
-        <button type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} className="text-xs text-primary">
+        <Button type="button" variant="ghost" size="sm" onClick={() => setOpen((value) => !value)} aria-expanded={open} className="-my-1 text-brand">
           {t(open ? 'scoring.hide' : 'scoring.show')}
-        </button>
+        </Button>
       }
     >
       <p className="text-xs text-muted-foreground">{t('scoring.summary', { base: scoring.baseScore })}</p>

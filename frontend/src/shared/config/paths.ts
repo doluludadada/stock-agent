@@ -12,5 +12,11 @@ export const paths = {
   watchlist: '/watchlist',
   account: '/account',
   adminSettings: '/admin/settings',
+  users: '/admin/users',
   stock: (code: string) => `/stocks/${encodeURIComponent(code)}`,
+  setup: '/setup',
+  signIn: '/sign-in',
+  register: '/register',
+  /** The sign-in page, returning to `next` afterwards. */
+  signInThen: (next: string) => (next === '/' ? '/sign-in' : `/sign-in?next=${encodeURIComponent(next)}`),
 }

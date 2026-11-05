@@ -13,6 +13,11 @@ from c_infrastructure.database.models.watchlist_dto import WatchlistDTO
 
 
 class WatchlistRepository(IWatchlistRepository):
+    """
+    One owner's watchlist, through a connector bound to that owner: another owner's entries are neither read nor
+    removed.
+    """
+
     def __init__(self, db: DatabaseConnector, logger: ILoggingProvider, market_clock: IMarketClock) -> None:
         self._db = db
         self._logger = logger
@@ -22,7 +27,7 @@ class WatchlistRepository(IWatchlistRepository):
     async def get_active(self) -> list[WatchlistEntry]:
         now = self._market_clock.now()
 
-        async with self._db.get_session() as session:
+        async with self._db.owner_session() as session:
             statement = select(WatchlistDTO).where(or_(col(WatchlistDTO.expires_at).is_(None), col(WatchlistDTO.expires_at) > now))
             result = await session.execute(statement)
             rows = result.scalars().all()
@@ -39,11 +44,15 @@ class WatchlistRepository(IWatchlistRepository):
         if not entries:
             return
 
-        async with self._db.get_session() as session:
+        async with self._db.owner_session() as session:
             for entry in entries:
                 await session.merge(
                     WatchlistDTO(
-                        stock_id=entry.stock_id, type=entry.watchlist_type, created_at=entry.created_at, expires_at=entry.expires_at
+                        owner_id=self._db.owner_id,
+                        stock_id=entry.stock_id,
+                        type=entry.watchlist_type,
+                        created_at=entry.created_at,
+                        expires_at=entry.expires_at,
                     )
                 )
 
@@ -58,7 +67,7 @@ class WatchlistRepository(IWatchlistRepository):
 
         matching = (col(WatchlistDTO.stock_id).in_(stock_ids), col(WatchlistDTO.type) == watchlist_type)
 
-        async with self._db.get_session() as session:
+        async with self._db.owner_session() as session:
             present = list((await session.execute(select(WatchlistDTO.stock_id).where(*matching))).scalars())
             await session.execute(delete(WatchlistDTO).where(*matching))
             await session.commit()

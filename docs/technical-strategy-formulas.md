@@ -100,8 +100,9 @@ It updates the owner's row only when that revision is still current, replaces th
 increments the revision, all in one transaction. A save from an older read raises `TechnicalSettingsConflictError`
 and changes nothing.
 
-`technical.owner_id` (`local`) names the one owner of this installation. The Web API's token is not an account: a
-future service with sign-in takes the owner from the signed-in account, never from a client.
+Each user's settings are their own: the repository is built for one owner, the signed-in user, and never takes the
+owner from a client. The single-owner versions saved theirs under the owner id `local`, which the first administrator
+takes at setup.
 
 ## Entry points
 

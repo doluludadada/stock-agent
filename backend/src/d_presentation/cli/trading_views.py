@@ -26,7 +26,7 @@ STOCK_REPORT_COLUMNS: tuple[tuple[str, JustifyMethod], ...] = (
 
 
 async def scan_social_buzz(runtime: Runtime, session: terminal.CliSession) -> PipelineStatus:
-    status = await runtime.pipeline.run_buzz_scan(built_in_strategy_id=session.built_in_strategy_id)
+    status = await session.pipeline.run_buzz_scan(built_in_strategy_id=session.built_in_strategy_id)
 
     print_buzz_report(status)
 
@@ -39,13 +39,13 @@ async def analyse_specific_stocks(runtime: Runtime, session: terminal.CliSession
     if stock_ids is None:
         return None
 
-    status = await runtime.pipeline.analyse_specific_stocks(stock_ids, built_in_strategy_id=session.built_in_strategy_id)
+    status = await session.pipeline.analyse_specific_stocks(stock_ids, built_in_strategy_id=session.built_in_strategy_id)
 
     print_stock_reports(status.manual_stocks)
 
-    await offer_manual_watchlist(stocks=status.manual_stocks, pipeline=runtime.pipeline)
+    await offer_manual_watchlist(stocks=status.manual_stocks, pipeline=session.pipeline)
 
-    await offer_manual_buy(stocks=status.manual_stocks, pipeline=runtime.pipeline)
+    await offer_manual_buy(stocks=status.manual_stocks, pipeline=session.pipeline)
 
     return status
 

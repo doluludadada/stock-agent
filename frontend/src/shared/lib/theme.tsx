@@ -17,14 +17,14 @@ const ThemeContext = createContext<ThemeContextValue | null>(null)
 function readPreference(): ThemePreference {
   try {
     const saved = window.localStorage.getItem(THEME_STORAGE_KEY)
-    return saved === 'light' || saved === 'dark' || saved === 'system' ? saved : 'dark'
+    return saved === 'light' || saved === 'dark' || saved === 'system' ? saved : 'system'
   } catch {
-    return 'dark'
+    return 'system'
   }
 }
 
 function systemTheme(): ResolvedTheme {
-  return window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
@@ -33,9 +33,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const resolved = preference === 'system' ? system : preference
 
   useEffect(() => {
-    const query = window.matchMedia?.('(prefers-color-scheme: light)')
+    const query = window.matchMedia?.('(prefers-color-scheme: dark)')
     if (!query) return
-    const onChange = () => setSystem(query.matches ? 'light' : 'dark')
+    const onChange = () => setSystem(query.matches ? 'dark' : 'light')
     query.addEventListener('change', onChange)
     return () => query.removeEventListener('change', onChange)
   }, [])

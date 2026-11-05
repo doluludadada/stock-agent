@@ -5,14 +5,14 @@ from typing import Any, cast
 import httpx
 import pytest
 from support.harness import build_harness, rising_history
+from support.settings import shipped_config
 
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from b_application.config.sources_config import SourcesConfig
 from c_infrastructure.ai_models.ai_adapter import grok_adapter
 from c_infrastructure.ai_models.ai_adapter.grok_adapter import GrokAdapter
 from c_infrastructure.feed.news.cnyes_news_provider import CnyesNewsProvider
 
-SOURCES = SourcesConfig.from_appsetting()
+SOURCES = shipped_config().sources
 
 
 class FakeLogger(ILoggingProvider):

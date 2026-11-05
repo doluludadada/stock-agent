@@ -15,13 +15,12 @@ from a_domain.model.system.stats import SystemStats
 from a_domain.types.enums import InformationSource, Workflow
 from b_application.config.app_config import AppConfig
 from b_application.config.market_data_config import MarketDataConfig, MarketHoursConfig
-from b_application.config.sources_config import SourcesConfig
 from b_application.use_cases.collect.buzz_scanner import BuzzScanner
 from c_infrastructure.feed.ptt_provider import PttProvider
 from c_infrastructure.market.twse_provider import TaiwanStockProvider
 from c_infrastructure.system.market_clock import TaiwanMarketClock
 
-SOURCES = SourcesConfig.from_appsetting()
+SOURCES = shipped_config().sources
 
 
 class SilentLogger:

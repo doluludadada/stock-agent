@@ -34,8 +34,8 @@ interface PriceVolumeChartProps {
   formatValue: (value: number) => string
   /** Axis ticks are coarser than tooltip values; defaults to formatValue. */
   formatAxisValue?: (value: number) => string
-  priceHeight?: number
-  volumeHeight?: number
+  /** A stock's volume reads in lots; an index's as the source gives it. */
+  formatVolume: (value: number) => string
   className?: string
 }
 
@@ -43,7 +43,7 @@ const directionColor = { up: 'var(--chart-up)', down: 'var(--chart-down)', flat:
 
 /**
  * Price on top and volume underneath as two synced charts sharing the date axis, never one chart
- * with two y-scales. Colors come from the chart roles in globals.css.
+ * with two y-scales. Colors come from the chart roles in globals.css; heights from the chart sizes in tokens.css.
  */
 export function PriceVolumeChart({
   data,
@@ -53,8 +53,7 @@ export function PriceVolumeChart({
   overlays = [],
   formatValue,
   formatAxisValue = formatValue,
-  priceHeight = 300,
-  volumeHeight = 84,
+  formatVolume,
   className,
 }: PriceVolumeChartProps) {
   const format = useFormat()
@@ -85,7 +84,7 @@ export function PriceVolumeChart({
             )
           })}
           <dt className="text-muted-foreground">{volumeLabel}</dt>
-          <dd className="tabular text-right text-foreground">{format.compact(point.volume)}</dd>
+          <dd className="tabular text-right text-foreground">{formatVolume(point.volume)}</dd>
         </dl>
       </div>
     )
@@ -95,23 +94,9 @@ export function PriceVolumeChart({
 
   return (
     <div className={cn('w-full', className)}>
-      {overlays.length > 0 && (
-        <ul className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground" aria-label={valueLabel}>
-          <li className="flex items-center gap-1.5">
-            <span aria-hidden className="h-0.5 w-4 rounded-full" style={{ background: stroke }} />
-            {valueLabel}
-          </li>
-          {overlays.map((overlay) => (
-            <li key={overlay.key} className="flex items-center gap-1.5">
-              <span aria-hidden className="h-0.5 w-4 rounded-full" style={{ background: `var(${overlay.colorVar})` }} />
-              {overlay.label}
-            </li>
-          ))}
-        </ul>
-      )}
-      <div style={{ height: priceHeight }} aria-hidden>
+      <div className="h-(--chart-price-height)" aria-hidden>
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={rows} syncId={syncId} margin={{ top: 8, right: 4, bottom: 0, left: 14 }}>
+          <ComposedChart data={rows} syncId={syncId} margin={{ top: 8, right: 0, bottom: 0, left: 16 }}>
             <defs>
               <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
                 <stop offset="0%" stopColor={stroke} stopOpacity={0.24} />
@@ -127,7 +112,7 @@ export function PriceVolumeChart({
               tick={{ fill: 'var(--chart-axis)', fontSize: 11 }}
               axisLine={false}
               tickLine={false}
-              width={64}
+              width={56}
               tickCount={5}
             />
             <Tooltip
@@ -161,9 +146,9 @@ export function PriceVolumeChart({
           </ComposedChart>
         </ResponsiveContainer>
       </div>
-      <div style={{ height: volumeHeight }} aria-hidden className="mt-1">
+      <div className="mt-1 h-(--chart-volume-height)" aria-hidden>
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={rows} syncId={syncId} margin={{ top: 4, right: 4, bottom: 0, left: 14 }} barCategoryGap={1}>
+          <BarChart data={rows} syncId={syncId} margin={{ top: 4, right: 0, bottom: 0, left: 16 }} barCategoryGap={1}>
             <XAxis
               dataKey="date"
               tickFormatter={format.monthDay}
@@ -175,11 +160,11 @@ export function PriceVolumeChart({
             />
             <YAxis
               orientation="right"
-              tickFormatter={(value: number) => (value === 0 ? '' : format.compact(value))}
+              tickFormatter={(value: number) => (value === 0 ? '' : formatVolume(value))}
               tick={{ fill: 'var(--chart-axis)', fontSize: 10 }}
               axisLine={false}
               tickLine={false}
-              width={64}
+              width={56}
               tickCount={2}
             />
             <Tooltip content={() => null} cursor={{ fill: 'var(--chart-grid)' }} isAnimationActive={false} />

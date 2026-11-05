@@ -1,29 +1,71 @@
-from collections.abc import AsyncGenerator, Awaitable, Callable
+import asyncio
+import math
+import sys
+from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from dataclasses import asdict
+from typing import Any
 
 from fastapi import FastAPI, Request, Response, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from a_domain.types.errors import ListingUnavailableError, TechnicalSettingsConflictError
-from d_presentation.dependencies import Runtime, create_market_valuation_cache, create_workflow_runs
+from a_domain.types.enums import ErrorCode
+from a_domain.types.errors import (
+    AlreadySetUpError,
+    LastAdministratorError,
+    ListingUnavailableError,
+    PasswordRefused,
+    PasswordRequired,
+    RealBrokerRefused,
+    RegistrationClosed,
+    SettingsConflictError,
+    SettingsEditError,
+    SettingsFileMissing,
+    SettingsFileRefused,
+    SignInRefused,
+    SignInRequired,
+    SignInThrottled,
+    TechnicalSettingsConflictError,
+    UserExistsError,
+)
+from b_application.config.settings_loader import InvalidSettingsError
+from d_presentation.dependencies import Runtime
+from d_presentation.live_runtime import RuntimeSwitch, watch_settings
 from d_presentation.web.routers.api_v1 import router as api_v1_router
+from d_presentation.web.session import (
+    AdministratorsOnly,
+    AppRequestRequired,
+    MockBrokerOnly,
+    NotFound,
+    SetupCodeRefused,
+    UnknownHost,
+    create_setup_code,
+)
+from d_presentation.web.workflow_runs import RunInProgress, TooManyRuns, WorkflowRuns
 
 DESCRIPTION = """
 Runs the stock-agent workflows and reads what they recorded, on the same runtime as the CLI.
 
-Scopes. Public: the built-in strategies and market data (`/v1/market`). Owner,
-`Authorization: Bearer <API_TOKEN>`: every write and every read of private data (runs, decisions, orders,
-watchlist, account, saved technical settings). Administrator, `Authorization: Bearer <ADMIN_API_TOKEN>`: only the
-settings files under `/v1/admin`. A scope whose token is unset answers 403; the administrator scope also when
-ADMIN_API_TOKEN equals API_TOKEN. Every write repeats `"confirm": true` in its body.
+Users. Anyone may register (`POST /v1/auth/register`) while registration is open, and signs in with a username or an
+email (`POST /v1/auth/sign-in`), which sets the HttpOnly session cookie `stock_agent_session`. Public: sign-in,
+registration, the first-time setup, the built-in strategies and market data (`/v1/market`). Signed in: every other
+read and write, each on the user's own runs, decisions, orders, watchlist, mock account and saved technical settings.
+Administrator: the users (`/v1/admin/users`) and the settings files (`/v1/admin/settings*`). 401 means sign in: the
+session is missing, expired or ended. 403 means signed in but not allowed, and never ends the session. Every write
+sends the header `X-Requested-With: stock-agent`, and every write but sign-in, sign-out, registration and setup
+repeats `"confirm": true` in its body.
 
 Orders. Full Cycle, specific-stock analysis, valuation and market data never order. Buzz and Intraday send orders
 through the same gates and trading journal as the CLI, and the API starts them only while the execution provider is
 the mock broker (403 otherwise). No endpoint places, cancels or modifies an order by itself, and the API offers no
 manual BUY.
 
-Workflows run in the background, one at a time per server: a start answers 202 with the run id, and
-GET /v1/runs/{run_id} reports the run's state and its record. Run the server with one worker process.
+Workflows run in the background, one at a time per user and a few at a time per server: a start answers 202 with the
+run id, and GET /v1/runs/{run_id} reports the run's state and its record; another user's run id answers 404. Run the
+server with one worker process.
 """
 
 MAX_BODY_BYTES = 2_000_000
@@ -47,7 +89,11 @@ async def add_security_headers(request: Request, call_next: Callable[[Request], 
 
     if "transfer-encoding" in request.headers or not declared.isdigit() or int(declared) > MAX_BODY_BYTES:
         return JSONResponse(
-            {"detail": f"A request body may hold at most {MAX_BODY_BYTES} bytes, with a Content-Length."}, status_code=413
+            {
+                "detail": f"A request body may hold at most {MAX_BODY_BYTES} bytes, with a Content-Length.",
+                "code": ErrorCode.BODY_TOO_LARGE,
+            },
+            status_code=413,
         )
 
     response = await call_next(request)
@@ -58,40 +104,121 @@ async def add_security_headers(request: Request, call_next: Callable[[Request], 
     return response
 
 
-async def answer_listing_unavailable(request: Request, error: ListingUnavailableError) -> JSONResponse:
-    """Every route that reads the exchange listing answers 503 when it could not be loaded."""
-    return JSONResponse({"detail": str(error)}, status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
+ERROR_ANSWERS: dict[type[Exception], tuple[int, ErrorCode]] = {
+    SignInRequired: (status.HTTP_401_UNAUTHORIZED, ErrorCode.SIGN_IN_REQUIRED),
+    SignInRefused: (status.HTTP_401_UNAUTHORIZED, ErrorCode.SIGN_IN_REFUSED),
+    UnknownHost: (status.HTTP_400_BAD_REQUEST, ErrorCode.UNKNOWN_HOST),
+    AppRequestRequired: (status.HTTP_403_FORBIDDEN, ErrorCode.APP_REQUEST_REQUIRED),
+    RegistrationClosed: (status.HTTP_403_FORBIDDEN, ErrorCode.REGISTRATION_CLOSED),
+    SetupCodeRefused: (status.HTTP_403_FORBIDDEN, ErrorCode.SETUP_CODE_REFUSED),
+    AdministratorsOnly: (status.HTTP_403_FORBIDDEN, ErrorCode.ADMINISTRATORS_ONLY),
+    RealBrokerRefused: (status.HTTP_403_FORBIDDEN, ErrorCode.REAL_BROKER_REFUSED),
+    MockBrokerOnly: (status.HTTP_403_FORBIDDEN, ErrorCode.MOCK_BROKER_ONLY),
+    SettingsFileRefused: (status.HTTP_403_FORBIDDEN, ErrorCode.SETTINGS_FILE_REFUSED),
+    PasswordRequired: (status.HTTP_403_FORBIDDEN, ErrorCode.PASSWORD_REQUIRED),
+    PasswordRefused: (status.HTTP_403_FORBIDDEN, ErrorCode.PASSWORD_REFUSED),
+    NotFound: (status.HTTP_404_NOT_FOUND, ErrorCode.NOT_FOUND),
+    SettingsFileMissing: (status.HTTP_404_NOT_FOUND, ErrorCode.SETTINGS_FILE_MISSING),
+    AlreadySetUpError: (status.HTTP_409_CONFLICT, ErrorCode.ALREADY_SET_UP),
+    UserExistsError: (status.HTTP_409_CONFLICT, ErrorCode.USER_EXISTS),
+    LastAdministratorError: (status.HTTP_409_CONFLICT, ErrorCode.LAST_ADMINISTRATOR),
+    TechnicalSettingsConflictError: (status.HTTP_409_CONFLICT, ErrorCode.TECHNICAL_SETTINGS_CONFLICT),
+    SettingsConflictError: (status.HTTP_409_CONFLICT, ErrorCode.SETTINGS_CONFLICT),
+    RunInProgress: (status.HTTP_409_CONFLICT, ErrorCode.RUN_IN_PROGRESS),
+    SettingsEditError: (status.HTTP_422_UNPROCESSABLE_CONTENT, ErrorCode.SETTINGS_EDIT_REFUSED),
+    InvalidSettingsError: (status.HTTP_422_UNPROCESSABLE_CONTENT, ErrorCode.SETTINGS_REFUSED),
+    SignInThrottled: (status.HTTP_429_TOO_MANY_REQUESTS, ErrorCode.SIGN_IN_THROTTLED),
+    TooManyRuns: (status.HTTP_429_TOO_MANY_REQUESTS, ErrorCode.TOO_MANY_RUNS),
+    ListingUnavailableError: (status.HTTP_503_SERVICE_UNAVAILABLE, ErrorCode.LISTING_UNAVAILABLE),
+}
+"""
+The status and the code each refusal a route lets through answers, with its message as the detail: each refusal
+names its code here, once. 401 is the only answer that signs the web app out; 403 says signed in, but not allowed;
+409 says read again or wait for the run; 429 says later.
+"""
 
 
-async def answer_settings_conflict(request: Request, error: TechnicalSettingsConflictError) -> JSONResponse:
-    """A read or a save of the technical settings that another save overtook answers 409: read them again."""
-    return JSONResponse({"detail": str(error)}, status_code=status.HTTP_409_CONFLICT)
+type ErrorAnswer = Callable[[Request, Any], Coroutine[Any, Any, Response]]
 
 
-def create_app(open_runtime: Callable[[], AbstractAsyncContextManager[Runtime]]) -> FastAPI:
+async def answer_refusal(request: Request, error: Exception) -> JSONResponse:
     """
-    The FastAPI app. Its lifespan opens the runtime once, through the same trading-setup checks as the CLI, and at
-    shutdown cancels a still-running workflow before the database closes, so its record ends as aborted.
+    `{detail, code}`. A throttled attempt also says, in Retry-After, how many seconds remain. Settings the app would not
+    start with also list their problems, each at its file, line and column, never a value.
+    """
+    status_code, code = ERROR_ANSWERS[type(error)]
+    seconds = max(1, math.ceil(error.retry_after.total_seconds())) if isinstance(error, SignInThrottled) else None
+    headers = {"Retry-After": str(seconds)} if seconds is not None else None
+    content: dict[str, object] = {"detail": str(error), "code": code}
+
+    if isinstance(error, InvalidSettingsError):
+        content["problems"] = [asdict(problem) for problem in error.problems]
+
+    return JSONResponse(content, status_code=status_code, headers=headers)
+
+
+async def answer_http_error(request: Request, error: StarletteHTTPException) -> Response:
+    """Every other refusal, such as FastAPI's own 404 for no such route or the LINE webhook's, with a code too."""
+    code = ErrorCode.NOT_FOUND if error.status_code == status.HTTP_404_NOT_FOUND else ErrorCode.REQUEST_REFUSED
+    return JSONResponse({"detail": error.detail, "code": code}, status_code=error.status_code, headers=error.headers)
+
+
+async def answer_invalid_request(request: Request, error: RequestValidationError) -> JSONResponse:
+    """A body, path or query that does not validate: FastAPI's list of the fields and why, as `detail`, with a code."""
+    content = {"detail": jsonable_encoder(error.errors()), "code": ErrorCode.INVALID_REQUEST}
+    return JSONResponse(content, status_code=status.HTTP_422_UNPROCESSABLE_CONTENT)
+
+
+async def offer_first_time_setup(app: FastAPI, runtime: Runtime) -> None:
+    """
+    While no user exists, the setup needs a code this start prints on the server's console only, so the first visitor
+    of a server reachable from elsewhere cannot make themselves its administrator. The CLI needs none: it runs here.
+    """
+    options = await runtime.signed_out.load_sign_in_options()
+    app.state.setup_code = create_setup_code() if options.needs_first_administrator else None
+
+    if app.state.setup_code is not None:
+        print(
+            f"No administrator yet. Set one up in the web app with the setup code {app.state.setup_code}, or with `just cli`.",
+            file=sys.stderr,
+            flush=True,
+        )
+
+
+def error_handlers() -> dict[int | type[Exception], ErrorAnswer]:
+    """Every error answer the app gives, each with its code: the refusals of ERROR_ANSWERS and FastAPI's own errors."""
+    handlers: dict[int | type[Exception], ErrorAnswer] = dict.fromkeys(ERROR_ANSWERS, answer_refusal)
+    return handlers | {StarletteHTTPException: answer_http_error, RequestValidationError: answer_invalid_request}
+
+
+def create_app(open_switch: Callable[[], AbstractAsyncContextManager[RuntimeSwitch]]) -> FastAPI:
+    """
+    The FastAPI app. Its lifespan opens the process's runtimes through the startup checks the CLI runs, offers the
+    first-time setup while no user exists and watches the settings files. At shutdown it stops the watch, cancels every
+    running workflow while its runtime is open, so its record ends as aborted, then closes every runtime.
     """
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
-        async with open_runtime() as runtime:
-            app.state.runtime = runtime
-            app.state.workflow_runs = workflow_runs = create_workflow_runs(runtime)
-            app.state.market_valuation_cache = create_market_valuation_cache(runtime)
+        async with open_switch() as switch:
+            app.state.runtime_switch = switch
+
+            with switch.hold() as opened:
+                app.state.workflow_runs = workflow_runs = WorkflowRuns(opened.runtime.logger)
+                await offer_first_time_setup(app, opened.runtime)
+
+            watcher = asyncio.get_running_loop().create_task(watch_settings(switch))
 
             try:
                 yield
 
             finally:
+                watcher.cancel()
                 await workflow_runs.stop()
 
-    app = FastAPI(title="TW-Stock-Alpha-Agent", description=DESCRIPTION, version="0.2.0", lifespan=lifespan)
+    app = FastAPI(
+        title="TW-Stock-Alpha-Agent", description=DESCRIPTION, version="0.2.0", lifespan=lifespan, exception_handlers=error_handlers()
+    )
     app.include_router(api_v1_router)
-
     app.middleware("http")(add_security_headers)
-    app.exception_handler(ListingUnavailableError)(answer_listing_unavailable)
-    app.exception_handler(TechnicalSettingsConflictError)(answer_settings_conflict)
-
     return app

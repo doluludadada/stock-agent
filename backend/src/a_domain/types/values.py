@@ -1,7 +1,8 @@
+import unicodedata
 from dataclasses import replace
 from typing import Annotated, Self, override
 
-from pydantic import Field
+from pydantic import AfterValidator, Field, SecretStr
 from pydantic.dataclasses import dataclass
 
 type Score[Number: (int, float)] = Annotated[Number, Field(ge=0, le=100)]
@@ -26,6 +27,29 @@ type BarsAgo = Annotated[int, Field(ge=0, le=250, strict=True)]
 
 type FormulaId = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{0,39}$")]
 """A stable identifier inside a strategy, such as a strategy's or an indicator's. It never holds a parameter."""
+
+
+type Username = Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$")]
+"""3 to 32 characters and no '@', so a sign-in identifier is a username or an email and never both."""
+
+type EmailAddress = Annotated[str, Field(max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")]
+"""The shape only. No mail is ever sent, so nothing proves the address is the user's."""
+
+type NewPassword = Annotated[SecretStr, Field(min_length=12, max_length=256)]
+"""A password a user chooses. SecretStr keeps it out of every repr and log line."""
+
+
+def comparable_name(text: str) -> str:
+    """
+    A username or an email as sign-in compares it: NFKC-normalized, stripped and case-folded, so a full-width or
+    upper-case "Alice " is "alice". The user store's unique indexes and the attempt limit per sign-in name compare
+    names this way, and no other.
+    """
+    return unicodedata.normalize("NFKC", text).strip().casefold()
+
+
+type SignInName = Annotated[str, AfterValidator(comparable_name)]
+"""A username or an email as sign-in compares it."""
 
 
 @dataclass(frozen=True, order=True)

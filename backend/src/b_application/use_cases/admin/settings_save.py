@@ -4,15 +4,14 @@ from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.system.settings_files import ISettingsFiles, SettingsAuditEntry, SettingsEdit
 from a_domain.types.enums import SettingsAction
-from a_domain.types.errors import SettingsConflictError
+from a_domain.types.ids import UserId
 
 
 class SettingsSave:
     """
-    Writes a proposed settings file when it has no problems and the file is still at the revision the administrator
-    read, with a backup of the old text and an audit entry of the setting paths it changed. It raises
-    SettingsConflictError, writing nothing, when the file changed since. The running process keeps the settings it
-    loaded; the file applies at the next start.
+    Writes a proposed settings file the app would start with, while the file is still at the revision it was proposed
+    against (SettingsConflictError otherwise, nothing written): the old text backed up, the new one put in place
+    atomically, and an audit entry naming the administrator by id and the setting paths it changed.
     """
 
     def __init__(self, settings_files: ISettingsFiles, market_clock: IMarketClock, logger: ILoggingProvider) -> None:
@@ -20,26 +19,18 @@ class SettingsSave:
         self._market_clock = market_clock
         self._logger = logger
 
-    async def execute(self, edit: SettingsEdit, expected_revision: str) -> SettingsEdit:
-        if edit.problems:
-            return edit
-
-        if edit.base_revision != expected_revision:
-            raise SettingsConflictError(f"{edit.file.file_name} changed since revision {expected_revision[:12]}; read it again")
-
+    async def execute(self, edit: SettingsEdit, actor: UserId) -> SettingsEdit:
         action = SettingsAction.RESTORE if edit.restored_backup_id is not None else SettingsAction.SAVE
         entry = SettingsAuditEntry(
             recorded_at=self._market_clock.now(),
             file=edit.file,
             action=action,
-            actor="admin",
+            actor=actor,
             from_revision=edit.base_revision,
             to_revision=edit.revision,
             settings=edit.changed,
         )
-        saved = await self._settings_files.replace(edit.file, edit.text, expected_revision, entry)
-        self._logger.info(
-            f"Settings {action.value} of {edit.file.file_name}: {len(edit.changed)} settings; applies at the next start."
-        )
+        saved = await self._settings_files.replace(edit.file, edit.text, edit.base_revision, entry)
+        self._logger.info(f"Settings {action.value} of {edit.file.file_name} by {actor}: {len(edit.changed)} settings changed.")
 
         return replace(edit, saved=saved)

@@ -1,105 +1,114 @@
-from collections.abc import Awaitable, Callable
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Query, status
 
 from a_domain.model.trading.order import Order
 from a_domain.types.ids import RunId
 from b_application.schemas.pipeline_status import PipelineStatus
-from d_presentation.dependencies import ApiToken, MockBroker, RuntimeDependency, WorkflowRunsDependency
-from d_presentation.web.schemas import Confirmed, RunAccepted, RunResponse, SignalResponse, StockIdsRequest
-from d_presentation.web.workflow_runs import RunInProgress, WorkflowRuns
+from d_presentation.web.schemas import Confirmed, ErrorResponse, RunAccepted, RunResponse, SignalResponse, StockIdsRequest
+from d_presentation.web.session import (
+    CurrentUser,
+    MockBroker,
+    NotFound,
+    PrivateAccess,
+    RunStarter,
+    UserPipeline,
+    WorkflowRunsDependency,
+)
 
-router = APIRouter(prefix="/runs", tags=["Workflow runs"], dependencies=[ApiToken])
+router = APIRouter(prefix="/runs", tags=["Workflow runs"], dependencies=[PrivateAccess])
 
 STARTED: dict[int | str, dict[str, Any]] = {
     status.HTTP_202_ACCEPTED: {"description": "The run started; poll GET /v1/runs/{run_id}."},
-    status.HTTP_409_CONFLICT: {"description": "Another run started by this server is still running."},
+    status.HTTP_409_CONFLICT: {"model": ErrorResponse, "description": "Another run of this user is still running."},
+    status.HTTP_429_TOO_MANY_REQUESTS: {
+        "model": ErrorResponse,
+        "description": "The server runs its most workflows at once; start yours later.",
+    },
 }
 
 MOCK_ONLY: dict[int | str, dict[str, Any]] = {
     **STARTED,
-    status.HTTP_403_FORBIDDEN: {"description": "The execution provider is not the mock broker; use the CLI."},
+    status.HTTP_403_FORBIDDEN: {"model": ErrorResponse, "description": "The execution provider is not the mock broker; use the CLI."},
 }
 
 
-def start(runs: WorkflowRuns, workflow: Callable[[RunId], Awaitable[PipelineStatus]]) -> RunAccepted:
-    try:
-        return RunAccepted(run_id=runs.start(workflow))
-
-    except RunInProgress as error:
-        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
-
-
 @router.post("/full-cycle", status_code=status.HTTP_202_ACCEPTED, responses=STARTED)
-async def start_full_cycle(body: Confirmed, runtime: RuntimeDependency, runs: WorkflowRunsDependency) -> RunAccepted:
+async def start_full_cycle(body: Confirmed, pipeline: UserPipeline, user: CurrentUser, start: RunStarter) -> RunAccepted:
     """Starts menu 1: the after-market full-universe analysis. One AI call per stock that passes the strategy. It never orders."""
-    return start(runs, lambda run_id: runtime.pipeline.run_full_cycle(run_id=run_id))
+    return RunAccepted(run_id=start(user, lambda run_id: pipeline.run_full_cycle(run_id=run_id)))
 
 
 @router.post("/specific-stocks", status_code=status.HTTP_202_ACCEPTED, responses=STARTED)
 async def start_specific_stock_analysis(
-    body: StockIdsRequest, runtime: RuntimeDependency, runs: WorkflowRunsDependency
+    body: StockIdsRequest, pipeline: UserPipeline, user: CurrentUser, start: RunStarter
 ) -> RunAccepted:
     """Starts menu 4's analysis of the given stocks. Each stock is one AI call. It never orders; the API offers no manual BUY."""
     stock_ids = body.stock_ids
-    return start(runs, lambda run_id: runtime.pipeline.analyse_specific_stocks(stock_ids, run_id=run_id))
+    return RunAccepted(run_id=start(user, lambda run_id: pipeline.analyse_specific_stocks(stock_ids, run_id=run_id)))
 
 
 @router.post("/buzz-scan", status_code=status.HTTP_202_ACCEPTED, dependencies=[MockBroker], responses=MOCK_ONLY)
-async def start_buzz_scan(body: Confirmed, runtime: RuntimeDependency, runs: WorkflowRunsDependency) -> RunAccepted:
+async def start_buzz_scan(body: Confirmed, pipeline: UserPipeline, user: CurrentUser, start: RunStarter) -> RunAccepted:
     """
     Starts menu 2, Social Buzz, on the mock broker only. Its decisions go through the same order gates and trading
     journal as the CLI's: a stop-loss SELL or a qualified BUY becomes a mock order. One AI call per qualified stock.
     """
-    return start(runs, lambda run_id: runtime.pipeline.run_buzz_scan(run_id=run_id))
+    return RunAccepted(run_id=start(user, lambda run_id: pipeline.run_buzz_scan(run_id=run_id)))
 
 
 @router.post("/intraday", status_code=status.HTTP_202_ACCEPTED, dependencies=[MockBroker], responses=MOCK_ONLY)
-async def start_intraday(body: Confirmed, runtime: RuntimeDependency, runs: WorkflowRunsDependency) -> RunAccepted:
+async def start_intraday(body: Confirmed, pipeline: UserPipeline, user: CurrentUser, start: RunStarter) -> RunAccepted:
     """Starts menu 3, Intraday, on the mock broker only, through the same order gates and journal as the CLI's."""
-    return start(runs, lambda run_id: runtime.pipeline.run_intraday(run_id=run_id))
+    return RunAccepted(run_id=start(user, lambda run_id: pipeline.run_intraday(run_id=run_id)))
 
 
 @router.get("")
 async def list_runs(
-    runtime: RuntimeDependency,
+    pipeline: UserPipeline,
+    user: CurrentUser,
     runs: WorkflowRunsDependency,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
 ) -> list[RunResponse]:
     """Recorded runs, newest first, whichever entry point (CLI or API) started them. Ask for limit + 1 to know of a next page."""
-    records = await runtime.journal.recent_runs(limit, offset)
-    return [response for record in records if (response := runs.describe(record.run_id, record)) is not None]
+    records = await pipeline.load_runs(limit, offset)
+    return [response for record in records if (response := runs.describe(user.user_id, record.run_id, record)) is not None]
 
 
-async def find_run(run_id: UUID, runtime: RuntimeDependency, runs: WorkflowRunsDependency) -> RunResponse:
-    record = await runtime.journal.find_run(RunId(run_id))
-    reports = await runtime.journal.stock_reports_of(RunId(run_id)) if record is not None else []
-    response = runs.describe(RunId(run_id), record, reports)
+async def find_run(
+    run_id: UUID, pipeline: UserPipeline, user: CurrentUser, runs: WorkflowRunsDependency
+) -> tuple[RunResponse, PipelineStatus | None]:
+    """The run as the API reports it and its recorded status, or 404 when neither the journal nor this server knows it."""
+    recorded = await pipeline.load_run(RunId(run_id))
+    response = runs.describe(
+        user.user_id, RunId(run_id), recorded.stats if recorded else None, recorded.manual_stocks if recorded else []
+    )
 
     if response is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No run {run_id}.")
+        raise NotFound(f"No run {run_id}.")
 
-    return response
+    return response, recorded
 
 
 @router.get("/{run_id}")
-async def get_run(run_id: UUID, runtime: RuntimeDependency, runs: WorkflowRunsDependency) -> RunResponse:
-    return await find_run(run_id, runtime, runs)
+async def get_run(run_id: UUID, pipeline: UserPipeline, user: CurrentUser, runs: WorkflowRunsDependency) -> RunResponse:
+    response, _ = await find_run(run_id, pipeline, user, runs)
+    return response
 
 
 @router.get("/{run_id}/signals")
-async def get_run_signals(run_id: UUID, runtime: RuntimeDependency, runs: WorkflowRunsDependency) -> list[SignalResponse]:
+async def get_run_signals(
+    run_id: UUID, pipeline: UserPipeline, user: CurrentUser, runs: WorkflowRunsDependency
+) -> list[SignalResponse]:
     """Every decision the run made, HOLD included, with the evidence it was made on."""
-    await find_run(run_id, runtime, runs)
-    signals = await runtime.journal.signals_of(RunId(run_id))
-    return [SignalResponse.model_validate(signal) for signal in signals]
+    _, recorded = await find_run(run_id, pipeline, user, runs)
+    return [SignalResponse.model_validate(signal) for signal in (recorded.signals if recorded else [])]
 
 
 @router.get("/{run_id}/orders")
-async def get_run_orders(run_id: UUID, runtime: RuntimeDependency, runs: WorkflowRunsDependency) -> list[Order]:
+async def get_run_orders(run_id: UUID, pipeline: UserPipeline, user: CurrentUser, runs: WorkflowRunsDependency) -> list[Order]:
     """Every order the run sent or refused, with its status, reason, fee, tax and realized PnL."""
-    await find_run(run_id, runtime, runs)
-    return await runtime.journal.orders_of(RunId(run_id))
+    _, recorded = await find_run(run_id, pipeline, user, runs)
+    return recorded.orders if recorded else []

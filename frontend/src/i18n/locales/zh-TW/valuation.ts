@@ -2,10 +2,24 @@ import type en from '../en/valuation'
 import type { DictionaryShape } from '../../types'
 
 const valuation: DictionaryShape<typeof en> = {
+  signIn: '登入後使用估值與低估掃描',
   title: '本益比估值',
   description: '以目標本益比、最近收盤價與近四季 EPS 計算合理價。',
   notAdvice: '依你假設的本益比估算，不是投資建議；本頁不會下單，也不會改動觀察清單。',
   marketTitle: '市場參考',
+  toolTitle: '估值工具',
+  toolQuestion: '用你的目標本益比估值指定股票，或掃描全市場',
+  start: {
+    stocks: { title: '輸入代號，用你的目標本益比估值', description: '最多 20 檔，用逗號或空白分開。' },
+    scan: { title: '掃描全市場的低估股票', description: '先跑本益比篩選，之後可以再用你的策略確認通過的股票。' },
+  },
+  how: {
+    title: '估值怎麼算',
+    question: '這一頁的數字從哪裡來',
+    fair: '合理價 = 近四季 EPS × 目標本益比。',
+    scenarios: '每檔都算保守、基準、樂觀三種倍數，看合理價落在哪個範圍。',
+    ai: '請 AI 解釋時每檔是一次付費 AI 呼叫，會先問過你。',
+  },
   loadingMarket: '載入市場估值中…',
   loadingValuation: '估值中…',
   loadingTechnical: '套用使用中的策略…',

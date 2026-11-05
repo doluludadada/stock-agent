@@ -19,6 +19,14 @@ class IExecutionProvider(Protocol):
         """Opens the broker session before the first order or account read. Raises saying what failed."""
         ...
 
+    async def close(self) -> None:
+        """
+        Gives back what connect() took: the broker session, once a login connect() began has ended, whether it
+        succeeded, failed or is still running when the caller gave up. The runtime that built the broker calls it when
+        it closes, so a runtime a settings change retired does not keep a login open beside the new one's.
+        """
+        ...
+
     async def place_order(self, order: Order) -> Order: ...
 
     async def get_account(self) -> Account:

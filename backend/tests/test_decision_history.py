@@ -14,6 +14,8 @@ from b_application.config.ai_config import PromptsConfig
 from b_application.use_cases.process.ai_analyser import AiAnalyser
 from b_application.use_cases.ship.decision_memory import DecisionMemory
 from c_infrastructure.database.chroma.knowledge_repository import ChromaKnowledgeRepository
+from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
+from d_presentation.dependencies import knowledge_collection
 
 
 class SilentLogger:
@@ -50,7 +52,9 @@ def make_signal(stock_id: str, action: TradeAction, score: int, reason: str, hou
 
 @pytest.fixture
 def knowledge_repository(tmp_path: Path) -> ChromaKnowledgeRepository:
-    return ChromaKnowledgeRepository(chromadb.PersistentClient(path=str(tmp_path / "chroma")), SilentLogger())
+    return ChromaKnowledgeRepository(
+        chromadb.PersistentClient(path=str(tmp_path / "chroma")), knowledge_collection(LEGACY_OWNER_ID), SilentLogger()
+    )
 
 
 async def remember(repository: ChromaKnowledgeRepository, *signals: TradeSignal) -> None:

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { apiRequest, strategyResultsKey, useSession, type Schemas } from '@/shared/api'
+import { apiRequest, strategyResultsKey, useIsSignedIn, type Schemas } from '@/shared/api'
 
 export type StockTechnical = Schemas['StockTechnicalResponse']
 
@@ -10,11 +10,11 @@ export const technicalKey = (stockId: string) => [...strategyResultsKey, 'techni
 
 /** The owner's active strategy on this stock, computed by the backend exactly as a run computes it. */
 export function useStockTechnical(stockId: string) {
-  const { unlocked } = useSession('owner')
+  const signedIn = useIsSignedIn()
   return useQuery({
     queryKey: technicalKey(stockId),
-    queryFn: ({ signal }) => apiRequest('get', '/v1/market/stocks/{stock_id}/technical', { scope: 'owner', params: { stock_id: stockId }, signal }),
-    enabled: unlocked,
+    queryFn: ({ signal }) => apiRequest('get', '/v1/market/stocks/{stock_id}/technical', { params: { stock_id: stockId }, signal }),
+    enabled: signedIn,
     staleTime: TECHNICAL_STALE_MS,
   })
 }

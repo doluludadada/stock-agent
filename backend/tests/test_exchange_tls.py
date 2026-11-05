@@ -3,6 +3,7 @@ Every HTTPS client that reads TWSE, TPEX, MOPS, MIS, cnyes, Yahoo or PTT data ve
 the news and PTT clients send the headers the `sources` settings name.
 """
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +15,6 @@ from trading_stack import MONDAY_10_00, MovableClock, SilentLogger, StockDirecto
 from a_domain.model.market.stock import Stock
 from a_domain.types.values import FiscalQuarter
 from b_application.config.market_data_config import MarketDataConfig, MarketHoursConfig
-from b_application.config.sources_config import SourcesConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.feed.news.cnyes_news_provider import CnyesNewsProvider
 from c_infrastructure.feed.news.yahoo_tw_news_provider import YahooTwNewsProvider
@@ -24,7 +24,7 @@ from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsP
 from c_infrastructure.market.twse_provider import TaiwanStockProvider
 from c_infrastructure.system.market_clock import TaiwanMarketClock
 
-SOURCES = SourcesConfig.from_appsetting()
+SOURCES = shipped_config().sources
 
 pytestmark = pytest.mark.asyncio
 
@@ -54,7 +54,9 @@ async def test_exchange_clients_keep_certificate_verification_on(clients: list[d
     db = DatabaseConnector(config=shipped_config(tmp_path), logger=SilentLogger())
     await db.init_db()
     unspaced = SOURCES.mops.model_copy(update={"request_interval_seconds": 0.0})
-    mops = MopsFundamentalsProvider(db=db, market_clock=MovableClock(MONDAY_10_00), mops=unspaced, logger=SilentLogger())
+    mops = MopsFundamentalsProvider(
+        db=db, market_clock=MovableClock(MONDAY_10_00), mops=unspaced, logger=SilentLogger(), write_lock=asyncio.Lock()
+    )
 
     try:
         await TaiwanStockProvider(

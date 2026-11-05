@@ -1,26 +1,33 @@
 from collections.abc import AsyncGenerator, Mapping, Sequence
 from contextlib import asynccontextmanager
+from copy import copy
+from datetime import UTC, datetime
+from itertools import count
 from pathlib import Path
-from typing import override
+from typing import Self, override
 
-from sqlalchemy import Connection, event, inspect, select
+import sqlalchemy
+from sqlalchemy import event, func, select
 from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
-from a_domain.ports.system.database_connector import IDatabaseConnector
+from a_domain.ports.system.database_connector import DatabaseMigration, DatabaseState, IDatabaseConnector
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.types.enums import DatabaseBackend
+from a_domain.types.errors import SignInRequired
+from a_domain.types.ids import UserId
 from b_application.config.app_config import AppConfig
-from c_infrastructure.database.models.schema_version_dto import SCHEMA_VERSION, SchemaVersionDTO, upgrade
-
-
-class OutdatedDatabaseError(RuntimeError):
-    """
-    The database holds tables of a schema version no upgrade reaches, or of none, or a table with columns other than its
-    SQLModel class declares. create_all never alters an existing table. Only startup raises it, and the CLI and the Web API
-    catch it to print the remedy, so it belongs to this adapter rather than to the domain's errors.
-    """
+from c_infrastructure.database.models.backups import DatabaseCommandError, copy_sqlite, run_postgresql_client
+from c_infrastructure.database.models.owned_rows import OWNER_COLUMN, guard_session
+from c_infrastructure.database.models.schema_version_dto import (
+    SCHEMA_VERSION,
+    OutdatedDatabaseError,
+    SchemaVersionDTO,
+    live_layout,
+    pending_steps,
+    upgrade,
+)
 
 
 class DatabaseConnector(IDatabaseConnector[AsyncSession]):
@@ -28,7 +35,10 @@ class DatabaseConnector(IDatabaseConnector[AsyncSession]):
 
     def __init__(self, config: AppConfig, logger: ILoggingProvider) -> None:
         self._logger = logger
+        self._db = config.db
+        self._backups = config.project_root / "backups"
         self._sqlite_path: Path | None = None
+        self._owner_id: UserId | None = None
 
         if config.db.backend == DatabaseBackend.POSTGRESQL:
             self._logger.info("Initialising PostgreSQL (asyncpg) connection...")
@@ -55,27 +65,15 @@ class DatabaseConnector(IDatabaseConnector[AsyncSession]):
     @override
     async def init_db(self) -> None:
         """
-        Create the tables that do not exist yet; a new database first gets its schema version stamp, and a database of
-        an older version first runs the upgrade steps from its version, in the same transaction. Raise
-        OutdatedDatabaseError, and change nothing, when the database is not new and its stamp is missing or of a version
-        no upgrade reaches, or when an existing table's columns differ from its SQLModel class.
+        Create the tables that do not exist yet; a new database first gets its schema version stamp. Raise
+        OutdatedDatabaseError, and change nothing, when the database is not new and its stamp is not SCHEMA_VERSION, an
+        older version included, or when an existing table's columns differ from its SQLModel class. Startup never
+        upgrades a database: `just db-migrate` does, after a backup.
         """
         stamp_table = SQLModel.metadata.tables[SchemaVersionDTO.__tablename__]
 
-        def live_layout(sync_connection: Connection) -> dict[str, frozenset[str]]:
-            tables = inspect(sync_connection)
-            return {table: frozenset(column["name"] for column in tables.get_columns(table)) for table in tables.get_table_names()}
-
         async with self._engine.begin() as connection:
-            live_columns = await connection.run_sync(live_layout)
-            stamps = (
-                list((await connection.execute(select(stamp_table.c.version))).scalars()) if stamp_table.name in live_columns else []
-            )
-
-            if len(stamps) == 1 and 1 <= stamps[0] < SCHEMA_VERSION:
-                self._logger.info(f"Upgrading the database from schema version {stamps[0]} to {SCHEMA_VERSION}...")
-                await upgrade(connection, stamps[0])
-                live_columns, stamps = await connection.run_sync(live_layout), [SCHEMA_VERSION]
+            live_columns, stamps = await live_layout(connection)
 
             if outdated := self.outdated_tables(live_columns, stamps):
                 raise OutdatedDatabaseError(self.outdated_message(outdated, stamps))
@@ -113,6 +111,13 @@ class DatabaseConnector(IDatabaseConnector[AsyncSession]):
 
     @override
     def outdated_message(self, outdated: list[str], stamps: Sequence[int]) -> str:
+        if pending_steps(stamps):
+            return (
+                f"The database is at schema version {stamps[0]}, and this version of stock-agent needs {SCHEMA_VERSION}. "
+                "Startup never upgrades a database.\nRemedy: run `just db-migrate`. It backs the database up into backups/ "
+                "first, then upgrades it in one transaction. `just db-status` shows the steps it runs."
+            )
+
         reset = f"delete {self._sqlite_path}, or " if self._sqlite_path else ""
         found = ", ".join(str(stamp) for stamp in stamps) or "none"
         version = (
@@ -135,10 +140,112 @@ class DatabaseConnector(IDatabaseConnector[AsyncSession]):
         )
 
     @override
+    async def state(self) -> DatabaseState:
+        live_columns: dict[str, frozenset[str]] = {}
+        stamps: list[int] = []
+        rows: dict[str, int] = {}
+
+        if self._sqlite_path is None or self._sqlite_path.exists():
+            async with self._engine.connect() as connection:
+                live_columns, stamps = await live_layout(connection)
+                rows = {
+                    name: (await connection.scalar(select(func.count()).select_from(sqlalchemy.table(name)))) or 0
+                    for name in sorted(live_columns)
+                }
+
+        pending = tuple(pending_steps(stamps))
+        outdated = self.outdated_tables(live_columns, stamps)
+
+        return DatabaseState(
+            backend=self._db.backend,
+            location=str(self._sqlite_path or f"{self._db.user}@{self._db.host}:{self._db.port}/{self._db.name}"),
+            stamps=tuple(stamps),
+            required=SCHEMA_VERSION,
+            pending=pending,
+            rows=rows,
+            refusal=self.outdated_message(outdated, stamps) if outdated else None,
+        )
+
+    @override
+    async def backup(self) -> Path:
+        stamps = (await self.state()).stamps
+        self._backups.mkdir(exist_ok=True)
+        self._backups.chmod(0o700)
+        taken = f"{datetime.now(UTC):%Y%m%d-%H%M%S}"
+        version = "-".join(str(stamp) for stamp in stamps) or "none"
+        stem, suffix = (self._db.name, "dump") if self._sqlite_path is None else ("stock_agent", "db")
+        names = (f"{stem}.{taken}{f'-{attempt}' if attempt > 1 else ''}.v{version}.{suffix}" for attempt in count(1))
+        destination = next(path for path in (self._backups / name for name in names) if not path.exists())
+        destination.touch(mode=0o600, exist_ok=False)
+
+        try:
+            if self._sqlite_path is None:
+                await run_postgresql_client("pg_dump", self._db, "--format=custom", f"--file={destination}")
+            else:
+                await copy_sqlite(self._sqlite_path, destination)
+        except BaseException:
+            destination.unlink(missing_ok=True)
+            raise
+
+        return destination
+
+    @override
+    async def migrate(self) -> DatabaseMigration:
+        before = await self.state()
+
+        if before.refusal is not None and not before.pending:
+            raise OutdatedDatabaseError(before.refusal)
+
+        if not before.pending:
+            return DatabaseMigration(backup=None, before=before, after=before)
+
+        backup = await self.backup()
+
+        try:
+            async with self._engine.begin() as connection:
+                await upgrade(connection, before.stamps)
+                live_columns, stamps = await live_layout(connection)
+
+                if outdated := self.outdated_tables(live_columns, stamps):
+                    raise OutdatedDatabaseError(self.outdated_message(outdated, stamps))
+
+        except Exception as error:
+            raise DatabaseCommandError(
+                f"{error}\nThe upgrade rolled back: the database is still at version {before.stamps[0]} with every row it "
+                f"had. Its backup from before the upgrade: {backup}"
+            ) from error
+
+        return DatabaseMigration(backup=backup, before=before, after=await self.state())
+
+    @override
+    async def restore(self, backup: Path) -> Path | None:
+        header = b"PGDMP" if self._sqlite_path is None else b"SQLite format 3\x00"
+
+        if not backup.is_file():
+            raise DatabaseCommandError(f"There is no file at {backup}. Nothing changed.")
+
+        with backup.open("rb") as file:
+            if file.read(len(header)) != header:
+                raise DatabaseCommandError(f"{backup} is not a backup of a {self._db.backend.value} database. Nothing changed.")
+
+        current = await self.backup() if (await self.state()).rows else None
+
+        if self._sqlite_path is None:
+            await run_postgresql_client(
+                "pg_restore", self._db, "--clean", "--if-exists", "--single-transaction", "--no-owner", str(backup)
+            )
+        else:
+            await copy_sqlite(backup, self._sqlite_path)
+
+        return current
+
+    @override
     @asynccontextmanager
     async def get_session(self) -> AsyncGenerator[AsyncSession]:
-        """Provide a transactional scope around a series of operations."""
+        """A transactional scope over the shared tables. A statement or flush on an owned table raises."""
         async with self._session_factory() as session:
+            guard_session(session.sync_session)
+
             try:
                 yield session
             except Exception as error:
@@ -147,6 +254,31 @@ class DatabaseConnector(IDatabaseConnector[AsyncSession]):
                 raise
             finally:
                 await session.close()
+
+    @override
+    def for_owner(self, owner_id: UserId | None) -> Self:
+        """A copy that shares this connector's engine and its pool."""
+        bound = copy(self)
+        bound._owner_id = owner_id
+        return bound
+
+    @property
+    @override
+    def owner_id(self) -> UserId:
+        if self._owner_id is None:
+            raise SignInRequired("Sign in first.")
+
+        return self._owner_id
+
+    @override
+    @asynccontextmanager
+    async def owner_session(self) -> AsyncGenerator[AsyncSession]:
+        """A transactional scope over the bound owner's rows."""
+        owner_id = self.owner_id
+
+        async with self.get_session() as session:
+            session.info[OWNER_COLUMN] = owner_id
+            yield session
 
     @override
     async def close(self) -> None:

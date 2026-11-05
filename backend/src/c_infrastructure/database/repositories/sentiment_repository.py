@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import replace
 from typing import override
 
@@ -11,8 +12,15 @@ from c_infrastructure.database.models.article_sentiment_dto import ArticleSentim
 
 
 class SentimentRepository(ISentimentRepository):
-    def __init__(self, db: DatabaseConnector) -> None:
+    """
+    The classified posts every user's Buzz scans share. One save at a time per process, every runtime's, under the
+    lock CachedPriceProvider writes its bars with: two runs merging the same post at once would both insert it, and
+    the second would fail on the key.
+    """
+
+    def __init__(self, db: DatabaseConnector, write_lock: asyncio.Lock) -> None:
         self._db = db
+        self._write_lock = write_lock
 
     @override
     async def find_classified(self, stock_id: str, posts: list[Article]) -> list[Article]:
@@ -46,7 +54,7 @@ class SentimentRepository(ISentimentRepository):
         if not rows:
             return
 
-        async with self._db.get_session() as session:
+        async with self._write_lock, self._db.get_session() as session:
             for row in rows.values():
                 await session.merge(row)
 

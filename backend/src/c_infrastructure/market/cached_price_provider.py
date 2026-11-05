@@ -33,6 +33,7 @@ class CachedPriceProvider(ICachedPriceProvider):
         market_data: MarketDataConfig,
         logger: ILoggingProvider,
         market_clock: IMarketClock,
+        write_lock: asyncio.Lock,
     ):
         self._history_provider = history_provider
         self._quote_provider = quote_provider
@@ -41,7 +42,8 @@ class CachedPriceProvider(ICachedPriceProvider):
         self._retry_interval = timedelta(hours=market_data.history_retry_hours)
         self._start_slack = timedelta(days=market_data.history_start_slack_days)
         # Two requests that fetch the same new stock would both insert its rows; one at a time, the second updates them.
-        self._write_lock = asyncio.Lock()
+        # The lock is the process's, so a retired runtime still finishing a run writes one at a time with the new one.
+        self._write_lock = write_lock
         self._downloads: dict[tuple[str, date, date], asyncio.Future[dict[str, list[Ohlcv]]]] = {}
         self._logger = logger
         self._clock = market_clock

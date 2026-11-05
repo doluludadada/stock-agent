@@ -1,8 +1,22 @@
 const valuation = {
+  signIn: 'Sign in to value stocks with your strategy',
   title: 'P/E valuation',
   description: 'Fair prices at your target P/E from the latest close and trailing EPS.',
   notAdvice: 'An estimate at the P/E you assume, not investment advice. This page never orders or changes your watchlist.',
   marketTitle: 'Market reference',
+  toolTitle: 'Value stocks',
+  toolQuestion: 'Chosen stocks at your target P/E, or a scan of the whole market',
+  start: {
+    stocks: { title: 'Enter codes to value them at your target P/E', description: 'Up to 20 stocks, separated by commas or spaces.' },
+    scan: { title: 'Scan the market for undervalued stocks', description: 'The P/E step runs first; you can then confirm the survivors with your strategy.' },
+  },
+  how: {
+    title: 'How the figures are made',
+    question: 'Where the numbers on this page come from',
+    fair: 'Fair price = trailing four-quarter EPS × the target P/E.',
+    scenarios: 'Each stock gets three multiples, conservative, base and optimistic, to show a range of fair prices.',
+    ai: 'An AI explanation is one paid AI call per stock, and the page asks first.',
+  },
   loadingMarket: 'Loading the market valuation…',
   loadingValuation: 'Valuing…',
   loadingTechnical: 'Applying the strategy in use…',

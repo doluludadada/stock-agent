@@ -16,37 +16,37 @@
   --card-foreground: var(--palette-ink);
   --popover: var(--palette-surface-raised);
   --popover-foreground: var(--palette-ink);
-  --primary: var(--palette-jade);
-  --primary-foreground: var(--palette-on-jade);
-  --secondary: var(--palette-surface-raised);
+  --primary: var(--palette-brand);
+  --primary-foreground: var(--palette-on-brand);
+  --secondary: var(--palette-surface-sunken);
   --secondary-foreground: var(--palette-ink);
   --muted: var(--palette-surface-sunken);
   --muted-foreground: var(--palette-ink-muted);
-  --accent: var(--palette-jade-soft);
+  --accent: var(--palette-brand-soft);
   --accent-foreground: var(--palette-ink);
   --destructive: var(--palette-danger);
   --border: var(--palette-line);
   --input: var(--palette-line-strong);
-  --ring: var(--palette-jade);
+  --ring: var(--palette-brand);
   --radius: var(--radius-base);
   --chart-1: var(--palette-chart-series-1);
-  --chart-2: var(--palette-chart-series-2);
-  --chart-3: var(--palette-chart-series-3);
+  --chart-2: var(--palette-chart-ma-fast);
+  --chart-3: var(--palette-chart-ma-slow);
   --chart-4: var(--palette-market-up);
   --chart-5: var(--palette-market-down);
-  --sidebar: var(--palette-surface-sunken);
+  --sidebar: var(--palette-surface);
   --sidebar-foreground: var(--palette-ink);
-  --sidebar-primary: var(--palette-jade);
-  --sidebar-primary-foreground: var(--palette-on-jade);
-  --sidebar-accent: var(--palette-jade-soft);
+  --sidebar-primary: var(--palette-brand);
+  --sidebar-primary-foreground: var(--palette-on-brand);
+  --sidebar-accent: var(--palette-brand-soft);
   --sidebar-accent-foreground: var(--palette-ink);
   --sidebar-border: var(--palette-line);
-  --sidebar-ring: var(--palette-jade);
+  --sidebar-ring: var(--palette-brand);
 
   /* Chart roles, read by Recharts through var(). */
   --chart-price: var(--palette-chart-series-1);
-  --chart-ma-fast: var(--palette-chart-series-2);
-  --chart-ma-slow: var(--palette-chart-series-3);
+  --chart-ma-fast: var(--palette-chart-ma-fast);
+  --chart-ma-slow: var(--palette-chart-ma-slow);
   --chart-volume: var(--palette-chart-volume);
   --chart-grid: var(--palette-chart-grid);
   --chart-axis: var(--palette-ink-faint);
@@ -58,6 +58,18 @@
   --font-sans: var(--font-family-sans);
   --font-heading: var(--font-family-sans);
   --font-mono: var(--font-family-mono);
+
+  --text-display: var(--font-size-display);
+  --text-display--line-height: 1.2;
+  --text-display--letter-spacing: var(--tracking-display);
+  --text-figure: var(--font-size-figure);
+  --text-figure--line-height: 1.05;
+  --text-figure--letter-spacing: var(--tracking-figure);
+  --text-figure-sm: var(--font-size-figure-sm);
+  --text-figure-sm--line-height: 1.15;
+  --text-figure-sm--letter-spacing: var(--tracking-figure);
+  --text-title: var(--font-size-title);
+  --text-title--line-height: 1.35;
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -93,10 +105,11 @@
 
   /* Product roles beyond shadcn. */
   --color-surface-raised: var(--palette-surface-raised);
+  --color-surface-sunken: var(--palette-surface-sunken);
   --color-faint: var(--palette-ink-faint);
   --color-line-strong: var(--palette-line-strong);
-  --color-jade: var(--palette-jade);
-  --color-jade-soft: var(--palette-jade-soft);
+  --color-brand: var(--palette-brand);
+  --color-brand-soft: var(--palette-brand-soft);
   --color-gold: var(--palette-gold);
   --color-gold-soft: var(--palette-gold-soft);
   --color-up: var(--palette-market-up);
@@ -104,19 +117,20 @@
   --color-down: var(--palette-market-down);
   --color-down-soft: var(--palette-market-down-soft);
   --color-flat: var(--palette-market-flat);
+  --color-danger-soft: var(--palette-danger-soft);
   --color-warning: var(--palette-warning);
-  --color-success: var(--palette-success);
 
   --radius-sm: calc(var(--radius) * 0.5);
   --radius-md: calc(var(--radius) * 0.75);
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.33);
-  --radius-2xl: calc(var(--radius) * 1.66);
-  --radius-3xl: calc(var(--radius) * 2);
-  --radius-4xl: calc(var(--radius) * 2.5);
+  --radius-xl: calc(var(--radius) * 1.25);
+  --radius-2xl: var(--radius-card);
+  --radius-3xl: calc(var(--radius-card) * 1.25);
+  --radius-4xl: calc(var(--radius-card) * 1.5);
 
   --shadow-card: var(--shadow-card);
   --shadow-pop: var(--shadow-pop);
+  --shadow-bar: var(--shadow-bar);
 }
 
 @layer base {
@@ -128,6 +142,8 @@
     color-scheme: light;
     font-feature-settings: "ss01", "cv11";
     -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    scroll-padding-top: calc(var(--topbar-height) + 1rem);
   }
   html.dark {
     color-scheme: dark;
@@ -135,6 +151,8 @@
   body {
     @apply bg-background text-foreground;
     min-height: 100dvh;
+    font-size: var(--font-size-body);
+    line-height: 1.55;
   }
   #root {
     isolation: isolate;
@@ -144,7 +162,7 @@
     outline-offset: 2px;
   }
   ::selection {
-    background: var(--palette-jade-soft);
+    background: var(--palette-brand-soft);
   }
 }
 
@@ -155,16 +173,31 @@
   }
   /* A small label above a value or a list; never uppercase, so CJK and English read the same. */
   .eyebrow {
-    font-size: 0.75rem;
+    font-size: var(--font-size-caption);
     font-weight: 500;
     color: var(--muted-foreground);
   }
-  /* The page title. Pages have one; panels use text-sm headings under it. */
+  /* The page title. Pages have one; cards use the title size under it. */
   .display {
-    font-size: var(--font-size-title);
-    letter-spacing: var(--tracking-title);
-    line-height: 1.25;
-    font-weight: 600;
+    font-size: var(--font-size-display);
+    letter-spacing: var(--tracking-display);
+    line-height: 1.2;
+    font-weight: 650;
+  }
+  /* A link in one cell whose target covers its whole row or card; the row or card is `relative`. */
+  .stretched-link::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+  }
+  /* A page's hero number: an index level or a price. */
+  .figure {
+    font-size: var(--font-size-figure);
+    letter-spacing: var(--tracking-figure);
+    line-height: 1.05;
+    font-weight: 650;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
   }
 }
 

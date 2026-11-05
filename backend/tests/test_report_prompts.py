@@ -17,11 +17,11 @@ from b_application.use_cases.process.ai_analyser import AiAnalyser
 from b_application.use_cases.valuation.valuation_explainer import ValuationExplainer
 from c_infrastructure.ai_models.sentiment_classifier import AiSentimentClassifier
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
-from d_presentation.dependencies import load_settings
+from d_presentation.dependencies import get_project_root, load_settings
 
 pytestmark = pytest.mark.asyncio
 
-SHIPPED = load_settings()
+SHIPPED = load_settings(get_project_root())
 """config/appsetting.yaml with the prompts of config/instructions.yaml, as the CLI and the Web API load them."""
 
 LAST_CLOSED_SESSION = date(2026, 10, 16)

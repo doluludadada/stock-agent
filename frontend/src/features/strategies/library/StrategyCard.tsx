@@ -62,7 +62,7 @@ export function StrategyCard(props: StrategyCardProps) {
         </div>
       </div>
 
-      <p className="line-clamp-2 text-sm text-pretty text-muted-foreground">
+      <p className="text-sm text-pretty text-muted-foreground">
         {labels.purpose(strategy) || t('card.noDescription')}
       </p>
 

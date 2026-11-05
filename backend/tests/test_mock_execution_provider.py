@@ -9,6 +9,7 @@ from a_domain.model.trading.order import Order
 from a_domain.types.enums import OrderStatus, OrderType, TimeInForce, TradeAction
 from a_domain.types.ids import new_decision_id, new_run_id
 from c_infrastructure.database.db_connector import DatabaseConnector
+from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
 from c_infrastructure.trading.mock.mock_execution_provider import MockExecutionProvider
 
 NOW = datetime(2026, 10, 19, 10, 0, tzinfo=UTC)
@@ -32,7 +33,7 @@ async def open_broker(
     if create_tables:
         await db.init_db()
 
-    return db, MockExecutionProvider(db=db, config=config, logger=SilentLogger())
+    return db, MockExecutionProvider(db=db.for_owner(LEGACY_OWNER_ID), config=config, logger=SilentLogger())
 
 
 def order(

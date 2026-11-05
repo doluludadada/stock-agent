@@ -1,95 +1,198 @@
-import {
-  Activity,
-  Calculator,
-  Layers,
-  LayoutDashboard,
-  LockKeyhole,
-  LockKeyholeOpen,
-  Menu,
-  Settings2,
-  Sparkles,
-  Star,
-  Wallet,
-  WifiOff,
-} from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
+import { Ellipsis, Search, WifiOff } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { NavLink, Outlet, useLocation } from 'react-router'
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router'
+import { UserMenu } from '@/features/auth'
 import { useTranslation } from '@/i18n'
-import { session, useSession } from '@/shared/api'
+import { useSession } from '@/shared/api'
+import { paths } from '@/shared/config/paths'
 import { useOnline } from '@/shared/lib/use-online'
 import { cn } from '@/shared/lib/utils'
-import { Button } from '@/shared/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/shared/ui/sheet'
-import { UnlockDialog } from '@/shared/ui/unlock'
-import { paths } from '@/shared/config/paths'
 import { BrandMark } from './BrandMark'
-import { PreferenceMenu } from './PreferenceMenu'
-import { StockSearch } from './StockSearch'
+import { isInTab, navSections, TAB_PAGES, type NavItem, type NavSection } from './navigation'
+import { PreferenceControls, PreferenceMenu } from './PreferenceMenu'
+import { SearchField, SearchPalette } from './StockSearch'
 
-const NAV = [
-  { to: paths.overview, key: 'overview', icon: LayoutDashboard, end: true },
-  { to: paths.strategies, key: 'strategies', icon: Layers, end: true },
-  { to: paths.newStrategy, key: 'builder', icon: Sparkles, end: false },
-  { to: paths.runs, key: 'runs', icon: Activity, end: false },
-  { to: paths.valuation, key: 'valuation', icon: Calculator, end: false },
-  { to: paths.watchlist, key: 'watchlist', icon: Star, end: false },
-  { to: paths.account, key: 'account', icon: Wallet, end: false },
-] as const
+/**
+ * One shell for every width: a tab bar on a phone, a rail of icons on a tablet, the full sidebar on a desktop. The
+ * side column is a grid cell as tall as the page, so its background never stops part way down.
+ */
+export function AppShell() {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const current = useSession()
+  const [searching, setSearching] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
+  const sections = navSections(current.status === 'signedIn' ? current.user.permissions : [])
 
-const ADMIN_NAV = [{ to: paths.adminSettings, key: 'admin', icon: Settings2, end: false }] as const
+  useEffect(() => {
+    window.scrollTo({ top: 0 })
+  }, [location.pathname])
 
-interface NavItem {
-  to: string
-  key: string
-  icon: LucideIcon
-  end: boolean
-}
-
-function NavItems({ onNavigate }: { onNavigate?: () => void }) {
   return (
-    <>
-      <NavList items={NAV} onNavigate={onNavigate} />
-      <div className="my-3 border-t" />
-      <NavList items={ADMIN_NAV} onNavigate={onNavigate} />
-    </>
+    <div className="min-h-dvh md:grid md:grid-cols-[var(--rail-width)_minmax(0,1fr)] lg:grid-cols-[var(--sidebar-width)_minmax(0,1fr)]">
+      <a
+        href="#main"
+        className="sr-only z-50 rounded-md bg-primary px-3 py-2 text-primary-foreground focus:not-sr-only focus:fixed focus:top-3 focus:left-3"
+      >
+        {t('skipToContent')}
+      </a>
+
+      <aside className="hidden border-r bg-sidebar md:block">
+        <div className="sticky top-0 flex h-dvh flex-col">
+          <div className="flex h-(--topbar-height) items-center justify-center px-3 lg:justify-start lg:px-4">
+            <BrandMark compact className="lg:hidden" />
+            <BrandMark className="hidden lg:flex" />
+          </div>
+          <nav aria-label={t('nav.label')} className="flex-1 overflow-y-auto px-2 pt-2 pb-6 lg:px-3">
+            <SideNav sections={sections} />
+          </nav>
+        </div>
+      </aside>
+
+      <div className="min-w-0">
+        <header className="sticky top-0 z-20 flex h-(--topbar-height) items-center gap-2 border-b bg-background/85 px-4 backdrop-blur-md md:px-6 lg:px-8">
+          <div className="md:hidden">
+            <BrandMark />
+          </div>
+          <SearchField onOpen={() => setSearching(true)} className="hidden md:flex" />
+          <div className="ml-auto flex items-center gap-1">
+            <PreferenceMenu />
+            <UserMenu adminLinks={{ users: paths.users, settings: paths.adminSettings }} onSignedOut={() => navigate(paths.overview)} />
+          </div>
+        </header>
+
+        <main
+          id="main"
+          tabIndex={-1}
+          className="mx-auto w-full max-w-(--content-max) px-4 pt-5 pb-[calc(var(--tabbar-height)+env(safe-area-inset-bottom)+1.5rem)] outline-none md:px-6 md:pb-10 lg:px-8 lg:pt-7"
+        >
+          <OfflineNotice />
+          <Outlet />
+        </main>
+      </div>
+
+      <TabBar onSearch={() => setSearching(true)} onMore={() => setMoreOpen(true)} moreActive={!Object.values(TAB_PAGES).some((item) => isInTab(item, location.pathname))} />
+      <MoreSheet open={moreOpen} onOpenChange={setMoreOpen} sections={sections} />
+      <SearchPalette open={searching} onOpenChange={setSearching} sections={sections} />
+    </div>
   )
 }
 
-function NavList({ items, onNavigate }: { items: readonly NavItem[]; onNavigate?: () => void }) {
+function SideNav({ sections }: { sections: NavSection[] }) {
   const { t } = useTranslation()
   return (
-    <ul className="space-y-0.5">
-      {items.map((item) => (
-        <li key={item.key}>
-          <NavLink
-            to={item.to}
-            end={item.end}
-            onClick={onNavigate}
-            className={({ isActive }) =>
-              cn(
-                'group relative flex h-8 items-center gap-2.5 rounded-lg px-2.5 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground',
-                isActive && 'bg-sidebar-accent font-medium text-foreground',
-              )
-            }
-          >
-            {({ isActive }) => (
-              <>
-                <span
-                  aria-hidden
-                  className={cn(
-                    'absolute top-1/2 left-0 h-4 w-0.5 -translate-y-1/2 rounded-full bg-primary transition-opacity',
-                    isActive ? 'opacity-100' : 'opacity-0',
-                  )}
-                />
-                <item.icon aria-hidden className={cn('size-4', isActive && 'text-primary')} />
-                {t(`nav.${item.key}`)}
-              </>
-            )}
-          </NavLink>
-        </li>
+    <div className="space-y-5">
+      {sections.map((section) => (
+        <div key={section.key} className="space-y-1">
+          <p className="eyebrow hidden px-2.5 pb-1 lg:block">{t(`nav.section.${section.key}`)}</p>
+          <div aria-hidden className="mx-3 mb-2 border-t first:hidden lg:hidden" />
+          <ul className="space-y-0.5">
+            {section.items.map((item) => (
+              <li key={item.key}>
+                <NavLink
+                  to={item.to}
+                  end={item.end}
+                  className={({ isActive }) =>
+                    cn(
+                      'group flex min-h-14 flex-col items-center justify-center gap-1 rounded-lg px-1 text-center text-[0.6875rem] leading-tight text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
+                      'lg:min-h-9 lg:flex-row lg:justify-start lg:gap-2.5 lg:px-2.5 lg:text-left lg:text-sm',
+                      isActive && 'bg-brand-soft font-medium text-brand hover:bg-brand-soft hover:text-brand',
+                    )
+                  }
+                >
+                  <item.icon aria-hidden className="size-5 shrink-0 lg:size-4" />
+                  {t(`nav.${item.key}`)}
+                </NavLink>
+              </li>
+            ))}
+          </ul>
+        </div>
       ))}
-    </ul>
+    </div>
+  )
+}
+
+const tabClass = 'flex min-h-11 flex-1 flex-col items-center justify-center gap-0.5 text-[0.6875rem] font-medium transition-colors'
+
+/** The phone's bottom bar: the market, the watchlist, search, the account and everything else. */
+function TabBar({ onSearch, onMore, moreActive }: { onSearch: () => void; onMore: () => void; moreActive: boolean }) {
+  const { t } = useTranslation()
+  const location = useLocation()
+  const tab = (name: keyof typeof TAB_PAGES, item: NavItem) => {
+    const active = isInTab(item, location.pathname)
+    return (
+      <Link to={item.to} aria-current={active ? 'page' : undefined} className={cn(tabClass, active ? 'text-brand' : 'text-muted-foreground')}>
+        <item.icon aria-hidden className={cn('size-5', active && name === 'watchlist' && 'fill-current')} />
+        {t(`nav.tab.${name}`)}
+      </Link>
+    )
+  }
+  return (
+    <nav
+      aria-label={t('nav.tabs')}
+      className="fixed inset-x-0 bottom-0 z-30 flex border-t bg-background/92 px-1 pb-[env(safe-area-inset-bottom)] shadow-bar backdrop-blur-md md:hidden"
+    >
+      <div className="flex h-(--tabbar-height) w-full items-stretch">
+        {tab('market', TAB_PAGES.market)}
+        {tab('watchlist', TAB_PAGES.watchlist)}
+        <button type="button" onClick={onSearch} className={cn(tabClass, 'text-muted-foreground')}>
+          <span className="grid size-9 place-items-center rounded-full bg-brand text-primary-foreground shadow-card">
+            <Search aria-hidden className="size-4.5" />
+          </span>
+          <span className="sr-only">{t('nav.tab.search')}</span>
+        </button>
+        {tab('account', TAB_PAGES.account)}
+        <button type="button" onClick={onMore} aria-haspopup="dialog" className={cn(tabClass, moreActive ? 'text-brand' : 'text-muted-foreground')}>
+          <Ellipsis aria-hidden className="size-5" />
+          {t('nav.tab.more')}
+        </button>
+      </div>
+    </nav>
+  )
+}
+
+/** Every page, the language and the theme, in a sheet that rises from the tab bar. */
+function MoreSheet({ open, onOpenChange, sections }: { open: boolean; onOpenChange: (open: boolean) => void; sections: NavSection[] }) {
+  const { t } = useTranslation()
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="bottom" className="max-h-[85dvh] gap-0 overflow-y-auto rounded-t-2xl bg-card pb-[calc(env(safe-area-inset-bottom)+1rem)]">
+        <SheetHeader className="pb-2">
+          <SheetTitle>{t('nav.moreTitle')}</SheetTitle>
+          <SheetDescription className="sr-only">{t('nav.label')}</SheetDescription>
+        </SheetHeader>
+        <nav aria-label={t('nav.label')} className="space-y-5 px-4">
+          {sections.map((section) => (
+            <div key={section.key}>
+              <p className="eyebrow mb-2">{t(`nav.section.${section.key}`)}</p>
+              <ul className="grid grid-cols-2 gap-2">
+                {section.items.map((item) => (
+                  <li key={item.key}>
+                    <NavLink
+                      to={item.to}
+                      end={item.end}
+                      onClick={() => onOpenChange(false)}
+                      className={({ isActive }) =>
+                        cn('flex min-h-12 items-center gap-2.5 rounded-xl border px-3 text-sm', isActive ? 'border-brand/30 bg-brand-soft font-medium text-brand' : 'bg-background')
+                      }
+                    >
+                      <item.icon aria-hidden className="size-4.5 shrink-0" />
+                      {t(`nav.${item.key}`)}
+                    </NavLink>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+          <div>
+            <p className="eyebrow mb-2">{t('preferences.title')}</p>
+            <PreferenceControls />
+          </div>
+        </nav>
+      </SheetContent>
+    </Sheet>
   )
 }
 
@@ -104,108 +207,6 @@ function OfflineNotice() {
           {t('offline')}
         </p>
       )}
-    </div>
-  )
-}
-
-/** Unlocks or locks the owner's private data for this tab. */
-function SessionButton() {
-  const { t } = useTranslation()
-  const { unlocked } = useSession('owner')
-  const [open, setOpen] = useState(false)
-  if (unlocked) {
-    return (
-      <Button type="button" variant="ghost" size="sm" onClick={() => session.lock('owner')} aria-label={t('session.lock')} className="gap-1.5 text-jade">
-        <LockKeyholeOpen aria-hidden className="size-4" />
-        <span aria-hidden className="hidden md:inline">
-          {t('session.unlocked')}
-        </span>
-      </Button>
-    )
-  }
-  return (
-    <>
-      <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)} aria-label={t('session.unlock')} className="gap-1.5">
-        <LockKeyhole aria-hidden className="size-4" />
-        <span aria-hidden className="hidden md:inline">
-          {t('session.unlock')}
-        </span>
-      </Button>
-      <UnlockDialog scope="owner" open={open} onOpenChange={setOpen} />
-    </>
-  )
-}
-
-export function AppShell() {
-  const { t } = useTranslation()
-  const [menuOpen, setMenuOpen] = useState(false)
-  const location = useLocation()
-
-  useEffect(() => {
-    window.scrollTo({ top: 0 })
-  }, [location.pathname])
-
-  return (
-    <div className="min-h-dvh">
-      <a
-        href="#main"
-        className="sr-only z-50 rounded-md bg-primary px-3 py-2 text-primary-foreground focus:not-sr-only focus:fixed focus:top-3 focus:left-3"
-      >
-        {t('skipToContent')}
-      </a>
-
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-(--sidebar-width) flex-col border-r bg-sidebar lg:flex">
-        <div className="flex h-(--topbar-height) items-center px-4">
-          <BrandMark />
-        </div>
-        <nav aria-label={t('nav.label')} className="flex-1 overflow-y-auto px-2.5 py-3">
-          <NavItems />
-        </nav>
-      </aside>
-
-      <div className="lg:pl-(--sidebar-width)">
-        <header className="sticky top-0 z-20 flex h-(--topbar-height) items-center gap-2 border-b bg-background/90 px-4 backdrop-blur sm:px-6">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="lg:hidden"
-            onClick={() => setMenuOpen(true)}
-            aria-label={t('nav.open')}
-          >
-            <Menu aria-hidden className="size-5" />
-          </Button>
-          <div className="lg:hidden">
-            <BrandMark compact />
-          </div>
-          <div className="flex flex-1 justify-end sm:justify-start">
-            <StockSearch />
-          </div>
-          <SessionButton />
-          <PreferenceMenu />
-        </header>
-
-        <main id="main" tabIndex={-1} className="mx-auto w-full max-w-(--content-max) px-4 py-5 outline-none sm:px-6 lg:py-6">
-          <OfflineNotice />
-          <Outlet />
-        </main>
-      </div>
-
-      <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
-        <SheetContent side="left" className="w-72 bg-sidebar p-0">
-          <SheetHeader className="border-b">
-            <SheetTitle asChild>
-              <div>
-                <BrandMark />
-              </div>
-            </SheetTitle>
-            <SheetDescription className="sr-only">{t('nav.label')}</SheetDescription>
-          </SheetHeader>
-          <nav aria-label={t('nav.label')} className="flex-1 px-2.5">
-            <NavItems onNavigate={() => setMenuOpen(false)} />
-          </nav>
-        </SheetContent>
-      </Sheet>
     </div>
   )
 }

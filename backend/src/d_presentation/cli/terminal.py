@@ -8,9 +8,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from signal import SIGINT, default_int_handler, signal as set_signal_handler
 
+from pydantic import SecretStr
 from rich.console import Console
 from rich.prompt import Confirm, Prompt
 
+from a_domain.model.system.user import User
+from b_application.pipeline import Pipeline
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 
 console = Console()
@@ -19,11 +22,13 @@ console = Console()
 @dataclass
 class CliSession:
     """
-    What one CLI session remembers between menu options: the built-in strategy the user loaded for the runs it starts,
-    or None for the saved settings. It lives only as long as the CLI process: no saved setting and no Web API request
-    sees it.
+    What one CLI session remembers between menu options: the signed-in administrator, the Pipeline built for them,
+    which every menu option runs on, and the built-in strategy the user loaded for the runs it starts, or None for the
+    saved settings. It lives only as long as the CLI process: no saved setting and no Web API request sees it.
     """
 
+    user: User
+    pipeline: Pipeline
     built_in_strategy_id: str | None = None
 
 
@@ -34,6 +39,18 @@ def ask_user(question: str, choices: list[str] | None = None) -> str | None:
 
     try:
         return Prompt.ask(question, choices=choices)
+    except KeyboardInterrupt, EOFError:
+        return None
+    finally:
+        set_signal_handler(SIGINT, asyncio_sigint_handler)
+
+
+def ask_secret(question: str) -> SecretStr | None:
+    """A hidden answer, such as a password. None when the user presses Ctrl-C or Ctrl-D at the prompt."""
+    asyncio_sigint_handler = set_signal_handler(SIGINT, default_int_handler)
+
+    try:
+        return SecretStr(Prompt.ask(question, password=True))
     except KeyboardInterrupt, EOFError:
         return None
     finally:

@@ -104,7 +104,7 @@ export function OperandEditor({ context, path, expression, depth = 0, volumeUnit
       )}
       {canWrap && (
         <div className="col-span-full">
-          <Button type="button" variant="ghost" size="sm" onClick={wrap} className="h-7 px-2 text-xs text-muted-foreground">
+          <Button type="button" variant="ghost" size="sm" onClick={wrap} className="px-2 text-xs text-muted-foreground md:h-7">
             <Sigma aria-hidden className="size-3.5" />
             {t('operand.addMath')}
           </Button>
@@ -120,7 +120,7 @@ function SourcePicker({ value, onChange }: { value: Source; onChange: (source: S
   return (
     <Field label={t('operand.source')} htmlFor={id}>
       <Select value={value} onValueChange={(next) => onChange(next as Source)}>
-        <SelectTrigger id={id} className="h-9 w-full">
+        <SelectTrigger id={id} className="w-full md:h-9">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -151,7 +151,7 @@ function MarketFields({
     <>
       <Field label={t('operand.field')} htmlFor={id}>
         <Select value={expression.field} onValueChange={(field) => onChange({ ...expression, field: field as typeof expression.field })}>
-          <SelectTrigger id={id} className="h-9 w-full">
+          <SelectTrigger id={id} className="w-full md:h-9">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -219,7 +219,7 @@ function IndicatorFields({
     <>
         <Field label={t('operand.indicator')} htmlFor={kindId}>
           <Select value={config.kind} onValueChange={(kind) => changeKind(kind as IndicatorKind)}>
-            <SelectTrigger id={kindId} className="h-9 w-full">
+            <SelectTrigger id={kindId} className="w-full md:h-9">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -244,7 +244,7 @@ function IndicatorFields({
         </Field>
         <Field label={t('operand.setting')} htmlFor={settingId}>
           <Select value={expression.indicatorId} onValueChange={changeSetting}>
-            <SelectTrigger id={settingId} className="h-9 w-full">
+            <SelectTrigger id={settingId} className="w-full md:h-9">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -264,7 +264,7 @@ function IndicatorFields({
         {spec.outputs.length > 1 && (
           <Field label={t('operand.output')} htmlFor={outputId}>
             <Select value={expression.output} onValueChange={(output) => onChange({ ...expression, output: output as IndicatorOutput })}>
-              <SelectTrigger id={outputId} className="h-9 w-full">
+              <SelectTrigger id={outputId} className="w-full md:h-9">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -310,7 +310,7 @@ function IndicatorFields({
               type="button"
               variant="outline"
               size="sm"
-              className="h-7 text-xs"
+              className="text-xs md:h-7"
               onClick={() => edit({ type: 'detachIndicator', conditionId, path, newIndicatorId: newIndicatorId(context.ids) })}
             >
               <Unlink aria-hidden className="size-3.5" />
@@ -354,7 +354,7 @@ function ArithmeticEditor({
           <Sigma aria-hidden className="size-3.5" />
           {t('operand.math')}
         </span>
-        <Button type="button" variant="ghost" size="sm" onClick={unwrap} className="h-7 px-2 text-xs text-muted-foreground">
+        <Button type="button" variant="ghost" size="sm" onClick={unwrap} className="px-2 text-xs text-muted-foreground md:h-7">
           <X aria-hidden className="size-3.5" />
           {t('operand.removeMath')}
         </Button>
@@ -362,7 +362,7 @@ function ArithmeticEditor({
       <OperandEditor context={context} path={[...path, 'left']} expression={expression.left} depth={depth + 1} volumeUnit={volumeUnit} />
       <Field label={t('operand.operator')} htmlFor={id} className="max-w-56">
         <Select value={expression.operator} onValueChange={(value) => setOperator(value as ArithmeticOperator)}>
-          <SelectTrigger id={id} className="h-9 w-full">
+          <SelectTrigger id={id} className="w-full md:h-9">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

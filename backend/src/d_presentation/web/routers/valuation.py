@@ -1,10 +1,9 @@
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Query, status
 
 from a_domain.model.valuation.scan import MarketValuation, ScanCriteria
 from a_domain.types.enums import ScanStep
-from d_presentation.dependencies import ApiToken, MarketValuationDependency, RuntimeDependency
 from d_presentation.web.schemas import (
     ExplanationRequest,
     MarketValuationResponse,
@@ -14,8 +13,9 @@ from d_presentation.web.schemas import (
     ValuationReportsResponse,
     ValuationScanResponse,
 )
+from d_presentation.web.session import MarketValuationDependency, NotFound, PrivateAccess, UserPipeline
 
-router = APIRouter(prefix="/valuation", tags=["Valuation"], dependencies=[ApiToken])
+router = APIRouter(prefix="/valuation", tags=["Valuation"], dependencies=[PrivateAccess])
 """
 The valuation menus 5 and 6 over HTTP. Every endpoint is read-only: it records no run, writes no watchlist entry and
 never reaches order execution. Only POST /explanation calls the AI, once per request.
@@ -41,7 +41,7 @@ async def get_market_valuation(cache: MarketValuationDependency) -> MarketValuat
 
 @router.get("/stocks")
 async def value_stocks(
-    runtime: RuntimeDependency,
+    pipeline: UserPipeline,
     cache: MarketValuationDependency,
     stock_ids: Annotated[list[StockId], Query(min_length=1, max_length=20)],
     target_pe: TargetPe | None = None,
@@ -49,14 +49,14 @@ async def value_stocks(
     """Menu 5: the stocks' valuation facts, and their three scenarios at the target P/E. An unknown id is left out."""
     market = await cache.get()
     valuations = [valuation for stock_id in dict.fromkeys(stock_ids) if (valuation := market.find(stock_id)) is not None]
-    reports = runtime.pipeline.appraise_valuations(valuations, target_pe)
+    reports = pipeline.appraise_valuations(valuations, target_pe)
 
     return ValuationReportsResponse(reports=[ValuationReportResponse.model_validate(report) for report in reports])
 
 
 @router.get("/scan")
 async def scan_undervalued(
-    runtime: RuntimeDependency,
+    pipeline: UserPipeline,
     cache: MarketValuationDependency,
     target_pe: TargetPe,
     min_undervaluation: Annotated[float, Query(ge=0, le=10, allow_inf_nan=False)],
@@ -68,10 +68,10 @@ async def scan_undervalued(
     history. No AI call.
     """
     market = await cache.get()
-    scan = runtime.pipeline.screen_valuation(market, ScanCriteria(target_pe=target_pe, min_undervaluation=min_undervaluation))
+    scan = pipeline.screen_valuation(market, ScanCriteria(target_pe=target_pe, min_undervaluation=min_undervaluation))
 
     if technical:
-        scan = await runtime.pipeline.confirm_valuation_technical(scan)
+        scan = await pipeline.confirm_valuation_technical(scan)
 
     return ValuationScanResponse.model_validate(
         {
@@ -88,16 +88,16 @@ async def scan_undervalued(
 
 @router.post("/explanation", responses={status.HTTP_404_NOT_FOUND: {"description": "Not a valued stock."}})
 async def explain_valuation(
-    body: ExplanationRequest, runtime: RuntimeDependency, cache: MarketValuationDependency
+    body: ExplanationRequest, pipeline: UserPipeline, cache: MarketValuationDependency
 ) -> ValuationExplanationResponse:
     """One paid AI call: the AI explains the domain's numbers for one stock with its news. It adds no number."""
     market = await cache.get()
     valuation = market.find(body.stock_id)
 
     if valuation is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No valuation for {body.stock_id}.")
+        raise NotFound(f"No valuation for {body.stock_id}.")
 
-    [report] = runtime.pipeline.appraise_valuations([valuation], body.target_pe)
-    sections = await runtime.pipeline.explain_valuation(report)
+    [report] = pipeline.appraise_valuations([valuation], body.target_pe)
+    sections = await pipeline.explain_valuation(report)
 
     return ValuationExplanationResponse(report=ValuationReportResponse.model_validate(report), sections=sections)

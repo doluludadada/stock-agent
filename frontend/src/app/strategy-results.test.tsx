@@ -7,6 +7,7 @@ import { useSaveStrategySettings } from '@/features/strategies/api/queries'
 import { builtInJson } from '@/features/strategies/model/built-ins.test-support'
 import { useValuationScan } from '@/features/valuation/api'
 import { session } from '@/shared/api'
+import { TEST_USER } from '@/test/users'
 
 /** The backend: it evaluates with whichever strategy is active, and a save switches it. */
 function fakeBackend() {
@@ -49,11 +50,11 @@ describe('saving or switching a strategy', () => {
     client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 60_000 } } })
     backend = fakeBackend()
     vi.stubGlobal('fetch', backend.fetch)
-    session.unlock('owner', 'owner-token')
+    session.signIn(TEST_USER)
   })
 
   afterEach(() => {
-    session.lock('owner')
+    session.signOut()
     vi.unstubAllGlobals()
   })
 

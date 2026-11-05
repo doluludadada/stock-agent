@@ -8,3 +8,8 @@ key). Each set has the same 44 file names: `<viewport>-<theme>-<language>-<page>
 The before set was taken with Playwright's full-page capture, which stops the fixed sidebar at 900 px. The after set
 grows the viewport to the page height instead, because the full-page capture drew the price chart past its panel in
 the image while the page itself measured correctly.
+
+The four `admin` shots in `after/` were taken again after the settings editor replaced the settings form, with one
+save made. The editor's height follows the viewport, so a grown viewport grows the editor with it. These four use the
+full-page capture at 1440 × 900 and 390 × 844, as `tools/capture-screens.ts` now does for a page that never fits a
+grown viewport. On the phone, the bottom bar stays where the screen ended.

@@ -39,3 +39,9 @@ wheels/
 /buzz_archive
 /backend/tests/leetcode
 shioaji.log
+
+# Database backups, and the SinoPac certificate (.pfx or .p12) the owner keeps in secrets/
+/backups/
+/secrets/
+*.pfx
+*.p12

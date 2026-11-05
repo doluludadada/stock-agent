@@ -1,4 +1,6 @@
 const strategies = {
+  summarySignIn: 'Sign in to see the strategy you use',
+  signIn: 'Sign in to keep and use your own strategies',
   untitled: 'Untitled strategy',
   copyName: '{{name}} copy',
   bars: '{{count}} daily bars',
@@ -77,6 +79,8 @@ const strategies = {
     others: 'Other strategies',
     noOthers: 'No other saved strategies.',
     ruleCount: '{{count}} rules',
+    showAllRules: 'Show all {{count}} rules',
+    showFewerRules: 'Show fewer rules',
   },
   toast: {
     activated: '{{name}} is now in use',

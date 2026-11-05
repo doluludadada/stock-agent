@@ -13,36 +13,52 @@ just run-bn   # backend on http://127.0.0.1:8800, one worker process
 just run-fn   # frontend dev server on http://127.0.0.1:5173
 ```
 
-Set two different long random strings in `.env` yourself: `API_TOKEN` (the owner) and `ADMIN_API_TOKEN` (the
-administrator). The UI asks for them in an unlock dialog and keeps them in the tab's memory only, so a reload asks
-again. The dev server forwards same-origin `/v1` requests to `STOCK_AGENT_API_URL` (default `http://127.0.0.1:8800`)
-and adds nothing to them: no token and no CORS header. `HOST` and `PORT` move the backend.
+The first start creates `secrets/accounts.key`, the key of the saved usernames and emails: back up `secrets/` with the
+database. The `ACCOUNTS_KEY` variable overrides the file, for Docker or production; `environment: prod` requires it
+and never creates the file. The dev server
+forwards same-origin `/v1` requests to `STOCK_AGENT_API_URL` (default `http://127.0.0.1:8800`) and adds nothing to
+them: no credential and no CORS header. `HOST` and `PORT` move the backend. On the first start with no user, the
+backend prints a one-time setup code on its console; the first-time setup in the web app needs it.
 
-## Scopes
+## Users and access
 
 The server checks every request. Hiding a menu is never the protection.
 
-| Scope | Credential | Opens |
+| Access | Credential | Opens |
 | --- | --- | --- |
-| Public | none | `GET /v1/technical-settings/built-in-strategies`, `/v1/market/stocks?query`, `/v1/market/most-traded`, `/v1/market/breadth`, `/v1/market/stocks/{id}`, `/v1/market/indexes/{index}` |
-| Owner | `Authorization: Bearer <API_TOKEN>` | every write, runs, decisions, orders, watchlist, account, saved strategies, `/v1/market/stocks/{id}/technical`, valuation |
-| Administrator | `Authorization: Bearer <ADMIN_API_TOKEN>` | `/v1/admin/*` only |
+| Public | none | `/v1/auth/status`, `/setup` (with the console's setup code), `/register`, `/sign-in`, `/sign-out`; `GET /v1/technical-settings/built-in-strategies`, `/v1/market/stocks?query`, `/v1/market/most-traded`, `/v1/market/breadth`, `/v1/market/stocks/{id}`, `/v1/market/indexes/{index}` |
+| Signed in | the session cookie | `/v1/auth/me`, every other write, and the user's own runs, decisions, orders, watchlist, mock account, saved strategies, `/v1/market/stocks/{id}/technical`, valuation |
+| Administrator | the session cookie of an administrator | `/v1/admin/users*` and `/v1/admin/settings*`, `/v1/admin/audit` |
 
-- A scope whose token is unset answers 403 (fail closed). The administrator scope also answers 403 while
-  `ADMIN_API_TOKEN` equals `API_TOKEN`; the owner token never opens it, and the administrator token never opens the
-  owner's data.
-- Every write repeats `"confirm": true` in its body.
+- `POST /v1/auth/sign-in` (a username or an email, in any case, and the password) sets `stock_agent_session`:
+  HttpOnly, SameSite=Strict, Path=/v1, Secure when the request came over https, for `accounts.session_days`. The
+  server keeps only the token's SHA-256 and reads the session and its user on every request, so a deactivation or a
+  new password signs the user out at the next request. `POST /v1/auth/sign-out` ends it.
+- 401 means sign in (no session, an expired or ended one): the only answer that makes the app forget the user. 403
+  means signed in but not allowed (not an administrator, registration closed, a user on a real-broker installation, a
+  write without the app header) and never ends the session. 429 with Retry-After answers sign-in failures past
+  `accounts.sign_in_failures_per_name` (per name and client address) or `sign_in_failures_per_client`, and
+  registrations past `accounts.registrations_per_client`.
+- Every write sends `X-Requested-With: stock-agent` (CSRF: another site cannot add the header without a preflight,
+  which the API never grants) and, but for the `/v1/auth` steps, repeats `"confirm": true` in its body.
+- Each user's data is their own: another user's run id answers 404. A user runs one workflow at a time, and users
+  together run `accounts.max_concurrent_runs` at once (429 past it); an administrator's run always starts. A user's paid AI calls stop at `accounts.daily_ai_calls`
+  a day and every user's together at `accounts.daily_ai_calls_total`; an administrator's count but are never refused.
+- Behind a reverse proxy, the proxy must pass the visitor's address and scheme, or every visitor shares the proxy's
+  address in the attempt limits and the cookie loses `Secure` under TLS: `proxy_set_header X-Forwarded-For
+  $remote_addr; proxy_set_header X-Forwarded-Proto $scheme;` in nginx, and uvicorn's `--proxy-headers` with
+  `FORWARDED_ALLOW_IPS` naming the proxy's address (127.0.0.1 by default; the proxy's bridge address in Docker).
+  `frontend/docs/deployment.md` has the full setup. `Secure` follows the request's scheme rather than being always
+  on, because the owner also signs in over plain http on the local network from a phone, where a `Secure` cookie
+  would never come back.
 - `/v1` answers only the host names in `api.allowed_hosts` (127.0.0.1 and localhost by default): a page on another
-  site cannot reach it through DNS rebinding. The LINE webhook keeps its own signature check and is exempt.
-- Bearer tokens are sent explicitly, never by the browser on its own, so a cross-site form or image cannot act with
-  them (no CSRF). There is no CORS middleware, so another origin cannot read an answer.
+  site cannot reach it through DNS rebinding. The LINE webhook keeps its own signature check and is exempt from the
+  session and the app header.
 - Every `/v1` answer carries `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
   `Referrer-Policy: no-referrer` and `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`.
-- A body over 2 MB, or a chunked body without a length, answers 413 before any route reads it: FastAPI parses a body
-  before it checks the bearer token.
+- A body over 2 MB, or a chunked body without a length, answers 413 before any route reads it.
 - Messages from the server reach the browser through `public_text`: credentials, key-like query parameters and file
   system paths are replaced and long messages are cut. The full text stays in the server log.
-- The UI drops a scope's cached data the moment its token changes or the server rejects it (401).
 
 ## Contract
 
@@ -62,25 +78,86 @@ draft and offers to save it into the newer settings.
 
 ## Settings files
 
-`/admin/settings` edits `config/appsetting.yaml` and `config/instructions.yaml`, named only by the `SettingsFile` id.
+`/v1/admin/settings*` edits every YAML file of `config/` (`appsetting.yaml`, `instructions.yaml`), each named only by
+its `SettingsFile` id (`appsetting`, `instructions`), as a whole text, and the server runs on a saved file at once.
+`tests/test_settings_refusal.py` fails when `config/*.yaml` and `SettingsFile` disagree. Every route needs a signed-in
+administrator (`PrivateAccess` and `EditSystemSettings`: 401 signed out, 403 for a user, who stays signed in), and
+every write the `X-Requested-With: stock-agent` header and `"confirm": true`.
 
-- Only `EditableSetting` paths change (AI model and behaviour, analysis windows, sentiment, collection rules, article
-  quality, the missing-session and official-close limits, valuation, watchlist expiry, display limits, and the six
-  prompts). The environment, broker, order mode, the score weights, buy and sell thresholds, sizing, stop-loss, and
-  the history and quote freshness are `LockedSetting`: shown, never written. Credentials, database, folders and
-  source URLs are neither.
-- A proposal is the current file with the changes applied through ruamel's round-trip mode, which keeps comments and
-  every other setting. It is validated by the same `load_settings` and `validate_trading_environment` that start the
-  app, so placeholders of each prompt are checked too (`placeholders()` in `ai_config.py`). Problems name a location
-  and a message, never a value: a settings error could otherwise echo a value from `.env`.
-- Preview writes nothing. A save needs `confirm`, no problem and the revision (SHA-256 of the file) the page read; a
-  stale one answers 409. It runs under a lock, copies the old text to `.settings-admin/backups/<file>/` (owner-only,
-  the latest 20 kept), writes a temporary file next to the original with its permissions, flushes it to disk and
-  renames it over, then appends a line to `.settings-admin/audit.jsonl` with the paths and revisions, never values.
-  A symlinked file or one outside `config/` is refused.
-- A restore puts a backup back through the same validation, revision check, backup and audit.
-- Every setting applies at the next start: the running process keeps the configuration it loaded. The page shows the
-  file's revision against the one the server runs on, and says when a restart is needed. There is no reload endpoint.
+### What a save does
+
+1. The text is checked the way the app starts, by the one function a start and a reload use too (`startup_settings`):
+   the settings load with the other file as it is on disk, the trading setup, the accounts key (prod refuses to start
+   without `ACCOUNTS_KEY`) and the active AI provider's key. Every problem is located at its file, line and column.
+   Refused: a key that names no setting, a key that names a value the environment owns (`password` under `db`,
+   `OPENAI_API_KEY` under `ai`, the accounts key), YAML anchors and aliases (refused before anything expands them), a
+   prompt outside `instructions.yaml`, a change of `environment`, which changes only when the app restarts, and a
+   lockout of the editor: an
+   `api.allowed_hosts` without the host the save was sent to, or an `api.settings_file_max_bytes` smaller than a
+   settings file.
+2. Every save and every restore needs the administrator's own password in the same request, so a stolen session alone
+   changes no setting. Each try is counted before it is checked, under its own limit
+   (`accounts.settings_password_failures` per administrator and address in `accounts.sign_in_window_minutes`), apart
+   from the sign-in's.
+3. The server opens the app on the new text: the whole startup, the database (a database older than the code is
+   refused, `just db-migrate`) and the broker login included, within `api.settings_build_timeout_seconds` (30), and its
+   database must hold an active administrator account of the one saving. A failure writes nothing.
+4. The file is written byte for byte, after a backup of the old text (`.settings-admin/backups/<file>/`, owner-only,
+   the latest `api.settings_backups_kept`), with an audit line naming the administrator by user id. The new settings
+   are current from the next request on. A request or a run that started earlier finishes on the settings it started
+   with; the earlier settings close when the last of them ends.
+
+An edit made on disk outside the app is loaded the same way within `api.settings_poll_seconds` (2), or kept as a
+refusal with its problems while the server keeps its settings; refused files are tried again once a file changes, or on
+the administrator's reload request. The CLI loads the files again before it prints each menu, and once more after a
+choice that may send an order (menus 2, 3 and 4): when they changed while the menu waited, it says so and prints the
+menu again on them. Every setting a save or a reload puts in place applies at once, `behavior.log_level` and
+`accounts.max_concurrent_runs` included (a run counts against the cap of the settings it starts on). HOST, PORT, `.env`
+and the environment are not edited here. A revision covers the two YAML files only, so an edit of
+`config/strategies/*.json` or `.env` alone reaches the running app at the next reload of a YAML file, or at a restart.
+
+### API contract for the editor page
+
+All bodies are JSON. `revision` is the SHA-256 the page read (64 hex characters).
+
+| Request | Answer |
+| --- | --- |
+| `GET /v1/admin/settings` | `SettingsOverviewResponse` |
+| `GET /v1/admin/settings/{file}` | `SettingsDocumentResponse` |
+| `POST /v1/admin/settings/{file}/preview` `{revision, text}` | `SettingsEditResponse`, nothing written |
+| `PUT /v1/admin/settings/{file}` `{confirm: true, revision, text, password}` | `SettingsEditResponse` with `saved` |
+| `GET /v1/admin/settings/{file}/backups` | `[{backup_id, revision, created_at}]`, newest first |
+| `POST /v1/admin/settings/{file}/backups/{backup_id}/preview` `{revision}` | `SettingsEditResponse` of the backup's text |
+| `POST /v1/admin/settings/{file}/backups/{backup_id}/restore` `{confirm: true, revision, password}` | `SettingsEditResponse`, as a save |
+| `POST /v1/admin/settings/reload` `{confirm: true}` | `SettingsOverviewResponse` after loading the files on disk again, refused ones included |
+| `GET /v1/admin/audit?limit=1..200` | `[{recorded_at, file, action, actor, actor_name, from_revision, to_revision, settings}]`, newest first |
+
+- `SettingsOverviewResponse`: `environment` (the one the server started in; show it read-only), `files` (each
+  `{file, file_name, revision, running_revision, modified_at}`: a revision on disk that differs from the running one
+  is an edit the server has not loaded), `refused` (`null`, or
+  `{revisions, previous, problems, at}` for the last edit on disk the server would not start with, until a file
+  changes again or a reload request applies it), and `draining` (earlier settings still finishing runs).
+- The reload request is the administrator's explicit "Try again": it loads the files on disk now, refused ones that
+  did not change included, because a refusal can come from outside the files (a database that was down, a broker
+  login that failed). Its answer is the overview after it: `refused` is `null` and each `running_revision` equals
+  `revision` when the reload applied; otherwise `refused` holds the new refusal. The watcher and the CLI never retry
+  unchanged refused files on their own.
+- `SettingsDocumentResponse`: `{status: <a files entry>, text}`, the whole text.
+- `SettingsEditResponse`: `file`, `base_revision` (the revision on disk it was compared with), `revision` (the
+  proposed text's; after a save, the file's), `running_revision`, `changed` (every setting path whose value differs,
+  removed or added ones included; an empty list when the text does not parse, and `problems` then holds the parse
+  problem), `diff` (unified diff lines), `problems`, `saved`, and `applied` (the server runs on this revision now).
+- A problem is `{message, file, path, line, column}`; `file`, `path`, `line` and `column` may be `null` (a value from
+  `.env`, the database or the broker). Lines and columns are 1-based: put the caret there. No message holds a value.
+- Every error answer of the API is `{detail, code}`: `detail` in words for a person, `code` a stable `ErrorCode` the
+  page switches on (one per refusal, from `ERROR_ANSWERS` in `web/app.py`; never switch on `detail`). The editor's:
+  403 `password_required` (no password), 403 `password_refused` (a wrong one; the session stays), 403
+  `administrators_only` (a signed-in user who is not an administrator; still signed in), 403 `settings_file_refused` (a
+  symlinked, outside or too large file), 404 `settings_file_missing` (no such file or backup), 409 `settings_conflict`
+  (the file or the running settings moved since the page read them: read again, keep the draft), 422
+  `settings_refused` with `problems` too (the app would not start with it; nothing saved), 422 `settings_edit_refused`,
+  422 `invalid_request` (a body that does not validate; `detail` is then FastAPI's list of fields), and 429
+  `sign_in_throttled` with `Retry-After` (too many wrong passwords).
 
 ## Orders from the Web
 
@@ -105,14 +182,15 @@ that can race the mock account's cash, which `formal-verify-order-gate` lists as
 | Market overview | Live: the TAIEX daily trend over 1M to 1Y (Yahoo Finance `^TWII`, cached like a stock's history; any listed stock or ETF can replace it through `?target=`), the latest session's most traded stocks, and its breadth: advancers, decliners and unchanged stocks from the TWSE and TPEX listings' own change, and each industry's counts and average change, industries from the company profiles. Yahoo serves no TPEX index, so there is none. |
 | Valuation | Live: market reference, specific stocks at a target P/E, undervalued scan with an explicit technical step, AI explanation per confirmed click. |
 | Mock account | Live: positions, P&L, equity curve and as-of, labelled with the broker and order mode. |
-| Settings administration | Live, as described above. |
-| Raw YAML editing, hot reload, sign-in and multiple owners | Not supported. |
+| Settings administration | Live: each settings file whole in a code editor that loads with the administrator's page only, checked by the server as it is typed with each problem at its line and column, saved with the administrator's password; the edits made on disk, the history and restore on the same page. Unsaved text survives a reload of that tab. |
+| Hot reload | A Web save or restore applies at once; an edit made on disk applies within `api.settings_poll_seconds`, or is reported when the app would not start with it. |
+| Accounts | Live: first-time setup with the console's code, sign-in by username or email, open registration, the account menu, and the administrator's users page (role, status, a new password). Each user has their own watchlist, mock account, runs and strategies. |
 
 ## Review findings (2026-11-03)
 
 | # | Severity | Finding | Fix and regression test |
 | --- | --- | --- | --- |
-| 1 | P1 | Account history, runs, decisions, orders and the watchlist answered without a token. | Owner scope on every private read. `test_only_strategy_definitions_and_market_data_are_public`, `test_private_reads_are_refused_while_api_token_is_unset`. |
+| 1 | P1 | Account history, runs, decisions, orders and the watchlist answered without a token. | Owner scope on every private read, now a signed-in session. `test_only_strategy_definitions_and_market_data_are_public`, `test_no_public_route_reaches_a_port_that_holds_a_users_data`. |
 | 2 | P1 | `main.py` and `just run` bound 0.0.0.0 with reload on. | Loopback default, one worker, reload off; `just run-bn`. |
 | 3 | P2 | No Host check, so DNS rebinding could reach the API. | `require_known_host`. `test_an_unknown_host_is_refused_before_any_route`. |
 | 4 | P2 | FastAPI reads a body before the token check, and nothing bounded it. | 413 above 2 MB or chunked. `test_an_oversized_body_is_refused_before_any_route_reads_it`. |
@@ -140,11 +218,14 @@ An independent review of the change found, and this round fixed:
 | R7 | P3 | After a 401 on a watchlist toggle the rollback put the private list back into the cache. | No rollback once the token is gone. |
 | R8 | P3 | A change that would make a settings file too large answered 500. | It is a refused edit (422). |
 
+R1's allowlist is gone since the whole-file editor (2026-11-04): a restore puts the whole backup back through the same
+checks, the password, and the same startup as a save (`tests/test_web_admin.py`).
+
 `test.sh` (staged before this round) imports `c_infrastructure.system.config_loader`, which does not exist; it was
 left as it is.
 
 Checked without a finding: SQL goes through SQLAlchemy with bound parameters; no React `dangerouslySetInnerHTML`;
-the production bundle has no source map, no `VITE_*` value and no token (only UI text naming `API_TOKEN`); news,
+the production bundle has no source map, no `VITE_*` value and no secret; news,
 PTT, AI and YAML text is displayed as text and never executed; no endpoint takes a URL or a file path.
 
 ## Performance
@@ -213,10 +294,11 @@ more in total is mostly the year of 0050 daily bars.
   httpx).
 - `GET /v1/market/stocks/{id}` and `/v1/market/indexes/{index}` are public and fetch an uncached history from Yahoo at
   most once per retry interval; put a rate limit in the reverse proxy before exposing them.
-- Tokens are not accounts: one owner, one administrator. A reload asks for the token again by design.
 - A settings save that answers 409 reloads the file, and the administrator's unsaved changes go with it; the message
   says to make the change again. The strategy designer keeps its draft instead.
-- Settings writes are serialized inside one server process, and the revision is checked again under that lock just
-  before the replace. A hand edit of the file in the instant between that check and the replace would be lost, and the
-  directory is not synced after the replace, so a power cut right after a save can bring back the previous file (never
-  a partial one).
+- Settings saves and reloads are serialized by the runtime switch's lock inside one server process, and the revision is
+  checked again just before the replace. A hand edit of the file in the instant between that check and the rename
+  would be lost, and the directory is not synced after the replace, so a power cut right after a save can bring back
+  the previous file (never a partial one); the next disk check then reloads what is there.
+- A retired runtime's HTTP clients (PTT, Tavily, the news providers) are released by the garbage collector, not closed,
+  when it closes; its database and its broker login are closed.

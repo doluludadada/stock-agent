@@ -9,7 +9,7 @@ from support.settings import shipped_config
 from trading_stack import SilentLogger
 
 from a_domain.model.trading.order import Order
-from a_domain.types.enums import OrderStatus, OrderType, TimeInForce, TradeAction
+from a_domain.types.enums import OrderStatus, OrderType, SystemEnvironment, TimeInForce, TradeAction
 from a_domain.types.ids import new_decision_id, new_run_id
 from b_application.config.trading_config import ShioajiConfig
 from c_infrastructure.trading.shioaji.execution_provider import ORDER_STATUS, ShioajiExecutionProvider
@@ -30,10 +30,11 @@ def provider(client: FakeShioaji) -> ShioajiExecutionProvider:
 
 
 def unconnected(client: FakeShioaji, simulation: bool) -> ShioajiExecutionProvider:
-    """An adapter whose client has not logged in yet: connect() logs it in."""
-    config = CONFIG.model_copy(update={"shioaji": credentials(simulation)})
+    """An adapter whose client has not logged in yet: connect() logs it in, to simulation as test does or production as prod does."""
+    environment = SystemEnvironment.TEST if simulation else SystemEnvironment.PROD
+    login = credentials().login(environment)
 
-    return ShioajiExecutionProvider(client=client, config=config, logger=SilentLogger())
+    return ShioajiExecutionProvider(client=client, login=login, config=CONFIG, logger=SilentLogger())
 
 
 def order(
@@ -61,9 +62,10 @@ def sent(client: FakeShioaji) -> list[tuple]:
     return [(trade.order.order_lot, trade.order.quantity, trade.order.order_type, trade.order.price) for trade in client.placed]
 
 
-def credentials(simulation: bool) -> ShioajiConfig:
+def credentials() -> ShioajiConfig:
+    """Every Shioaji variable set, the test pair to its own values: a login shows which pair its environment read."""
     return ShioajiConfig(
-        simulation=simulation,
+        _env_file=None,
         poll_interval_seconds=0,
         max_polls=3,
         SHIOAJI_API_KEY="key",
@@ -71,6 +73,8 @@ def credentials(simulation: bool) -> ShioajiConfig:
         SHIOAJI_CA_PATH="/certs/Sinopac.pfx",
         SHIOAJI_CA_PASSWORD="ca-password",
         SHIOAJI_PERSON_ID="A123456789",
+        SHIOAJI_API_KEY_TEST="test-key",
+        SHIOAJI_SECRET_KEY_TEST="test-secret",
     )
 
 
@@ -362,20 +366,22 @@ async def test_get_account_refuses_a_balance_the_broker_reports_as_an_error() ->
         await provider(client).get_account()
 
 
-async def test_simulation_login_uses_the_api_key_pair_and_no_ca() -> None:
+async def test_the_test_environment_logs_in_to_simulation_with_only_the_test_key_pair_and_no_ca() -> None:
     client = FakeShioaji()
 
     await unconnected(client, simulation=True).connect()
 
-    assert ([(login["api_key"], login["secret_key"]) for login in client.logins], client.ca_activations) == ([("key", "secret")], [])
+    logins = [(login["api_key"], login["secret_key"]) for login in client.logins]
+    assert (logins, client.ca_activations) == ([("test-key", "test-secret")], [])
     assert client.stock_account is client.account_at_login
 
 
-async def test_production_login_activates_the_ca() -> None:
+async def test_the_prod_environment_logs_in_with_the_production_key_pair_and_activates_the_ca() -> None:
     client = FakeShioaji(simulation=False)
 
     await unconnected(client, simulation=False).connect()
 
+    assert [(login["api_key"], login["secret_key"]) for login in client.logins] == [("key", "secret")]
     assert client.ca_activations == [{"ca_path": "/certs/Sinopac.pfx", "ca_passwd": "ca-password", "person_id": "A123456789"}]
 
 

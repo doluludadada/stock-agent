@@ -1,15 +1,22 @@
 from fastapi import APIRouter
 
-from d_presentation.dependencies import KnownHost
-from d_presentation.web.routers import account, admin, market, runs, technical_settings, valuation, watchlist, webhook_router
+from d_presentation.web.routers import (
+    account,
+    admin,
+    admin_users,
+    auth,
+    market,
+    runs,
+    technical_settings,
+    valuation,
+    watchlist,
+    webhook_router,
+)
+from d_presentation.web.session import AppRequest, KnownHost
 
 router = APIRouter(prefix="/v1")
 
-router.include_router(runs.router, dependencies=[KnownHost])
-router.include_router(watchlist.router, dependencies=[KnownHost])
-router.include_router(technical_settings.router, dependencies=[KnownHost])
-router.include_router(account.router, dependencies=[KnownHost])
-router.include_router(market.router, dependencies=[KnownHost])
-router.include_router(valuation.router, dependencies=[KnownHost])
-router.include_router(admin.router, dependencies=[KnownHost])
+for module in (auth, runs, watchlist, technical_settings, account, market, valuation, admin, admin_users):
+    router.include_router(module.router, dependencies=[KnownHost, AppRequest])
+
 router.include_router(webhook_router.router, prefix="/webhook")

@@ -104,6 +104,7 @@ class FakeShioaji:
 
     stock_account: StockAccount | None = None
     logins: list[dict] = field(default_factory=list)
+    logouts: int = 0
     ca_activations: list[dict] = field(default_factory=list)
     placed: list[Trade] = field(default_factory=list)
     cancelled: list[Trade] = field(default_factory=list)
@@ -127,6 +128,10 @@ class FakeShioaji:
 
         self.stock_account = self.account_at_login
         return [self.stock_account] if self.stock_account else []
+
+    def logout(self) -> bool:
+        self.logouts += 1
+        return True
 
     def activate_ca(self, ca_path: str, ca_passwd: str, person_id: str = "", store: int = 0) -> bool:
         self.ca_activations.append({"ca_path": ca_path, "ca_passwd": ca_passwd, "person_id": person_id})

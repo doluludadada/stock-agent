@@ -11,15 +11,17 @@ from support.settings import shipped_config
 
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.watchlist import WatchlistEntry
-from a_domain.types.enums import WatchlistType
+from a_domain.types.enums import SettingsFile, WatchlistType
 from b_application.config.market_data_config import MarketHoursConfig
+from b_application.config.settings_loader import InvalidSettingsError
 from b_application.config.trading_config import WatchlistConfig
 from b_application.use_cases.trade.watch_stocks import WatchStocks
 from c_infrastructure.database.db_connector import DatabaseConnector
+from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
 from c_infrastructure.database.models.watchlist_dto import WatchlistDTO
 from c_infrastructure.database.repositories.watchlist_repository import WatchlistRepository
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
-from d_presentation.dependencies import load_settings
+from d_presentation.dependencies import get_project_root, load_settings
 
 FRIDAY_EVENING = datetime(2026, 10, 30, 18, 0, tzinfo=TAIWAN_TIMEZONE)
 
@@ -43,7 +45,7 @@ class Watchlist:
 
     def __init__(self, db: DatabaseConnector, automatic_expiry_sessions: int = 1) -> None:
         self.clock = SettableClock()
-        self.repository = WatchlistRepository(db=db, logger=SilentLogger(), market_clock=self.clock)
+        self.repository = WatchlistRepository(db.for_owner(LEGACY_OWNER_ID), SilentLogger(), self.clock)
         config = shipped_config().model_copy(
             update={"watchlist": WatchlistConfig(automatic_expiry_sessions=automatic_expiry_sessions)}
         )
@@ -187,8 +189,12 @@ async def test_an_entry_without_a_type_is_refused_before_the_repository_can_save
 async def test_a_stored_row_without_a_type_fails_to_load_instead_of_reading_as_technical(
     database: DatabaseConnector, watchlist: Watchlist
 ) -> None:
-    async with database.get_session() as session:
-        session.add(WatchlistDTO(stock_id="2330", type=cast(WatchlistType, ""), created_at=FRIDAY_EVENING, expires_at=None))
+    async with database.for_owner(LEGACY_OWNER_ID).owner_session() as session:
+        session.add(
+            WatchlistDTO(
+                owner_id=LEGACY_OWNER_ID, stock_id="2330", type=cast(WatchlistType, ""), created_at=FRIDAY_EVENING, expires_at=None
+            )
+        )
         await session.commit()
 
     with pytest.raises(ValueError, match="WatchlistType"):
@@ -213,7 +219,14 @@ async def test_the_cli_reports_newly_added_and_already_present_manual_stocks(cap
 
 
 def test_the_watchlist_config_counts_sessions_and_refuses_the_old_hours_key() -> None:
-    assert load_settings().watchlist.automatic_expiry_sessions == 1
+    root = get_project_root()
+    text = (root / "config" / "appsetting.yaml").read_text(encoding="utf-8")
+    old_key = text.replace("  automatic_expiry_sessions: 1", "  automatic_expiry_hours: 24", 1)
 
-    with pytest.raises(ValidationError, match="automatic_expiry_hours"):
-        WatchlistConfig.model_validate({"automatic_expiry_hours": 24})
+    assert load_settings(root).watchlist.automatic_expiry_sessions == 1
+    with pytest.raises(InvalidSettingsError) as refused:
+        load_settings(root, {SettingsFile.APPSETTING: old_key})
+
+    assert [(problem.path, problem.message) for problem in refused.value.problems] == [
+        ("watchlist.automatic_expiry_hours", "names no setting")
+    ]

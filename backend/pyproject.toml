@@ -26,7 +26,8 @@ dependencies = [
     "beautifulsoup4>=4.14.3",
     "lxml>=6.0.2",
     "anthropic>=2.4.0",
-    "ruamel-yaml>=0.18",
+    "argon2-cffi>=25.1.0",
+    "cryptography>=50.0.2",
 ]
 
 [dependency-groups]

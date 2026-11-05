@@ -54,7 +54,7 @@ def market_harness(now: datetime = AFTER_CLOSE_FRIDAY, config: AppConfig | None 
 def appraise(harness: CliHarness, market: MarketValuation, stock_id: str, target_pe: float) -> ValuationReport:
     valuation = market.find(stock_id)
     assert valuation is not None
-    [report] = harness.runtime.pipeline.appraise_valuations([valuation], target_pe)
+    [report] = harness.pipeline.appraise_valuations([valuation], target_pe)
     return report
 
 
@@ -68,7 +68,7 @@ def capture_cli_output(monkeypatch: pytest.MonkeyPatch) -> io.StringIO:
 async def test_market_load_values_every_stock_from_filings_and_official_closes() -> None:
     harness = market_harness()
 
-    market = await harness.runtime.pipeline.load_market_valuation()
+    market = await harness.pipeline.load_market_valuation()
 
     assert harness.fundamentals.requested == [{Q(2026, 3), Q(2026, 2), Q(2025, 4), Q(2025, 3), Q(2025, 2)}]
     tsmc = market.find("2330")
@@ -89,7 +89,7 @@ async def test_failed_quarter_is_reported_and_never_turns_into_zero() -> None:
     harness = market_harness()
     harness.fundamentals.failed_quarters.add(Q(2025, 4))
 
-    market = await harness.runtime.pipeline.load_market_valuation()
+    market = await harness.pipeline.load_market_valuation()
 
     assert market.find("2330").eps == EpsUnavailable(EpsUnavailableReason.SOURCE_FAILED, Q(2025, 4))
     assert any("2025Q4" in warning for warning in market.source_warnings)
@@ -100,7 +100,7 @@ async def test_a_quarter_whose_refresh_failed_is_reported_with_the_age_of_the_pa
     harness = market_harness()
     harness.fundamentals.refresh_failed_quarters.add(Q(2026, 3))
 
-    market = await harness.runtime.pipeline.load_market_valuation()
+    market = await harness.pipeline.load_market_valuation()
 
     assert isinstance(market.find("1232").eps, Eps)
     assert market.source_warnings == (
@@ -120,9 +120,9 @@ async def test_numbers_come_from_the_domain_and_never_from_the_ai() -> None:
         "fair_price": 9999,
         "eps": 123.45,
     }
-    market = await harness.runtime.pipeline.load_market_valuation()
+    market = await harness.pipeline.load_market_valuation()
 
-    sections = await harness.runtime.pipeline.explain_valuation(appraise(harness, market, "2330", 25))
+    sections = await harness.pipeline.explain_valuation(appraise(harness, market, "2330", 25))
 
     prompt = harness.ai.calls[0].prompt
     assert "27.99x" in prompt
@@ -139,9 +139,9 @@ async def test_numbers_come_from_the_domain_and_never_from_the_ai() -> None:
 @pytest.mark.asyncio
 async def test_loss_making_stock_never_asks_the_ai_for_a_fair_price() -> None:
     harness = market_harness()
-    market = await harness.runtime.pipeline.load_market_valuation()
+    market = await harness.pipeline.load_market_valuation()
 
-    await harness.runtime.pipeline.explain_valuation(appraise(harness, market, "1101", 25))
+    await harness.pipeline.explain_valuation(appraise(harness, market, "1101", 25))
 
     prompt = harness.ai.calls[0].prompt
     assert "No fair price was computed because: loss-making, P/E not applicable" in prompt
@@ -153,9 +153,9 @@ async def test_loss_making_stock_never_asks_the_ai_for_a_fair_price() -> None:
 async def test_failed_ai_call_still_yields_every_report_item() -> None:
     harness = market_harness()
     harness.ai.failures["2330"] = TimeoutError("AI provider timed out")
-    market = await harness.runtime.pipeline.load_market_valuation()
+    market = await harness.pipeline.load_market_valuation()
 
-    explained = await harness.runtime.pipeline.explain_valuation(appraise(harness, market, "2330", 25))
+    explained = await harness.pipeline.explain_valuation(appraise(harness, market, "2330", 25))
 
     sections = {section.title: section.lines for section in explained}
     assert len(sections) == 11
@@ -165,9 +165,9 @@ async def test_failed_ai_call_still_yields_every_report_item() -> None:
 @pytest.mark.asyncio
 async def test_scan_then_technical_step_records_where_each_stock_left() -> None:
     harness = market_harness()
-    market = await harness.runtime.pipeline.load_market_valuation()
+    market = await harness.pipeline.load_market_valuation()
 
-    strict = harness.runtime.pipeline.screen_valuation(market, ScanCriteria(target_pe=20, min_undervaluation=0.0))
+    strict = harness.pipeline.screen_valuation(market, ScanCriteria(target_pe=20, min_undervaluation=0.0))
     assert [report.stock.stock_id for report in strict.survivors] == ["2603", "1232"]
     assert {elimination.report.stock.stock_id: elimination.reason for elimination in strict.eliminations} == {
         "2330": EliminationReason.BELOW_MIN_UNDERVALUATION,
@@ -175,8 +175,8 @@ async def test_scan_then_technical_step_records_where_each_stock_left() -> None:
         "0050": EliminationReason.EPS_UNAVAILABLE,
     }
 
-    confirmed = await harness.runtime.pipeline.confirm_valuation_technical(
-        harness.runtime.pipeline.screen_valuation(market, ScanCriteria(target_pe=30, min_undervaluation=0.0))
+    confirmed = await harness.pipeline.confirm_valuation_technical(
+        harness.pipeline.screen_valuation(market, ScanCriteria(target_pe=30, min_undervaluation=0.0))
     )
 
     assert [report.stock.stock_id for report in confirmed.survivors] == ["2330"]
@@ -191,10 +191,10 @@ async def test_technical_step_drops_daily_history_older_than_the_history_limit()
     harness = market_harness()
     stale_session = harness.clock.today() - timedelta(days=harness.config.freshness.history_max_lag_days + 1)
     harness.prices.history["2330"] = rising_history(2415.0, stale_session)
-    market = await harness.runtime.pipeline.load_market_valuation()
+    market = await harness.pipeline.load_market_valuation()
 
-    confirmed = await harness.runtime.pipeline.confirm_valuation_technical(
-        harness.runtime.pipeline.screen_valuation(market, ScanCriteria(target_pe=30, min_undervaluation=0.0))
+    confirmed = await harness.pipeline.confirm_valuation_technical(
+        harness.pipeline.screen_valuation(market, ScanCriteria(target_pe=30, min_undervaluation=0.0))
     )
 
     assert [report.stock.stock_id for report in confirmed.survivors] == []
@@ -204,10 +204,10 @@ async def test_technical_step_drops_daily_history_older_than_the_history_limit()
 @pytest.mark.asyncio
 async def test_undervalued_stock_prompt_asks_the_ai_to_explain_low_pe_causes() -> None:
     harness = market_harness()
-    market = await harness.runtime.pipeline.load_market_valuation()
-    scan = harness.runtime.pipeline.screen_valuation(market, ScanCriteria(target_pe=20, min_undervaluation=0.0))
+    market = await harness.pipeline.load_market_valuation()
+    scan = harness.pipeline.screen_valuation(market, ScanCriteria(target_pe=20, min_undervaluation=0.0))
 
-    await harness.runtime.pipeline.explain_valuation(scan.survivors[0])
+    await harness.pipeline.explain_valuation(scan.survivors[0])
 
     assert harness.config.valuation.low_pe_prompt_rule in harness.ai.calls[0].prompt
 

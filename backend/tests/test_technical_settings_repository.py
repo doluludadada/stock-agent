@@ -21,6 +21,7 @@ from trading_stack import SilentLogger
 
 from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
 from a_domain.types.errors import TechnicalSettingsConflictError
+from a_domain.types.ids import UserId
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.technical_settings_dto import (
     TechnicalFormulaNodeDTO,
@@ -51,10 +52,15 @@ async def db(tmp_path: Path) -> AsyncIterator[DatabaseConnector]:
 
 
 @pytest_asyncio.fixture
-async def other_process(tmp_path: Path, db: DatabaseConnector) -> AsyncIterator[SqlTechnicalSettingsRepository]:
+async def other_process(tmp_path: Path, db: DatabaseConnector) -> AsyncIterator[DatabaseConnector]:
     connector = open_database(tmp_path)
-    yield SqlTechnicalSettingsRepository(connector)
+    yield connector
     await connector.close()
+
+
+def of(db: DatabaseConnector, owner: str) -> SqlTechnicalSettingsRepository:
+    """The settings repository dependencies.py builds for one owner."""
+    return SqlTechnicalSettingsRepository(db.for_owner(UserId(owner)))
 
 
 def with_period(strategy: TechnicalStrategy, indicator_id: str, period: int) -> TechnicalStrategy:
@@ -72,89 +78,82 @@ def count_rows(folder: Path, table: str, owner_id: str) -> int:
 
 
 async def test_a_first_load_saves_the_initial_settings_at_revision_0_and_a_later_load_never_resets_them(db: DatabaseConnector) -> None:
-    repository = SqlTechnicalSettingsRepository(db)
 
-    first = await repository.load("alice", replace(INITIAL, revision=7))
-    later = await repository.load("alice", OTHER_INITIAL)
+    first = await of(db, "alice").load(replace(INITIAL, revision=7))
+    later = await of(db, "alice").load(OTHER_INITIAL)
 
     assert first == later == INITIAL
     assert first.revision == 0
 
 
 async def test_a_save_from_the_revision_read_replaces_the_settings_and_counts_up(db: DatabaseConnector) -> None:
-    repository = SqlTechnicalSettingsRepository(db)
-    read = await repository.load("alice", INITIAL)
+    read = await of(db, "alice").load(INITIAL)
     edited = replace(read, active_strategy_id="aggressive", buzz_strategy_id="conservative")
 
-    saved = await repository.save("alice", edited)
+    saved = await of(db, "alice").save(edited)
 
     assert saved == replace(edited, revision=1)
-    assert await repository.load("alice", INITIAL) == saved
-    assert (await repository.save("alice", saved)).revision == 2
-    assert (await repository.load("alice", OTHER_INITIAL)).revision == 2
+    assert await of(db, "alice").load(INITIAL) == saved
+    assert (await of(db, "alice").save(saved)).revision == 2
+    assert (await of(db, "alice").load(OTHER_INITIAL)).revision == 2
 
 
 async def test_a_save_from_an_older_revision_is_refused_and_changes_nothing(db: DatabaseConnector) -> None:
-    repository = SqlTechnicalSettingsRepository(db)
-    read = await repository.load("alice", INITIAL)
-    first = await repository.save("alice", replace(read, active_strategy_id="aggressive"))
+    read = await of(db, "alice").load(INITIAL)
+    first = await of(db, "alice").save(replace(read, active_strategy_id="aggressive"))
 
     with pytest.raises(TechnicalSettingsConflictError):
-        await repository.save("alice", replace(read, active_strategy_id="conservative", buzz_strategy_id="conservative"))
+        await of(db, "alice").save(replace(read, active_strategy_id="conservative", buzz_strategy_id="conservative"))
 
-    assert await repository.load("alice", INITIAL) == first
+    assert await of(db, "alice").load(INITIAL) == first
 
 
 async def test_a_save_for_an_owner_who_never_loaded_is_refused_and_creates_nothing(db: DatabaseConnector) -> None:
-    repository = SqlTechnicalSettingsRepository(db)
 
     with pytest.raises(TechnicalSettingsConflictError):
-        await repository.save("nobody", INITIAL)
+        await of(db, "nobody").save(INITIAL)
 
-    assert await repository.load("nobody", OTHER_INITIAL) == OTHER_INITIAL
+    assert await of(db, "nobody").load(OTHER_INITIAL) == OTHER_INITIAL
 
 
 async def test_of_two_saves_from_one_revision_in_two_processes_one_wins_and_the_other_changes_nothing(
-    db: DatabaseConnector, other_process: SqlTechnicalSettingsRepository
+    db: DatabaseConnector, other_process: DatabaseConnector
 ) -> None:
-    repository = SqlTechnicalSettingsRepository(db)
-    read = await repository.load("alice", INITIAL)
+    read = await of(db, "alice").load(INITIAL)
 
     results = await asyncio.gather(
-        repository.save("alice", replace(read, active_strategy_id="aggressive")),
-        other_process.save("alice", replace(read, active_strategy_id="conservative")),
+        of(db, "alice").save(replace(read, active_strategy_id="aggressive")),
+        of(other_process, "alice").save(replace(read, active_strategy_id="conservative")),
         return_exceptions=True,
     )
 
     [winner] = [result for result in results if isinstance(result, TechnicalSettings)]
     assert [type(result) for result in results if not isinstance(result, TechnicalSettings)] == [TechnicalSettingsConflictError]
     assert winner.revision == 1
-    assert await repository.load("alice", INITIAL) == winner
+    assert await of(db, "alice").load(INITIAL) == winner
 
 
 async def test_each_owner_has_independent_settings(db: DatabaseConnector) -> None:
-    repository = SqlTechnicalSettingsRepository(db)
-    alice, bob = await repository.load("alice", INITIAL), await repository.load("bob", INITIAL)
+    alice, bob = await of(db, "alice").load(INITIAL), await of(db, "bob").load(INITIAL)
 
-    alice_saved = await repository.save(
-        "alice", replace(alice, strategies=(with_period(alice.strategies[1], "ind_a", 37),), active_strategy_id="balanced")
+    alice_saved = await of(db, "alice").save(
+        replace(alice, strategies=(with_period(alice.strategies[1], "ind_a", 37),), active_strategy_id="balanced")
     )
 
-    assert await repository.load("bob", INITIAL) == bob == INITIAL
-    bob_saved = await repository.save("bob", replace(bob, active_strategy_id="aggressive"))
+    assert await of(db, "bob").load(INITIAL) == bob == INITIAL
+    bob_saved = await of(db, "bob").save(replace(bob, active_strategy_id="aggressive"))
     assert bob_saved.revision == 1
-    assert await repository.load("alice", INITIAL) == alice_saved
+    assert await of(db, "alice").load(INITIAL) == alice_saved
     assert [strategy.strategy_id for strategy in alice_saved.strategies] == ["balanced"]
 
 
 async def test_two_processes_loading_a_new_owner_at_once_save_the_initial_settings_once(
-    tmp_path: Path, db: DatabaseConnector, other_process: SqlTechnicalSettingsRepository
+    tmp_path: Path, db: DatabaseConnector, other_process: DatabaseConnector
 ) -> None:
-    repository = SqlTechnicalSettingsRepository(db)
     owners = [f"owner_{number}" for number in range(5)]
 
     loads = await asyncio.gather(
-        *(load for owner in owners for load in (repository.load(owner, INITIAL), other_process.load(owner, OTHER_INITIAL)))
+        *(load for owner in owners for load in (of(db, owner).load(INITIAL), of(other_process, owner).load(OTHER_INITIAL)))
     )
 
     for owner, mine, theirs in zip(owners, loads[::2], loads[1::2], strict=True):
@@ -168,29 +167,25 @@ async def test_two_processes_loading_a_new_owner_at_once_save_the_initial_settin
 
 
 async def test_a_copy_of_a_built_in_strategy_changes_alone(db: DatabaseConnector) -> None:
-    repository = SqlTechnicalSettingsRepository(db)
-    read = await repository.load("alice", INITIAL)
+    read = await of(db, "alice").load(INITIAL)
     balanced = read.active_strategy
     copies = (
         replace(balanced, strategy_id="my_balanced", name="My Balanced"),
         replace(balanced, strategy_id="your_balanced", name="Your Balanced"),
     )
-    with_copies = await repository.save(
-        "alice", replace(read, strategies=(*read.strategies, *copies), active_strategy_id="my_balanced")
-    )
+    with_copies = await of(db, "alice").save(replace(read, strategies=(*read.strategies, *copies), active_strategy_id="my_balanced"))
 
-    edited = await repository.save(
-        "alice",
+    edited = await of(db, "alice").save(
         replace(
             with_copies,
             strategies=tuple(
                 with_period(strategy, "ind_b", 83) if strategy.strategy_id == "my_balanced" else strategy
                 for strategy in with_copies.strategies
             ),
-        ),
+        )
     )
 
-    loaded = await repository.load("alice", INITIAL)
+    loaded = await of(db, "alice").load(INITIAL)
     assert loaded == edited
     assert {strategy.strategy_id: strategy.indicators["ind_b"].period for strategy in loaded.strategies} == {
         "conservative": 60,
@@ -205,14 +200,13 @@ async def test_a_copy_of_a_built_in_strategy_changes_alone(db: DatabaseConnector
 
 async def test_saving_settings_never_changes_the_built_in_strategy_files(db: DatabaseConnector) -> None:
     files = {path.name: path.read_bytes() for path in STRATEGY_FILES.glob("*.json")}
-    repository = SqlTechnicalSettingsRepository(db)
-    read = await repository.load("alice", INITIAL)
+    read = await of(db, "alice").load(INITIAL)
 
-    await repository.save("alice", replace(read, strategies=tuple(with_period(strategy, "ind_a", 37) for strategy in read.strategies)))
+    await of(db, "alice").save(replace(read, strategies=tuple(with_period(strategy, "ind_a", 37) for strategy in read.strategies)))
 
     assert {path.name: path.read_bytes() for path in STRATEGY_FILES.glob("*.json")} == files
     assert shipped_config().technical.built_in_strategies == INITIAL.strategies
-    assert all(strategy.indicators["ind_a"].period == 37 for strategy in (await repository.load("alice", INITIAL)).strategies)
+    assert all(strategy.indicators["ind_a"].period == 37 for strategy in (await of(db, "alice").load(INITIAL)).strategies)
 
 
 # --------------------------------- Round trip --------------------------------- #
@@ -316,11 +310,11 @@ async def test_settings_keep_every_formula_through_json_and_sql(tmp_path: Path, 
     assert unused_formula_words() == []
     document = settings_json()
     settings = SETTINGS.validate_json(json.dumps(document))
-    await SqlTechnicalSettingsRepository(db).load("alice", settings)
+    await of(db, "alice").load(settings)
     reopened = open_database(tmp_path)
 
     try:
-        loaded = await SqlTechnicalSettingsRepository(reopened).load("alice", OTHER_INITIAL)
+        loaded = await of(reopened, "alice").load(OTHER_INITIAL)
     finally:
         await reopened.close()
 
@@ -364,15 +358,14 @@ def node_row(**columns: Any) -> dict[str, Any]:
     ],
 )
 async def test_the_database_refuses_rows_that_break_a_formula(db: DatabaseConnector, table: type, row: dict[str, Any]) -> None:
-    repository = SqlTechnicalSettingsRepository(db)
-    read = await repository.load("alice", INITIAL)
+    read = await of(db, "alice").load(INITIAL)
 
     with pytest.raises(IntegrityError):
-        async with db.get_session() as session:
+        async with db.for_owner(UserId("alice")).owner_session() as session:
             await session.execute(insert(table), [row])
             await session.commit()
 
-    assert await repository.load("alice", INITIAL) == read
+    assert await of(db, "alice").load(INITIAL) == read
 
 
 def nodes_of(node: str) -> Update:
@@ -392,12 +385,11 @@ def nodes_of(node: str) -> Update:
 )
 async def test_rows_the_domain_model_refuses_are_never_read_as_settings(db: DatabaseConnector, change: Update) -> None:
     """The tables leave these checks to the domain model, which validates every row it reads."""
-    repository = SqlTechnicalSettingsRepository(db)
-    await repository.load("alice", INITIAL)
+    await of(db, "alice").load(INITIAL)
 
-    async with db.get_session() as session:
+    async with db.for_owner(UserId("alice")).owner_session() as session:
         await session.execute(change)
         await session.commit()
 
     with pytest.raises(ValidationError):
-        await repository.load("alice", INITIAL)
+        await of(db, "alice").load(INITIAL)

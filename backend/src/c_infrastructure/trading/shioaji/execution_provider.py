@@ -2,6 +2,7 @@ import asyncio
 import math
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from functools import partial
 from typing import override
 
 from shioaji import Shioaji
@@ -18,6 +19,7 @@ from a_domain.ports.trading.execution_provider import IBrokerExecutionProvider
 from a_domain.rules.trading.execution import BrokerOutcomeRule, FillRule, LotSplitRule, OrderAcceptanceRule
 from a_domain.types.enums import LotKind, OrderStatus, RejectReason, TimeInForce, TradeAction
 from b_application.config.app_config import AppConfig
+from b_application.config.trading_config import ShioajiLogin
 
 BROKER = "Shioaji"
 
@@ -65,7 +67,7 @@ What each Shioaji status means in the domain order lifecycle (OrderStatus.next_s
 
 class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContract, Trade]):
     """
-    The Sinopac broker through the Shioaji client, simulation or production as `shioaji.simulation` says.
+    The Sinopac broker through the Shioaji client, simulation or production as the login's environment says.
 
     The client is synchronous, so every call runs in a worker thread. Quantities are shares in the domain:
     LotSplitRule splits them into the whole lots, sent as a board-lot order with the order's time in force (IOC or
@@ -88,9 +90,9 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
     Fee and tax are TradingCostRule's, which may differ from the broker's discounted fee.
     """
 
-    def __init__(self, client: Shioaji, config: AppConfig, logger: ILoggingProvider) -> None:
+    def __init__(self, client: Shioaji, login: ShioajiLogin, config: AppConfig, logger: ILoggingProvider) -> None:
         self._client = client
-        self._credentials = config.shioaji
+        self._login = login
         self._logger = logger
         self._cost_rule = config.market.cost_rule()
         self._fill_rule = FillRule(cost_rule=self._cost_rule)
@@ -100,29 +102,29 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
         self._shares_per_unit = {StockOrderLot.Common: config.market.board_lot_shares, StockOrderLot.IntradayOdd: 1}
         self._poll_interval_seconds = config.shioaji.poll_interval_seconds
         self._max_polls = config.shioaji.max_polls
+        self._session: asyncio.Future[object] | None = None
+        """The login connect() began, in its thread: close() waits for it, then logs out."""
 
     @override
     async def connect(self) -> None:
         """Logs in, then in production activates the CA certificate that signs orders. Raises saying what failed."""
-        credentials = self._credentials
-
-        if credentials.api_key is None or credentials.secret_key is None:
-            raise RuntimeError(f"Shioaji needs {', '.join(credentials.missing_credentials())}")
-
-        api_key, secret_key = credentials.api_key.get_secret_value(), credentials.secret_key.get_secret_value()
-        await asyncio.to_thread(self._client.login, api_key=api_key, secret_key=secret_key, subscribe_trade=False)
+        login = self._login
+        api_key, secret_key = login.api_key.get_secret_value(), login.secret_key.get_secret_value()
+        call = partial(self._client.login, api_key=api_key, secret_key=secret_key, subscribe_trade=False)
+        self._session = asyncio.get_running_loop().run_in_executor(None, call)
+        await asyncio.shield(self._session)
         account = self._client.stock_account
 
         if account is None:
             raise RuntimeError("the login returned no stock account")
 
-        if credentials.simulation:
+        if login.simulation:
             return
 
-        ca_path, ca_password, person_id = credentials.ca_path, credentials.ca_password, credentials.person_id
+        ca_path, ca_password, person_id = login.ca_path, login.ca_password, login.person_id
 
         if ca_path is None or ca_password is None or person_id is None:
-            raise RuntimeError(f"Shioaji production needs {', '.join(credentials.missing_credentials())}")
+            raise RuntimeError("Shioaji production needs the CA certificate's path, its password and the person id")
 
         if not await asyncio.to_thread(
             self._client.activate_ca, ca_path, ca_password.get_secret_value(), person_id.get_secret_value()
@@ -131,6 +133,24 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
 
         if not account.signed:
             raise RuntimeError(f"stock account {account.account_id} has not signed Shioaji's API trading agreement")
+
+    @override
+    async def close(self) -> None:
+        """
+        Logs out once the login has ended: a login a timeout or a cancel left running in its thread is waited for, and
+        a failed one is logged out too, in case the broker opened a session before it failed. A provider that never
+        began a login has nothing to log out of. A logout that fails is logged and ignored: the runtime closes anyway,
+        and the session expires.
+        """
+        if self._session is None:
+            return
+
+        await asyncio.wait([self._session])
+
+        try:
+            await asyncio.to_thread(self._client.logout)
+        except Exception as error:
+            self._logger.warning(f"Shioaji logout failed: {type(error).__name__}: {error}")
 
     @override
     async def get_account(self) -> Account:

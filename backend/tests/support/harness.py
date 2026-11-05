@@ -6,10 +6,12 @@ use-case constructors.
 """
 
 import tempfile
-from collections.abc import Iterable
-from dataclasses import dataclass
+from collections.abc import AsyncIterator, Iterable
+from contextlib import asynccontextmanager, nullcontext
+from dataclasses import dataclass, fields, replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import patch
 
 from rich.prompt import Confirm, Prompt
@@ -17,6 +19,7 @@ from rich.prompt import Confirm, Prompt
 from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
+from a_domain.model.system.user import User
 from a_domain.model.trading.account import Position
 from a_domain.model.trading.watchlist import WatchlistEntry
 from a_domain.rules.technical.calculation.calculator import MovingAverageIndicator
@@ -29,21 +32,28 @@ from a_domain.types.enums import (
     IndicatorKind,
     InformationSource,
     OrderMode,
+    Role,
     RuleEffect,
     SystemEnvironment,
     WatchlistType,
 )
+from a_domain.types.ids import UserId
 from a_domain.types.values import FiscalQuarter
 from b_application.config.ai_config import PromptsConfig
 from b_application.config.app_config import AppConfig
 from b_application.config.chat_config import NotificationConfig
 from b_application.config.market_data_config import MarketHoursConfig
+from b_application.config.settings_loader import settings_revision, settings_texts, validate_trading_environment
 from b_application.config.trading_config import TradingConfig
+from b_application.pipeline import Pipeline
 from b_application.schemas.pipeline_status import PipelineStatus
+from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
+from c_infrastructure.system.attempt_log import MemoryAttemptLog
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 from c_infrastructure.system.settings_files import SettingsFiles
-from d_presentation.cli import interactive
-from d_presentation.dependencies import ProviderDependencies, Runtime, compose_runtime, validate_trading_environment
+from d_presentation.cli import interactive, terminal
+from d_presentation.dependencies import OwnedPorts, ProviderDependencies, Runtime, compose_runtime
+from d_presentation.live_runtime import RuntimeSwitch
 from support.fakes import (
     PROMPT_TEMPLATES,
     VALUATION_PROMPT_TEMPLATE,
@@ -59,12 +69,14 @@ from support.fakes import (
     FakeStockProvider,
     FakeTechnicalSettingsRepository,
     FakeTradingJournal,
+    FakeUserStore,
     FakeWatchlistRepository,
     RecordingChatPlatform,
     RecordingExecutionProvider,
     RecordingLogger,
+    SignedOut,
 )
-from support.settings import shipped_config
+from support.settings import environment_setup, shipped_config
 
 MARKET_OPEN = datetime(2026, 10, 19, 10, 0, tzinfo=TAIWAN_TIMEZONE)
 MARKET_CLOSED = datetime(2026, 10, 19, 14, 0, tzinfo=TAIWAN_TIMEZONE)
@@ -161,7 +173,27 @@ class CliHarness:
     broker: RecordingExecutionProvider
     technical_settings: FakeTechnicalSettingsRepository
     logger: RecordingLogger
+    users: FakeUserStore
+    dependencies: ProviderDependencies
     runtime: Runtime
+    owners: dict[UserId, OwnedPorts]
+    """The ports of every owner but the administrator, made on the owner's first request and kept for the next."""
+
+    settings_root: Path
+    """The project root whose config/ the harness's settings files and a reload read."""
+
+    @property
+    def administrator(self) -> User:
+        """The first administrator the harness acts as: the legacy owner, whose ports are the harness's own fakes."""
+        return self.users.by_id[LEGACY_OWNER_ID]
+
+    @property
+    def pipeline(self) -> Pipeline:
+        return self.runtime.pipeline_for(self.administrator)
+
+    def session(self) -> terminal.CliSession:
+        """A CLI session of the administrator, made by the CLI's own session_for."""
+        return interactive.session_for(self.runtime, self.administrator)
 
     def list_stock(
         self, stock_id: str, history: list[Ohlcv], realtime_price: float | None = None, realtime_age: timedelta = FRESH
@@ -255,7 +287,7 @@ class CliHarness:
             raise AssertionError(f"menu {choice} asked an unexpected confirmation: {question!r}")
 
         with patch.object(Prompt, "ask", answer_prompt), patch.object(Confirm, "ask", answer_confirm):
-            return await interactive.run_menu_option(choice, self.runtime)
+            return await interactive.run_menu_option(choice, self.runtime, self.session())
 
     async def run_valuation_menu(self, choice: str, *, answers: Iterable[str], confirm: Iterable[bool] = ()) -> list[str]:
         """
@@ -277,14 +309,27 @@ class CliHarness:
             return remaining_confirms.pop(0)
 
         with patch.object(Prompt, "ask", answer_prompt), patch.object(Confirm, "ask", answer_confirm):
-            assert await interactive.run_menu_option(choice, self.runtime) is None
+            assert await interactive.run_menu_option(choice, self.runtime, self.session()) is None
 
         assert not remaining_answers and not remaining_confirms, f"menu {choice} left answers unused"
         return asked
 
 
+ADMINISTRATOR = User(
+    user_id=LEGACY_OWNER_ID, username="owner", email="owner@example.com", role=Role.ADMINISTRATOR, created_at=MARKET_OPEN
+)
+ADMINISTRATOR_PASSWORD = "correct horse battery"
+MEMBER = User(user_id=UserId("u-member"), username="member", email="member@example.com", role=Role.USER, created_at=MARKET_OPEN)
+"""A registered user who is not an administrator. A test that needs one adds it: harness.users.add(MEMBER, MEMBER_PASSWORD)."""
+MEMBER_PASSWORD = "member password here"
+
 UNUSED_PROJECT_ROOT = Path(tempfile.gettempdir()) / "stock-agent-harness-has-no-settings-files"
 """Where the harness's settings-file adapter points unless a test gives its own copy: never the repository's config/."""
+
+
+def real_broker_config() -> AppConfig:
+    """The harness settings on Shioaji in prod, with orders disabled and placeholder credentials: a real-broker installation."""
+    return environment_setup(harness_config(), SystemEnvironment.PROD, ExecutionProvider.SHIOAJI, OrderMode.DISABLED)
 
 
 def build_harness(
@@ -296,6 +341,10 @@ def build_harness(
 ) -> CliHarness:
     config = config or harness_config()
     validate_trading_environment(config)
+
+    if not config.settings_revisions:
+        on_disk = {file: settings_revision(text) for file, text in settings_texts(settings_root).items()}
+        config = config.model_copy(update={"settings_revisions": on_disk})
 
     logger = RecordingLogger()
     clock = FakeMarketClock(now=now)
@@ -311,8 +360,32 @@ def build_harness(
     chat_platform = RecordingChatPlatform()
     journal = FakeTradingJournal()
     watchlist = FakeWatchlistRepository(clock)
-    technical_settings = FakeTechnicalSettingsRepository({config.technical.owner_id: settings or harness_settings()})
+    technical_settings = FakeTechnicalSettingsRepository(settings or harness_settings())
     broker = RecordingExecutionProvider()
+
+    users = FakeUserStore()
+    users.add(ADMINISTRATOR, ADMINISTRATOR_PASSWORD)
+    owners: dict[UserId, OwnedPorts] = {}
+
+    def owned_ports(user: User | None) -> OwnedPorts:
+        if user is None:
+            return OwnedPorts(*(cast(Any, SignedOut(cast(type, field.type))) for field in fields(OwnedPorts)))
+
+        if user.user_id == ADMINISTRATOR.user_id:
+            return OwnedPorts(journal, watchlist, technical_settings, knowledge, broker, ai, sentiment)
+
+        return owners.setdefault(
+            user.user_id,
+            OwnedPorts(
+                FakeTradingJournal(),
+                FakeWatchlistRepository(clock),
+                FakeTechnicalSettingsRepository(settings or harness_settings()),
+                FakeKnowledgeRepository(),
+                RecordingExecutionProvider(),
+                ai,
+                sentiment,
+            ),
+        )
 
     dependencies = ProviderDependencies(
         stock_provider=stocks,
@@ -321,16 +394,14 @@ def build_harness(
         news_provider=news,
         social_media_provider=social,
         ai_provider=ai,
-        sentiment_classifier=sentiment,
-        knowledge_repository=knowledge,
         conversation_repository=conversations,
-        journal=journal,
-        watchlist_repository=watchlist,
-        technical_settings_repository=technical_settings,
-        execution_provider=broker,
         notification_provider=None,
         platform_provider=chat_platform,
         settings_files=SettingsFiles(project_root=settings_root, max_bytes=262_144, backups_kept=3, logger=logger),
+        user_store=users,
+        attempt_log=MemoryAttemptLog(),
+        real_broker=None if config.trading.execution_provider == ExecutionProvider.MOCK else broker,
+        owned_ports=owned_ports,
     )
     return CliHarness(
         config=config,
@@ -350,5 +421,46 @@ def build_harness(
         broker=broker,
         technical_settings=technical_settings,
         logger=logger,
+        users=users,
+        dependencies=dependencies,
         runtime=compose_runtime(config, logger, clock, dependencies),
+        owners=owners,
+        settings_root=settings_root,
     )
+
+
+def signs_in_then(answer: str):
+    """A Prompt.ask that signs in as the administrator at the CLI's start and then answers every other prompt `answer`."""
+
+    def ask(question: str, *args, **kwargs) -> str:
+        if kwargs.get("password"):
+            return ADMINISTRATOR_PASSWORD
+
+        return ADMINISTRATOR.username if question == "Username or email" else answer
+
+    return ask
+
+
+def runtime_for(harness: CliHarness, config: AppConfig) -> Runtime:
+    """A runtime over the harness's fakes built from other settings, as a reload opens it: the real broker for Shioaji."""
+    real_broker = None if config.trading.execution_provider == ExecutionProvider.MOCK else harness.broker
+    return compose_runtime(config, harness.logger, harness.clock, replace(harness.dependencies, real_broker=real_broker))
+
+
+@asynccontextmanager
+async def open_harness_switch(harness: CliHarness) -> AsyncIterator[RuntimeSwitch]:
+    """
+    The real runtime switch over the harness: its first runtime is harness.runtime, and a reload opens one over the same
+    fakes from the settings files under harness.settings_root, as the real opener does over the real adapters.
+    """
+
+    def opener(config: AppConfig):
+        return nullcontext(harness.runtime if config is harness.config else runtime_for(harness, config))
+
+    switch = RuntimeSwitch(opener, harness.settings_root, harness.logger)
+    await switch.start(harness.config)
+
+    try:
+        yield switch
+    finally:
+        await switch.close()

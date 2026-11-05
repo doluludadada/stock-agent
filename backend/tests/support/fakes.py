@@ -4,6 +4,7 @@ Each fake answers like its real adapter and records what the outside system
 behind that port would observe: rows written, prompts sent, orders placed.
 """
 
+import inspect
 import json
 import re
 from collections.abc import Collection
@@ -12,12 +13,15 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from uuid import UUID
 
+from pydantic import SecretStr
+
 from a_domain.model.chat.conversation import Conversation
 from a_domain.model.chat.message import Message
 from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.model.system.stats import SystemStats
+from a_domain.model.system.user import User, UserSession
 from a_domain.model.trading.account import Account, AccountSnapshot, Position
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.signal import TradeSignal
@@ -25,10 +29,25 @@ from a_domain.model.trading.watchlist import WatchlistEntry
 from a_domain.rules.fundamentals.trailing_eps import EpsFilings, QuarterEps
 from a_domain.rules.technical.strategy import TechnicalSettings
 from a_domain.rules.trading.cost import TradingCostRule
-from a_domain.types.enums import AiAnalysisFocus, MarketIndex, MessageRole, SentimentLabel, TradeAction, WatchlistType
-from a_domain.types.errors import TechnicalSettingsConflictError
-from a_domain.types.ids import DecisionId, RunId
-from a_domain.types.values import FiscalQuarter
+from a_domain.types.enums import (
+    AiAnalysisFocus,
+    MarketIndex,
+    MessageRole,
+    Role,
+    SentimentLabel,
+    TradeAction,
+    UserStatus,
+    WatchlistType,
+)
+from a_domain.types.errors import (
+    AlreadySetUpError,
+    LastAdministratorError,
+    SignInRequired,
+    TechnicalSettingsConflictError,
+    UserExistsError,
+)
+from a_domain.types.ids import DecisionId, RunId, SessionToken, UserId
+from a_domain.types.values import FiscalQuarter, comparable_name
 from b_application.config.market_data_config import MarketHoursConfig
 from c_infrastructure.database.models.trading_journal_dto import RunStockReportDTO
 from c_infrastructure.system.market_clock import TaiwanMarketClock
@@ -46,6 +65,10 @@ PROMPT_HEADER = re.compile(r"^(fundamental analysis|momentum analysis|valuation 
 class RecordingLogger:
     def __init__(self) -> None:
         self.records: list[tuple[str, str]] = []
+        self.level: str | int = "INFO"
+
+    def set_level(self, level: str | int) -> None:
+        self.level = level
 
     def info(self, message: str) -> None:
         self.records.append(("info", message))
@@ -183,6 +206,25 @@ class AiCall:
     prompt: str
 
 
+class AiVendor:
+    """
+    A paid AI vendor behind a counted provider (DailyCappedAiProvider): it answers every call with `reply`, counts the
+    calls and keeps the stock of each saved reply.
+    """
+
+    def __init__(self, reply: str = "{}") -> None:
+        self.reply = reply
+        self.calls = 0
+        self.saved: list[str] = []
+
+    async def generate_reply(self, messages: tuple[Message, ...]) -> Message:
+        self.calls += 1
+        return Message(role=MessageRole.ASSISTANT, content=self.reply, timestamp=messages[-1].timestamp)
+
+    def save_response(self, stock_id: str, content: str) -> None:
+        self.saved.append(stock_id)
+
+
 class FakeAiProvider:
     """
     Answers each prompt for the stock named in its header (PROMPT_TEMPLATES or VALUATION_PROMPT_TEMPLATE):
@@ -303,7 +345,9 @@ class FakeTradingJournal:
 
     async def save_stock_reports(self, run_id: RunId, stocks: list[Stock]) -> None:
         """Keeps each stock as the SQL journal stores it, so a later change to the Stock object is not seen."""
-        self.stock_reports[run_id] = [RunStockReportDTO.from_domain(run_id, position, stock) for position, stock in enumerate(stocks)]
+        self.stock_reports[run_id] = [
+            RunStockReportDTO.from_domain(run_id, position, stock, "fake") for position, stock in enumerate(stocks)
+        ]
 
     async def stock_reports_of(self, run_id: RunId) -> list[Stock]:
         return [row.to_domain() for row in self.stock_reports.get(run_id, [])]
@@ -365,6 +409,7 @@ class RecordingExecutionProvider:
         self.cash = cash
         self.positions: list[Position] = []
         self.placed: list[Order] = []
+        self.closed = False
         self._cost_rule = cost_rule or TradingCostRule(
             fee_rate=0.001425, tax_rate=0.003, etf_tax_rate=0.001, min_fee=20, bond_etf_tax_exempt_until=date(2026, 12, 31)
         )
@@ -384,30 +429,136 @@ class RecordingExecutionProvider:
     async def get_account(self) -> Account:
         return Account(cash=self.cash, positions=[replace(position) for position in self.positions])
 
+    async def close(self) -> None:
+        self.closed = True
+
 
 class FakeTechnicalSettingsRepository:
     """
-    Like the SQL repository: each owner's saved settings, the initial ones saved on an owner's first load, and a save
-    refused, changing nothing, when the revision it carries is no longer the saved one. The next interrupted_loads
-    loads fail as a load does when a save lands between its reads.
+    Like the SQL repository built for one owner: the saved settings, the initial ones saved on the first load, and a
+    save refused, changing nothing, when the revision it carries is no longer the saved one. The next
+    interrupted_loads loads fail as a load does when a save lands between its reads.
     """
 
-    def __init__(self, saved: dict[str, TechnicalSettings] | None = None) -> None:
-        self.saved = dict(saved or {})
+    def __init__(self, saved: TechnicalSettings | None = None) -> None:
+        self.saved = saved
         self.interrupted_loads = 0
 
-    async def load(self, owner_id: str, initial: TechnicalSettings) -> TechnicalSettings:
+    async def load(self, initial: TechnicalSettings) -> TechnicalSettings:
         if self.interrupted_loads:
             self.interrupted_loads -= 1
-            raise TechnicalSettingsConflictError(f"The technical settings of {owner_id} changed while being read. Read them again.")
+            raise TechnicalSettingsConflictError("The technical settings changed while being read. Read them again.")
 
-        return self.saved.setdefault(owner_id, replace(initial, revision=0))
+        if self.saved is None:
+            self.saved = replace(initial, revision=0)
 
-    async def save(self, owner_id: str, settings: TechnicalSettings) -> TechnicalSettings:
-        current = self.saved.get(owner_id)
+        return self.saved
 
-        if current is None or current.revision != settings.revision:
+    async def save(self, settings: TechnicalSettings) -> TechnicalSettings:
+        if self.saved is None or self.saved.revision != settings.revision:
             raise TechnicalSettingsConflictError("The technical settings changed after they were read.")
 
-        self.saved[owner_id] = replace(settings, revision=settings.revision + 1)
-        return self.saved[owner_id]
+        self.saved = replace(settings, revision=settings.revision + 1)
+        return self.saved
+
+
+class FakeUserStore:
+    """
+    Like SqlUserStore, in memory: names unique and found without regard to case, sessions by token, a deactivated user
+    signed out, and the last active administrator kept. It keeps passwords in the clear: it is a fake.
+    """
+
+    def __init__(self) -> None:
+        self.by_id: dict[UserId, User] = {}
+        self.passwords: dict[UserId, str] = {}
+        self.sessions: dict[SessionToken, UserSession] = {}
+
+    def add(self, user: User, password: str) -> None:
+        self.by_id[user.user_id] = replace(user)
+        self.passwords[user.user_id] = password
+
+    def named(self, identifier: str) -> User | None:
+        name = comparable_name(identifier)
+        return next(
+            (user for user in self.by_id.values() if name in (comparable_name(user.username), comparable_name(user.email))), None
+        )
+
+    async def check_key(self) -> None:
+        return None
+
+    async def user_count(self) -> int:
+        return len(self.by_id)
+
+    async def create(self, user: User, password: SecretStr) -> None:
+        if user.user_id in self.by_id:
+            raise AlreadySetUpError(f"User {user.user_id} exists.")
+
+        for taken in ("username", "email"):
+            if any(getattr(other, taken).casefold() == getattr(user, taken).casefold() for other in self.by_id.values()):
+                raise UserExistsError(taken)
+
+        self.add(user, password.get_secret_value())
+
+    async def verify_password(self, identifier: str, password: SecretStr) -> User | None:
+        user = self.named(identifier)
+        matches = user is not None and self.passwords[user.user_id] == password.get_secret_value()
+        return replace(user) if user is not None and matches and user.status == UserStatus.ACTIVE else None
+
+    async def find_by_name(self, identifier: str) -> User | None:
+        user = self.named(identifier)
+        return replace(user) if user is not None else None
+
+    async def open_session(self, user_id: UserId, now: datetime, expires_at: datetime) -> UserSession:
+        session = UserSession(
+            token=SessionToken(f"session-{len(self.sessions) + 1}-{user_id}"), user_id=user_id, created_at=now, expires_at=expires_at
+        )
+        self.sessions[session.token] = session
+        return session
+
+    async def session_user(self, token: SessionToken, now: datetime) -> User | None:
+        session = self.sessions.get(token)
+        user = self.by_id.get(session.user_id) if session is not None and session.expires_at > now else None
+        return replace(user) if user is not None and user.status == UserStatus.ACTIVE else None
+
+    async def close_session(self, token: SessionToken) -> None:
+        self.sessions.pop(token, None)
+
+    async def users(self) -> list[User]:
+        return [replace(user) for user in sorted(self.by_id.values(), key=lambda user: user.created_at)]
+
+    async def find(self, user_id: UserId) -> User | None:
+        user = self.by_id.get(user_id)
+        return replace(user) if user is not None else None
+
+    async def save(self, user: User, now: datetime, password: SecretStr | None = None) -> None:
+        after = {**self.by_id, user.user_id: user}
+
+        if not any(other.role == Role.ADMINISTRATOR and other.status == UserStatus.ACTIVE for other in after.values()):
+            raise LastAdministratorError("At least one active administrator must remain. Nothing was saved.")
+
+        self.by_id[user.user_id] = replace(user)
+
+        if password is not None:
+            self.passwords[user.user_id] = password.get_secret_value()
+
+        if user.status != UserStatus.ACTIVE or password is not None:
+            self.sessions = {token: session for token, session in self.sessions.items() if session.user_id != user.user_id}
+
+
+class SignedOut:
+    """
+    A port of a signed-out pipeline that holds a user's data: any call raises SignInRequired, as the adapters do, from a
+    coroutine for the port's async methods and at once for its plain ones.
+    """
+
+    def __init__(self, port: type) -> None:
+        self.port = port
+
+    def __getattr__(self, name: str):
+        def refuse(*args, **kwargs):
+            raise SignInRequired(f"{self.port.__name__}.{name} needs a signed-in user.")
+
+        async def refuse_later(*args, **kwargs):
+            refuse()
+
+        return refuse_later if inspect.iscoroutinefunction(getattr(self.port, name)) else refuse

@@ -5,6 +5,7 @@ import { I18nextProvider } from 'react-i18next'
 import { MemoryRouter } from 'react-router'
 import { initI18n } from '@/i18n'
 import { session } from '@/shared/api'
+import { TEST_USER } from '@/test/users'
 import { RunDetailPage } from './RunDetailPage'
 
 const RUN = '11111111-1111-4111-8111-111111111111'
@@ -23,9 +24,9 @@ function renderRun() {
 }
 
 describe('a finished run whose decisions or orders failed to load', () => {
-  beforeEach(() => session.unlock('owner', 'owner-token'))
+  beforeEach(() => session.signIn(TEST_USER))
   afterEach(() => {
-    session.lock('owner')
+    session.signOut()
     vi.unstubAllGlobals()
   })
 

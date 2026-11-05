@@ -1,31 +1,27 @@
 import asyncio
 import difflib
-import io
 import json
 import os
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, override
 from uuid import uuid4
 
-import yaml
 from pydantic import TypeAdapter
-from ruamel.yaml import YAML
-from ruamel.yaml.comments import CommentedMap
-from ruamel.yaml.scalarstring import LiteralScalarString
 
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from a_domain.ports.system.settings_files import ISettingsFiles, SettingsAuditEntry, SettingsBackup, SettingsDocument
-from a_domain.types.enums import SettingsFile
-from a_domain.types.errors import SettingsConflictError, SettingsEditError
+from a_domain.ports.system.settings_files import ISettingsFiles, SettingsAuditEntry, SettingsBackup, SettingsDocument, SettingsProblem
+from a_domain.types.enums import SettingsFile, SystemEnvironment
+from a_domain.types.errors import SettingsConflictError, SettingsEditError, SettingsFileMissing, SettingsFileRefused
 from b_application.config.settings_loader import (
     InvalidSettingsError,
-    TradingSetupError,
-    load_settings,
+    parsed_document,
     settings_revision,
-    validate_trading_environment,
+    settings_texts,
+    startup_settings,
+    validate_editor_reachable,
 )
 
 
@@ -34,14 +30,16 @@ class SettingsFiles(ISettingsFiles):
     config/appsetting.yaml and config/instructions.yaml, edited in place. A save checks the revision under a lock,
     copies the old text to <project>/.settings-admin/backups/<file>/, writes the new text to a temporary file next to
     the original with the original's permissions, flushes it to disk and renames it over the original, so a crash
-    leaves the old or the new file whole. Each save appends one line to .settings-admin/audit.jsonl. The admin folder
+    leaves the old or the new file whole. Each save appends one line to .settings-admin/audit.jsonl before it writes,
+    so an audit that cannot be written stops the save with the file and the running app as they were. The admin folder
     is outside config/ and the frontend, created owner-only (0700), and keeps the latest `backups_kept` backups.
 
-    A file that is a symlink, or that resolves outside config/, is refused. Values go in through ruamel's round-trip
-    mode, which keeps comments and every setting it does not touch; nothing in a file is ever executed.
+    A file that is a symlink, or that resolves outside config/, is refused. The administrator's text is written byte
+    for byte; nothing in a file is ever executed (YAML is read with the safe loader only).
     """
 
     def __init__(self, project_root: Path, max_bytes: int, backups_kept: int, logger: ILoggingProvider) -> None:
+        self._project_root = project_root
         self._config_folder = (project_root / "config").resolve()
         self._admin_folder = project_root / ".settings-admin"
         self._max_bytes = max_bytes
@@ -49,19 +47,19 @@ class SettingsFiles(ISettingsFiles):
         self._logger = logger
         self._lock = asyncio.Lock()
         self._audit = TypeAdapter(SettingsAuditEntry)
-        self._yaml = YAML(typ="rt")
-        self._yaml.preserve_quotes = True
-        self._yaml.width = 4096
 
     @override
     async def read(self, file: SettingsFile) -> SettingsDocument:
         path = self._config_folder / file.file_name
 
+        if not path.exists():
+            raise SettingsFileMissing(f"{file.file_name} is missing from config/.")
+
         if path.is_symlink() or path.resolve().parent != self._config_folder:
-            raise PermissionError(f"{file.file_name} is not a regular file inside config/")
+            raise SettingsFileRefused(f"{file.file_name} is not a regular file inside config/")
 
         if path.stat().st_size > self._max_bytes:
-            raise ValueError(f"{file.file_name} is larger than {self._max_bytes} bytes")
+            raise SettingsFileRefused(f"{file.file_name} is larger than {self._max_bytes} bytes")
 
         text = path.read_text(encoding="utf-8")
         modified_at = datetime.fromtimestamp(path.stat().st_mtime, UTC)
@@ -80,8 +78,8 @@ class SettingsFiles(ISettingsFiles):
                 raise SettingsConflictError(f"{file.file_name} changed since revision {expected_revision[:12]}; read it again")
 
             await self.keep_backup(current)
-            saved = await self.write(file, text)
             await self.record(entry)
+            saved = await self.write(file, text)
 
         self._logger.info(f"Settings file {file.file_name} saved: {current.revision[:12]} -> {saved.revision[:12]}")
 
@@ -172,51 +170,37 @@ class SettingsFiles(ISettingsFiles):
         return settings_revision(text)
 
     @override
-    def values(self, text: str, paths: Sequence[str]) -> dict[str, Any]:
-        document = self._yaml.load(text) or CommentedMap()
+    def leaves(self, file: SettingsFile, text: str) -> dict[str, Any] | None:
+        try:
+            document = parsed_document(file, text)
+        except InvalidSettingsError:
+            return None
+
         found: dict[str, Any] = {}
+        pending: list[tuple[str, Any]] = [("", document)]
 
-        for path in paths:
-            node: Any = document
+        while pending:
+            prefix, node = pending.pop()
 
-            for key in path.split("."):
-                node = node.get(key) if isinstance(node, Mapping) else None
+            if not isinstance(node, Mapping) or not node:
+                found[prefix] = node
+                continue
 
-            if node is not None:
-                found[path] = json.loads(json.dumps(node))
+            pending.extend((f"{prefix}.{key}" if prefix else str(key), value) for key, value in node.items())
 
+        found.pop("", None)
         return found
 
     @override
-    def edited(self, text: str, changes: Mapping[str, Any]) -> str:
-        document = self._yaml.load(text) or CommentedMap()
+    def check(self, file: SettingsFile, text: str, environment: SystemEnvironment, host: str) -> tuple[SettingsProblem, ...]:
+        texts = settings_texts(self._project_root, {file: text})
 
-        for path, value in changes.items():
-            *sections, key = path.split(".")
-            node = document
-
-            for section in sections:
-                node = node.setdefault(section, CommentedMap())
-
-            node[key] = LiteralScalarString(value) if isinstance(value, str) and "\n" in value else value
-
-        output = io.StringIO()
-        self._yaml.dump(document, output)
-
-        return output.getvalue()
-
-    @override
-    def problems(self, file: SettingsFile, text: str) -> list[str]:
         try:
-            config = load_settings({file: text})
-            validate_trading_environment(config)
+            validate_editor_reachable(startup_settings(self._project_root, texts, environment), texts, host)
         except InvalidSettingsError as error:
-            return error.problems
-        except (yaml.YAMLError, TradingSetupError, ValueError, TypeError, AttributeError, OSError) as error:
-            return [f"{type(error).__name__}: {error}"]
+            return tuple(error.problems)
 
-        missing = config.ai.missing_key()
-        return [f"ai.active_model: {config.ai.active_model.value} needs {missing} set; the app would not start"] if missing else []
+        return ()
 
     @override
     def diff(self, file: SettingsFile, before: str, after: str) -> list[str]:

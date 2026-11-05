@@ -9,37 +9,43 @@ thresholds, eligibility and run counters come from the use cases that produced t
 import re
 from datetime import date, datetime
 from enum import StrEnum
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, SecretStr, StringConstraints
 
 from a_domain.model.analysis.technical_report import TechnicalReport
 from a_domain.model.fundamentals.eps import EpsUnavailable
 from a_domain.model.valuation.scan import ScanCriteria
 from a_domain.model.valuation.valuation import PeMedian, ReportSection
+from a_domain.ports.system.settings_files import Revision, SettingsProblem
 from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
 from a_domain.types.enums import (
-    EditableSetting,
     EliminationReason,
     EpsBasis,
     EpsKind,
+    ErrorCode,
     ExecutionProvider,
     IndicatorOutput,
     InformationSource,
-    LockedSetting,
     MarketIndex,
     MarketType,
     OrderMode,
     PeNotApplicableReason,
+    Role,
     ScanStep,
     ScenarioName,
+    SettingsAction,
     SettingsFile,
     SignalSource,
+    SystemEnvironment,
     TradeAction,
+    UserStatus,
     WatchlistType,
     Workflow,
 )
+from a_domain.types.values import EmailAddress, NewPassword, Username
+from d_presentation.live_runtime import ReloadRefused
 
 StockId = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=10, pattern=r"^[0-9A-Za-z]+$")]
 
@@ -447,81 +453,145 @@ class ValuationExplanationResponse(BaseModel):
 #                                Settings files                                #
 # ---------------------------------------------------------------------------- #
 
-type SettingValue = (
-    Annotated[str, Field(max_length=20_000)]
-    | bool
-    | int
-    | float
-    | Annotated[list[Annotated[str, Field(max_length=200)]], Field(max_length=200)]
-)
-"""What a form field can hold: text (a prompt), a switch, a number or a list of short words."""
+
+class SettingsTextRequest(BaseModel):
+    revision: Revision
+    """The file revision the administrator read; a file that moved past it answers 409."""
+
+    text: Annotated[str, Field(max_length=1_048_576)]
+    """The whole file. The editor refuses one larger than api.settings_file_max_bytes."""
 
 
-class SettingsChangesRequest(BaseModel):
-    revision: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
-    """The file revision the administrator read; a save from an older one answers 409."""
-
-    changes: Annotated[dict[EditableSetting, SettingValue], Field(min_length=1, max_length=60)]
-    """Allowlisted settings of this file only, by dotted path. Any other path is refused before anything is read."""
-
-
-class SettingsSaveRequest(Confirmed, SettingsChangesRequest):
-    pass
+class SettingsSaveRequest(Confirmed, SettingsTextRequest):
+    password: Annotated[SecretStr, Field(max_length=256)] | None = None
+    """The administrator's own password, which every save needs: without it, 403. Never logged or echoed."""
 
 
 class SettingsRestoreRequest(BaseModel):
-    revision: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+    revision: Revision
 
 
 class SettingsRestoreConfirmed(Confirmed, SettingsRestoreRequest):
-    pass
+    password: Annotated[SecretStr, Field(max_length=256)] | None = None
+    """The administrator's own password, which every restore needs, as a save does."""
 
 
 class SettingsFileStatusResponse(BaseModel):
     file: SettingsFile
+    file_name: str
     revision: str
     """The revision on disk now."""
 
     running_revision: str | None
-    """The revision this server loaded at startup and runs on. When it differs, a restart applies the file."""
+    """The revision of the settings the server runs on now."""
 
     modified_at: datetime
-    restart_required: bool
 
 
-class EditableSettingResponse(BaseModel):
-    setting: EditableSetting
-    value: Any
-    """The value in the file; None when the file leaves it to the default."""
+class SettingsOverviewResponse(BaseModel):
+    environment: SystemEnvironment
+    """The environment this server started in. Read-only here: it changes only when the app restarts."""
 
-    choices: list[str]
+    files: list[SettingsFileStatusResponse]
+
+    refused: ReloadRefused | None
+    """
+    The edit on disk the server refused, its revisions, the ones it kept running on (`previous`) and its problems, until
+    the files change again or a reload succeeds; None otherwise.
+    """
+
+    draining: int
+    """Earlier settings still open because a request or a run that started on them has not ended."""
 
 
-class SettingsFileResponse(BaseModel):
+class SettingsDocumentResponse(BaseModel):
     status: SettingsFileStatusResponse
-    settings: list[EditableSettingResponse]
-    locked: dict[LockedSetting, Any]
-    """Shown, never changed from the Web: the environment, broker, order mode, sizing and order-gate settings."""
+    text: str
 
 
-class SettingsEditResponse(Response):
+class SettingsEditResponse(BaseModel):
     file: SettingsFile
     base_revision: str
+    """The revision on disk the text was compared with."""
+
     revision: str
     """The proposed text's revision; after a save, the file's new revision."""
 
+    running_revision: str | None
     changed: list[str]
-    diff: list[str]
-    problems: list[str]
-    """Why the app would refuse to start with the proposed file: an edit with problems is never saved."""
+    """Every setting path whose value the text changes, a removed or an added one included."""
 
-    values: dict[str, Any]
+    diff: list[str]
+    problems: list[SettingsProblem]
+    """Why the app would refuse to start with the text, each at its file, line and column when one names a place."""
+
     saved: bool
-    restart_required: bool
-    """A saved file applies at the next start; the running server keeps the settings it loaded."""
+    applied: bool
+    """The server runs on this revision now: a saved file applies at once, every setting in it."""
 
 
 class SettingsBackupResponse(Response):
     backup_id: str
     revision: str
     created_at: datetime
+
+
+class SettingsAuditEntryResponse(BaseModel):
+    recorded_at: datetime
+    file: SettingsFile
+    action: SettingsAction
+    actor: str
+    """The administrator's user id, which is all the audit file keeps."""
+
+    actor_name: str | None
+    """The administrator's username, read now; None for a user who no longer exists."""
+
+    from_revision: str
+    to_revision: str
+    settings: list[str]
+
+
+class ErrorResponse(BaseModel):
+    """Every refusal: `detail` in words for a person, `code` for the client to switch on."""
+
+    detail: str
+    code: ErrorCode
+
+
+class ProblemsResponse(ErrorResponse):
+    """A save or a reload the app would not start with (`settings_refused`): nothing was saved; the problems say where and why."""
+
+    problems: list[SettingsProblem]
+
+
+class AuthStatusResponse(BaseModel):
+    """What the web app shows first: the first-time setup, or sign-in with or without registration."""
+
+    needs_first_administrator: bool
+    registration_open: bool
+
+
+class RegistrationRequest(BaseModel):
+    username: Username
+    email: EmailAddress
+    password: NewPassword
+
+
+class SetupRequest(RegistrationRequest):
+    """The first administrator, with the one-time code the server printed on its console at start."""
+
+    setup_code: SecretStr
+
+
+class SignInRequest(BaseModel):
+    identifier: Annotated[str, StringConstraints(min_length=1, max_length=254)]
+    """A username or an email, in any case."""
+    password: Annotated[SecretStr, Field(max_length=256)]
+
+
+class UserChangeRequest(Confirmed):
+    """An administrator's change of one user. A field left out stays as it is."""
+
+    role: Role | None = None
+    status: UserStatus | None = None
+    password: NewPassword | None = None

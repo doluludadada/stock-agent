@@ -1,41 +1,38 @@
 import { useSyncExternalStore } from 'react'
+import type { components } from './schema.gen'
+
+type Schemas = components['schemas']
+export type User = Schemas['User']
+export type Permission = Schemas['Permission']
 
 /**
- * The bearer tokens this tab holds, in memory only: never in storage, the URL or the bundle, so a reload asks again.
- * `owner` is API_TOKEN, `admin` is ADMIN_API_TOKEN; the server checks every request, this only carries them.
+ * Who is signed in, in this tab. The server keeps the session in an HttpOnly cookie the page cannot read, so this
+ * mirrors what the server last said: `checking` until GET /v1/auth/me answers, then signed in or out. `ended` says a
+ * 401 ended the session this tab held: it expired, the user was deactivated or got a new password, or signed out
+ * in another tab.
  */
-export type Scope = 'owner' | 'admin'
+export type Session = { status: 'checking' } | { status: 'signedOut'; ended: boolean } | { status: 'signedIn'; user: User }
 
-export type LockReason = 'locked' | 'rejected'
-
-interface ScopeState {
-  token: string | null
-  reason: LockReason
-}
-
-const state: Record<Scope, ScopeState> = {
-  owner: { token: null, reason: 'locked' },
-  admin: { token: null, reason: 'locked' },
-}
+let current: Session = { status: 'checking' }
+/** Counts the sessions this tab has known, so the refusal of an earlier one never ends a later one. */
+let generation = 0
 const listeners = new Set<() => void>()
-let snapshot = { owner: state.owner, admin: state.admin }
 
-function update(scope: Scope, next: ScopeState) {
-  state[scope] = next
-  snapshot = { owner: state.owner, admin: state.admin }
+function update(next: Session, newGeneration: boolean) {
+  current = next
+  if (newGeneration) generation += 1
   listeners.forEach((listener) => listener())
 }
 
 export const session = {
-  token: (scope: Scope) => state[scope].token,
-  unlock: (scope: Scope, token: string) => update(scope, { token: token.trim(), reason: 'locked' }),
-  lock: (scope: Scope) => update(scope, { token: null, reason: 'locked' }),
-  /**
-   * The server refused `token` (401): forget it so the next request does not repeat it. An answer that arrives after
-   * the user typed another token refers to the old one and leaves the new one alone.
-   */
-  reject: (scope: Scope, token: string) => {
-    if (state[scope].token === token) update(scope, { token: null, reason: 'rejected' })
+  current: (): Session => current,
+  generation: (): number => generation,
+  /** The server answered with this user; the same user again only refreshes the details, such as a changed role. */
+  signIn: (user: User) => update({ status: 'signedIn', user }, current.status !== 'signedIn' || current.user.user_id !== user.user_id),
+  signOut: () => update({ status: 'signedOut', ended: false }, true),
+  /** A request sent during session `sentIn` answered 401: that session is over, unless another began since. */
+  expire: (sentIn: number) => {
+    if (sentIn === generation && current.status === 'signedIn') update({ status: 'signedOut', ended: true }, true)
   },
   subscribe: (listener: () => void) => {
     listeners.add(listener)
@@ -43,10 +40,21 @@ export const session = {
       listeners.delete(listener)
     }
   },
-  snapshot: () => snapshot,
 }
 
-export function useSession(scope: Scope) {
-  const current = useSyncExternalStore(session.subscribe, session.snapshot)[scope]
-  return { unlocked: current.token !== null, reason: current.reason }
+export function hasPermission(state: Session, permission: Permission): boolean {
+  return state.status === 'signedIn' && state.user.permissions.includes(permission)
+}
+
+export function useSession(): Session {
+  return useSyncExternalStore(session.subscribe, session.current)
+}
+
+/** Private data is read only while someone is signed in, so a visitor's page sends no request it knows will fail. */
+export function useIsSignedIn(): boolean {
+  return useSession().status === 'signedIn'
+}
+
+export function useHasPermission(permission: Permission): boolean {
+  return hasPermission(useSession(), permission)
 }

@@ -1,5 +1,5 @@
 import { skipToken, useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiRequest, strategyResultsKey, useSession, type Schemas } from '@/shared/api'
+import { apiRequest, strategyResultsKey, useIsSignedIn, type Schemas } from '@/shared/api'
 
 export type ValuationReport = Schemas['ValuationReportResponse']
 export type ValuationScan = Schemas['ValuationScanResponse']
@@ -19,11 +19,11 @@ export const valuationKeys = {
 }
 
 export function useMarketValuation() {
-  const { unlocked } = useSession('owner')
+  const signedIn = useIsSignedIn()
   return useQuery({
     queryKey: valuationKeys.market,
-    queryFn: ({ signal }) => apiRequest('get', '/v1/valuation/market', { scope: 'owner', signal }),
-    enabled: unlocked,
+    queryFn: ({ signal }) => apiRequest('get', '/v1/valuation/market', { signal }),
+    enabled: signedIn,
     staleTime: MARKET_STALE_MS,
   })
 }
@@ -33,7 +33,7 @@ export function useValuedStocks(request: { stockIds: string[]; targetPe: number 
     queryKey: valuationKeys.stocks(request?.stockIds ?? [], request?.targetPe ?? null),
     queryFn: ({ signal }) =>
       apiRequest('get', '/v1/valuation/stocks', {
-        scope: 'owner',
+        
         query: { stock_ids: request!.stockIds, ...(request!.targetPe === null ? {} : { target_pe: request!.targetPe }) },
         signal,
       }),
@@ -47,7 +47,7 @@ export function useValuationScan(request: { targetPe: number; minUndervaluation:
     queryKey: valuationKeys.scan(request?.targetPe ?? 0, request?.minUndervaluation ?? 0, request?.technical ?? false),
     queryFn: ({ signal }) =>
       apiRequest('get', '/v1/valuation/scan', {
-        scope: 'owner',
+        
         query: { target_pe: request!.targetPe, min_undervaluation: request!.minUndervaluation, technical: request!.technical },
         signal,
       }),
@@ -68,7 +68,7 @@ export function useExplanation(stockId: string, targetPe: number) {
   const pending = useIsMutating({ mutationKey: key }) > 0
   const mutation = useMutation({
     mutationKey: key,
-    mutationFn: () => apiRequest('post', '/v1/valuation/explanation', { scope: 'owner', body: { confirm: true, stock_id: stockId, target_pe: targetPe } }),
+    mutationFn: () => apiRequest('post', '/v1/valuation/explanation', { body: { confirm: true, stock_id: stockId, target_pe: targetPe } }),
     onSuccess: (explanation) => client.setQueryData<Explanation>(key, explanation),
   })
   return { explanation: stored.data, pending, ask: mutation.mutate }

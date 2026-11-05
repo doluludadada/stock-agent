@@ -33,11 +33,55 @@ export interface paths {
         };
         /**
          * Get Settings Audit
-         * @description The latest saves and restores, newest first: when, which file, which revisions and which settings. No value.
+         * @description The latest saves and restores, newest first: when, which file, by whom, which revisions and which settings. No value.
          */
         get: operations["get_settings_audit_v1_admin_audit_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Settings Overview
+         * @description Every settings file with its revision on disk and the one the server runs on, an edit on disk the server refused and
+         *     why, how many earlier settings still finish runs, and what applies only at a restart.
+         */
+        get: operations["get_settings_overview_v1_admin_settings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/settings/reload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reload Settings
+         * @description The administrator's try again: loads the settings files as they are on disk now, an edit the server refused
+         *     before included, since a refusal can come from outside the files (a database that was down, a broker login that
+         *     failed). The server runs on them when they start, and the answer's `refused` is null; or it keeps its settings,
+         *     and `refused` says why.
+         */
+        post: operations["reload_settings_v1_admin_settings_reload_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -53,14 +97,16 @@ export interface paths {
         };
         /**
          * Get Settings File
-         * @description The file's allowlisted settings with their values in the file, and the read-only settings it shows.
+         * @description The whole file as it is on disk, with its revision and the one the server runs on.
          */
         get: operations["get_settings_file_v1_admin_settings__file__get"];
         /**
-         * Save Settings Change
-         * @description Saves the change when the app would start with it and the file is still at `revision`. It applies at the next start.
+         * Save Settings File
+         * @description Opens the app on the whole new text, writes it and runs on it at once, when the app starts with it, the file is
+         *     still at `revision` and the password is the administrator's own; or refuses with nothing written and the app as it
+         *     was. Runs that started earlier finish on the settings they started with.
          */
-        put: operations["save_settings_change_v1_admin_settings__file__put"];
+        put: operations["save_settings_file_v1_admin_settings__file__put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -96,7 +142,7 @@ export interface paths {
         put?: never;
         /**
          * Preview Settings Restore
-         * @description The backup against the current file: its diff and problems. Nothing is written.
+         * @description The backup's whole text against the file on disk, reviewed as a save would be. Nothing is written.
          */
         post: operations["preview_settings_restore_v1_admin_settings__file__backups__backup_id__preview_post"];
         delete?: never;
@@ -116,7 +162,7 @@ export interface paths {
         put?: never;
         /**
          * Restore Settings Backup
-         * @description Puts the backup back through the same validation, revision check, backup and audit as a save.
+         * @description Puts the backup's whole text back through the same checks, password, startup, backup, audit and swap as a save.
          */
         post: operations["restore_settings_backup_v1_admin_settings__file__backups__backup_id__restore_post"];
         delete?: never;
@@ -135,10 +181,174 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Preview Settings Change
-         * @description The change on the current file: its diff and why the app would refuse it. Nothing is written.
+         * Preview Settings File
+         * @description The text against the file on disk: its diff, the settings it changes, those applying only at a restart, and its
+         *     problems at their line and column. Nothing is written.
          */
-        post: operations["preview_settings_change_v1_admin_settings__file__preview_post"];
+        post: operations["preview_settings_file_v1_admin_settings__file__preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Users
+         * @description Every user, oldest first. No administrator sees another user's data: this is the directory only.
+         */
+        get: operations["list_users_v1_admin_users_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/users/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change User
+         * @description Changes a role, deactivates or reactivates a user, or sets a new password. A deactivation or a new password ends
+         *     every session of the user at once; their data stays, and a run of theirs already running finishes.
+         */
+        patch: operations["change_user_v1_admin_users__user_id__patch"];
+        trace?: never;
+    };
+    "/v1/auth/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Me
+         * @description The signed-in user with their permissions, which the app reads to show the administration pages. 401 when signed out.
+         */
+        get: operations["get_me_v1_auth_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/register": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register
+         * @description A new user with the role user: 403 while registration is closed, 409 for a taken username or email, 429 past the limit.
+         */
+        post: operations["register_v1_auth_register_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Up
+         * @description First use only: the administrator, who takes over the data of the single-user version. It needs the setup code the
+         *     server printed on its console at start (403 otherwise), so the first visitor of an exposed server cannot claim it.
+         *     409 once a user exists. The app then signs in like any user.
+         */
+        post: operations["set_up_v1_auth_setup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign In
+         * @description Sets the session cookie. 401 for a wrong name or password, one message for both; 429 past the attempt limits.
+         */
+        post: operations["sign_in_v1_auth_sign_in_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/sign-out": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign Out
+         * @description Ends this browser's session and clears its cookie. Signing out twice is fine.
+         */
+        post: operations["sign_out_v1_auth_sign_out_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Sign In Status
+         * @description What the web app shows first: the first-time setup while no user exists, then sign-in, with registration while it is open.
+         */
+        get: operations["get_sign_in_status_v1_auth_status_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -723,6 +933,17 @@ export interface components {
          * @enum {string}
          */
         ArithmeticOperator: "add" | "subtract" | "multiply" | "divide";
+        /**
+         * AuthStatusResponse
+         * @description What the web app shows first: the first-time setup, or sign-in with or without registration.
+         */
+        AuthStatusResponse: {
+            /** Needs First Administrator */
+            needs_first_administrator: boolean;
+            /** Registration Open */
+            registration_open: boolean;
+        };
+        BackupId: string;
         BarsAgo: number;
         /** BollingerIndicator */
         BollingerIndicator: {
@@ -852,26 +1073,11 @@ export interface components {
         "DataReference-Input": components["schemas"]["MarketValue"] | components["schemas"]["LatestPrice"] | components["schemas"]["IndicatorValue"];
         "DataReference-Output": components["schemas"]["MarketValue"] | components["schemas"]["LatestPrice"] | components["schemas"]["IndicatorValue"];
         /**
-         * EditableSetting
-         * @description A setting the administrator may change from the Web, named by its dotted path in its file. Anything not listed
-         *     stays read-only there: the environment, the broker and order mode, the score weights and thresholds, sizing and
-         *     stop-loss, the history and quote freshness, database, folders, credentials and every source URL.
-         * @enum {string}
-         */
-        EditableSetting: "ai.active_model" | "ai.temperature" | "ai.max_output_tokens" | "ai.connection_timeout" | "ai.article_content_length" | "ai.available_models.openai" | "ai.available_models.grok" | "ai.available_models.gemini" | "ai.available_models.groq" | "ai.available_models.nvidia" | "ai.available_models.claude" | "behavior.log_level" | "behavior.enable_web_search" | "behavior.web_search_max_results" | "analysis.reason_item_limit" | "analysis.article_fetch_limit" | "analysis.lookback_days" | "analysis.history_calendar_days_per_bar" | "sentiment.min_confidence" | "sentiment.min_opinions" | "sentiment.consensus_share" | "collect_rules.buzz_min_mentions" | "collect_rules.buzz_min_engagement" | "collect_rules.social_article_limit" | "collect_rules.ptt_lookback_days" | "collect_rules.spam_keywords" | "collect_rules.financial_keywords" | "collect_rules.ptt_tags" | "quality.min_chars_stock" | "quality.min_chars_news" | "quality.min_chars_gossip" | "freshness.missing_session_listed_stocks" | "freshness.daily_close_max_missed_sessions" | "valuation.scenario_spread" | "valuation.max_scan_explanations" | "watchlist.automatic_expiry_sessions" | "market_data.search_result_limit" | "market_data.most_traded_count" | "system_prompt" | "rag_injection_prompt" | "ai_analysis_report_prompt_fundamental" | "ai_analysis_report_prompt_momentum" | "social_sentiment_prompt" | "ai_valuation_explanation_prompt";
-        /** EditableSettingResponse */
-        EditableSettingResponse: {
-            /** Choices */
-            choices: string[];
-            setting: components["schemas"]["EditableSetting"];
-            /** Value */
-            value: unknown;
-        };
-        /**
          * EliminationReason
          * @enum {string}
          */
         EliminationReason: "eps_unavailable" | "eps_not_positive" | "price_missing" | "price_stale" | "below_min_undervaluation" | "no_price_history" | "technical_hard_failure";
+        EmailAddress: string;
         /**
          * EpsBasis
          * @enum {string}
@@ -913,6 +1119,23 @@ export interface components {
          * @enum {string}
          */
         EpsUnavailableReason: "not_loaded" | "not_reported" | "incomplete_history" | "source_failed";
+        /**
+         * ErrorCode
+         * @description The stable name of each refusal the Web API answers, in `code` next to `detail`: a client switches on it, never on
+         *     the words, which may change. Every 403 has its own, so the page tells a missing password from a wrong one, a
+         *     refused file, a user who is not an administrator and an installation on a real broker.
+         * @enum {string}
+         */
+        ErrorCode: "sign_in_required" | "sign_in_refused" | "sign_in_throttled" | "registration_closed" | "setup_code_refused" | "already_set_up" | "user_exists" | "last_administrator" | "unknown_host" | "app_request_required" | "administrators_only" | "real_broker_refused" | "mock_broker_only" | "password_required" | "password_refused" | "settings_file_refused" | "settings_file_missing" | "settings_conflict" | "settings_edit_refused" | "settings_refused" | "technical_settings_conflict" | "run_in_progress" | "too_many_runs" | "listing_unavailable" | "not_found" | "invalid_request" | "body_too_large" | "request_refused";
+        /**
+         * ErrorResponse
+         * @description Every refusal: `detail` in words for a person, `code` for the client to switch on.
+         */
+        ErrorResponse: {
+            code: components["schemas"]["ErrorCode"];
+            /** Detail */
+            detail: string;
+        };
         /**
          * ExecutionProvider
          * @enum {string}
@@ -1023,14 +1246,6 @@ export interface components {
             stock_id: string;
             today: components["schemas"]["DailyBarResponse"] | null;
         };
-        /**
-         * LockedSetting
-         * @description Settings the Web shows but never changes: they choose the broker, real orders, sizing and the order gates. The
-         *     score weights choose automatic orders as surely as the thresholds they are compared with, and the daily history's
-         *     freshness decides which stocks a run analyses at all.
-         * @enum {string}
-         */
-        LockedSetting: "environment" | "trading.execution_provider" | "trading.order_mode" | "shioaji.simulation" | "db.backend" | "analysis.min_combined_score_buy" | "analysis.max_combined_score_sell" | "analysis.technical_weight" | "analysis.ai_weight" | "analysis.risk_per_trade_pct" | "analysis.stop_loss_pct" | "analysis.lot_size" | "freshness.realtime_max_lag_minutes" | "freshness.history_max_lag_days";
         /** MacdIndicator */
         MacdIndicator: {
             fast: components["schemas"]["IndicatorPeriod"];
@@ -1113,6 +1328,8 @@ export interface components {
             kind: "sma" | "volume_sma";
             period: components["schemas"]["IndicatorPeriod"];
         };
+        /** Format: password */
+        NewPassword: string;
         NonEmptyText: string;
         NonNegativeFiniteFloat: number;
         Number: number;
@@ -1230,6 +1447,14 @@ export interface components {
             kind: "adx" | "atr" | "mfi" | "obv" | "rsi";
             period: components["schemas"]["IndicatorPeriod"];
         };
+        /**
+         * Permission
+         * @description What a role may do beyond using its own data. A signed-in user of any role runs every workflow on their own mock
+         *     account, watchlist, records and strategies; no permission is needed for that. Each member's docstring names where
+         *     it is checked, always against User.permissions.
+         * @enum {string}
+         */
+        Permission: "manage_users" | "edit_system_settings" | "use_cli" | "use_real_broker" | "notify_recipients" | "uncapped_ai" | "uncapped_runs";
         /** PositionValueResponse */
         PositionValueResponse: {
             /** Average Cost */
@@ -1248,7 +1473,42 @@ export interface components {
             unrealized_pnl: number;
         };
         PositiveFiniteFloat: number;
+        /**
+         * ProblemsResponse
+         * @description A save or a reload the app would not start with (`settings_refused`): nothing was saved; the problems say where and why.
+         */
+        ProblemsResponse: {
+            code: components["schemas"]["ErrorCode"];
+            /** Detail */
+            detail: string;
+            /** Problems */
+            problems: components["schemas"]["SettingsProblem"][];
+        };
         PublicText: string;
+        /** RegistrationRequest */
+        RegistrationRequest: {
+            email: components["schemas"]["EmailAddress"];
+            password: components["schemas"]["NewPassword"];
+            username: components["schemas"]["Username"];
+        };
+        /** ReloadRefused */
+        ReloadRefused: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Previous */
+            previous: {
+                [key: string]: string;
+            };
+            /** Problems */
+            problems: components["schemas"]["SettingsProblem"][];
+            /** Revisions */
+            revisions: {
+                [key: string]: string;
+            };
+        };
         /** ReportSection */
         ReportSection: {
             /** Lines */
@@ -1257,6 +1517,11 @@ export interface components {
             title: string;
         };
         Revision: string;
+        /**
+         * Role
+         * @enum {string}
+         */
+        Role: "administrator" | "user";
         /**
          * RuleEffect
          * @enum {string}
@@ -1356,22 +1621,21 @@ export interface components {
             undervaluation: number;
         };
         Score_int_: number;
-        SettingValue: string | boolean | number | string[];
         /**
          * SettingsAction
          * @enum {string}
          */
         SettingsAction: "save" | "restore";
-        /**
-         * SettingsAuditEntry
-         * @description One save or restore: when, by which scope, from which revision to which, and the setting paths it changed. No value.
-         */
-        SettingsAuditEntry: {
+        /** SettingsAuditEntryResponse */
+        SettingsAuditEntryResponse: {
             action: components["schemas"]["SettingsAction"];
             /** Actor */
             actor: string;
+            /** Actor Name */
+            actor_name: string | null;
             file: components["schemas"]["SettingsFile"];
-            from_revision: components["schemas"]["Revision"];
+            /** From Revision */
+            from_revision: string;
             /**
              * Recorded At
              * Format: date-time
@@ -1379,7 +1643,8 @@ export interface components {
             recorded_at: string;
             /** Settings */
             settings: string[];
-            to_revision: components["schemas"]["Revision"];
+            /** To Revision */
+            to_revision: string;
         };
         /** SettingsBackupResponse */
         SettingsBackupResponse: {
@@ -1393,17 +1658,16 @@ export interface components {
             /** Revision */
             revision: string;
         };
-        /** SettingsChangesRequest */
-        SettingsChangesRequest: {
-            /** Changes */
-            changes: {
-                [key: string]: components["schemas"]["SettingValue"];
-            };
-            /** Revision */
-            revision: string;
+        /** SettingsDocumentResponse */
+        SettingsDocumentResponse: {
+            status: components["schemas"]["SettingsFileStatusResponse"];
+            /** Text */
+            text: string;
         };
         /** SettingsEditResponse */
         SettingsEditResponse: {
+            /** Applied */
+            applied: boolean;
             /** Base Revision */
             base_revision: string;
             /** Changed */
@@ -1412,17 +1676,13 @@ export interface components {
             diff: string[];
             file: components["schemas"]["SettingsFile"];
             /** Problems */
-            problems: string[];
-            /** Restart Required */
-            restart_required: boolean;
+            problems: components["schemas"]["SettingsProblem"][];
             /** Revision */
             revision: string;
+            /** Running Revision */
+            running_revision: string | null;
             /** Saved */
             saved: boolean;
-            /** Values */
-            values: {
-                [key: string]: unknown;
-            };
         };
         /**
          * SettingsFile
@@ -1430,30 +1690,46 @@ export interface components {
          * @enum {string}
          */
         SettingsFile: "appsetting" | "instructions";
-        /** SettingsFileResponse */
-        SettingsFileResponse: {
-            /** Locked */
-            locked: {
-                [key: string]: unknown;
-            };
-            /** Settings */
-            settings: components["schemas"]["EditableSettingResponse"][];
-            status: components["schemas"]["SettingsFileStatusResponse"];
-        };
         /** SettingsFileStatusResponse */
         SettingsFileStatusResponse: {
             file: components["schemas"]["SettingsFile"];
+            /** File Name */
+            file_name: string;
             /**
              * Modified At
              * Format: date-time
              */
             modified_at: string;
-            /** Restart Required */
-            restart_required: boolean;
             /** Revision */
             revision: string;
             /** Running Revision */
             running_revision: string | null;
+        };
+        /** SettingsOverviewResponse */
+        SettingsOverviewResponse: {
+            /** Draining */
+            draining: number;
+            environment: components["schemas"]["SystemEnvironment"];
+            /** Files */
+            files: components["schemas"]["SettingsFileStatusResponse"][];
+            refused: components["schemas"]["ReloadRefused"] | null;
+        };
+        /**
+         * SettingsProblem
+         * @description One reason the app would not start with the settings: what, and where when a settings file names a place. The
+         *     line and column are 1-based and point at the key the problem is about, or the YAML parser's mark. Never a value:
+         *     pydantic's own text can quote the input, which can be a secret from .env.
+         */
+        SettingsProblem: {
+            /** Column */
+            column?: number | null;
+            file?: components["schemas"]["SettingsFile"] | null;
+            /** Line */
+            line?: number | null;
+            /** Message */
+            message: string;
+            /** Path */
+            path?: string | null;
         };
         /** SettingsRestoreConfirmed */
         SettingsRestoreConfirmed: {
@@ -1462,27 +1738,56 @@ export interface components {
              * @constant
              */
             confirm: true;
-            /** Revision */
-            revision: string;
+            /** Password */
+            password?: string | null;
+            revision: components["schemas"]["Revision"];
         };
         /** SettingsRestoreRequest */
         SettingsRestoreRequest: {
-            /** Revision */
-            revision: string;
+            revision: components["schemas"]["Revision"];
         };
         /** SettingsSaveRequest */
         SettingsSaveRequest: {
-            /** Changes */
-            changes: {
-                [key: string]: components["schemas"]["SettingValue"];
-            };
             /**
              * Confirm
              * @constant
              */
             confirm: true;
-            /** Revision */
-            revision: string;
+            /** Password */
+            password?: string | null;
+            revision: components["schemas"]["Revision"];
+            /** Text */
+            text: string;
+        };
+        /** SettingsTextRequest */
+        SettingsTextRequest: {
+            revision: components["schemas"]["Revision"];
+            /** Text */
+            text: string;
+        };
+        /**
+         * SetupRequest
+         * @description The first administrator, with the one-time code the server printed on its console at start.
+         */
+        SetupRequest: {
+            email: components["schemas"]["EmailAddress"];
+            password: components["schemas"]["NewPassword"];
+            /**
+             * Setup Code
+             * Format: password
+             */
+            setup_code: string;
+            username: components["schemas"]["Username"];
+        };
+        /** SignInRequest */
+        SignInRequest: {
+            /** Identifier */
+            identifier: string;
+            /**
+             * Password
+             * Format: password
+             */
+            password: string;
         };
         /**
          * SignalResponse
@@ -1613,6 +1918,14 @@ export interface components {
             /** Warnings */
             warnings: string[];
         };
+        /**
+         * SystemEnvironment
+         * @description Which machine the app runs on, and with it what it may trade on. Its properties are the one table of what each
+         *     environment allows; the trading setup check and the broker login read them, and nothing else decides by
+         *     environment. A process takes its environment at start: neither the Web editor nor a reload changes it.
+         * @enum {string}
+         */
+        SystemEnvironment: "dev" | "test" | "prod";
         /**
          * TechnicalReport
          * @description Result produced by a TechnicalStrategy.
@@ -1759,6 +2072,51 @@ export interface components {
          * @enum {string}
          */
         TradeAction: "buy" | "sell" | "hold";
+        /**
+         * User
+         * @description A person who signs in, and the owner of their own mock account, watchlist, records and strategies. It holds no
+         *     credential: the user store keeps the password hash and the encrypted username and email, and hands back this model
+         *     with both decrypted, so the Web answers with it.
+         */
+        User: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            email: components["schemas"]["EmailAddress"];
+            /**
+             * Permissions
+             * @description What the user's role allows beyond their own data: the web app shows the administration pages from it.
+             */
+            readonly permissions: components["schemas"]["Permission"][];
+            role: components["schemas"]["Role"];
+            /** @default active */
+            status: components["schemas"]["UserStatus"];
+            /** User Id */
+            user_id: string;
+            username: components["schemas"]["Username"];
+        };
+        /**
+         * UserChangeRequest
+         * @description An administrator's change of one user. A field left out stays as it is.
+         */
+        UserChangeRequest: {
+            /**
+             * Confirm
+             * @constant
+             */
+            confirm: true;
+            password?: components["schemas"]["NewPassword"] | null;
+            role?: components["schemas"]["Role"] | null;
+            status?: components["schemas"]["UserStatus"] | null;
+        };
+        /**
+         * UserStatus
+         * @enum {string}
+         */
+        UserStatus: "active" | "deactivated";
+        Username: string;
         /** ValidationError */
         ValidationError: {
             /** Context */
@@ -1930,7 +2288,60 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SettingsAuditEntry"][];
+                    "application/json": components["schemas"]["SettingsAuditEntryResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_settings_overview_v1_admin_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsOverviewResponse"];
+                };
+            };
+        };
+    };
+    reload_settings_v1_admin_settings_reload_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Confirmed"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsOverviewResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1961,7 +2372,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SettingsFileResponse"];
+                    "application/json": components["schemas"]["SettingsDocumentResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1975,7 +2386,7 @@ export interface operations {
             };
         };
     };
-    save_settings_change_v1_admin_settings__file__put: {
+    save_settings_file_v1_admin_settings__file__put: {
         parameters: {
             query?: never;
             header?: never;
@@ -1999,19 +2410,41 @@ export interface operations {
                     "application/json": components["schemas"]["SettingsEditResponse"];
                 };
             };
+            /** @description A save or a restore without the password (password_required), or with a wrong one (password_refused). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description The file changed after the revision the request carries; nothing saved. */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
-            /** @description The app would refuse the file; nothing saved. The detail lists why. */
+            /** @description The app would not start with it. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ProblemsResponse"];
+                };
+            };
+            /** @description Too many wrong passwords from this address; Retry-After says when. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
         };
     };
@@ -2052,7 +2485,7 @@ export interface operations {
             header?: never;
             path: {
                 file: components["schemas"]["SettingsFile"];
-                backup_id: string;
+                backup_id: components["schemas"]["BackupId"];
             };
             cookie?: never;
         };
@@ -2088,7 +2521,7 @@ export interface operations {
             header?: never;
             path: {
                 file: components["schemas"]["SettingsFile"];
-                backup_id: string;
+                backup_id: components["schemas"]["BackupId"];
             };
             cookie?: never;
         };
@@ -2107,23 +2540,45 @@ export interface operations {
                     "application/json": components["schemas"]["SettingsEditResponse"];
                 };
             };
+            /** @description A save or a restore without the password (password_required), or with a wrong one (password_refused). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description The file changed after the revision the request carries; nothing saved. */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
-            /** @description The app would refuse the file; nothing saved. The detail lists why. */
+            /** @description The app would not start with it. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ProblemsResponse"];
+                };
+            };
+            /** @description Too many wrong passwords from this address; Retry-After says when. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
         };
     };
-    preview_settings_change_v1_admin_settings__file__preview_post: {
+    preview_settings_file_v1_admin_settings__file__preview_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -2134,7 +2589,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["SettingsChangesRequest"];
+                "application/json": components["schemas"]["SettingsTextRequest"];
             };
         };
         responses: {
@@ -2154,6 +2609,232 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_users_v1_admin_users_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"][];
+                };
+            };
+        };
+    };
+    change_user_v1_admin_users__user_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserChangeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
+            };
+            /** @description No such user. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No active administrator would remain; nothing saved. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_me_v1_auth_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
+            };
+        };
+    };
+    register_v1_auth_register_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegistrationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_up_v1_auth_setup_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetupRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sign_in_v1_auth_sign_in_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SignInRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sign_out_v1_auth_sign_out_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_sign_in_status_v1_auth_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthStatusResponse"];
                 };
             };
         };
@@ -2420,14 +3101,18 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
-            /** @description Another run started by this server is still running. */
+            /** @description Another run of this user is still running. */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
             /** @description Validation Error */
             422: {
@@ -2436,6 +3121,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The server runs its most workflows at once; start yours later. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2462,12 +3156,14 @@ export interface operations {
                     "application/json": components["schemas"]["RunAccepted"];
                 };
             };
-            /** @description Another run started by this server is still running. */
+            /** @description Another run of this user is still running. */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
             /** @description Validation Error */
             422: {
@@ -2476,6 +3172,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The server runs its most workflows at once; start yours later. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2507,14 +3212,18 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
-            /** @description Another run started by this server is still running. */
+            /** @description Another run of this user is still running. */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
             /** @description Validation Error */
             422: {
@@ -2523,6 +3232,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The server runs its most workflows at once; start yours later. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2549,12 +3267,14 @@ export interface operations {
                     "application/json": components["schemas"]["RunAccepted"];
                 };
             };
-            /** @description Another run started by this server is still running. */
+            /** @description Another run of this user is still running. */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
             /** @description Validation Error */
             422: {
@@ -2563,6 +3283,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The server runs its most workflows at once; start yours later. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

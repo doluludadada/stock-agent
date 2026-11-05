@@ -8,14 +8,14 @@ from dataclasses import dataclass
 
 from rich.panel import Panel
 
-from a_domain.types.enums import ExecutionProvider, OrderMode
+from a_domain.model.system.user import User
+from a_domain.types.enums import ExecutionProvider, OrderMode, Permission
 from a_domain.types.errors import ListingUnavailableError
 from b_application.config.app_config import AppConfig
-from b_application.config.settings_loader import InvalidSettingsError
 from b_application.schemas.pipeline_status import PipelineStatus
-from c_infrastructure.database.db_connector import OutdatedDatabaseError
-from d_presentation.cli import account_views, terminal, trading_views, valuation_views
-from d_presentation.dependencies import Runtime, TradingSetupError, open_runtime
+from d_presentation.cli import account_views, terminal, trading_views, user_views, valuation_views
+from d_presentation.dependencies import STARTUP_REFUSALS, Runtime
+from d_presentation.live_runtime import ReloadRefused, RuntimeSwitch, SettingsReload, SettingsReloaded, describe, open_runtime_switch
 
 EXIT = "0"
 
@@ -43,7 +43,7 @@ MENU = {
             "Analyse watchlist stocks with news and AI.",
             "Generate next-day trading signals.",
         ),
-        run=lambda runtime, session: runtime.pipeline.run_full_cycle(built_in_strategy_id=session.built_in_strategy_id),
+        run=lambda runtime, session: session.pipeline.run_full_cycle(built_in_strategy_id=session.built_in_strategy_id),
     ),
     "2": MenuOption(
         title="Scan Social Buzz",
@@ -54,7 +54,7 @@ MENU = {
     "3": MenuOption(
         title="Run Intraday Trading",
         description=("Revalidate positions and active watchlist stocks.", "Generate signals."),
-        run=lambda runtime, session: runtime.pipeline.run_intraday(built_in_strategy_id=session.built_in_strategy_id),
+        run=lambda runtime, session: session.pipeline.run_intraday(built_in_strategy_id=session.built_in_strategy_id),
         may_submit_orders=True,
     ),
     "4": MenuOption(
@@ -87,7 +87,7 @@ MENU = {
             "Show cash, positions and unrealized PnL at the latest prices.",
             "Show the equity curve and the account as of a date. Never places orders.",
         ),
-        run=lambda runtime, _: account_views.show_account_history(runtime),
+        run=lambda runtime, session: account_views.show_account_history(session.pipeline),
     ),
     "8": MenuOption(
         title="Load Built-in Strategy",
@@ -101,18 +101,110 @@ MENU = {
 
 
 async def interactive_menu() -> None:
-    session = terminal.CliSession()
+    async with open_runtime_switch() as switch:
+        with switch.hold() as opened:
+            user = await user_views.sign_in(opened.runtime.signed_out)
 
-    async with open_runtime() as runtime:
+        if user is None:
+            return
+
         try:
-            while (choice := ask_menu_choice(runtime.config, session)) not in (None, EXIT):
-                await run_menu_option(choice, runtime, session)
-                terminal.console.print("\n" + "=" * 50 + "\n")
+            await run_menu(switch, user)
 
         finally:
             terminal.console.print("\n[yellow]Shutting down...[/yellow]")
 
     terminal.console.print("[bold green]System stopped.[/bold green]")
+
+
+async def run_menu(switch: RuntimeSwitch, user: User) -> None:
+    """
+    One round per menu option. Before the menu prints, the settings files on disk are loaded when they changed, with a
+    line saying so. The round then holds one runtime from the menu it prints to the option's summary, so the trading
+    setup the menu shows (broker, order mode, the real-broker warning) is the one the chosen option runs on, and an
+    edit made during an option waits for the next round. An option that may send an order looks at the files once
+    more after the choice: settings that changed while the menu waited, a Web save included, print the menu again on
+    them instead. The user is read again before each option; menu 8's strategy carries over to the next round while
+    the settings still have it.
+    """
+    built_in_strategy_id: str | None = None
+
+    while True:
+        print_reload(await switch.reload())
+
+        with switch.hold() as opened:
+            runtime = opened.runtime
+            built_in_strategy_id = still_built_in(runtime, built_in_strategy_id)
+            session = session_for(runtime, user, built_in_strategy_id)
+            choice = ask_menu_choice(runtime.config, session)
+
+            if choice in (None, EXIT) or not await still_signed_in(runtime, session):
+                return
+
+            if MENU[choice].may_submit_orders and await reloaded(switch):
+                terminal.console.print("[yellow]The settings changed while the menu waited. Choose again on them.[/yellow]")
+                continue
+
+            await run_menu_option(choice, runtime, session)
+            built_in_strategy_id = session.built_in_strategy_id
+
+        terminal.console.print("\n" + "=" * 50 + "\n")
+
+
+async def reloaded(switch: RuntimeSwitch) -> bool:
+    """
+    Loads the settings files when they changed, saying so. True when the CLI runs on new settings now: in the CLI's
+    process nothing else reloads, so the round's runtime is no longer the current one.
+    """
+    reload = await switch.reload()
+    print_reload(reload)
+    return isinstance(reload, SettingsReloaded)
+
+
+def print_reload(reload: SettingsReload | None) -> None:
+    """Nothing when the settings files did not change; one line for a reload; the problems for one the app refused."""
+    match reload:
+        case SettingsReloaded():
+            terminal.console.print(f"[green]Settings reloaded: {describe(reload)}.[/green]")
+        case ReloadRefused(problems=problems):
+            terminal.console.print("[red]The settings files on disk would not start, so the CLI keeps its settings:[/red]")
+
+            for problem in problems:
+                terminal.console.print(f"  - {problem}", style="red", markup=False, highlight=False)
+        case None:
+            return
+
+
+def still_built_in(runtime: Runtime, built_in_strategy_id: str | None) -> str | None:
+    """Menu 8's strategy for this round, or None, with a line, when the reloaded settings no longer have it."""
+    strategies = {strategy.strategy_id for strategy in runtime.config.technical.built_in_strategies}
+
+    if built_in_strategy_id is None or built_in_strategy_id in strategies:
+        return built_in_strategy_id
+
+    terminal.console.print(
+        f"[yellow]The settings no longer have the built-in {built_in_strategy_id}; runs use the saved settings.[/yellow]"
+    )
+    return None
+
+
+def session_for(runtime: Runtime, user: User, built_in_strategy_id: str | None = None) -> terminal.CliSession:
+    """The one way a CLI session is made, from the signed-in administrator: every menu option runs on their Pipeline."""
+    return terminal.CliSession(user=user, pipeline=runtime.pipeline_for(user), built_in_strategy_id=built_in_strategy_id)
+
+
+async def still_signed_in(runtime: Runtime, session: terminal.CliSession) -> bool:
+    """
+    Reads the user again before each menu option: a user deactivated, or no longer an administrator, since the CLI
+    started loses it, and with it manual BUY and the real broker, at the next option.
+    """
+    user = await runtime.signed_out.load_user(session.user.user_id)
+
+    if user is not None and Permission.USE_CLI in user.permissions:
+        return True
+
+    terminal.console.print("[red]You were signed out: your account is deactivated or no longer an administrator.[/red]")
+    return False
 
 
 def ask_menu_choice(config: AppConfig, session: terminal.CliSession) -> str | None:
@@ -125,15 +217,15 @@ def ask_menu_choice(config: AppConfig, session: terminal.CliSession) -> str | No
     return choice
 
 
-async def run_menu_option(choice: str, runtime: Runtime, session: terminal.CliSession | None = None) -> PipelineStatus | None:
+async def run_menu_option(choice: str, runtime: Runtime, session: terminal.CliSession) -> PipelineStatus | None:
     """
-    Runs the chosen option and summarizes the trading workflow it ran. Ctrl-D at one of its y/n prompts cancels it.
-    Without a session the option runs on the saved settings.
+    Runs the chosen option on the session's Pipeline and summarizes the trading workflow it ran. Ctrl-D at one of its
+    y/n prompts cancels it.
     """
     option = MENU[choice]
 
     try:
-        status = await option.run(runtime, session or terminal.CliSession())
+        status = await option.run(runtime, session)
     except EOFError:
         terminal.console.print(f"\n[yellow]{option.title} cancelled.[/yellow]")
         return None
@@ -148,6 +240,7 @@ async def run_menu_option(choice: str, runtime: Runtime, session: terminal.CliSe
 
 
 def print_menu(config: AppConfig, session: terminal.CliSession) -> None:
+    terminal.console.print(f"Signed in:          {session.user.username} ({session.user.role.value})")
     print_trading_setup(config)
     strategy = session.built_in_strategy_id
     terminal.console.print(f"Technical strategy: {f'built-in {strategy}, this session only' if strategy else 'saved settings'}")
@@ -196,15 +289,13 @@ def print_trading_setup(config: AppConfig) -> None:
 
     terminal.console.print(f"Environment:        {terminal.format_label(config.environment.value)}")
     terminal.console.print(f"Execution Provider: {broker}")
-    terminal.console.print(
-        f"Account:            {'the broker default stock account' if real_broker else config.mock_trading.account_id}"
-    )
+    terminal.console.print(f"Account:            {'the broker default stock account' if real_broker else 'your mock account'}")
     terminal.console.print(f"Orders:             {mode}")
 
     if not real_broker:
         return
 
-    server = "SIMULATION (paper trading)" if config.shioaji.simulation else "PRODUCTION: REAL ACCOUNT, REAL MONEY"
+    server = "SIMULATION (paper trading)" if config.environment.shioaji_simulation else "PRODUCTION: REAL ACCOUNT, REAL MONEY"
     order_menus = ", ".join(key for key, option in MENU.items() if option.may_submit_orders)
     orders = (
         f"menus {order_menus} send orders to the broker"
@@ -237,7 +328,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt, asyncio.CancelledError, SystemExit:
         pass
 
-    except (InvalidSettingsError, OutdatedDatabaseError, TradingSetupError) as error:
+    except STARTUP_REFUSALS as error:
         terminal.console.print(str(error), style="red", markup=False, highlight=False)
         exit_code = 1
 

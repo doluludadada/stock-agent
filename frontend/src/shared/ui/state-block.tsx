@@ -11,16 +11,18 @@ interface StateBlockProps {
   className?: string
 }
 
-/** Empty, locked, error and not-found states share one compact layout; inside a panel it needs no frame of its own. */
+/** Empty, signed-out, error and not-found states share one compact layout; inside a card it needs no frame of its own. */
 export function StateBlock({ icon: Icon, title, description, action, tone = 'neutral', className }: StateBlockProps) {
   return (
-    <div role={tone === 'danger' ? 'alert' : 'status'} className={cn('flex flex-col items-center justify-center gap-2 px-4 py-6 text-center', className)}>
-      <Icon aria-hidden className={cn('size-5', tone === 'danger' ? 'text-destructive' : 'text-muted-foreground')} />
-      <div className="max-w-sm space-y-0.5">
-        <p className="text-sm font-medium">{title}</p>
-        {description && <p className="text-xs text-pretty text-muted-foreground">{description}</p>}
+    <div role={tone === 'danger' ? 'alert' : 'status'} className={cn('flex flex-col items-center justify-center gap-3 px-4 py-8 text-center', className)}>
+      <span className={cn('grid size-10 place-items-center rounded-full', tone === 'danger' ? 'bg-danger-soft text-destructive' : 'bg-muted text-muted-foreground')}>
+        <Icon aria-hidden className="size-5" />
+      </span>
+      <div className="max-w-sm space-y-1">
+        <p className="text-title font-semibold text-balance">{title}</p>
+        {description && <p className="text-sm text-pretty text-muted-foreground">{description}</p>}
       </div>
-      {action}
+      {action && <div className="flex flex-wrap items-center justify-center gap-2">{action}</div>}
     </div>
   )
 }

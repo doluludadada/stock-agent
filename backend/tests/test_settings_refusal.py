@@ -11,12 +11,17 @@ import traceback
 from pathlib import Path
 
 import pytest
+import yaml
+from trading_stack import SilentLogger
 
-from a_domain.types.enums import SettingsFile
-from b_application.config.settings_loader import InvalidSettingsError, load_settings
+from a_domain.ports.system.settings_files import SettingsProblem
+from a_domain.types.enums import SettingsFile, SystemEnvironment
+from b_application.config.settings_loader import InvalidSettingsError, load_settings, startup_settings
+from c_infrastructure.system.settings_files import SettingsFiles
 
 BACKEND = Path(__file__).resolve().parents[1]
-CONFIG = BACKEND.parent / "config"
+ROOT = BACKEND.parent
+CONFIG = ROOT / "config"
 
 SECRET = "Kq7x9"
 """Short enough that pydantic's shortened input value shows all of it."""
@@ -59,10 +64,20 @@ def test_settings_that_do_not_validate_name_each_problem_and_never_a_value_from_
         monkeypatch.setenv(name, value)
 
     with pytest.raises(InvalidSettingsError) as refused:
-        load_settings({SettingsFile.APPSETTING: appsetting} if appsetting else None)
+        load_settings(tmp_path, {SettingsFile.APPSETTING: appsetting} if appsetting else None)
 
     assert f"{location}: " in str(refused.value) and words in str(refused.value)
     assert SECRET not in "".join(traceback.format_exception(refused.value))
+
+
+def test_a_candidate_is_validated_by_itself_not_by_the_file_on_disk() -> None:
+    shipped = (CONFIG / "appsetting.yaml").read_text(encoding="utf-8")
+    candidate = "".join(line for line in shipped.splitlines(keepends=True) if "mis_quotes_url:" not in line)
+
+    with pytest.raises(InvalidSettingsError) as refused:
+        load_settings(ROOT, {SettingsFile.APPSETTING: candidate})
+
+    assert "sources.exchange.mis_quotes_url: Field required" in str(refused.value)
 
 
 @pytest.mark.asyncio
@@ -83,3 +98,138 @@ async def test_the_cli_and_the_served_api_print_invalid_settings_alone_and_exit_
     assert process.returncode == 1
     assert "db.backend is sqlite" in printed
     assert "Traceback" not in printed and SECRET not in printed
+
+
+SHIPPED = {file: (CONFIG / file.file_name).read_text(encoding="utf-8") for file in SettingsFile}
+
+
+def at(text: str, needle: str) -> tuple[int, int]:
+    """The 1-based line and column where `needle` starts in `text`."""
+    before = text[: text.index(needle)]
+    return before.count("\n") + 1, len(before) - (before.rfind("\n") + 1) + 1
+
+
+def refused(file: SettingsFile, text: str) -> list[SettingsProblem]:
+    with pytest.raises(InvalidSettingsError) as error:
+        load_settings(ROOT, {file: text})
+
+    return error.value.problems
+
+
+def test_the_shipped_settings_load_and_name_no_unread_key() -> None:
+    assert load_settings(ROOT).environment.value == "dev"
+
+
+def test_every_yaml_file_in_config_is_a_settings_file() -> None:
+    assert {file.file_name for file in SettingsFile} == {path.name for path in CONFIG.glob("*.yaml")}
+
+
+def test_a_file_that_does_not_parse_is_refused_at_the_parsers_mark() -> None:
+    text = SHIPPED[SettingsFile.APPSETTING].replace("  order_mode: mock_only\n", "  order_mode: [mock_only\n", 1)
+
+    [problem] = refused(SettingsFile.APPSETTING, text)
+
+    assert (problem.file, problem.message.startswith("YAML: ")) == (SettingsFile.APPSETTING, True)
+    assert problem.line is not None and problem.line > at(text, "  order_mode: [mock_only")[0]
+
+
+def test_a_refused_value_is_located_at_its_key() -> None:
+    text = SHIPPED[SettingsFile.APPSETTING].replace("  order_mode: mock_only", "  order_mode: sometimes", 1)
+
+    [problem] = refused(SettingsFile.APPSETTING, text)
+
+    assert (problem.file, problem.path, problem.line, problem.column) == (
+        SettingsFile.APPSETTING,
+        "trading.order_mode",
+        *at(text, "order_mode: sometimes"),
+    )
+    assert "sometimes" not in problem.message
+    assert str(problem).startswith(f"appsetting.yaml line {problem.line}, column 3, trading.order_mode: Input should be")
+
+
+@pytest.mark.parametrize(
+    ("addition", "path", "words"),
+    [
+        ("  order_mod: live\n", "trading.order_mod", "names no setting"),
+        ("  OPENAI_API_KEY: from-yaml\n", None, "comes from the environment"),
+        ("  password: from-yaml\n", None, "comes from the environment"),
+        ("  system_prompt: from-yaml\n", None, "is the prompt system_prompt of instructions.yaml"),
+    ],
+    ids=["unknown", "environment-alias", "environment-field", "prompt"],
+)
+def test_a_key_the_app_would_not_read_is_refused_at_its_line(addition: str, path: str | None, words: str) -> None:
+    section = {"order_mod": "trading:\n", "OPENAI_API_KEY": "ai:\n", "password": "db:\n", "system_prompt": "ai:\n"}
+    key = addition.strip().split(":")[0]
+    text = SHIPPED[SettingsFile.APPSETTING].replace(section[key], section[key] + addition, 1)
+
+    [problem] = refused(SettingsFile.APPSETTING, text)
+
+    assert (problem.line, problem.column) == at(text, addition.lstrip())
+    assert problem.path == (path or f"{section[key].strip(':\n')}.{key}") and words in problem.message
+    assert "from-yaml" not in str(problem)
+
+
+def test_a_secret_can_never_be_written_into_appsetting_yaml_even_as_the_accounts_key() -> None:
+    text = SHIPPED[SettingsFile.APPSETTING].replace("accounts:\n", "accounts:\n  ACCOUNTS_KEY: from-yaml\n  key: from-yaml\n", 1)
+
+    problems = refused(SettingsFile.APPSETTING, text)
+
+    assert [problem.path for problem in problems] == ["accounts.ACCOUNTS_KEY", "accounts.key"]
+
+
+def test_instructions_yaml_takes_only_its_prompts_and_a_refused_prompt_is_located_there() -> None:
+    unknown = SHIPPED[SettingsFile.INSTRUCTIONS] + "\nsystem_promt: typo\n"
+    [typo] = refused(SettingsFile.INSTRUCTIONS, unknown)
+
+    assert (typo.file, typo.path, typo.line) == (SettingsFile.INSTRUCTIONS, "system_promt", at(unknown, "system_promt")[0])
+
+    prompts = yaml.safe_load(SHIPPED[SettingsFile.INSTRUCTIONS])
+    without_placeholder = yaml.safe_dump({**prompts, "rag_injection_prompt": "no results placeholder here"}, allow_unicode=True)
+    [prompt] = refused(SettingsFile.INSTRUCTIONS, without_placeholder)
+
+    assert (prompt.file, prompt.path) == (SettingsFile.INSTRUCTIONS, "ai.rag_injection_prompt")
+    assert (prompt.line, prompt.column) == at(without_placeholder, "rag_injection_prompt:")
+
+
+def test_an_unsafe_trading_setup_is_located_at_the_setting_it_names(tmp_path: Path) -> None:
+    (tmp_path / "config").mkdir()
+    for file, text in SHIPPED.items():
+        (tmp_path / "config" / file.file_name).write_text(text, encoding="utf-8")
+    (tmp_path / "config" / "strategies").symlink_to(CONFIG / "strategies")
+    text = SHIPPED[SettingsFile.APPSETTING].replace("  execution_provider: mock", "  execution_provider: shioaji", 1)
+    files = SettingsFiles(project_root=tmp_path, max_bytes=262_144, backups_kept=3, logger=SilentLogger())
+
+    problems = files.check(SettingsFile.APPSETTING, text, SystemEnvironment.DEV, "127.0.0.1")
+    [problem] = [problem for problem in problems if problem.path != "ai.active_model"]
+
+    assert (problem.path, problem.line) == ("trading.execution_provider", at(text, "execution_provider: shioaji")[0])
+    assert problem.message == "environment dev trades only on mock, not shioaji"
+
+
+def test_a_missing_ai_key_is_a_located_refusal_at_the_first_start(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project = away_from_the_repository_env(tmp_path)
+    monkeypatch.chdir(project)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    text = (CONFIG / "appsetting.yaml").read_text(encoding="utf-8")
+
+    with pytest.raises(InvalidSettingsError) as refused:
+        startup_settings(project)
+
+    [problem] = refused.value.problems
+    assert (problem.file, problem.path, problem.line) == (SettingsFile.APPSETTING, "ai.active_model", at(text, "active_model:")[0])
+    assert problem.message == "claude needs ANTHROPIC_API_KEY in the environment or .env; the app would not start"
+
+
+def test_settings_of_another_environment_than_the_process_started_in_are_refused_where_they_set_it(tmp_path: Path) -> None:
+    (tmp_path / "config").mkdir()
+    for file, text in SHIPPED.items():
+        (tmp_path / "config" / file.file_name).write_text(text, encoding="utf-8")
+    (tmp_path / "config" / "strategies").symlink_to(CONFIG / "strategies")
+    text = SHIPPED[SettingsFile.APPSETTING].replace("environment: dev", "environment: test", 1)
+
+    with pytest.raises(InvalidSettingsError) as refused:
+        startup_settings(tmp_path, {SettingsFile.APPSETTING: text}, SystemEnvironment.DEV)
+
+    problem = next(problem for problem in refused.value.problems if problem.path == "environment")
+    assert (problem.file, problem.line, problem.column) == (SettingsFile.APPSETTING, *at(text, "environment: test"))
+    assert problem.message.endswith("this process started as dev: the environment changes only when the app restarts")

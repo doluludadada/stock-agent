@@ -5,11 +5,11 @@ import hashlib
 import hmac
 import json
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager, nullcontext
+from contextlib import asynccontextmanager
 
 import httpx
 import pytest
-from support.harness import CliHarness, build_harness
+from support.harness import CliHarness, build_harness, open_harness_switch
 
 from b_application.config.chat_config import LineConfig
 from d_presentation.web.app import create_app
@@ -23,7 +23,7 @@ WEBHOOK = "/v1/webhook/line"
 @asynccontextmanager
 async def serve(harness: CliHarness, secret: str | None = SECRET) -> AsyncIterator[httpx.AsyncClient]:
     harness.config.line = LineConfig(LINE_CHANNEL_SECRET=secret)
-    app = create_app(lambda: nullcontext(harness.runtime))
+    app = create_app(lambda: open_harness_switch(harness))
 
     async with (
         app.router.lifespan_context(app),

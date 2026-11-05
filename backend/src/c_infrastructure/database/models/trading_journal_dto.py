@@ -3,7 +3,7 @@ from typing import Any, ClassVar, Self
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import JSON, Column
+from sqlalchemy import JSON, Column, Index
 from sqlmodel import Field, SQLModel
 
 from a_domain.model.analysis.ai_analysis_report import AiAnalysisReport
@@ -17,9 +17,10 @@ from c_infrastructure.database.utc_datetime import UtcDateTime
 
 
 class WorkflowRunDTO(SQLModel, table=True):
-    """One workflow run (SystemStats). end_time stays empty when the run never finished."""
+    """One workflow run (SystemStats) of one owner. end_time stays empty when the run never finished."""
 
     __tablename__: ClassVar[str] = "workflow_runs"
+    __table_args__ = (Index("ix_workflow_runs_owner_start", "owner_id", "start_time"),)
 
     run_id: UUID = Field(primary_key=True)
     workflow: Workflow
@@ -45,6 +46,11 @@ class WorkflowRunDTO(SQLModel, table=True):
     errors: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
     execution_log: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
     failure: str | None = None
+    owner_id: str = Field(exclude=True)
+    """
+    The user the run belongs to. Every owned table ends with this column, as the upgrade to version 3 added it. It never
+    leaves the row: model_dump(), which reads the row back into its domain model, leaves it out.
+    """
 
 
 class TradeSignalDTO(SQLModel, table=True):
@@ -69,6 +75,7 @@ class TradeSignalDTO(SQLModel, table=True):
     history_until: datetime | None = Field(default=None, sa_type=UtcDateTime)
     technical_report: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     ai_report: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    owner_id: str = Field(exclude=True)
 
 
 class OrderDTO(SQLModel, table=True):
@@ -98,6 +105,7 @@ class OrderDTO(SQLModel, table=True):
 
     created_at: datetime = Field(sa_type=UtcDateTime)
     updated_at: datetime = Field(sa_type=UtcDateTime)
+    owner_id: str = Field(exclude=True)
 
 
 class SnapshotPositionJson(BaseModel):
@@ -131,9 +139,10 @@ class SnapshotPositionJson(BaseModel):
 
 
 class AccountSnapshotDTO(SQLModel, table=True):
-    """Cash and positions right after the fill of `order_id`."""
+    """One owner's cash and positions right after the fill of `order_id`."""
 
     __tablename__: ClassVar[str] = "account_snapshots"
+    __table_args__ = (Index("ix_account_snapshots_owner_taken", "owner_id", "taken_at"),)
 
     snapshot_id: UUID = Field(primary_key=True)
     taken_at: datetime = Field(index=True, sa_type=UtcDateTime)
@@ -141,9 +150,10 @@ class AccountSnapshotDTO(SQLModel, table=True):
     order_id: UUID = Field(index=True)
     cash: float
     positions: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    owner_id: str
 
     @classmethod
-    def from_domain(cls, snapshot: AccountSnapshot) -> Self:
+    def from_domain(cls, snapshot: AccountSnapshot, owner_id: str) -> Self:
         positions = [SnapshotPositionJson.from_domain(position).model_dump(mode="json") for position in snapshot.account.positions]
 
         return cls(
@@ -153,10 +163,11 @@ class AccountSnapshotDTO(SQLModel, table=True):
             order_id=snapshot.order_id,
             cash=snapshot.account.cash,
             positions=positions,
+            owner_id=owner_id,
         )
 
     def to_domain(self) -> AccountSnapshot:
-        """The account id and opening times are not stored, so the account reads back with the defaults."""
+        """The account is the owner's, whose id is its account id. Opening times are not stored, so they read back empty."""
         positions = [SnapshotPositionJson.model_validate(item).to_domain() for item in self.positions]
 
         return AccountSnapshot(
@@ -164,7 +175,7 @@ class AccountSnapshotDTO(SQLModel, table=True):
             taken_at=self.taken_at,
             run_id=RunId(self.run_id),
             order_id=OrderId(self.order_id),
-            account=Account(cash=self.cash, positions=positions),
+            account=Account(account_id=self.owner_id, cash=self.cash, positions=positions),
         )
 
 
@@ -195,12 +206,13 @@ class RunStockReportDTO(SQLModel, table=True):
     position: int = Field(primary_key=True)
     stock_id: str
     report: dict[str, Any] = Field(sa_column=Column(JSON, nullable=False))
+    owner_id: str
 
     @classmethod
-    def from_domain(cls, run_id: RunId, position: int, stock: Stock) -> Self:
+    def from_domain(cls, run_id: RunId, position: int, stock: Stock, owner_id: str) -> Self:
         report = StockReportJson.model_validate(stock).model_dump(mode="json")
 
-        return cls(run_id=run_id, position=position, stock_id=stock.stock_id, report=report)
+        return cls(run_id=run_id, position=position, stock_id=stock.stock_id, report=report, owner_id=owner_id)
 
     def to_domain(self) -> Stock:
         """

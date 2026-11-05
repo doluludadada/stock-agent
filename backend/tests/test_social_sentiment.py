@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -149,7 +150,24 @@ async def db(tmp_path: Path) -> AsyncIterator[DatabaseConnector]:
 
 def make_classifier(ai_provider: ScriptedAiProvider, db: DatabaseConnector) -> AiSentimentClassifier:
     config = shipped_config().model_copy(update={"prompts": PromptsConfig(social_sentiment="Stock {stock_id}\n{posts_text}")})
-    return AiSentimentClassifier(ai_provider, SentimentRepository(db), config, SilentLogger())
+    return AiSentimentClassifier(ai_provider, SentimentRepository(db, asyncio.Lock()), config, SilentLogger())
+
+
+@pytest.mark.asyncio
+async def test_two_runs_saving_the_same_classified_posts_at_once_both_succeed(db: DatabaseConnector) -> None:
+    repository = SentimentRepository(db, asyncio.Lock())
+    posts = [
+        replace(
+            make_post(f"Opinion {number}", url=f"https://www.ptt.cc/bbs/Stock/M.{number}.A.html"),
+            sentiment=SentimentLabel.BULLISH,
+            sentiment_confidence=0.8,
+        )
+        for number in range(20)
+    ]
+
+    await asyncio.gather(*(repository.save_classified("2330", posts) for _ in range(4)))
+
+    assert len(await repository.find_classified("2330", posts)) == 20
 
 
 @pytest.mark.asyncio

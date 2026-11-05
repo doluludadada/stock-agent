@@ -24,8 +24,9 @@ from c_infrastructure.database.models.trading_journal_dto import (
 
 class TradingJournal(ITradingJournal):
     """
-    SQL tables workflow_runs, trade_signals, orders, account_snapshots and run_stock_reports. Every save is an upsert
-    by primary key.
+    One owner's rows of the SQL tables workflow_runs, trade_signals, orders, account_snapshots and run_stock_reports,
+    through a connector bound to that owner. Every save is an upsert by primary key and stamps the owner; the owner
+    session keeps every read and write to the owner's rows, so a run id of another owner reads as no run.
     """
 
     def __init__(self, db: DatabaseConnector) -> None:
@@ -34,34 +35,36 @@ class TradingJournal(ITradingJournal):
 
     @override
     async def save_run(self, run: SystemStats) -> None:
-        async with self._db.get_session() as session:
-            await session.merge(WorkflowRunDTO.model_validate(asdict(run)))
+        async with self._db.owner_session() as session:
+            await session.merge(WorkflowRunDTO.model_validate({**asdict(run), "owner_id": self._db.owner_id}))
             await session.commit()
 
     @override
     async def save_signals(self, run_id: RunId, signals: list[TradeSignal]) -> None:
-        async with self._db.get_session() as session:
+        async with self._db.owner_session() as session:
             for signal in signals:
                 reports = self._signal.dump_python(signal, mode="json", include={"technical_report", "ai_report"})
-                await session.merge(TradeSignalDTO.model_validate({**asdict(signal), **reports, "run_id": run_id}))
+                await session.merge(
+                    TradeSignalDTO.model_validate({**asdict(signal), **reports, "run_id": run_id, "owner_id": self._db.owner_id})
+                )
 
             await session.commit()
 
     @override
     async def save_order(self, order: Order) -> None:
-        async with self._db.get_session() as session:
-            await session.merge(OrderDTO.model_validate(asdict(order)))
+        async with self._db.owner_session() as session:
+            await session.merge(OrderDTO.model_validate({**asdict(order), "owner_id": self._db.owner_id}))
             await session.commit()
 
     @override
     async def save_snapshot(self, snapshot: AccountSnapshot) -> None:
-        async with self._db.get_session() as session:
-            await session.merge(AccountSnapshotDTO.from_domain(snapshot))
+        async with self._db.owner_session() as session:
+            await session.merge(AccountSnapshotDTO.from_domain(snapshot, self._db.owner_id))
             await session.commit()
 
     @override
     async def snapshots(self) -> list[AccountSnapshot]:
-        async with self._db.get_session() as session:
+        async with self._db.owner_session() as session:
             result = await session.execute(select(AccountSnapshotDTO).order_by(col(AccountSnapshotDTO.taken_at)))
             rows = result.scalars().all()
 
@@ -69,17 +72,17 @@ class TradingJournal(ITradingJournal):
 
     @override
     async def save_stock_reports(self, run_id: RunId, stocks: list[Stock]) -> None:
-        async with self._db.get_session() as session:
+        async with self._db.owner_session() as session:
             await session.execute(delete(RunStockReportDTO).where(col(RunStockReportDTO.run_id) == run_id))
 
             for position, stock in enumerate(stocks):
-                session.add(RunStockReportDTO.from_domain(run_id, position, stock))
+                session.add(RunStockReportDTO.from_domain(run_id, position, stock, self._db.owner_id))
 
             await session.commit()
 
     @override
     async def stock_reports_of(self, run_id: RunId) -> list[Stock]:
-        async with self._db.get_session() as session:
+        async with self._db.owner_session() as session:
             statement = (
                 select(RunStockReportDTO).where(col(RunStockReportDTO.run_id) == run_id).order_by(col(RunStockReportDTO.position))
             )
@@ -89,7 +92,7 @@ class TradingJournal(ITradingJournal):
 
     @override
     async def recent_runs(self, limit: int, offset: int = 0) -> list[SystemStats]:
-        async with self._db.get_session() as session:
+        async with self._db.owner_session() as session:
             statement = select(WorkflowRunDTO).order_by(col(WorkflowRunDTO.start_time).desc()).offset(offset).limit(limit)
             rows = (await session.execute(statement)).scalars().all()
 
@@ -97,14 +100,14 @@ class TradingJournal(ITradingJournal):
 
     @override
     async def find_run(self, run_id: RunId) -> SystemStats | None:
-        async with self._db.get_session() as session:
+        async with self._db.owner_session() as session:
             row = await session.get(WorkflowRunDTO, run_id)
 
         return SystemStats(**row.model_dump()) if row is not None else None
 
     @override
     async def signals_of(self, run_id: RunId) -> list[TradeSignal]:
-        async with self._db.get_session() as session:
+        async with self._db.owner_session() as session:
             statement = select(TradeSignalDTO).where(col(TradeSignalDTO.run_id) == run_id).order_by(col(TradeSignalDTO.generated_at))
             rows = (await session.execute(statement)).scalars().all()
 
@@ -112,7 +115,7 @@ class TradingJournal(ITradingJournal):
 
     @override
     async def orders_of(self, run_id: RunId) -> list[Order]:
-        async with self._db.get_session() as session:
+        async with self._db.owner_session() as session:
             statement = select(OrderDTO).where(col(OrderDTO.run_id) == run_id).order_by(col(OrderDTO.created_at))
             rows = (await session.execute(statement)).scalars().all()
 

@@ -66,10 +66,7 @@ async function answer(options: Options, request: IncomingMessage, response: Serv
   const url = new URL(request.url ?? '/', 'http://localhost')
   if (url.pathname.startsWith('/v1')) {
     if (!options.api) return response.writeHead(503).end('no api')
-    const upstream = await fetch(new URL(url.pathname + url.search, options.api), {
-      method: request.method,
-      headers: { authorization: request.headers.authorization ?? '' },
-    })
+    const upstream = await fetch(new URL(url.pathname + url.search, options.api), { method: request.method })
     response.writeHead(upstream.status, { 'content-type': upstream.headers.get('content-type') ?? 'application/json' })
     return response.end(Buffer.from(await upstream.arrayBuffer()))
   }

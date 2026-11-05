@@ -1,4 +1,4 @@
-import { Activity, ArrowRight, Megaphone, Play, Radar, ScanSearch, ShieldAlert } from 'lucide-react'
+import { Activity, Megaphone, Play, Radar, ScanSearch, ShieldAlert } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { toast } from 'sonner'
@@ -10,6 +10,7 @@ import { isAcceptedList, parseStockIds } from '@/shared/lib/stock-ids'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { ConfirmDialog } from '@/shared/ui/confirm-dialog'
+import { DataTable, type Column } from '@/shared/ui/data-table'
 import { ErrorState } from '@/shared/ui/error-state'
 import { Input } from '@/shared/ui/input'
 import { PageHeader } from '@/shared/ui/page-header'
@@ -17,8 +18,7 @@ import { Panel } from '@/shared/ui/panel'
 import { Skeleton } from '@/shared/ui/skeleton'
 import { StateBlock } from '@/shared/ui/state-block'
 import { StockIdsProblem } from '@/shared/ui/stock-ids-problem'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/shared/ui/table'
-import { RequireUnlock } from '@/shared/ui/unlock'
+import { RequireSignIn } from '@/shared/ui/require-sign-in'
 import { PAGE_SIZE, useRunsPage, useStartRun, type Run, type RunKind } from './api'
 import { RunStateBadge } from './RunStateBadge'
 
@@ -32,12 +32,14 @@ const KINDS: { kind: RunKind; icon: typeof Play; orders: boolean }[] = [
 export function RunsPage() {
   const { t } = useTranslation('runs')
   return (
-    <div className="space-y-4">
-      <PageHeader title={t('title')} description={t('description')} />
-      <RequireUnlock scope="owner" className="rounded-xl border">
-        <StartPanel />
-        <History />
-      </RequireUnlock>
+    <div className="space-y-5 lg:space-y-6">
+      <PageHeader eyebrow={t('common:nav.section.mine')} title={t('title')} description={t('description')} />
+      <RequireSignIn layout="page" reason={t('signIn')}>
+        <div className="space-y-4 lg:space-y-5">
+          <StartPanel />
+          <History />
+        </div>
+      </RequireSignIn>
     </div>
   )
 }
@@ -62,8 +64,9 @@ function StartPanel() {
           navigate(paths.run(accepted.run_id))
         },
         onError: (error) => {
-          if (isApiError(error, 'conflict')) toast.error(t('busy'))
-          else if (isApiError(error, 'forbidden')) toast.error(t('mockOnly'), { description: error.message })
+          const code = isApiError(error) ? error.code : null
+          if (code === 'run_in_progress') toast.error(t('busy'))
+          else if (code === 'mock_broker_only') toast.error(t('mockOnly'), { description: error.message })
           else toast.error(t('startFailed', { reason: error.message }))
         },
       },
@@ -76,13 +79,15 @@ function StartPanel() {
   }
 
   return (
-    <Panel title={t('startTitle')} flush>
-      <ul className="divide-y">
+    <Panel title={t('startTitle')} description={t('startQuestion')}>
+      <ul className="grid gap-3 @2xl:grid-cols-2">
         {KINDS.map(({ kind, icon: Icon, orders }) => (
-          <li key={kind} className="grid gap-x-4 gap-y-2 px-4 py-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
-            <div className="min-w-0 space-y-0.5">
-              <h3 className="flex flex-wrap items-center gap-2 text-sm font-medium">
-                <Icon aria-hidden className="size-4 text-muted-foreground" />
+          <li key={kind} className="flex flex-col gap-3 rounded-xl border bg-background/60 p-4">
+            <div className="min-w-0 flex-1 space-y-1">
+              <h3 className="flex flex-wrap items-center gap-2 text-sm font-semibold">
+                <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-brand-soft text-brand">
+                  <Icon aria-hidden className="size-4" />
+                </span>
                 {t(`kind.${kind}.title`)}
                 {orders ? (
                   <Badge variant="outline" className="gap-1 border-gold/40 font-normal text-gold">
@@ -99,23 +104,23 @@ function StartPanel() {
               <p className="text-xs text-muted-foreground">{t(`kind.${kind}.cost`)}</p>
             </div>
             {kind === 'specific-stocks' ? (
-              <form onSubmit={onSpecific} className="flex flex-wrap items-start gap-2 md:w-80">
+              <form onSubmit={onSpecific} className="flex flex-wrap items-start gap-2">
                 <Input
                   value={stockText}
                   onChange={(event) => setStockText(event.target.value)}
                   placeholder={t('stocksPlaceholder')}
                   aria-label={t('stocksLabel')}
                   aria-describedby="specific-stocks-problem"
-                  className="h-8 min-w-0 flex-1 font-mono"
+                  className="min-w-0 flex-1 font-mono md:h-8"
                 />
-                <Button type="submit" size="sm" className="h-8" disabled={!isAcceptedList(stocks) || start.isPending}>
+                <Button type="submit" size="sm" className="md:h-8" disabled={!isAcceptedList(stocks) || start.isPending}>
                   <Play aria-hidden />
                   {t('start')}
                 </Button>
                 <StockIdsProblem id="specific-stocks-problem" list={stocks} />
               </form>
             ) : (
-              <Button type="button" size="sm" variant="outline" className="justify-self-start" onClick={() => setConfirming(kind)} disabled={start.isPending}>
+              <Button type="button" size="sm" variant="outline" className="self-start" onClick={() => setConfirming(kind)} disabled={start.isPending}>
                 <Play aria-hidden />
                 {t('start')}
               </Button>
@@ -170,45 +175,28 @@ function History() {
   )
 }
 
+/** Every run, newest first; a row opens the run. On a phone a row reads as the run and its state. */
 function RunsTable({ runs }: { runs: Run[] }) {
   const { t } = useTranslation('runs')
   const locale = useLocale()
-  return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>{t('column.started')}</TableHead>
-          <TableHead>{t('column.workflow')}</TableHead>
-          <TableHead>{t('column.state')}</TableHead>
-          <TableHead className="text-right">{t('column.signals')}</TableHead>
-          <TableHead className="text-right">{t('column.orders')}</TableHead>
-          <TableHead className="text-right">{t('column.errors')}</TableHead>
-          <TableHead>
-            <span className="sr-only">{t('open')}</span>
-          </TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {runs.map((run) => (
-          <TableRow key={run.run_id}>
-            <TableCell className="tabular whitespace-nowrap">{run.summary ? formatDateTime(locale, run.summary.start_time) : '—'}</TableCell>
-            <TableCell>{run.summary ? t(`workflow.${run.summary.workflow}`) : '—'}</TableCell>
-            <TableCell>
-              <RunStateBadge state={run.state} />
-            </TableCell>
-            <TableCell className="tabular text-right">{run.summary?.signals_generated ?? '—'}</TableCell>
-            <TableCell className="tabular text-right">{run.summary?.orders_submitted ?? '—'}</TableCell>
-            <TableCell className="tabular text-right">{run.summary?.errors.length ?? (run.error ? 1 : 0)}</TableCell>
-            <TableCell className="text-right">
-              <Button asChild size="sm" variant="ghost">
-                <Link to={paths.run(run.run_id)} aria-label={t('openRun', { time: run.summary ? formatDateTime(locale, run.summary.start_time) : run.run_id })}>
-                  <ArrowRight aria-hidden className="size-4" />
-                </Link>
-              </Button>
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
-  )
+  const started = (run: Run) => (run.summary ? formatDateTime(locale, run.summary.start_time) : '—')
+  const columns: Column<Run>[] = [
+    {
+      key: 'started',
+      header: t('column.started'),
+      className: 'whitespace-nowrap',
+      cell: (run) => (
+        <Link to={paths.run(run.run_id)} aria-label={t('openRun', { time: started(run) })} className="stretched-link block min-w-0 hover:text-brand focus-visible:text-brand">
+          <span className="tabular block font-medium">{started(run)}</span>
+          <span className="block truncate text-xs text-muted-foreground md:hidden">{run.summary ? t(`workflow.${run.summary.workflow}`) : t('unrecorded')}</span>
+        </Link>
+      ),
+    },
+    { key: 'workflow', header: t('column.workflow'), from: 'md', className: 'w-full whitespace-nowrap', cell: (run) => (run.summary ? t(`workflow.${run.summary.workflow}`) : t('unrecorded')) },
+    { key: 'state', header: t('column.state'), className: 'whitespace-nowrap', cell: (run) => <RunStateBadge state={run.state} /> },
+    { key: 'signals', header: t('column.signals'), numeric: true, from: 'md', cell: (run) => run.summary?.signals_generated ?? '—' },
+    { key: 'orders', header: t('column.orders'), numeric: true, from: 'md', cell: (run) => run.summary?.orders_submitted ?? '—' },
+    { key: 'errors', header: t('column.errors'), numeric: true, from: 'sm', cell: (run) => run.summary?.errors.length ?? (run.error ? 1 : 0) },
+  ]
+  return <DataTable rows={runs} columns={columns} rowKey={(run) => run.run_id} label={t('historyTitle')} />
 }

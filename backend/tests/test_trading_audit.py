@@ -14,6 +14,7 @@ from a_domain.model.trading.watchlist import WatchlistEntry
 from a_domain.types.enums import OrderMode, OrderStatus, RejectReason, SignalSource, TradeAction, WatchlistType, Workflow
 from b_application.use_cases.trade.order_execution import OrderExecution
 from c_infrastructure.database.models.trading_journal_dto import AccountSnapshotDTO, OrderDTO, TradeSignalDTO, WorkflowRunDTO
+from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
 from c_infrastructure.database.repositories.trading_journal import TradingJournal
 
 pytestmark = pytest.mark.asyncio
@@ -30,7 +31,7 @@ async def test_an_order_row_traces_back_to_its_price_reports_signal_run_and_resu
 
     await stack.pipeline.buy_manually(stock)
 
-    async with stack.db.get_session() as session:
+    async with stack.db.for_owner(LEGACY_OWNER_ID).owner_session() as session:
         order_row = (await session.execute(select(OrderDTO))).scalar_one()
         signal_row = await session.get(TradeSignalDTO, order_row.decision_id)
         run_row = await session.get(WorkflowRunDTO, order_row.run_id)
@@ -95,7 +96,7 @@ async def test_a_refused_manual_buy_is_a_recorded_rejected_order_with_its_reason
     assert isinstance(result, Order)
     assert result.status == OrderStatus.REJECTED and result.reason is not None and result.reason.startswith(reason)
 
-    async with stack.db.get_session() as session:
+    async with stack.db.for_owner(LEGACY_OWNER_ID).owner_session() as session:
         row = (await session.execute(select(OrderDTO))).scalar_one()
 
     assert (row.id, row.status, row.reason, row.fee) == (result.id, OrderStatus.REJECTED, result.reason, 0)
@@ -139,7 +140,7 @@ async def test_a_manual_buy_that_cannot_become_an_order_says_why(
 
     assert status.manual_buy_refusal is not None and status.manual_buy_refusal.startswith(reason)
 
-    async with stack.db.get_session() as session:
+    async with stack.db.for_owner(LEGACY_OWNER_ID).owner_session() as session:
         assert (await session.execute(select(OrderDTO))).first() is None
 
 
@@ -187,7 +188,7 @@ class UnwritableSignals(TradingJournal):
 
 async def test_a_decision_that_cannot_be_recorded_sends_no_order(tmp_path) -> None:
     stack = await open_stack(tmp_path)
-    stack = await open_stack(tmp_path, journal=UnwritableSignals(db=stack.db))
+    stack = await open_stack(tmp_path, journal=UnwritableSignals(stack.db.for_owner(LEGACY_OWNER_ID)))
 
     status = await stack.pipeline.buy_manually(analysed_stock())
 
@@ -199,7 +200,7 @@ class UnwritableOrders(TradingJournal):
     """A journal that cannot save an order in the given statuses."""
 
     def __init__(self, db, refused: set[OrderStatus]) -> None:
-        super().__init__(db=db)
+        super().__init__(db.for_owner(LEGACY_OWNER_ID))
         self.refused = refused
 
     async def save_order(self, order: Order) -> None:
@@ -297,7 +298,7 @@ class BrokerThatChecksTheRecord:
         self.recorded_before_sending: list[OrderStatus] = []
 
     async def place_order(self, order: Order) -> Order:
-        async with self.stack.db.get_session() as session:
+        async with self.stack.db.for_owner(LEGACY_OWNER_ID).owner_session() as session:
             row = await session.get(OrderDTO, order.id)
             self.recorded_before_sending.append(row.status if row else None)
 
@@ -322,13 +323,13 @@ async def test_a_run_is_recorded_when_it_starts_and_when_it_aborts(tmp_path) -> 
 
     with pytest.raises(RuntimeError):
         async with stack.run_history.execute(Workflow.INTRADAY) as stats:
-            async with stack.db.get_session() as session:
+            async with stack.db.for_owner(LEGACY_OWNER_ID).owner_session() as session:
                 started = await session.get(WorkflowRunDTO, stats.run_id)
                 assert started is not None and started.end_time is None
 
             raise RuntimeError("Yahoo hung")
 
-    async with stack.db.get_session() as session:
+    async with stack.db.for_owner(LEGACY_OWNER_ID).owner_session() as session:
         ended = await session.get(WorkflowRunDTO, stats.run_id)
 
     assert ended is not None and ended.end_time is not None
@@ -371,7 +372,7 @@ async def cancel_during_the_broker_call(stack, cancels: int) -> None:
 
 
 async def recorded_orders(stack) -> list[tuple[OrderStatus, int, str | None]]:
-    async with stack.db.get_session() as session:
+    async with stack.db.for_owner(LEGACY_OWNER_ID).owner_session() as session:
         rows = (await session.execute(select(OrderDTO))).scalars().all()
 
     return [(row.status, row.filled_quantity, row.reason) for row in rows]

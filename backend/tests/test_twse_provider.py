@@ -6,14 +6,14 @@ from typing import Any, cast
 
 import httpx
 import pytest
+from support.settings import shipped_config
 
 from a_domain.types.enums import MarketType
 from b_application.config.market_data_config import MarketDataConfig, MarketHoursConfig
-from b_application.config.sources_config import SourcesConfig
 from c_infrastructure.market.twse_provider import TaiwanStockProvider
 from c_infrastructure.system.market_clock import TaiwanMarketClock
 
-SOURCES = SourcesConfig.from_appsetting()
+SOURCES = shipped_config().sources
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

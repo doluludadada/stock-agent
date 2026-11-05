@@ -5,6 +5,7 @@ import { I18nextProvider } from 'react-i18next'
 import { MemoryRouter } from 'react-router'
 import { initI18n } from '@/i18n'
 import { session } from '@/shared/api'
+import { TEST_USER } from '@/test/users'
 import { ValuationPage } from './ValuationPage'
 
 const scenario = (targetPe: number, fairPrice: number) => ({ target_pe: targetPe, fair_price: fairPrice, undervaluation: 0.5 })
@@ -66,14 +67,14 @@ function renderPage() {
 
 describe('the undervalued scan', () => {
   afterEach(() => {
-    session.lock('owner')
+    session.signOut()
     vi.unstubAllGlobals()
   })
 
   it('asks the AI about the P/E the scan used, even after the field was edited', async () => {
     const server = backend()
     vi.stubGlobal('fetch', server.fetch)
-    session.unlock('owner', 'owner-token')
+    session.signIn(TEST_USER)
     const user = userEvent.setup()
     renderPage()
 
@@ -94,7 +95,7 @@ describe('the undervalued scan', () => {
     let answer = () => {}
     const server = backend(new Promise<void>((resolve) => (answer = resolve)))
     vi.stubGlobal('fetch', server.fetch)
-    session.unlock('owner', 'owner-token')
+    session.signIn(TEST_USER)
     const user = userEvent.setup()
     renderPage()
 

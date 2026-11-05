@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { apiRequest, runResultsKey, useSession, type Schemas } from '@/shared/api'
+import { apiRequest, runResultsKey, useIsSignedIn, type Schemas } from '@/shared/api'
 
 export type AccountHistory = Schemas['AccountHistoryResponse']
 
@@ -7,11 +7,11 @@ export const accountKeys = { history: (asOf: string | null) => [...runResultsKey
 
 /** The account now, its equity curve and, when asked, the account at the end of a past day. It never orders. */
 export function useAccountHistory(asOf: string | null) {
-  const { unlocked } = useSession('owner')
+  const signedIn = useIsSignedIn()
   return useQuery({
     queryKey: accountKeys.history(asOf),
-    queryFn: ({ signal }) => apiRequest('get', '/v1/account/history', { scope: 'owner', query: asOf ? { as_of: asOf } : {}, signal }),
-    enabled: unlocked,
+    queryFn: ({ signal }) => apiRequest('get', '/v1/account/history', { query: asOf ? { as_of: asOf } : {}, signal }),
+    enabled: signedIn,
     /** Asking for another day keeps the page on screen until the answer arrives. */
     placeholderData: keepPreviousData,
   })

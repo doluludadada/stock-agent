@@ -51,6 +51,8 @@ server {
     location /v1/ {
         proxy_pass http://127.0.0.1:8800;
         proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 
     location / {
@@ -64,6 +66,28 @@ server {
 }
 ```
 
-The proxy must not add an `Authorization` header: the owner and the administrator type their tokens into the page,
-which keeps them in memory only. Run one backend worker: background runs, their one-at-a-time lock and the settings
-revision the server started with live in that process.
+The proxy must not add an `Authorization` header or a cookie: each user signs in on the page, and the API sets its
+HttpOnly, SameSite=Strict session cookie on `/v1`. Forward the `Set-Cookie` and `Cookie` headers unchanged, and serve
+the app and `/v1` from the same host name. Run one backend worker: background runs, their one-at-a-time lock and the
+settings revision the server started with live in that process.
+
+## The visitor's address and scheme behind the proxy
+
+The backend counts sign-in failures and registrations per client address, and marks the session cookie `Secure` when
+the request came over https. Behind a proxy, every request reaches the backend from the proxy, over plain http. So:
+
+1. The proxy sets the visitor's address and scheme, overwriting whatever the visitor sent. The nginx block above does
+   it with `proxy_set_header X-Forwarded-For $remote_addr;` and `proxy_set_header X-Forwarded-Proto $scheme;`. Caddy's
+   `reverse_proxy` sets both headers itself.
+2. uvicorn reads those headers only from the addresses in `FORWARDED_ALLOW_IPS` (by default 127.0.0.1), with
+   `--proxy-headers` (on by default). A proxy on the same machine needs nothing more.
+3. In Docker the proxy reaches the backend from the bridge network, not from 127.0.0.1. Start the backend with that
+   network's proxy address trusted, for example
+   `FORWARDED_ALLOW_IPS=172.18.0.2 uvicorn main:app --host 0.0.0.0 --port 8800 --proxy-headers`. Never trust `*`
+   while the backend's port is reachable without the proxy: anyone could then claim any address.
+
+Without these, every visitor shares the proxy's address: 20 failed sign-ins by anyone lock every user's Web sign-in
+for 15 minutes, and registration allows 3 per hour for the whole site. The cookie would also lack `Secure` under TLS.
+
+`Secure` is decided by the request's scheme, not set always, because the owner also uses the app over plain http on the
+local network, from a phone, where a `Secure` cookie would never be sent back and sign-in would fail.

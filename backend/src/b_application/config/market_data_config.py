@@ -1,7 +1,7 @@
 from datetime import time
 from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 
 class MarketHoursConfig(BaseModel):
@@ -12,8 +12,6 @@ class MarketHoursConfig(BaseModel):
     trade continuously until `closing_auction_start` and run the closing call auction until `close`. A session's
     daily bar is final in every price source from `settled`.
     """
-
-    model_config = ConfigDict(extra="forbid")
 
     opening_auction_start: time = time(8, 30)
     continuous_start: time = time(9, 0)
@@ -35,8 +33,6 @@ class MarketHoursConfig(BaseModel):
 
 class MarketDataConfig(BaseModel):
     """How the price and listing adapters pace, batch and cache their requests."""
-
-    model_config = ConfigDict(extra="forbid")
 
     quote_batch_size: int = Field(default=50, gt=0)
     """Stocks per TWSE MIS request. MIS answers 100 channels per request and refuses 200."""

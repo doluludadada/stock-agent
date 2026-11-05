@@ -51,7 +51,7 @@ function reducer(state: DraftState, action: DraftAction): DraftState {
 
 export type SaveOutcome =
   | { ok: true; settings: StrategySettings }
-  | { ok: false; reason: 'invalid' | 'full' | 'conflict' | 'locked' }
+  | { ok: false; reason: 'invalid' | 'full' | 'conflict' | 'notLoaded' }
   | { ok: false; reason: 'refused'; problems: { rule: number | null; message: string }[] }
   | { ok: false; reason: 'failed'; error: unknown }
 
@@ -86,7 +86,7 @@ export function useStrategyDraft(initial: Strategy) {
   const save = useCallback(async (): Promise<SaveOutcome> => {
     setAttempted(true)
     if (errorsOf(issues).length > 0) return { ok: false, reason: 'invalid' }
-    if (!settings.data) return { ok: false, reason: 'locked' }
+    if (!settings.data) return { ok: false, reason: 'notLoaded' }
     const strategy = pruneEditorIndicators(state.draft, kept)
     const next = withStrategy(settings.data, strategy)
     if (isRefusal(next)) return { ok: false, reason: 'full' }

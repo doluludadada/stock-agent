@@ -31,8 +31,12 @@ class MopsFundamentalsProvider(IFundamentalsProvider):
     deadline plus grace and is not empty. Any other page is reused for `provisional_page_max_age_hours`.
     """
 
-    def __init__(self, db: DatabaseConnector, market_clock: IMarketClock, mops: MopsSources, logger: ILoggingProvider) -> None:
+    def __init__(
+        self, db: DatabaseConnector, market_clock: IMarketClock, mops: MopsSources, logger: ILoggingProvider, write_lock: asyncio.Lock
+    ) -> None:
         self._db = db
+        # One page save at a time per process, every runtime's: two runs merging the same quarter at once would both insert it.
+        self._write_lock = write_lock
         self._mops = mops
         self._market_codes = {MarketType.TWSE: mops.twse_market_code, MarketType.TPEX: mops.tpex_market_code}
         self._industry_sources = {
@@ -197,7 +201,7 @@ class MopsFundamentalsProvider(IFundamentalsProvider):
 
     @override
     async def save_page(self, market: MarketType, page: QuarterEps) -> None:
-        async with self._db.get_session() as session:
+        async with self._write_lock, self._db.get_session() as session:
             await session.merge(QuarterEpsDTO.from_domain(market, page))
             await session.commit()
 

@@ -5,7 +5,10 @@ from a_domain.model.trading.signal import TradeSignal
 
 
 class IKnowledgeRepository(Protocol):
-    """Stores trading decisions and returns a stock's own decision history as AI context."""
+    """
+    Stores one owner's trading decisions and returns a stock's own decision history as AI context. Another owner's
+    decisions are never returned.
+    """
 
     async def find_decision_history(self, stock_id: str, limit: int = 3) -> str:
         """Returns the newest saved decisions for this stock only, or an empty string."""

@@ -55,19 +55,25 @@ describe('the market overview', () => {
     expect(within(trend).queryByRole('link', { name: /TAIEX/ })).toBeNull()
   })
 
-  it('shows the session counts and the strongest and weakest industries, and all of them on request', async () => {
+  it('shows the session counts in one phrase, colored by direction', async () => {
     await renderOverview()
-    const panel = screen.getByRole('region', { name: 'Market breadth' })
+    const panel = screen.getByRole('region', { name: 'Advancers and decliners' })
 
+    expect(within(panel).getByText('Broadly down')).toHaveClass('text-down')
     expect(within(panel).getByText('312')).toHaveClass('text-up')
     expect(within(panel).getByText('1,488')).toHaveClass('text-down')
-    const shown = () => within(panel).getAllByRole('row').slice(1).map((row) => row.textContent ?? '')
-    expect(shown().filter((text) => text.startsWith('Industry')).map((text) => text.slice(0, 10))).toEqual([
-      'Industry A', 'Industry B', 'Industry C', 'Industry D', 'Industry G', 'Industry H', 'Industry I', 'Industry J',
-    ])
+  })
+
+  it('names both ends of the industries by their sign, and lists all of them on request', async () => {
+    await renderOverview()
+    const panel = screen.getByRole('region', { name: 'Industries' })
+    const table = within(panel).getByRole('table', { name: 'Industries' })
+    const shown = () => within(table).getAllByRole('row').slice(1).map((row) => row.querySelector('td, th')?.textContent)
+
+    expect(shown()).toEqual(['Largest gains', 'Industry A', 'Industry B', 'Industry C', 'Largest declines', 'Industry H', 'Industry I', 'Industry J'])
 
     await userEvent.setup().click(within(panel).getByRole('button', { name: 'Show all 10 industries' }))
 
-    expect(shown().map((text) => text.slice(0, 10))).toEqual(Object.keys(industries))
+    expect(shown()).toEqual(Object.keys(industries))
   })
 })

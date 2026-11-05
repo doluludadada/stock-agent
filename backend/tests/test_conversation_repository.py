@@ -9,6 +9,8 @@ from a_domain.model.chat.message import Message
 from a_domain.types.enums import MessageRole
 from c_infrastructure.database.chroma.conversation_repository import ChromaConversationRepository
 from c_infrastructure.database.chroma.knowledge_repository import ChromaKnowledgeRepository
+from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
+from d_presentation.dependencies import knowledge_collection
 
 pytestmark = pytest.mark.asyncio
 
@@ -43,7 +45,7 @@ async def test_a_saved_conversation_reads_back_whole(tmp_path: Path) -> None:
 async def test_conversations_and_decisions_share_one_store_without_mixing(tmp_path: Path) -> None:
     client = chromadb.PersistentClient(path=str(tmp_path))
     conversations = ChromaConversationRepository(client, SilentLogger())
-    knowledge = ChromaKnowledgeRepository(client, SilentLogger())
+    knowledge = ChromaKnowledgeRepository(client, knowledge_collection(LEGACY_OWNER_ID), SilentLogger())
 
     saved = conversation("2330")
 

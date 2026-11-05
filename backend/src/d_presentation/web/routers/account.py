@@ -2,16 +2,16 @@ from datetime import date
 
 from fastapi import APIRouter
 
-from d_presentation.dependencies import ApiToken, RuntimeDependency
 from d_presentation.web.schemas import AccountAsOfResponse, AccountHistoryResponse, AccountValueResponse
+from d_presentation.web.session import PrivateAccess, RuntimeDependency, UserPipeline
 
-router = APIRouter(prefix="/account", tags=["Account"])
+router = APIRouter(prefix="/account", tags=["Account"], dependencies=[PrivateAccess])
 
 
-@router.get("/history", dependencies=[ApiToken])
-async def get_account_history(runtime: RuntimeDependency, as_of: date | None = None) -> AccountHistoryResponse:
+@router.get("/history")
+async def get_account_history(pipeline: UserPipeline, runtime: RuntimeDependency, as_of: date | None = None) -> AccountHistoryResponse:
     """Menu 7: the account now, its equity curve, and the account at the end of `as_of`. It never orders and records no run."""
-    status = await runtime.pipeline.load_account_history(as_of)
+    status = await pipeline.load_account_history(as_of)
     snapshot = status.account_as_of
 
     return AccountHistoryResponse(

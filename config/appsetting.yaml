@@ -1,5 +1,8 @@
 # config/appsetting.yaml
 
+# dev: a developer's machine, the mock broker only. test: staging before launch, Shioaji only in simulation with the
+# *_TEST key pair. prod: the live service, PostgreSQL only, the only environment for order_mode live. dev and test refuse
+# to start while a production Shioaji credential is set. Neither the Web editor nor a reload changes it: restart.
 environment: dev
 
 ai:
@@ -53,9 +56,6 @@ chat:
   reset_reply: "✨ Memory cleared. Let's start over."
 
 technical:
-  # Whose saved technical settings the CLI and the Web API read and write. This installation has one owner. A future
-  # service with sign-in takes the owner from the signed-in account, never from this file or from a client.
-  owner_id: local
   # The developer's strategies, in menu order: each is config/strategies/<id>.json. Saving settings never changes them.
   built_in_strategies: [conservative, balanced, aggressive]
   # An owner's first settings copy every built-in strategy and select this one for every workflow.
@@ -208,14 +208,37 @@ trading:
   order_mode: mock_only
 
 mock_trading:
-  account_id: mock-dev
+  # Each user's mock account starts with this cash the first time it is read.
   initial_cash: 1000000
 
-# Used only with trading.execution_provider: shioaji. Credentials come from the environment or .env:
-# SHIOAJI_API_KEY and SHIOAJI_SECRET_KEY, plus SHIOAJI_CA_PATH, SHIOAJI_CA_PASSWORD and SHIOAJI_PERSON_ID in production.
+accounts:
+  # Paid AI calls (stock analysis, valuation explanations, Buzz sentiment) a user may make per Taiwan calendar day.
+  # Administrators have no such limit; their calls still count toward the server's total below.
+  daily_ai_calls: 60
+  # Paid AI calls of every user together per Taiwan calendar day. Past it, users' calls are refused until midnight.
+  # An administrator's calls count toward it and are never refused.
+  daily_ai_calls_total: 600
+  # Anyone may register as a user once the first administrator exists. Never on an installation with a real broker.
+  registration_open: true
+  # Failed sign-ins before the next is refused for the window: per sign-in name and client address, and per address.
+  sign_in_failures_per_name: 5
+  sign_in_failures_per_client: 20
+  sign_in_window_minutes: 15
+  # Wrong passwords re-entered for a sensitive settings change, per administrator and client address, per window.
+  settings_password_failures: 5
+  # Registrations from one client address per window.
+  registrations_per_client: 3
+  registration_window_minutes: 60
+  # How long a Web sign-in lasts, from the sign-in.
+  session_days: 14
+  # Web workflow runs at once, every user's together; each user runs one at a time.
+  max_concurrent_runs: 2
+
+# Used only with trading.execution_provider: shioaji. The environment above decides the server and the credentials,
+# which come from the environment or .env only: test logs in to Shioaji's paper-trading server with
+# SHIOAJI_API_KEY_TEST and SHIOAJI_SECRET_KEY_TEST; prod logs in to the real account with SHIOAJI_API_KEY,
+# SHIOAJI_SECRET_KEY, SHIOAJI_CA_PATH, SHIOAJI_CA_PASSWORD and SHIOAJI_PERSON_ID; dev never uses Shioaji.
 shioaji:
-  # true: Shioaji's paper-trading environment. false: the real account, real money.
-  simulation: true
   # Seconds between two reads of an order's status at the broker.
   poll_interval_seconds: 0.5
   # Reads of an order's status before a working order is cancelled, and again after the cancel request.

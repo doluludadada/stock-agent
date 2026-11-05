@@ -5,6 +5,7 @@ import { useAccountHistory } from '@/features/account/api'
 import { runKeys, useRun } from '@/features/runs/api'
 import { useWatchlistEntries } from '@/features/watchlist/api'
 import { session } from '@/shared/api'
+import { TEST_USER } from '@/test/users'
 
 const RUN = '11111111-1111-4111-8111-111111111111'
 
@@ -38,14 +39,14 @@ function RunState() {
 
 describe('a run that ends', () => {
   afterEach(() => {
-    session.lock('owner')
+    session.signOut()
     vi.unstubAllGlobals()
   })
 
   it('makes the account and the watchlist load again, so they never show what was there before the run', async () => {
     const backend = fakeBackend()
     vi.stubGlobal('fetch', backend.fetch)
-    session.unlock('owner', 'owner-token')
+    session.signIn(TEST_USER)
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 60_000 } } })
     const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
 

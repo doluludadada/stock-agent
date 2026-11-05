@@ -71,7 +71,7 @@ export function RuleCard({ context, rule, index, targeted, onTarget }: RuleCardP
               value={rule.name}
               onChange={(event) => edit({ type: 'setRuleName', ruleId: rule.id, name: event.target.value })}
               placeholder={t('rule.namePlaceholder')}
-              className="h-9"
+              className="md:h-9"
               aria-invalid={isBlocking(issue(`rule:${rule.id}`)) ? true : undefined}
               aria-describedby={issue(`rule:${rule.id}`) ? `${nameId}-error` : undefined}
             />
@@ -84,7 +84,7 @@ export function RuleCard({ context, rule, index, targeted, onTarget }: RuleCardP
             type="button"
             variant="ghost"
             size="icon"
-            className="size-9 text-muted-foreground hover:text-destructive"
+            className="text-muted-foreground hover:text-destructive md:size-9"
             onClick={() => edit({ type: 'removeRule', ruleId: rule.id })}
             aria-label={t('rule.remove', { index: index + 1 })}
           >
@@ -113,7 +113,7 @@ function EffectPicker({ value, onChange }: { value: RuleEffect; onChange: (effec
         {t('rule.effect')}
       </Label>
       <Select value={value} onValueChange={(effect) => onChange(effect as RuleEffect)}>
-        <SelectTrigger id={id} className="h-9 w-40">
+        <SelectTrigger id={id} className="w-40 md:h-9">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -229,7 +229,7 @@ function NestedGroup({ context, group }: { context: EditorContext; group: Condit
           type="button"
           variant="ghost"
           size="sm"
-          className="h-7 text-xs text-muted-foreground hover:text-destructive"
+          className="text-xs text-muted-foreground hover:text-destructive md:h-7"
           onClick={() => context.edit({ type: 'removeCondition', conditionId: group.id })}
         >
           <Trash2 aria-hidden className="size-3.5" />
@@ -257,7 +257,7 @@ function ComparisonItem({ context, comparison }: { context: EditorContext; compa
           type="button"
           onClick={() => context.toggle(comparison.id)}
           aria-expanded={open}
-          className="flex min-w-0 flex-1 items-start gap-2 rounded-md text-left"
+          className="flex min-h-11 min-w-0 flex-1 items-start gap-2 rounded-md py-1 text-left md:min-h-0 md:py-0"
         >
           <ChevronDown aria-hidden className={cn('mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform', !open && '-rotate-90')} />
           <span className="min-w-0 text-sm leading-relaxed first-letter:uppercase">{sentence}</span>
@@ -273,7 +273,7 @@ function ComparisonItem({ context, comparison }: { context: EditorContext; compa
             type="button"
             variant="ghost"
             size="icon"
-            className="size-8 text-muted-foreground"
+            className="text-muted-foreground md:size-8"
             onClick={() => context.toggle(comparison.id)}
             aria-label={t(open ? 'condition.collapse' : 'condition.edit')}
           >
@@ -283,7 +283,7 @@ function ComparisonItem({ context, comparison }: { context: EditorContext; compa
             type="button"
             variant="ghost"
             size="icon"
-            className="size-8 text-muted-foreground hover:text-destructive"
+            className="text-muted-foreground hover:text-destructive md:size-8"
             onClick={() => context.edit({ type: 'removeCondition', conditionId: comparison.id })}
             aria-label={t('condition.remove')}
           >
@@ -320,7 +320,7 @@ function ComparisonEditor({ context, comparison }: { context: EditorContext; com
               value={comparison.operator}
               onValueChange={(operator) => context.edit({ type: 'setComparator', conditionId: comparison.id, operator: operator as Comparison['operator'] })}
             >
-              <SelectTrigger id={comparatorId} className="h-9 w-full">
+              <SelectTrigger id={comparatorId} className="w-full md:h-9">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

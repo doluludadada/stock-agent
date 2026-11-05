@@ -19,6 +19,7 @@ import c_infrastructure.database.models
 from a_domain.model.trading.watchlist import WatchlistEntry
 from a_domain.types.enums import WatchlistType
 from c_infrastructure.database.db_connector import DatabaseConnector
+from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
 from c_infrastructure.database.repositories.watchlist_repository import WatchlistRepository
 from c_infrastructure.database.utc_datetime import UtcDateTime
 
@@ -39,7 +40,7 @@ def stored_watchlist(tmp_path: Path) -> list[tuple[str, str]]:
 
 
 async def test_a_taiwan_time_is_stored_as_utc_and_reads_back_as_the_same_aware_instant(db: DatabaseConnector, tmp_path: Path) -> None:
-    repository = WatchlistRepository(db=db, logger=SilentLogger(), market_clock=MovableClock(MONDAY_10_00))
+    repository = WatchlistRepository(db.for_owner(LEGACY_OWNER_ID), SilentLogger(), MovableClock(MONDAY_10_00))
     entry = WatchlistEntry(
         stock_id="2330", watchlist_type=WatchlistType.TECHNICAL, created_at=MONDAY_10_00, expires_at=MONDAY_10_00 + timedelta(hours=8)
     )
@@ -53,7 +54,7 @@ async def test_a_taiwan_time_is_stored_as_utc_and_reads_back_as_the_same_aware_i
 
 
 async def test_a_naive_time_is_refused_and_nothing_is_stored(db: DatabaseConnector, tmp_path: Path) -> None:
-    repository = WatchlistRepository(db=db, logger=SilentLogger(), market_clock=MovableClock(MONDAY_10_00))
+    repository = WatchlistRepository(db.for_owner(LEGACY_OWNER_ID), SilentLogger(), MovableClock(MONDAY_10_00))
     naive = WatchlistEntry(
         stock_id="2330", watchlist_type=WatchlistType.MANUAL, created_at=datetime(2026, 10, 19, 10, 0), expires_at=None
     )

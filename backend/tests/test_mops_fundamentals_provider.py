@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -5,17 +6,17 @@ from typing import Any, cast
 
 import httpx
 import pytest
+from support.settings import shipped_config
 
 from a_domain.rules.fundamentals.trailing_eps import QuarterEps
 from a_domain.types.enums import DatabaseBackend, MarketType
 from a_domain.types.values import FiscalQuarter
 from b_application.config.market_data_config import MarketHoursConfig
-from b_application.config.sources_config import SourcesConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
 
-SOURCES = SourcesConfig.from_appsetting()
+SOURCES = shipped_config().sources
 
 FIXTURES = Path(__file__).parent / "fixtures"
 Q = FiscalQuarter
@@ -64,7 +65,7 @@ async def build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[MopsFu
     db = DatabaseConnector(config=cast(Any, config), logger=SilentLogger())
     await db.init_db()
     clock = MovableClock()
-    provider = MopsFundamentalsProvider(db=db, market_clock=clock, mops=SOURCES.mops, logger=SilentLogger())
+    provider = MopsFundamentalsProvider(db=db, market_clock=clock, mops=SOURCES.mops, logger=SilentLogger(), write_lock=asyncio.Lock())
     mops = FakeMops()
     monkeypatch.setattr(provider, "download", mops.download)
     return provider, mops, clock
@@ -72,7 +73,9 @@ async def build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[MopsFu
 
 def parser() -> MopsFundamentalsProvider:
     """Parsing reads no database and no clock."""
-    return MopsFundamentalsProvider(db=cast(Any, None), market_clock=MovableClock(), mops=SOURCES.mops, logger=SilentLogger())
+    return MopsFundamentalsProvider(
+        db=cast(Any, None), market_clock=MovableClock(), mops=SOURCES.mops, logger=SilentLogger(), write_lock=asyncio.Lock()
+    )
 
 
 def test_parser_reads_every_industry_table_of_a_real_page() -> None:

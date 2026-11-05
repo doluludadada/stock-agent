@@ -1,6 +1,7 @@
-import { useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useLocale, useTranslation } from '@/i18n'
-import type { FormulaText } from './model/describe'
+import { strategyFromApi, type ApiStrategy } from './api/mapping'
+import { describeCondition, type FormulaText } from './model/describe'
 import { isBuiltInId } from './model/settings'
 import type { Strategy } from './model/types'
 
@@ -29,4 +30,19 @@ export function useStrategyLabels() {
       purpose: (strategy: Strategy) => (builtIn(strategy) ? t(`builtin.${strategy.id}.purpose`) : ''),
     }
   }, [t])
+}
+
+/**
+ * Each rule of a strategy the backend evaluated, as the sentence the designer shows, keyed by the rule's name: a
+ * report names its rules, and the sentence says the check in the reader's language.
+ */
+export function useRuleSentences(): (strategy: ApiStrategy) => ReadonlyMap<string, string> {
+  const text = useFormulaText()
+  return useCallback(
+    (strategy: ApiStrategy) => {
+      const model = strategyFromApi(strategy)
+      return new Map(model.rules.map((rule) => [rule.name, describeCondition(rule.condition, model, text)]))
+    },
+    [text],
+  )
 }

@@ -1,18 +1,22 @@
 """
 How the CLI and the Web API load their settings at startup, and refuse an unsafe trading setup. The administrator's
-settings editor validates a candidate file through the same two functions, so a saved file is one the app starts with.
+settings editor validates a candidate file through the same functions, so a saved file is one the app starts with.
 """
 
 import hashlib
 import json
-from collections.abc import Mapping
+from base64 import urlsafe_b64decode
+from collections.abc import Iterator, Mapping
 from pathlib import Path
-from typing import Any
+from types import UnionType
+from typing import Any, Union, get_args, get_origin
 
 import yaml
-from pydantic import ValidationError
+from pydantic import BaseModel, SecretStr, TypeAdapter, ValidationError
 
-from a_domain.types.enums import ExecutionProvider, OrderMode, SettingsFile, SystemEnvironment
+from a_domain.ports.system.settings_files import SettingsProblem
+from a_domain.types.enums import ExecutionProvider, InstructionKey, OrderMode, SettingsFile, SystemEnvironment
+from a_domain.types.values import FormulaId
 from b_application.config.app_config import AppConfig
 
 
@@ -43,92 +47,423 @@ def settings_text(project_root: Path, file: SettingsFile) -> str:
     return path.read_text(encoding="utf-8") if path.exists() else ""
 
 
+def settings_texts(project_root: Path, candidates: Mapping[SettingsFile, str] | None = None) -> dict[SettingsFile, str]:
+    """
+    Every settings file's text: the candidate's where one is given, else the file's on disk, read only then, and empty
+    when it is missing.
+    """
+    candidates = candidates or {}
+    return {file: candidates[file] if file in candidates else settings_text(project_root, file) for file in SettingsFile}
+
+
 def inject_prompt_settings(settings: dict[str, Any], instructions: dict[str, Any]) -> None:
-    """Copies the AI prompts of config/instructions.yaml into the ai and prompts sections of the settings."""
+    """Copies the AI prompts of config/instructions.yaml into the settings each InstructionKey names."""
     if not instructions:
         return
 
-    ai_settings = settings.setdefault("ai", {})
-    ai_settings["system_prompt"] = instructions.get("system_prompt")
-    ai_settings["rag_injection_prompt"] = instructions.get("rag_injection_prompt")
+    for key in InstructionKey:
+        section, name = key.settings_path.split(".")
 
-    prompts = settings.setdefault("prompts", {})
-    prompts["analysis_report_fundamental"] = instructions.get("ai_analysis_report_prompt_fundamental")
-    prompts["analysis_report_momentum"] = instructions.get("ai_analysis_report_prompt_momentum")
-    prompts["valuation_explanation"] = instructions.get("ai_valuation_explanation_prompt")
-    prompts["social_sentiment"] = instructions.get("social_sentiment_prompt")
+        if isinstance(target := settings.setdefault(section, {}), dict):
+            target[name] = instructions.get(key.value)
 
 
-def inject_built_in_strategies(settings: dict[str, Any], strategies_folder: Path) -> None:
-    """Replaces each id in technical.built_in_strategies with its config/strategies/<id>.json; AppConfig validates them."""
-    technical = settings.get("technical", {})
-    ids = technical.get("built_in_strategies", [])
-    technical["built_in_strategies"] = [
-        json.loads((strategies_folder / f"{strategy_id}.json").read_text(encoding="utf-8")) for strategy_id in ids
-    ]
+def inject_built_in_strategies(settings: dict[str, Any], strategies_folder: Path, texts: Mapping[SettingsFile, str]) -> None:
+    """
+    Replaces each id in technical.built_in_strategies with its config/strategies/<id>.json; AppConfig validates them.
+    InvalidSettingsError at each id that cannot be read, saying why in words, never with a path of the server.
+    """
+    technical = settings.get("technical")
+
+    if not isinstance(technical, dict) or not isinstance(ids := technical.get("built_in_strategies", []), list):
+        return
+
+    strategies, problems = [], []
+
+    for index, strategy_id in enumerate(ids):
+        try:
+            strategies.append(read_built_in_strategy(strategies_folder, strategy_id))
+        except ValueError as error:
+            problems.append(locate(texts, f"technical.built_in_strategies.{index}", str(error)))
+
+    if problems:
+        raise InvalidSettingsError(problems)
+
+    technical["built_in_strategies"] = strategies
 
 
-def load_settings(candidates: Mapping[SettingsFile, str] | None = None) -> AppConfig:
+def read_built_in_strategy(strategies_folder: Path, strategy_id: object) -> Any:
+    """
+    config/strategies/<id>.json, its id checked as a FormulaId before it names a path, so no id reaches another folder.
+    ValueError in words, never an OSError's text: an id that is no strategy id, a file that is missing, or one that is not
+    JSON.
+    """
+    try:
+        TypeAdapter(FormulaId).validate_python(strategy_id)
+    except ValidationError:
+        raise ValueError("is not a built-in strategy id: lowercase letters, digits and underscores") from None
+
+    path = strategies_folder / f"{strategy_id}.json"
+
+    if not path.is_file():
+        raise ValueError("names no built-in strategy in config/strategies")
+
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except OSError, ValueError:
+        raise ValueError(f"config/strategies/{strategy_id}.json cannot be read as JSON") from None
+
+
+def load_settings(project_root: Path, candidates: Mapping[SettingsFile, str] | None = None) -> AppConfig:
     """
     config/appsetting.yaml with the prompts of config/instructions.yaml and the built-in strategies of
-    config/strategies/. AppConfig reads the secrets from .env and keeps each file's revision, the settings this
-    process runs on. A candidate text stands in for its file: the administrator's edit is validated by the same load.
-    """
-    project_root = get_project_root()
-    texts = {file: (candidates or {}).get(file, settings_text(project_root, file)) for file in SettingsFile}
-    settings = yaml.safe_load(texts[SettingsFile.APPSETTING]) or {}
+    config/strategies/, the secrets from .env, and each file's revision: the settings this process runs on. A
+    candidate text stands in for its file, so the administrator's edit and a reload are validated by this same load,
+    and only the texts it is given: nothing is filled in from the file on disk.
 
-    inject_prompt_settings(settings, yaml.safe_load(texts[SettingsFile.INSTRUCTIONS]) or {})
-    inject_built_in_strategies(settings, project_root / "config" / "strategies")
+    Raises InvalidSettingsError, every problem located (SettingsProblem): a file that does not parse, at the parser's
+    mark; a key that names no setting, or a setting the environment owns, which is refused so a secret can never be
+    written into a settings file; a value the settings refuse, at its key or the nearest section above it.
+    """
+    texts = settings_texts(project_root, candidates)
+    documents = {file: parsed_document(file, text) for file, text in texts.items()}
+
+    if problems := unread_keys(documents, texts):
+        raise InvalidSettingsError(problems)
+
+    settings = documents[SettingsFile.APPSETTING]
+    inject_prompt_settings(settings, documents[SettingsFile.INSTRUCTIONS])
+
+    inject_built_in_strategies(settings, project_root / "config" / "strategies", texts)
+
     revisions = {file: settings_revision(text) for file, text in texts.items()}
 
     try:
         return AppConfig(project_root=project_root, settings_revisions=revisions, **settings)
     except ValidationError as error:
-        raise InvalidSettingsError(error) from None
+        located = [locate(texts, ".".join(str(part) for part in problem["loc"]), problem["msg"]) for problem in error.errors()]
+        raise InvalidSettingsError(located) from None
+
+
+def parsed_document(file: SettingsFile, text: str) -> dict[str, Any]:
+    """
+    The file's settings; InvalidSettingsError at the parser's mark when it does not parse or is not a mapping, and at the
+    first anchor or alias: a settings file needs neither, and a few hundred bytes of aliases expand to millions of
+    values, so they are refused from the parser's events, before anything expands them.
+    """
+    try:
+        if (anchored := next((event for event in yaml.parse(text) if anchor_or_alias(event)), None)) is not None:
+            mark = anchored.start_mark
+            message = "YAML anchors and aliases are not allowed in a settings file"
+            raise InvalidSettingsError([SettingsProblem(message=message, file=file, line=mark.line + 1, column=mark.column + 1)])
+
+        document = yaml.safe_load(text)
+    except yaml.MarkedYAMLError as error:
+        mark = error.problem_mark or error.context_mark
+        line, column = (mark.line + 1, mark.column + 1) if mark else (None, None)
+        raise InvalidSettingsError([SettingsProblem(message=f"YAML: {error.problem}", file=file, line=line, column=column)]) from None
+    except yaml.YAMLError as error:
+        raise InvalidSettingsError([SettingsProblem(message=f"YAML: {type(error).__name__}", file=file)]) from None
+
+    if document is not None and not isinstance(document, dict):
+        raise InvalidSettingsError([SettingsProblem(message="The file must map setting names to values", file=file, line=1, column=1)])
+
+    return document or {}
+
+
+def anchor_or_alias(event: yaml.Event) -> bool:
+    return isinstance(event, yaml.AliasEvent) or getattr(event, "anchor", None) is not None
+
+
+def unread_keys(documents: Mapping[SettingsFile, dict[str, Any]], texts: Mapping[SettingsFile, str]) -> list[SettingsProblem]:
+    """
+    Every key the app would not read: one that names no setting, one that names a setting the environment owns (a
+    field with an environment alias: DB_PASSWORD under db, OPENAI_API_KEY under ai), and a prompt written anywhere but
+    instructions.yaml. The settings come from AppConfig's own fields, recursively, never from a list kept by hand; a field
+    the loader sets itself is marked `exclude` and names no setting either.
+    """
+    appsetting = [
+        locate_in(texts, SettingsFile.APPSETTING, path.split("."), path, message)
+        for path, message in unread_settings(documents[SettingsFile.APPSETTING], AppConfig, "")
+    ]
+    instructions = [
+        locate_in(texts, SettingsFile.INSTRUCTIONS, [str(key)], str(key), "names no prompt of instructions.yaml")
+        for key in documents[SettingsFile.INSTRUCTIONS]
+        if key not in set(InstructionKey)
+    ]
+    return appsetting + instructions
+
+
+def unread_settings(node: Mapping[Any, Any], model: type[BaseModel], prefix: str) -> Iterator[tuple[str, str]]:
+    """(path, why) for each key of one section the settings would not read; sections are followed into their models."""
+    fields = model.model_fields
+    environment = {name for name, field in fields.items() if field.validation_alias is not None}
+    environment |= {str(fields[name].validation_alias) for name in environment}
+    prompts = {key.settings_path: key.value for key in InstructionKey}
+
+    for key, value in node.items():
+        path = f"{prefix}{key}"
+
+        if key in environment:
+            yield path, "comes from the environment or .env, never from a settings file"
+        elif path in prompts:
+            yield path, f"is the prompt {prompts[path]} of instructions.yaml"
+        elif key not in fields or fields[key].exclude:
+            yield path, "names no setting"
+        elif isinstance(value, Mapping) and (section := section_model(fields[key].annotation)) is not None:
+            yield from unread_settings(value, section, f"{path}.")
+
+
+def section_model(annotation: Any) -> type[BaseModel] | None:
+    """The settings model a field holds, alone or in an optional: a section whose keys are settings too."""
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return annotation
+
+    if isinstance(annotation, UnionType) or get_origin(annotation) is Union:
+        return next((model for argument in get_args(annotation) if (model := section_model(argument)) is not None), None)
+
+    return None
+
+
+def locate(texts: Mapping[SettingsFile, str], path: str | None, message: str) -> SettingsProblem:
+    """
+    A problem about a setting, placed in the file that sets it: a prompt in instructions.yaml at its key, anything else in
+    appsetting.yaml at the deepest key of its path the file has. A path no file sets (a value from .env, a default)
+    keeps its path and gets no file.
+    """
+    if path is None:
+        return SettingsProblem(message=message)
+
+    prompt = next((key for key in InstructionKey if path == key.settings_path or path.startswith(f"{key.settings_path}.")), None)
+
+    if prompt is not None:
+        return locate_in(texts, SettingsFile.INSTRUCTIONS, [prompt.value], path, message)
+
+    return locate_in(texts, SettingsFile.APPSETTING, path.split("."), path, message)
+
+
+def locate_in(texts: Mapping[SettingsFile, str], file: SettingsFile, keys: list[str], path: str, message: str) -> SettingsProblem:
+    """The problem at the start of the deepest of `keys` the file's YAML has, found with yaml.compose, which runs nothing."""
+    try:
+        node = yaml.compose(texts[file])
+    except yaml.YAMLError:
+        node = None
+
+    mark = None
+
+    for key in keys:
+        child = child_node(node, key)
+
+        if child is None:
+            break
+
+        mark, node = child[0].start_mark, child[1]
+
+    if mark is None:
+        return SettingsProblem(message=message, path=path)
+
+    return SettingsProblem(message=message, file=file, path=path, line=mark.line + 1, column=mark.column + 1)
+
+
+def child_node(node: yaml.Node | None, key: str) -> tuple[yaml.Node, yaml.Node] | None:
+    """The (key, value) nodes of `key` in a mapping node, or (item, item) of the index `key` in a sequence node."""
+    if isinstance(node, yaml.MappingNode):
+        return next(((name, value) for name, value in node.value if name.value == key), None)
+
+    if isinstance(node, yaml.SequenceNode) and key.isdigit() and int(key) < len(node.value):
+        return node.value[int(key)], node.value[int(key)]
+
+    return None
 
 
 class InvalidSettingsError(RuntimeError):
     """
-    config/ or .env hold a value the settings refuse, so the CLI or the Web API does not start. Each problem is a
-    location and pydantic's message, never the value: pydantic's own text shows the input, which can be a secret
-    from .env, so neither the message nor a traceback carries the ValidationError.
+    The app would not start with the settings: config/ or .env hold a value the settings refuse, a setup the startup
+    checks refuse, or a startup on them failed. The CLI or the Web API does not start, and a reload or a Web save keeps
+    the running settings. Each problem is located and carries the message, never the value: pydantic's own text shows
+    the input, which can be a secret from .env, so neither the message nor a traceback carries the ValidationError.
     """
 
-    def __init__(self, error: ValidationError) -> None:
-        self.problems = [f"{'.'.join(str(part) for part in problem['loc'])}: {problem['msg']}" for problem in error.errors()]
-        super().__init__("\n".join(["The settings in config/ and .env do not validate:", *(f"  - {line}" for line in self.problems)]))
+    def __init__(self, problems: list[SettingsProblem]) -> None:
+        self.problems = problems
+        super().__init__(
+            "\n".join(["The app would not start with the settings in config/ and .env:", *(f"  - {problem}" for problem in problems)])
+        )
 
 
 class TradingSetupError(RuntimeError):
-    """The trading settings or the broker login do not let the CLI or the Web API start. The message says what to change."""
+    """
+    The trading settings or the broker login do not let the CLI or the Web API start. The message says what to change;
+    `path` is the setting it is about, when a settings file sets it.
+    """
+
+    def __init__(self, message: str, path: str | None = None) -> None:
+        self.path = path
+        super().__init__(message)
+
+
+def startup_settings(
+    project_root: Path, candidates: Mapping[SettingsFile, str] | None = None, environment: SystemEnvironment | None = None
+) -> AppConfig:
+    """
+    The settings a start, a reload or a Web save opens the app on, through every check startup runs before it opens
+    anything: the load (each file parsed, every key the app would not read refused, every value validated), the trading
+    setup, the environment the process started in (`environment`, None at its first start), the accounts key and the
+    active AI provider's key. Raises one InvalidSettingsError with every refusal located once, never a value.
+    """
+    texts = settings_texts(project_root, candidates)
+    config = load_settings(project_root, texts)
+
+    try:
+        validate_trading_environment(config)
+        validate_environment_unchanged(config, environment or config.environment)
+        validate_accounts_environment(config)
+    except (TradingSetupError, AccountsSetupError) as error:
+        raise InvalidSettingsError([locate(texts, error.path, str(error))]) from None
+
+    if missing := config.ai.missing_key():
+        message = f"{config.ai.active_model.value} needs {missing} in the environment or .env; the app would not start"
+        raise InvalidSettingsError([locate(texts, "ai.active_model", message)])
+
+    return config
 
 
 def validate_trading_environment(config: AppConfig) -> None:
     """
-    Refuses a trading setup that could send an order nobody meant to send, before any broker is contacted.
+    Refuses a setup that could send an order nobody meant to send, or use a credential the environment must not see,
+    before any broker or database is contacted. What each environment allows is SystemEnvironment's table:
 
-    - DEV uses the mock broker only.
-    - mock_only order mode needs the mock broker.
-    - live order mode needs environment live and the Shioaji broker.
-    - The Shioaji broker needs its credentials.
-    Order mode disabled never orders, so outside DEV it may read a real Shioaji account.
+    - the brokers and order modes it allows (dev: the mock only; only prod: order mode live);
+    - mock_only order mode needs the mock broker, live needs Shioaji;
+    - dev and test refuse to start while a production Shioaji credential is set;
+    - prod refuses SQLite;
+    - Shioaji needs the credentials its environment reads.
+    Order mode disabled never orders, so in test and prod it may read a Shioaji account.
     """
     environment, provider, mode = config.environment, config.trading.execution_provider, config.trading.order_mode
 
-    if environment == SystemEnvironment.DEV and provider != ExecutionProvider.MOCK:
-        raise TradingSetupError("DEV environment requires MockExecutionProvider")
+    if provider not in environment.brokers:
+        allowed = ", ".join(sorted(broker.value for broker in environment.brokers))
+        raise TradingSetupError(
+            f"environment {environment.value} trades only on {allowed}, not {provider.value}", "trading.execution_provider"
+        )
+
+    if mode not in environment.order_modes:
+        allowed = " or ".join(other.value for other in SystemEnvironment if mode in other.order_modes)
+        raise TradingSetupError(f"order_mode {mode.value} needs environment {allowed}, not {environment.value}", "trading.order_mode")
 
     if mode == OrderMode.MOCK_ONLY and provider != ExecutionProvider.MOCK:
         raise TradingSetupError(
             f"order_mode mock_only needs execution_provider mock, not {provider.value}. "
-            f"Use order_mode disabled to read the {provider.value} account without ordering"
+            f"Use order_mode disabled to read the {provider.value} account without ordering",
+            "trading.order_mode",
         )
 
-    if mode == OrderMode.LIVE and (environment != SystemEnvironment.LIVE or provider != ExecutionProvider.SHIOAJI):
+    if mode == OrderMode.LIVE and provider != ExecutionProvider.SHIOAJI:
+        raise TradingSetupError(f"order_mode live needs execution_provider shioaji, not {provider.value}", "trading.order_mode")
+
+    if config.db.backend not in environment.databases:
+        allowed = " or ".join(sorted(backend.value for backend in environment.databases))
         raise TradingSetupError(
-            f"order_mode live needs environment live and execution_provider shioaji, not {environment.value} and {provider.value}"
+            f"environment {environment.value} needs db.backend {allowed}, not {config.db.backend.value}", "db.backend"
         )
 
-    if provider == ExecutionProvider.SHIOAJI and (missing := config.shioaji.missing_credentials()):
-        raise TradingSetupError(f"execution_provider shioaji needs {', '.join(missing)} in the environment or .env")
+    validate_environment_credentials(config)
+
+
+def validate_environment_credentials(config: AppConfig) -> None:
+    """The Shioaji variables the environment must not see, and those its broker needs. Names only, never a value."""
+    environment, given = config.environment, config.shioaji.given()
+
+    if refused := [credential.value for credential in environment.refused_credentials if credential in given]:
+        raise TradingSetupError(
+            f"environment {environment.value} refuses to start while {', '.join(refused)} is set: the production Shioaji "
+            "credentials belong only in the production machine's environment or .env",
+            "environment",
+        )
+
+    needed = environment.shioaji_credentials if config.trading.execution_provider == ExecutionProvider.SHIOAJI else ()
+
+    if missing := [credential.value for credential in needed if credential not in given]:
+        raise TradingSetupError(
+            f"execution_provider shioaji in environment {environment.value} needs {', '.join(missing)} in the environment or .env"
+        )
+
+
+def validate_environment_unchanged(config: AppConfig, environment: SystemEnvironment) -> None:
+    """
+    A process keeps the environment it started in, because the environment decides which credentials it reads: a
+    settings change on disk or from the Web that changes it is refused, and the running settings keep serving.
+    """
+    if config.environment != environment:
+        raise TradingSetupError(
+            f"environment is {config.environment.value} in the settings, but this process started as {environment.value}: "
+            "the environment changes only when the app restarts",
+            "environment",
+        )
+
+
+def validate_editor_reachable(config: AppConfig, texts: Mapping[SettingsFile, str], host: str) -> None:
+    """
+    A Web save must leave the administrator who makes it a way back into the editor: the host they reached it at stays
+    in api.allowed_hosts, and every settings file stays within api.settings_file_max_bytes. InvalidSettingsError at the
+    setting that would lock them out.
+    """
+    too_large = [file.file_name for file, text in texts.items() if len(text.encode("utf-8")) > config.api.settings_file_max_bytes]
+    problems = []
+
+    if host not in config.api.allowed_hosts:
+        problems.append(locate(texts, "api.allowed_hosts", f"leaves out {host}, the host this editor is reached at"))
+
+    if too_large:
+        message = f"is smaller than {', '.join(too_large)}: the editor could no longer read it"
+        problems.append(locate(texts, "api.settings_file_max_bytes", message))
+
+    if problems:
+        raise InvalidSettingsError(problems)
+
+
+class AccountsSetupError(RuntimeError):
+    """
+    The user accounts cannot start: the accounts key is not 32 base64url bytes, or the environment needs ACCOUNTS_KEY
+    and it is not set. The message names where the key came from; `path` is the setting it is about, if any.
+    """
+
+    def __init__(self, message: str, path: str | None = None) -> None:
+        self.path = path
+        super().__init__(message)
+
+
+def accounts_key_bytes(key: SecretStr) -> bytes:
+    """The accounts key's bytes: base64url, its padding optional, as the app writes secrets/accounts.key. Raises ValueError."""
+    return urlsafe_b64decode(key.get_secret_value() + "=" * (-len(key.get_secret_value()) % 4))
+
+
+def validate_accounts_key(key: SecretStr, source: str) -> SecretStr:
+    """`key`, or AccountsSetupError naming `source` when it is not 32 random bytes in base64url."""
+    try:
+        length = len(accounts_key_bytes(key))
+    except ValueError:
+        length = 0
+
+    if length != 32:
+        raise AccountsSetupError(f"{source} must be 32 random bytes in base64url, as the app writes secrets/accounts.key.")
+
+    return key
+
+
+def validate_accounts_environment(config: AppConfig) -> SecretStr | None:
+    """
+    ACCOUNTS_KEY when the environment or .env sets it, or None when it is unset or blank: the key file is used then,
+    where the environment allows one (SystemEnvironment.accounts_key_file). Prod refuses to start without the variable.
+    """
+    environment = config.environment
+
+    if config.accounts.key is None and not environment.accounts_key_file:
+        raise AccountsSetupError(
+            f"environment {environment.value} needs ACCOUNTS_KEY in the environment or .env: it never creates "
+            "secrets/accounts.key, because its app folder may not survive a redeploy and a new key locks every account",
+            "environment",
+        )
+
+    return None if config.accounts.key is None else validate_accounts_key(config.accounts.key, "ACCOUNTS_KEY")

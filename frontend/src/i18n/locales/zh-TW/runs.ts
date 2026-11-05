@@ -2,9 +2,12 @@ import type en from '../en/runs'
 import type { DictionaryShape } from '../../types'
 
 const runs: DictionaryShape<typeof en> = {
+  detailSignIn: '登入後查看這次分析',
+  signIn: '登入後啟動分析並查看你的任務紀錄',
   title: '分析任務',
   description: '啟動分析並查看紀錄；同時只執行一個任務。',
   startTitle: '啟動任務',
+  startQuestion: '四種流程，你的任務一次執行一個',
   start: '啟動',
   started: '已啟動「{{kind}}」',
   busy: '還有任務在執行，請等它結束。',
@@ -87,6 +90,7 @@ const runs: DictionaryShape<typeof en> = {
   runningNote: '執行中，狀態會自動更新。',
   unfinishedNote: '這個任務沒有正常結束，紀錄保留已完成的部分。',
   summaryTitle: '統計',
+  summaryQuestion: '這次任務經過的每一步',
   counter: {
     scanned: '掃描',
     passedTechnical: '通過策略',
@@ -98,8 +102,9 @@ const runs: DictionaryShape<typeof en> = {
   },
   errorsTitle: '過程中 {{count}} 個錯誤',
   reportsTitle: '股票報告',
+  reportsQuestion: '{{count}} 檔股票與各自的分數',
+  hardFailuresTitle: '被 {{count}} 條規則排除',
   score: { technical: '技術', ai: 'AI', composite: '綜合' },
-  hardFailures: '排除原因：{{list}}',
   signalsTitle: '決策（{{count}}）',
   noSignals: '這個任務沒有記錄任何決策。',
   signalsFailed: '無法載入決策。',

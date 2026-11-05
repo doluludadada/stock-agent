@@ -2,8 +2,8 @@
 
 The web UI for Stock Agent: a market overview with a selectable research target, the strategy library and formula
 designer, analysis runs, valuation, the watchlist, the mock account and the administrator's settings editor. It reads
-and writes through the backend Web API on same-origin `/v1` paths. Owner and administrator tokens are typed into the
-page and kept in the tab's memory only.
+and writes through the backend Web API on same-origin `/v1` paths. People sign in with their own account; the first
+visit to a new site sets up the administrator with the code the backend prints on its console.
 
 ## Run
 
@@ -28,8 +28,9 @@ bun run build
 bun run e2e        # Playwright against a running backend; first run: bunx playwright install chromium
 ```
 
-`just frontend-check` runs the first five from the repository root. `bun tools/capture-screens.ts <out-dir>` saves
-a screenshot of every page in both themes and languages, on desktop and mobile, from a running build; it only reads.
+`just frontend-check` runs the first five from the repository root. `bun tools/capture-screens.ts <out-dir> --url <app>`
+signs in through the API and saves every page at 375, 768, 1024 and 1440 px in both themes, with an audit of each in
+`audit.json`; besides signing in, it only reads.
 
 ## Stack
 

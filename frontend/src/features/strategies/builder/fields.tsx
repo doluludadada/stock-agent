@@ -82,7 +82,7 @@ export function NumberField({ label, value, onChange, issue, suffix, step = 1, m
             setSynced(parsed)
             onChange(parsed)
           }}
-          className={cn('tabular h-9', suffix && 'pr-10', inputClassName)}
+          className={cn('tabular md:h-9', suffix && 'pr-10', inputClassName)}
         />
         {suffix && (
           <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs text-muted-foreground">{suffix}</span>
@@ -117,7 +117,7 @@ export function DayField({ value, onChange, issue, hint }: { value: number; onCh
             onChange(Number(next))
           }}
         >
-          <SelectTrigger id={id} className="h-9 min-w-0 flex-1">
+          <SelectTrigger id={id} className="min-w-0 flex-1 md:h-9">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

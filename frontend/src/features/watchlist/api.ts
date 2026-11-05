@@ -1,16 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiRequest, isApiError, runResultsKey, session, useSession, type Schemas } from '@/shared/api'
+import { apiRequest, isApiError, runResultsKey, session, useIsSignedIn, type Schemas } from '@/shared/api'
 
 export type WatchlistEntry = Schemas['WatchlistEntryResponse']
 
 export const watchlistKeys = { all: [...runResultsKey, 'watchlist'] as const }
 
 export function useWatchlistEntries() {
-  const { unlocked } = useSession('owner')
+  const signedIn = useIsSignedIn()
   return useQuery({
     queryKey: watchlistKeys.all,
-    queryFn: ({ signal }) => apiRequest('get', '/v1/watchlist', { scope: 'owner', signal }),
-    enabled: unlocked,
+    queryFn: ({ signal }) => apiRequest('get', '/v1/watchlist', { signal }),
+    enabled: signedIn,
   })
 }
 
@@ -25,8 +25,8 @@ export function useWatchlistChange() {
   return useMutation({
     mutationFn: ({ action, stockIds }: Change): Promise<unknown> =>
       action === 'add'
-        ? apiRequest('post', '/v1/watchlist/manual', { scope: 'owner', body: { confirm: true, stock_ids: stockIds } })
-        : apiRequest('post', '/v1/watchlist/manual/remove', { scope: 'owner', body: { confirm: true, stock_ids: stockIds } }),
+        ? apiRequest('post', '/v1/watchlist/manual', { body: { confirm: true, stock_ids: stockIds } })
+        : apiRequest('post', '/v1/watchlist/manual/remove', { body: { confirm: true, stock_ids: stockIds } }),
     onMutate: async ({ action, stockIds }) => {
       await client.cancelQueries({ queryKey: watchlistKeys.all })
       const previous = client.getQueryData<WatchlistEntry[]>(watchlistKeys.all) ?? []
@@ -46,8 +46,8 @@ export function useWatchlistChange() {
       return { removed, added }
     },
     onError: (error, { action }, context) => {
-      // A refused token already dropped the owner's cache; putting the old list back would show it while locked.
-      if (isApiError(error, 'unauthorized') || session.token('owner') === null || !context) return
+      // An ended session already dropped the user's cache; putting the old list back would show it signed out.
+      if (isApiError(error, 'unauthorized') || session.current().status !== 'signedIn' || !context) return
       client.setQueryData<WatchlistEntry[]>(watchlistKeys.all, (entries = []) =>
         action === 'add'
           ? entries.filter((entry) => !(entry.watchlist_type === 'manual' && context.added.includes(entry.stock_id)))

@@ -10,7 +10,7 @@ This project is not financial advice. Treat generated signals as decision suppor
 
 - Market: Taiwan stocks.
 - Primary UI: CLI at `backend/src/d_presentation/cli/interactive.py`.
-- API: FastAPI at `backend/main.py` starts Full Cycle and specific-stock analysis (never order), and Buzz and Intraday on the mock broker only; reads runs, signals, orders, the watchlist and the account; serves market data and valuation; reads and saves the owner's technical strategies; and lets an administrator edit the allowlisted settings files. See [Web API](#web-api).
+- API: FastAPI at `backend/main.py` starts Full Cycle and specific-stock analysis (never order), and Buzz and Intraday on the mock broker only; reads runs, signals, orders, the watchlist and the account; serves market data and valuation; reads and saves the owner's technical strategies; and lets an administrator edit the settings files, which the server runs on at once. See [Web API](#web-api).
 - Web UI: `frontend/` (Bun, React, Vite) on the same API through a same-origin `/v1` proxy. See [`docs/web-integration.md`](docs/web-integration.md).
 - Order execution: `MockExecutionProvider` by default. `ShioajiExecutionProvider` (Sinopac) is wired for `execution_provider: shioaji`, see [Real broker (Shioaji)](#real-broker-shioaji). It has not been run against a real Shioaji account.
 - Database: local SQLite at `stock_agent.db` with `db.backend: sqlite`. `db.backend: postgresql` uses the PostgreSQL credentials in `.env` and refuses to start without them.
@@ -32,6 +32,13 @@ uv sync --all-extras
 $env:PYTHONPATH = "src"
 uv run python -m d_presentation.cli.interactive
 ```
+
+The CLI signs in first, with a username or an email and the password, and only an administrator may use it: it is the
+only way to a manual BUY and to a real broker. On an installation with no user yet it sets up the first administrator
+instead (username, email, password), who takes over the data the single-user versions kept: the runs, the watchlist,
+the mock account and the saved strategies. Before each menu option it reads the user again, so an administrator who
+was deactivated or demoted loses the CLI at the next option. A locked-out administrator gets a new password on the
+machine with `just reset-password <username or email>`.
 
 Menu behavior:
 
@@ -183,19 +190,34 @@ Main files:
 
 ### Real broker (Shioaji)
 
-The shipped settings use the mock broker in `mock_only` order mode. The CLI and the Web API refuse to start a combination that could send an order nobody meant to send, and says what to change:
+The shipped settings use the mock broker in `mock_only` order mode on `environment: dev`. The environment decides what
+the app may trade on, with which credentials, from one table (`SystemEnvironment` in
+`backend/src/a_domain/types/enums.py`):
+
+| `environment` | Brokers | Order modes | Shioaji server and credentials | Database |
+| --- | --- | --- | --- | --- |
+| `dev` (a developer's machine) | `mock` | `mock_only`, `disabled` | none: no Shioaji variable is read | SQLite or PostgreSQL |
+| `test` (staging before launch) | `mock`, `shioaji` | `mock_only`, `disabled` | simulation, with `SHIOAJI_API_KEY_TEST` and `SHIOAJI_SECRET_KEY_TEST` only | SQLite or PostgreSQL |
+| `prod` (the live service) | `mock`, `shioaji` | `mock_only`, `disabled`, `live` | production, with `SHIOAJI_API_KEY`, `SHIOAJI_SECRET_KEY`, `SHIOAJI_CA_PATH`, `SHIOAJI_CA_PASSWORD` and `SHIOAJI_PERSON_ID` only | PostgreSQL only |
+
+`dev` and `test` refuse to start while any of the five production variables is set in the environment or `.env`, so the
+production key lives only on the production machine; the refusal names the variables, never their values. Nothing
+else chooses simulation: a test machine cannot log in with the production key, and prod cannot run in simulation. The
+CLI and the Web API also refuse a combination that could send an order nobody meant to send, and say what to change:
 
 | `environment` | `execution_provider` | `order_mode` | Starts? |
 | --- | --- | --- | --- |
-| any | `mock` | `mock_only` or `disabled` | Yes. |
+| any | `mock` | `mock_only` or `disabled` | Yes (prod on PostgreSQL). |
 | any | `mock` | `live` | No. Live order mode needs Shioaji. |
-| `dev` | `shioaji` | any | No. DEV never touches a real broker. |
-| `test` or `live` | `shioaji` | `mock_only` | No. Use `disabled` to read the Shioaji account without ordering. |
-| `test` or `live` | `shioaji` | `disabled` | Yes. Cash and positions come from Shioaji, no order is sent. |
-| `test` | `shioaji` | `live` | No. Live order mode needs `environment: live`. |
-| `live` | `shioaji` | `live` | Yes. Menus 2 and 3 and a confirmed manual BUY send orders to Shioaji. |
+| `dev` | `shioaji` | any | No. Dev never touches a real broker. |
+| `test` or `prod` | `shioaji` | `mock_only` | No. Use `disabled` to read the Shioaji account without ordering. |
+| `test` or `prod` | `shioaji` | `disabled` | Yes. Cash and positions come from Shioaji, no order is sent. |
+| `test` | `shioaji` | `live` | No. Live order mode needs `environment: prod`. |
+| `prod` | `shioaji` | `live` | Yes. Menus 2 and 3 and a confirmed manual BUY send orders to Shioaji. |
 
-`shioaji.simulation: true` (the default) logs in to Shioaji's paper-trading environment. Set it to `false` only after testing there; the account is then real money. Shioaji needs `SHIOAJI_API_KEY` and `SHIOAJI_SECRET_KEY` in the environment or `.env`, and in production also `SHIOAJI_CA_PATH`, `SHIOAJI_CA_PASSWORD` and `SHIOAJI_PERSON_ID`. With any non-mock broker the menu header shows a red REAL BROKER panel with the broker, simulation or production, and the order mode.
+On the production machine, keep the SinoPac CA certificate at `secrets/Sinopac.pfx` in the checkout (the `secrets/`
+folder is gitignored) and set `SHIOAJI_CA_PATH` to that file's path. With any non-mock broker the menu header shows a red
+REAL BROKER panel with the broker, simulation (test) or production (prod), and the order mode.
 
 How the adapter trades: quantities are shares; whole 1000-share lots go as one board-lot order, LIMIT IOC, and the rest as one intraday odd-lot order, LIMIT ROD, because TWSE and TPEx take intraday odd lots as ROD only. Before sending, it refuses a BUY that the cash cannot pay, because the broker checks the trading limit, not the cash. Cash is the bank balance minus settlement payments due and minus the BUYs the broker lists as dealt today. A part still working after `shioaji.max_polls` status reads `shioaji.poll_interval_seconds` apart (about five seconds) is cancelled, the odd-lot ROD part included, so no order is left working. The order then ends with what filled and its fee, and its reason lists each part with its time in force, its status and the shares it dealt. A part the broker still reports as working after the cancel, or a timed-out call it cannot find again, ends the order FAILED with a reason that says to check the broker.
 
@@ -212,14 +234,23 @@ TAVILY_API_KEY=
 LINE_CHANNEL_ID=
 LINE_CHANNEL_SECRET=
 LINE_CHANNEL_ACCESS_TOKEN=
-API_TOKEN=
-ADMIN_API_TOKEN=
+SHIOAJI_API_KEY_TEST=
+SHIOAJI_SECRET_KEY_TEST=
 DB_USER=
 DB_PASSWORD=
 DB_HOST=
 DB_PORT=
 DB_NAME=
 ```
+
+The accounts key encrypts the saved usernames and emails and keys their lookup. The app makes it itself: the first
+start of the CLI or the Web API creates `secrets/accounts.key` (32 random bytes, mode 600, gitignored) and logs its
+path, never the key. Back up `secrets/` with the database. The CLI and the Web API refuse a key other than the one the
+users were saved with. Losing it locks every account: a new key does not help, so restore the original
+`secrets/accounts.key` from the backup. The `ACCOUNTS_KEY` variable, from the environment or `.env`, overrides the
+file, for Docker or production; a blank value counts as unset. `environment: prod` requires the variable and never
+creates the file, because a production app folder, such as a Docker container's, may not survive a redeploy, and a key
+created there would lock every account at the next deploy.
 
 `db.backend` in `config/appsetting.yaml` chooses the database, never the `DB_*` keys. `postgresql` needs `DB_USER`, `DB_PASSWORD`, `DB_HOST` and `DB_NAME`. `sqlite` keeps the local `stock_agent.db`, and refuses to start while all four are set.
 
@@ -241,13 +272,15 @@ uv run python tools/architecture_check.py src --pyright
 Run the API and the web UI, in this order, from the repository root:
 
 ```bash
-just run-bn   # backend Web API on http://127.0.0.1:8800, one worker; API_TOKEN and ADMIN_API_TOKEN from .env
+just run-bn   # backend Web API on http://127.0.0.1:8800, one worker; the first start creates secrets/accounts.key
 just run-fn   # frontend dev server on http://127.0.0.1:5173, proxying /v1 to the backend
 ```
 
-`API_TOKEN` opens the owner's data and `ADMIN_API_TOKEN`, a different value, opens only the settings files; both are
-long random strings you put in `.env` yourself. The browser keeps them in the tab's memory only. `HOST` and `PORT`
-move the backend; serve another network only behind a TLS reverse proxy (see `docs/web-integration.md`).
+Users sign in to the web app with a username or an email and a password. On the first start with no user, the
+backend prints a one-time setup code on its console: the first-time setup in the web app needs it, so the first
+visitor of a server reachable from elsewhere cannot make themselves its administrator (the CLI needs none). After
+that, anyone may register as a user while `accounts.registration_open` is on. `HOST` and `PORT` move the backend;
+serve another network only behind a TLS reverse proxy (see `docs/web-integration.md`).
 
 Run Docker:
 
@@ -255,25 +288,41 @@ Run Docker:
 docker compose up --build
 ```
 
+### Database migrations
+
+The database commands open only the database that `db.backend` selects, so they need no accounts key, AI key or broker. Run them from the repository root with the app stopped:
+
+```bash
+just db-status                        # where the database is, its schema version and the code's, pending steps, rows per table
+just db-backup                        # a copy in backups/, named after the UTC time and the schema version
+just db-migrate                       # a backup, then the pending upgrade steps in one transaction; nothing pending changes nothing
+just db-restore backups/<file> --yes  # a backup of the current database, then the given backup put back
+```
+
+On PostgreSQL the backups use `pg_dump` and `pg_restore`, which must be on `PATH`. [docs/database-migrations.md](docs/database-migrations.md) covers the commands, backups and restore, and how to write and test an upgrade step.
+
 ## Web API
 
 The API runs on the same runtime as the CLI: `backend/src/d_presentation/dependencies.py` builds it once at startup, with the same trading-setup checks, so the API refuses to start on any setup the CLI refuses. The OpenAPI page is at `/docs`; `frontend/src/shared/api/openapi.json` is the committed contract the web UI generates its types from.
 
-Scopes: public (built-in strategies, `/v1/market`), owner (`Authorization: Bearer <API_TOKEN>`: every write and every private read) and administrator (`Bearer <ADMIN_API_TOKEN>`: `/v1/admin` only). A scope whose token is unset answers 403; the administrator scope also while its token equals `API_TOKEN`. Every write repeats `"confirm": true`. Requests must name a host in `api.allowed_hosts` (127.0.0.1 and localhost by default).
+Access: public (sign-in, registration, the first-time setup, the built-in strategies, `/v1/market`), signed in (the session cookie `POST /v1/auth/sign-in` sets: every other read and write, on the user's own data) and administrator (`/v1/admin`: the users and the settings files). 401 means sign in; 403 means not allowed and keeps the session. Every write sends `X-Requested-With: stock-agent`, and every write but the sign-in steps repeats `"confirm": true`. Requests must name a host in `api.allowed_hosts` (127.0.0.1 and localhost by default). Each user's runs, watchlist, mock account and strategies are their own; one run per user at a time.
 
-| Method and path | Scope | What it does |
+| Method and path | Access | What it does |
 | --- | --- | --- |
-| `POST /v1/runs/full-cycle`, `/v1/runs/specific-stocks` | owner | Start menu 1 or menu 4's analysis (at most 20 stock ids) in the background: 202 with the run id. They never order. |
-| `POST /v1/runs/buzz-scan`, `/v1/runs/intraday` | owner | Start menus 2 and 3 only while the execution provider is the mock broker (403 otherwise). Their orders go through the same gates and journal as the CLI's. |
-| `GET /v1/runs?limit&offset`, `/v1/runs/{id}`, `.../signals`, `.../orders` | owner | Runs newest first, a run's state, record and saved stock reports, its decisions and orders. |
-| `GET /v1/watchlist`, `POST /v1/watchlist/manual`, `POST /v1/watchlist/manual/remove` | owner | Active entries with names; add or remove MANUAL entries only. |
-| `GET`/`PUT /v1/technical-settings` | owner | The owner's strategies with the `revision` a save must carry (409 when stale, 422 when invalid). |
+| `GET /v1/auth/status`, `POST /v1/auth/setup`, `/register`, `/sign-in`, `/sign-out` | public | Whether the first-time setup or registration is offered; set up the first administrator (with the console's setup code); register; sign in (sets the session cookie); sign out. |
+| `GET /v1/auth/me` | signed in | The signed-in user with their permissions. |
+| `GET /v1/admin/users`, `PATCH /v1/admin/users/{id}` | administrator | The users; change a role, deactivate or reactivate, set a new password. The last active administrator stays (409). |
+| `POST /v1/runs/full-cycle`, `/v1/runs/specific-stocks` | signed in | Start menu 1 or menu 4's analysis (at most 20 stock ids) in the background: 202 with the run id, 409 while the user's own run runs. They never order. |
+| `POST /v1/runs/buzz-scan`, `/v1/runs/intraday` | signed in | Start menus 2 and 3 only while the execution provider is the mock broker (403 otherwise). Their orders go through the same gates and journal as the CLI's. |
+| `GET /v1/runs?limit&offset`, `/v1/runs/{id}`, `.../signals`, `.../orders` | signed in | Runs newest first, a run's state, record and saved stock reports, its decisions and orders. |
+| `GET /v1/watchlist`, `POST /v1/watchlist/manual`, `POST /v1/watchlist/manual/remove` | signed in | Active entries with names; add or remove MANUAL entries only. |
+| `GET`/`PUT /v1/technical-settings` | signed in | The user's strategies with the `revision` a save must carry (409 when stale, 422 when invalid). |
 | `GET /v1/technical-settings/built-in-strategies` | public | The built-in strategies. |
 | `GET /v1/market/stocks?query`, `/v1/market/most-traded`, `/v1/market/stocks/{id}` | public | Listing search, the latest session's most traded stocks, a stock's cached daily bars. No realtime quote. |
-| `GET /v1/market/stocks/{id}/technical` | owner | The active strategy's evaluation of the stock and each indicator at every bar it read. |
-| `GET /v1/valuation/market`, `/stocks`, `/scan`; `POST /v1/valuation/explanation` | owner | Menus 5 and 6, read-only. Only the explanation calls the AI, once per confirmed request. |
-| `GET /v1/account/history?as_of=` | owner | Menu 7, with the execution provider and order mode it reads. |
-| `/v1/admin/settings...`, `/v1/admin/audit` | administrator | The allowlisted settings of `appsetting.yaml` and `instructions.yaml`: read, preview, save with revision, backups, restore, audit. A save applies at the next start. |
+| `GET /v1/market/stocks/{id}/technical` | signed in | The active strategy's evaluation of the stock and each indicator at every bar it read. |
+| `GET /v1/valuation/market`, `/stocks`, `/scan`; `POST /v1/valuation/explanation` | signed in | Menus 5 and 6, read-only. Only the explanation calls the AI, once per confirmed request. |
+| `GET /v1/account/history?as_of=` | signed in | Menu 7, with the execution provider and order mode it reads. |
+| `/v1/admin/settings...`, `/v1/admin/audit` | administrator | `appsetting.yaml` and `instructions.yaml` as whole texts: read, preview, save with revision and the password again, backups, restore with the password, reload, audit. A save opens the app on the new text first, then writes it and runs on it at once; an edit on disk is loaded too. See [docs/web-integration.md](docs/web-integration.md#settings-files). |
 
 One workflow runs at a time per server process; a second start answers 409. Run the API with one worker.
 
@@ -281,7 +330,8 @@ One workflow runs at a time per server process; a second start answers 409. Run 
 
 - `stock_agent.db`: SQLite application and mock trading state. The trading record is `workflow_runs`, `trade_signals`, `orders` and `account_snapshots`; the mock broker's book is `mock_cash` and `mock_positions`. Each owner's technical settings are `technical_settings` (selections and revision), `technical_strategies`, `technical_indicators`, `technical_rules` and `technical_formula_nodes` (one row per part of a rule's formula), tied together by foreign keys.
 
-Tables are created with `create_all`, which never changes an existing table. A new database also gets a `schema_version` row, the code's `SCHEMA_VERSION` (`backend/src/c_infrastructure/database/models/schema_version_dto.py`), which says how its rows are stored. A database of an older version is upgraded in place at startup, one step of `UPGRADES` in that file per version, in one transaction, and keeps its rows: version 1 to 2 adds `workflow_runs.failure`, filled in for the runs that stopped by an exception. At startup the app stops, changing nothing, when the database is not new and its schema version is missing or one no upgrade reaches, or when an existing table's columns differ from the code. The message names each table to drop. A `stock_agent.db` made before the schema version existed is refused for every table, because several of its tables hold Taiwan wall-clock times that the current code reads as UTC. Delete that file, or drop the tables the message names; the next start recreates them empty. Cached prices and EPS refill themselves, while the mock account, watchlist and trading rows in a dropped table are lost. Such a file's `mock_positions` also hold average costs without the buy fee, and its unused `mock_orders` table can be dropped.
+Tables are created with `create_all`, which never changes an existing table. A new database also gets a `schema_version` row, the code's `SCHEMA_VERSION` (`backend/src/c_infrastructure/database/models/schema_version_dto.py`), which says how its rows are stored. Startup never upgrades a database. When the database's schema version is older than the code's, the app stops, changing nothing, and names `just db-migrate`, which backs the database up and then upgrades it in one transaction, keeping every row (see [Database migrations](#database-migrations)). The app also stops when the database is not new and its schema version is missing or one no upgrade reaches, or when an existing table's columns differ from the code. That message names each table to drop. A `stock_agent.db` made before the schema version existed is refused for every table, because several of its tables hold Taiwan wall-clock times that the current code reads as UTC. Delete that file, or drop the tables the message names; the next start recreates them empty. Cached prices and EPS refill themselves, while the mock account, watchlist and trading rows in a dropped table are lost. Such a file's `mock_positions` also hold average costs without the buy fee, and its unused `mock_orders` table can be dropped.
+- `backups/`: the database backups that `just db-backup`, `just db-migrate` and `just db-restore` write, owner-only and ignored by git.
 - `chroma_data/`: Chroma persistence.
 - `news_archive/`: archived news payloads.
 - `buzz_archive/`: archived social buzz payloads.
@@ -291,9 +341,9 @@ Tables are created with `create_all`, which never changes an existing table. A n
 
 - Every BUY or SELL decision gets one `orders` row before anything reaches the broker. A closed market, a disabled order mode or a quote older than `freshness.realtime_max_lag_minutes` makes that row `REJECTED` with the reason, and nothing is sent.
 - `Run Full Cycle` does not call order execution.
-- The Web API starts Buzz and Intraday only while the execution provider is the mock broker, through the same order gates and journal as the CLI; every other endpoint never orders, and the Web has no manual BUY. Every write needs `API_TOKEN` and `confirm: true`; the settings editor needs `ADMIN_API_TOKEN` and never changes the environment, broker, order mode, the score weights and thresholds, sizing, stop-loss, or the history and quote freshness.
+- The Web API starts Buzz and Intraday only while the execution provider is the mock broker, through the same order gates and journal as the CLI; every other endpoint never orders, and the Web has no manual BUY. Every write needs a signed-in user and `confirm: true`; the settings editor needs an administrator, never changes the environment, and needs the administrator's password again to change the broker, order mode, `shioaji`, `db`, the score weights and thresholds, sizing, stop-loss, or the history and quote freshness.
 - Manual BUY override is explicit user intent and still uses the same order checks.
-- Real orders need `environment: live`, `execution_provider: shioaji`, `order_mode: live` and the Shioaji credentials together. Any other combination with Shioaji either refuses to start or only reads the account.
+- Real orders need `environment: prod`, `execution_provider: shioaji`, `order_mode: live` and the production Shioaji credentials together. Any other combination with Shioaji either refuses to start or only reads the account, and dev and test never see a production credential.
 
 ## Known Cleanup Areas
 

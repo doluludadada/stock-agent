@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiRequest, isApiError, strategyResultsKey, useSession } from '@/shared/api'
+import { apiRequest, isApiError, strategyResultsKey, useIsSignedIn } from '@/shared/api'
 import type { StrategySettings } from '../model/types'
 import { settingsFromApi, settingsToApi, strategyFromApi } from './mapping'
 
@@ -18,11 +18,11 @@ export function useBuiltInStrategies() {
 }
 
 export function useStrategySettings() {
-  const { unlocked } = useSession('owner')
+  const signedIn = useIsSignedIn()
   return useQuery({
     queryKey: strategyKeys.settings,
-    queryFn: async ({ signal }) => settingsFromApi(await apiRequest('get', '/v1/technical-settings', { scope: 'owner', signal })),
-    enabled: unlocked,
+    queryFn: async ({ signal }) => settingsFromApi(await apiRequest('get', '/v1/technical-settings', { signal })),
+    enabled: signedIn,
   })
 }
 
@@ -36,7 +36,7 @@ export function useSaveStrategySettings() {
   return useMutation({
     mutationFn: async (settings: StrategySettings) =>
       settingsFromApi(
-        await apiRequest('put', '/v1/technical-settings', { scope: 'owner', body: { confirm: true, settings: settingsToApi(settings) } }),
+        await apiRequest('put', '/v1/technical-settings', { body: { confirm: true, settings: settingsToApi(settings) } }),
       ),
     onSuccess: (saved) => {
       client.setQueryData(strategyKeys.settings, saved)

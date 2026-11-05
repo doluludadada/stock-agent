@@ -1,4 +1,4 @@
-import { ArrowLeft, SearchX } from 'lucide-react'
+import { ArrowLeft, ClipboardList, ReceiptText, SearchX } from 'lucide-react'
 import type { UseQueryResult } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { Link } from 'react-router'
@@ -7,14 +7,13 @@ import { paths } from '@/shared/config/paths'
 import { isApiError } from '@/shared/api'
 import { formatDateTime, formatNumber, formatPrice } from '@/shared/lib/format'
 import { Badge } from '@/shared/ui/badge'
-import { Button } from '@/shared/ui/button'
+import { DataTable, type Column } from '@/shared/ui/data-table'
 import { ErrorState } from '@/shared/ui/error-state'
 import { Panel } from '@/shared/ui/panel'
 import { Skeleton } from '@/shared/ui/skeleton'
 import { Stat } from '@/shared/ui/stat'
 import { StateBlock } from '@/shared/ui/state-block'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/shared/ui/table'
-import { RequireUnlock } from '@/shared/ui/unlock'
+import { RequireSignIn } from '@/shared/ui/require-sign-in'
 import { useRun, useRunOrders, useRunSignals, type Order, type Run, type Signal } from './api'
 import { RunStateBadge } from './RunStateBadge'
 
@@ -24,10 +23,11 @@ interface RunDetailPageProps {
 }
 
 export function RunDetailPage(props: RunDetailPageProps) {
+  const { t } = useTranslation('runs')
   return (
-    <RequireUnlock scope="owner" className="rounded-xl border">
+    <RequireSignIn layout="page" reason={t('detailSignIn')}>
       <RunDetail {...props} />
-    </RequireUnlock>
+    </RequireSignIn>
   )
 }
 
@@ -38,30 +38,44 @@ function RunDetail({ runId, renderWatch }: RunDetailPageProps) {
   const signals = useRunSignals(runId, ended)
   const orders = useRunOrders(runId, ended)
 
-  if (run.isPending) return <Skeleton className="h-96 rounded-xl" />
-  if (isApiError(run.error, 'notFound')) return <StateBlock icon={SearchX} title={t('notFound')} className="rounded-xl border" />
-  if (run.isError) return <ErrorState error={run.error} title={t('loadFailed')} onRetry={() => void run.refetch()} className="rounded-xl border" />
+  const back = (
+    <Link to={paths.runs} className="-ml-1 inline-flex min-h-11 items-center gap-1.5 rounded-md px-1 text-sm text-muted-foreground hover:text-foreground md:min-h-8">
+      <ArrowLeft aria-hidden className="size-4" />
+      {t('back')}
+    </Link>
+  )
+  if (run.isPending) return <Skeleton className="h-96 rounded-2xl" />
+  if (isApiError(run.error, 'notFound')) {
+    return (
+      <div className="space-y-3">
+        {back}
+        <StateBlock icon={SearchX} title={t('notFound')} className="rounded-2xl border bg-card py-12" />
+      </div>
+    )
+  }
+  if (run.isError) return <ErrorState error={run.error} title={t('loadFailed')} onRetry={() => void run.refetch()} className="rounded-2xl border bg-card py-12" />
 
   return (
-    <div className="space-y-4">
-      <Button asChild variant="ghost" size="sm" className="-ml-2 text-muted-foreground">
-        <Link to={paths.runs}>
-          <ArrowLeft aria-hidden />
-          {t('back')}
-        </Link>
-      </Button>
-      <Header run={run.data} />
-      {run.data.state === 'running' && <p className="rounded-lg border border-primary/30 bg-accent px-3 py-2 text-sm">{t('runningNote')}</p>}
-      {run.data.state === 'unfinished' && <p className="rounded-lg border border-gold/35 bg-gold-soft px-3 py-2 text-sm">{t('unfinishedNote')}</p>}
+    <div className="space-y-5 lg:space-y-6">
+      <div className="space-y-3">
+        {back}
+        <Header run={run.data} />
+      </div>
+      {run.data.state === 'running' && <p className="rounded-xl border border-brand/30 bg-brand-soft px-4 py-2.5 text-sm">{t('runningNote')}</p>}
+      {run.data.state === 'unfinished' && <p className="rounded-xl border border-gold/35 bg-gold-soft px-4 py-2.5 text-sm">{t('unfinishedNote')}</p>}
       {run.data.error && (
-        <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm" role="alert">
+        <p className="rounded-xl border border-destructive/30 bg-danger-soft px-4 py-2.5 text-sm" role="alert">
           {run.data.error}
         </p>
       )}
       {run.data.summary && <Summary summary={run.data.summary} />}
       {(run.data.reports ?? []).length > 0 && <Reports reports={run.data.reports ?? []} renderWatch={renderWatch} />}
-      {ended && <Signals query={signals} />}
-      {ended && <Orders query={orders} />}
+      {ended && (
+        <div className="grid items-start gap-4 lg:gap-5 xl:grid-cols-2">
+          <Signals query={signals} />
+          <Orders query={orders} />
+        </div>
+      )}
       {run.data.summary && run.data.summary.execution_log.length > 0 && <Log lines={run.data.summary.execution_log} title={t('logTitle')} />}
     </div>
   )
@@ -102,10 +116,10 @@ function Summary({ summary }: { summary: NonNullable<Run['summary']> }) {
     ['stale', summary.stale_market_data_count],
   ] as const
   return (
-    <Panel title={t('summaryTitle')}>
-      <dl className="grid grid-cols-3 gap-x-6 gap-y-3 sm:grid-cols-4 lg:grid-cols-7">
+    <Panel title={t('summaryTitle')} description={t('summaryQuestion')}>
+      <dl className="grid grid-cols-3 gap-x-6 gap-y-4 @xl:grid-cols-4 @4xl:grid-cols-7">
         {counters.map(([key, value]) => (
-          <Stat key={key} label={t(`counter.${key}`)}>
+          <Stat key={key} label={t(`counter.${key}`)} size="lg">
             {value}
           </Stat>
         ))}
@@ -115,22 +129,23 @@ function Summary({ summary }: { summary: NonNullable<Run['summary']> }) {
   )
 }
 
+/** One card per stock: its scores, the price the run read, the rules that excluded it and the AI's summary. */
 function Reports({ reports, renderWatch }: { reports: NonNullable<Run['reports']>; renderWatch?: RunDetailPageProps['renderWatch'] }) {
   const { t } = useTranslation('runs')
   const locale = useLocale()
   return (
-    <Panel title={t('reportsTitle')} flush>
-      <ul className="divide-y">
+    <Panel title={t('reportsTitle')} description={t('reportsQuestion', { count: reports.length })}>
+      <ul className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,20rem),1fr))] gap-3">
         {reports.map((report) => (
-          <li key={report.stock_id} className="space-y-2 px-4 py-3">
-            <div className="flex items-center justify-between gap-3">
-              <Link to={paths.stock(report.stock_id)} className="flex items-baseline gap-2 text-sm font-medium hover:text-primary">
+          <li key={report.stock_id} className="flex flex-col gap-3 rounded-xl border bg-background/60 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <Link to={paths.stock(report.stock_id)} className="flex min-h-11 min-w-0 flex-col justify-center hover:text-brand md:min-h-0">
+                <span className="truncate font-semibold">{report.name ?? report.stock_id}</span>
                 <span className="font-mono text-xs text-muted-foreground">{report.stock_id}</span>
-                {report.name}
               </Link>
               {renderWatch?.(report.stock_id, report.name ?? report.stock_id)}
             </div>
-            <dl className="grid max-w-md grid-cols-3 gap-x-6">
+            <dl className="grid grid-cols-3 gap-3 rounded-lg bg-muted/60 px-3 py-2.5">
               <Stat label={t('score.technical')}>{report.technical_report?.score ?? '—'}</Stat>
               <Stat label={t('score.ai')}>{report.ai_report?.score ?? '—'}</Stat>
               <Stat label={t('score.composite')}>{report.composite_score ?? '—'}</Stat>
@@ -140,9 +155,18 @@ function Reports({ reports, renderWatch }: { reports: NonNullable<Run['reports']
               {report.latest_market_data_at && ` · ${formatDateTime(locale, report.latest_market_data_at)}`}
             </p>
             {report.technical_report && report.technical_report.hard_failures.length > 0 && (
-              <p className="text-xs text-destructive">{t('hardFailures', { list: report.technical_report.hard_failures.join(', ') })}</p>
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-destructive">{t('hardFailuresTitle', { count: report.technical_report.hard_failures.length })}</p>
+                <ul className="flex flex-wrap gap-1.5">
+                  {report.technical_report.hard_failures.map((rule) => (
+                    <li key={rule} className="rounded-md border border-destructive/25 bg-danger-soft px-2 py-0.5 text-xs">
+                      {rule}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
-            {report.ai_report && <p className="text-sm text-muted-foreground">{report.ai_report.summary}</p>}
+            {report.ai_report && <p className="text-sm text-pretty text-muted-foreground">{report.ai_report.summary}</p>}
           </li>
         ))}
       </ul>
@@ -153,42 +177,31 @@ function Reports({ reports, renderWatch }: { reports: NonNullable<Run['reports']
 function Signals({ query }: { query: UseQueryResult<Signal[]> }) {
   const { t } = useTranslation('runs')
   const locale = useLocale()
-  if (query.isPending) return <Skeleton className="h-32 rounded-xl" />
-  if (query.isError) return <ErrorState error={query.error} title={t('signalsFailed')} onRetry={() => void query.refetch()} className="rounded-xl border" />
+  if (query.isPending) return <Skeleton className="h-32 rounded-2xl" />
+  if (query.isError) return <ErrorState error={query.error} title={t('signalsFailed')} onRetry={() => void query.refetch()} className="rounded-2xl border bg-card" />
   const signals = query.data
+  const columns: Column<Signal>[] = [
+    {
+      key: 'stock',
+      header: t('column.stock'),
+      cell: (signal) => (
+        <Link to={paths.stock(signal.stock_id)} className="stretched-link font-mono hover:text-brand focus-visible:text-brand">
+          {signal.stock_id}
+        </Link>
+      ),
+    },
+    { key: 'action', header: t('column.action'), cell: (signal) => t(`action.${signal.action}`) },
+    { key: 'score', header: t('column.score'), numeric: true, cell: (signal) => signal.score },
+    { key: 'quantity', header: t('column.quantity'), numeric: true, from: 'sm', cell: (signal) => formatNumber(locale, signal.quantity) },
+    { key: 'price', header: t('column.price'), numeric: true, from: 'sm', cell: (signal) => formatPrice(locale, signal.price_at_signal) },
+    { key: 'reason', header: t('column.reason'), from: 'lg', className: 'w-full min-w-48 whitespace-normal text-xs text-muted-foreground', cell: (signal) => signal.reason },
+  ]
   return (
-    <Panel title={t('signalsTitle', { count: signals.length })} flush>
+    <Panel title={t('signalsTitle', { count: signals.length })} flush={signals.length > 0}>
       {signals.length > 0 ? (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t('column.stock')}</TableHead>
-              <TableHead>{t('column.action')}</TableHead>
-              <TableHead className="text-right">{t('column.score')}</TableHead>
-              <TableHead className="text-right">{t('column.quantity')}</TableHead>
-              <TableHead className="text-right">{t('column.price')}</TableHead>
-              <TableHead>{t('column.reason')}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {signals.map((signal) => (
-              <TableRow key={signal.decision_id}>
-                <TableCell>
-                  <Link to={paths.stock(signal.stock_id)} className="font-mono hover:text-primary">
-                    {signal.stock_id}
-                  </Link>
-                </TableCell>
-                <TableCell>{t(`action.${signal.action}`)}</TableCell>
-                <TableCell className="tabular text-right">{signal.score}</TableCell>
-                <TableCell className="tabular text-right">{formatNumber(locale, signal.quantity)}</TableCell>
-                <TableCell className="tabular text-right">{formatPrice(locale, signal.price_at_signal)}</TableCell>
-                <TableCell className="max-w-md text-xs text-muted-foreground">{signal.reason}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <DataTable rows={signals} columns={columns} rowKey={(signal) => signal.decision_id} label={t('signalsTitle', { count: signals.length })} />
       ) : (
-        <p className="px-4 py-3 text-sm text-muted-foreground">{t('noSignals')}</p>
+        <StateBlock icon={ClipboardList} title={t('noSignals')} className="py-4" />
       )}
     </Panel>
   )
@@ -197,52 +210,33 @@ function Signals({ query }: { query: UseQueryResult<Signal[]> }) {
 function Orders({ query }: { query: UseQueryResult<Order[]> }) {
   const { t } = useTranslation('runs')
   const locale = useLocale()
-  if (query.isPending) return <Skeleton className="h-24 rounded-xl" />
-  if (query.isError) return <ErrorState error={query.error} title={t('ordersFailed')} onRetry={() => void query.refetch()} className="rounded-xl border" />
+  if (query.isPending) return <Skeleton className="h-24 rounded-2xl" />
+  if (query.isError) return <ErrorState error={query.error} title={t('ordersFailed')} onRetry={() => void query.refetch()} className="rounded-2xl border bg-card" />
   const orders = query.data
-  if (orders.length === 0) {
-    return (
-      <Panel title={t('ordersTitle', { count: 0 })}>
-        <p className="text-sm text-muted-foreground">{t('noOrders')}</p>
-      </Panel>
-    )
-  }
+  const columns: Column<Order>[] = [
+    { key: 'stock', header: t('column.stock'), className: 'font-mono', cell: (order) => order.stock_id },
+    { key: 'action', header: t('column.action'), cell: (order) => t(`action.${order.action}`) },
+    { key: 'status', header: t('column.status'), cell: (order) => t(`orderStatus.${order.status}`) },
+    { key: 'quantity', header: t('column.quantity'), numeric: true, cell: (order) => `${formatNumber(locale, order.filled_quantity)} / ${formatNumber(locale, order.quantity)}` },
+    { key: 'price', header: t('column.price'), numeric: true, from: 'sm', cell: (order) => (order.limit_price !== null ? formatPrice(locale, order.limit_price) : '—') },
+    { key: 'costs', header: t('column.costs'), numeric: true, from: 'md', cell: (order) => formatNumber(locale, order.fee + order.tax) },
+    { key: 'reason', header: t('column.reason'), from: 'lg', className: 'w-full min-w-48 whitespace-normal text-xs text-muted-foreground', cell: (order) => order.reason ?? '' },
+  ]
   return (
-    <Panel title={t('ordersTitle', { count: orders.length })} flush>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>{t('column.stock')}</TableHead>
-            <TableHead>{t('column.action')}</TableHead>
-            <TableHead>{t('column.status')}</TableHead>
-            <TableHead className="text-right">{t('column.quantity')}</TableHead>
-            <TableHead className="text-right">{t('column.price')}</TableHead>
-            <TableHead className="text-right">{t('column.costs')}</TableHead>
-            <TableHead>{t('column.reason')}</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {orders.map((order) => (
-            <TableRow key={order.id}>
-              <TableCell className="font-mono">{order.stock_id}</TableCell>
-              <TableCell>{t(`action.${order.action}`)}</TableCell>
-              <TableCell>{t(`orderStatus.${order.status}`)}</TableCell>
-              <TableCell className="tabular text-right">{formatNumber(locale, order.filled_quantity)} / {formatNumber(locale, order.quantity)}</TableCell>
-              <TableCell className="tabular text-right">{order.limit_price !== null ? formatPrice(locale, order.limit_price) : '—'}</TableCell>
-              <TableCell className="tabular text-right">{formatNumber(locale, order.fee + order.tax)}</TableCell>
-              <TableCell className="text-xs text-muted-foreground">{order.reason ?? ''}</TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+    <Panel title={t('ordersTitle', { count: orders.length })} flush={orders.length > 0}>
+      {orders.length > 0 ? (
+        <DataTable rows={orders} columns={columns} rowKey={(order) => order.id} label={t('ordersTitle', { count: orders.length })} />
+      ) : (
+        <StateBlock icon={ReceiptText} title={t('noOrders')} className="py-4" />
+      )}
     </Panel>
   )
 }
 
 function Log({ lines, title, tone = 'neutral' }: { lines: string[]; title: string; tone?: 'neutral' | 'danger' }) {
   return (
-    <details className={tone === 'danger' ? 'mt-3 rounded-lg border border-destructive/30 px-3 py-2' : 'rounded-xl border bg-card px-4 py-2.5'}>
-      <summary className="cursor-pointer text-sm font-medium">{title}</summary>
+    <details className={tone === 'danger' ? 'mt-4 rounded-xl border border-destructive/30 bg-danger-soft px-4 py-2.5' : 'rounded-2xl border bg-card px-5 py-3 shadow-card'}>
+      <summary className="flex min-h-11 cursor-pointer items-center text-sm font-medium md:min-h-8">{title}</summary>
       <ul className="mt-2 max-h-72 space-y-1 overflow-y-auto font-mono text-xs text-muted-foreground">
         {lines.map((line, index) => (
           <li key={index}>{line}</li>

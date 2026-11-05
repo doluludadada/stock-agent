@@ -5,7 +5,7 @@ import pytest
 from a_domain.rules.trading.cost import AffordableQuantityRule, TradingCostRule
 from a_domain.types.enums import TradeAction
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
-from d_presentation.dependencies import load_settings
+from d_presentation.dependencies import get_project_root, load_settings
 
 RULE = TradingCostRule(fee_rate=0.001425, tax_rate=0.003, etf_tax_rate=0.001, min_fee=20, bond_etf_tax_exempt_until=date(2026, 12, 31))
 NOW = datetime(2026, 10, 19, 10, 0, tzinfo=TAIWAN_TIMEZONE)
@@ -66,7 +66,7 @@ def test_a_bond_etf_buy_pays_no_tax_on_either_side_of_the_exemption() -> None:
 
 
 def test_the_shipped_config_taxes_etf_sells_at_a_third_of_the_stock_rate_and_bond_etf_sells_from_2027() -> None:
-    cost_rule = load_settings().market.cost_rule()
+    cost_rule = load_settings(get_project_root()).market.cost_rule()
 
     assert cost_rule.apply(TradeAction.SELL, "2330", price=50, quantity=2000, now=NOW).tax == 300
     assert cost_rule.apply(TradeAction.SELL, "0056", price=50, quantity=2000, now=NOW).tax == 100

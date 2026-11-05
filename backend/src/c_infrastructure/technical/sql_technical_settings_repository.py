@@ -23,16 +23,18 @@ CHILD_TABLES = (TechnicalFormulaNodeDTO, TechnicalRuleDTO, TechnicalIndicatorDTO
 
 class SqlTechnicalSettingsRepository(ITechnicalSettingsRepository):
     """
-    Technical settings in ordinary SQL tables, on SQLite or PostgreSQL. Every read and write names one owner, and a
-    save replaces that owner's rows in the same transaction that checks and raises the revision.
+    One owner's technical settings in ordinary SQL tables, on SQLite or PostgreSQL, through a connector bound to that
+    owner. A save replaces the owner's rows in the same transaction that checks and raises the revision.
     """
 
     def __init__(self, db: DatabaseConnector) -> None:
         self._db = db
 
     @override
-    async def load(self, owner_id: str, initial: TechnicalSettings) -> TechnicalSettings:
-        async with self._db.get_session() as session:
+    async def load(self, initial: TechnicalSettings) -> TechnicalSettings:
+        owner_id = self._db.owner_id
+
+        async with self._db.owner_session() as session:
             if await session.get(TechnicalSettingsDTO, owner_id) is None:
                 session.add(TechnicalSettingsDTO.from_domain(owner_id, replace(initial, revision=0)))
 
@@ -48,10 +50,7 @@ class SqlTechnicalSettingsRepository(ITechnicalSettingsRepository):
 
             settings = await session.get(TechnicalSettingsDTO, owner_id, populate_existing=True)
             revision = settings.revision if settings else None
-            rows = {
-                table: (await session.execute(select(table).where(col(table.owner_id) == owner_id))).scalars().all()
-                for table in CHILD_TABLES
-            }
+            rows = {table: (await session.execute(select(table))).scalars().all() for table in CHILD_TABLES}
             again = await session.get(TechnicalSettingsDTO, owner_id, populate_existing=True)
 
         if settings is None or again is None or again.revision != revision:
@@ -60,25 +59,25 @@ class SqlTechnicalSettingsRepository(ITechnicalSettingsRepository):
         return settings.to_domain(rows)
 
     @override
-    async def save(self, owner_id: str, settings: TechnicalSettings) -> TechnicalSettings:
+    async def save(self, settings: TechnicalSettings) -> TechnicalSettings:
         saved = replace(settings, revision=settings.revision + 1)
         claim = (
             update(TechnicalSettingsDTO)
-            .where(col(TechnicalSettingsDTO.owner_id) == owner_id, col(TechnicalSettingsDTO.revision) == settings.revision)
+            .where(col(TechnicalSettingsDTO.revision) == settings.revision)
             .values(active_strategy_id=saved.active_strategy_id, buzz_strategy_id=saved.buzz_strategy_id, revision=saved.revision)
             .returning(col(TechnicalSettingsDTO.revision))
         )
 
-        async with self._db.get_session() as session:
+        async with self._db.owner_session() as session:
             if (await session.execute(claim)).scalar_one_or_none() is None:
                 raise TechnicalSettingsConflictError(
                     "The technical settings changed after they were read. Read them again before saving."
                 )
 
             for table in CHILD_TABLES:
-                await session.execute(delete(table).where(col(table.owner_id) == owner_id))
+                await session.execute(delete(table))
 
-            for table, rows in TechnicalSettingsDTO.child_rows(owner_id, saved):
+            for table, rows in TechnicalSettingsDTO.child_rows(self._db.owner_id, saved):
                 await session.execute(insert(table), rows)
 
             await session.commit()

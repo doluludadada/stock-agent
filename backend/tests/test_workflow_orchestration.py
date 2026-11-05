@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta
 
 import pytest
-from pydantic import SecretStr
 from support.harness import (
     FRESH,
     MARKET_CLOSED,
@@ -13,6 +12,7 @@ from support.harness import (
     harness_config,
     rising_history,
 )
+from support.settings import environment_setup
 
 from a_domain.model.market.article import Article
 from a_domain.model.market.stock import Stock
@@ -29,7 +29,6 @@ from a_domain.types.enums import (
 )
 from a_domain.types.ids import new_run_id
 from b_application.config.app_config import AppConfig
-from b_application.config.trading_config import TradingConfig
 
 
 def stock_ids(stocks: list[Stock]) -> list[str]:
@@ -306,7 +305,8 @@ async def test_a_run_record_names_its_strategy_and_ai_model_and_counts_its_fills
     harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
     harness.watch("2330", WatchlistType.TECHNICAL)
     ai = harness.config.ai
-    saved = harness.technical_settings.saved[harness.config.technical.owner_id]
+    saved = harness.technical_settings.saved
+    assert saved is not None
 
     status = await harness.run_menu("3")
 
@@ -446,7 +446,7 @@ async def test_a_workflow_started_under_a_named_run_id_records_under_it(workflow
     harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
     run_id = new_run_id()
 
-    status = await getattr(harness.runtime.pipeline, workflow)(*arguments, run_id=run_id)
+    status = await getattr(harness.pipeline, workflow)(*arguments, run_id=run_id)
 
     assert status.stats.run_id == run_id
     assert list(harness.journal.runs) == [run_id]
@@ -470,7 +470,7 @@ def wanted_by_every_workflow(config: AppConfig | None = None) -> CliHarness:
     [
         (SystemEnvironment.DEV, ExecutionProvider.MOCK, OrderMode.DISABLED, [], (OrderStatus.REJECTED, "ORDER_MODE_DISABLED")),
         (SystemEnvironment.DEV, ExecutionProvider.MOCK, OrderMode.MOCK_ONLY, ["2330"], (OrderStatus.FILLED, "")),
-        (SystemEnvironment.LIVE, ExecutionProvider.SHIOAJI, OrderMode.LIVE, ["2330"], (OrderStatus.FILLED, "")),
+        (SystemEnvironment.PROD, ExecutionProvider.SHIOAJI, OrderMode.LIVE, ["2330"], (OrderStatus.FILLED, "")),
     ],
     ids=["disabled", "mock-only", "live"],
 )
@@ -484,13 +484,7 @@ async def test_buzz_and_intraday_send_an_order_only_when_the_order_mode_allows_i
     placed: list[str],
     outcome: tuple[OrderStatus, str],
 ) -> None:
-    config = harness_config()
-    config.environment = environment
-    config.trading = TradingConfig(execution_provider=provider, order_mode=mode)
-    config.shioaji = config.shioaji.model_copy(
-        update={"simulation": True, "api_key": SecretStr("key"), "secret_key": SecretStr("secret")}
-    )
-    harness = wanted_by_every_workflow(config)
+    harness = wanted_by_every_workflow(environment_setup(harness_config(), environment, provider, mode))
 
     await harness.run_menu(menu)
 

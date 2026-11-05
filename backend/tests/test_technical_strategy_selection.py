@@ -25,7 +25,6 @@ from d_presentation.cli import interactive, terminal
 pytestmark = pytest.mark.asyncio
 
 STRATEGY = TypeAdapter(TechnicalStrategy)
-OWNER = harness_config().technical.owner_id
 
 
 @pytest.fixture
@@ -69,7 +68,7 @@ async def test_a_run_reads_its_strategy_again_when_a_save_interrupts_the_first_r
     harness = stopped_out_holding()
     harness.technical_settings.interrupted_loads = 1
 
-    await harness.runtime.pipeline.run_intraday()
+    await harness.pipeline.run_intraday()
 
     assert [(order.stock_id, order.action) for order in harness.broker.placed] == [("2330", TradeAction.SELL)]
 
@@ -79,7 +78,7 @@ async def test_a_run_whose_strategy_read_is_interrupted_twice_fails_before_any_o
     harness.technical_settings.interrupted_loads = 2
 
     with pytest.raises(TechnicalSettingsConflictError):
-        await harness.runtime.pipeline.run_intraday()
+        await harness.pipeline.run_intraday()
 
     assert harness.broker.placed == []
 
@@ -113,12 +112,12 @@ async def test_a_run_given_a_built_in_strategy_uses_it_and_leaves_the_saved_sett
     harness = build_harness()
     harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
 
-    with_built_in = await harness.runtime.pipeline.analyse_specific_stocks(["2330"], built_in_strategy_id="aggressive")
-    with_saved = await harness.runtime.pipeline.analyse_specific_stocks(["2330"])
+    with_built_in = await harness.pipeline.analyse_specific_stocks(["2330"], built_in_strategy_id="aggressive")
+    with_saved = await harness.pipeline.analyse_specific_stocks(["2330"])
 
     assert reported(with_built_in, "2330") == (0, ["Need 61 daily bars; received 10"])
     assert reported(with_saved, "2330") == (90, [])
-    assert harness.technical_settings.saved == {OWNER: harness_settings()}
+    assert harness.technical_settings.saved == harness_settings()
 
 
 async def test_an_unknown_built_in_strategy_stops_the_run_before_it_starts() -> None:
@@ -126,7 +125,7 @@ async def test_an_unknown_built_in_strategy_stops_the_run_before_it_starts() -> 
     harness.list_stock("2330", rising_history(100.0))
 
     with pytest.raises(ValueError, match="my_balanced"):
-        await harness.runtime.pipeline.run_full_cycle(built_in_strategy_id="my_balanced")
+        await harness.pipeline.run_full_cycle(built_in_strategy_id="my_balanced")
 
     assert (harness.journal.runs, harness.prices.history_requests) == ({}, [])
 
@@ -167,7 +166,7 @@ async def test_a_run_fetches_enough_calendar_days_for_the_bars_its_strategy_need
     harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
     windows = history_windows(harness)
 
-    status = await harness.runtime.pipeline.analyse_specific_stocks(["2330"], built_in_strategy_id=built_in_strategy_id)
+    status = await harness.pipeline.analyse_specific_stocks(["2330"], built_in_strategy_id=built_in_strategy_id)
 
     assert windows == [days]
     assert reported(status, "2330")[1] == hard_failures, "the window is an estimate: a stock with fewer bars still fails"
@@ -202,7 +201,7 @@ async def choose(
 async def test_menu_8_offers_exactly_the_three_built_in_strategies_and_cancel(screen: io.StringIO) -> None:
     harness = build_harness()
 
-    _, offered = await choose(harness, terminal.CliSession(), "8", "0")
+    _, offered = await choose(harness, harness.session(), "8", "0")
 
     listed = [line for line in screen.getvalue().splitlines() if line.startswith("[")]
     assert listed == ["[1] Conservative", "[2] Balanced", "[3] Aggressive", "[0] Cancel"]
@@ -225,9 +224,7 @@ def harness_with_built_ins() -> CliHarness:
     """Three built-in strategies that score every priced stock 70, 80 and 60, and saved settings that score it 90."""
     config = harness_config()
     config.technical = TechnicalConfig(
-        owner_id=OWNER,
-        built_in_strategies=(built_in("first", 70), built_in("second", 80), built_in("third", 60)),
-        initial_strategy_id="first",
+        built_in_strategies=(built_in("first", 70), built_in("second", 80), built_in("third", 60)), initial_strategy_id="first"
     )
     harness = build_harness(config=config)
     harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
@@ -237,20 +234,20 @@ def harness_with_built_ins() -> CliHarness:
 @pytest.mark.parametrize(("choice", "score"), [("1", 70), ("2", 80), ("3", 60)])
 async def test_a_built_in_strategy_loaded_from_menu_8_scores_the_sessions_later_runs(choice: str, score: int) -> None:
     harness = harness_with_built_ins()
-    session = terminal.CliSession()
+    session = harness.session()
 
     assert await choose(harness, session, "8", choice) == (None, [["0", "1", "2", "3"]])
     specific, _ = await choose(harness, session, "4", "2330")
     full_cycle, _ = await choose(harness, session, "1")
 
     assert reported(specific, "2330") == reported(full_cycle, "2330") == (score, [])
-    assert harness.technical_settings.saved == {OWNER: harness_settings()}
+    assert harness.technical_settings.saved == harness_settings()
 
 
 @pytest.mark.parametrize("cancel", ["0", None], ids=["cancel", "ctrl-c"])
 async def test_cancelling_menu_8_keeps_the_strategy_the_session_had(cancel: str | None) -> None:
     harness = harness_with_built_ins()
-    session = terminal.CliSession()
+    session = harness.session()
 
     await choose(harness, session, "8", cancel)
     saved, _ = await choose(harness, session, "4", "2330")
@@ -259,13 +256,13 @@ async def test_cancelling_menu_8_keeps_the_strategy_the_session_had(cancel: str 
     second, _ = await choose(harness, session, "4", "2330")
 
     assert (reported(saved, "2330"), reported(second, "2330")) == ((90, []), (80, []))
-    assert harness.technical_settings.saved == {OWNER: harness_settings()}
+    assert harness.technical_settings.saved == harness_settings()
 
 
 async def test_a_new_cli_session_starts_on_the_saved_settings() -> None:
     harness = harness_with_built_ins()
-    await choose(harness, terminal.CliSession(), "8", "2")
+    await choose(harness, harness.session(), "8", "2")
 
-    status, _ = await choose(harness, terminal.CliSession(), "4", "2330")
+    status, _ = await choose(harness, harness.session(), "4", "2330")
 
     assert reported(status, "2330") == (90, [])

@@ -2,19 +2,20 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { session } from '@/shared/api'
+import { TEST_USER } from '@/test/users'
 import { useWatchlistChange, watchlistKeys, type WatchlistEntry } from './api'
 
 const manual = (stockId: string): WatchlistEntry => ({ stock_id: stockId, name: null, watchlist_type: 'manual', created_at: '2026-11-01T00:00:00Z', expires_at: null })
 
 describe('adding to the manual watchlist', () => {
   afterEach(() => {
-    session.lock('owner')
+    session.signOut()
     vi.unstubAllGlobals()
   })
 
   it('shows a stock already on the manual list once while the server answers', async () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => undefined)))
-    session.unlock('owner', 'owner-token')
+    session.signIn(TEST_USER)
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     client.setQueryData<WatchlistEntry[]>(watchlistKeys.all, [manual('2330')])
     const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
@@ -28,7 +29,7 @@ describe('adding to the manual watchlist', () => {
   it("rolls back only the refused click and keeps the other click's change", async () => {
     const answers: ((response: Response) => void)[] = []
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => answers.push(resolve))))
-    session.unlock('owner', 'owner-token')
+    session.signIn(TEST_USER)
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     client.setQueryData<WatchlistEntry[]>(watchlistKeys.all, [manual('2330')])
     const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>

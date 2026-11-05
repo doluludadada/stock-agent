@@ -72,6 +72,7 @@ def cache_over(yahoo: ScriptedYahoo, db: DatabaseConnector, clock: MovableClock)
         market_data=MarketDataConfig(),
         logger=SilentLogger(),
         market_clock=clock,
+        write_lock=asyncio.Lock(),
     )
 
 
@@ -98,6 +99,7 @@ async def test_history_holds_settled_sessions_and_is_refetched_when_a_newer_one_
         market_data=MarketDataConfig(),
         logger=SilentLogger(),
         market_clock=clock,
+        write_lock=asyncio.Lock(),
     )
     seen = []
 
@@ -130,6 +132,7 @@ async def test_realtime_quotes_come_from_the_quote_source_and_are_never_cached(d
         market_data=MarketDataConfig(),
         logger=SilentLogger(),
         market_clock=clock,
+        write_lock=asyncio.Lock(),
     )
 
     first = await cache.fetch_realtime_bars([Stock(stock_id="2330")])
@@ -212,6 +215,7 @@ async def test_a_window_earlier_than_any_asked_before_is_fetched_once_and_a_shor
         market_data=MarketDataConfig(),
         logger=SilentLogger(),
         market_clock=clock,
+        write_lock=asyncio.Lock(),
     )
     calls = []
 

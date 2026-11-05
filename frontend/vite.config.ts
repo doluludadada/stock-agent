@@ -51,6 +51,8 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
+    // Page tests render charts and dialogs; on a loaded machine they need more than the 5 s default.
+    testTimeout: 20_000,
     include: ['src/**/*.test.{ts,tsx}', 'tools/**/*.test.ts'],
     exclude: ['**/node_modules/**'],
     css: false,

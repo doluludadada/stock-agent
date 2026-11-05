@@ -50,7 +50,7 @@ async def test_a_listing_read_answers_503_when_the_listing_could_not_be_loaded(p
         response = await client.get(path)
 
     assert response.status_code == 503
-    assert response.json() == {"detail": "The TWSE and TPEX listings could not be loaded."}
+    assert response.json() == {"detail": "The TWSE and TPEX listings could not be loaded.", "code": "listing_unavailable"}
     assert response.headers["cache-control"] == "no-store"
 
 

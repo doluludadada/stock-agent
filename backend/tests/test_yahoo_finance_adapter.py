@@ -6,12 +6,12 @@ import pandas as pd
 import pytest
 import yfinance
 from support.fakes import RecordingLogger
+from support.settings import shipped_config
 
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.types.enums import MarketIndex, MarketType
 from b_application.config.market_data_config import MarketDataConfig, MarketHoursConfig
-from b_application.config.sources_config import SourcesConfig
 from c_infrastructure.market.yahoo_finance_adapter import YahooFinanceProvider
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
 
@@ -53,7 +53,7 @@ def provider(batch_size: int = 50) -> YahooFinanceProvider:
     return YahooFinanceProvider(
         TaiwanMarketClock(MarketHoursConfig()),
         MarketDataConfig(history_batch_size=batch_size, history_batch_delay_seconds=0),
-        SourcesConfig.from_appsetting().yahoo,
+        shipped_config().sources.yahoo,
         RecordingLogger(),
     )
 

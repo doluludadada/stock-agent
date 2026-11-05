@@ -9,10 +9,11 @@ from c_infrastructure.database.utc_datetime import UtcDateTime
 
 
 class WatchlistDTO(SQLModel, table=True):
-    """One persisted watchlist membership source for one stock."""
+    """One persisted watchlist membership source for one stock, on one owner's watchlist."""
 
     __tablename__: ClassVar[str] = "watchlists"
 
+    owner_id: str = Field(primary_key=True)
     stock_id: str = Field(primary_key=True)
     type: WatchlistType = Field(sa_column=Column(String, primary_key=True, nullable=False))
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), sa_type=UtcDateTime)

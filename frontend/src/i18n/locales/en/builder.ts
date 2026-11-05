@@ -1,4 +1,5 @@
 const builder = {
+  signIn: 'Sign in to design and save a formula',
   backToLibrary: 'Strategy library',
   eyebrowNew: 'New strategy',
   eyebrowEdit: 'Edit strategy',
@@ -120,7 +121,7 @@ const builder = {
     refused: 'The strategy did not pass validation. Nothing was saved.',
     refusedTitle: 'These parts did not pass:',
     full: 'The settings hold the most strategies they can. Delete one first.',
-    locked: 'Unlock first.',
+    notLoaded: 'The settings have not loaded yet. Save again in a moment; your draft is kept.',
     failed: 'The save did not go through. Your draft is kept; try again.',
     hintDirty: 'You have unsaved changes.',
   },

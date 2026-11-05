@@ -11,8 +11,8 @@ from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrate
 from a_domain.rules.trading.account_value import AccountValueRule, PositionValueRule
 from a_domain.rules.trading.cost import TradingCostRule
 from a_domain.rules.trading.tick import LimitPriceRule, TickSizeRule
-from a_domain.types.enums import ExecutionProvider, OrderMode
-from a_domain.types.values import FormulaId, NonEmptyText
+from a_domain.types.enums import ExecutionProvider, OrderMode, ShioajiCredential, SystemEnvironment
+from a_domain.types.values import FormulaId
 
 
 class AnalysisConfig(BaseModel):
@@ -63,12 +63,6 @@ class TechnicalConfig(BaseModel):
     """
     Where technical strategies come from. Every value comes from the `technical` section of config/appsetting.yaml;
     load_settings reads each built-in strategy from config/strategies/<id>.json.
-    """
-
-    owner_id: NonEmptyText
-    """
-    Whose saved technical settings the CLI and the Web API read and write. This installation has one owner. A future
-    service with sign-in takes the owner from the signed-in account instead, and never from what a client sends.
     """
 
     built_in_strategies: Annotated[tuple[TechnicalStrategy, ...], Field(min_length=1)]
@@ -151,29 +145,39 @@ class TradingConfig(BaseModel):
 
 class MockTradingConfig(BaseModel):
     """
-    DEV / TEST fake broker account configuration.
+    DEV / TEST fake broker accounts: each user's mock account is keyed by the user's id.
 
-    Initial cash is only used when mock_cash has no row yet.
+    Initial cash is only used when the user's mock_cash row does not exist yet.
     """
 
-    account_id: str = "mock-dev"
     initial_cash: float = Field(default=1_000_000, gt=0)
     max_fill_quantity: int | None = Field(default=None, gt=0)
     """Most shares the simulated market fills per order at the limit price. Unset fills any quantity."""
+
+
+class ShioajiLogin(BaseModel):
+    """What one Shioaji login uses: the server, the key pair, and in production the CA certificate that signs orders."""
+
+    model_config = ConfigDict(frozen=True)
+
+    simulation: bool
+    api_key: SecretStr
+    secret_key: SecretStr
+    ca_path: str | None = None
+    ca_password: SecretStr | None = None
+    person_id: SecretStr | None = None
 
 
 class ShioajiConfig(BaseSettings):
     """
     Shioaji (Sinopac) broker login, used when trading.execution_provider is shioaji.
 
-    Credentials come from the environment or .env only. Simulation logs in to Shioaji's paper-trading
-    environment and needs no CA certificate; production signs real orders with the CA. The env prefix keeps
-    an unrelated SIMULATION variable from switching the broker to production.
+    Credentials come from the environment or .env only, each field from its ShioajiCredential variable. Which ones a
+    login reads, and whether it is simulation, is SystemEnvironment's table: test logs in to Shioaji's paper-trading
+    server with the *_TEST key pair, prod to the real account with the production key pair and CA certificate.
     """
 
     model_config = SettingsConfigDict(env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore", env_prefix="SHIOAJI_")
-
-    simulation: bool = True
 
     poll_interval_seconds: float = Field(ge=0)
     """Wait between two reads of an order's status at the broker. It comes from config/appsetting.yaml, like max_polls."""
@@ -181,27 +185,50 @@ class ShioajiConfig(BaseSettings):
     max_polls: int = Field(gt=0)
     """Reads of an order's status before the adapter cancels it, and again after the cancel request."""
 
-    api_key: SecretStr | None = Field(default=None, validation_alias="SHIOAJI_API_KEY")
-    secret_key: SecretStr | None = Field(default=None, validation_alias="SHIOAJI_SECRET_KEY")
-    ca_path: str | None = Field(default=None, validation_alias="SHIOAJI_CA_PATH")
-    ca_password: SecretStr | None = Field(default=None, validation_alias="SHIOAJI_CA_PASSWORD")
-    person_id: SecretStr | None = Field(default=None, validation_alias="SHIOAJI_PERSON_ID")
+    api_key: SecretStr | None = Field(default=None, validation_alias=ShioajiCredential.API_KEY.value)
+    secret_key: SecretStr | None = Field(default=None, validation_alias=ShioajiCredential.SECRET_KEY.value)
+    ca_path: str | None = Field(default=None, validation_alias=ShioajiCredential.CA_PATH.value)
+    ca_password: SecretStr | None = Field(default=None, validation_alias=ShioajiCredential.CA_PASSWORD.value)
+    person_id: SecretStr | None = Field(default=None, validation_alias=ShioajiCredential.PERSON_ID.value)
+    api_key_test: SecretStr | None = Field(default=None, validation_alias=ShioajiCredential.API_KEY_TEST.value)
+    secret_key_test: SecretStr | None = Field(default=None, validation_alias=ShioajiCredential.SECRET_KEY_TEST.value)
 
-    @field_validator("api_key", "secret_key", "ca_path", "ca_password", "person_id", mode="before")
+    @field_validator("api_key", "secret_key", "ca_path", "ca_password", "person_id", "api_key_test", "secret_key_test", mode="before")
     @classmethod
     def _blank_is_missing(cls, value: object) -> object:
         return None if isinstance(value, str) and not value.strip() else value
 
-    def missing_credentials(self) -> list[str]:
-        """The environment variables a login still needs: the API key pair always, the CA trio in production."""
-        required = ["api_key", "secret_key"] if self.simulation else ["api_key", "secret_key", "ca_path", "ca_password", "person_id"]
+    def given(self) -> frozenset[ShioajiCredential]:
+        """The Shioaji variables that are set, by name only: a refusal names them and never shows a value."""
+        return frozenset(
+            ShioajiCredential(field.validation_alias)
+            for name, field in type(self).model_fields.items()
+            if isinstance(field.validation_alias, str) and getattr(self, name) is not None
+        )
 
-        return [str(type(self).model_fields[name].validation_alias) for name in required if getattr(self, name) is None]
+    def login(self, environment: SystemEnvironment) -> ShioajiLogin:
+        """
+        The login with the environment's own credentials, each by name. validate_trading_environment refuses a start
+        with one of them missing, so a missing one here fails validation as a bug.
+        """
+        match environment:
+            case SystemEnvironment.DEV:
+                raise ValueError("environment dev never logs in to Shioaji")
+            case SystemEnvironment.TEST:
+                credentials = {"api_key": self.api_key_test, "secret_key": self.secret_key_test}
+            case SystemEnvironment.PROD:
+                credentials = {
+                    "api_key": self.api_key,
+                    "secret_key": self.secret_key,
+                    "ca_path": self.ca_path,
+                    "ca_password": self.ca_password,
+                    "person_id": self.person_id,
+                }
+
+        return ShioajiLogin.model_validate({"simulation": environment.shioaji_simulation, **credentials})
 
 
 class WatchlistConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
     automatic_expiry_sessions: int = Field(default=1, gt=0)
     """
     A TECHNICAL or BUZZ entry stays active through the close of this many trading sessions after its workflow

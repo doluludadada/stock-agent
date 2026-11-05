@@ -28,7 +28,7 @@ async def value_specific_stocks(runtime: Runtime, session: terminal.CliSession) 
     if stock_ids is None:
         return
 
-    market = await load_market(runtime.pipeline)
+    market = await load_market(session.pipeline)
     valuations = find_valuations(market, stock_ids)
 
     if not valuations:
@@ -45,12 +45,12 @@ async def value_specific_stocks(runtime: Runtime, session: terminal.CliSession) 
 
     terminal.console.print(f"Asking the AI to explain: {', '.join(item.stock.stock_id for item in valuations)}")
 
-    for report in runtime.pipeline.appraise_valuations(valuations, target_pe):
-        print_valuation_explanation(report, await runtime.pipeline.explain_valuation(report))
+    for report in session.pipeline.appraise_valuations(valuations, target_pe):
+        print_valuation_explanation(report, await session.pipeline.explain_valuation(report))
 
 
 async def scan_undervalued_stocks(runtime: Runtime, session: terminal.CliSession) -> None:
-    market = await load_market(runtime.pipeline)
+    market = await load_market(session.pipeline)
 
     if not market.valuations:
         terminal.console.print("[yellow]No stocks loaded.[/yellow]")
@@ -63,7 +63,7 @@ async def scan_undervalued_stocks(runtime: Runtime, session: terminal.CliSession
         terminal.console.print("[yellow]Scan cancelled.[/yellow]")
         return
 
-    scan = runtime.pipeline.screen_valuation(market, criteria)
+    scan = session.pipeline.screen_valuation(market, criteria)
     print_valuation_step(scan, runtime.config)
 
     if not scan.survivors:
@@ -71,14 +71,14 @@ async def scan_undervalued_stocks(runtime: Runtime, session: terminal.CliSession
 
     if terminal.confirm(f"Confirm {len(scan.survivors)} matches with the technical strategy?"):
         terminal.console.print("Loading daily history for the matches...")
-        scan = await runtime.pipeline.confirm_valuation_technical(scan, session.built_in_strategy_id)
+        scan = await session.pipeline.confirm_valuation_technical(scan, session.built_in_strategy_id)
         print_technical_step(scan)
 
     candidates = scan.explanation_candidates
 
     if candidates and terminal.confirm(f"Explain the top {len(candidates)} stocks with AI ({len(candidates)} AI calls)?"):
         for report in candidates:
-            print_valuation_explanation(report, await runtime.pipeline.explain_valuation(report))
+            print_valuation_explanation(report, await session.pipeline.explain_valuation(report))
 
 
 async def load_market(pipeline: Pipeline) -> MarketValuation:

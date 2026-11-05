@@ -1,6 +1,5 @@
 import asyncio
 import sys
-from contextlib import nullcontext
 from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
@@ -9,20 +8,18 @@ from uuid import uuid4
 
 import pytest
 from pydantic import TypeAdapter
-from support.harness import CliHarness, build_harness, falling_history, harness_config, harness_settings, rising_history
-from support.settings import shipped_config
-from support.web import AUTHORIZED, TOKEN, ended, run_to_end, serve, write
+from support.harness import build_harness, falling_history, harness_config, harness_settings, open_harness_switch, rising_history
+from support.settings import environment_setup, shipped_config
+from support.web import ended, hold_stock_list, run_to_end, serve, write
 
 from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
 from a_domain.types.enums import ExecutionProvider, OrderMode, SystemEnvironment, TradeAction, WatchlistType
-from b_application.config.trading_config import TradingConfig
-from d_presentation import dependencies
-from d_presentation.dependencies import TradingSetupError, open_runtime
-from d_presentation.web.app import create_app
+from b_application.config import settings_loader
+from b_application.config.settings_loader import InvalidSettingsError
+from d_presentation.live_runtime import open_runtime_switch
+from d_presentation.web.app import ERROR_ANSWERS, create_app
 
 pytestmark = pytest.mark.asyncio
-
-OWNER = harness_config().technical.owner_id
 
 
 def settings_document() -> dict[str, Any]:
@@ -42,23 +39,6 @@ WRITES = [
     ("POST", "/v1/watchlist/manual/remove", {"stock_ids": ["2330"]}),
     ("PUT", "/v1/technical-settings", {"settings": settings_document()}),
 ]
-
-
-def hold_stock_list(harness: CliHarness) -> asyncio.Event:
-    """Makes every workflow wait at its first stock-list call until the returned event is set."""
-    release = asyncio.Event()
-    get_all, get_by_id = harness.stocks.get_all, harness.stocks.get_by_id
-
-    async def held_get_all():
-        await release.wait()
-        return await get_all()
-
-    async def held_get_by_id(stock_id: str):
-        await release.wait()
-        return await get_by_id(stock_id)
-
-    harness.stocks.get_all, harness.stocks.get_by_id = held_get_all, held_get_by_id
-    return release
 
 
 # ----------------------------------- Runs ----------------------------------- #
@@ -132,7 +112,7 @@ async def test_one_run_at_a_time_and_the_running_one_reads_as_running() -> None:
 async def test_a_run_stopped_by_unreadable_settings_reports_why_without_a_record() -> None:
     harness = build_harness()
 
-    async def broken_settings(owner_id, initial):
+    async def broken_settings(initial):
         raise ValueError("stored technical settings of local are not valid")
 
     harness.technical_settings.load = broken_settings
@@ -282,7 +262,10 @@ async def test_a_watchlist_add_during_a_listing_outage_answers_503_not_unlisted(
     async with serve(harness) as client:
         response = await write(client, "POST", "/v1/watchlist/manual", {"stock_ids": ["2330"]})
 
-    assert (response.status_code, response.json()) == (503, {"detail": "The TWSE and TPEX listings could not be loaded."})
+    assert (response.status_code, response.json()) == (
+        503,
+        {"detail": "The TWSE and TPEX listings could not be loaded.", "code": "listing_unavailable"},
+    )
     assert harness.watchlist.rows == []
 
 
@@ -291,22 +274,18 @@ async def test_a_watchlist_add_during_a_listing_outage_answers_503_not_unlisted(
 SETTINGS_PATH = "/v1/technical-settings"
 
 
-@pytest.mark.parametrize(
-    ("token", "headers", "status"),
-    [(None, AUTHORIZED, 403), (TOKEN, {}, 401), (TOKEN, {"Authorization": "Bearer wrong-token"}, 401)],
-    ids=["api-token-unset", "no-bearer-token", "wrong-bearer-token"],
-)
-async def test_the_saved_settings_are_private_to_the_api_token(token: str | None, headers: dict[str, str], status: int) -> None:
-    async with serve(build_harness(), token=token, authorized=False) as client:
-        response = await client.get(SETTINGS_PATH, headers=headers)
+@pytest.mark.parametrize("cookie", [None, "forged"], ids=["signed-out", "forged-session"])
+async def test_the_saved_settings_are_private_to_the_signed_in_user(cookie: str | None) -> None:
+    async with serve(build_harness(), authorized=False) as client:
+        response = await client.get(SETTINGS_PATH, cookies={"stock_agent_session": cookie} if cookie else None)
 
-    assert response.status_code == status
+    assert response.status_code == 401
     assert "strategies" not in response.text
 
 
 async def test_the_saved_settings_come_with_the_revision_a_save_must_carry() -> None:
     async with serve(build_harness()) as client:
-        response = await client.get(SETTINGS_PATH, headers=AUTHORIZED)
+        response = await client.get(SETTINGS_PATH)
 
     assert response.status_code == 200
     assert response.json() == settings_document()
@@ -322,7 +301,7 @@ async def test_a_save_replaces_the_settings_raises_the_revision_and_drives_the_n
     async with serve(harness) as client:
         before = await run_to_end(client, "/v1/runs/specific-stocks", {"stock_ids": ["2330"]})
         saved = await write(client, "PUT", SETTINGS_PATH, {"settings": document})
-        read = await client.get(SETTINGS_PATH, headers=AUTHORIZED)
+        read = await client.get(SETTINGS_PATH)
         after = await run_to_end(client, "/v1/runs/specific-stocks", {"stock_ids": ["2330"]})
 
     assert (saved.status_code, saved.json()) == (200, document | {"revision": 1})
@@ -341,7 +320,7 @@ async def test_a_save_from_a_stale_revision_answers_409_and_saves_nothing() -> N
     async with serve(harness) as client:
         accepted = await write(client, "PUT", SETTINGS_PATH, {"settings": first})
         refused = await write(client, "PUT", SETTINGS_PATH, {"settings": stale})
-        read = await client.get(SETTINGS_PATH, headers=AUTHORIZED)
+        read = await client.get(SETTINGS_PATH)
 
     assert (accepted.status_code, refused.status_code) == (200, 409)
     assert read.json() == first | {"revision": 1}
@@ -365,7 +344,7 @@ async def test_invalid_settings_are_refused_at_their_fields_under_body_settings_
     assert [*strategies, 0, "indicators", "ind_m", "macd"] in locations
     assert any(location[:9] == [*strategies, 1, "rules", 0, "condition", "comparison", "right"] for location in locations)
     assert all(location[:2] == ["body", "settings"] for location in locations), locations
-    assert harness.technical_settings.saved == {OWNER: harness_settings()}
+    assert harness.technical_settings.saved == harness_settings()
 
 
 @pytest.mark.parametrize(
@@ -389,11 +368,11 @@ async def test_settings_that_contradict_themselves_are_refused_and_nothing_is_sa
 
     assert response.status_code == 422
     assert [error["loc"][:2] for error in response.json()["detail"]] == [["body", "settings"]]
-    assert harness.technical_settings.saved == {OWNER: harness_settings()}
+    assert harness.technical_settings.saved == harness_settings()
 
 
 async def test_the_built_in_strategies_are_public_in_menu_order() -> None:
-    async with serve(build_harness(), token=None) as client:
+    async with serve(build_harness(), authorized=False) as client:
         response = await client.get(f"{SETTINGS_PATH}/built-in-strategies")
 
     built_ins = shipped_config().technical.built_in_strategies
@@ -410,7 +389,7 @@ async def test_the_old_settings_page_and_reset_are_gone() -> None:
         reset = await write(client, "POST", f"{SETTINGS_PATH}/reset", {})
 
     assert (page.status_code, reset.status_code) == (404, 404)
-    assert harness.technical_settings.saved == {OWNER: harness_settings()}
+    assert harness.technical_settings.saved == harness_settings()
 
 
 # ---------------------------------- Account --------------------------------- #
@@ -450,29 +429,28 @@ async def test_account_history_names_the_broker_and_order_mode_the_settings_choo
 
 
 @pytest.mark.parametrize(("method", "path", "body"), WRITES + ORDERING_WRITES + VALUATION_WRITES)
-async def test_writes_are_refused_while_api_token_is_unset(method: str, path: str, body: dict[str, Any]) -> None:
+async def test_writes_need_a_session(method: str, path: str, body: dict[str, Any]) -> None:
     harness = build_harness()
     harness.list_stock("2330", rising_history(100.0))
-
-    async with serve(harness, token=None) as client:
-        response = await write(client, method, path, body)
-
-    assert response.status_code == 403
-    assert (harness.journal.runs, harness.watchlist.rows, harness.technical_settings.saved) == ({}, [], {OWNER: harness_settings()})
-
-
-@pytest.mark.parametrize("authorization", [None, "Bearer wrong-token", f"Basic {TOKEN}"])
-@pytest.mark.parametrize(("method", "path", "body"), WRITES + ORDERING_WRITES + VALUATION_WRITES)
-async def test_writes_need_the_bearer_token(method: str, path: str, body: dict[str, Any], authorization: str | None) -> None:
-    harness = build_harness()
-    harness.list_stock("2330", rising_history(100.0))
-    headers = {"Authorization": authorization} if authorization else {}
 
     async with serve(harness, authorized=False) as client:
-        response = await client.request(method, path, json={"confirm": True, **body}, headers=headers)
+        response = await write(client, method, path, body)
 
-    assert response.status_code == 401 and response.headers["www-authenticate"] == "Bearer"
-    assert (harness.journal.runs, harness.watchlist.rows) == ({}, [])
+    assert response.status_code == 401
+    assert (harness.journal.runs, harness.watchlist.rows, harness.technical_settings.saved) == ({}, [], harness_settings())
+
+
+@pytest.mark.parametrize(("method", "path", "body"), WRITES + ORDERING_WRITES + VALUATION_WRITES)
+async def test_writes_need_the_web_apps_header_so_another_site_cannot_send_them(method: str, path: str, body: dict[str, Any]) -> None:
+    harness = build_harness()
+    harness.list_stock("2330", rising_history(100.0))
+
+    async with serve(harness) as client:
+        response = await client.request(method, path, json={"confirm": True, **body}, headers={"X-Requested-With": ""})
+        still_signed_in = await client.get("/v1/watchlist")
+
+    assert (response.status_code, still_signed_in.status_code) == (403, 200)
+    assert (harness.journal.runs, harness.watchlist.rows, harness.technical_settings.saved) == ({}, [], harness_settings())
 
 
 @pytest.mark.parametrize("confirm", [{}, {"confirm": False}, {"confirm": "yes"}])
@@ -482,11 +460,11 @@ async def test_writes_need_confirm_true(method: str, path: str, body: dict[str, 
     harness.list_stock("2330", rising_history(100.0))
 
     async with serve(harness) as client:
-        response = await client.request(method, path, json={**body, **confirm}, headers=AUTHORIZED)
+        response = await client.request(method, path, json={**body, **confirm})
 
     assert response.status_code == 422
     assert ["body", "confirm"] in [error["loc"] for error in response.json()["detail"]]
-    assert (harness.journal.runs, harness.watchlist.rows, harness.technical_settings.saved) == ({}, [], {OWNER: harness_settings()})
+    assert (harness.journal.runs, harness.watchlist.rows, harness.technical_settings.saved) == ({}, [], harness_settings())
 
 
 PUBLIC_READS = ("/v1/technical-settings/built-in-strategies",)
@@ -497,17 +475,10 @@ async def test_only_strategy_definitions_and_market_data_are_public() -> None:
     async with serve(build_harness(), authorized=False) as client:
         public = [(await client.get(path)).status_code for path in PUBLIC_READS]
         anonymous = [(await client.get(path)).status_code for path in PRIVATE_READS]
-        wrong = [(await client.get(path, headers={"Authorization": "Bearer wrong"})).status_code for path in PRIVATE_READS]
+        forged = [(await client.get(path, cookies={"stock_agent_session": "forged"})).status_code for path in PRIVATE_READS]
 
     assert public == [200]
-    assert anonymous == wrong == [401, 401, 401, 401]
-
-
-async def test_private_reads_are_refused_while_api_token_is_unset() -> None:
-    async with serve(build_harness(), token=None) as client:
-        statuses = [(await client.get(path)).status_code for path in PRIVATE_READS]
-
-    assert statuses == [403, 403, 403, 403]
+    assert anonymous == forged == [401, 401, 401, 401]
 
 
 async def test_a_run_s_decisions_and_orders_are_private() -> None:
@@ -516,10 +487,8 @@ async def test_a_run_s_decisions_and_orders_are_private() -> None:
 
     async with serve(harness) as client:
         run = await run_to_end(client, "/v1/runs/full-cycle")
-        anonymous = [
-            (await client.get(f"/v1/runs/{run['run_id']}{part}", headers={"Authorization": ""})).status_code
-            for part in ("", "/signals", "/orders")
-        ]
+        client.cookies.clear()
+        anonymous = [(await client.get(f"/v1/runs/{run['run_id']}{part}")).status_code for part in ("", "/signals", "/orders")]
 
     assert anonymous == [401, 401, 401]
 
@@ -542,15 +511,17 @@ async def test_api_answers_are_private_unframable_and_unsniffable() -> None:
 
 
 async def test_the_api_writes_only_runs_watchlist_settings_and_settings_files_and_says_which_can_order() -> None:
-    app = create_app(lambda: nullcontext(build_harness().runtime))
-    writes = {
+    app = create_app(lambda: open_harness_switch(build_harness()))
+    every_write = {
         (method.upper(), path)
         for path, operations in app.openapi()["paths"].items()
         for method in operations
         if method not in {"get", "head"} and not path.startswith(("/v1/webhook", "/v1/admin"))
     }
+    writes = {(method, path) for method, path in every_write if not path.startswith("/v1/auth")}
 
     assert writes == {(method, path) for method, path, _ in WRITES + ORDERING_WRITES + VALUATION_WRITES}
+    assert every_write - writes == {("POST", f"/v1/auth/{step}") for step in ("setup", "register", "sign-in", "sign-out")}
     description = app.openapi()["info"]["description"]
     assert "No endpoint places, cancels or modifies an order by itself" in description
     assert "only while the execution provider is" in description
@@ -585,21 +556,13 @@ async def test_no_request_but_buzz_and_intraday_reaches_the_broker() -> None:
 
 def shioaji_config(order_mode: OrderMode, environment: SystemEnvironment):
     """A setup the CLI accepts with the Shioaji broker: order mode disabled reads a real account without ordering."""
-    config = harness_config()
-    shioaji = config.shioaji.model_copy(update={"simulation": True, "api_key": "placeholder", "secret_key": "placeholder"})
-    return config.model_copy(
-        update={
-            "environment": environment,
-            "trading": TradingConfig(execution_provider=ExecutionProvider.SHIOAJI, order_mode=order_mode),
-            "shioaji": shioaji,
-        }
-    )
+    return environment_setup(harness_config(), environment, ExecutionProvider.SHIOAJI, order_mode)
 
 
 REAL_BROKER_SETUPS = [
     (OrderMode.DISABLED, SystemEnvironment.TEST),
-    (OrderMode.DISABLED, SystemEnvironment.LIVE),
-    (OrderMode.LIVE, SystemEnvironment.LIVE),
+    (OrderMode.DISABLED, SystemEnvironment.PROD),
+    (OrderMode.LIVE, SystemEnvironment.PROD),
 ]
 
 
@@ -656,10 +619,10 @@ async def test_the_api_refuses_to_start_on_the_trading_setups_the_cli_refuses(mo
     unsafe = shipped_config()
     unsafe.environment = SystemEnvironment.DEV
     unsafe.trading.execution_provider = ExecutionProvider.SHIOAJI
-    monkeypatch.setattr(dependencies, "load_settings", lambda: unsafe)
-    app = create_app(open_runtime)
+    monkeypatch.setattr(settings_loader, "load_settings", lambda project_root, texts: unsafe)
+    app = create_app(open_runtime_switch)
 
-    with pytest.raises(TradingSetupError, match="DEV environment requires MockExecutionProvider"):
+    with pytest.raises(InvalidSettingsError, match="trading.execution_provider: environment dev trades only on mock, not shioaji"):
         async with app.router.lifespan_context(app):
             pass
 
@@ -681,7 +644,7 @@ async def refuse():
     yield
 
 
-main.open_runtime = refuse
+main.open_runtime_switch = refuse
 uvicorn.run(main.app, host="127.0.0.1", port=0)
 """
 
@@ -776,7 +739,7 @@ async def test_an_oversized_body_is_refused_before_any_route_reads_it() -> None:
         )
 
     assert huge.status_code == 413
-    assert harness.technical_settings.saved == {OWNER: harness_settings()}
+    assert harness.technical_settings.saved == harness_settings()
 
 
 async def test_a_formula_nested_too_deep_is_refused_without_saving() -> None:
@@ -796,7 +759,7 @@ async def test_a_formula_nested_too_deep_is_refused_without_saving() -> None:
         response = await client.put("/v1/technical-settings", json={"confirm": True, "settings": document})
 
     assert response.status_code == 422
-    assert harness.technical_settings.saved == {OWNER: harness_settings()}
+    assert harness.technical_settings.saved == harness_settings()
 
 
 @pytest.mark.parametrize("encoding", ["chunked", "gzip, chunked", "identity"])
@@ -808,3 +771,9 @@ async def test_a_body_without_a_plain_length_is_refused(encoding: str) -> None:
 
     assert response.status_code == 413
     assert harness.journal.runs == {}
+
+
+def test_every_refusal_has_its_own_code() -> None:
+    codes = [code for _, code in ERROR_ANSWERS.values()]
+
+    assert len(set(codes)) == len(codes)

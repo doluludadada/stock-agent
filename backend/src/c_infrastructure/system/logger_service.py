@@ -7,11 +7,22 @@ from a_domain.ports.system.logging_provider import ILoggingProvider
 
 
 class LoggerService(ILoggingProvider):
-    """Loguru on stderr. depth=1 makes each record name the code that called the port method, not this adapter."""
+    """
+    Loguru on stderr, the process's one sink. depth=1 makes each record name the code that called the port method, not
+    this adapter.
+    """
 
     def __init__(self, level: str | int = "INFO") -> None:
         logger.remove()
-        logger.add(
+        self._sink: int | None = None
+        self.set_level(level)
+
+    @override
+    def set_level(self, level: str | int) -> None:
+        if self._sink is not None:
+            logger.remove(self._sink)
+
+        self._sink = logger.add(
             sys.stderr,
             level=level,
             format=(

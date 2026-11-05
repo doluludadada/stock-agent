@@ -14,9 +14,9 @@ export function NotFoundRoute() {
         icon={Compass}
         title={t('notFound.title')}
         description={t('notFound.description')}
-        className="rounded-xl border py-10"
+        className="rounded-2xl border bg-card py-12 shadow-card"
         action={
-          <Button asChild variant="outline" size="sm">
+          <Button asChild variant="outline">
             <Link to={paths.overview}>{t('notFound.home')}</Link>
           </Button>
         }
@@ -36,9 +36,9 @@ export function RouteErrorBoundary() {
         icon={TriangleAlert}
         title={t('routeError.title')}
         description={t('routeError.description')}
-        className="rounded-xl border py-10"
+        className="rounded-2xl border bg-card py-12 shadow-card"
         action={
-          <Button type="button" variant="outline" size="sm" onClick={() => window.location.assign(paths.overview)}>
+          <Button type="button" variant="outline" onClick={() => window.location.assign(paths.overview)}>
             {t('routeError.reload')}
           </Button>
         }

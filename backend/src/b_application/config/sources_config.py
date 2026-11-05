@@ -1,8 +1,7 @@
 from datetime import date
-from typing import Self, override
+from typing import Self
 
 from pydantic import BaseModel, NonNegativeInt, model_validator
-from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict, YamlConfigSettingsSource
 
 from a_domain.types.enums import MarketIndex
 
@@ -150,16 +149,12 @@ class LineSources(BaseModel):
     max_message_length: int
 
 
-class SourcesConfig(BaseSettings):
+class SourcesConfig(BaseModel):
     """
     Where each outside service lives and the text formats its pages use. The values live only in the `sources`
-    section of config/appsetting.yaml: load_settings passes that section, and an AppConfig built without it calls
-    from_appsetting, which reads the same section, found like the .env files from the working folder.
+    section of config/appsetting.yaml, which load_settings passes: nothing here reads a file, so a candidate file is
+    validated by itself and never filled in from the file on disk.
     """
-
-    model_config = SettingsConfigDict(
-        yaml_file=("config/appsetting.yaml", "../config/appsetting.yaml"), yaml_config_section="sources", extra="forbid"
-    )
 
     exchange: ExchangeSources
     yahoo: YahooSources
@@ -168,20 +163,3 @@ class SourcesConfig(BaseSettings):
     news: NewsSources
     ai: AiSources
     line: LineSources
-
-    @classmethod
-    @override
-    def settings_customise_sources(
-        cls,
-        settings_cls: type[BaseSettings],
-        init_settings: PydanticBaseSettingsSource,
-        env_settings: PydanticBaseSettingsSource,
-        dotenv_settings: PydanticBaseSettingsSource,
-        file_secret_settings: PydanticBaseSettingsSource,
-    ) -> tuple[PydanticBaseSettingsSource, ...]:
-        return (init_settings, YamlConfigSettingsSource(settings_cls))
-
-    @classmethod
-    def from_appsetting(cls) -> Self:
-        """The `sources` section alone. A call with no fields reads it too, but the type checker sees only required fields."""
-        return cls.model_validate(YamlConfigSettingsSource(cls)())

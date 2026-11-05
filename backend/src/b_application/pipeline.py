@@ -1,21 +1,30 @@
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
-from typing import Any
+
+from pydantic import SecretStr
 
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
+from a_domain.model.system.stats import SystemStats
+from a_domain.model.system.user import User, UserSession
 from a_domain.model.valuation.scan import MarketValuation, ScanCriteria, ValuationScan
 from a_domain.model.valuation.valuation import ReportSection, StockValuation, ValuationReport
-from a_domain.ports.system.settings_files import SettingsEdit
+from a_domain.ports.system.settings_files import SettingsAuditEntry, SettingsBackup, SettingsDocument, SettingsEdit
 from a_domain.rules.market.breadth import MarketBreadth
+from a_domain.rules.system.registration import SignInOffer
 from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
 from a_domain.rules.watchlist.membership import WatchlistAddition
-from a_domain.types.enums import AiAnalysisFocus, EditableSetting, MarketIndex, SettingsFile, WatchlistType, Workflow
-from a_domain.types.ids import RunId
-from a_domain.types.values import PositiveFiniteFloat
+from a_domain.types.enums import AiAnalysisFocus, MarketIndex, Role, SettingsFile, UserStatus, WatchlistType, Workflow
+from a_domain.types.ids import RunId, SessionToken, UserId
+from a_domain.types.values import EmailAddress, NewPassword, PositiveFiniteFloat, Username
 from b_application.schemas.pipeline_status import PipelineStatus
+from b_application.use_cases.admin.editor_access import EditorAccess
+from b_application.use_cases.admin.settings_audit import SettingsAudit
+from b_application.use_cases.admin.settings_backups import SettingsBackups
+from b_application.use_cases.admin.settings_confirmation import SettingsConfirmation
 from b_application.use_cases.admin.settings_editor import SettingsEditor
+from b_application.use_cases.admin.settings_reader import SettingsReader
 from b_application.use_cases.admin.settings_save import SettingsSave
 from b_application.use_cases.chat.chat_reply import ChatReply
 from b_application.use_cases.chat.dispatcher import Dispatcher
@@ -39,19 +48,33 @@ from b_application.use_cases.process.strategy_loader import StrategyLoader
 from b_application.use_cases.process.technical_filter import TechnicalFilter
 from b_application.use_cases.process.technical_settings_editor import TechnicalSettingsEditor
 from b_application.use_cases.ship.decision_memory import DecisionMemory
+from b_application.use_cases.ship.recent_runs import RecentRuns
 from b_application.use_cases.ship.reporting import Reporting
 from b_application.use_cases.ship.run_history import RunHistory
+from b_application.use_cases.ship.run_lookup import RunLookup
 from b_application.use_cases.ship.run_reports import RunReports
 from b_application.use_cases.ship.signals import Signals
 from b_application.use_cases.trade.account_history import AccountHistory
 from b_application.use_cases.trade.account_loader import AccountLoader
 from b_application.use_cases.trade.account_risk_check import AccountRiskCheck
+from b_application.use_cases.trade.active_watchlist import ActiveWatchlist
 from b_application.use_cases.trade.manual_signal import ManualSignal
 from b_application.use_cases.trade.order_execution import OrderExecution
 from b_application.use_cases.trade.order_outcome import OrderOutcome
 from b_application.use_cases.trade.order_preparation import OrderPreparation
 from b_application.use_cases.trade.unwatch_stocks import UnwatchStocks
 from b_application.use_cases.trade.watch_stocks import WatchStocks
+from b_application.use_cases.users.first_administrator_setup import FirstAdministratorSetup
+from b_application.use_cases.users.password_reset import PasswordReset
+from b_application.use_cases.users.session_start import SessionStart
+from b_application.use_cases.users.session_user import SessionUser
+from b_application.use_cases.users.sign_in_attempt import SignInAttempt
+from b_application.use_cases.users.sign_in_options import SignInOptions
+from b_application.use_cases.users.sign_out import SignOut
+from b_application.use_cases.users.user_change import UserChange
+from b_application.use_cases.users.user_directory import UserDirectory
+from b_application.use_cases.users.user_lookup import UserLookup
+from b_application.use_cases.users.user_registration import UserRegistration
 from b_application.use_cases.valuation.market_valuation_loader import MarketValuationLoader
 from b_application.use_cases.valuation.valuation_appraiser import ValuationAppraiser
 from b_application.use_cases.valuation.valuation_explainer import ValuationExplainer
@@ -77,6 +100,10 @@ class Pipeline:
     while those quotes are fresh, and at the end. Full Cycle, specific-stock analysis and valuation never send.
 
     A built-in strategy id, the CLI session's choice, makes a run use that built-in strategy instead of the saved one.
+
+    Whose data an operation reads and writes is fixed when dependencies.py builds this Pipeline: every port that holds
+    a user's data was built for one signed-in user, or for nobody (a signed-out Pipeline, whose such ports refuse with
+    SignInRequired). No operation takes an owner, so none can be handed the wrong one.
     """
 
     strategy_loader: StrategyLoader
@@ -110,6 +137,9 @@ class Pipeline:
     order_outcome: OrderOutcome
     reporting: Reporting
     run_reports: RunReports
+    recent_runs: RecentRuns
+    run_lookup: RunLookup
+    active_watchlist: ActiveWatchlist
     account_history: AccountHistory
     fundamentals_feed: FundamentalsFeed
     market_valuation_loader: MarketValuationLoader
@@ -118,8 +148,24 @@ class Pipeline:
     valuation_explainer: ValuationExplainer
     chat_reply: ChatReply
     dispatcher: Dispatcher
+    settings_reader: SettingsReader
+    settings_backups: SettingsBackups
+    settings_audit: SettingsAudit
     settings_editor: SettingsEditor
+    settings_confirmation: SettingsConfirmation
     settings_save: SettingsSave
+    editor_access: EditorAccess
+    sign_in_options: SignInOptions
+    first_administrator_setup: FirstAdministratorSetup
+    sign_in_attempt: SignInAttempt
+    user_lookup: UserLookup
+    password_reset: PasswordReset
+    user_registration: UserRegistration
+    session_start: SessionStart
+    session_user: SessionUser
+    sign_out: SignOut
+    user_directory: UserDirectory
+    user_change: UserChange
 
     async def run_full_cycle(self, run_id: RunId | None = None, built_in_strategy_id: str | None = None) -> PipelineStatus:
         """After-market analysis of the whole market. It records decisions priced from daily closes and never orders."""
@@ -297,6 +343,35 @@ class Pipeline:
         """The watchlist endpoint's removal: only MANUAL entries go; it returns the stocks that had one."""
         return await self.unwatch_stocks.execute(stock_ids)
 
+    async def load_watchlist(self) -> PipelineStatus:
+        """
+        The watchlist endpoint: every active entry, one per stock and watchlist type, and the listing that names the
+        watched stocks; a listing outage leaves them unnamed rather than failing the page.
+        """
+        status = PipelineStatus.read_only(Workflow.RESEARCH)
+        status.watchlist = await self.active_watchlist.execute()
+        status.universe_stocks = await self.market_scanner.execute(status.stats)
+
+        return status
+
+    async def load_runs(self, limit: int, offset: int) -> list[SystemStats]:
+        """The runs endpoint: `limit` recorded runs, newest first, after the `offset` newest, whichever entry point started them."""
+        return await self.recent_runs.execute(limit, offset)
+
+    async def load_run(self, run_id: RunId) -> PipelineStatus | None:
+        """
+        One recorded run as its status: the record, the specific-stock reports as manual_stocks, the decisions and the
+        orders. None when the journal holds no such run.
+        """
+        recorded = await self.run_lookup.execute(run_id)
+
+        if recorded is None:
+            return None
+
+        stats, reports, signals, orders = recorded
+
+        return PipelineStatus(stats=stats, manual_stocks=reports, signals=signals, orders=orders)
+
     async def load_account_history(self, as_of: date | None) -> PipelineStatus:
         """
         Menu 7 and the account endpoint: the account now, its equity curve and the account as of a date. It records no
@@ -412,23 +487,105 @@ class Pipeline:
         """
         return await self.technical_settings_editor.execute(settings)
 
-    async def preview_settings_file(
-        self, file: SettingsFile, changes: Mapping[EditableSetting, Any] | None = None, backup_id: str | None = None
-    ) -> SettingsEdit:
-        """The administrator's change or restore of one settings file, validated and compared, and not written."""
-        return await self.settings_editor.execute(file, changes, backup_id)
+    async def read_settings_file(self, file: SettingsFile) -> SettingsDocument:
+        """One settings file as it is on disk."""
+        return await self.settings_reader.execute(file)
 
-    async def save_settings_file(
+    async def list_settings_backups(self, file: SettingsFile) -> list[SettingsBackup]:
+        """The kept backups of one settings file, newest first."""
+        return await self.settings_backups.execute(file)
+
+    async def load_settings_audit(self, limit: int) -> list[tuple[SettingsAuditEntry, User | None]]:
+        """The latest saves and restores, newest first, each with the administrator who made it."""
+        return await self.settings_audit.execute(limit)
+
+    async def preview_settings_file(
+        self, file: SettingsFile, expected_revision: str, host: str, text: str | None = None, backup_id: str | None = None
+    ) -> SettingsEdit:
+        """
+        The administrator's whole new text, or a kept backup to put back, against the file on disk and the settings this
+        Pipeline's runtime runs on: what it changes, what applies only at a restart, and its problems, a lockout of the
+        editor reached at `host` included. Nothing is written.
+        """
+        return await self.settings_editor.execute(file, expected_revision, host, text, backup_id)
+
+    async def review_settings_save(
         self,
+        administrator: User,
         file: SettingsFile,
         expected_revision: str,
-        changes: Mapping[EditableSetting, Any] | None = None,
+        host: str,
+        password: SecretStr | None,
+        client: str,
+        text: str | None = None,
         backup_id: str | None = None,
     ) -> SettingsEdit:
         """
-        The same proposal, saved when the app would start with it and the file is still at `expected_revision`. It
-        applies at the next start; it never reaches a workflow already running.
+        A save or a restore, reviewed as its preview is and confirmed: InvalidSettingsError with the problems of a text
+        the app would refuse, then PasswordRequired, PasswordRefused or SignInThrottled without the administrator's own
+        password inside its attempt limit. Nothing is written.
         """
-        edit = await self.settings_editor.execute(file, changes, backup_id)
+        edit = await self.settings_editor.execute(file, expected_revision, host, text, backup_id)
+        await self.settings_confirmation.execute(administrator, edit, password, client)
+        return edit
 
-        return await self.settings_save.execute(edit, expected_revision)
+    async def confirm_editor_access(self, running: SignInOffer, saving: UserId | None) -> None:
+        """
+        The settings this Pipeline's runtime runs on, before a save (`saving`, the administrator) or a reload from disk
+        (None) puts them in place, compared with the running settings' sign-in offer: InvalidSettingsError when no
+        administrator could sign in to the editor.
+        """
+        candidate = await self.sign_in_options.execute()
+        await self.editor_access.execute(candidate, running, saving)
+
+    async def save_settings_file(self, edit: SettingsEdit, actor: UserId) -> SettingsEdit:
+        """Writes a proposal the app starts with, still at its base revision, with a backup and an audit entry naming `actor`."""
+        return await self.settings_save.execute(edit, actor)
+
+    async def load_sign_in_options(self) -> SignInOffer:
+        """The sign-in screen and the CLI's start: is the first administrator still to be set up, and may anyone register?"""
+        return await self.sign_in_options.execute()
+
+    async def set_up_first_administrator(self, username: Username, email: EmailAddress, password: NewPassword) -> User:
+        """First use, from the CLI or the Web: the administrator, who takes over the data of the single-owner version."""
+        return await self.first_administrator_setup.execute(username, email, password)
+
+    async def sign_in(self, identifier: str, password: SecretStr, client: str) -> User:
+        """The CLI's sign-in: the user, inside the attempt limits. It raises SignInRefused or SignInThrottled."""
+        return await self.sign_in_attempt.execute(identifier, password, client)
+
+    async def load_user(self, user_id: UserId) -> User | None:
+        """The user as saved now, for the CLI's check before each menu option. None when unknown or deactivated."""
+        return await self.user_lookup.execute(user_id)
+
+    async def reset_password(self, identifier: str, password: NewPassword) -> User | None:
+        """The operator's reset of a password on the machine: every session of the user ends. None for an unknown name."""
+        return await self.password_reset.execute(identifier, password)
+
+    async def register(self, username: Username, email: EmailAddress, password: NewPassword, client: str) -> User:
+        """Open registration: a new user with the role user. It raises RegistrationClosed or SignInThrottled."""
+        return await self.user_registration.execute(username, email, password, client)
+
+    async def sign_in_with_session(self, identifier: str, password: SecretStr, client: str) -> tuple[User, UserSession]:
+        """The Web's sign-in: the same check as the CLI's, then a session for the browser's cookie."""
+        user = await self.sign_in_attempt.execute(identifier, password, client)
+
+        return user, await self.session_start.execute(user)
+
+    async def find_signed_in_user(self, token: SessionToken) -> User | None:
+        """Every signed-in Web request, before dependencies.py builds that user's Pipeline: the session's user, now."""
+        return await self.session_user.execute(token)
+
+    async def end_session(self, token: SessionToken) -> None:
+        """The Web's sign-out."""
+        await self.sign_out.execute(token)
+
+    async def load_users(self) -> list[User]:
+        """The administrator's list of users."""
+        return await self.user_directory.execute()
+
+    async def change_user(
+        self, user_id: UserId, role: Role | None, status: UserStatus | None, password: NewPassword | None
+    ) -> User | None:
+        """The administrator's change of a user's role, status or password. None when no such user exists."""
+        return await self.user_change.execute(user_id, role, status, password)

@@ -1,10 +1,9 @@
 from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Path, Query, status
+from fastapi import APIRouter, Path, Query, status
 
 from a_domain.rules.market.breadth import MarketBreadth
 from a_domain.types.enums import MarketIndex
-from d_presentation.dependencies import ApiToken, RuntimeDependency
 from d_presentation.web.schemas import (
     DailyBarResponse,
     IndexHistoryResponse,
@@ -12,6 +11,7 @@ from d_presentation.web.schemas import (
     StockHistoryResponse,
     StockTechnicalResponse,
 )
+from d_presentation.web.session import NotFound, PrivateAccess, SignedOutPipeline, UserPipeline
 
 router = APIRouter(prefix="/market", tags=["Market data"])
 
@@ -26,48 +26,48 @@ NOT_LISTED: dict[int | str, dict[str, Any]] = {status.HTTP_404_NOT_FOUND: {"desc
 
 @router.get("/stocks", responses=UNAVAILABLE)
 async def search_stocks(
-    runtime: RuntimeDependency, query: Annotated[str, Query(min_length=1, max_length=40)]
+    pipeline: SignedOutPipeline, query: Annotated[str, Query(min_length=1, max_length=40)]
 ) -> list[ListedStockResponse]:
     """Listed and OTC stocks whose code or name matches, best first, each with its latest official close. Public."""
-    return [ListedStockResponse.model_validate(stock) for stock in await runtime.pipeline.search_stocks(query)]
+    return [ListedStockResponse.model_validate(stock) for stock in await pipeline.search_stocks(query)]
 
 
 @router.get("/most-traded", responses=UNAVAILABLE)
-async def get_most_traded(runtime: RuntimeDependency) -> list[ListedStockResponse]:
+async def get_most_traded(pipeline: SignedOutPipeline) -> list[ListedStockResponse]:
     """The latest session's most traded stocks in the TWSE and TPEX daily listings, with that session's bar. Public."""
-    return [ListedStockResponse.model_validate(stock) for stock in await runtime.pipeline.load_most_traded()]
+    return [ListedStockResponse.model_validate(stock) for stock in await pipeline.load_most_traded()]
 
 
 @router.get("/breadth", responses=UNAVAILABLE)
-async def get_market_breadth(runtime: RuntimeDependency) -> MarketBreadth:
+async def get_market_breadth(pipeline: SignedOutPipeline) -> MarketBreadth:
     """
     The latest session's advancers, decliners and unchanged stocks in the TWSE and TPEX daily listings, each with the
     exchange's own change, and the same per industry with the average change in percent. Public.
     """
-    return await runtime.pipeline.load_market_breadth()
+    return await pipeline.load_market_breadth()
 
 
 @router.get("/indexes/{index}")
-async def get_index_history(index: MarketIndex, runtime: RuntimeDependency, bars: BarCount = 250) -> IndexHistoryResponse:
+async def get_index_history(index: MarketIndex, pipeline: SignedOutPipeline, bars: BarCount = 250) -> IndexHistoryResponse:
     """
     One market index's completed daily bars, oldest first, from the history cache the stock pages share. Public. Like
     a stock's history, it fetches no realtime quote.
     """
-    history = await runtime.pipeline.load_index_history(index, bars)
+    history = await pipeline.load_index_history(index, bars)
 
     return IndexHistoryResponse(index=index, bars=[DailyBarResponse.model_validate(bar) for bar in history])
 
 
 @router.get("/stocks/{stock_id}", responses=NOT_LISTED)
-async def get_stock_history(stock_id: StockIdPath, runtime: RuntimeDependency, bars: BarCount = 250) -> StockHistoryResponse:
+async def get_stock_history(stock_id: StockIdPath, pipeline: SignedOutPipeline, bars: BarCount = 250) -> StockHistoryResponse:
     """
     One stock's completed daily bars, oldest first, from the history cache the workflows share. Public. It fetches
     no realtime quote: the latest bar is the last settled session's close.
     """
-    result = await runtime.pipeline.load_stock_history(stock_id, bars)
+    result = await pipeline.load_stock_history(stock_id, bars)
 
     if not result.manual_stocks:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"{stock_id} is not a listed stock, or the exchange listing is unavailable.")
+        raise NotFound(f"{stock_id} is not a listed stock, or the exchange listing is unavailable.")
 
     stock = result.manual_stocks[0]
 
@@ -78,16 +78,16 @@ async def get_stock_history(stock_id: StockIdPath, runtime: RuntimeDependency, b
     )
 
 
-@router.get("/stocks/{stock_id}/technical", dependencies=[ApiToken], responses=NOT_LISTED)
-async def get_stock_technical(stock_id: StockIdPath, runtime: RuntimeDependency) -> StockTechnicalResponse:
+@router.get("/stocks/{stock_id}/technical", responses=NOT_LISTED, dependencies=[PrivateAccess])
+async def get_stock_technical(stock_id: StockIdPath, pipeline: UserPipeline) -> StockTechnicalResponse:
     """
     The owner's active strategy applied to the stock exactly as a run applies it, with each indicator's value at every
     bar it read. Private: it reads the owner's saved strategy.
     """
-    strategy, result = await runtime.pipeline.evaluate_stock(stock_id)
+    strategy, result = await pipeline.evaluate_stock(stock_id)
 
     if not result.manual_stocks:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"{stock_id} is not a listed stock, or the exchange listing is unavailable.")
+        raise NotFound(f"{stock_id} is not a listed stock, or the exchange listing is unavailable.")
 
     stock = result.manual_stocks[0]
 

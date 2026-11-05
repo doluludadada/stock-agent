@@ -8,6 +8,7 @@ from a_domain.model.system.stats import SystemStats
 from a_domain.model.trading.account import Account, AccountSnapshot
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.signal import TradeSignal
+from a_domain.model.trading.watchlist import WatchlistEntry
 from a_domain.types.enums import ExecutionProvider, IndicatorOutput, OrderMode, Workflow
 from a_domain.types.values import FormulaId
 
@@ -40,7 +41,13 @@ class PipelineStatus:
     """
 
     universe_stocks: list[Stock] = field(default_factory=list)
-    """MarketScanner: every listed stock, for Full Cycle and the valuation workflows."""
+    """
+    MarketScanner: every listed stock, for Full Cycle and the valuation workflows, and the names of the watched stocks.
+    Empty during a listing outage.
+    """
+
+    watchlist: list[WatchlistEntry] = field(default_factory=list)
+    """ActiveWatchlist: every active watchlist entry, one per stock and watchlist type."""
 
     held_stocks: list[Stock] = field(default_factory=list)
     """

@@ -6,6 +6,7 @@ import { RouterProvider, createMemoryRouter } from 'react-router'
 import { builtInJson } from '@/features/strategies/model/built-ins.test-support'
 import { initI18n } from '@/i18n'
 import { session } from '@/shared/api'
+import { TEST_USER } from '@/test/users'
 import { NewStrategyRoute, StrategyLibraryRoute } from './router/routes/strategies'
 
 const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
@@ -20,7 +21,7 @@ describe('copying an official strategy', () => {
     })
   })
   afterAll(() => vi.unstubAllGlobals())
-  afterEach(() => session.lock('owner'))
+  afterEach(() => session.signOut())
 
   it('copies the official strategy, not the owner strategy that kept its id', async () => {
     const official = builtInJson('balanced')
@@ -30,7 +31,7 @@ describe('copying an official strategy', () => {
       if (url === '/v1/technical-settings') return json({ active_strategy_id: 'balanced', buzz_strategy_id: 'balanced', strategies: [edited], revision: 1 })
       return json([])
     }))
-    session.unlock('owner', 'owner-token')
+    session.signIn(TEST_USER)
     const router = createMemoryRouter(
       [
         { path: '/strategies', element: <StrategyLibraryRoute /> },

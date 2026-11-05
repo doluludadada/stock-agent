@@ -4,6 +4,7 @@ import { I18nextProvider } from 'react-i18next'
 import { MemoryRouter } from 'react-router'
 import { initI18n } from '@/i18n'
 import { session, type Schemas } from '@/shared/api'
+import { TEST_USER } from '@/test/users'
 import { AccountPage } from './AccountPage'
 
 const unpriced = { stock_id: '2330', quantity: 1000, average_cost: 100, mark_price: 100, marked_at: null, market_value: 100_000, unrealized_pnl: 0 }
@@ -19,13 +20,17 @@ const history: Schemas['AccountHistoryResponse'] = {
 
 describe('the account positions', () => {
   afterEach(() => {
-    session.lock('owner')
+    session.signOut()
     vi.unstubAllGlobals()
   })
 
   it('says a position without a quote is unpriced, and does not also call it a daily close', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(history), { status: 200, headers: { 'Content-Type': 'application/json' } })))
-    session.unlock('owner', 'owner-token')
+    const listing = [{ stock_id: '2330', name: '台積電', market: 'twse', today: null }]
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => new Response(JSON.stringify(url.startsWith('/v1/market/stocks') ? listing : history), { status: 200, headers: { 'Content-Type': 'application/json' } })),
+    )
+    session.signIn(TEST_USER)
     render(
       <I18nextProvider i18n={initI18n('en')}>
         <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>

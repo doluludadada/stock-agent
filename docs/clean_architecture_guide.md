@@ -213,7 +213,7 @@ infrastructure decides how.
 - Methods take and return domain models, never database rows or DTOs.
 - I/O methods are `async`.
 - If an adapter needs a helper, the helper is a method on the port, not a private method in the
-  adapter.
+  adapter. Section 5 names the one kind of infrastructure code that is never a port method.
 - A type that only this port and its adapters use lives in the port's file.
 
 ```python
@@ -332,10 +332,26 @@ async def checkout(self, cart_id: CartId) -> PipelineStatus:
 
 - Every class here implements a port. It has only that port's methods, and each one is marked
   `@override`.
+- One folder also holds code that implements no port: `c_infrastructure/database/models/`. Next to
+  the tables (DTOs) it holds code whose subject is the tables themselves and never a domain model:
+  the schema upgrade steps, which run on a raw connection; the owner guard that the database
+  connector installs on every session it opens; the key derivation and sealing of the users
+  table's columns; and the copies of the whole database that backups and restores make. Such code has no domain meaning, so it is never a port method. A port that named
+  a session hook, a storage name or a cipher would put a library's detail into the domain. Module
+  functions and plain classes are allowed in that folder for this code only. Any other helper of an
+  adapter is a port method (3.4), and a name the wiring can compute, such as a collection name, is
+  passed to the adapter's constructor.
 - Infrastructure carries data in and out. It makes no domain decision.
 - Database rows (DTOs) live only here, one DTO file per area, and are converted to domain models
   here. `SQLModel` is used only for these tables. Information only a table needs, such as a row's
   position in a list or a JSON column, belongs to the DTO and never to a model.
+- The database carries the schema version of the code that created or last upgraded it. A
+  change to an existing table, or to how a column stores its value, appends an upgrade step, which
+  raises the code's schema version. A step names the tables and columns as they were at its
+  version, never through today's table classes. A new table needs no step, because startup
+  creates it. Startup never upgrades a database. It refuses an older one, and the migrate command
+  upgrades it after a backup. A test compares the table classes with a committed snapshot of the
+  current version's tables, so a change to an existing table without a step fails the tests.
 - A query lives in the repository for the table it is about.
 - Logging goes through the logging port (for example a loguru adapter). Log ids and counts, never
   private user content.
@@ -346,6 +362,9 @@ async def checkout(self, cart_id: CartId) -> PipelineStatus:
 
 - Routers and CLI commands only: read the input, call one `Pipeline` method, return the answer.
   No business decisions, and no copy of a domain rule.
+- The database commands (`just db-*`) are the one exception. They must open a database that
+  startup refuses, so no Pipeline exists yet, and they call the database connector's port
+  directly. No other command or route calls a port.
 - Presentation code may name a domain type in a request, a response or a signature, even a type
   from a rule file, but it never runs a rule.
 - `dependencies.py` is the only place that creates objects. Plain functions are enough; cache
@@ -458,6 +477,15 @@ From the owner's review of the model folder on 2026-11-04:
   the post.
 - `FiscalQuarter` carried the filing-deadline and trailing-twelve-months knowledge of two rules in
   the EPS model file. The rules hold that knowledge; the quarter is a shared value.
+
+From the review of the user accounts on 2026-11-04:
+
+- The owner guard and the users table's key derivation sat under `c_infrastructure/database/models/`
+  because the architecture check skips that folder, and no rule said what belongs there. Section 5
+  now says what may live there, and why it is never a port method.
+- `IKnowledgeRepository.collection_name()` put a Chroma collection name and the legacy owner's
+  special case into a domain port, only to obey "an adapter's helper is a method on the port". The
+  wiring computes the name and passes it to the adapter.
 
 ---
 

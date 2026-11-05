@@ -1,4 +1,4 @@
-import { Calculator, Info, Sparkles, TriangleAlert } from 'lucide-react'
+import { Calculator, Info, Radar, Sparkles, TriangleAlert } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
@@ -18,54 +18,83 @@ import { Stat } from '@/shared/ui/stat'
 import { StateBlock } from '@/shared/ui/state-block'
 import { StockIdsProblem } from '@/shared/ui/stock-ids-problem'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/ui/tabs'
-import { RequireUnlock } from '@/shared/ui/unlock'
+import { RequireSignIn } from '@/shared/ui/require-sign-in'
 import { useExplaining, useExplanation, useMarketValuation, useValuationScan, useValuedStocks, type ValuationReport } from './api'
 import { DEFAULT_MIN_UNDERVALUATION_PERCENT, DEFAULT_TARGET_PE, parseMinUndervaluation, parseTargetPe } from './model'
 
 export function ValuationPage() {
   const { t } = useTranslation('valuation')
   return (
-    <div className="space-y-4">
-      <PageHeader title={t('title')} description={t('description')} />
-      <p className="flex items-start gap-2 text-xs text-muted-foreground">
-        <Info aria-hidden className="mt-px size-3.5 shrink-0 text-gold" />
-        {t('notAdvice')}
-      </p>
-      <RequireUnlock scope="owner" className="rounded-xl border">
-        <MarketReference />
-        <Tabs defaultValue="stocks" className="gap-4">
-          <TabsList>
-            <TabsTrigger value="stocks">{t('tab.stocks')}</TabsTrigger>
-            <TabsTrigger value="scan">{t('tab.scan')}</TabsTrigger>
-          </TabsList>
-          <TabsContent value="stocks">
-            <SpecificStocks />
-          </TabsContent>
-          <TabsContent value="scan">
-            <Scan />
-          </TabsContent>
-        </Tabs>
-      </RequireUnlock>
+    <div className="space-y-5 lg:space-y-6">
+      <div className="space-y-3">
+        <PageHeader eyebrow={t('common:nav.section.research')} title={t('title')} description={t('description')} />
+        <p className="flex items-start gap-2 text-xs text-muted-foreground">
+          <Info aria-hidden className="mt-px size-3.5 shrink-0 text-gold" />
+          {t('notAdvice')}
+        </p>
+      </div>
+      <RequireSignIn layout="page" reason={t('signIn')}>
+        <div className="grid items-start gap-4 lg:gap-5 xl:grid-cols-[minmax(0,1fr)_22rem]">
+          <MarketReference className="xl:col-start-2 xl:row-start-1" />
+          <Panel className="xl:col-start-1 xl:row-span-2 xl:row-start-1" title={t('toolTitle')} description={t('toolQuestion')}>
+            <Tabs defaultValue="stocks" className="gap-4">
+              <TabsList className="w-full md:w-fit">
+                <TabsTrigger value="stocks">{t('tab.stocks')}</TabsTrigger>
+                <TabsTrigger value="scan">{t('tab.scan')}</TabsTrigger>
+              </TabsList>
+              <TabsContent value="stocks">
+                <SpecificStocks />
+              </TabsContent>
+              <TabsContent value="scan">
+                <Scan />
+              </TabsContent>
+            </Tabs>
+          </Panel>
+          <HowPanel className="xl:col-start-2 xl:row-start-2" />
+        </div>
+      </RequireSignIn>
     </div>
   )
 }
 
-function MarketReference() {
+/** How the page's figures are made, beside the tool on a wide screen and under it on a phone. */
+function HowPanel({ className }: { className?: string }) {
+  const { t } = useTranslation('valuation')
+  return (
+    <Panel className={className} title={t('how.title')} description={t('how.question')}>
+      <ul className="space-y-3 text-sm text-pretty text-muted-foreground">
+        <li>{t('how.fair')}</li>
+        <li>{t('formula')}</li>
+        <li>{t('how.scenarios')}</li>
+        <li>{t('lowPeCaveat')}</li>
+        <li>{t('how.ai')}</li>
+      </ul>
+    </Panel>
+  )
+}
+
+function MarketReference({ className }: { className?: string }) {
   const { t } = useTranslation('valuation')
   const locale = useLocale()
   const market = useMarketValuation()
   return (
-    <Panel title={t('marketTitle')} aside={market.data && t('lastSession', { date: formatDate(locale, market.data.last_closed_session) })}>
+    <Panel className={className} title={t('marketTitle')} description={market.data && t('lastSession', { date: formatDate(locale, market.data.last_closed_session) })}>
       {market.isPending ? (
         <p className="text-sm text-muted-foreground">{t('loadingMarket')}</p>
       ) : market.isError ? (
         <ErrorState error={market.error} title={t('marketFailed')} onRetry={() => void market.refetch()} />
       ) : (
         <>
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
-            <Stat label={t('valued')}>{formatNumber(locale, market.data.valued_stocks)}</Stat>
-            <Stat label={t('medianPe')}>{market.data.median_pe ? formatNumber(locale, market.data.median_pe.value, 2) : '—'}</Stat>
-            <Stat label={t('medianSample')}>{market.data.median_pe ? formatNumber(locale, market.data.median_pe.sample_size) : '—'}</Stat>
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-4 @md:grid-cols-3 @lg:gap-x-6">
+            <Stat label={t('valued')} size="lg">
+              {formatNumber(locale, market.data.valued_stocks)}
+            </Stat>
+            <Stat label={t('medianPe')} size="lg">
+              {market.data.median_pe ? formatNumber(locale, market.data.median_pe.value, 2) : '—'}
+            </Stat>
+            <Stat label={t('medianSample')} size="lg">
+              {market.data.median_pe ? formatNumber(locale, market.data.median_pe.sample_size) : '—'}
+            </Stat>
           </dl>
           {market.data.source_warnings.length > 0 && (
             <p className="mt-3 flex items-start gap-1.5 text-xs text-gold">
@@ -97,9 +126,9 @@ function SpecificStocks() {
   return (
     <div className="space-y-4">
       <form onSubmit={submit} className="flex flex-wrap items-end gap-3">
-        <div className="grid gap-1.5">
+        <div className="grid w-full gap-1.5 sm:w-auto">
           <Label htmlFor="valuation-ids">{t('stockIds')}</Label>
-          <Input id="valuation-ids" value={ids} onChange={(event) => setIds(event.target.value)} placeholder="2330, 2317" className="w-60 font-mono" aria-describedby="valuation-ids-problem" />
+          <Input id="valuation-ids" value={ids} onChange={(event) => setIds(event.target.value)} placeholder="2330, 2317" className="w-full font-mono sm:w-60" aria-describedby="valuation-ids-problem" />
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="valuation-pe">{t('targetPe')}</Label>
@@ -111,11 +140,12 @@ function SpecificStocks() {
         </Button>
         <StockIdsProblem id="valuation-ids-problem" list={list} />
       </form>
+      {!request && <StateBlock icon={Calculator} title={t('start.stocks.title')} description={t('start.stocks.description')} className="rounded-xl bg-muted/50 py-10" />}
       {result.isFetching && <p className="text-sm text-muted-foreground">{t('loadingValuation')}</p>}
       {result.isError && <ErrorState error={result.error} title={t('valueFailed')} onRetry={() => void result.refetch()} className="rounded-xl border" />}
       {result.data && result.data.reports.length === 0 && <StateBlock icon={Calculator} title={t('noneFound')} className="rounded-xl border" />}
       {result.data && result.data.reports.length > 0 && (
-        <div className="grid items-start gap-4 lg:grid-cols-2">
+        <div className="grid items-start gap-4 @3xl:grid-cols-2">
           {result.data.reports.map((report) => (
             <ReportCard key={report.valuation.stock.stock_id} report={report} />
           ))}
@@ -158,6 +188,7 @@ function Scan() {
         </Button>
         <p className="w-full text-xs text-muted-foreground">{t('formula')}</p>
       </form>
+      {!request && <StateBlock icon={Radar} title={t('start.scan.title')} description={t('start.scan.description')} className="rounded-xl bg-muted/50 py-10" />}
       {scan.isFetching && <p className="text-sm text-muted-foreground">{t(request?.technical ? 'loadingTechnical' : 'loadingMarket')}</p>}
       {scan.isError && <ErrorState error={scan.error} title={t('scanFailed')} onRetry={() => void scan.refetch()} className="rounded-xl border" />}
       {scan.data && (
@@ -182,7 +213,7 @@ function Scan() {
             )}
           </div>
           <p className="text-xs text-muted-foreground">{t('lowPeCaveat')}</p>
-          <div className="grid items-start gap-4 lg:grid-cols-2">
+          <div className="grid items-start gap-4 @3xl:grid-cols-2">
             {scan.data.survivors.map((report) => (
               <ReportCard
                 key={report.valuation.stock.stock_id}
@@ -221,7 +252,7 @@ function ReportCard({
       }
       aside={
         report.undervaluation !== null && (
-          <span className={cn('tabular text-sm font-semibold', report.undervaluation > 0 ? 'text-jade' : 'text-foreground')}>{formatSignedPercent(locale, report.undervaluation, 1)}</span>
+          <span className={cn('tabular text-sm font-semibold', report.undervaluation > 0 ? 'text-brand' : 'text-foreground')}>{formatSignedPercent(locale, report.undervaluation, 1)}</span>
         )
       }
     >

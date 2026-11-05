@@ -2,6 +2,8 @@ import type en from '../en/strategies'
 import type { DictionaryShape } from '../../types'
 
 const strategies: DictionaryShape<typeof en> = {
+  summarySignIn: '登入後顯示你正在使用的策略',
+  signIn: '登入後保存並使用你自己的策略',
   untitled: '未命名策略',
   copyName: '{{name}} 副本',
   bars: '{{count}} 根日 K',
@@ -80,6 +82,8 @@ const strategies: DictionaryShape<typeof en> = {
     others: '其他策略',
     noOthers: '沒有其他已儲存的策略。',
     ruleCount: '{{count}} 條規則',
+    showAllRules: '顯示全部 {{count}} 條規則',
+    showFewerRules: '收合規則',
   },
   toast: {
     activated: '已改用「{{name}}」',

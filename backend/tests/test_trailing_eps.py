@@ -2,6 +2,7 @@ from copy import deepcopy
 from datetime import date, datetime
 
 import pytest
+from support.settings import shipped_config
 
 from a_domain.model.fundamentals.eps import Eps, EpsUnavailable
 from a_domain.model.market.stock import Stock
@@ -10,7 +11,6 @@ from a_domain.rules.fundamentals.filing import FilingDeadlineRule, FilingWarning
 from a_domain.rules.fundamentals.trailing_eps import QuarterEps, TrailingEpsQuartersRule, TrailingEpsRule, filing_candidates
 from a_domain.types.enums import EpsKind, EpsUnavailableReason
 from a_domain.types.values import FiscalQuarter
-from b_application.config.sources_config import SourcesConfig
 
 FETCHED_AT = datetime(2026, 10, 30, 18, 6)
 Q = FiscalQuarter
@@ -26,7 +26,7 @@ MOPS_CUMULATIVE_EPS = {
 
 RULE = TrailingEpsRule()
 TODAY = date(2026, 10, 30)
-MOPS = SourcesConfig.from_appsetting().mops
+MOPS = shipped_config().sources.mops
 
 
 def filings(**overrides: dict[str, float] | None) -> dict[FiscalQuarter, QuarterEps | None]:

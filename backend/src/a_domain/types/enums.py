@@ -256,15 +256,117 @@ class WatchlistType(StrEnum):
     MANUAL = auto()
 
 
-class SystemEnvironment(StrEnum):
-    DEV = auto()
-    TEST = auto()
-    LIVE = auto()
+class ShioajiCredential(StrEnum):
+    """
+    An environment variable a Shioaji login reads, from the process environment or .env, never from a settings file.
+    SystemEnvironment.shioaji_credentials says which ones each environment reads; no environment reads another's.
+    """
+
+    API_KEY = "SHIOAJI_API_KEY"
+    SECRET_KEY = "SHIOAJI_SECRET_KEY"
+    CA_PATH = "SHIOAJI_CA_PATH"
+    CA_PASSWORD = "SHIOAJI_CA_PASSWORD"
+    PERSON_ID = "SHIOAJI_PERSON_ID"
+    API_KEY_TEST = "SHIOAJI_API_KEY_TEST"
+    """The paper-trading key pair, which only environment test reads."""
+
+    SECRET_KEY_TEST = "SHIOAJI_SECRET_KEY_TEST"
 
 
 class ExecutionProvider(StrEnum):
     MOCK = auto()
     SHIOAJI = auto()
+
+
+class SystemEnvironment(StrEnum):
+    """
+    Which machine the app runs on, and with it what it may trade on. Its properties are the one table of what each
+    environment allows; the trading setup check and the broker login read them, and nothing else decides by
+    environment. A process takes its environment at start: neither the Web editor nor a reload changes it.
+    """
+
+    DEV = auto()
+    """A developer's machine: the mock broker only, and no Shioaji credential is read."""
+
+    TEST = auto()
+    """Staging before launch: Shioaji only in simulation, with the *_TEST key pair only, or the mock broker."""
+
+    PROD = auto()
+    """The live service: Shioaji only in production, with the production credentials, or the mock broker; PostgreSQL only."""
+
+    @property
+    def brokers(self) -> frozenset[ExecutionProvider]:
+        match self:
+            case SystemEnvironment.DEV:
+                return frozenset({ExecutionProvider.MOCK})
+            case SystemEnvironment.TEST | SystemEnvironment.PROD:
+                return frozenset(ExecutionProvider)
+
+    @property
+    def order_modes(self) -> frozenset[OrderMode]:
+        """Only prod may send a real-money order."""
+        match self:
+            case SystemEnvironment.DEV | SystemEnvironment.TEST:
+                return frozenset({OrderMode.MOCK_ONLY, OrderMode.DISABLED})
+            case SystemEnvironment.PROD:
+                return frozenset(OrderMode)
+
+    @property
+    def databases(self) -> frozenset[DatabaseBackend]:
+        """Prod keeps every user's data in PostgreSQL, never in a local SQLite file."""
+        match self:
+            case SystemEnvironment.DEV | SystemEnvironment.TEST:
+                return frozenset(DatabaseBackend)
+            case SystemEnvironment.PROD:
+                return frozenset({DatabaseBackend.POSTGRESQL})
+
+    @property
+    def shioaji_credentials(self) -> tuple[ShioajiCredential, ...]:
+        """
+        The variables a Shioaji login reads here: the API key and the secret key, and in production the CA certificate's
+        path, its password and the person id. ShioajiConfig.login reads each by name.
+        """
+        match self:
+            case SystemEnvironment.DEV:
+                return ()
+            case SystemEnvironment.TEST:
+                return (ShioajiCredential.API_KEY_TEST, ShioajiCredential.SECRET_KEY_TEST)
+            case SystemEnvironment.PROD:
+                return (
+                    ShioajiCredential.API_KEY,
+                    ShioajiCredential.SECRET_KEY,
+                    ShioajiCredential.CA_PATH,
+                    ShioajiCredential.CA_PASSWORD,
+                    ShioajiCredential.PERSON_ID,
+                )
+
+    @property
+    def shioaji_simulation(self) -> bool:
+        """Shioaji's paper-trading server, or the real account. Never configured: test is always simulation, prod never."""
+        return self != SystemEnvironment.PROD
+
+    @property
+    def accounts_key_file(self) -> bool:
+        """
+        The accounts key may live in secrets/accounts.key, created on the first start, when ACCOUNTS_KEY is unset: dev
+        and test. Prod reads ACCOUNTS_KEY only: its app folder may not survive a redeploy (a Docker container), and a
+        key created there would lock every account at the next deploy.
+        """
+        match self:
+            case SystemEnvironment.DEV | SystemEnvironment.TEST:
+                return True
+            case SystemEnvironment.PROD:
+                return False
+
+    @property
+    def refused_credentials(self) -> tuple[ShioajiCredential, ...]:
+        """
+        The production credentials, wherever this environment does not read them: dev and test refuse to start while
+        one is set, so the production key lives only on the production machine.
+        """
+        return tuple(
+            credential for credential in SystemEnvironment.PROD.shioaji_credentials if credential not in self.shioaji_credentials
+        )
 
 
 class Workflow(StrEnum):
@@ -581,97 +683,165 @@ class SettingsFile(StrEnum):
                 return "instructions.yaml"
 
 
+class InstructionKey(StrEnum):
+    """
+    A key of config/instructions.yaml: an AI prompt, and the setting load_settings copies it into. One table for the
+    copy, for refusing any other key of the file, and for placing a refused prompt back on its line there.
+    """
+
+    SYSTEM_PROMPT = "system_prompt"
+    RAG_INJECTION_PROMPT = "rag_injection_prompt"
+    ANALYSIS_REPORT_FUNDAMENTAL = "ai_analysis_report_prompt_fundamental"
+    ANALYSIS_REPORT_MOMENTUM = "ai_analysis_report_prompt_momentum"
+    VALUATION_EXPLANATION = "ai_valuation_explanation_prompt"
+    SOCIAL_SENTIMENT = "social_sentiment_prompt"
+
+    @property
+    def settings_path(self) -> str:
+        match self:
+            case InstructionKey.SYSTEM_PROMPT:
+                return "ai.system_prompt"
+            case InstructionKey.RAG_INJECTION_PROMPT:
+                return "ai.rag_injection_prompt"
+            case InstructionKey.ANALYSIS_REPORT_FUNDAMENTAL:
+                return "prompts.analysis_report_fundamental"
+            case InstructionKey.ANALYSIS_REPORT_MOMENTUM:
+                return "prompts.analysis_report_momentum"
+            case InstructionKey.VALUATION_EXPLANATION:
+                return "prompts.valuation_explanation"
+            case InstructionKey.SOCIAL_SENTIMENT:
+                return "prompts.social_sentiment"
+
+
 class SettingsAction(StrEnum):
     SAVE = auto()
     RESTORE = auto()
 
 
-class EditableSetting(StrEnum):
+class ErrorCode(StrEnum):
     """
-    A setting the administrator may change from the Web, named by its dotted path in its file. Anything not listed
-    stays read-only there: the environment, the broker and order mode, the score weights and thresholds, sizing and
-    stop-loss, the history and quote freshness, database, folders, credentials and every source URL.
+    The stable name of each refusal the Web API answers, in `code` next to `detail`: a client switches on it, never on
+    the words, which may change. Every 403 has its own, so the page tells a missing password from a wrong one, a
+    refused file, a user who is not an administrator and an installation on a real broker.
     """
 
-    AI_ACTIVE_MODEL = "ai.active_model"
-    AI_TEMPERATURE = "ai.temperature"
-    AI_MAX_OUTPUT_TOKENS = "ai.max_output_tokens"
-    AI_CONNECTION_TIMEOUT = "ai.connection_timeout"
-    AI_ARTICLE_CONTENT_LENGTH = "ai.article_content_length"
-    AI_MODEL_OPENAI = "ai.available_models.openai"
-    AI_MODEL_GROK = "ai.available_models.grok"
-    AI_MODEL_GEMINI = "ai.available_models.gemini"
-    AI_MODEL_GROQ = "ai.available_models.groq"
-    AI_MODEL_NVIDIA = "ai.available_models.nvidia"
-    AI_MODEL_CLAUDE = "ai.available_models.claude"
-    BEHAVIOR_LOG_LEVEL = "behavior.log_level"
-    BEHAVIOR_ENABLE_WEB_SEARCH = "behavior.enable_web_search"
-    BEHAVIOR_WEB_SEARCH_MAX_RESULTS = "behavior.web_search_max_results"
-    ANALYSIS_REASON_ITEM_LIMIT = "analysis.reason_item_limit"
-    ANALYSIS_ARTICLE_FETCH_LIMIT = "analysis.article_fetch_limit"
-    ANALYSIS_LOOKBACK_DAYS = "analysis.lookback_days"
-    ANALYSIS_HISTORY_CALENDAR_DAYS_PER_BAR = "analysis.history_calendar_days_per_bar"
-    SENTIMENT_MIN_CONFIDENCE = "sentiment.min_confidence"
-    SENTIMENT_MIN_OPINIONS = "sentiment.min_opinions"
-    SENTIMENT_CONSENSUS_SHARE = "sentiment.consensus_share"
-    COLLECT_BUZZ_MIN_MENTIONS = "collect_rules.buzz_min_mentions"
-    COLLECT_BUZZ_MIN_ENGAGEMENT = "collect_rules.buzz_min_engagement"
-    COLLECT_SOCIAL_ARTICLE_LIMIT = "collect_rules.social_article_limit"
-    COLLECT_PTT_LOOKBACK_DAYS = "collect_rules.ptt_lookback_days"
-    COLLECT_SPAM_KEYWORDS = "collect_rules.spam_keywords"
-    COLLECT_FINANCIAL_KEYWORDS = "collect_rules.financial_keywords"
-    COLLECT_PTT_TAGS = "collect_rules.ptt_tags"
-    QUALITY_MIN_CHARS_STOCK = "quality.min_chars_stock"
-    QUALITY_MIN_CHARS_NEWS = "quality.min_chars_news"
-    QUALITY_MIN_CHARS_GOSSIP = "quality.min_chars_gossip"
-    FRESHNESS_MISSING_SESSION_LISTED_STOCKS = "freshness.missing_session_listed_stocks"
-    FRESHNESS_DAILY_CLOSE_MAX_MISSED_SESSIONS = "freshness.daily_close_max_missed_sessions"
-    VALUATION_SCENARIO_SPREAD = "valuation.scenario_spread"
-    VALUATION_MAX_SCAN_EXPLANATIONS = "valuation.max_scan_explanations"
-    WATCHLIST_AUTOMATIC_EXPIRY_SESSIONS = "watchlist.automatic_expiry_sessions"
-    MARKET_DATA_SEARCH_RESULT_LIMIT = "market_data.search_result_limit"
-    MARKET_DATA_MOST_TRADED_COUNT = "market_data.most_traded_count"
-    SYSTEM_PROMPT = "system_prompt"
-    RAG_INJECTION_PROMPT = "rag_injection_prompt"
-    ANALYSIS_REPORT_PROMPT_FUNDAMENTAL = "ai_analysis_report_prompt_fundamental"
-    ANALYSIS_REPORT_PROMPT_MOMENTUM = "ai_analysis_report_prompt_momentum"
-    SOCIAL_SENTIMENT_PROMPT = "social_sentiment_prompt"
-    VALUATION_EXPLANATION_PROMPT = "ai_valuation_explanation_prompt"
+    SIGN_IN_REQUIRED = auto()
+    SIGN_IN_REFUSED = auto()
+    SIGN_IN_THROTTLED = auto()
+    REGISTRATION_CLOSED = auto()
+    SETUP_CODE_REFUSED = auto()
+    ALREADY_SET_UP = auto()
+    USER_EXISTS = auto()
+    LAST_ADMINISTRATOR = auto()
+    UNKNOWN_HOST = auto()
+    APP_REQUEST_REQUIRED = auto()
+    ADMINISTRATORS_ONLY = auto()
+    REAL_BROKER_REFUSED = auto()
+    MOCK_BROKER_ONLY = auto()
+    PASSWORD_REQUIRED = auto()
+    PASSWORD_REFUSED = auto()
+    SETTINGS_FILE_REFUSED = auto()
+    SETTINGS_FILE_MISSING = auto()
+    SETTINGS_CONFLICT = auto()
+    SETTINGS_EDIT_REFUSED = auto()
+    SETTINGS_REFUSED = auto()
+    """The app would not start with the settings: the answer also lists `problems`, each at its file, line and column."""
+
+    TECHNICAL_SETTINGS_CONFLICT = auto()
+    RUN_IN_PROGRESS = auto()
+    TOO_MANY_RUNS = auto()
+    LISTING_UNAVAILABLE = auto()
+    NOT_FOUND = auto()
+    INVALID_REQUEST = auto()
+    """The body, the path or the query does not validate: `detail` is FastAPI's list of the fields and why."""
+
+    BODY_TOO_LARGE = auto()
+    REQUEST_REFUSED = auto()
+    """Any other refusal, such as the LINE webhook's: `detail` says why."""
+
+
+class Permission(StrEnum):
+    """
+    What a role may do beyond using its own data. A signed-in user of any role runs every workflow on their own mock
+    account, watchlist, records and strategies; no permission is needed for that. Each member's docstring names where
+    it is checked, always against User.permissions.
+    """
+
+    MANAGE_USERS = auto()
+    """List users, change a role or a password, deactivate or reactivate one: /v1/admin/users. Checked by requires()."""
+
+    EDIT_SYSTEM_SETTINGS = auto()
+    """The settings files config/appsetting.yaml and config/instructions.yaml: /v1/admin/settings*. Checked by requires()."""
+
+    USE_CLI = auto()
+    """Sign in to the CLI, the only path to manual BUY and to orders on a real broker. Checked by the CLI's sign-in."""
+
+    USE_REAL_BROKER = auto()
+    """
+    Use the private pages, and own a pipeline, over the installation's real broker (Shioaji). Checked by the Web's
+    private-page gate before any Pipeline is built, and again where dependencies.py picks the broker, so no Pipeline
+    of another user ever holds it.
+    """
+
+    NOTIFY_RECIPIENTS = auto()
+    """This user's run reports go to the installation's LINE recipients. Checked where dependencies.py builds Reporting."""
+
+    UNCAPPED_AI = auto()
+    """
+    No per-user daily limit on paid AI calls (accounts.daily_ai_calls). The calls still count toward the server's daily
+    total, which never refuses them. Checked where dependencies.py builds the user's AI provider.
+    """
+
+    UNCAPPED_RUNS = auto()
+    """
+    Start a Web run while the server runs its most at once (accounts.max_concurrent_runs), so other users' runs never
+    keep an administrator from working. One run at a time per user still holds, and the run counts toward the cap
+    others meet. Checked by WorkflowRuns.start.
+    """
+
+
+class Role(StrEnum):
+    ADMINISTRATOR = auto()
+    """Everything: their own data, the users and the system settings files."""
+
+    USER = auto()
+    """Everything except administration. Open registration creates this role."""
 
     @property
-    def file(self) -> SettingsFile:
-        return SettingsFile.APPSETTING if "." in self.value else SettingsFile.INSTRUCTIONS
-
-    @property
-    def choices(self) -> tuple[str, ...]:
-        """The values a choice setting accepts; empty for a free value that the file's validation bounds."""
+    def permissions(self) -> frozenset[Permission]:
+        """The table from role to permissions. A new permission is granted here, never by a check that names a role."""
         match self:
-            case EditableSetting.AI_ACTIVE_MODEL:
-                return tuple(provider.value for provider in AiProvider)
-            case EditableSetting.BEHAVIOR_LOG_LEVEL:
-                return ("DEBUG", "INFO", "WARNING", "ERROR")
-            case _:
-                return ()
+            case Role.ADMINISTRATOR:
+                return frozenset(Permission)
+            case Role.USER:
+                return frozenset()
 
 
-class LockedSetting(StrEnum):
+class AttemptLimit(StrEnum):
+    """Which limit counts a sign-in or registration attempt. Each counts per client address."""
+
+    SIGN_IN_NAME = auto()
+    """Failed sign-ins of one sign-in name from one client address."""
+
+    SIGN_IN_CLIENT = auto()
+    """Failed sign-ins of any name from one client address."""
+
+    REGISTRATION = auto()
+    """Registrations from one client address."""
+
+    SETTINGS_PASSWORD = auto()
     """
-    Settings the Web shows but never changes: they choose the broker, real orders, sizing and the order gates. The
-    score weights choose automatic orders as surely as the thresholds they are compared with, and the daily history's
-    freshness decides which stocks a run analyses at all.
+    Passwords an administrator re-entered to save or restore a settings file, per administrator and client address.
+    Its own count, so the editor cannot guess the password faster than the sign-in allows, nor lock the sign-in out.
     """
 
-    ENVIRONMENT = "environment"
-    EXECUTION_PROVIDER = "trading.execution_provider"
-    ORDER_MODE = "trading.order_mode"
-    SHIOAJI_SIMULATION = "shioaji.simulation"
-    DATABASE_BACKEND = "db.backend"
-    MIN_COMBINED_SCORE_BUY = "analysis.min_combined_score_buy"
-    MAX_COMBINED_SCORE_SELL = "analysis.max_combined_score_sell"
-    TECHNICAL_WEIGHT = "analysis.technical_weight"
-    AI_WEIGHT = "analysis.ai_weight"
-    RISK_PER_TRADE_PCT = "analysis.risk_per_trade_pct"
-    STOP_LOSS_PCT = "analysis.stop_loss_pct"
-    LOT_SIZE = "analysis.lot_size"
-    REALTIME_MAX_LAG_MINUTES = "freshness.realtime_max_lag_minutes"
-    HISTORY_MAX_LAG_DAYS = "freshness.history_max_lag_days"
+
+class UserStatus(StrEnum):
+    ACTIVE = auto()
+    """May sign in. Every session of the user is valid until it expires."""
+
+    DEACTIVATED = auto()
+    """
+    May not sign in, and every session ended at the change. A run already running finishes. The user's data stays, and
+    reactivation restores access.
+    """

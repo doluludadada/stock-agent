@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, waitFor } from '@testing-library/react'
 import { RouterProvider, createMemoryRouter } from 'react-router'
 import { session } from '@/shared/api'
+import { TEST_USER } from '@/test/users'
 import { strategyFromApi } from '../api/mapping'
 import { builtInJson } from '../model/built-ins.test-support'
 import { useStrategyDraft } from './use-strategy-draft'
@@ -26,14 +27,14 @@ function fakeServer() {
 
 describe('saving a strategy draft', () => {
   afterEach(() => {
-    session.lock('owner')
+    session.signOut()
     vi.unstubAllGlobals()
   })
 
   it('keeps what was typed during the save, and a later conflict over another strategy does not say this one changed', async () => {
     const { server, fetch } = fakeServer()
     vi.stubGlobal('fetch', fetch)
-    session.unlock('owner', 'owner-token')
+    session.signIn(TEST_USER)
     const draft: { current: ReturnType<typeof useStrategyDraft> | null } = { current: null }
     const capture = (value: ReturnType<typeof useStrategyDraft>) => (draft.current = value)
     function Probe() {

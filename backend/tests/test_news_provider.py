@@ -6,11 +6,10 @@ from support.settings import shipped_config
 
 from a_domain.model.market.article import Article
 from a_domain.types.enums import InformationSource
-from b_application.config.sources_config import SourcesConfig
 from c_infrastructure.feed.news.yahoo_tw_news_provider import YahooTwNewsProvider
 from c_infrastructure.feed.news_provider import NewsProvider
 
-SOURCES = SourcesConfig.from_appsetting()
+SOURCES = shipped_config().sources
 
 
 class SilentLogger:

@@ -1,168 +1,210 @@
-from collections.abc import Awaitable
-from typing import Annotated, Any
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Path, Query, status
+from fastapi import APIRouter, Path, Query, Request, status
 
-from a_domain.ports.system.settings_files import SettingsAuditEntry, SettingsDocument, SettingsEdit
-from a_domain.types.enums import EditableSetting, LockedSetting, SettingsFile
-from a_domain.types.errors import SettingsConflictError, SettingsEditError
-from d_presentation.dependencies import AdminToken, RuntimeDependency, running_settings_revision
+from a_domain.ports.system.settings_files import BackupId, SettingsDocument, SettingsEdit
+from a_domain.types.enums import SettingsFile
 from d_presentation.web.schemas import (
-    EditableSettingResponse,
+    Confirmed,
+    ErrorResponse,
+    ProblemsResponse,
+    SettingsAuditEntryResponse,
     SettingsBackupResponse,
-    SettingsChangesRequest,
+    SettingsDocumentResponse,
     SettingsEditResponse,
-    SettingsFileResponse,
     SettingsFileStatusResponse,
+    SettingsOverviewResponse,
     SettingsRestoreConfirmed,
     SettingsRestoreRequest,
     SettingsSaveRequest,
+    SettingsTextRequest,
+)
+from d_presentation.web.session import (
+    CurrentUser,
+    EditSystemSettings,
+    PrivateAccess,
+    RequestHold,
+    RuntimeDependency,
+    RuntimeSwitchDependency,
+    UserPipeline,
+    client_of,
+    host_of,
 )
 
-router = APIRouter(prefix="/admin", tags=["Administration"], dependencies=[AdminToken])
+router = APIRouter(prefix="/admin", tags=["Administration"], dependencies=[PrivateAccess, EditSystemSettings])
 """
-The two settings files config/appsetting.yaml and config/instructions.yaml, named only by their SettingsFile id. Only
-the allowlisted settings change; the file is validated as the app loads it at startup, saved atomically with a
-backup and an audit entry, and applies when the server restarts.
+Administrators only (403 otherwise, signed in still). Every YAML settings file of config/, named only by its
+SettingsFile id and edited as a whole text. A save or a restore is checked as the app starts, needs the administrator's
+password again, opens the app on the new text before it writes anything, then writes it atomically with a backup and
+an audit entry and runs on it at once.
 """
 
-BackupId = Annotated[str, Path(pattern=r"^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}$")]
-SAVE_ANSWERS: dict[int | str, dict[str, Any]] = {
-    status.HTTP_409_CONFLICT: {"description": "The file changed after the revision the request carries; nothing saved."},
-    status.HTTP_422_UNPROCESSABLE_CONTENT: {"description": "The app would refuse the file; nothing saved. The detail lists why."},
+BackupPath = Annotated[BackupId, Path()]
+SAVE_ANSWERS: dict[int | str, dict] = {
+    status.HTTP_403_FORBIDDEN: {
+        "model": ErrorResponse,
+        "description": "A save or a restore without the password (password_required), or with a wrong one (password_refused).",
+    },
+    status.HTTP_409_CONFLICT: {
+        "model": ErrorResponse,
+        "description": "The file changed after the revision the request carries; nothing saved.",
+    },
+    status.HTTP_422_UNPROCESSABLE_CONTENT: {"model": ProblemsResponse, "description": "The app would not start with it."},
+    status.HTTP_429_TOO_MANY_REQUESTS: {
+        "model": ErrorResponse,
+        "description": "Too many wrong passwords from this address; Retry-After says when.",
+    },
 }
 
 
-def file_refusal(error: OSError | ValueError) -> HTTPException:
-    """
-    404 when the file is missing; 403 when it is a symlink, outside config/ or too large, which the editor never follows
-    or reads. 409 says only that another save came first. A missing file's error holds its full path, so the answer
-    says it in words instead.
-    """
-    if isinstance(error, FileNotFoundError):
-        return HTTPException(status.HTTP_404_NOT_FOUND, "The settings file is missing from config/.")
-
-    return HTTPException(status.HTTP_403_FORBIDDEN, str(error))
-
-
-async def read_document(runtime: RuntimeDependency, file: SettingsFile) -> SettingsDocument:
-    try:
-        return await runtime.settings_files.read(file)
-    except (PermissionError, ValueError, FileNotFoundError) as error:
-        raise file_refusal(error) from error
-
-
-async def file_status(runtime: RuntimeDependency, file: SettingsFile) -> SettingsFileStatusResponse:
-    document = await read_document(runtime, file)
-    running = running_settings_revision(runtime, file)
+def file_status(document: SettingsDocument, switch: RuntimeSwitchDependency) -> SettingsFileStatusResponse:
     return SettingsFileStatusResponse(
-        file=file,
+        file=document.file,
+        file_name=document.file.file_name,
         revision=document.revision,
-        running_revision=running,
+        running_revision=switch.status.running.get(document.file),
         modified_at=document.modified_at,
-        restart_required=document.revision != running,
     )
 
 
-def edit_response(runtime: RuntimeDependency, edit: SettingsEdit) -> SettingsEditResponse:
+def edit_response(edit: SettingsEdit, switch: RuntimeSwitchDependency) -> SettingsEditResponse:
     revision = edit.saved.revision if edit.saved else edit.revision
+    running = switch.status.running.get(edit.file)
     return SettingsEditResponse(
         file=edit.file,
         base_revision=edit.base_revision,
         revision=revision,
+        running_revision=running,
         changed=list(edit.changed),
         diff=list(edit.diff),
         problems=list(edit.problems),
-        values=edit.values,
         saved=edit.saved is not None,
-        restart_required=revision != running_settings_revision(runtime, edit.file),
+        applied=revision == running,
     )
 
 
-async def saved_or_refused(runtime: RuntimeDependency, edit_call: Awaitable[SettingsEdit]) -> SettingsEditResponse:
-    try:
-        edit = await edit_call
-    except SettingsConflictError as error:
-        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
-    except SettingsEditError as error:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
-    except (PermissionError, ValueError, FileNotFoundError) as error:
-        raise file_refusal(error) from error
+@router.get("/settings")
+async def get_settings_overview(
+    pipeline: UserPipeline, runtime: RuntimeDependency, switch: RuntimeSwitchDependency
+) -> SettingsOverviewResponse:
+    """
+    Every settings file with its revision on disk and the one the server runs on, an edit on disk the server refused and
+    why, how many earlier settings still finish runs, and what applies only at a restart.
+    """
+    return await overview(pipeline, runtime, switch)
 
-    if edit.saved is None:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, {"problems": list(edit.problems), "diff": list(edit.diff)})
 
-    return edit_response(runtime, edit)
+@router.post("/settings/reload")
+async def reload_settings(
+    body: Confirmed, pipeline: UserPipeline, runtime: RuntimeDependency, switch: RuntimeSwitchDependency
+) -> SettingsOverviewResponse:
+    """
+    The administrator's try again: loads the settings files as they are on disk now, an edit the server refused
+    before included, since a refusal can come from outside the files (a database that was down, a broker login that
+    failed). The server runs on them when they start, and the answer's `refused` is null; or it keeps its settings,
+    and `refused` says why.
+    """
+    await switch.retry()
+    return await overview(pipeline, runtime, switch)
+
+
+async def overview(pipeline: UserPipeline, runtime: RuntimeDependency, switch: RuntimeSwitchDependency) -> SettingsOverviewResponse:
+    documents = [await pipeline.read_settings_file(file) for file in SettingsFile]
+    status = switch.status
+    return SettingsOverviewResponse(
+        environment=runtime.config.environment,
+        files=[file_status(document, switch) for document in documents],
+        refused=status.refused,
+        draining=status.draining,
+    )
 
 
 @router.get("/settings/{file}")
-async def get_settings_file(file: SettingsFile, runtime: RuntimeDependency) -> SettingsFileResponse:
-    """The file's allowlisted settings with their values in the file, and the read-only settings it shows."""
-    document = await read_document(runtime, file)
-    editable = [setting for setting in EditableSetting if setting.file == file]
-    values = runtime.settings_files.values(document.text, [setting.value for setting in editable])
-    locked = (
-        runtime.settings_files.values(document.text, [setting.value for setting in LockedSetting])
-        if file == SettingsFile.APPSETTING
-        else {}
-    )
-
-    return SettingsFileResponse(
-        status=await file_status(runtime, file),
-        settings=[
-            EditableSettingResponse(setting=setting, value=values.get(setting.value), choices=list(setting.choices))
-            for setting in editable
-        ],
-        locked={LockedSetting(path): value for path, value in locked.items()},
-    )
+async def get_settings_file(file: SettingsFile, pipeline: UserPipeline, switch: RuntimeSwitchDependency) -> SettingsDocumentResponse:
+    """The whole file as it is on disk, with its revision and the one the server runs on."""
+    document = await pipeline.read_settings_file(file)
+    return SettingsDocumentResponse(status=file_status(document, switch), text=document.text)
 
 
 @router.post("/settings/{file}/preview")
-async def preview_settings_change(
-    file: SettingsFile, body: SettingsChangesRequest, runtime: RuntimeDependency
+async def preview_settings_file(
+    file: SettingsFile, body: SettingsTextRequest, request: Request, pipeline: UserPipeline, switch: RuntimeSwitchDependency
 ) -> SettingsEditResponse:
-    """The change on the current file: its diff and why the app would refuse it. Nothing is written."""
-    try:
-        edit = await runtime.pipeline.preview_settings_file(file, changes=body.changes)
-    except SettingsEditError as error:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
-
-    return edit_response(runtime, edit)
+    """
+    The text against the file on disk: its diff, the settings it changes, those applying only at a restart, and its
+    problems at their line and column. Nothing is written.
+    """
+    return edit_response(await pipeline.preview_settings_file(file, body.revision, host_of(request), text=body.text), switch)
 
 
 @router.put("/settings/{file}", responses=SAVE_ANSWERS)
-async def save_settings_change(file: SettingsFile, body: SettingsSaveRequest, runtime: RuntimeDependency) -> SettingsEditResponse:
-    """Saves the change when the app would start with it and the file is still at `revision`. It applies at the next start."""
-    return await saved_or_refused(runtime, runtime.pipeline.save_settings_file(file, body.revision, changes=body.changes))
+async def save_settings_file(
+    file: SettingsFile,
+    body: SettingsSaveRequest,
+    request: Request,
+    opened: RequestHold,
+    user: CurrentUser,
+    switch: RuntimeSwitchDependency,
+) -> SettingsEditResponse:
+    """
+    Opens the app on the whole new text, writes it and runs on it at once, when the app starts with it, the file is
+    still at `revision` and the password is the administrator's own; or refuses with nothing written and the app as it
+    was. Runs that started earlier finish on the settings they started with.
+    """
+    client, host = client_of(request), host_of(request)
+    edit = await switch.save(opened, user, file, body.revision, text=body.text, password=body.password, client=client, host=host)
+    return edit_response(edit, switch)
 
 
 @router.get("/settings/{file}/backups")
-async def list_settings_backups(file: SettingsFile, runtime: RuntimeDependency) -> list[SettingsBackupResponse]:
-    return [SettingsBackupResponse.model_validate(backup) for backup in await runtime.settings_files.backups(file)]
+async def list_settings_backups(file: SettingsFile, pipeline: UserPipeline) -> list[SettingsBackupResponse]:
+    return [SettingsBackupResponse.model_validate(backup) for backup in await pipeline.list_settings_backups(file)]
 
 
 @router.post("/settings/{file}/backups/{backup_id}/preview")
 async def preview_settings_restore(
-    file: SettingsFile, backup_id: BackupId, body: SettingsRestoreRequest, runtime: RuntimeDependency
+    file: SettingsFile,
+    backup_id: BackupPath,
+    body: SettingsRestoreRequest,
+    request: Request,
+    pipeline: UserPipeline,
+    switch: RuntimeSwitchDependency,
 ) -> SettingsEditResponse:
-    """The backup against the current file: its diff and problems. Nothing is written."""
-    try:
-        edit = await runtime.pipeline.preview_settings_file(file, backup_id=backup_id)
-    except SettingsEditError as error:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
-
-    return edit_response(runtime, edit)
+    """The backup's whole text against the file on disk, reviewed as a save would be. Nothing is written."""
+    return edit_response(await pipeline.preview_settings_file(file, body.revision, host_of(request), backup_id=backup_id), switch)
 
 
 @router.post("/settings/{file}/backups/{backup_id}/restore", responses=SAVE_ANSWERS)
 async def restore_settings_backup(
-    file: SettingsFile, backup_id: BackupId, body: SettingsRestoreConfirmed, runtime: RuntimeDependency
+    file: SettingsFile,
+    backup_id: BackupPath,
+    body: SettingsRestoreConfirmed,
+    request: Request,
+    opened: RequestHold,
+    user: CurrentUser,
+    switch: RuntimeSwitchDependency,
 ) -> SettingsEditResponse:
-    """Puts the backup back through the same validation, revision check, backup and audit as a save."""
-    return await saved_or_refused(runtime, runtime.pipeline.save_settings_file(file, body.revision, backup_id=backup_id))
+    """Puts the backup's whole text back through the same checks, password, startup, backup, audit and swap as a save."""
+    client, host = client_of(request), host_of(request)
+    edit = await switch.save(opened, user, file, body.revision, backup_id=backup_id, password=body.password, client=client, host=host)
+    return edit_response(edit, switch)
 
 
 @router.get("/audit")
-async def get_settings_audit(runtime: RuntimeDependency, limit: Annotated[int, Query(ge=1, le=200)] = 50) -> list[SettingsAuditEntry]:
-    """The latest saves and restores, newest first: when, which file, which revisions and which settings. No value."""
-    return await runtime.settings_files.audit_entries(limit)
+async def get_settings_audit(
+    pipeline: UserPipeline, limit: Annotated[int, Query(ge=1, le=200)] = 50
+) -> list[SettingsAuditEntryResponse]:
+    """The latest saves and restores, newest first: when, which file, by whom, which revisions and which settings. No value."""
+    return [
+        SettingsAuditEntryResponse(
+            recorded_at=entry.recorded_at,
+            file=entry.file,
+            action=entry.action,
+            actor=entry.actor,
+            actor_name=actor.username if actor else None,
+            from_revision=entry.from_revision,
+            to_revision=entry.to_revision,
+            settings=list(entry.settings),
+        )
+        for entry, actor in await pipeline.load_settings_audit(limit)
+    ]

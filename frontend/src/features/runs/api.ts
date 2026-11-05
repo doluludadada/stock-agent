@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiRequest, runResultsKey, useSession, type Schemas } from '@/shared/api'
+import { apiRequest, runResultsKey, useIsSignedIn, type Schemas } from '@/shared/api'
 
 export type Run = Schemas['RunResponse']
 export type Signal = Schemas['SignalResponse']
@@ -28,14 +28,14 @@ const isLive = (run: Run | undefined) => run?.state === 'running'
 
 /** One page of recorded runs, newest first; one extra row tells whether a next page exists. */
 export function useRunsPage(offset: number) {
-  const { unlocked } = useSession('owner')
+  const signedIn = useIsSignedIn()
   return useQuery({
     queryKey: runKeys.page(offset),
     queryFn: async ({ signal }) => {
-      const runs = await apiRequest('get', '/v1/runs', { scope: 'owner', query: { limit: PAGE_SIZE + 1, offset }, signal })
+      const runs = await apiRequest('get', '/v1/runs', { query: { limit: PAGE_SIZE + 1, offset }, signal })
       return { runs: runs.slice(0, PAGE_SIZE), hasNext: runs.length > PAGE_SIZE }
     },
-    enabled: unlocked,
+    enabled: signedIn,
     refetchInterval: (query) => (query.state.data?.runs.some(isLive) ? POLL_MS : false),
   })
 }
@@ -45,17 +45,17 @@ export function useRunsPage(offset: number) {
  * poll that sees it end reloads the account and the watchlist the run may have changed.
  */
 export function useRun(runId: string) {
-  const { unlocked } = useSession('owner')
+  const signedIn = useIsSignedIn()
   const client = useQueryClient()
   return useQuery({
     queryKey: runKeys.run(runId),
     queryFn: async ({ signal }) => {
       const before = client.getQueryData<Run>(runKeys.run(runId))
-      const run = await apiRequest('get', '/v1/runs/{run_id}', { scope: 'owner', params: { run_id: runId }, signal })
+      const run = await apiRequest('get', '/v1/runs/{run_id}', { params: { run_id: runId }, signal })
       if (isLive(before) && !isLive(run)) void client.invalidateQueries({ queryKey: runResultsKey })
       return run
     },
-    enabled: unlocked,
+    enabled: signedIn,
     refetchInterval: (query) => (isLive(query.state.data) ? POLL_MS : false),
   })
 }
@@ -63,7 +63,7 @@ export function useRun(runId: string) {
 export function useRunSignals(runId: string, enabled: boolean) {
   return useQuery({
     queryKey: runKeys.signals(runId),
-    queryFn: ({ signal }) => apiRequest('get', '/v1/runs/{run_id}/signals', { scope: 'owner', params: { run_id: runId }, signal }),
+    queryFn: ({ signal }) => apiRequest('get', '/v1/runs/{run_id}/signals', { params: { run_id: runId }, signal }),
     enabled,
   })
 }
@@ -71,7 +71,7 @@ export function useRunSignals(runId: string, enabled: boolean) {
 export function useRunOrders(runId: string, enabled: boolean) {
   return useQuery({
     queryKey: runKeys.orders(runId),
-    queryFn: ({ signal }) => apiRequest('get', '/v1/runs/{run_id}/orders', { scope: 'owner', params: { run_id: runId }, signal }),
+    queryFn: ({ signal }) => apiRequest('get', '/v1/runs/{run_id}/orders', { params: { run_id: runId }, signal }),
     enabled,
   })
 }
@@ -81,8 +81,8 @@ export function useStartRun() {
   return useMutation({
     mutationFn: ({ kind, stockIds = [] }: { kind: RunKind; stockIds?: string[] }) =>
       kind === 'specific-stocks'
-        ? apiRequest('post', START_PATHS[kind], { scope: 'owner', body: { confirm: true, stock_ids: stockIds } })
-        : apiRequest('post', START_PATHS[kind], { scope: 'owner', body: { confirm: true } }),
+        ? apiRequest('post', START_PATHS[kind], { body: { confirm: true, stock_ids: stockIds } })
+        : apiRequest('post', START_PATHS[kind], { body: { confirm: true } }),
     onSettled: () => client.invalidateQueries({ queryKey: runKeys.all }),
   })
 }
