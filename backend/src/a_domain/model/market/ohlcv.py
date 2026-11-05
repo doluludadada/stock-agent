@@ -1,13 +1,20 @@
 from datetime import datetime
 
-from sqlmodel import Field, SQLModel
+from pydantic import Field
+from pydantic.dataclasses import dataclass
 
 
-class Ohlcv(SQLModel):
+@dataclass(frozen=True)
+class Ohlcv:
     ts: datetime = Field(description="Timestamp of the candle")
-    open: float = Field(default=0)
-    high: float = Field(default=0)
-    low: float = Field(default=0)
-    close: float = Field(default=0)
-    volume: int = Field(default=0)
-    adj_close: float | None = Field(default=None)
+    open: float = 0
+    high: float = 0
+    low: float = 0
+    close: float = 0
+    volume: int = 0
+    adj_close: float | None = None
+    change: float | None = None
+    """
+    The exchange's official change from the session's reference price: the previous close, adjusted on an ex-rights or
+    ex-dividend day. Only the TWSE and TPEX listings report it; a bar from another source has None.
+    """

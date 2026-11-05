@@ -1,10 +1,8 @@
 from datetime import datetime
 from typing import Protocol
 
-from a_domain.model.trading.account import Account
-from a_domain.model.trading.broker_order_report import BrokerOrderReport
-from a_domain.model.trading.order import Order
-from a_domain.model.trading.position import Position
+from a_domain.model.trading.account import Account, Position
+from a_domain.model.trading.order import ExchangeOrder, Order
 from a_domain.types.enums import LotKind, RejectReason
 
 
@@ -57,7 +55,7 @@ class IBrokerExecutionProvider[BrokerAccount, Contract, Trade](IExecutionProvide
         """The cash the account can still pay for a BUY with. Never more than the broker will settle."""
         ...
 
-    async def send(self, contract: Contract, order: Order, held: Position | None) -> list[BrokerOrderReport]:
+    async def send(self, contract: Contract, order: Order, held: Position | None) -> list[ExchangeOrder]:
         """
         Sends the order as one exchange order per lot part, in turn, and records what each part dealt on it. Stops at
         a part still working. Returns the report of every part it sent.
@@ -80,6 +78,6 @@ class IBrokerExecutionProvider[BrokerAccount, Contract, Trade](IExecutionProvide
         """The exchange order with this tag, after re-reading the account's orders. None when absent or the read fails."""
         ...
 
-    def report_of(self, trade: Trade) -> BrokerOrderReport:
+    def exchange_order_of(self, trade: Trade) -> ExchangeOrder:
         """The exchange order in the domain's terms."""
         ...

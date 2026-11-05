@@ -4,15 +4,15 @@ from datetime import UTC, timedelta
 import pytest
 from sqlmodel import col, select
 from support.harness import rising_history
-from trading_stack import MONDAY_10_00, TradingStack, analysed_stock, bar, open_stack
+from trading_stack import MONDAY_10_00, SilentLogger, TradingStack, analysed_stock, bar, open_stack, run_stats
 
 from a_domain.model.analysis.ai_analysis_report import AiAnalysisReport
 from a_domain.model.analysis.technical_report import TechnicalReport
-from a_domain.model.trading.account import Account
+from a_domain.model.trading.account import Account, Position
 from a_domain.model.trading.order import Order
-from a_domain.model.trading.position import Position
-from a_domain.model.trading.watchlist_entry import WatchlistEntry
-from a_domain.types.enums import OrderMode, OrderStatus, SignalSource, TradeAction, WatchlistType, Workflow
+from a_domain.model.trading.watchlist import WatchlistEntry
+from a_domain.types.enums import OrderMode, OrderStatus, RejectReason, SignalSource, TradeAction, WatchlistType, Workflow
+from b_application.use_cases.trade.order_execution import OrderExecution
 from c_infrastructure.database.models.trading_journal_dto import AccountSnapshotDTO, OrderDTO, TradeSignalDTO, WorkflowRunDTO
 from c_infrastructure.database.repositories.trading_journal import TradingJournal
 
@@ -55,7 +55,16 @@ async def test_an_order_row_traces_back_to_its_price_reports_signal_run_and_resu
         0,
     )
     assert snapshot_row.cash == 1_000_000 - 200_285
-    assert snapshot_row.positions == [{"stock_id": "2330", "quantity": 2000, "average_cost": 100.1425, "mark_price": 100.0}]
+    assert snapshot_row.positions == [
+        {
+            "stock_id": "2330",
+            "quantity": 2000,
+            "average_cost": 100.1425,
+            "mark_price": 100.0,
+            "marked_at": MONDAY_10_00.isoformat(),
+            "unrealized_pnl": 0.0,
+        }
+    ]
 
 
 async def test_a_filled_manual_buy_returns_the_filled_order(tmp_path) -> None:
@@ -226,21 +235,60 @@ async def test_a_broker_answer_that_cannot_be_recorded_is_a_run_error_and_the_fi
     assert [position.quantity for position in (await stack.broker.get_account()).positions] == [2000]
 
 
-async def test_a_decision_gets_one_order_however_often_its_orders_are_sent(tmp_path) -> None:
+async def test_a_stop_loss_sale_gets_one_order_although_intraday_sends_its_orders_twice(tmp_path) -> None:
     stack = await open_stack(tmp_path)
+    await hold(stack, 1_000_000, Position(stock_id="2330", quantity=1000, average_cost=100.0))
+    stack.quotes.realtime = {"2330": bar(MONDAY_10_00 - timedelta(minutes=1), 85)}
+
+    status = await stack.pipeline.run_intraday()
+
+    assert [(order.stock_id, order.action, order.status) for order in status.orders] == [
+        ("2330", TradeAction.SELL, OrderStatus.FILLED)
+    ]
+    assert (await stack.broker.get_account()).positions == []
+    assert await recorded_orders(stack) == [(OrderStatus.FILLED, 1000, None)]
+
+
+class CountingBroker:
+    """The mock broker, keeping the status of each order it is asked to place."""
+
+    def __init__(self, stack) -> None:
+        self.stack = stack
+        self.asked: list[OrderStatus] = []
+
+    async def place_order(self, order: Order) -> Order:
+        self.asked.append(order.status)
+        return await self.stack.broker.place_order(order)
+
+    async def get_account(self):
+        return await self.stack.broker.get_account()
+
+
+@pytest.mark.parametrize(
+    ("ending", "asked", "status"),
+    [(None, [OrderStatus.PENDING], OrderStatus.FILLED), ("rejected", [], OrderStatus.REJECTED), ("failed", [], OrderStatus.FAILED)],
+)
+async def test_order_execution_sends_only_a_pending_order(tmp_path, ending: str | None, asked: list, status: OrderStatus) -> None:
+    stack = await open_stack(tmp_path)
+    broker = CountingBroker(stack)
+    execution = OrderExecution(broker, stack.journal, stack.clock, SilentLogger())
     stock = analysed_stock()
     stock.realtime_bar = stack.quotes.realtime["2330"]
     account = await stack.broker.get_account()
     signal = stack.config.manual_entry_rule().apply(stock, account, equity=account.cash, now=stack.clock.now())
+    stats = run_stats(Workflow.MANUAL_BUY)
+    order = stack.config.order_rule().apply(signal, stats.run_id, stack.clock.now(), stack.clock.trading_phase())
 
-    async with stack.run_history.execute(Workflow.MANUAL_BUY) as status:
-        await stack.journal.save_signals(status.stats.run_id, [signal])
-        status.signals.append(signal)
-        await stack.pipeline.send_orders(status)
-        await stack.pipeline.send_orders(status)
+    if ending == "rejected":
+        order.reject(RejectReason.ORDER_MODE_DISABLED, "order mode disabled", now=stack.clock.now())
 
-    assert [order.status for order in status.orders] == [OrderStatus.FILLED]
-    assert [position.quantity for position in (await stack.broker.get_account()).positions] == [2000]
+    if ending == "failed":
+        order.fail("the order record could not be saved, so the order was not sent: disk full", now=stack.clock.now())
+
+    result = await execution.execute(order, stats)
+
+    assert (broker.asked, result.status) == (asked, status)
+    assert [position.quantity for position in (await stack.broker.get_account()).positions] == ([2000] if asked else [])
 
 
 class BrokerThatChecksTheRecord:
@@ -273,18 +321,20 @@ async def test_a_run_is_recorded_when_it_starts_and_when_it_aborts(tmp_path) -> 
     stack = await open_stack(tmp_path)
 
     with pytest.raises(RuntimeError):
-        async with stack.run_history.execute(Workflow.INTRADAY) as status:
+        async with stack.run_history.execute(Workflow.INTRADAY) as stats:
             async with stack.db.get_session() as session:
-                started = await session.get(WorkflowRunDTO, status.stats.run_id)
+                started = await session.get(WorkflowRunDTO, stats.run_id)
                 assert started is not None and started.end_time is None
 
             raise RuntimeError("Yahoo hung")
 
     async with stack.db.get_session() as session:
-        ended = await session.get(WorkflowRunDTO, status.stats.run_id)
+        ended = await session.get(WorkflowRunDTO, stats.run_id)
 
     assert ended is not None and ended.end_time is not None
     assert ended.errors == ["Run aborted: RuntimeError: Yahoo hung"]
+    assert (await stack.journal.find_run(stats.run_id)) == stats
+    assert stats.failure == "RuntimeError: Yahoo hung"
 
 
 class SlowBroker:

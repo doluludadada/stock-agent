@@ -4,26 +4,25 @@ workflows, which decide what to value and reach no order, signal or watchlist wr
 """
 
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 
+from pydantic import TypeAdapter, ValidationError
 from rich.panel import Panel
 from rich.table import Table
 
-from a_domain.model.fundamentals.eps import SOURCE_LABELS, Eps
-from a_domain.model.valuation.market_valuation import MarketValuation
-from a_domain.model.valuation.scan_criteria import ScanCriteria
-from a_domain.model.valuation.stock_valuation import StockValuation
-from a_domain.model.valuation.target_pe import TargetPe
-from a_domain.model.valuation.valuation_explanation import LOW_PE_CAVEAT, ValuationExplanation
-from a_domain.model.valuation.valuation_report import LABEL, UNDERVALUATION_FORMULA
-from a_domain.model.valuation.valuation_scan import ValuationScan
+from a_domain.model.fundamentals.eps import Eps
+from a_domain.model.valuation.scan import MarketValuation, ScanCriteria, ValuationScan
+from a_domain.model.valuation.valuation import ReportSection, StockValuation, ValuationReport
 from a_domain.types.enums import EliminationReason, ScanStep
+from a_domain.types.values import PositiveFiniteFloat
+from b_application.config.app_config import AppConfig
 from b_application.pipeline import Pipeline
 from d_presentation.cli import terminal
 from d_presentation.dependencies import Runtime
 
 
-async def value_specific_stocks(runtime: Runtime) -> None:
+async def value_specific_stocks(runtime: Runtime, session: terminal.CliSession) -> None:
+    """Menu 5. It uses no technical strategy, so the session's built-in strategy does not apply."""
     stock_ids = terminal.ask_stock_ids()
 
     if stock_ids is None:
@@ -36,8 +35,8 @@ async def value_specific_stocks(runtime: Runtime) -> None:
         terminal.console.print("[yellow]No stocks loaded.[/yellow]")
         return
 
-    print_valuation_facts(valuations, market)
-    needs_target = runtime.pipeline.needs_target_pe(valuations)
+    print_valuation_facts(valuations, market, runtime.config)
+    needs_target = any(valuation.needs_target_pe for valuation in valuations)
     target_pe = ask_target_pe() if needs_target else None
 
     if needs_target and target_pe is None:
@@ -46,18 +45,18 @@ async def value_specific_stocks(runtime: Runtime) -> None:
 
     terminal.console.print(f"Asking the AI to explain: {', '.join(item.stock.stock_id for item in valuations)}")
 
-    for report in runtime.pipeline.appraise_valuations(market, valuations, target_pe):
-        print_valuation_explanation(await runtime.pipeline.explain_valuation(report))
+    for report in runtime.pipeline.appraise_valuations(valuations, target_pe):
+        print_valuation_explanation(report, await runtime.pipeline.explain_valuation(report))
 
 
-async def scan_undervalued_stocks(runtime: Runtime) -> None:
+async def scan_undervalued_stocks(runtime: Runtime, session: terminal.CliSession) -> None:
     market = await load_market(runtime.pipeline)
 
     if not market.valuations:
         terminal.console.print("[yellow]No stocks loaded.[/yellow]")
         return
 
-    print_market_reference(market)
+    print_market_reference(market, runtime.config)
     criteria = ask_scan_criteria()
 
     if criteria is None:
@@ -65,21 +64,21 @@ async def scan_undervalued_stocks(runtime: Runtime) -> None:
         return
 
     scan = runtime.pipeline.screen_valuation(market, criteria)
-    print_valuation_step(scan)
+    print_valuation_step(scan, runtime.config)
 
     if not scan.survivors:
         return
 
-    if terminal.confirm(f"Confirm {len(scan.survivors)} matches with the active technical strategy?"):
+    if terminal.confirm(f"Confirm {len(scan.survivors)} matches with the technical strategy?"):
         terminal.console.print("Loading daily history for the matches...")
-        scan = await runtime.pipeline.confirm_valuation_technical(scan)
+        scan = await runtime.pipeline.confirm_valuation_technical(scan, session.built_in_strategy_id)
         print_technical_step(scan)
 
     candidates = scan.explanation_candidates
 
     if candidates and terminal.confirm(f"Explain the top {len(candidates)} stocks with AI ({len(candidates)} AI calls)?"):
         for report in candidates:
-            print_valuation_explanation(await runtime.pipeline.explain_valuation(report))
+            print_valuation_explanation(report, await runtime.pipeline.explain_valuation(report))
 
 
 async def load_market(pipeline: Pipeline) -> MarketValuation:
@@ -107,8 +106,8 @@ def find_valuations(market: MarketValuation, stock_ids: list[str]) -> list[Stock
     return valuations
 
 
-def ask_target_pe() -> TargetPe | None:
-    return ask_number("Target P/E (a finite number > 0; blank cancels)", TargetPe)
+def ask_target_pe() -> PositiveFiniteFloat | None:
+    return ask_number("Target P/E (a finite number > 0; blank cancels)", TypeAdapter(PositiveFiniteFloat).validate_python)
 
 
 def ask_scan_criteria() -> ScanCriteria | None:
@@ -125,8 +124,8 @@ def ask_scan_criteria() -> ScanCriteria | None:
 
 def ask_number[Value](question: str, parse: Callable[[float], Value]) -> Value | None:
     """
-    Asks until `parse` accepts the number typed, printing the domain's reason for each refusal; blank cancels.
-    Text that is not a number reaches `parse` as NaN, which TargetPe and ScanCriteria refuse as not finite.
+    Asks until `parse` accepts the number typed, printing what was wrong in one line for each refusal; blank cancels.
+    Text that is not a number reaches `parse` as NaN, which the target P/E and ScanCriteria refuse as not finite.
     """
     while True:
         raw_value = terminal.ask_user(question)
@@ -136,8 +135,9 @@ def ask_number[Value](question: str, parse: Callable[[float], Value]) -> Value |
 
         try:
             return parse(parse_number(raw_value))
-        except ValueError as error:
-            terminal.console.print(str(error), style="red", markup=False, highlight=False)
+        except ValidationError as error:
+            reasons = "; ".join(detail["msg"] for detail in error.errors())
+            terminal.console.print(reasons, style="red", markup=False, highlight=False)
 
 
 def parse_number(text: str) -> float:
@@ -147,18 +147,19 @@ def parse_number(text: str) -> float:
         return math.nan
 
 
-def print_market_reference(market: MarketValuation) -> None:
+def print_market_reference(market: MarketValuation, config: AppConfig) -> None:
     median = market.median_pe()
     median_text = f"{median.value:.2f} (over {median.sample_size} stocks with EPS > 0 and a fresh close)" if median else "-"
 
     terminal.console.print(f"Market median P/E for reference: {median_text}")
     terminal.console.print(
-        f"Last closed session: {market.last_closed_session}. A close is stale once {market.max_missed_sessions + 1} or more "
+        f"Last closed session: {market.last_closed_session}. "
+        f"A close is stale once {config.freshness.daily_close_max_missed_sessions + 1} or more "
         "weekday sessions have closed after it; stale closes are excluded from the scan."
     )
 
 
-def print_valuation_facts(valuations: list[StockValuation], market: MarketValuation) -> None:
+def print_valuation_facts(valuations: list[StockValuation], market: MarketValuation, config: AppConfig) -> None:
     table = Table(title="Valuation Facts")
 
     for column in ("Stock", "Name", "Industry", "Close (session)", "EPS", "Current P/E", "Industry median P/E"):
@@ -166,7 +167,7 @@ def print_valuation_facts(valuations: list[StockValuation], market: MarketValuat
 
     for item in valuations:
         stock = item.stock
-        industry_median = market.median_pe(stock.industry) if stock.industry else None
+        industry_median = item.industry_median_pe
 
         table.add_row(
             stock.stock_id,
@@ -179,42 +180,42 @@ def print_valuation_facts(valuations: list[StockValuation], market: MarketValuat
         )
 
     terminal.console.print(table)
-    print_market_reference(market)
+    print_market_reference(market, config)
 
     for item in valuations:
         for warning in item.warnings:
             terminal.console.print(f"[yellow]{item.stock.stock_id}: {warning}[/yellow]")
 
 
-def print_valuation_explanation(explanation: ValuationExplanation) -> None:
-    stock = explanation.report.stock
+def print_valuation_explanation(report: ValuationReport, sections: Sequence[ReportSection]) -> None:
+    stock = report.stock
     grid = Table.grid(padding=(0, 2))
     grid.add_column(style="bold", no_wrap=True)
     grid.add_column(overflow="fold")
 
-    for section in explanation.sections():
+    for section in sections:
         grid.add_row(section.title, "\n".join(section.lines))
 
-    terminal.console.print(Panel(grid, title=f"{stock.stock_id} {stock.name or ''} · {LABEL}", title_align="left"))
+    title = f"{stock.stock_id} {stock.name or ''} · Valuation based on a specified P/E"
+    terminal.console.print(Panel(grid, title=title, title_align="left"))
 
 
-def print_valuation_step(scan: ValuationScan) -> None:
+def print_valuation_step(scan: ValuationScan, config: AppConfig) -> None:
     criteria = scan.criteria
     eliminated = scan.elimination_counts(ScanStep.VALUATION)
     scanned = len(scan.survivors) + sum(eliminated.values())
 
-    terminal.console.print(
-        f"Valuation step: target P/E {criteria.target_pe.value:.2f}, undervaluation >= {criteria.min_undervaluation:.1%}"
-    )
-    terminal.console.print(f"({UNDERVALUATION_FORMULA})")
+    terminal.console.print(f"Valuation step: target P/E {criteria.target_pe:.2f}, undervaluation >= {criteria.min_undervaluation:.1%}")
+    terminal.console.print(f"({config.valuation.undervaluation_formula})")
     terminal.console.print(f"Scanned {scanned} -> passed {len(scan.survivors)}")
     terminal.console.print(f"Eliminated at valuation: {format_eliminations(eliminated)}")
     terminal.console.print(undervalued_table(scan))
-    terminal.console.print(LOW_PE_CAVEAT)
+    terminal.console.print(config.valuation.low_pe_caveat)
 
 
 def undervalued_table(scan: ValuationScan) -> Table:
-    table = Table(title=f"Undervalued at target P/E {scan.criteria.target_pe.value:.2f} · {LABEL} · not a BUY signal")
+    target = scan.criteria.target_pe
+    table = Table(title=f"Undervalued at target P/E {target:.2f} · Valuation based on a specified P/E · not a BUY signal")
 
     for column in ("#", "Stock", "Name", "Close (session)", "EPS", "Current P/E", "Target P/E", "Fair price", "Undervalued"):
         table.add_column(column)
@@ -238,7 +239,7 @@ def undervalued_table(scan: ValuationScan) -> Table:
             f"{base.fair_price:,.2f}" if base else "-",
             f"{base.undervaluation:.1%}" if base else "-",
             f"{eps.kind.label} {eps.period_label}" if eps else "-",
-            SOURCE_LABELS[eps.source] if eps else "-",
+            eps.source.label if eps else "-",
         )
 
     return table

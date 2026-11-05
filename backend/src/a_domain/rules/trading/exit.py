@@ -1,14 +1,14 @@
 from collections.abc import Set as AbstractSet
-from dataclasses import dataclass
 from datetime import datetime
 
-from icontract import ensure, invariant, require
+from pydantic.dataclasses import dataclass
 
 from a_domain.model.market.stock import Stock
-from a_domain.model.trading.position import Position
+from a_domain.model.trading.account import Position
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.rules.trading.reason import ExitReasonRule
 from a_domain.types.enums import SignalSource, SkipReason, TradeAction
+from a_domain.types.values import ProperFraction, Score
 
 
 @dataclass(frozen=True)
@@ -49,7 +49,6 @@ class StopLossQuoteRule:
         return None
 
 
-@invariant(lambda self: 0 < self.stop_loss_pct < 1)
 @dataclass(frozen=True)
 class StopLossRule:
     """
@@ -58,12 +57,9 @@ class StopLossRule:
     AccountRiskCheck runs it on its own, before any analysis; ExitRule runs it first.
     """
 
-    stop_loss_pct: float
+    stop_loss_pct: ProperFraction
     reason_rule: ExitReasonRule
 
-    @require(lambda stock: stock.current_price is not None, "Exit decision requires a valid current price")
-    @require(lambda position: position.quantity > 0, "Exit decision requires a positive position quantity")
-    @ensure(lambda result: result is None or (result.action == TradeAction.SELL and result.quantity > 0))
     def apply(self, stock: Stock, position: Position, *, now: datetime) -> TradeSignal | None:
         current_price = stock.current_price
 
@@ -87,18 +83,14 @@ class StopLossRule:
         )
 
 
-@invariant(lambda self: 0 <= self.sell_threshold <= 100)
 @dataclass(frozen=True)
 class ExitRule:
     """Sell-side rule for a held position: the stop-loss SELL first, then a SELL at or below `sell_threshold`, else HOLD."""
 
-    sell_threshold: int
+    sell_threshold: Score[int]
     stop_loss_rule: StopLossRule
     reason_rule: ExitReasonRule
 
-    @require(lambda stock: stock.current_price is not None, "Exit decision requires a valid current price")
-    @require(lambda position: position.quantity > 0, "Exit decision requires a positive position quantity")
-    @ensure(lambda result: result.action != TradeAction.SELL or result.quantity > 0, "SELL signal must have positive quantity")
     def apply(self, stock: Stock, position: Position, *, now: datetime) -> TradeSignal:
         stop_loss_signal = self.stop_loss_rule.apply(stock, position, now=now)
 

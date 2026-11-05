@@ -1,0 +1,9 @@
+{
+  "name": "stock-agent-openapi-types",
+  "private": true,
+  "description": "openapi-typescript needs the JavaScript compiler API of TypeScript 5; the app compiles with TypeScript 7, so the generator lives in its own install.",
+  "devDependencies": {
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3"
+  }
+}

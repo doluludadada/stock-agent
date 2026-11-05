@@ -1,0 +1,416 @@
+{
+  "strategy_id": "aggressive",
+  "name": "Aggressive",
+  "indicators": {
+    "ind_a": {"kind": "sma", "period": 20},
+    "ind_b": {"kind": "sma", "period": 60},
+    "ind_c": {"kind": "volume_sma", "period": 5},
+    "ind_d": {"kind": "rsi", "period": 14},
+    "ind_e": {"kind": "macd", "fast": 12, "slow": 26, "signal": 9},
+    "ind_f": {"kind": "bollinger", "period": 20, "std": 2.0},
+    "ind_g": {"kind": "stochastic", "k_period": 9, "d_period": 3},
+    "ind_h": {"kind": "adx", "period": 14},
+    "ind_i": {"kind": "atr", "period": 14},
+    "ind_j": {"kind": "obv", "period": 20},
+    "ind_k": {"kind": "mfi", "period": 14}
+  },
+  "scoring": {"base_score": 50, "block_failure_penalty": 15, "failure_score_reduction": 5, "pass_score_increase": 5},
+  "rules": [
+    {
+      "name": "Price Above MA_20",
+      "effect": "block_on_fail",
+      "condition": {
+        "type": "group",
+        "operator": "all",
+        "conditions": [
+          {
+            "type": "comparison",
+            "operator": "gt",
+            "left": {"type": "indicator", "indicator_id": "ind_a"},
+            "right": 0
+          },
+          {
+            "type": "comparison",
+            "operator": "gt",
+            "left": {"type": "latest_price"},
+            "right": {"type": "indicator", "indicator_id": "ind_a"}
+          }
+        ]
+      }
+    },
+    {
+      "name": "MACD Bullish (line > signal)",
+      "effect": "block_on_fail",
+      "condition": {
+        "type": "comparison",
+        "operator": "gt",
+        "left": {"type": "indicator", "indicator_id": "ind_e", "output": "line"},
+        "right": {"type": "indicator", "indicator_id": "ind_e", "output": "signal"}
+      }
+    },
+    {
+      "name": "RSI Range 0-85",
+      "effect": "block_on_fail",
+      "condition": {
+        "type": "group",
+        "operator": "all",
+        "conditions": [
+          {
+            "type": "comparison",
+            "operator": "gte",
+            "left": {"type": "indicator", "indicator_id": "ind_d"},
+            "right": 0
+          },
+          {
+            "type": "comparison",
+            "operator": "lte",
+            "left": {"type": "indicator", "indicator_id": "ind_d"},
+            "right": 85
+          }
+        ]
+      }
+    },
+    {
+      "name": "Daily Range Safety",
+      "effect": "block_on_fail",
+      "condition": {
+        "type": "comparison",
+        "operator": "lt",
+        "left": {
+          "type": "arithmetic",
+          "operator": "divide",
+          "left": {
+            "type": "arithmetic",
+            "operator": "subtract",
+            "left": {"type": "market", "field": "high"},
+            "right": {"type": "market", "field": "low"}
+          },
+          "right": {"type": "market", "field": "low"}
+        },
+        "right": 0.07
+      }
+    },
+    {
+      "name": "Liquidity Check",
+      "effect": "block_on_fail",
+      "condition": {
+        "type": "comparison",
+        "operator": "gte",
+        "left": {"type": "indicator", "indicator_id": "ind_c"},
+        "right": 300
+      }
+    },
+    {
+      "name": "Minimum Price Check",
+      "effect": "block_on_fail",
+      "condition": {"type": "comparison", "operator": "gte", "left": {"type": "latest_price"}, "right": 10}
+    },
+    {
+      "name": "Volume Expansion >= 0.5x vs MA_5",
+      "effect": "block_on_fail",
+      "condition": {
+        "type": "group",
+        "operator": "all",
+        "conditions": [
+          {
+            "type": "comparison",
+            "operator": "gt",
+            "left": {"type": "indicator", "indicator_id": "ind_c"},
+            "right": 0
+          },
+          {
+            "type": "comparison",
+            "operator": "gte",
+            "left": {"type": "market", "field": "volume"},
+            "right": {
+              "type": "arithmetic",
+              "operator": "multiply",
+              "left": {"type": "indicator", "indicator_id": "ind_c"},
+              "right": 0.5
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Price Above MA_60",
+      "effect": "reduce_score_on_fail",
+      "condition": {
+        "type": "group",
+        "operator": "all",
+        "conditions": [
+          {
+            "type": "comparison",
+            "operator": "gt",
+            "left": {"type": "indicator", "indicator_id": "ind_b"},
+            "right": 0
+          },
+          {
+            "type": "comparison",
+            "operator": "gt",
+            "left": {"type": "latest_price"},
+            "right": {"type": "indicator", "indicator_id": "ind_b"}
+          }
+        ]
+      }
+    },
+    {
+      "name": "MACD Bullish (line > 0, histogram > 0)",
+      "effect": "reduce_score_on_fail",
+      "condition": {
+        "type": "group",
+        "operator": "all",
+        "conditions": [
+          {
+            "type": "comparison",
+            "operator": "gt",
+            "left": {"type": "indicator", "indicator_id": "ind_e", "output": "line"},
+            "right": 0
+          },
+          {
+            "type": "comparison",
+            "operator": "gt",
+            "left": {"type": "indicator", "indicator_id": "ind_e", "output": "histogram"},
+            "right": 0
+          }
+        ]
+      }
+    },
+    {
+      "name": "ADX Trend 20-50 with Bullish Direction",
+      "effect": "reduce_score_on_fail",
+      "condition": {
+        "type": "group",
+        "operator": "all",
+        "conditions": [
+          {
+            "type": "comparison",
+            "operator": "gte",
+            "left": {"type": "indicator", "indicator_id": "ind_h", "output": "adx"},
+            "right": 20
+          },
+          {
+            "type": "comparison",
+            "operator": "lte",
+            "left": {"type": "indicator", "indicator_id": "ind_h", "output": "adx"},
+            "right": 50
+          },
+          {
+            "type": "comparison",
+            "operator": "gt",
+            "left": {"type": "indicator", "indicator_id": "ind_h", "output": "plus_di"},
+            "right": {"type": "indicator", "indicator_id": "ind_h", "output": "minus_di"}
+          }
+        ]
+      }
+    },
+    {
+      "name": "Stochastic Health (K < 80, K > D)",
+      "effect": "reduce_score_on_fail",
+      "condition": {
+        "type": "group",
+        "operator": "all",
+        "conditions": [
+          {
+            "type": "comparison",
+            "operator": "lt",
+            "left": {"type": "indicator", "indicator_id": "ind_g", "output": "percent_k"},
+            "right": 80
+          },
+          {
+            "type": "comparison",
+            "operator": "gt",
+            "left": {"type": "indicator", "indicator_id": "ind_g", "output": "percent_k"},
+            "right": {"type": "indicator", "indicator_id": "ind_g", "output": "percent_d"}
+          }
+        ]
+      }
+    },
+    {
+      "name": "Bollinger %B < 0.9",
+      "effect": "reduce_score_on_fail",
+      "condition": {
+        "type": "comparison",
+        "operator": "lt",
+        "left": {"type": "indicator", "indicator_id": "ind_f", "output": "percent_b"},
+        "right": 0.9
+      }
+    },
+    {
+      "name": "Volume Expansion >= 0.8x vs MA_5",
+      "effect": "reduce_score_on_fail",
+      "condition": {
+        "type": "group",
+        "operator": "all",
+        "conditions": [
+          {
+            "type": "comparison",
+            "operator": "gt",
+            "left": {"type": "indicator", "indicator_id": "ind_c"},
+            "right": 0
+          },
+          {
+            "type": "comparison",
+            "operator": "gte",
+            "left": {"type": "market", "field": "volume"},
+            "right": {
+              "type": "arithmetic",
+              "operator": "multiply",
+              "left": {"type": "indicator", "indicator_id": "ind_c"},
+              "right": 0.8
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "MFI < 80",
+      "effect": "reduce_score_on_fail",
+      "condition": {
+        "type": "comparison",
+        "operator": "lt",
+        "left": {"type": "indicator", "indicator_id": "ind_k"},
+        "right": 80
+      }
+    },
+    {
+      "name": "ATR Range",
+      "effect": "reduce_score_on_fail",
+      "condition": {
+        "type": "group",
+        "operator": "all",
+        "conditions": [
+          {
+            "type": "comparison",
+            "operator": "gte",
+            "left": {
+              "type": "arithmetic",
+              "operator": "divide",
+              "left": {"type": "indicator", "indicator_id": "ind_i"},
+              "right": {"type": "market", "field": "close"}
+            },
+            "right": 0.01
+          },
+          {
+            "type": "comparison",
+            "operator": "lte",
+            "left": {
+              "type": "arithmetic",
+              "operator": "divide",
+              "left": {"type": "indicator", "indicator_id": "ind_i"},
+              "right": {"type": "market", "field": "close"}
+            },
+            "right": 0.05
+          }
+        ]
+      }
+    },
+    {
+      "name": "RSI Range 50-70",
+      "effect": "increase_score_on_pass",
+      "condition": {
+        "type": "group",
+        "operator": "all",
+        "conditions": [
+          {
+            "type": "comparison",
+            "operator": "gte",
+            "left": {"type": "indicator", "indicator_id": "ind_d"},
+            "right": 50
+          },
+          {
+            "type": "comparison",
+            "operator": "lte",
+            "left": {"type": "indicator", "indicator_id": "ind_d"},
+            "right": 70
+          }
+        ]
+      }
+    },
+    {
+      "name": "Golden Cross",
+      "effect": "increase_score_on_pass",
+      "condition": {
+        "type": "group",
+        "operator": "all",
+        "conditions": [
+          {
+            "type": "comparison",
+            "operator": "gt",
+            "left": {"type": "indicator", "indicator_id": "ind_b"},
+            "right": 0
+          },
+          {
+            "type": "comparison",
+            "operator": "crosses_above",
+            "left": {"type": "indicator", "indicator_id": "ind_a"},
+            "right": {"type": "indicator", "indicator_id": "ind_b"}
+          },
+          {
+            "type": "comparison",
+            "operator": "lt",
+            "left": {
+              "type": "arithmetic",
+              "operator": "divide",
+              "left": {
+                "type": "arithmetic",
+                "operator": "subtract",
+                "left": {"type": "indicator", "indicator_id": "ind_a"},
+                "right": {"type": "indicator", "indicator_id": "ind_b"}
+              },
+              "right": {"type": "indicator", "indicator_id": "ind_b"}
+            },
+            "right": 0.03
+          }
+        ]
+      }
+    },
+    {
+      "name": "Bollinger Squeeze < 0.1",
+      "effect": "increase_score_on_pass",
+      "condition": {
+        "type": "comparison",
+        "operator": "lt",
+        "left": {"type": "indicator", "indicator_id": "ind_f", "output": "bandwidth"},
+        "right": 0.1
+      }
+    },
+    {
+      "name": "Volume Expansion >= 1.5x vs MA_5",
+      "effect": "increase_score_on_pass",
+      "condition": {
+        "type": "group",
+        "operator": "all",
+        "conditions": [
+          {
+            "type": "comparison",
+            "operator": "gt",
+            "left": {"type": "indicator", "indicator_id": "ind_c"},
+            "right": 0
+          },
+          {
+            "type": "comparison",
+            "operator": "gte",
+            "left": {"type": "market", "field": "volume"},
+            "right": {
+              "type": "arithmetic",
+              "operator": "multiply",
+              "left": {"type": "indicator", "indicator_id": "ind_c"},
+              "right": 1.5
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "OBV Trend",
+      "effect": "increase_score_on_pass",
+      "condition": {
+        "type": "comparison",
+        "operator": "gt",
+        "left": {"type": "indicator", "indicator_id": "ind_j"},
+        "right": {"type": "indicator", "indicator_id": "ind_j", "output": "moving_average"}
+      }
+    }
+  ]
+}

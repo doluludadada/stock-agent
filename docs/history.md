@@ -61,3 +61,38 @@
   * The size of an equity-based BUY.
   * A run record lost under a concurrent database reader.
   * A native crash at pytest exit.
+
+## 2026-11-02 The code rebuilt to the rewritten architecture guide
+
+* On `develop`, from `dc42d6e`. The guide was rewritten first (one concept per file, one model style, constants in `enums.py` or settings, one Pipeline of use cases) from the owner's review notes in the code, and `AGENTS.md` became the one project rule file that Codex and Claude Code share.
+* The domain:
+  * Every model and rule is a pydantic dataclass. icontract and SQLModel left the domain; SQLModel is only for infrastructure tables.
+  * Split files went back to one file per concept: the account (`Account`, `Position`, and the account value shapes, five down to three), the order (its life cycle on `OrderStatus`), the watchlist, the technical indicators, the strategy, EPS, and the P/E valuation and scan.
+  * Decisions left the models for rules: the order acceptance check, the fill snapshot marks, the filing deadlines and finality, the P/E appraisal, the valuation scan step.
+  * Module constants became enum labels or settings: the filing deadlines and grace, the report sentences, the prompt rules.
+* The application:
+  * One `Pipeline` whose fields are use cases. The five step-group classes are gone, presentation calls only the Pipeline, and no use case sees `PipelineStatus`: each takes values and `stats` and returns its result.
+  * `AccountEquity`, `AnalysisCandidates`, `DecisionCandidates`, `CompositeScorer`, `ContextLoader` and `AiProcessor` were folded into the steps that need them. `StrategyLoader` and `ChatReply` are new.
+* The checker gained FUTURE-IMPORT, DOMAIN-STYLE, MODULE-CONSTANT, PIPELINE-FIELDS, RULE-CALLERS, USECASE-STATUS and PATH-COMMENT, and pyright reports deprecations.
+* Visible changes: `GET /v1/account/history` returns flat positions and an equity curve keyed by date; menus 5 and 6 print one-line refusals; a manual BUY of a stock with no composite score reads the account and the quote before it refuses.
+* Verification:
+  * 840 tests pass, and the architecture check reports 0 findings and 0 pyright errors.
+  * The order-gate check passes all seven properties at default bounds (542,394 runs) and with 2 stocks (15,132,225 runs), and all 17 mutants are caught. A run-by-run trace comparison of the old and new code found 472,734 identical runs.
+  * Menus 1 to 7, the Web API and the settings page were driven with the market closed.
+* Still open:
+  * `_send_orders` is a loop in the Pipeline; the guide's shape is one use case that owns the one-order-per-decision rule.
+  * The technical settings repeat their limits in the infrastructure schema, because moving them changes where the settings page shows an error.
+  * `ValuationAppraiser` and `ValuationScreener` each wrap one rule call, and the Pipeline calls `ValuationScan.after_technical_step`.
+  * The MOPS industry feeds list only companies that filed the newest quarter, so most industries are missing early in each filing season.
+  * A chat reset deletes the system prompt (chat is future work).
+
+## 2026-11-03 Technical strategies became formulas the user composes
+
+* On `develop`, from the half-finished working tree of `1c256b7`, following `docs/strategy-implementation-handoff-2026-11-03.zh-TW.md`. The design is `docs/technical-strategy-formulas.md`.
+* The domain:
+  * A rule's condition is a formula of typed parts: a number, a daily bar field, the latest price, an indicator output, arithmetic, a comparison (crossings included) and `all`/`any` groups. Indicators have stable ids such as `ind_a` and parameters the user sets. The criteria classes, the dotted series names and `TechnicalIndicators` are gone.
+  * Missing data, a division by zero or a non-finite value fails the stock with score 0 instead of making a comparison false. `required_bars` reaches the history fetch.
+* Storage: each owner's settings are rows of five SQL tables with composite foreign keys and CHECK constraints, saved with a revision check. `config/technical.yaml` became `config/strategies/{conservative,balanced,aggressive}.json`, which score 300 seeded stocks exactly as the criteria did. Buzz now starts on Balanced.
+* Entry points: `GET`/`PUT /v1/technical-settings` (token, 409, 422), `GET /v1/technical-settings/built-in-strategies` and `/schema`; the settings page and `/reset` are gone. CLI menu 8 loads a built-in strategy for the session.
+* The order step is an inline loop in Buzz, Intraday and manual BUY instead of `Pipeline._send_orders`. The guide now exempts Pipeline operations from the length limit, lets a rule expose derived properties, and lets the Pipeline and presentation name a rule's value type in an annotation.
+* Settings: `db` holds the database only, the chat reset strings moved to `chat`, `technical` holds the owner, the built-in strategy list and the initial choice. The AI provider is Claude Haiku 5.5 (`claude-haiku-5-5`); NVIDIA is configured but its model did not answer.

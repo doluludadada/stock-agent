@@ -1,7 +1,6 @@
 from datetime import UTC, datetime
 from typing import override
 
-from a_domain.model.analysis.sentiment_classification import SentimentClassification
 from a_domain.model.chat.message import Message
 from a_domain.model.market.article import Article
 from a_domain.ports.ai.ai_provider import IAiProvider
@@ -36,23 +35,20 @@ class AiSentimentClassifier(ISentimentClassifier):
         self._logger = logger
 
     @override
-    async def classify(self, stock_id: str, articles: list[Article]) -> list[SentimentClassification]:
-        urls = [article.url for article in articles if article.url]
-        cached = await self._sentiment_repository.find_classifications(stock_id, urls)
-        uncached = [article for article in articles if article.url not in cached]
+    async def classify(self, stock_id: str, posts: list[Article]) -> list[Article]:
+        cached = await self._sentiment_repository.find_classified(stock_id, posts)
+        cached_urls = {post.url for post in cached}
+        uncached = [post for post in posts if post.url not in cached_urls]
 
-        self._logger.info(f"Sentiment cache for {stock_id}: {len(articles) - len(uncached)}/{len(articles)} posts cached.")
+        self._logger.info(f"Sentiment cache for {stock_id}: {len(posts) - len(uncached)}/{len(posts)} posts cached.")
 
         if not uncached:
-            return list(cached.values())
+            return cached
 
         prompt = Message(role=MessageRole.USER, content=self._prompt_builder.apply(stock_id, uncached), timestamp=datetime.now(UTC))
         reply = await self._ai_provider.generate_reply(messages=(prompt,))
-        fresh = parse_sentiment_reply(reply.content, post_count=len(uncached))
-        fresh_by_url = {uncached[number - 1].url: classification for number, classification in fresh.items()}
+        fresh = parse_sentiment_reply(reply.content, uncached)
 
-        await self._sentiment_repository.save_classifications(
-            stock_id, {url: classification for url, classification in fresh_by_url.items() if url}
-        )
+        await self._sentiment_repository.save_classified(stock_id, fresh)
 
-        return [*cached.values(), *fresh.values()]
+        return [*cached, *fresh]

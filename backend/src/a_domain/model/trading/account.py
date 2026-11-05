@@ -1,25 +1,116 @@
-import math
+from datetime import datetime
+from uuid import UUID, uuid4
 
-from sqlmodel import Field, SQLModel
+from pydantic import ConfigDict, Field, FiniteFloat, PositiveInt, validate_call
+from pydantic.dataclasses import dataclass
 
-from a_domain.model.trading.order import Order
-from a_domain.model.trading.position import Position
-from a_domain.rules.trading.cost import TradingCostRule
-from a_domain.types.enums import RejectReason, TradeAction
+from a_domain.types.ids import OrderId, RunId
+from a_domain.types.values import NonEmptyText, NonNegativeFiniteFloat, PositiveFiniteFloat
 
 
-class Account(SQLModel):
+@dataclass(frozen=True)
+class Mark:
+    """
+    The price a position is valued at and when that price was quoted: a realtime quote, a daily close or a fill price.
+
+    `unrealized_pnl` is what selling the whole position at `price` would bring after the SELL fee and tax, minus its
+    cost basis. It is None when the mark was taken without the trading costs: a fill snapshot keeps prices only, and
+    SnapshotValueRule values a snapshot again whenever it is shown. A PnL never exists without its price and time.
+    """
+
+    price: PositiveFiniteFloat
+    at: datetime
+    unrealized_pnl: FiniteFloat | None = None
+
+
+@dataclass(config=ConfigDict(validate_assignment=True))
+class Position:
+    """
+    Broker/account ownership state and, once a rule valued it, the price it is valued at. `average_cost` is per share
+    and includes the buy fees paid. A position the broker reports has no mark: AccountValueRule, SnapshotValueRule and
+    FillSnapshotRule build new marked positions and never mark one in place.
+    """
+
+    stock_id: NonEmptyText
+    quantity: PositiveInt
+    average_cost: PositiveFiniteFloat
+
+    opened_at: datetime | None = None
+
+    mark: Mark | None = None
+    """None: no price is known, so the position counts at its average cost with no unrealized PnL."""
+
+    @property
+    def cost_basis(self) -> float:
+        return self.quantity * self.average_cost
+
+    @property
+    def mark_price(self) -> float:
+        """The mark's price, else the average cost."""
+        return self.mark.price if self.mark else self.average_cost
+
+    @property
+    def marked_at(self) -> datetime | None:
+        """When the mark's price was quoted. None: no price is known."""
+        return self.mark.at if self.mark else None
+
+    @property
+    def market_value(self) -> float:
+        return self.quantity * self.mark_price
+
+    @property
+    def unrealized_pnl(self) -> float:
+        """The mark's unrealized PnL. 0 when there is no mark or the mark was taken without the trading costs."""
+        return self.mark.unrealized_pnl if self.mark and self.mark.unrealized_pnl is not None else 0.0
+
+    @validate_call
+    def profit_on_sale(self, quantity: PositiveInt, net_proceeds: FiniteFloat) -> float:
+        """Net proceeds of selling `quantity` shares minus their cost basis. The one PnL formula, realized or not."""
+        return net_proceeds - quantity * self.average_cost
+
+    @validate_call
+    def can_cover(self, quantity: PositiveInt) -> bool:
+        return self.quantity >= quantity
+
+    @validate_call
+    def add(self, quantity: PositiveInt, price: PositiveFiniteFloat) -> None:
+        """Buys more at `price`. The mark valued the old quantity, so it goes."""
+        total_quantity = self.quantity + quantity
+        self.average_cost = (self.cost_basis + quantity * price) / total_quantity
+        self.quantity = total_quantity
+        self.mark = None
+
+    @validate_call
+    def remaining_after_sell(self, quantity: PositiveInt) -> int:
+        if not self.can_cover(quantity):
+            raise ValueError("Position quantity is insufficient")
+
+        return self.quantity - quantity
+
+    @validate_call
+    def reduce(self, quantity: PositiveInt) -> None:
+        """Sells `quantity` shares. The mark valued the old quantity, so it goes."""
+        self.quantity = self.remaining_after_sell(quantity)
+        self.mark = None
+
+
+@dataclass(config=ConfigDict(validate_assignment=True))
+class Account:
     """
     Cash and positions held at the broker.
 
     Cash settles at the fill: T+2 settlement and margin are not modeled, and there are no pending
     orders (the app sends IOC only). Fees and tax reach the account through the amounts each trade
     settles with, which TradingCostRule computes.
+
+    The account the broker reports has no marks, so its market value counts every position at its average cost.
+    AccountValueRule returns the same account valued at the run's latest prices. A run sizes its BUYs on that
+    account's equity, which the run keeps as PipelineStatus.equity; menu 7 shows it as the account now.
     """
 
-    account_id: str = Field(default="default", min_length=1)
+    account_id: NonEmptyText = "default"
 
-    cash: float = Field(default=0, ge=0)
+    cash: NonNegativeFiniteFloat = 0.0
     positions: list[Position] = Field(default_factory=list)
 
     @property
@@ -27,10 +118,23 @@ class Account(SQLModel):
         """The ids of the stocks this account holds."""
         return frozenset(position.stock_id for position in self.positions)
 
-    def can_afford(self, amount: float) -> bool:
-        if not math.isfinite(amount) or amount < 0:
-            raise ValueError("Amount must be a finite non-negative number")
+    @property
+    def market_value(self) -> float:
+        """Each position at its mark, a position without one at its average cost."""
+        return sum(position.market_value for position in self.positions)
 
+    @property
+    def unrealized_pnl(self) -> float:
+        """Net of the SELL fee and tax, summed over the positions valued with the trading costs."""
+        return sum(position.unrealized_pnl for position in self.positions)
+
+    @property
+    def equity(self) -> float:
+        """Cash plus market value: gross, before the costs of selling."""
+        return self.cash + self.market_value
+
+    @validate_call
+    def can_afford(self, amount: NonNegativeFiniteFloat) -> bool:
         return self.cash >= amount
 
     def position_for(self, stock_id: str) -> Position | None:
@@ -40,44 +144,12 @@ class Account(SQLModel):
 
         return None
 
-    def refusal_for(self, order: Order, cost_rule: TradingCostRule) -> tuple[RejectReason, str] | None:
-        """
-        Why this account cannot pay for or deliver `order` at its limit price, or None. A broker's pre-trade check:
-        a BUY needs the cash for the whole quantity plus fee, a SELL needs the shares.
-        """
-        if order.limit_price is None:
-            raise ValueError("Only a priced (LIMIT) order has a known cost")
-
-        if order.action == TradeAction.BUY:
-            needed = -cost_rule.apply(TradeAction.BUY, order.stock_id, order.limit_price, order.quantity, now=order.created_at).net
-
-            if not self.can_afford(needed):
-                return RejectReason.INSUFFICIENT_CASH, f"needs {needed:,.0f} including fee, cash is {self.cash:,.0f}"
-
-            return None
-
-        position = self.position_for(order.stock_id)
-
-        if position is None:
-            return RejectReason.POSITION_NOT_FOUND, f"no {order.stock_id} shares held"
-
-        if not position.can_cover(order.quantity):
-            return RejectReason.INSUFFICIENT_POSITION, f"holds {position.quantity}, selling {order.quantity}"
-
-        return None
-
-    def buy(self, stock_id: str, quantity: int, price: float, total_cost: float) -> Position:
+    @validate_call
+    def buy(
+        self, stock_id: NonEmptyText, quantity: PositiveInt, price: PositiveFiniteFloat, total_cost: PositiveFiniteFloat
+    ) -> Position:
         """Pays `total_cost` (gross plus fee) for shares traded at `price`. The whole cost, fee included, is the cost basis."""
-        if not stock_id.strip():
-            raise ValueError("stock_id is required")
-
-        if quantity <= 0:
-            raise ValueError("Quantity must be positive")
-
-        if not math.isfinite(price) or price <= 0:
-            raise ValueError("Price must be positive")
-
-        if not math.isfinite(total_cost) or total_cost < price * quantity:
+        if total_cost < price * quantity:
             raise ValueError("Total cost cannot be below the traded value")
 
         if not self.can_afford(total_cost):
@@ -96,16 +168,11 @@ class Account(SQLModel):
 
         return position
 
-    def sell(self, stock_id: str, quantity: int, cash_delta: float) -> int:
+    @validate_call
+    def sell(self, stock_id: NonEmptyText, quantity: PositiveInt, cash_delta: FiniteFloat) -> int:
         """Receives `cash_delta` (gross minus fee and tax) and returns the shares left in the position."""
-        if not stock_id.strip():
-            raise ValueError("stock_id is required")
-
-        if quantity <= 0:
-            raise ValueError("Quantity must be positive")
-
-        if not math.isfinite(cash_delta) or self.cash + cash_delta < 0:
-            raise ValueError("Cash delta must be finite and keep cash non-negative")
+        if self.cash + cash_delta < 0:
+            raise ValueError("Cash delta must keep cash non-negative")
 
         position = self.position_for(stock_id)
 
@@ -123,3 +190,19 @@ class Account(SQLModel):
         self.cash += cash_delta
 
         return remaining_quantity
+
+
+@dataclass(frozen=True, kw_only=True)
+class AccountSnapshot:
+    """
+    The account right after a fill: its cash, and each position marked at the price the run had for it then (the
+    filled stock at its fill price), without the trading costs. All snapshots in time order are the account's
+    history. AccountAsOfRule hands one back with its account valued at a later day's closes; its identity stays the
+    fill's.
+    """
+
+    snapshot_id: UUID = Field(default_factory=uuid4)
+    taken_at: datetime
+    run_id: RunId
+    order_id: OrderId
+    account: Account

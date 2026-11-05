@@ -24,6 +24,5 @@ class IStockProvider(Protocol):
         """
         Each stock's latest official daily close, keyed by stock_id, from the same exchange listing as get_all().
         The bar's ts is its session date at the close. A stock that did not trade in that session is absent.
-        Like the Stocks, every call returns new Ohlcv objects.
         """
         ...

@@ -1,18 +1,16 @@
-from dataclasses import dataclass
 from datetime import datetime
 
-from icontract import ensure, invariant, require
+from pydantic.dataclasses import dataclass
 
 from a_domain.model.market.stock import Stock
-from a_domain.model.trading.account import Account
-from a_domain.model.trading.position import Position
+from a_domain.model.trading.account import Account, Position
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.rules.trading.reason import EntryReasonRule
 from a_domain.rules.trading.sizing import SizingRule
 from a_domain.types.enums import SignalSource, TradeAction
+from a_domain.types.values import Score
 
 
-@invariant(lambda self: 0 <= self.buy_threshold <= 100)
 @dataclass(frozen=True)
 class EntryRule:
     """
@@ -20,13 +18,10 @@ class EntryRule:
     A BUY needs a composite score at or above `buy_threshold` and a quantity SizingRule can fit with the run's equity.
     """
 
-    buy_threshold: int
+    buy_threshold: Score[int]
     sizing_rule: SizingRule
     reason_rule: EntryReasonRule
 
-    @require(lambda stock: stock.current_price is not None, "Entry decision requires a valid current price")
-    @ensure(lambda result: result.quantity >= 0, "BUY signal quantity must be non-negative")
-    @ensure(lambda result: result.action != TradeAction.BUY or result.quantity > 0, "BUY signal must have positive quantity")
     def apply(self, stock: Stock, account: Account, position: Position | None = None, *, equity: float, now: datetime) -> TradeSignal:
         current_price = stock.current_price
         composite_score = stock.composite_score
@@ -60,9 +55,6 @@ class ManualEntryRule:
 
     sizing_rule: SizingRule
 
-    @require(lambda stock: stock.current_price is not None, "Manual BUY requires a current price")
-    @require(lambda stock: stock.composite_score is not None, "Manual BUY requires a composite score")
-    @ensure(lambda result: result.source == SignalSource.MANUAL)
     def apply(self, stock: Stock, account: Account, *, equity: float, now: datetime) -> TradeSignal:
         current_price = stock.current_price
         composite_score = stock.composite_score

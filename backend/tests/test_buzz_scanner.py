@@ -1,20 +1,21 @@
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import httpx
 import pytest
 from support.settings import shipped_config
-from trading_stack import run_status
+from trading_stack import run_stats
 
 from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.post_listing import PostListing
 from a_domain.model.market.stock import Stock
+from a_domain.model.system.stats import SystemStats
 from a_domain.types.enums import InformationSource, Workflow
 from b_application.config.app_config import AppConfig
 from b_application.config.market_data_config import MarketDataConfig, MarketHoursConfig
 from b_application.config.sources_config import SourcesConfig
-from b_application.schemas.pipeline_status import PipelineStatus
 from b_application.use_cases.collect.buzz_scanner import BuzzScanner
 from c_infrastructure.feed.ptt_provider import PttProvider
 from c_infrastructure.market.twse_provider import TaiwanStockProvider
@@ -77,13 +78,12 @@ async def make_stock_provider(monkeypatch: pytest.MonkeyPatch, stock_ids: list[s
     return provider
 
 
-async def scan(articles: list[Article], stock_provider: TaiwanStockProvider, config: AppConfig) -> PipelineStatus:
+async def scan(articles: list[Article], stock_provider: TaiwanStockProvider, config: AppConfig) -> tuple[list[Stock], SystemStats]:
     scanner = BuzzScanner(
         social_media_provider=FakeSocialMediaProvider(articles), stock_provider=stock_provider, logger=SilentLogger(), config=config
     )
-    status = run_status(Workflow.BUZZ_SCAN)
-    await scanner.execute(status)
-    return status
+    stats = run_stats(Workflow.BUZZ_SCAN)
+    return await scanner.execute({}, stats), stats
 
 
 @pytest.mark.asyncio
@@ -91,12 +91,12 @@ async def test_buzz_articles_do_not_leak_into_later_workflows_in_the_same_sessio
     stock_provider = await make_stock_provider(monkeypatch, ["2330"])
     config = make_config(min_mentions=1, min_engagement=1000)
 
-    first_scan = await scan([make_post("2330")], stock_provider, config)
-    second_scan = await scan([make_post("2330")], stock_provider, config)
+    first_scan, _ = await scan([make_post("2330")], stock_provider, config)
+    second_scan, _ = await scan([make_post("2330")], stock_provider, config)
     later_lookup = await stock_provider.get_by_id("2330")
 
-    assert len(first_scan.buzz_stocks[0].articles) == 1
-    assert len(second_scan.buzz_stocks[0].articles) == 1
+    assert len(first_scan[0].articles) == 1
+    assert len(second_scan[0].articles) == 1
     assert later_lookup is not None
     assert later_lookup.articles == []
 
@@ -109,12 +109,12 @@ async def test_a_stock_qualifies_by_mention_count_or_by_engagement(monkeypatch: 
     one_engaged_post = [make_post("2222", engagement=100)]
     below_both_thresholds = [make_post("3333", engagement=5) for _ in range(19)]
 
-    status = await scan([*many_mentions, *one_engaged_post, *below_both_thresholds], stock_provider, config)
+    buzz_stocks, stats = await scan([*many_mentions, *one_engaged_post, *below_both_thresholds], stock_provider, config)
 
-    assert [stock.stock_id for stock in status.buzz_stocks] == ["1111", "2222"]
-    assert [len(stock.articles) for stock in status.buzz_stocks] == [20, 1]
-    assert status.stats.buzz_scanned == 3
-    assert status.stats.buzz_qualified == 2
+    assert [stock.stock_id for stock in buzz_stocks] == ["1111", "2222"]
+    assert [len(stock.articles) for stock in buzz_stocks] == [20, 1]
+    assert stats.buzz_scanned == 3
+    assert stats.buzz_qualified == 2
 
 
 @pytest.mark.asyncio
@@ -122,11 +122,11 @@ async def test_engagement_one_below_the_threshold_does_not_qualify(monkeypatch: 
     stock_provider = await make_stock_provider(monkeypatch, ["2222"])
     config = make_config(min_mentions=20, min_engagement=100)
 
-    status = await scan([make_post("2222", engagement=60), make_post("2222", engagement=39)], stock_provider, config)
+    buzz_stocks, stats = await scan([make_post("2222", engagement=60), make_post("2222", engagement=39)], stock_provider, config)
 
-    assert status.buzz_stocks == []
-    assert status.stats.buzz_scanned == 1
-    assert status.stats.buzz_qualified == 0
+    assert buzz_stocks == []
+    assert stats.buzz_scanned == 1
+    assert stats.buzz_qualified == 0
 
 
 def test_ptt_post_engagement_counts_every_push_boo_and_arrow() -> None:
@@ -237,7 +237,7 @@ async def test_ptt_reads_at_most_30_search_pages_for_one_tag(monkeypatch: pytest
 
 def test_the_buzz_archive_quotes_the_first_500_characters_of_each_post(tmp_path: Path) -> None:
     ptt = PttProvider(config=shipped_config(tmp_path), logger=SilentLogger(), stock_provider=FakeStockList())
-    post = make_post("2330").model_copy(update={"content": "a" * 500 + "b" * 100})
+    post = replace(make_post("2330"), content="a" * 500 + "b" * 100)
 
     ptt.save_social_media_data([post])
 

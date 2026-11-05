@@ -1,60 +1,37 @@
 from typing import Any
 
-from fastapi import APIRouter
-from fastapi.exceptions import RequestValidationError
-from pydantic import ValidationError
+from fastapi import APIRouter, status
 
-from c_infrastructure.technical.technical_settings_schema import TechnicalSettingsSchema
-from d_presentation.dependencies import RuntimeDependency, WritePermission
-from d_presentation.web.schemas import Confirmed, TechnicalSettingsRequest
+from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
+from d_presentation.dependencies import ApiToken, RuntimeDependency
+from d_presentation.web.schemas import TechnicalSettingsRequest
 
 router = APIRouter(prefix="/technical-settings", tags=["Technical settings"])
 
-
-async def current_document(runtime: RuntimeDependency) -> dict[str, Any]:
-    return TechnicalSettingsSchema.from_domain(await runtime.technical_settings_repository.load()).to_document()
+CONFLICT: dict[int | str, dict[str, Any]] = {status.HTTP_409_CONFLICT: {"description": "Another save came first"}}
 
 
-@router.get("")
-async def get_technical_settings(runtime: RuntimeDependency) -> dict[str, Any]:
+@router.get("", dependencies=[ApiToken], responses=CONFLICT)
+async def get_technical_settings(runtime: RuntimeDependency) -> TechnicalSettings:
     """
-    The settings the next workflow will use: the active and Buzz strategy ids, and each strategy's indicator parameters,
-    scoring and rules. A workflow already running keeps the settings it started with.
+    The owner's strategies and which one each workflow uses, with the revision a save must carry. The first read
+    copies every built-in strategy for the owner. A workflow already running keeps the strategy it started with. A
+    save that lands during the read answers 409: read again.
     """
-    return await current_document(runtime)
+    return await runtime.pipeline.load_technical_settings()
 
 
-@router.get("/schema")
-async def get_technical_settings_schema() -> dict[str, Any]:
-    """The JSON schema of the settings document, with each field's type and bounds."""
-    return TechnicalSettingsSchema.model_json_schema()
-
-
-@router.put("", dependencies=[WritePermission])
-async def save_technical_settings(body: TechnicalSettingsRequest, runtime: RuntimeDependency) -> dict[str, Any]:
+@router.put("", dependencies=[ApiToken], responses=CONFLICT)
+async def save_technical_settings(body: TechnicalSettingsRequest, runtime: RuntimeDependency) -> TechnicalSettings:
     """
-    Validates the whole document and saves it to config/technical.local.yaml for the next workflow. An invalid document
-    saves nothing and answers 422 with one error per field, located under body.settings.
+    Replaces the owner's settings as a whole, for the next workflow. Invalid settings save nothing and answer 422 with
+    one error per field under body.settings. Settings read before another save answer 409 and save nothing: read
+    them again, reapply the change, and save with the new revision.
     """
-    try:
-        settings = TechnicalSettingsSchema.model_validate(body.settings).to_domain()
-
-    except ValidationError as error:
-        raise RequestValidationError(
-            [
-                {"loc": ("body", "settings", *detail["loc"]), "msg": detail["msg"], "type": detail["type"]}
-                for detail in error.errors(include_url=False, include_context=False, include_input=False)
-            ]
-        ) from error
-
-    await runtime.technical_settings_repository.save(settings)
-
-    return await current_document(runtime)
+    return await runtime.pipeline.save_technical_settings(body.settings)
 
 
-@router.post("/reset", dependencies=[WritePermission])
-async def reset_technical_settings(body: Confirmed, runtime: RuntimeDependency) -> dict[str, Any]:
-    """Deletes config/technical.local.yaml, so the next workflow uses config/technical.yaml again."""
-    await runtime.technical_settings_repository.reset()
-
-    return await current_document(runtime)
+@router.get("/built-in-strategies")
+async def get_built_in_strategies(runtime: RuntimeDependency) -> tuple[TechnicalStrategy, ...]:
+    """The developer's strategies. A client copies one under its own strategy_id to start an owner's strategy from it."""
+    return runtime.config.technical.built_in_strategies

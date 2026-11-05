@@ -3,11 +3,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+import httpx
 import pytest
 
-from a_domain.model.fundamentals.fiscal_quarter import FiscalQuarter
-from a_domain.model.fundamentals.quarter_eps import QuarterEps
-from a_domain.types.enums import MarketType
+from a_domain.rules.fundamentals.trailing_eps import QuarterEps
+from a_domain.types.enums import DatabaseBackend, MarketType
+from a_domain.types.values import FiscalQuarter
 from b_application.config.market_data_config import MarketHoursConfig
 from b_application.config.sources_config import SourcesConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
@@ -56,7 +57,10 @@ class FakeMops:
 
 
 async def build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[MopsFundamentalsProvider, FakeMops, MovableClock]:
-    config = SimpleNamespace(project_root=tmp_path, db=SimpleNamespace(user=None, password=None, host=None, name=None, port=5432))
+    config = SimpleNamespace(
+        project_root=tmp_path,
+        db=SimpleNamespace(backend=DatabaseBackend.SQLITE, user=None, password=None, host=None, name=None, port=5432),
+    )
     db = DatabaseConnector(config=cast(Any, config), logger=SilentLogger())
     await db.init_db()
     clock = MovableClock()
@@ -201,3 +205,24 @@ async def test_industries_merge_every_market_and_refetch_a_market_only_once_its_
     clock.current += timedelta(hours=24)
     assert await provider.fetch_industries() == {"2330": "半導體業", "6488": "半導體業"}
     assert requests == [MarketType.TWSE, MarketType.TPEX, MarketType.TPEX, MarketType.TWSE, MarketType.TPEX]
+
+
+@pytest.mark.asyncio
+async def test_industries_come_from_every_companys_profile_and_name_its_industry_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Trimmed rows of t187ap03_L and mopsfin_t187ap03_O as served on 2026-11-04. 91 (depositary receipts) has no name."""
+    profiles = {
+        SOURCES.mops.twse_industries_url: [
+            {"公司代號": "1101", "公司簡稱": "台泥", "產業別": "01"},
+            {"公司代號": "2330", "公司簡稱": "台積電", "產業別": "24"},
+            {"公司代號": "9103", "公司簡稱": "美德醫療-DR", "產業別": "91"},
+        ],
+        SOURCES.mops.tpex_industries_url: [
+            {"SecuritiesCompanyCode": "6488", "CompanyAbbreviation": "環球晶", "SecuritiesIndustryCode": "24"},
+            {"SecuritiesCompanyCode": "8069", "CompanyAbbreviation": "元太", "SecuritiesIndustryCode": "26"},
+        ],
+    }
+    real_client = httpx.AsyncClient
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json=profiles[str(request.url)]))
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: real_client(transport=transport))
+
+    assert await parser().fetch_industries() == {"1101": "水泥工業", "2330": "半導體業", "6488": "半導體業", "8069": "光電業"}

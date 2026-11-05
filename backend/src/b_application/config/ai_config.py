@@ -1,7 +1,41 @@
-from pydantic import BaseModel, Field
+from string import Formatter
+from typing import Annotated, Literal
+
+from pydantic import AfterValidator, BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from a_domain.types.enums import AiProvider
+
+
+def placeholders(required: set[str], optional: set[str] | None = None) -> AfterValidator:
+    """
+    A prompt template the code fills with str.format: it must name every required placeholder and no other than the
+    optional ones, and write a literal brace twice. An empty template is unset. Checked at startup and before the
+    administrator's save, so a broken template never reaches a run.
+    """
+    allowed = required | (optional or set())
+
+    def check(template: str | None) -> str | None:
+        if not template:
+            return template
+
+        try:
+            names = {field.split(".")[0].split("[")[0] for _, field, _, _ in Formatter().parse(template) if field is not None}
+        except ValueError as error:
+            raise ValueError(f"not a valid template ({error}); write a literal brace as {{{{ or }}}}") from error
+
+        if unknown := names - allowed:
+            raise ValueError(f"unknown placeholders {sorted(unknown)}; this template may use {sorted(allowed)}")
+
+        if missing := required - names:
+            raise ValueError(f"missing placeholders {sorted(missing)}")
+
+        return template
+
+    return AfterValidator(check)
+
+
+type ReportPrompt = Annotated[str, placeholders({"stock_id", "articles_text"})]
 
 
 class AiConfig(BaseSettings):
@@ -16,20 +50,43 @@ class AiConfig(BaseSettings):
     grok_api_key: str | None = Field(default=None, validation_alias="GROK_API_KEY")
     gemini_api_key: str | None = Field(default=None, validation_alias="GEMINI_API_KEY")
     groq_api_key: str | None = Field(default=None, validation_alias="GROQ_API_KEY")
+    nvidia_api_key: str | None = Field(default=None, validation_alias="NVIDIA_API_KEY")
+    anthropic_api_key: str | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
 
     connection_timeout: int = Field(description="Timeout for AI model connections")
     temperature: float = Field(ge=0, le=2)
-    """How freely the model words its reply: 0 always picks the likeliest words."""
+    """How freely the model words its reply: 0 always picks the likeliest words. Claude refuses this setting."""
+
+    max_output_tokens: int = Field(gt=0)
+    """The most tokens a Claude reply may use, its thinking included. The other providers use their own default."""
+
+    def missing_key(self) -> str | None:
+        """The environment variable the active provider still needs, or None when its model and key are set."""
+        keys = {
+            AiProvider.OPENAI: ("OPENAI_API_KEY", self.openai_api_key),
+            AiProvider.GROK: ("GROK_API_KEY", self.grok_api_key),
+            AiProvider.GEMINI: ("GEMINI_API_KEY", self.gemini_api_key),
+            AiProvider.GROQ: ("GROQ_API_KEY", self.groq_api_key),
+            AiProvider.NVIDIA: ("NVIDIA_API_KEY", self.nvidia_api_key),
+            AiProvider.CLAUDE: ("ANTHROPIC_API_KEY", self.anthropic_api_key),
+        }
+        name, key = keys[self.active_model]
+
+        if self.active_model not in self.available_models:
+            return f"ai.available_models.{self.active_model.value}"
+
+        return name if not (key and key.strip()) else None
 
     system_prompt: str | None = None
-    rag_injection_prompt: str | None = None
+    rag_injection_prompt: Annotated[str | None, placeholders({"search_results"})] = None
     article_content_length: int = Field(ge=100)
 
 
 class BehaviorConfig(BaseModel):
     """System behaviour and toggles. The web and X search filters default to none; the rest comes from config/appsetting.yaml."""
 
-    log_level: str | int
+    log_level: Literal["TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"] | int
+    """A loguru level name or number: the logger refuses any other at startup."""
     enable_web_search: bool
     enable_x_search: bool
     enable_inline_citations: bool
@@ -56,10 +113,15 @@ class TavilyConfig(BaseSettings):
 class PromptsConfig(BaseModel):
     """AI analysis prompt templates."""
 
-    analysis_report_fundamental: str = ""
-    analysis_report_momentum: str = ""
-    valuation_explanation: str = ""
-    social_sentiment: str = ""
+    analysis_report_fundamental: ReportPrompt = ""
+    analysis_report_momentum: ReportPrompt = ""
+    valuation_explanation: Annotated[
+        str,
+        placeholders({"valuation_facts", "valuation_rules", "data_warnings"}, {"stock_id", "stock_name", "industry", "articles_text"}),
+    ] = ""
+    """The domain's numbers, rules and data warnings must reach the AI, which only explains them."""
+
+    social_sentiment: Annotated[str, placeholders({"stock_id", "posts_text"})] = ""
 
 
 class SentimentConfig(BaseModel):

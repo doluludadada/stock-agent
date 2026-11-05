@@ -22,20 +22,21 @@ async def bought_2000_on_monday(tmp_path):
 async def test_current_positions_are_marked_at_the_latest_quote_net_of_exit_costs(tmp_path) -> None:
     stack = await bought_2000_on_monday(tmp_path)
 
-    report = await stack.account_history.execute(as_of=None)
+    status = await stack.pipeline.load_account_history(as_of=None)
 
-    [held] = report.current.positions
-    assert (held.position.quantity, held.mark.close, held.market_value) == (2000, 112, 224_000)
+    [held] = status.account.positions
+    assert (held.quantity, held.mark_price, held.market_value) == (2000, 112, 224_000)
     assert held.unrealized_pnl == pytest.approx(224_000 - 319 - 672 - 200_285)
-    assert report.current.equity == pytest.approx(1_000_000 - 200_285 + 224_000)
+    assert status.account.equity == pytest.approx(1_000_000 - 200_285 + 224_000)
+    assert status.live_stock_ids == {"2330"}
 
 
 async def test_the_equity_curve_marks_each_trading_day_at_its_close(tmp_path) -> None:
     stack = await bought_2000_on_monday(tmp_path)
 
-    report = await stack.account_history.execute(as_of=None)
+    status = await stack.pipeline.load_account_history(as_of=None)
 
-    assert [(point.day, point.cash, point.equity) for point in report.equity_curve] == [
+    assert [(day, account.cash, account.equity) for day, account in status.equity_curve.items()] == [
         (date(2026, 10, 19), 799_715, 999_715),
         (date(2026, 10, 20), 799_715, 1_019_715),
     ]
@@ -49,12 +50,12 @@ async def test_the_account_as_of_a_day_is_its_last_fill_marked_at_that_days_clos
 ) -> None:
     stack = await bought_2000_on_monday(tmp_path)
 
-    report = await stack.account_history.execute(as_of=day)
+    status = await stack.pipeline.load_account_history(as_of=day)
 
     if market_value is None:
-        assert report.as_of is None
+        assert status.account_as_of is None
         return
 
-    assert report.as_of is not None
-    _, valuation = report.as_of
-    assert (valuation.cash, valuation.market_value) == (799_715, market_value)
+    assert status.account_as_of is not None
+    account = status.account_as_of.account
+    assert (account.cash, account.market_value) == (799_715, market_value)

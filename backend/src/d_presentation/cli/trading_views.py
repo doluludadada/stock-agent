@@ -4,11 +4,9 @@ from rich.console import JustifyMethod
 from rich.table import Table
 
 from a_domain.model.market.stock import Stock
-from a_domain.model.trading.watchlist_addition import WatchlistAddition
-from a_domain.types.enums import WatchlistType
+from a_domain.rules.watchlist.membership import WatchlistAddition
 from b_application.pipeline import Pipeline
 from b_application.schemas.pipeline_status import PipelineStatus
-from b_application.use_cases.trade.watch_stocks import WatchStocks
 from d_presentation.cli import terminal
 from d_presentation.dependencies import Runtime
 
@@ -27,36 +25,42 @@ STOCK_REPORT_COLUMNS: tuple[tuple[str, JustifyMethod], ...] = (
 )
 
 
-async def scan_social_buzz(runtime: Runtime) -> PipelineStatus:
-    status = await runtime.pipeline.run_buzz_scan()
+async def scan_social_buzz(runtime: Runtime, session: terminal.CliSession) -> PipelineStatus:
+    status = await runtime.pipeline.run_buzz_scan(built_in_strategy_id=session.built_in_strategy_id)
 
     print_buzz_report(status)
 
     return status
 
 
-async def analyse_specific_stocks(runtime: Runtime) -> PipelineStatus | None:
+async def analyse_specific_stocks(runtime: Runtime, session: terminal.CliSession) -> PipelineStatus | None:
     stock_ids = terminal.ask_stock_ids()
 
     if stock_ids is None:
         return None
 
-    status = await runtime.pipeline.analyse_specific_stocks(stock_ids)
+    status = await runtime.pipeline.analyse_specific_stocks(stock_ids, built_in_strategy_id=session.built_in_strategy_id)
 
     print_stock_reports(status.manual_stocks)
 
-    await offer_manual_watchlist(stocks=status.manual_stocks, watch_stocks=runtime.watch_stocks)
+    await offer_manual_watchlist(stocks=status.manual_stocks, pipeline=runtime.pipeline)
 
     await offer_manual_buy(stocks=status.manual_stocks, pipeline=runtime.pipeline)
 
     return status
 
 
-async def offer_manual_watchlist(stocks: list[Stock], watch_stocks: WatchStocks) -> None:
+async def offer_manual_watchlist(stocks: list[Stock], pipeline: Pipeline) -> None:
     if not stocks or not terminal.confirm("Add these stocks to the manual watchlist?"):
         return
 
-    print_watchlist_result(await watch_stocks.execute(stocks=stocks, watchlist_type=WatchlistType.MANUAL))
+    _, addition = await pipeline.watch_manually([stock.stock_id for stock in stocks])
+
+    if addition is None:
+        terminal.console.print("[yellow]The listing no longer holds every analysed stock; nothing was added.[/yellow]")
+        return
+
+    print_watchlist_result(addition)
 
 
 async def offer_manual_buy(stocks: list[Stock], pipeline: Pipeline) -> None:
@@ -130,11 +134,13 @@ def print_context_summary(status: PipelineStatus) -> None:
     terminal.console.print("[bold green]Execution Complete[/bold green]")
     terminal.console.print(
         f"Scanned={status.stats.total_scanned}, "
-        f"Survivors={len(status.survivors)}, "
+        f"Survivors={status.stats.passed_technical}, "
         f"Signals={status.stats.signals_generated}, "
         f"Orders={status.stats.orders_submitted}, "
         f"Stale={status.stats.stale_market_data_count}, "
-        f"Errors={status.stats.total_errors}"
+        f"Errors={status.stats.total_errors}, "
+        f"Filled={status.stats.orders_filled}, "
+        f"Strategy={status.stats.technical_strategy_id or '-'}"
     )
 
     if status.stale_stock_ids:
@@ -155,8 +161,10 @@ def print_stale_market_data(status: PipelineStatus) -> None:
     table.add_column("Stock")
     table.add_column("Last Data Time")
 
+    stocks = status.stocks
+
     for stock_id in sorted(status.stale_stock_ids):
-        stock = status.stocks_cache.get(stock_id)
+        stock = stocks.get(stock_id)
         data_time = stock.latest_market_data_at if stock is not None else None
 
         table.add_row(stock_id, terminal.format_datetime(data_time))

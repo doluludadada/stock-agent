@@ -1,11 +1,28 @@
 from datetime import datetime
 
+from pydantic.dataclasses import dataclass
+
 from a_domain.model.market.stock import Stock
-from a_domain.model.trading.watchlist_addition import WatchlistAddition
-from a_domain.model.trading.watchlist_entry import WatchlistEntry
+from a_domain.model.trading.watchlist import WatchlistEntry
 from a_domain.types.enums import WatchlistType
 
 
+@dataclass(frozen=True)
+class WatchlistAddition:
+    """What WatchlistRule decided for one watchlist type: the entries to save, and the stocks that were already on it."""
+
+    watchlist_type: WatchlistType
+    entries: list[WatchlistEntry]
+    """Entries to persist: new memberships plus renewed automatic ones."""
+
+    already_present_stock_ids: list[str]
+
+    @property
+    def added_stock_ids(self) -> list[str]:
+        return [entry.stock_id for entry in self.entries if entry.stock_id not in self.already_present_stock_ids]
+
+
+@dataclass(frozen=True)
 class WatchlistRule:
     """
     Decides how stocks join the watchlist.
@@ -40,6 +57,4 @@ class WatchlistRule:
             if not (is_manual and stock.stock_id in current_entries)
         ]
 
-        return WatchlistAddition(
-            watchlist_type=watchlist_type, stocks=unique_stocks, already_present_stock_ids=already_present_stock_ids, entries=entries
-        )
+        return WatchlistAddition(watchlist_type=watchlist_type, entries=entries, already_present_stock_ids=already_present_stock_ids)

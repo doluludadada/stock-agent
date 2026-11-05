@@ -11,8 +11,8 @@ class IDatabaseConnector[Session](Protocol):
 
     async def init_db(self) -> None:
         """
-        Creates the tables that do not exist yet, stamping a new database with the code's schema version, after refusing
-        a database whose stamp or tables do not match the code.
+        Creates the tables that do not exist yet, stamping a new database with the code's schema version, after
+        upgrading a database of an older version in place and refusing one whose stamp or tables do not match the code.
         """
         ...
 

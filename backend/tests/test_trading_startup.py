@@ -150,7 +150,7 @@ def screen(monkeypatch) -> io.StringIO:
 async def test_the_menu_header_warns_about_a_real_broker(
     screen: io.StringIO, simulation: bool, mode: OrderMode, server: str, orders: str
 ) -> None:
-    interactive.print_menu(trading_config(LIVE, SHIOAJI, mode, simulation=simulation, **ALL_CREDENTIALS))
+    interactive.print_menu(trading_config(LIVE, SHIOAJI, mode, simulation=simulation, **ALL_CREDENTIALS), terminal.CliSession())
 
     output = screen.getvalue()
     assert "REAL BROKER" in output and server in output and orders in output
@@ -158,7 +158,7 @@ async def test_the_menu_header_warns_about_a_real_broker(
 
 
 async def test_the_menu_header_shows_no_broker_warning_for_the_mock(screen: io.StringIO) -> None:
-    interactive.print_menu(trading_config(DEV, MOCK, OrderMode.MOCK_ONLY))
+    interactive.print_menu(trading_config(DEV, MOCK, OrderMode.MOCK_ONLY), terminal.CliSession())
 
     output = screen.getvalue()
     assert "REAL BROKER" not in output
@@ -182,7 +182,7 @@ def menu_entry(output: str, title: str) -> list[str]:
 async def test_menus_2_3_and_4_say_they_may_submit_orders_under_the_current_order_mode(
     screen: io.StringIO, environment: SystemEnvironment, provider: ExecutionProvider, mode: OrderMode, orders: str
 ) -> None:
-    interactive.print_menu(trading_config(environment, provider, mode, **ALL_CREDENTIALS))
+    interactive.print_menu(trading_config(environment, provider, mode, **ALL_CREDENTIALS), terminal.CliSession())
 
     output = screen.getvalue()
     assert orders in menu_entry(output, "[2] Scan Social Buzz")

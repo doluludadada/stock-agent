@@ -1,13 +1,11 @@
 from collections import defaultdict
-from dataclasses import dataclass
 
-import icontract
+from pydantic import NonNegativeInt
+from pydantic.dataclasses import dataclass
 
 from a_domain.model.market.article import Article
 
 
-@icontract.invariant(lambda self: self.min_mentions >= 0)
-@icontract.invariant(lambda self: self.min_engagement >= 0)
 @dataclass(frozen=True)
 class SocialBuzzCriteria:
     """
@@ -15,8 +13,8 @@ class SocialBuzzCriteria:
     their engagement adds up to `min_engagement`.
     """
 
-    min_mentions: int
-    min_engagement: int
+    min_mentions: NonNegativeInt
+    min_engagement: NonNegativeInt
 
     def apply(self, articles: list[Article]) -> dict[str, list[Article]]:
         """The posts of each trending stock by stock id, in the order the stocks were first mentioned."""

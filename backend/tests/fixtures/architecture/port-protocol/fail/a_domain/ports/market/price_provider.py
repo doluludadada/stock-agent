@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Protocol
 
 
@@ -12,3 +13,8 @@ class StockProvider(Protocol):
 class IClock:
     def now(self) -> float:
         return 0.0
+
+
+@dataclass(frozen=True)
+class Quote:
+    price: float

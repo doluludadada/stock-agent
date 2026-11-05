@@ -8,12 +8,13 @@ from typing import override
 import httpx
 from bs4 import BeautifulSoup
 
-from a_domain.model.fundamentals.fiscal_quarter import FiscalQuarter
-from a_domain.model.fundamentals.quarter_eps import EpsFilings, QuarterEps
 from a_domain.ports.market.fundamentals_provider import IFundamentalsProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
+from a_domain.rules.fundamentals.filing import FilingDeadlineRule, FinalFilingsRule
+from a_domain.rules.fundamentals.trailing_eps import EpsFilings, QuarterEps
 from a_domain.types.enums import MarketType
+from a_domain.types.values import FiscalQuarter
 from b_application.config.sources_config import MopsSources
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.quarter_eps_dto import QuarterEpsDTO
@@ -23,7 +24,8 @@ from c_infrastructure.market.twse_provider import ROC_YEAR_OFFSET
 class MopsFundamentalsProvider(IFundamentalsProvider):
     """
     Cumulative EPS from the MOPS bulk income statements (one page per market and quarter), cached in SQLite.
-    Industry from the MOPS income-statement summaries on the TWSE and TPEX OpenAPI, cached in memory.
+    Industry from the company profiles on the TWSE and TPEX OpenAPI, whose industry codes `industry_names` names, cached
+    in memory.
 
     A quarter's cached page is final, and never fetched again, once it was fetched after the quarter's last filing
     deadline plus grace and is not empty. Any other page is reused for `provisional_page_max_age_hours`.
@@ -34,11 +36,14 @@ class MopsFundamentalsProvider(IFundamentalsProvider):
         self._mops = mops
         self._market_codes = {MarketType.TWSE: mops.twse_market_code, MarketType.TPEX: mops.tpex_market_code}
         self._industry_sources = {
-            MarketType.TWSE: (mops.twse_industries_url, mops.twse_industry_company_field),
-            MarketType.TPEX: (mops.tpex_industries_url, mops.tpex_industry_company_field),
+            MarketType.TWSE: (mops.twse_industries_url, mops.twse_industry_company_field, mops.twse_industry_field),
+            MarketType.TPEX: (mops.tpex_industries_url, mops.tpex_industry_company_field, mops.tpex_industry_field),
         }
         self._provisional_page_max_age = timedelta(hours=mops.provisional_page_max_age_hours)
         self._industry_max_age = timedelta(hours=mops.industry_max_age_hours)
+        self._final_filings_rule = FinalFilingsRule(
+            filing_deadline_rule=FilingDeadlineRule(mops.filing_deadlines), grace_days=mops.filing_grace_days
+        )
         self._clock = market_clock
         self._logger = logger
         self._last_request_at: float | None = None
@@ -80,7 +85,7 @@ class MopsFundamentalsProvider(IFundamentalsProvider):
 
         cumulative_eps = await self.download(market, quarter)
 
-        if cumulative_eps == {} and quarter.is_final_on(today):
+        if cumulative_eps == {} and self._final_filings_rule.apply(quarter, today):
             self._logger.warning(f"{label}: empty page for a quarter whose filing deadline has passed; not cached")
             cumulative_eps = None
 
@@ -100,7 +105,7 @@ class MopsFundamentalsProvider(IFundamentalsProvider):
 
     @override
     def is_reusable(self, page: QuarterEps, now: datetime) -> bool:
-        if page.cumulative_eps and page.quarter.is_final_on(self._clock.to_trading_date(page.fetched_at)):
+        if page.cumulative_eps and self._final_filings_rule.apply(page.quarter, self._clock.to_trading_date(page.fetched_at)):
             return True
 
         return now - page.fetched_at < self._provisional_page_max_age
@@ -216,17 +221,17 @@ class MopsFundamentalsProvider(IFundamentalsProvider):
 
     @override
     async def fetch_market_industries(self, market: MarketType) -> dict[str, str] | None:
-        url, id_field = self._industry_sources[market]
-        industry_field = self._mops.industry_field
+        url, id_field, industry_field = self._industry_sources[market]
+        names = self._mops.industry_names
 
         try:
             async with httpx.AsyncClient(timeout=self._mops.timeout_seconds) as client:
                 response = await client.get(url)
                 response.raise_for_status()
                 return {
-                    str(row[id_field]).strip(): str(row[industry_field]).strip()
+                    str(row[id_field]).strip(): names[code]
                     for row in response.json()
-                    if row.get(id_field) and row.get(industry_field)
+                    if row.get(id_field) and (code := str(row.get(industry_field, "")).strip()) in names
                 }
         except Exception as error:
             self._logger.warning(f"MOPS industries for {market.value} unavailable: {error}")

@@ -9,7 +9,9 @@ from dataclasses import dataclass
 from rich.panel import Panel
 
 from a_domain.types.enums import ExecutionProvider, OrderMode
+from a_domain.types.errors import ListingUnavailableError
 from b_application.config.app_config import AppConfig
+from b_application.config.settings_loader import InvalidSettingsError
 from b_application.schemas.pipeline_status import PipelineStatus
 from c_infrastructure.database.db_connector import OutdatedDatabaseError
 from d_presentation.cli import account_views, terminal, trading_views, valuation_views
@@ -22,7 +24,7 @@ EXIT = "0"
 class MenuOption:
     title: str
     description: tuple[str, ...]
-    run: Callable[[Runtime], Awaitable[PipelineStatus | None]]
+    run: Callable[[Runtime, terminal.CliSession], Awaitable[PipelineStatus | None]]
     """The option's view. It returns the trading workflow's status, which the menu summarizes, or None."""
 
     may_submit_orders: bool = False
@@ -41,7 +43,7 @@ MENU = {
             "Analyse watchlist stocks with news and AI.",
             "Generate next-day trading signals.",
         ),
-        run=lambda runtime: runtime.pipeline.run_full_cycle(),
+        run=lambda runtime, session: runtime.pipeline.run_full_cycle(built_in_strategy_id=session.built_in_strategy_id),
     ),
     "2": MenuOption(
         title="Scan Social Buzz",
@@ -52,7 +54,7 @@ MENU = {
     "3": MenuOption(
         title="Run Intraday Trading",
         description=("Revalidate positions and active watchlist stocks.", "Generate signals."),
-        run=lambda runtime: runtime.pipeline.run_intraday(),
+        run=lambda runtime, session: runtime.pipeline.run_intraday(built_in_strategy_id=session.built_in_strategy_id),
         may_submit_orders=True,
     ),
     "4": MenuOption(
@@ -85,16 +87,26 @@ MENU = {
             "Show cash, positions and unrealized PnL at the latest prices.",
             "Show the equity curve and the account as of a date. Never places orders.",
         ),
-        run=account_views.show_account_history,
+        run=lambda runtime, _: account_views.show_account_history(runtime),
+    ),
+    "8": MenuOption(
+        title="Load Built-in Strategy",
+        description=(
+            "Use a built-in technical strategy for the runs this session starts.",
+            "Saved settings and the Web API stay as they are.",
+        ),
+        run=lambda runtime, session: load_built_in_strategy(runtime, session),
     ),
 }
 
 
 async def interactive_menu() -> None:
+    session = terminal.CliSession()
+
     async with open_runtime() as runtime:
         try:
-            while (choice := ask_menu_choice(runtime.config)) not in (None, EXIT):
-                await run_menu_option(choice, runtime)
+            while (choice := ask_menu_choice(runtime.config, session)) not in (None, EXIT):
+                await run_menu_option(choice, runtime, session)
                 terminal.console.print("\n" + "=" * 50 + "\n")
 
         finally:
@@ -103,8 +115,8 @@ async def interactive_menu() -> None:
     terminal.console.print("[bold green]System stopped.[/bold green]")
 
 
-def ask_menu_choice(config: AppConfig) -> str | None:
-    print_menu(config)
+def ask_menu_choice(config: AppConfig, session: terminal.CliSession) -> str | None:
+    print_menu(config, session)
     choice = terminal.ask_user("Select an option", choices=[EXIT, *MENU])
 
     if choice is None:
@@ -113,14 +125,20 @@ def ask_menu_choice(config: AppConfig) -> str | None:
     return choice
 
 
-async def run_menu_option(choice: str, runtime: Runtime) -> PipelineStatus | None:
-    """Runs the chosen option and summarizes the trading workflow it ran. Ctrl-D at one of its y/n prompts cancels it."""
+async def run_menu_option(choice: str, runtime: Runtime, session: terminal.CliSession | None = None) -> PipelineStatus | None:
+    """
+    Runs the chosen option and summarizes the trading workflow it ran. Ctrl-D at one of its y/n prompts cancels it.
+    Without a session the option runs on the saved settings.
+    """
     option = MENU[choice]
 
     try:
-        status = await option.run(runtime)
+        status = await option.run(runtime, session or terminal.CliSession())
     except EOFError:
         terminal.console.print(f"\n[yellow]{option.title} cancelled.[/yellow]")
+        return None
+    except ListingUnavailableError as error:
+        terminal.console.print(f"[red]{error}[/red]")
         return None
 
     if status is not None:
@@ -129,8 +147,10 @@ async def run_menu_option(choice: str, runtime: Runtime) -> PipelineStatus | Non
     return status
 
 
-def print_menu(config: AppConfig) -> None:
+def print_menu(config: AppConfig, session: terminal.CliSession) -> None:
     print_trading_setup(config)
+    strategy = session.built_in_strategy_id
+    terminal.console.print(f"Technical strategy: {f'built-in {strategy}, this session only' if strategy else 'saved settings'}")
     terminal.console.print("")
 
     for key, option in MENU.items():
@@ -145,6 +165,28 @@ def print_menu(config: AppConfig) -> None:
         terminal.console.print("")
 
     terminal.console.print(f"[{EXIT}] Exit")
+
+
+async def load_built_in_strategy(runtime: Runtime, session: terminal.CliSession) -> None:
+    """Menu 8: one of the built-in strategies for this session's runs, or cancel and keep the current choice."""
+    strategies = runtime.config.technical.built_in_strategies
+
+    for number, strategy in enumerate(strategies, start=1):
+        terminal.console.print(f"[{number}] {strategy.name}")
+
+    terminal.console.print(f"[{EXIT}] Cancel")
+    choice = terminal.ask_user(
+        "Load which built-in strategy", choices=[EXIT, *(str(number) for number in range(1, len(strategies) + 1))]
+    )
+
+    if choice in (None, EXIT):
+        terminal.console.print("\n[yellow]Cancelled. The strategy is unchanged.[/yellow]")
+        return None
+
+    strategy = strategies[int(choice) - 1]
+    session.built_in_strategy_id = strategy.strategy_id
+    terminal.console.print(f"Runs in this session use the built-in {strategy.name} strategy. Saved settings are unchanged.")
+    return None
 
 
 def print_trading_setup(config: AppConfig) -> None:
@@ -195,7 +237,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt, asyncio.CancelledError, SystemExit:
         pass
 
-    except (OutdatedDatabaseError, TradingSetupError) as error:
+    except (InvalidSettingsError, OutdatedDatabaseError, TradingSetupError) as error:
         terminal.console.print(str(error), style="red", markup=False, highlight=False)
         exit_code = 1
 

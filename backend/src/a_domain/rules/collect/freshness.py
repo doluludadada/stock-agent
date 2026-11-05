@@ -1,13 +1,13 @@
 from collections.abc import Mapping
-from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from typing import Annotated
 
-import icontract
+from pydantic import Field, NonNegativeInt, PositiveInt
+from pydantic.dataclasses import dataclass
 
 from a_domain.model.market.ohlcv import Ohlcv
 
 
-@icontract.invariant(lambda self: self.max_lag > timedelta(0))
 @dataclass(frozen=True)
 class DataFreshnessRule:
     """
@@ -17,7 +17,7 @@ class DataFreshnessRule:
     Daily history is compared as trading dates (days matter for technical analysis).
     """
 
-    max_lag: timedelta
+    max_lag: Annotated[timedelta, Field(gt=timedelta(0))]
 
     def apply(self, observed_at: date, now: date) -> bool:
         return now - observed_at <= self.max_lag
@@ -39,7 +39,6 @@ class RealtimeQuoteRule:
         return f"stale realtime bar: {quote.ts.isoformat()}"
 
 
-@icontract.invariant(lambda self: self.listed_stock_limit > 0)
 @dataclass(frozen=True)
 class MissingSessionRule:
     """
@@ -49,7 +48,7 @@ class MissingSessionRule:
     `listed_stock_limit` of them.
     """
 
-    listed_stock_limit: int
+    listed_stock_limit: PositiveInt
 
     def apply(self, last_sessions: Mapping[str, date], settled_session: date) -> str | None:
         behind = sorted(stock_id for stock_id, session in last_sessions.items() if session < settled_session)
@@ -81,7 +80,6 @@ class MissedSessionsRule:
         return missed
 
 
-@icontract.invariant(lambda self: self.max_missed_sessions >= 0)
 @dataclass(frozen=True)
 class DailyCloseFreshnessRule:
     """
@@ -93,7 +91,7 @@ class DailyCloseFreshnessRule:
     stale until the next close is published. That errs toward excluding a price, never toward using an old one.
     """
 
-    max_missed_sessions: int
+    max_missed_sessions: NonNegativeInt
 
     def apply(self, session: date, last_closed_session: date) -> bool:
         return MissedSessionsRule().apply(session, last_closed_session) <= self.max_missed_sessions

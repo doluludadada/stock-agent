@@ -9,8 +9,9 @@ from support.fakes import RecordingLogger
 
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
-from a_domain.types.enums import MarketType
+from a_domain.types.enums import MarketIndex, MarketType
 from b_application.config.market_data_config import MarketDataConfig, MarketHoursConfig
+from b_application.config.sources_config import SourcesConfig
 from c_infrastructure.market.yahoo_finance_adapter import YahooFinanceProvider
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
 
@@ -52,6 +53,7 @@ def provider(batch_size: int = 50) -> YahooFinanceProvider:
     return YahooFinanceProvider(
         TaiwanMarketClock(MarketHoursConfig()),
         MarketDataConfig(history_batch_size=batch_size, history_batch_delay_seconds=0),
+        SourcesConfig.from_appsetting().yahoo,
         RecordingLogger(),
     )
 
@@ -172,3 +174,30 @@ async def test_download_failure_propagates(monkeypatch) -> None:
 
     with pytest.raises(ConnectionError):
         await provider().fetch_history([TSMC], datetime(2026, 10, 1), datetime(2026, 10, 30))
+
+
+@pytest.mark.asyncio
+async def test_an_index_history_asks_for_the_symbol_the_settings_name_and_keeps_only_closed_sessions(yahoo) -> None:
+    # Yahoo's ^TWII rows as served on 2026-11-04: the 2026-11-03 session had no close yet and no volume.
+    yahoo.frames.append(
+        yahoo_frame(
+            daily("2026-10-30", "2026-11-02", "2026-11-03"),
+            {
+                "^TWII": [
+                    (46139.79, 46139.79, 44726.26, 45211.83, 45211.83, 4001100),
+                    (45034.53, 45156.17, 44399.10, 44920.14, 44920.14, 3232000),
+                    (44481.59, 44614.64, 43191.58, NAN, NAN, 0),
+                ]
+            },
+        )
+    )
+
+    bars = await provider().fetch_index_history(MarketIndex.TAIEX, datetime(2026, 10, 1), datetime(2026, 11, 3))
+
+    assert_requested(yahoo.calls[0], ["^TWII"], start="2026-10-01", end="2026-11-04", interval="1d")
+    assert bars == [
+        Ohlcv(
+            ts=session(2026, 10, 30), open=46139.79, high=46139.79, low=44726.26, close=45211.83, volume=4001100, adj_close=45211.83
+        ),
+        Ohlcv(ts=session(2026, 11, 2), open=45034.53, high=45156.17, low=44399.10, close=44920.14, volume=3232000, adj_close=44920.14),
+    ]

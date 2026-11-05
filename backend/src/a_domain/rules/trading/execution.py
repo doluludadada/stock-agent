@@ -1,25 +1,27 @@
 from collections.abc import Sequence
-from dataclasses import dataclass
 from datetime import datetime
 
-from icontract import ensure, require
+from pydantic import PositiveInt, validate_call
+from pydantic.dataclasses import dataclass
 
-from a_domain.model.trading.broker_order_report import BrokerOrderReport
-from a_domain.model.trading.order import Order
-from a_domain.model.trading.position import Position
-from a_domain.model.trading.trade_cost import TradeCost
-from a_domain.rules.trading.cost import TradingCostRule
+from a_domain.model.trading.account import Account, Position
+from a_domain.model.trading.order import ExchangeOrder, Order
+from a_domain.rules.trading.cost import TradeCost, TradingCostRule
 from a_domain.types.enums import LotKind, OrderStatus, OrderType, RejectReason, TimeInForce, TradeAction
 
 
 @dataclass(frozen=True)
 class OrderAcceptanceRule:
     """
-    Why a broker adapter refuses an order before the broker sees it, whichever broker it is, or None. The app tracks no
-    working orders, so it sends only LIMIT orders whose unfilled part ends at once: IOC or FOK, never ROD.
+    Why a broker adapter refuses an order from `account` before the broker sees it, whichever broker it is, or None.
+    The app tracks no working orders, so it sends only LIMIT orders whose unfilled part ends at once: IOC or FOK, never
+    ROD. Then a broker's pre-trade check at the limit price: a BUY needs the cash for the whole quantity plus fee, a SELL
+    needs the shares.
     """
 
-    def apply(self, order: Order) -> tuple[RejectReason, str] | None:
+    cost_rule: TradingCostRule
+
+    def apply(self, order: Order, account: Account) -> tuple[RejectReason, str] | None:
         if order.order_type != OrderType.LIMIT or order.limit_price is None:
             return RejectReason.UNSUPPORTED_ORDER_TYPE, "the app sends LIMIT orders only"
 
@@ -28,6 +30,20 @@ class OrderAcceptanceRule:
                 RejectReason.UNSUPPORTED_TIME_IN_FORCE,
                 f"{order.time_in_force.name} would leave a working order at the broker that the app does not track",
             )
+
+        if order.action == TradeAction.BUY:
+            cost = self.cost_rule.apply(TradeAction.BUY, order.stock_id, order.limit_price, order.quantity, now=order.created_at)
+            needed = -cost.net
+            refusal = RejectReason.INSUFFICIENT_CASH, f"needs {needed:,.0f} including fee, cash is {account.cash:,.0f}"
+            return None if account.can_afford(needed) else refusal
+
+        position = account.position_for(order.stock_id)
+
+        if position is None:
+            return RejectReason.POSITION_NOT_FOUND, f"no {order.stock_id} shares held"
+
+        if not position.can_cover(order.quantity):
+            return RejectReason.INSUFFICIENT_POSITION, f"holds {position.quantity}, selling {order.quantity}"
 
         return None
 
@@ -42,9 +58,8 @@ class LotSplitRule:
 
     board_lot_shares: int
 
-    @require(lambda quantity: quantity > 0)
-    @ensure(lambda quantity, result: sum(shares for _, shares in result) == quantity)
-    def apply(self, quantity: int) -> list[tuple[LotKind, int]]:
+    @validate_call
+    def apply(self, quantity: PositiveInt) -> list[tuple[LotKind, int]]:
         odd_shares = quantity % self.board_lot_shares
         parts = ((LotKind.BOARD_LOT, quantity - odd_shares), (LotKind.ODD_LOT, odd_shares))
 
@@ -86,21 +101,21 @@ class BrokerOutcomeRule:
 
     broker: str
 
-    def apply(self, order: Order, reports: Sequence[BrokerOrderReport], now: datetime) -> None:
+    def apply(self, order: Order, parts: Sequence[ExchangeOrder], now: datetime) -> None:
         if order.status == OrderStatus.FILLED:
             return
 
-        summary = "; ".join(report.description for report in reports)
+        summary = "; ".join(part.description for part in parts)
 
-        if not all(report.is_done for report in reports):
+        if any(part.status.is_open for part in parts):
             order.fail(f"still working at the broker after a cancel request, check {self.broker}: {summary}", now=now)
             return
 
-        if any(report.status == OrderStatus.FAILED or report.deals_missing for report in reports):
+        if any(part.status == OrderStatus.FAILED or part.deals_missing for part in parts):
             order.fail(f"unexplained broker result: {summary}", now=now)
             return
 
-        if order.filled_quantity == 0 and all(report.status == OrderStatus.REJECTED for report in reports):
+        if order.filled_quantity == 0 and all(part.status == OrderStatus.REJECTED for part in parts):
             order.reject(RejectReason.BROKER_REFUSED, summary, now=now)
             return
 

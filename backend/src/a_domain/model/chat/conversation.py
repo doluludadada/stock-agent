@@ -1,7 +1,10 @@
 from collections.abc import Iterable
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from datetime import datetime
 from uuid import UUID, uuid4
+
+from pydantic import Field
+from pydantic.dataclasses import dataclass
 
 from a_domain.model.chat.message import Message
 
@@ -11,9 +14,9 @@ class Conversation:
     user_id: str
     created_at: datetime
     updated_at: datetime
-    id: UUID = field(default_factory=uuid4)
+    id: UUID = Field(default_factory=uuid4)
     selected_model_name: str | None = None
-    messages: tuple[Message, ...] = field(default_factory=tuple)
+    messages: tuple[Message, ...] = Field(default_factory=tuple)
 
     def add_messages(self, messages: Iterable[Message], *, now: datetime) -> Conversation:
         """The conversation with these messages added at its end. Without messages it is unchanged."""

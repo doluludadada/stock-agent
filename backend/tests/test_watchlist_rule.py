@@ -6,13 +6,11 @@ from typing import cast
 import pytest
 import pytest_asyncio
 from pydantic import ValidationError
-from sqlalchemy.exc import IntegrityError
 from support.harness import build_harness, falling_history, rising_history
 from support.settings import shipped_config
 
 from a_domain.model.market.stock import Stock
-from a_domain.model.trading.stock_watchlist import StockWatchlist
-from a_domain.model.trading.watchlist_entry import WatchlistEntry
+from a_domain.model.trading.watchlist import WatchlistEntry
 from a_domain.types.enums import WatchlistType
 from b_application.config.market_data_config import MarketHoursConfig
 from b_application.config.trading_config import WatchlistConfig
@@ -55,8 +53,12 @@ class Watchlist:
         return await self.watch_stocks.execute([Stock(stock_id=stock_id) for stock_id in stock_ids], watchlist_type)
 
     async def active_types(self) -> dict[str, set[WatchlistType]]:
-        watchlist = StockWatchlist.from_entries(await self.repository.get_active())
-        return {stock.stock_id: stock.watchlist_types for stock in watchlist.willing_stocks}
+        types: dict[str, set[WatchlistType]] = {}
+
+        for entry in await self.repository.get_active():
+            types.setdefault(entry.stock_id, set()).add(entry.watchlist_type)
+
+        return types
 
     def advance(self, hours: int) -> None:
         self.clock.current = self.clock.current + timedelta(hours=hours)
@@ -169,17 +171,14 @@ async def test_an_expired_automatic_stock_is_added_again_not_reported_as_present
 
 
 def test_a_watchlist_entry_cannot_be_made_without_its_type() -> None:
-    with pytest.raises(TypeError, match="watchlist_type"):
+    with pytest.raises(ValidationError, match="watchlist_type"):
         WatchlistEntry(stock_id="2330", created_at=FRIDAY_EVENING, expires_at=None)
 
 
 @pytest.mark.asyncio
-@pytest.mark.filterwarnings("ignore:Column 'watchlists.type' is marked as a member of the primary key")
-async def test_the_repository_refuses_an_entry_without_a_type_instead_of_saving_it_as_technical(watchlist: Watchlist) -> None:
-    untyped = WatchlistEntry(stock_id="2330", watchlist_type=cast(WatchlistType, None), created_at=FRIDAY_EVENING, expires_at=None)
-
-    with pytest.raises(IntegrityError):
-        await watchlist.repository.save([untyped])
+async def test_an_entry_without_a_type_is_refused_before_the_repository_can_save_it_as_technical(watchlist: Watchlist) -> None:
+    with pytest.raises(ValidationError, match="watchlist_type"):
+        WatchlistEntry(stock_id="2330", watchlist_type=cast(WatchlistType, None), created_at=FRIDAY_EVENING, expires_at=None)
 
     assert await watchlist.active_types() == {}
 

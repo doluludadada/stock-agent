@@ -1,14 +1,13 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from pathlib import Path
 from secrets import compare_digest
-from typing import Annotated, Any
+from typing import Annotated
 
 import chromadb
-import yaml
 from fastapi import Depends, HTTPException, Request, status as http_status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import SecretStr
 
 from a_domain.ports.ai.ai_provider import IAiProvider
 from a_domain.ports.ai.knowledge_repository import IKnowledgeRepository
@@ -21,46 +20,58 @@ from a_domain.ports.market.news_source import INewsSource
 from a_domain.ports.market.stock_provider import IStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.notification_provider import INotificationProvider
+from a_domain.ports.system.settings_files import ISettingsFiles
 from a_domain.ports.trading.execution_provider import IExecutionProvider
 from a_domain.ports.trading.trading_journal import ITradingJournal
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
-from a_domain.types.enums import AiProvider, ExecutionProvider, OrderMode, SystemEnvironment
+from a_domain.types.enums import AiProvider, ExecutionProvider, SettingsFile
 from b_application.config.app_config import AppConfig
-from b_application.pipeline import ChatSteps, CollectSteps, Pipeline, ProcessSteps, TradingSteps, ValuationSteps
-from b_application.use_cases.chat.ai_processor import AiProcessor
-from b_application.use_cases.chat.context_loader import ContextLoader
+from b_application.config.settings_loader import TradingSetupError, load_settings, validate_trading_environment
+from b_application.pipeline import Pipeline
+from b_application.use_cases.admin.settings_editor import SettingsEditor
+from b_application.use_cases.admin.settings_save import SettingsSave
+from b_application.use_cases.chat.chat_reply import ChatReply
 from b_application.use_cases.chat.dispatcher import Dispatcher
 from b_application.use_cases.collect.buzz_scanner import BuzzScanner
 from b_application.use_cases.collect.fundamentals_feed import FundamentalsFeed
+from b_application.use_cases.collect.index_history_loader import IndexHistoryLoader
 from b_application.use_cases.collect.intraday_candidates import IntradayCandidates
+from b_application.use_cases.collect.market_breadth_loader import MarketBreadthLoader
 from b_application.use_cases.collect.market_data_collector import MarketDataCollector
 from b_application.use_cases.collect.market_scanner import MarketScanner
+from b_application.use_cases.collect.most_traded import MostTraded
 from b_application.use_cases.collect.news_feed import NewsFeed
+from b_application.use_cases.collect.official_change_feed import OfficialChangeFeed
 from b_application.use_cases.collect.realtime_quote_feed import RealtimeQuoteFeed
 from b_application.use_cases.collect.stock_lookup import StockLookup
+from b_application.use_cases.collect.stock_search import StockSearch
 from b_application.use_cases.process.ai_analyser import AiAnalyser
-from b_application.use_cases.process.composite_scorer import CompositeScorer
+from b_application.use_cases.process.indicator_readings import IndicatorReadings
 from b_application.use_cases.process.sentiment_analyser import SentimentAnalyser
+from b_application.use_cases.process.strategy_loader import StrategyLoader
 from b_application.use_cases.process.technical_filter import TechnicalFilter
-from b_application.use_cases.process.valuation_explainer import ValuationExplainer
+from b_application.use_cases.process.technical_settings_editor import TechnicalSettingsEditor
 from b_application.use_cases.ship.decision_memory import DecisionMemory
 from b_application.use_cases.ship.reporting import Reporting
 from b_application.use_cases.ship.run_history import RunHistory
+from b_application.use_cases.ship.run_reports import RunReports
 from b_application.use_cases.ship.signals import Signals
-from b_application.use_cases.trade.account_equity import AccountEquity
 from b_application.use_cases.trade.account_history import AccountHistory
 from b_application.use_cases.trade.account_loader import AccountLoader
 from b_application.use_cases.trade.account_risk_check import AccountRiskCheck
-from b_application.use_cases.trade.analysis_candidates import AnalysisCandidates
-from b_application.use_cases.trade.decision_candidates import DecisionCandidates
 from b_application.use_cases.trade.manual_signal import ManualSignal
 from b_application.use_cases.trade.order_execution import OrderExecution
 from b_application.use_cases.trade.order_outcome import OrderOutcome
 from b_application.use_cases.trade.order_preparation import OrderPreparation
+from b_application.use_cases.trade.unwatch_stocks import UnwatchStocks
 from b_application.use_cases.trade.watch_stocks import WatchStocks
+from b_application.use_cases.valuation.market_valuation_loader import MarketValuationLoader
+from b_application.use_cases.valuation.valuation_appraiser import ValuationAppraiser
+from b_application.use_cases.valuation.valuation_explainer import ValuationExplainer
+from b_application.use_cases.valuation.valuation_screener import ValuationScreener
+from c_infrastructure.ai_models.ai_adapter.claude_adapter import ClaudeAdapter
 from c_infrastructure.ai_models.ai_adapter.gemini_adapter import GeminiAIAdapter
 from c_infrastructure.ai_models.ai_adapter.grok_adapter import GrokAdapter
-from c_infrastructure.ai_models.ai_adapter.groq_adapter import GroqAIAdapter
 from c_infrastructure.ai_models.ai_adapter.openai_adapter import OpenAIAdapter
 from c_infrastructure.ai_models.ai_adapter.web_search_adapter import WebSearchAiAdapter
 from c_infrastructure.ai_models.sentiment_classifier import AiSentimentClassifier
@@ -85,8 +96,10 @@ from c_infrastructure.platforms.line.line_notification_adapter import LineNotifi
 from c_infrastructure.system.chat_styler_service import ChatStylerService
 from c_infrastructure.system.logger_service import LoggerService
 from c_infrastructure.system.market_clock import TaiwanMarketClock
-from c_infrastructure.technical.yaml_technical_settings_repository import YamlTechnicalSettingsRepository
+from c_infrastructure.system.settings_files import SettingsFiles
+from c_infrastructure.technical.sql_technical_settings_repository import SqlTechnicalSettingsRepository
 from c_infrastructure.trading.mock.mock_execution_provider import MockExecutionProvider
+from d_presentation.web.market_valuation_cache import MarketValuationCache
 from d_presentation.web.workflow_runs import WorkflowRuns
 
 
@@ -98,12 +111,10 @@ class Runtime:
     """
 
     pipeline: Pipeline
-    watch_stocks: WatchStocks
-    account_history: AccountHistory
     stock_provider: IStockProvider
     journal: ITradingJournal
     watchlist_repository: IWatchlistRepository
-    technical_settings_repository: ITechnicalSettingsRepository
+    settings_files: ISettingsFiles
     config: AppConfig
     logger: ILoggingProvider
 
@@ -125,83 +136,7 @@ class ProviderDependencies:
     execution_provider: IExecutionProvider
     notification_provider: INotificationProvider | None
     platform_provider: IPlatformProvider | None
-
-
-def get_project_root() -> Path:
-    """The nearest folder above this file that holds the justfile or .git: config/, .env and stock_agent.db live there."""
-    for parent in Path(__file__).resolve().parents:
-        if (parent / "justfile").exists() or (parent / ".git").exists():
-            return parent
-
-    raise FileNotFoundError("Could not find project root.")
-
-
-def load_yaml(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-
-    with path.open(encoding="utf-8") as config_file:
-        return yaml.safe_load(config_file) or {}
-
-
-def inject_prompt_settings(settings: dict[str, Any], instructions: dict[str, Any]) -> None:
-    """Copies the AI prompts of config/instructions.yaml into the ai and prompts sections of the settings."""
-    if not instructions:
-        return
-
-    ai_settings = settings.setdefault("ai", {})
-    ai_settings["system_prompt"] = instructions.get("system_prompt")
-    ai_settings["rag_injection_prompt"] = instructions.get("rag_injection_prompt")
-
-    prompts = settings.setdefault("prompts", {})
-    prompts["analysis_report_fundamental"] = instructions.get("ai_analysis_report_prompt_fundamental")
-    prompts["analysis_report_momentum"] = instructions.get("ai_analysis_report_prompt_momentum")
-    prompts["valuation_explanation"] = instructions.get("ai_valuation_explanation_prompt")
-    prompts["social_sentiment"] = instructions.get("social_sentiment_prompt")
-
-
-def load_settings() -> AppConfig:
-    """config/appsetting.yaml with the prompts of config/instructions.yaml. AppConfig reads the secrets from .env."""
-    project_root = get_project_root()
-    settings = load_yaml(project_root / "config" / "appsetting.yaml")
-
-    inject_prompt_settings(settings, load_yaml(project_root / "config" / "instructions.yaml"))
-
-    return AppConfig(project_root=project_root, **settings)
-
-
-class TradingSetupError(RuntimeError):
-    """The trading settings or the broker login do not let the CLI or the Web API start. The message says what to change."""
-
-
-def validate_trading_environment(config: AppConfig) -> None:
-    """
-    Refuses a trading setup that could send an order nobody meant to send, before any broker is contacted.
-
-    - DEV uses the mock broker only.
-    - mock_only order mode needs the mock broker.
-    - live order mode needs environment live and the Shioaji broker.
-    - The Shioaji broker needs its credentials.
-    Order mode disabled never orders, so outside DEV it may read a real Shioaji account.
-    """
-    environment, provider, mode = config.environment, config.trading.execution_provider, config.trading.order_mode
-
-    if environment == SystemEnvironment.DEV and provider != ExecutionProvider.MOCK:
-        raise TradingSetupError("DEV environment requires MockExecutionProvider")
-
-    if mode == OrderMode.MOCK_ONLY and provider != ExecutionProvider.MOCK:
-        raise TradingSetupError(
-            f"order_mode mock_only needs execution_provider mock, not {provider.value}. "
-            f"Use order_mode disabled to read the {provider.value} account without ordering"
-        )
-
-    if mode == OrderMode.LIVE and (environment != SystemEnvironment.LIVE or provider != ExecutionProvider.SHIOAJI):
-        raise TradingSetupError(
-            f"order_mode live needs environment live and execution_provider shioaji, not {environment.value} and {provider.value}"
-        )
-
-    if provider == ExecutionProvider.SHIOAJI and (missing := config.shioaji.missing_credentials()):
-        raise TradingSetupError(f"execution_provider shioaji needs {', '.join(missing)} in the environment or .env")
+    settings_files: ISettingsFiles
 
 
 def create_ai_provider(config: AppConfig, logger: ILoggingProvider) -> IAiProvider:
@@ -215,7 +150,11 @@ def create_ai_provider(config: AppConfig, logger: ILoggingProvider) -> IAiProvid
 
     match provider:
         case AiProvider.OPENAI:
-            return OpenAIAdapter(config=config, logger=logger, model_name=model_name)
+            return OpenAIAdapter(config, logger, model_name, provider, config.ai.openai_api_key)
+        case AiProvider.NVIDIA:
+            return OpenAIAdapter(config, logger, model_name, provider, config.ai.nvidia_api_key, config.sources.ai.nvidia_base_url)
+        case AiProvider.CLAUDE:
+            return ClaudeAdapter(config=config, logger=logger, model_name=model_name)
         case AiProvider.GROK:
             return GrokAdapter(config=config, logger=logger, model_name=model_name)
         case AiProvider.GEMINI:
@@ -226,7 +165,7 @@ def create_ai_provider(config: AppConfig, logger: ILoggingProvider) -> IAiProvid
 
 def create_groq_provider(config: AppConfig, logger: ILoggingProvider, model_name: str) -> IAiProvider:
     """Groq, searching the web first when web search is on and TAVILY_API_KEY and the RAG injection prompt are set."""
-    groq = GroqAIAdapter(config=config, logger=logger, model_name=model_name)
+    groq = OpenAIAdapter(config, logger, model_name, AiProvider.GROQ, config.ai.groq_api_key, config.sources.ai.groq_base_url)
     results_prompt = config.ai.rag_injection_prompt
 
     if not (config.behavior.enable_web_search and config.tavily.api_key and results_prompt):
@@ -290,7 +229,9 @@ def create_price_provider(
 ) -> CachedPriceProvider:
     """Yahoo daily history cached in the database, and TWSE MIS realtime quotes."""
     return CachedPriceProvider(
-        history_provider=YahooFinanceProvider(market_clock=market_clock, market_data=config.market_data, logger=logger),
+        history_provider=YahooFinanceProvider(
+            market_clock=market_clock, market_data=config.market_data, yahoo=config.sources.yahoo, logger=logger
+        ),
         quote_provider=MisQuoteProvider(exchange=config.sources.exchange, market_data=config.market_data, logger=logger),
         db=db,
         market_data=config.market_data,
@@ -309,7 +250,6 @@ async def build_provider_dependencies(
     logger.info(f"Opening ChromaDB at: {config.db.chroma_persist_path}")
     chroma_client = chromadb.PersistentClient(path=config.db.chroma_persist_path)
 
-    technical_path = config.project_root / "config" / "technical.yaml"
     ai_provider = create_ai_provider(config, logger)
 
     return ProviderDependencies(
@@ -324,175 +264,94 @@ async def build_provider_dependencies(
         conversation_repository=ChromaConversationRepository(chroma_client, logger),
         journal=TradingJournal(db=db),
         watchlist_repository=WatchlistRepository(db=db, logger=logger, market_clock=market_clock),
-        technical_settings_repository=YamlTechnicalSettingsRepository(technical_path),
+        technical_settings_repository=SqlTechnicalSettingsRepository(db),
         execution_provider=await create_execution_provider(config, db, logger),
         notification_provider=create_notification_provider(config, logger),
         platform_provider=create_platform_provider(config, logger),
-    )
-
-
-def build_collect_steps(
-    config: AppConfig, logger: ILoggingProvider, market_clock: TaiwanMarketClock, dependencies: ProviderDependencies
-) -> CollectSteps:
-    buzz_scanner = BuzzScanner(
-        social_media_provider=dependencies.social_media_provider,
-        stock_provider=dependencies.stock_provider,
-        logger=logger,
-        config=config,
-    )
-
-    news_feed = NewsFeed(news_provider=dependencies.news_provider, config=config, logger=logger)
-
-    return CollectSteps(
-        market_scanner=MarketScanner(stock_provider=dependencies.stock_provider, logger=logger),
-        stock_lookup=StockLookup(stock_provider=dependencies.stock_provider, logger=logger),
-        intraday_candidates=IntradayCandidates(
-            stock_provider=dependencies.stock_provider, watchlist_repository=dependencies.watchlist_repository, logger=logger
+        settings_files=SettingsFiles(
+            project_root=config.project_root,
+            max_bytes=config.api.settings_file_max_bytes,
+            backups_kept=config.api.settings_backups_kept,
+            logger=logger,
         ),
-        data_collector=MarketDataCollector(
-            ohlcv_provider=dependencies.price_provider, market_clock=market_clock, config=config, logger=logger
-        ),
-        realtime_quote_feed=RealtimeQuoteFeed(
-            quote_provider=dependencies.price_provider, market_clock=market_clock, config=config, logger=logger
-        ),
-        buzz_scanner=buzz_scanner,
-        news_feed=news_feed,
     )
 
 
-def build_process_steps(
+def build_pipeline(
     config: AppConfig, logger: ILoggingProvider, market_clock: TaiwanMarketClock, dependencies: ProviderDependencies
-) -> ProcessSteps:
-    ai_analyser = AiAnalyser(
-        ai_provider=dependencies.ai_provider,
-        knowledge_repository=dependencies.knowledge_repository,
-        market_clock=market_clock,
-        config=config,
-        logger=logger,
-    )
-
-    return ProcessSteps(
-        ai_analyser=ai_analyser,
-        technical_filter=TechnicalFilter(logger=logger),
-        composite_scorer=CompositeScorer(config=config, logger=logger),
-        sentiment_analyser=SentimentAnalyser(classifier=dependencies.sentiment_classifier, config=config, logger=logger),
-    )
-
-
-def build_trading_steps(
-    config: AppConfig, logger: ILoggingProvider, market_clock: TaiwanMarketClock, dependencies: ProviderDependencies
-) -> TradingSteps:
-    broker, journal = dependencies.execution_provider, dependencies.journal
-
-    return TradingSteps(
-        run_history=RunHistory(journal=journal, market_clock=market_clock, config=config, logger=logger),
-        account_loader=AccountLoader(execution_provider=broker, stock_provider=dependencies.stock_provider, logger=logger),
-        account_equity=AccountEquity(config=config, logger=logger),
-        account_risk_check=AccountRiskCheck(dependencies.journal, market_clock, config, logger),
-        analysis_candidates=AnalysisCandidates(),
-        decision_candidates=DecisionCandidates(),
-        watch_stocks=WatchStocks(dependencies.watchlist_repository, market_clock, config, logger),
-        signals=Signals(dependencies.journal, market_clock, config, logger),
-        manual_signal=ManualSignal(dependencies.journal, market_clock, config, logger),
-        decision_memory=DecisionMemory(knowledge_repository=dependencies.knowledge_repository, logger=logger),
-        order_preparation=OrderPreparation(journal=journal, market_clock=market_clock, config=config, logger=logger),
-        order_execution=OrderExecution(execution_provider=broker, journal=journal, market_clock=market_clock, logger=logger),
-        order_outcome=OrderOutcome(execution_provider=broker, journal=journal, market_clock=market_clock, logger=logger),
-        reporting=Reporting(dependencies.notification_provider, config, logger),
-    )
-
-
-def build_chat_steps(
-    config: AppConfig, logger: ILoggingProvider, market_clock: TaiwanMarketClock, dependencies: ProviderDependencies
-) -> ChatSteps:
+) -> Pipeline:
+    """Every use case once, over the given ports. The trading and the valuation operations share the collect and process steps."""
+    stocks, prices = dependencies.stock_provider, dependencies.price_provider
+    journal, broker = dependencies.journal, dependencies.execution_provider
     chat_styler = ChatStylerService(config.sources.line.sentence_endings, config.sources.line.max_message_length)
 
-    return ChatSteps(
-        context_loader=ContextLoader(
-            repository=dependencies.conversation_repository, market_clock=market_clock, config=config, logger=logger
-        ),
-        ai_processor=AiProcessor(ai_provider=dependencies.ai_provider, chat_styler_provider=chat_styler, logger=logger),
-        conversation_repository=dependencies.conversation_repository,
-        dispatcher=Dispatcher(platform_provider=dependencies.platform_provider, logger=logger),
-        reset_commands=frozenset(config.db.reset_commands),
-        market_clock=market_clock,
-    )
-
-
-def build_valuation_steps(
-    config: AppConfig,
-    logger: ILoggingProvider,
-    market_clock: TaiwanMarketClock,
-    dependencies: ProviderDependencies,
-    collect: CollectSteps,
-    process: ProcessSteps,
-) -> ValuationSteps:
-    """Menus 5 and 6. It takes no TradingSteps: valuation never reaches orders, signals or the watchlist."""
-    return ValuationSteps(
-        stock_provider=dependencies.stock_provider,
+    return Pipeline(
+        strategy_loader=StrategyLoader(dependencies.technical_settings_repository, config, logger),
+        technical_settings_editor=TechnicalSettingsEditor(dependencies.technical_settings_repository, config),
+        run_history=RunHistory(journal, market_clock, config, logger),
+        account_loader=AccountLoader(broker, stocks, logger),
+        market_scanner=MarketScanner(stocks, logger),
+        stock_lookup=StockLookup(stocks, logger),
+        stock_search=StockSearch(stocks, config),
+        most_traded=MostTraded(stocks, config),
+        market_breadth_loader=MarketBreadthLoader(stocks, dependencies.fundamentals_provider),
+        index_history_loader=IndexHistoryLoader(prices, market_clock, config),
+        buzz_scanner=BuzzScanner(dependencies.social_media_provider, stocks, logger, config),
+        intraday_candidates=IntradayCandidates(stocks, dependencies.watchlist_repository, logger),
+        data_collector=MarketDataCollector(prices, market_clock, config, logger),
+        official_change_feed=OfficialChangeFeed(stocks),
+        realtime_quote_feed=RealtimeQuoteFeed(prices, market_clock, config, logger),
+        technical_filter=TechnicalFilter(logger),
+        indicator_readings=IndicatorReadings(),
+        news_feed=NewsFeed(dependencies.news_provider, config, logger),
+        ai_analyser=AiAnalyser(dependencies.ai_provider, dependencies.knowledge_repository, market_clock, config, logger),
+        sentiment_analyser=SentimentAnalyser(dependencies.sentiment_classifier, config, logger),
+        watch_stocks=WatchStocks(dependencies.watchlist_repository, market_clock, config, logger),
+        unwatch_stocks=UnwatchStocks(dependencies.watchlist_repository, logger),
+        account_risk_check=AccountRiskCheck(journal, market_clock, config, logger),
+        signals=Signals(journal, market_clock, config, logger),
+        manual_signal=ManualSignal(journal, market_clock, config, logger),
+        decision_memory=DecisionMemory(dependencies.knowledge_repository, logger),
+        order_preparation=OrderPreparation(journal, market_clock, config, logger),
+        order_execution=OrderExecution(broker, journal, market_clock, logger),
+        order_outcome=OrderOutcome(broker, journal, market_clock, logger),
+        reporting=Reporting(dependencies.notification_provider, config, logger),
+        run_reports=RunReports(journal, logger),
+        account_history=AccountHistory(broker, journal, stocks, prices, market_clock, config, logger),
         fundamentals_feed=FundamentalsFeed(dependencies.fundamentals_provider, market_clock, logger),
-        data_collector=collect.data_collector,
-        technical_filter=process.technical_filter,
-        news_feed=collect.news_feed,
+        market_valuation_loader=MarketValuationLoader(stocks, market_clock, config),
+        valuation_appraiser=ValuationAppraiser(config),
+        valuation_screener=ValuationScreener(config),
         valuation_explainer=ValuationExplainer(dependencies.ai_provider, market_clock, config, logger),
-        technical_settings_repository=dependencies.technical_settings_repository,
-        market_clock=market_clock,
-        scenario_spread=config.valuation.scenario_spread,
-        close_max_missed_sessions=config.freshness.daily_close_max_missed_sessions,
-        max_scan_explanations=config.valuation.max_scan_explanations,
-    )
-
-
-def build_account_history(
-    config: AppConfig, logger: ILoggingProvider, market_clock: TaiwanMarketClock, dependencies: ProviderDependencies
-) -> AccountHistory:
-    """Menu 7 and the account endpoint call it directly: one read-only operation, not a workflow."""
-    return AccountHistory(
-        execution_provider=dependencies.execution_provider,
-        journal=dependencies.journal,
-        stock_provider=dependencies.stock_provider,
-        ohlcv_provider=dependencies.price_provider,
-        market_clock=market_clock,
-        config=config,
-        logger=logger,
+        chat_reply=ChatReply(
+            dependencies.ai_provider, chat_styler, dependencies.conversation_repository, market_clock, config, logger
+        ),
+        dispatcher=Dispatcher(dependencies.platform_provider, logger),
+        settings_editor=SettingsEditor(dependencies.settings_files),
+        settings_save=SettingsSave(dependencies.settings_files, market_clock, logger),
     )
 
 
 def compose_runtime(
     config: AppConfig, logger: ILoggingProvider, market_clock: TaiwanMarketClock, dependencies: ProviderDependencies
 ) -> Runtime:
-    collect = build_collect_steps(config, logger, market_clock, dependencies)
-    process = build_process_steps(config, logger, market_clock, dependencies)
-    trading = build_trading_steps(config, logger, market_clock, dependencies)
-
-    pipeline = Pipeline(
-        collect=collect,
-        process=process,
-        trading=trading,
-        chat=build_chat_steps(config, logger, market_clock, dependencies),
-        valuation=build_valuation_steps(config, logger, market_clock, dependencies, collect, process),
-        technical_settings_repository=dependencies.technical_settings_repository,
-        logger=logger,
-    )
-
     return Runtime(
-        pipeline=pipeline,
-        watch_stocks=trading.watch_stocks,
-        account_history=build_account_history(config, logger, market_clock, dependencies),
+        pipeline=build_pipeline(config, logger, market_clock, dependencies),
         stock_provider=dependencies.stock_provider,
         journal=dependencies.journal,
         watchlist_repository=dependencies.watchlist_repository,
-        technical_settings_repository=dependencies.technical_settings_repository,
+        settings_files=dependencies.settings_files,
         config=config,
         logger=logger,
     )
 
 
 @asynccontextmanager
-async def open_runtime() -> AsyncIterator[Runtime]:
+async def open_runtime() -> AsyncGenerator[Runtime]:
     """
     Builds the runtime from config/ and the real adapters, once per process, and closes the database when the caller is done.
-    It raises TradingSetupError for an unsafe trading setup and OutdatedDatabaseError for an old database, before any workflow runs.
+    It raises InvalidSettingsError for settings that do not validate, TradingSetupError for an unsafe trading setup and
+    OutdatedDatabaseError for an old database, before any workflow runs.
     """
     config = load_settings()
     validate_trading_environment(config)
@@ -515,7 +374,11 @@ def create_workflow_runs(runtime: Runtime) -> WorkflowRuns:
     return WorkflowRuns(runtime.logger)
 
 
-bearer = HTTPBearer(auto_error=False, description="The value of API_TOKEN. Reads need no token.")
+def create_market_valuation_cache(runtime: Runtime) -> MarketValuationCache:
+    return MarketValuationCache(runtime.pipeline.load_market_valuation, ttl_seconds=runtime.config.api.valuation_cache_minutes * 60)
+
+
+bearer = HTTPBearer(auto_error=False, description="API_TOKEN for the owner's endpoints, ADMIN_API_TOKEN for /v1/admin.")
 
 
 def get_runtime(request: Request) -> Runtime:
@@ -527,23 +390,77 @@ def get_workflow_runs(request: Request) -> WorkflowRuns:
     return request.app.state.workflow_runs
 
 
+def get_market_valuation_cache(request: Request) -> MarketValuationCache:
+    return request.app.state.market_valuation_cache
+
+
 RuntimeDependency = Annotated[Runtime, Depends(get_runtime)]
 WorkflowRunsDependency = Annotated[WorkflowRuns, Depends(get_workflow_runs)]
+MarketValuationDependency = Annotated[MarketValuationCache, Depends(get_market_valuation_cache)]
+Credentials = Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]
 
 
-def require_write_permission(
-    runtime: RuntimeDependency, credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]
-) -> None:
-    """Every write: 403 while API_TOKEN is unset, 401 without its bearer token. The body's `confirm: true` is checked after."""
-    token = runtime.config.api.token
+def require_known_host(request: Request, runtime: RuntimeDependency) -> None:
+    """
+    Every /v1 request: 400 unless its Host header names one of api.allowed_hosts, so a page on another site cannot
+    reach the API through DNS rebinding.
+    """
+    if request.url.hostname not in runtime.config.api.allowed_hosts:
+        raise HTTPException(http_status.HTTP_400_BAD_REQUEST, "Unknown host.")
 
-    if token is None:
-        raise HTTPException(http_status.HTTP_403_FORBIDDEN, "Writes are disabled. Set API_TOKEN to enable them.")
 
-    if credentials is None or not compare_digest(credentials.credentials.encode(), token.get_secret_value().encode()):
+def check_bearer(expected: SecretStr, credentials: HTTPAuthorizationCredentials | None) -> None:
+    if credentials is None or not compare_digest(credentials.credentials.encode(), expected.get_secret_value().encode()):
         raise HTTPException(
             http_status.HTTP_401_UNAUTHORIZED, "A valid bearer token is required.", headers={"WWW-Authenticate": "Bearer"}
         )
 
 
-WritePermission = Depends(require_write_permission)
+def require_api_token(runtime: RuntimeDependency, credentials: Credentials) -> None:
+    """
+    Every write and every read of the owner's private data: 403 while API_TOKEN is unset, 401 without its bearer
+    token. A write's body `confirm: true` is checked after.
+    """
+    token = runtime.config.api.token
+
+    if token is None:
+        raise HTTPException(http_status.HTTP_403_FORBIDDEN, "Private endpoints are disabled. Set API_TOKEN to enable them.")
+
+    check_bearer(token, credentials)
+
+
+def require_admin_token(runtime: RuntimeDependency, credentials: Credentials) -> None:
+    """The settings-file endpoints: 403 while ADMIN_API_TOKEN is unset or equals API_TOKEN, 401 without its bearer token."""
+    api = runtime.config.api
+
+    if api.admin_token is None or not api.admin_enabled:
+        raise HTTPException(
+            http_status.HTTP_403_FORBIDDEN, "Administration is disabled. Set ADMIN_API_TOKEN, different from API_TOKEN."
+        )
+
+    check_bearer(api.admin_token, credentials)
+
+
+def require_mock_broker(runtime: RuntimeDependency) -> None:
+    """
+    Buzz and Intraday send orders. The Web API starts them only on the mock broker, so a browser never reaches a
+    real account: 403 for any other execution provider, whatever the order mode.
+    """
+    if runtime.config.trading.execution_provider != ExecutionProvider.MOCK:
+        raise HTTPException(
+            http_status.HTTP_403_FORBIDDEN,
+            "The Web API starts Buzz and Intraday only on the mock broker. Use the CLI for another execution provider.",
+        )
+
+
+KnownHost = Depends(require_known_host)
+
+
+def running_settings_revision(runtime: Runtime, file: SettingsFile) -> str | None:
+    """The revision of the file this process loaded at startup, the settings it runs on."""
+    return runtime.config.settings_revisions.get(file)
+
+
+ApiToken = Depends(require_api_token)
+AdminToken = Depends(require_admin_token)
+MockBroker = Depends(require_mock_broker)

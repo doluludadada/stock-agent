@@ -12,7 +12,7 @@ from support.fakes import (
     FakeTechnicalSettingsRepository,
     FakeWatchlistRepository,
 )
-from support.harness import harness_config, harness_settings
+from support.harness import UNUSED_PROJECT_ROOT, harness_config, harness_settings
 from support.settings import shipped_config
 
 from a_domain.model.analysis.ai_analysis_report import AiAnalysisReport
@@ -25,13 +25,13 @@ from a_domain.types.enums import ExecutionProvider, OrderMode, Workflow
 from b_application.config.app_config import AppConfig
 from b_application.config.market_data_config import MarketHoursConfig
 from b_application.pipeline import Pipeline
-from b_application.schemas.pipeline_status import PipelineStatus
 from b_application.use_cases.ship.run_history import RunHistory
 from b_application.use_cases.trade.account_history import AccountHistory
 from b_application.use_cases.trade.order_execution import OrderExecution
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.repositories.trading_journal import TradingJournal
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
+from c_infrastructure.system.settings_files import SettingsFiles
 from c_infrastructure.trading.mock.mock_execution_provider import MockExecutionProvider
 from d_presentation.dependencies import ProviderDependencies, compose_runtime
 
@@ -45,11 +45,9 @@ class SilentLogger:
     info = warning = debug = critical = error = success = trace = exception = _drop
 
 
-def run_status(workflow: Workflow = Workflow.INTRADAY) -> PipelineStatus:
-    return PipelineStatus(
-        stats=SystemStats(
-            workflow=workflow, execution_provider=ExecutionProvider.MOCK, order_mode=OrderMode.MOCK_ONLY, start_time=MONDAY_10_00
-        )
+def run_stats(workflow: Workflow = Workflow.INTRADAY) -> SystemStats:
+    return SystemStats(
+        workflow=workflow, execution_provider=ExecutionProvider.MOCK, order_mode=OrderMode.MOCK_ONLY, start_time=MONDAY_10_00
     )
 
 
@@ -150,13 +148,13 @@ async def open_stack(tmp_path: Path, configure=lambda config: None, journal: Tra
         conversation_repository=FakeConversationRepository(),
         journal=journal,
         watchlist_repository=watchlist,
-        technical_settings_repository=FakeTechnicalSettingsRepository(harness_settings()),
+        technical_settings_repository=FakeTechnicalSettingsRepository({config.technical.owner_id: harness_settings()}),
         execution_provider=broker,
         notification_provider=None,
         platform_provider=None,
+        settings_files=SettingsFiles(project_root=UNUSED_PROJECT_ROOT, max_bytes=1, backups_kept=1, logger=logger),
     )
-    runtime = compose_runtime(config, logger, clock, dependencies)
-    trading = runtime.pipeline.trading
+    pipeline = compose_runtime(config, logger, clock, dependencies).pipeline
 
     return TradingStack(
         config,
@@ -165,9 +163,9 @@ async def open_stack(tmp_path: Path, configure=lambda config: None, journal: Tra
         quotes,
         journal,
         broker,
-        runtime.pipeline,
-        trading.run_history,
-        trading.order_execution,
-        runtime.account_history,
+        pipeline,
+        pipeline.run_history,
+        pipeline.order_execution,
+        pipeline.account_history,
         watchlist,
     )

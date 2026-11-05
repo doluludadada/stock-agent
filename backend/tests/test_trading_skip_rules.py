@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 from uuid import uuid4
 
@@ -5,10 +6,10 @@ import pytest
 
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
-from a_domain.model.trading.account_snapshot import AccountSnapshot
+from a_domain.model.trading.account import Account, AccountSnapshot
+from a_domain.rules.trading.account_value import PriceHistoryStartRule
 from a_domain.rules.trading.decision import DecisionSkipRule
 from a_domain.rules.trading.exit import BlockedStockRule, StopLossQuoteRule
-from a_domain.rules.trading.valuation import LatestMarkRule, PriceHistoryStartRule
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 
 NOW = datetime(2026, 10, 19, 10, 0, tzinfo=TAIWAN_TIMEZONE)
@@ -50,7 +51,10 @@ def test_a_stop_loss_is_checked_only_once_and_only_on_a_fresh_realtime_quote(
 
 def snapshot_taken(day: date) -> AccountSnapshot:
     return AccountSnapshot(
-        taken_at=datetime(day.year, day.month, day.day, 13, 30, tzinfo=TAIWAN_TIMEZONE), run_id=uuid4(), order_id=uuid4(), cash=0
+        taken_at=datetime(day.year, day.month, day.day, 13, 30, tzinfo=TAIWAN_TIMEZONE),
+        run_id=uuid4(),
+        order_id=uuid4(),
+        account=Account(cash=0),
     )
 
 
@@ -71,8 +75,10 @@ def test_daily_prices_reach_back_to_the_history_window_or_the_first_fill(snapsho
 
 
 def test_a_stock_is_marked_at_its_realtime_quote_else_at_its_last_daily_close() -> None:
-    daily = {"2330": [DAILY], "2317": [DAILY.model_copy(update={"close": 97}), DAILY], "1101": []}
+    stocks = [
+        Stock(stock_id="2330", ohlcv=[DAILY], realtime_bar=QUOTE),
+        Stock(stock_id="2317", ohlcv=[replace(DAILY, close=97), DAILY]),
+        Stock(stock_id="1101"),
+    ]
 
-    marks = LatestMarkRule().apply(daily, {"2330": QUOTE})
-
-    assert {stock_id: mark.close for stock_id, mark in marks.items()} == {"2330": 100, "2317": 98}
+    assert {stock.stock_id: stock.latest_bar.close for stock in stocks if stock.latest_bar} == {"2330": 100, "2317": 98}

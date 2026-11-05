@@ -43,7 +43,8 @@ def new_order(action: TradeAction = TradeAction.BUY, quantity: int = 1000) -> Or
 
 
 def fill(order: Order, quantity: int) -> None:
-    order.fill(quantity, 100, COSTS.apply(order.action, "2330", 100, quantity, now=NOW), now=NOW)
+    cost = COSTS.apply(order.action, "2330", 100, quantity, now=NOW)
+    order.fill(quantity, 100, cost.fee, cost.tax, now=NOW)
 
 
 def order_in(status: OrderStatus) -> Order:
@@ -100,7 +101,7 @@ def test_only_a_pending_or_submitted_order_is_open_and_only_an_open_order_fails_
     order = order_in(status)
     is_open = status in {OrderStatus.PENDING, OrderStatus.SUBMITTED}
 
-    assert order.is_open is is_open
+    assert order.status.is_open is is_open
 
     order.fail_if_open("broker call failed", now=NOW)
 
@@ -115,8 +116,10 @@ def test_partial_fills_accumulate_price_quantity_fee_and_tax() -> None:
     order = new_order(action=TradeAction.SELL)
     order.submit(now=NOW)
 
-    order.fill(400, 100, COSTS.apply(TradeAction.SELL, "2330", 100, 400, now=NOW), realized_pnl=1_000, now=NOW)
-    order.fill(600, 110, COSTS.apply(TradeAction.SELL, "2330", 110, 600, now=NOW), realized_pnl=2_000, now=NOW)
+    cost = COSTS.apply(TradeAction.SELL, "2330", 100, 400, now=NOW)
+    order.fill(400, 100, cost.fee, cost.tax, realized_pnl=1_000, now=NOW)
+    cost = COSTS.apply(TradeAction.SELL, "2330", 110, 600, now=NOW)
+    order.fill(600, 110, cost.fee, cost.tax, realized_pnl=2_000, now=NOW)
 
     assert order.status == OrderStatus.FILLED
     assert order.filled_quantity == 1000
@@ -137,7 +140,8 @@ def test_a_fill_beyond_the_limit_price_is_refused() -> None:
     order = order_in(OrderStatus.SUBMITTED)
 
     with pytest.raises(ValueError, match="BUY fill price cannot exceed limit_price"):
-        order.fill(1, 101, COSTS.apply(TradeAction.BUY, "2330", 101, 1, now=NOW), now=NOW)
+        cost = COSTS.apply(TradeAction.BUY, "2330", 101, 1, now=NOW)
+        order.fill(1, 101, cost.fee, cost.tax, now=NOW)
 
     assert (order.status, order.filled_quantity) == (OrderStatus.SUBMITTED, 0)
 

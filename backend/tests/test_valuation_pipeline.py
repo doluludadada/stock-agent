@@ -7,17 +7,11 @@ import pytest
 from rich.console import Console
 from support.harness import CliHarness, build_harness, falling_history, harness_config, rising_history
 
-from a_domain.model.fundamentals.eps import Eps
-from a_domain.model.fundamentals.eps_unavailable import EpsUnavailable
-from a_domain.model.fundamentals.fiscal_quarter import FiscalQuarter
-from a_domain.model.valuation.pe_not_applicable import PeNotApplicable
-from a_domain.model.valuation.pe_ratio import PeRatio
-from a_domain.model.valuation.scan_criteria import ScanCriteria
-from a_domain.model.valuation.target_pe import TARGET_PE_REQUIREMENT, TargetPe
-from a_domain.model.valuation.valuation_explanation import NOT_INVESTMENT_ADVICE
-from a_domain.model.valuation.valuation_report import LABEL
-from a_domain.rules.ai.prompt import LOW_PE_RULE
+from a_domain.model.fundamentals.eps import Eps, EpsUnavailable
+from a_domain.model.valuation.scan import MarketValuation, ScanCriteria
+from a_domain.model.valuation.valuation import PeRatio, ValuationReport
 from a_domain.types.enums import EliminationReason, EpsUnavailableReason, PeNotApplicableReason, WatchlistType
+from a_domain.types.values import FiscalQuarter
 from b_application.config.app_config import AppConfig
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 from d_presentation.cli import terminal
@@ -57,6 +51,13 @@ def market_harness(now: datetime = AFTER_CLOSE_FRIDAY, config: AppConfig | None 
     return harness
 
 
+def appraise(harness: CliHarness, market: MarketValuation, stock_id: str, target_pe: float) -> ValuationReport:
+    valuation = market.find(stock_id)
+    assert valuation is not None
+    [report] = harness.runtime.pipeline.appraise_valuations([valuation], target_pe)
+    return report
+
+
 def capture_cli_output(monkeypatch: pytest.MonkeyPatch) -> io.StringIO:
     output = io.StringIO()
     monkeypatch.setattr(terminal, "console", Console(file=output, width=400))
@@ -77,8 +78,8 @@ async def test_market_load_values_every_stock_from_filings_and_official_closes()
     assert tsmc.current_pe == PeRatio(price=2415.0, eps=86.28)
     assert tsmc.stock.industry == "半導體業"
     assert tsmc.close_is_fresh
-    assert market.find("1101").current_pe == PeNotApplicable(PeNotApplicableReason.EPS_NEGATIVE)
-    assert market.find("0050").current_pe == PeNotApplicable(PeNotApplicableReason.EPS_UNAVAILABLE)
+    assert market.find("1101").current_pe == PeNotApplicableReason.EPS_NEGATIVE
+    assert market.find("0050").current_pe == PeNotApplicableReason.EPS_UNAVAILABLE
     assert market.last_closed_session == date(2026, 10, 30)
     assert harness.stocks.stocks["2330"].eps == EpsUnavailable(EpsUnavailableReason.NOT_LOADED)
 
@@ -121,18 +122,18 @@ async def test_numbers_come_from_the_domain_and_never_from_the_ai() -> None:
     }
     market = await harness.runtime.pipeline.load_market_valuation()
 
-    explanation = await harness.runtime.pipeline.explain_valuation(market.appraise(market.find("2330"), TargetPe(25)))
+    sections = await harness.runtime.pipeline.explain_valuation(appraise(harness, market, "2330", 25))
 
     prompt = harness.ai.calls[0].prompt
     assert "27.99x" in prompt
     assert "Base 2,157.00 TWD" in prompt
     assert harness.news.requested == ["2330"]
-    printed = "\n".join(line for section in explanation.sections() for line in section.lines)
+    printed = "\n".join(line for section in sections for line in section.lines)
     assert "先進製程需求強勁" in printed
     assert "客戶庫存調整" in printed
     assert "9999" not in printed
     assert "123.45" not in printed
-    assert NOT_INVESTMENT_ADVICE in printed
+    assert harness.config.valuation.not_investment_advice in printed
 
 
 @pytest.mark.asyncio
@@ -140,7 +141,7 @@ async def test_loss_making_stock_never_asks_the_ai_for_a_fair_price() -> None:
     harness = market_harness()
     market = await harness.runtime.pipeline.load_market_valuation()
 
-    await harness.runtime.pipeline.explain_valuation(market.appraise(market.find("1101"), TargetPe(25)))
+    await harness.runtime.pipeline.explain_valuation(appraise(harness, market, "1101", 25))
 
     prompt = harness.ai.calls[0].prompt
     assert "No fair price was computed because: loss-making, P/E not applicable" in prompt
@@ -154,9 +155,9 @@ async def test_failed_ai_call_still_yields_every_report_item() -> None:
     harness.ai.failures["2330"] = TimeoutError("AI provider timed out")
     market = await harness.runtime.pipeline.load_market_valuation()
 
-    explanation = await harness.runtime.pipeline.explain_valuation(market.appraise(market.find("2330"), TargetPe(25)))
+    explained = await harness.runtime.pipeline.explain_valuation(appraise(harness, market, "2330", 25))
 
-    sections = {section.title: section.lines for section in explanation.sections()}
+    sections = {section.title: section.lines for section in explained}
     assert len(sections) == 11
     assert any("AI explanation unavailable" in line for line in sections["Insufficient data warnings"])
 
@@ -166,7 +167,7 @@ async def test_scan_then_technical_step_records_where_each_stock_left() -> None:
     harness = market_harness()
     market = await harness.runtime.pipeline.load_market_valuation()
 
-    strict = harness.runtime.pipeline.screen_valuation(market, ScanCriteria(target_pe=TargetPe(20), min_undervaluation=0.0))
+    strict = harness.runtime.pipeline.screen_valuation(market, ScanCriteria(target_pe=20, min_undervaluation=0.0))
     assert [report.stock.stock_id for report in strict.survivors] == ["2603", "1232"]
     assert {elimination.report.stock.stock_id: elimination.reason for elimination in strict.eliminations} == {
         "2330": EliminationReason.BELOW_MIN_UNDERVALUATION,
@@ -175,7 +176,7 @@ async def test_scan_then_technical_step_records_where_each_stock_left() -> None:
     }
 
     confirmed = await harness.runtime.pipeline.confirm_valuation_technical(
-        harness.runtime.pipeline.screen_valuation(market, ScanCriteria(target_pe=TargetPe(30), min_undervaluation=0.0))
+        harness.runtime.pipeline.screen_valuation(market, ScanCriteria(target_pe=30, min_undervaluation=0.0))
     )
 
     assert [report.stock.stock_id for report in confirmed.survivors] == ["2330"]
@@ -193,7 +194,7 @@ async def test_technical_step_drops_daily_history_older_than_the_history_limit()
     market = await harness.runtime.pipeline.load_market_valuation()
 
     confirmed = await harness.runtime.pipeline.confirm_valuation_technical(
-        harness.runtime.pipeline.screen_valuation(market, ScanCriteria(target_pe=TargetPe(30), min_undervaluation=0.0))
+        harness.runtime.pipeline.screen_valuation(market, ScanCriteria(target_pe=30, min_undervaluation=0.0))
     )
 
     assert [report.stock.stock_id for report in confirmed.survivors] == []
@@ -204,11 +205,11 @@ async def test_technical_step_drops_daily_history_older_than_the_history_limit()
 async def test_undervalued_stock_prompt_asks_the_ai_to_explain_low_pe_causes() -> None:
     harness = market_harness()
     market = await harness.runtime.pipeline.load_market_valuation()
-    scan = harness.runtime.pipeline.screen_valuation(market, ScanCriteria(target_pe=TargetPe(20), min_undervaluation=0.0))
+    scan = harness.runtime.pipeline.screen_valuation(market, ScanCriteria(target_pe=20, min_undervaluation=0.0))
 
     await harness.runtime.pipeline.explain_valuation(scan.survivors[0])
 
-    assert LOW_PE_RULE in harness.ai.calls[0].prompt
+    assert harness.config.valuation.low_pe_prompt_rule in harness.ai.calls[0].prompt
 
 
 @pytest.mark.asyncio
@@ -220,15 +221,17 @@ async def test_menu_5_reports_each_stock_and_rejects_invalid_targets(monkeypatch
 
     printed = output.getvalue()
     assert [question.split(" (")[0] for question in asked] == ["Enter stock IDs separated by space or comma"] + ["Target P/E"] * 4
-    assert printed.count(TARGET_PE_REQUIREMENT) == 3
+    assert printed.count("Input should be a finite number\n") == 2
+    assert printed.count("Input should be greater than 0\n") == 1
+    assert "validation error" not in printed
     assert "Stock not found: 9999" in printed
     assert [call.stock_id for call in harness.ai.calls] == ["2330", "1101", "0050"]
-    assert printed.count(LABEL) >= 3
+    assert printed.count("Valuation based on a specified P/E") >= 3
     assert "86.28 TWD (TTM, 2025Q3–2026Q2, actual, MOPS" in printed
     assert "2,415.00 TWD (2026-10-29 close, published by the exchange)" in printed
     assert "loss-making, P/E not applicable" in printed
     assert "Insufficient data" in printed
-    assert printed.count(NOT_INVESTMENT_ADVICE) == 3
+    assert printed.count(harness.config.valuation.not_investment_advice) == 3
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,7 @@
 # Technical analysis domain review
 
+> Implemented design: [Technical strategy formulas](technical-strategy-formulas.md). Where this document disagrees with it, this document is history.
+
 This review answers the question under US-001 in `docs/requirements.md`. Are the technical-analysis domain models split too finely? And where does the technical-scoring configuration belong, `appsetting.yaml` or the strategy file?
 
 It covers `a_domain/rules/technical/` (`criteria/`, `calculation/`, `strategy.py`), `a_domain/model/analysis/`, `a_domain/model/indicators/`, and `RuleEffect` in `a_domain/types/enums.py`. Paths below are relative to `backend/src/` unless they start with `config/` or `docs/`.

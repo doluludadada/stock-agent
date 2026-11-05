@@ -1,7 +1,6 @@
 from typing import Any, override
 
 import httpx
-from icontract import require
 
 from a_domain.model.chat.web_search_result import WebSearchResult
 from a_domain.ports.chat.web_search_provider import IWebSearchProvider
@@ -14,8 +13,10 @@ class TavilySearchAdapter(IWebSearchProvider):
     Tavily web search adapter.
     """
 
-    @require(lambda config: bool(config.tavily.api_key), "Missing tavily_api_key in configuration.")
     def __init__(self, config: AppConfig, logger: ILoggingProvider) -> None:
+        if not config.tavily.api_key:
+            raise ValueError("Missing tavily_api_key in configuration.")
+
         self._search_url = config.sources.ai.tavily_search_url
         self._logger = logger
         self._client = httpx.AsyncClient(timeout=httpx.Timeout(config.tavily.connection_timeout))

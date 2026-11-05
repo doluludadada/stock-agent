@@ -1,8 +1,11 @@
+from collections.abc import Sequence
+
+from a_domain.model.system.stats import SystemStats
+from a_domain.model.trading.signal import TradeSignal
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.notification_provider import INotificationProvider
 from a_domain.types.enums import TradeAction
 from b_application.config.app_config import AppConfig
-from b_application.schemas.pipeline_status import PipelineStatus
 
 
 class Reporting:
@@ -19,7 +22,7 @@ class Reporting:
         self._recipients = config.notifications.recipients
         self._logger = logger
 
-    async def execute(self, status: PipelineStatus) -> None:
+    async def execute(self, signals: Sequence[TradeSignal], stats: SystemStats) -> None:
         if not self._enabled:
             self._logger.info("Notifications disabled.")
             return
@@ -32,11 +35,11 @@ class Reporting:
             self._logger.warning("Notification recipients are empty.")
             return
 
-        for signal in [signal for signal in status.signals if signal.action != TradeAction.HOLD]:
+        for signal in [signal for signal in signals if signal.action != TradeAction.HOLD]:
             try:
                 sent = await self._notification.send_signal_alert(signal, self._recipients)
             except Exception as error:
-                self._logger.error(status.stats.add_error(f"Notification failed for {signal.stock_id}: {error}"))
+                self._logger.error(stats.add_error(f"Notification failed for {signal.stock_id}: {error}"))
                 continue
 
             if sent:

@@ -1,5 +1,3 @@
-# backend/src/c_infrastructure/system/market_clock.py
-
 from datetime import date, datetime, time, timedelta
 from typing import override
 from zoneinfo import ZoneInfo

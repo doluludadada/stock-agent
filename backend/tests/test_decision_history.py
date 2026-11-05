@@ -4,7 +4,7 @@ from pathlib import Path
 import chromadb
 import pytest
 from support.settings import shipped_config
-from trading_stack import MONDAY_10_00, MovableClock, run_status
+from trading_stack import MONDAY_10_00, MovableClock, run_stats
 
 from a_domain.model.chat.message import Message
 from a_domain.model.market.stock import Stock
@@ -54,10 +54,10 @@ def knowledge_repository(tmp_path: Path) -> ChromaKnowledgeRepository:
 
 
 async def remember(repository: ChromaKnowledgeRepository, *signals: TradeSignal) -> None:
-    status = run_status(Workflow.FULL_CYCLE)
-    status.signals = list(signals)
-    status.stocks_cache = {signal.stock_id: Stock(stock_id=signal.stock_id) for signal in signals}
-    await DecisionMemory(knowledge_repository=repository, logger=SilentLogger()).execute(status)
+    stocks = {signal.stock_id: Stock(stock_id=signal.stock_id) for signal in signals}
+    await DecisionMemory(knowledge_repository=repository, logger=SilentLogger()).execute(
+        signals, stocks, run_stats(Workflow.FULL_CYCLE)
+    )
 
 
 class FailingFor2317:
@@ -74,14 +74,15 @@ class FailingFor2317:
 @pytest.mark.asyncio
 async def test_one_failed_save_does_not_stop_the_other_decisions(knowledge_repository: ChromaKnowledgeRepository) -> None:
     signals = [make_signal(stock_id, TradeAction.HOLD, 50, "hold", hour=1) for stock_id in ("2317", "2330")]
-    status = run_status(Workflow.FULL_CYCLE)
-    status.signals = signals
-    status.stocks_cache = {signal.stock_id: Stock(stock_id=signal.stock_id) for signal in signals}
+    stocks = {signal.stock_id: Stock(stock_id=signal.stock_id) for signal in signals}
+    stats = run_stats(Workflow.FULL_CYCLE)
 
-    await DecisionMemory(knowledge_repository=FailingFor2317(knowledge_repository), logger=SilentLogger()).execute(status)
+    await DecisionMemory(knowledge_repository=FailingFor2317(knowledge_repository), logger=SilentLogger()).execute(
+        signals, stocks, stats
+    )
 
     assert "Stock: 2330" in await knowledge_repository.find_decision_history("2330")
-    assert status.stats.errors == ["Decision memory failed for 2317: disk full"]
+    assert stats.errors == ["Decision memory failed for 2317: disk full"]
 
 
 @pytest.mark.asyncio
@@ -142,7 +143,7 @@ async def test_ai_analysis_prompt_carries_the_analysed_stocks_own_history(knowle
         market_clock=MovableClock(MONDAY_10_00),
     )
 
-    await analyser.execute([Stock(stock_id="2330")], run_status(Workflow.FULL_CYCLE), AiAnalysisFocus.FUNDAMENTAL)
+    await analyser.execute([Stock(stock_id="2330")], AiAnalysisFocus.FUNDAMENTAL, run_stats(Workflow.FULL_CYCLE))
 
     assert "[Past Analysis]" in ai_provider.prompts[0]
     assert "Reason: Strong revenue growth" in ai_provider.prompts[0]

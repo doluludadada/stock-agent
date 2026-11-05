@@ -1,18 +1,19 @@
+from dataclasses import replace
 from datetime import datetime
 
-from sqlmodel import Field, SQLModel
+from pydantic import ConfigDict, Field
+from pydantic.dataclasses import dataclass
 
 from a_domain.model.analysis.ai_analysis_report import AiAnalysisReport
 from a_domain.model.analysis.technical_report import TechnicalReport
-from a_domain.model.fundamentals.eps import Eps
-from a_domain.model.fundamentals.eps_unavailable import EpsUnavailable
-from a_domain.model.indicators.technical_indicators import TechnicalIndicators
+from a_domain.model.fundamentals.eps import Eps, EpsUnavailable
 from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.types.enums import EpsUnavailableReason, MarketType, WatchlistType
 
 
-class Stock(SQLModel):
+@dataclass(config=ConfigDict(validate_assignment=True))
+class Stock:
     """
     Stock Domain Model.
 
@@ -23,7 +24,7 @@ class Stock(SQLModel):
     # --------------------------------- Identity --------------------------------- #
     stock_id: str
     name: str | None = None
-    market: MarketType = Field(default=MarketType.TWSE)
+    market: MarketType = MarketType.TWSE
     industry: str | None = None
 
     # ----------------------------------- Data ----------------------------------- #
@@ -38,7 +39,6 @@ class Stock(SQLModel):
     eps: Eps | EpsUnavailable = Field(default_factory=lambda: EpsUnavailable(EpsUnavailableReason.NOT_LOADED))
 
     # -------------------------------- Analysis ---------------------------------- #
-    indicators: TechnicalIndicators = Field(default_factory=TechnicalIndicators)
     technical_report: TechnicalReport | None = None
     ai_report: AiAnalysisReport | None = None
     composite_score: int | None = None
@@ -46,10 +46,13 @@ class Stock(SQLModel):
     watchlist_types: set[WatchlistType] = Field(default_factory=set)
 
     def load_history(self, bars: list[Ohlcv]) -> None:
-        """New daily history. The indicators and the technical report came from the old one, so they are cleared."""
+        """New daily history. The technical report came from the old one, so it is cleared."""
         self.ohlcv = list(bars)
-        self.indicators = TechnicalIndicators()
         self.technical_report = None
+
+    def take_official_change(self, close: Ohlcv) -> None:
+        """The listing's official change of a session goes onto the daily bar of that session, which has none of its own."""
+        self.ohlcv = [replace(bar, change=close.change) if bar.ts == close.ts else bar for bar in self.ohlcv]
 
     # -------------------------------- Shortcuts --------------------------------- #
     @property
@@ -72,10 +75,6 @@ class Stock(SQLModel):
     @property
     def latest_market_data_at(self) -> datetime | None:
         return self.latest_bar.ts if self.latest_bar else None
-
-    @property
-    def current_volume(self) -> int | None:
-        return self.today.volume if self.today else None
 
     @property
     def technical_score(self) -> int | None:

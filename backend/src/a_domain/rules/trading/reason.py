@@ -1,9 +1,7 @@
-from dataclasses import dataclass
-
-from icontract import ensure
+from pydantic.dataclasses import dataclass
 
 from a_domain.model.market.stock import Stock
-from a_domain.model.trading.position import Position
+from a_domain.model.trading.account import Position
 from a_domain.types.enums import TradeAction
 
 
@@ -43,7 +41,6 @@ class EntryReasonRule:
     item_limit: int
     summary_rule: AnalysisSummaryRule
 
-    @ensure(lambda result: len(result) > 0, "Reason must not be empty")
     def apply(self, stock: Stock, hold_cause: str | None) -> str:
         report = stock.ai_report
 
@@ -65,7 +62,6 @@ class ExitReasonRule:
     item_limit: int
     summary_rule: AnalysisSummaryRule
 
-    @ensure(lambda result: len(result) > 0, "Reason must not be empty")
     def apply(self, stock: Stock, position: Position, action: TradeAction, cause: str) -> str:
         parts = [f"Exit: {action.name} - {cause}", f"Position: qty={position.quantity}, avg={position.average_cost:.2f}"]
         selling = action == TradeAction.SELL

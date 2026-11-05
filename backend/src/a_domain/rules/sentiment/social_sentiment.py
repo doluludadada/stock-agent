@@ -1,15 +1,15 @@
 from collections.abc import Iterable
-from dataclasses import dataclass
+from typing import Annotated
 
-from icontract import invariant
+from pydantic import Field, PositiveInt
+from pydantic.dataclasses import dataclass
 
-from a_domain.model.analysis.sentiment_classification import SentimentClassification
 from a_domain.model.analysis.social_sentiment import SocialSentiment
+from a_domain.model.market.article import Article
 from a_domain.types.enums import SentimentConsensus, SentimentLabel
+from a_domain.types.values import Fraction
 
 
-@invariant(lambda self: self.min_opinions >= 1)
-@invariant(lambda self: 0.5 < self.consensus_share <= 1, "consensus_share must be above one half, so only one stance can reach it")
 @dataclass(frozen=True)
 class SentimentConsensusRule:
     """
@@ -18,8 +18,9 @@ class SentimentConsensusRule:
     and never netted, so an even bullish/bearish split is DISAGREEMENT, not NEUTRAL.
     """
 
-    min_opinions: int
-    consensus_share: float
+    min_opinions: PositiveInt
+    consensus_share: Annotated[float, Field(gt=0.5, le=1)]
+    """Above one half, so only one stance can reach it."""
 
     def apply(self, bullish: int, bearish: int, neutral: int) -> SentimentConsensus:
         opinions = bullish + bearish + neutral
@@ -36,25 +37,28 @@ class SentimentConsensusRule:
         return SentimentConsensus.DISAGREEMENT
 
 
-@invariant(lambda self: 0 <= self.min_confidence <= 1)
 @dataclass(frozen=True)
 class SocialSentimentRule:
-    """Tallies a stock's classified posts. A classification below `min_confidence` counts as UNCLEAR."""
+    """
+    Tallies a stock's classified posts. A post classified below `min_confidence` counts as UNCLEAR, and a post without a
+    sentiment is not counted.
+    """
 
-    min_confidence: float
+    min_confidence: Fraction
     consensus_rule: SentimentConsensusRule
 
-    def apply(self, classifications: Iterable[SentimentClassification], posts: int) -> SocialSentiment:
+    def apply(self, classified: Iterable[Article], post_count: int) -> SocialSentiment:
         labels = [
-            classification.label if classification.confidence >= self.min_confidence else SentimentLabel.UNCLEAR
-            for classification in classifications
+            post.sentiment if post.sentiment_confidence >= self.min_confidence else SentimentLabel.UNCLEAR
+            for post in classified
+            if post.sentiment is not None and post.sentiment_confidence is not None
         ]
         bullish, bearish, neutral = (
             labels.count(label) for label in (SentimentLabel.BULLISH, SentimentLabel.BEARISH, SentimentLabel.NEUTRAL)
         )
 
         return SocialSentiment(
-            posts=posts,
+            posts=post_count,
             bullish=bullish,
             bearish=bearish,
             neutral=neutral,

@@ -1,14 +1,31 @@
-import math
-from dataclasses import dataclass
 from datetime import date, datetime
+from typing import Literal
 
-from icontract import ensure, invariant, require
+from pydantic import NonNegativeFloat, NonNegativeInt, PositiveInt, validate_call
+from pydantic.dataclasses import dataclass
 
-from a_domain.model.trading.trade_cost import TradeCost
 from a_domain.types.enums import SecurityKind, TradeAction
+from a_domain.types.values import PositiveFiniteFloat
 
 
-@invariant(lambda self: self.fee_rate >= 0 and self.tax_rate >= 0 and self.etf_tax_rate >= 0 and self.min_fee >= 0)
+@dataclass(frozen=True)
+class TradeCost:
+    """What executing `gross` worth of shares costs. Fee and tax are whole NT dollars, rounded down."""
+
+    action: TradeAction
+    gross: float
+    fee: int
+    tax: int
+
+    @property
+    def net(self) -> float:
+        """Signed cash change: a BUY pays gross + fee, a SELL receives gross - fee - tax."""
+        if self.action == TradeAction.BUY:
+            return -(self.gross + self.fee)
+
+        return self.gross - self.fee - self.tax
+
+
 @dataclass(frozen=True)
 class TradingCostRule:
     """
@@ -18,16 +35,22 @@ class TradingCostRule:
     of `now`, the trade's time, in its own zone; every Taiwan trading hour falls on the same date in UTC and in Taipei.
     """
 
-    fee_rate: float
-    tax_rate: float
-    etf_tax_rate: float
-    min_fee: int
+    fee_rate: NonNegativeFloat
+    tax_rate: NonNegativeFloat
+    etf_tax_rate: NonNegativeFloat
+    min_fee: NonNegativeInt
     bond_etf_tax_exempt_until: date
 
-    @require(lambda action: action != TradeAction.HOLD, "HOLD has no cost")
-    @require(lambda price: math.isfinite(price) and price > 0)
-    @require(lambda quantity: quantity > 0)
-    def apply(self, action: TradeAction, stock_id: str, price: float, quantity: int, *, now: datetime) -> TradeCost:
+    @validate_call
+    def apply(
+        self,
+        action: Literal[TradeAction.BUY, TradeAction.SELL],
+        stock_id: str,
+        price: PositiveFiniteFloat,
+        quantity: PositiveInt,
+        *,
+        now: datetime,
+    ) -> TradeCost:
         gross = price * quantity
         fee = max(self.min_fee, int(gross * self.fee_rate))
         kind = SecurityKind.of(stock_id)
@@ -44,10 +67,8 @@ class AffordableQuantityRule:
 
     cost_rule: TradingCostRule
 
-    @require(lambda price: math.isfinite(price) and price > 0)
-    @require(lambda lot_size: lot_size > 0)
-    @ensure(lambda result, lot_size: result >= 0 and result % lot_size == 0)
-    def apply(self, cash: float, stock_id: str, price: float, lot_size: int, *, now: datetime) -> int:
+    @validate_call
+    def apply(self, cash: float, stock_id: str, price: PositiveFiniteFloat, lot_size: PositiveInt, *, now: datetime) -> int:
         # The fee is rounded down, so up to one dollar more than cash / (price * (1 + fee_rate)) can still fit.
         quantity = int((cash + 1) // (price * (1 + self.cost_rule.fee_rate))) // lot_size * lot_size
 

@@ -1,5 +1,3 @@
-# backend/src/a_domain/types/enums.py
-
 from enum import StrEnum, auto
 
 
@@ -8,6 +6,21 @@ class AiProvider(StrEnum):
     GROK = auto()
     GEMINI = auto()
     GROQ = auto()
+    NVIDIA = auto()
+    """NVIDIA's hosted models through its OpenAI-compatible API."""
+
+    CLAUDE = auto()
+    """Anthropic's Claude models through the Messages API."""
+
+    @property
+    def label(self) -> str:
+        match self:
+            case AiProvider.OPENAI:
+                return "OpenAI"
+            case AiProvider.NVIDIA:
+                return "NVIDIA"
+            case _:
+                return self.value.capitalize()
 
 
 class AiAnalysisFocus(StrEnum):
@@ -26,6 +39,13 @@ class MessageRole(StrEnum):
 class MarketType(StrEnum):
     TWSE = auto()
     TPEX = auto()
+
+
+class MarketIndex(StrEnum):
+    """A market index with a daily history. Yahoo Finance serves it under the symbol `sources.yahoo.index_symbols` names."""
+
+    TAIEX = auto()
+    """The TWSE Capitalization Weighted Stock Index."""
 
 
 class SecurityKind(StrEnum):
@@ -75,14 +95,40 @@ class OrderType(StrEnum):
 
 
 class OrderStatus(StrEnum):
-    """Order lifecycle. Legal changes are listed once, in a_domain.model.trading.order.ORDER_TRANSITIONS."""
+    """Order lifecycle. Each status lists the statuses that may follow it in next_statuses."""
 
     PENDING = auto()
+    """Built by the app, not yet accepted by a broker."""
+
     SUBMITTED = auto()
+    """Accepted and working; may hold a partial fill."""
+
     FILLED = auto()
+    """The whole quantity executed."""
+
     CANCELLED = auto()
+    """Stopped before the whole quantity executed (by a cancel, an IOC remainder, or a FOK kill); may hold a partial fill."""
+
     FAILED = auto()
+    """A technical error (exception, broker unreachable), whatever state the order was in."""
+
     REJECTED = auto()
+    """Refused by a business or validation rule before acceptance (gate refused, invalid order, insufficient cash or shares)."""
+
+    @property
+    def next_statuses(self) -> frozenset[OrderStatus]:
+        """SUBMITTED to SUBMITTED is a partial fill that leaves the rest working."""
+        match self:
+            case OrderStatus.PENDING:
+                return frozenset({OrderStatus.SUBMITTED, OrderStatus.REJECTED, OrderStatus.FAILED, OrderStatus.CANCELLED})
+            case OrderStatus.SUBMITTED:
+                return frozenset({OrderStatus.SUBMITTED, OrderStatus.FILLED, OrderStatus.CANCELLED, OrderStatus.FAILED})
+            case _:
+                return frozenset()
+
+    @property
+    def is_open(self) -> bool:
+        return bool(self.next_statuses)
 
 
 class RejectReason(StrEnum):
@@ -167,6 +213,14 @@ class InformationSource(StrEnum):
         """Public discussion boards, as opposed to news media and company filings."""
         return self in {InformationSource.PTT_STOCK, InformationSource.PTT_GOSSIPING}
 
+    @property
+    def label(self) -> str:
+        match self:
+            case InformationSource.TWSE_MOPS:
+                return "MOPS"
+            case _:
+                return self.value
+
 
 class SentimentLabel(StrEnum):
     """One post's stance toward its stock."""
@@ -224,6 +278,9 @@ class Workflow(StrEnum):
     VALUATION = auto()
     """Menus 5 and 6. Read-only: no run record, no order."""
 
+    RESEARCH = auto()
+    """The Web stock page's technical evaluation, and the account history. Read-only: no run record, no AI call, no order."""
+
 
 class OrderMode(StrEnum):
     MOCK_ONLY = auto()
@@ -245,15 +302,15 @@ class EpsKind(StrEnum):
 
     @property
     def label(self) -> str:
-        return EPS_KIND_LABELS[self]
-
-
-EPS_KIND_LABELS = {
-    EpsKind.SINGLE_QUARTER: "single quarter",
-    EpsKind.CUMULATIVE: "cumulative",
-    EpsKind.ANNUAL: "annual",
-    EpsKind.TRAILING_TWELVE_MONTHS: "TTM",
-}
+        match self:
+            case EpsKind.SINGLE_QUARTER:
+                return "single quarter"
+            case EpsKind.CUMULATIVE:
+                return "cumulative"
+            case EpsKind.ANNUAL:
+                return "annual"
+            case EpsKind.TRAILING_TWELVE_MONTHS:
+                return "TTM"
 
 
 class EpsBasis(StrEnum):
@@ -277,6 +334,19 @@ class EpsUnavailableReason(StrEnum):
 
     SOURCE_FAILED = auto()
     """A quarter the TTM needs could not be fetched."""
+
+    @property
+    def label(self) -> str:
+        """What the report says after "Insufficient data", with `{quarter}` where the reason's quarter goes."""
+        match self:
+            case EpsUnavailableReason.NOT_LOADED:
+                return "no financial statements were loaded"
+            case EpsUnavailableReason.NOT_REPORTED:
+                return "no filing for this code since {quarter} (an ETF, a DR, a new listing or a company that has not filed)"
+            case EpsUnavailableReason.INCOMPLETE_HISTORY:
+                return "the cumulative EPS for {quarter} is missing, so the TTM EPS cannot be computed"
+            case EpsUnavailableReason.SOURCE_FAILED:
+                return "the {quarter} filings could not be fetched"
 
 
 class ScanStep(StrEnum):
@@ -306,18 +376,21 @@ class EliminationReason(StrEnum):
 
     @property
     def label(self) -> str:
-        return ELIMINATION_LABELS[self]
-
-
-ELIMINATION_LABELS = {
-    EliminationReason.EPS_UNAVAILABLE: "insufficient EPS data",
-    EliminationReason.EPS_NOT_POSITIVE: "EPS ≤ 0",
-    EliminationReason.PRICE_MISSING: "no valid price",
-    EliminationReason.PRICE_STALE: "stale price",
-    EliminationReason.BELOW_MIN_UNDERVALUATION: "undervaluation below the minimum",
-    EliminationReason.NO_PRICE_HISTORY: "no usable daily history (missing or stale), so the technical strategy cannot run",
-    EliminationReason.TECHNICAL_HARD_FAILURE: "technical hard failure",
-}
+        match self:
+            case EliminationReason.EPS_UNAVAILABLE:
+                return "insufficient EPS data"
+            case EliminationReason.EPS_NOT_POSITIVE:
+                return "EPS ≤ 0"
+            case EliminationReason.PRICE_MISSING:
+                return "no valid price"
+            case EliminationReason.PRICE_STALE:
+                return "stale price"
+            case EliminationReason.BELOW_MIN_UNDERVALUATION:
+                return "undervaluation below the minimum"
+            case EliminationReason.NO_PRICE_HISTORY:
+                return "no usable daily history (missing or stale), so the technical strategy cannot run"
+            case EliminationReason.TECHNICAL_HARD_FAILURE:
+                return "technical hard failure"
 
 
 class PeNotApplicableReason(StrEnum):
@@ -328,15 +401,26 @@ class PeNotApplicableReason(StrEnum):
 
     @property
     def label(self) -> str:
-        return PE_NOT_APPLICABLE_LABELS[self]
+        match self:
+            case PeNotApplicableReason.EPS_UNAVAILABLE:
+                return "insufficient data"
+            case PeNotApplicableReason.EPS_ZERO:
+                return "cannot be computed"
+            case PeNotApplicableReason.EPS_NEGATIVE:
+                return "loss-making, P/E not applicable"
+            case PeNotApplicableReason.INVALID_PRICE:
+                return "no valid price"
 
-
-PE_NOT_APPLICABLE_LABELS = {
-    PeNotApplicableReason.EPS_UNAVAILABLE: "insufficient data",
-    PeNotApplicableReason.EPS_ZERO: "cannot be computed",
-    PeNotApplicableReason.EPS_NEGATIVE: "loss-making, P/E not applicable",
-    PeNotApplicableReason.INVALID_PRICE: "no valid price",
-}
+    @property
+    def elimination_reason(self) -> EliminationReason:
+        """Why the undervalued scan's valuation step eliminates a stock whose P/E does not apply for this reason."""
+        match self:
+            case PeNotApplicableReason.EPS_UNAVAILABLE:
+                return EliminationReason.EPS_UNAVAILABLE
+            case PeNotApplicableReason.EPS_ZERO | PeNotApplicableReason.EPS_NEGATIVE:
+                return EliminationReason.EPS_NOT_POSITIVE
+            case PeNotApplicableReason.INVALID_PRICE:
+                return EliminationReason.PRICE_MISSING
 
 
 class ScenarioName(StrEnum):
@@ -346,4 +430,248 @@ class ScenarioName(StrEnum):
 
     @property
     def label(self) -> str:
-        return {ScenarioName.CONSERVATIVE: "Conservative", ScenarioName.BASE: "Base", ScenarioName.OPTIMISTIC: "Optimistic"}[self]
+        match self:
+            case ScenarioName.CONSERVATIVE:
+                return "Conservative"
+            case ScenarioName.BASE:
+                return "Base"
+            case ScenarioName.OPTIMISTIC:
+                return "Optimistic"
+
+
+class DatabaseBackend(StrEnum):
+    """
+    The database this process writes. It is chosen in config/appsetting.yaml, never from which credentials happen to be
+    set, so a service missing one PostgreSQL variable fails at startup instead of writing to a local SQLite file.
+    """
+
+    SQLITE = auto()
+    POSTGRESQL = auto()
+
+
+class IndicatorOutput(StrEnum):
+    """One number an indicator gives. Which outputs an indicator has is IndicatorKind.outputs."""
+
+    VALUE = auto()
+    LINE = auto()
+    SIGNAL = auto()
+    HISTOGRAM = auto()
+    UPPER = auto()
+    MIDDLE = auto()
+    LOWER = auto()
+    BANDWIDTH = auto()
+    PERCENT_B = auto()
+    PERCENT_K = auto()
+    PERCENT_D = auto()
+    ADX = auto()
+    PLUS_DI = auto()
+    MINUS_DI = auto()
+    MOVING_AVERAGE = auto()
+
+
+class IndicatorKind(StrEnum):
+    """An indicator the calculator knows. A strategy sets its parameters; its name in a rule is only a label."""
+
+    SMA = auto()
+    """Simple moving average of the daily closes."""
+
+    VOLUME_SMA = auto()
+    """Simple moving average of the daily volumes, in shares."""
+
+    RSI = auto()
+    MACD = auto()
+    BOLLINGER = auto()
+    STOCHASTIC = auto()
+    ADX = auto()
+    ATR = auto()
+    OBV = auto()
+    """On-balance volume, and its simple moving average over the period."""
+
+    MFI = auto()
+
+    @property
+    def outputs(self) -> tuple[IndicatorOutput, ...]:
+        match self:
+            case IndicatorKind.MACD:
+                return IndicatorOutput.LINE, IndicatorOutput.SIGNAL, IndicatorOutput.HISTOGRAM
+            case IndicatorKind.BOLLINGER:
+                return (
+                    IndicatorOutput.UPPER,
+                    IndicatorOutput.MIDDLE,
+                    IndicatorOutput.LOWER,
+                    IndicatorOutput.BANDWIDTH,
+                    IndicatorOutput.PERCENT_B,
+                )
+            case IndicatorKind.STOCHASTIC:
+                return IndicatorOutput.PERCENT_K, IndicatorOutput.PERCENT_D
+            case IndicatorKind.ADX:
+                return IndicatorOutput.ADX, IndicatorOutput.PLUS_DI, IndicatorOutput.MINUS_DI
+            case IndicatorKind.OBV:
+                return IndicatorOutput.VALUE, IndicatorOutput.MOVING_AVERAGE
+            case _:
+                return (IndicatorOutput.VALUE,)
+
+
+class MarketField(StrEnum):
+    """A field of one completed daily bar. Volume is in shares."""
+
+    OPEN = auto()
+    HIGH = auto()
+    LOW = auto()
+    CLOSE = auto()
+    VOLUME = auto()
+
+
+class FormulaNode(StrEnum):
+    """The kind of one part of a technical formula; JSON names it in the part's `type` field."""
+
+    CONSTANT = auto()
+    """A plain number. JSON writes it as the number itself, with no `type`."""
+
+    MARKET = auto()
+    LATEST_PRICE = auto()
+    INDICATOR = auto()
+    ARITHMETIC = auto()
+    COMPARISON = auto()
+    GROUP = auto()
+
+
+class ArithmeticOperator(StrEnum):
+    ADD = auto()
+    SUBTRACT = auto()
+    MULTIPLY = auto()
+    DIVIDE = auto()
+
+
+class ComparisonOperator(StrEnum):
+    GT = auto()
+    GTE = auto()
+    LT = auto()
+    LTE = auto()
+    EQ = auto()
+    NE = auto()
+    CROSSES_ABOVE = auto()
+    """The left side was at or below the right side one daily bar earlier, and is above it now."""
+
+    CROSSES_BELOW = auto()
+    """The left side was at or above the right side one daily bar earlier, and is below it now."""
+
+    @property
+    def is_crossing(self) -> bool:
+        return self in (ComparisonOperator.CROSSES_ABOVE, ComparisonOperator.CROSSES_BELOW)
+
+
+class GroupOperator(StrEnum):
+    ALL = auto()
+    ANY = auto()
+
+
+class SettingsFile(StrEnum):
+    """A settings file in config/ the administrator may edit from the Web. Nothing else on disk can be named."""
+
+    APPSETTING = auto()
+    INSTRUCTIONS = auto()
+
+    @property
+    def file_name(self) -> str:
+        match self:
+            case SettingsFile.APPSETTING:
+                return "appsetting.yaml"
+            case SettingsFile.INSTRUCTIONS:
+                return "instructions.yaml"
+
+
+class SettingsAction(StrEnum):
+    SAVE = auto()
+    RESTORE = auto()
+
+
+class EditableSetting(StrEnum):
+    """
+    A setting the administrator may change from the Web, named by its dotted path in its file. Anything not listed
+    stays read-only there: the environment, the broker and order mode, the score weights and thresholds, sizing and
+    stop-loss, the history and quote freshness, database, folders, credentials and every source URL.
+    """
+
+    AI_ACTIVE_MODEL = "ai.active_model"
+    AI_TEMPERATURE = "ai.temperature"
+    AI_MAX_OUTPUT_TOKENS = "ai.max_output_tokens"
+    AI_CONNECTION_TIMEOUT = "ai.connection_timeout"
+    AI_ARTICLE_CONTENT_LENGTH = "ai.article_content_length"
+    AI_MODEL_OPENAI = "ai.available_models.openai"
+    AI_MODEL_GROK = "ai.available_models.grok"
+    AI_MODEL_GEMINI = "ai.available_models.gemini"
+    AI_MODEL_GROQ = "ai.available_models.groq"
+    AI_MODEL_NVIDIA = "ai.available_models.nvidia"
+    AI_MODEL_CLAUDE = "ai.available_models.claude"
+    BEHAVIOR_LOG_LEVEL = "behavior.log_level"
+    BEHAVIOR_ENABLE_WEB_SEARCH = "behavior.enable_web_search"
+    BEHAVIOR_WEB_SEARCH_MAX_RESULTS = "behavior.web_search_max_results"
+    ANALYSIS_REASON_ITEM_LIMIT = "analysis.reason_item_limit"
+    ANALYSIS_ARTICLE_FETCH_LIMIT = "analysis.article_fetch_limit"
+    ANALYSIS_LOOKBACK_DAYS = "analysis.lookback_days"
+    ANALYSIS_HISTORY_CALENDAR_DAYS_PER_BAR = "analysis.history_calendar_days_per_bar"
+    SENTIMENT_MIN_CONFIDENCE = "sentiment.min_confidence"
+    SENTIMENT_MIN_OPINIONS = "sentiment.min_opinions"
+    SENTIMENT_CONSENSUS_SHARE = "sentiment.consensus_share"
+    COLLECT_BUZZ_MIN_MENTIONS = "collect_rules.buzz_min_mentions"
+    COLLECT_BUZZ_MIN_ENGAGEMENT = "collect_rules.buzz_min_engagement"
+    COLLECT_SOCIAL_ARTICLE_LIMIT = "collect_rules.social_article_limit"
+    COLLECT_PTT_LOOKBACK_DAYS = "collect_rules.ptt_lookback_days"
+    COLLECT_SPAM_KEYWORDS = "collect_rules.spam_keywords"
+    COLLECT_FINANCIAL_KEYWORDS = "collect_rules.financial_keywords"
+    COLLECT_PTT_TAGS = "collect_rules.ptt_tags"
+    QUALITY_MIN_CHARS_STOCK = "quality.min_chars_stock"
+    QUALITY_MIN_CHARS_NEWS = "quality.min_chars_news"
+    QUALITY_MIN_CHARS_GOSSIP = "quality.min_chars_gossip"
+    FRESHNESS_MISSING_SESSION_LISTED_STOCKS = "freshness.missing_session_listed_stocks"
+    FRESHNESS_DAILY_CLOSE_MAX_MISSED_SESSIONS = "freshness.daily_close_max_missed_sessions"
+    VALUATION_SCENARIO_SPREAD = "valuation.scenario_spread"
+    VALUATION_MAX_SCAN_EXPLANATIONS = "valuation.max_scan_explanations"
+    WATCHLIST_AUTOMATIC_EXPIRY_SESSIONS = "watchlist.automatic_expiry_sessions"
+    MARKET_DATA_SEARCH_RESULT_LIMIT = "market_data.search_result_limit"
+    MARKET_DATA_MOST_TRADED_COUNT = "market_data.most_traded_count"
+    SYSTEM_PROMPT = "system_prompt"
+    RAG_INJECTION_PROMPT = "rag_injection_prompt"
+    ANALYSIS_REPORT_PROMPT_FUNDAMENTAL = "ai_analysis_report_prompt_fundamental"
+    ANALYSIS_REPORT_PROMPT_MOMENTUM = "ai_analysis_report_prompt_momentum"
+    SOCIAL_SENTIMENT_PROMPT = "social_sentiment_prompt"
+    VALUATION_EXPLANATION_PROMPT = "ai_valuation_explanation_prompt"
+
+    @property
+    def file(self) -> SettingsFile:
+        return SettingsFile.APPSETTING if "." in self.value else SettingsFile.INSTRUCTIONS
+
+    @property
+    def choices(self) -> tuple[str, ...]:
+        """The values a choice setting accepts; empty for a free value that the file's validation bounds."""
+        match self:
+            case EditableSetting.AI_ACTIVE_MODEL:
+                return tuple(provider.value for provider in AiProvider)
+            case EditableSetting.BEHAVIOR_LOG_LEVEL:
+                return ("DEBUG", "INFO", "WARNING", "ERROR")
+            case _:
+                return ()
+
+
+class LockedSetting(StrEnum):
+    """
+    Settings the Web shows but never changes: they choose the broker, real orders, sizing and the order gates. The
+    score weights choose automatic orders as surely as the thresholds they are compared with, and the daily history's
+    freshness decides which stocks a run analyses at all.
+    """
+
+    ENVIRONMENT = "environment"
+    EXECUTION_PROVIDER = "trading.execution_provider"
+    ORDER_MODE = "trading.order_mode"
+    SHIOAJI_SIMULATION = "shioaji.simulation"
+    DATABASE_BACKEND = "db.backend"
+    MIN_COMBINED_SCORE_BUY = "analysis.min_combined_score_buy"
+    MAX_COMBINED_SCORE_SELL = "analysis.max_combined_score_sell"
+    TECHNICAL_WEIGHT = "analysis.technical_weight"
+    AI_WEIGHT = "analysis.ai_weight"
+    RISK_PER_TRADE_PCT = "analysis.risk_per_trade_pct"
+    STOP_LOSS_PCT = "analysis.stop_loss_pct"
+    LOT_SIZE = "analysis.lot_size"
+    REALTIME_MAX_LAG_MINUTES = "freshness.realtime_max_lag_minutes"
+    HISTORY_MAX_LAG_DAYS = "freshness.history_max_lag_days"

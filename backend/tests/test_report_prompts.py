@@ -2,21 +2,19 @@ from collections.abc import Awaitable, Callable
 from datetime import date, datetime, time
 
 import pytest
-from trading_stack import MONDAY_10_00, MovableClock, SilentLogger, run_status
+from trading_stack import MONDAY_10_00, MovableClock, SilentLogger, run_stats
 
-from a_domain.model.analysis.sentiment_classification import SentimentClassification
 from a_domain.model.chat.message import Message
 from a_domain.model.fundamentals.eps import Eps
-from a_domain.model.fundamentals.fiscal_quarter import FiscalQuarter
 from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
-from a_domain.model.valuation.stock_valuation import StockValuation
-from a_domain.model.valuation.target_pe import TargetPe
-from a_domain.model.valuation.valuation_report import ValuationReport
+from a_domain.rules.fundamentals.filing import FilingDeadlineRule
+from a_domain.rules.valuation.valuation import AppraisalRule, StockValuationRule
 from a_domain.types.enums import AiAnalysisFocus, EpsBasis, EpsKind, InformationSource, Workflow
+from a_domain.types.values import FiscalQuarter
 from b_application.use_cases.process.ai_analyser import AiAnalyser
-from b_application.use_cases.process.valuation_explainer import ValuationExplainer
+from b_application.use_cases.valuation.valuation_explainer import ValuationExplainer
 from c_infrastructure.ai_models.sentiment_classifier import AiSentimentClassifier
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 from d_presentation.dependencies import load_settings
@@ -49,10 +47,10 @@ class NoHistory:
 
 
 class NothingClassified:
-    async def find_classifications(self, stock_id: str, urls: list[str]) -> dict[str, SentimentClassification]:
-        return {}
+    async def find_classified(self, stock_id: str, posts: list[Article]) -> list[Article]:
+        return []
 
-    async def save_classifications(self, stock_id: str, classifications: dict[str, SentimentClassification]) -> None:
+    async def save_classified(self, stock_id: str, posts: list[Article]) -> None:
         return None
 
 
@@ -76,7 +74,7 @@ async def analysis_prompt(focus: AiAnalysisFocus) -> str:
     ai = PromptRecorder()
     analyser = AiAnalyser(ai, NoHistory(), MovableClock(MONDAY_10_00), SHIPPED, SilentLogger())
 
-    await analyser.execute([stock()], run_status(Workflow.SPECIFIC_STOCKS), focus)
+    await analyser.execute([stock()], focus, run_stats(Workflow.SPECIFIC_STOCKS))
 
     [prompt] = ai.prompts
     return prompt
@@ -112,11 +110,14 @@ async def valuation_prompt() -> str:
         fetched_at=MONDAY_10_00,
     )
     close = Ohlcv(ts=datetime.combine(LAST_CLOSED_SESSION, time(13, 30), TAIWAN_TIMEZONE), open=1000, high=1000, low=1000, close=1000)
-    valuation = StockValuation(stock=valued, close=close, last_closed_session=LAST_CLOSED_SESSION, max_missed_sessions=1)
+    valuation_rule = StockValuationRule(
+        max_missed_sessions=1, filing_deadline_rule=FilingDeadlineRule(SHIPPED.sources.mops.filing_deadlines)
+    )
+    valuation = valuation_rule.apply(valued, close, LAST_CLOSED_SESSION)
     ai = PromptRecorder()
     explainer = ValuationExplainer(ai, MovableClock(MONDAY_10_00), SHIPPED, SilentLogger())
 
-    await explainer.execute(ValuationReport.appraise(valuation, TargetPe(25), SHIPPED.valuation.scenario_spread))
+    await explainer.execute(AppraisalRule(SHIPPED.valuation.scenario_spread).apply(valuation, 25))
 
     [prompt] = ai.prompts
     return prompt

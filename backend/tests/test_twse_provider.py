@@ -1,3 +1,4 @@
+import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -99,6 +100,25 @@ async def test_a_zero_close_is_no_close(payloads: dict[str, list[dict[str, str]]
 
 
 @pytest.mark.asyncio
+async def test_reads_at_once_of_an_empty_stock_list_download_it_once(monkeypatch, payloads: dict[str, list[dict[str, str]]]) -> None:
+    sent: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(str(request.url))
+        await asyncio.sleep(0.01)
+        return httpx.Response(200, json=payloads[str(request.url)])
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: real_client(transport=httpx.MockTransport(handler)))
+    provider = make_provider()
+
+    every_stock, one_stock, closes = await asyncio.gather(provider.get_all(), provider.get_by_id("1101"), provider.get_latest_closes())
+
+    assert sorted(sent) == sorted(PAYLOADS)
+    assert one_stock is not None and one_stock.stock_id in {stock.stock_id for stock in every_stock} and "1101" in closes
+
+
+@pytest.mark.asyncio
 async def test_closes_come_from_the_cached_stock_list_download(requests: list[httpx.Request]) -> None:
     provider = make_provider()
 
@@ -107,3 +127,25 @@ async def test_closes_come_from_the_cached_stock_list_download(requests: list[ht
 
     assert closes["1101"].close == 28.2
     assert sorted(str(request.url) for request in requests) == sorted(PAYLOADS)
+
+
+@pytest.mark.asyncio
+async def test_each_close_carries_the_change_its_listing_reports(requests: list[httpx.Request]) -> None:
+    """TWSE writes '-10.0000', TPEX '-58.00 ' with a trailing space."""
+    closes = await make_provider().get_latest_closes()
+
+    assert {stock_id: bar.change for stock_id, bar in closes.items()} == {"1101": 0.2, "2330": -10.0, "6488": -58.0, "8069": -4.0}
+
+
+@pytest.mark.parametrize(("text", "change"), [("+1.50", 1.5), ("--- ", None), ("nan", None), ("149.00", None)])
+@pytest.mark.asyncio
+async def test_a_change_that_is_no_number_or_leaves_no_reference_price_keeps_the_close_without_one(
+    payloads: dict[str, list[dict[str, str]]], requests: list[httpx.Request], text: str, change: float | None
+) -> None:
+    """A 149.00 close cannot have risen by 149.00: its reference price would be 0."""
+    row = next(row for row in payloads[SOURCES.exchange.tpex_daily_quotes_url] if row["SecuritiesCompanyCode"] == "8069")
+    row["Change"] = text
+
+    closes = await make_provider().get_latest_closes()
+
+    assert (closes["8069"].close, closes["8069"].change) == (149.0, change)

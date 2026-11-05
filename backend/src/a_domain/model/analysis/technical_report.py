@@ -1,11 +1,10 @@
-# backend/src/a_domain/model/analysis/technical_report.pyl
-from dataclasses import dataclass, field
+from pydantic import ConfigDict, Field
+from pydantic.dataclasses import dataclass
 
-from icontract import invariant
+from a_domain.types.values import Score
 
 
-@invariant(lambda self: 0 <= self.score <= 100, "Technical score must be 0-100")
-@dataclass
+@dataclass(frozen=True, config=ConfigDict(json_schema_serialization_defaults_required=True))
 class TechnicalReport:
     """
     Result produced by a TechnicalStrategy.
@@ -15,10 +14,10 @@ class TechnicalReport:
     Observations describe optional technical signals.
     """
 
-    score: int
-    hard_failures: list[str] = field(default_factory=list)
-    soft_failures: list[str] = field(default_factory=list)
-    observations: list[str] = field(default_factory=list)
+    score: Score[int]
+    hard_failures: list[str] = Field(default_factory=list)
+    soft_failures: list[str] = Field(default_factory=list)
+    observations: list[str] = Field(default_factory=list)
 
     @property
     def passed(self) -> bool:

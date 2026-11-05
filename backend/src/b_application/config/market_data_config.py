@@ -55,6 +55,12 @@ class MarketDataConfig(BaseModel):
     history_retry_hours: float = Field(default=2, gt=0)
     """A history behind the last settled session is asked for again at most this often."""
 
+    history_start_slack_days: int = Field(default=14, ge=0)
+    """
+    A cached history that starts more than this many calendar days after the window asked for is fetched again, at
+    most every retry interval: holidays such as the Lunar New Year closure leave up to about ten days without a bar.
+    """
+
     history_save_chunk_size: int = Field(default=5_000, gt=0)
     """Cached daily bars written per database commit."""
 
@@ -62,3 +68,9 @@ class MarketDataConfig(BaseModel):
     """How long the TWSE and TPEX listings, with each stock's latest official close, are reused."""
 
     listing_timeout_seconds: float = Field(default=30.0, gt=0)
+
+    search_result_limit: int = Field(default=12, gt=0, le=50)
+    """The most stocks one search of the listing answers with."""
+
+    most_traded_count: int = Field(default=10, gt=0, le=50)
+    """How many of the latest session's most traded stocks the market overview lists."""

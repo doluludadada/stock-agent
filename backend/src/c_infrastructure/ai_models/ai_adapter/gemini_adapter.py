@@ -4,7 +4,6 @@ from typing import override
 
 from google.generativeai.client import configure
 from google.generativeai.generative_models import GenerativeModel
-from icontract import require
 
 from a_domain.model.chat.message import Message, MessageRole
 from a_domain.ports.system.logging_provider import ILoggingProvider
@@ -13,8 +12,10 @@ from c_infrastructure.ai_models.base import BaseAIAdapter
 
 
 class GeminiAIAdapter(BaseAIAdapter):
-    @require(lambda config: bool(config.ai.gemini_api_key), "Missing gemini_api_key in configuration.")
     def __init__(self, config: AppConfig, logger: ILoggingProvider, model_name: str) -> None:
+        if not config.ai.gemini_api_key:
+            raise ValueError("Missing gemini_api_key in configuration.")
+
         super().__init__(config, logger, model_name)
         configure(api_key=config.ai.gemini_api_key)
         self._model = GenerativeModel(model_name)

@@ -1,12 +1,11 @@
-from dataclasses import dataclass
+from typing import Self
 
-from icontract import invariant
+from pydantic import NonNegativeInt, model_validator
+from pydantic.dataclasses import dataclass
 
 from a_domain.types.enums import SentimentConsensus
 
 
-@invariant(lambda self: min(self.bullish, self.bearish, self.neutral, self.unclear) >= 0)
-@invariant(lambda self: self.classified <= self.posts, "cannot classify more posts than were given")
 @dataclass(frozen=True)
 class SocialSentiment:
     """
@@ -14,12 +13,19 @@ class SocialSentiment:
     feeds trading decisions. Ratios are shares of the opinions (bullish, bearish and neutral).
     """
 
-    posts: int
-    bullish: int
-    bearish: int
-    neutral: int
-    unclear: int
+    posts: NonNegativeInt
+    bullish: NonNegativeInt
+    bearish: NonNegativeInt
+    neutral: NonNegativeInt
+    unclear: NonNegativeInt
     consensus: SentimentConsensus
+
+    @model_validator(mode="after")
+    def classifies_at_most_the_posts(self) -> Self:
+        if self.classified > self.posts:
+            raise ValueError("cannot classify more posts than were given")
+
+        return self
 
     @property
     def classified(self) -> int:

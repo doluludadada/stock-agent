@@ -1,5 +1,9 @@
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
+from typing import Annotated, Self
 from uuid import UUID, uuid4
+
+from pydantic import Field
+from pydantic.dataclasses import dataclass
 
 from a_domain.types.errors import OrderVersionConflictError
 
@@ -7,11 +11,11 @@ from a_domain.types.errors import OrderVersionConflictError
 @dataclass(frozen=True, kw_only=True)
 class Order:
     customer_id: UUID
-    total: int
-    id: UUID = field(default_factory=uuid4)
-    version: int = 1
+    total: Annotated[int, Field(ge=0)]
+    id: UUID = Field(default_factory=uuid4)
+    version: Annotated[int, Field(ge=1)] = 1
 
-    def change_total(self, total: int, expected_version: int) -> "Order":
+    def change_total(self, total: int, expected_version: int) -> Self:
         if expected_version != self.version:
             raise OrderVersionConflictError(self.id, self.version)
 

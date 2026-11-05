@@ -1,10 +1,10 @@
+from dataclasses import replace
 from datetime import UTC, date, datetime
 
 import pytest
 
-from a_domain.model.trading.broker_order_report import BrokerOrderReport
-from a_domain.model.trading.order import Order
-from a_domain.model.trading.position import Position
+from a_domain.model.trading.account import Account, Position
+from a_domain.model.trading.order import ExchangeOrder, Order
 from a_domain.rules.trading.cost import TradingCostRule
 from a_domain.rules.trading.execution import BrokerOutcomeRule, FillRule, LotSplitRule, OrderAcceptanceRule
 from a_domain.types.enums import LotKind, OrderStatus, OrderType, RejectReason, TimeInForce, TradeAction
@@ -16,6 +16,7 @@ COSTS = TradingCostRule(
     fee_rate=0.001425, tax_rate=0.003, etf_tax_rate=0.001, min_fee=20, bond_etf_tax_exempt_until=date(2026, 12, 31)
 )
 OUTCOME = BrokerOutcomeRule(broker="Shioaji")
+ACCEPTANCE = OrderAcceptanceRule(cost_rule=COSTS)
 
 
 def new_order(action: TradeAction = TradeAction.BUY, quantity: int = 1500) -> Order:
@@ -33,8 +34,8 @@ def new_order(action: TradeAction = TradeAction.BUY, quantity: int = 1500) -> Or
     )
 
 
-def report(status: OrderStatus, ordered: int = 1000, dealt: int = 0, reported: int | None = None) -> BrokerOrderReport:
-    return BrokerOrderReport(
+def part(status: OrderStatus, ordered: int = 1000, dealt: int = 0, reported: int | None = None) -> ExchangeOrder:
+    return ExchangeOrder(
         stock_id="2330",
         status=status,
         ordered_shares=ordered,
@@ -62,9 +63,35 @@ def report(status: OrderStatus, ordered: int = 1000, dealt: int = 0, reported: i
 def test_a_broker_takes_only_limit_orders_that_leave_nothing_working(
     order_type: OrderType, limit_price: float | None, time_in_force: TimeInForce, refusal: tuple[RejectReason, str] | None
 ) -> None:
-    placing = new_order().model_copy(update={"order_type": order_type, "limit_price": limit_price, "time_in_force": time_in_force})
+    placing = replace(new_order(), order_type=order_type, limit_price=limit_price, time_in_force=time_in_force)
 
-    assert OrderAcceptanceRule().apply(placing) == refusal
+    assert ACCEPTANCE.apply(placing, Account(cash=1_000_000)) == refusal
+
+
+@pytest.mark.parametrize(
+    ("action", "quantity", "account", "refusal"),
+    [
+        (TradeAction.BUY, 1000, Account(cash=100_142), None),
+        (
+            TradeAction.BUY,
+            1000,
+            Account(cash=100_141),
+            (RejectReason.INSUFFICIENT_CASH, "needs 100,142 including fee, cash is 100,141"),
+        ),
+        (TradeAction.SELL, 1000, Account(cash=0), (RejectReason.POSITION_NOT_FOUND, "no 2330 shares held")),
+        (TradeAction.SELL, 1000, Account(positions=[Position(stock_id="2330", quantity=1000, average_cost=90)]), None),
+        (
+            TradeAction.SELL,
+            2000,
+            Account(positions=[Position(stock_id="2330", quantity=1000, average_cost=90)]),
+            (RejectReason.INSUFFICIENT_POSITION, "holds 1000, selling 2000"),
+        ),
+    ],
+)
+def test_a_broker_takes_a_buy_the_cash_pays_for_with_its_fee_and_a_sell_of_shares_held(
+    action: TradeAction, quantity: int, account: Account, refusal: tuple[RejectReason, str] | None
+) -> None:
+    assert ACCEPTANCE.apply(new_order(action, quantity), account) == refusal
 
 
 @pytest.mark.parametrize(
@@ -81,31 +108,16 @@ def test_a_quantity_splits_into_whole_board_lots_and_the_odd_shares(board_lot_sh
 
 
 @pytest.mark.parametrize(
-    ("status", "done"),
-    [
-        (OrderStatus.PENDING, False),
-        (OrderStatus.SUBMITTED, False),
-        (OrderStatus.FILLED, True),
-        (OrderStatus.CANCELLED, True),
-        (OrderStatus.REJECTED, True),
-        (OrderStatus.FAILED, True),
-    ],
-)
-def test_an_exchange_order_is_done_once_its_status_is_final(status: OrderStatus, done: bool) -> None:
-    assert report(status).is_done is done
-
-
-@pytest.mark.parametrize(
     ("finished", "missing"),
     [
-        (report(OrderStatus.FILLED, dealt=1000), False),
-        (report(OrderStatus.CANCELLED, dealt=400), False),
-        (report(OrderStatus.FILLED, dealt=400), True),
-        (report(OrderStatus.CANCELLED, dealt=400, reported=600), True),
+        (part(OrderStatus.FILLED, dealt=1000), False),
+        (part(OrderStatus.CANCELLED, dealt=400), False),
+        (part(OrderStatus.FILLED, dealt=400), True),
+        (part(OrderStatus.CANCELLED, dealt=400, reported=600), True),
     ],
 )
 def test_deals_are_missing_when_they_fall_short_of_the_broker_count_or_of_a_filled_quantity(
-    finished: BrokerOrderReport, missing: bool
+    finished: ExchangeOrder, missing: bool
 ) -> None:
     assert finished.deals_missing is missing
 
@@ -132,46 +144,47 @@ def test_a_sell_fill_realizes_its_net_proceeds_less_the_cost_basis_of_held_share
 def test_a_filled_order_keeps_its_status() -> None:
     order = new_order(quantity=1000)
     order.submit(now=NOW)
-    order.fill(1000, 100, COSTS.apply(TradeAction.BUY, "2330", 100, 1000, now=NOW), now=NOW)
+    cost = COSTS.apply(TradeAction.BUY, "2330", 100, 1000, now=NOW)
+    order.fill(1000, 100, cost.fee, cost.tax, now=NOW)
 
-    OUTCOME.apply(order, [report(OrderStatus.FILLED, dealt=1000)], NOW)
+    OUTCOME.apply(order, [part(OrderStatus.FILLED, dealt=1000)], NOW)
 
     assert (order.status, order.reason) == (OrderStatus.FILLED, None)
 
 
 @pytest.mark.parametrize(
-    ("reports", "status", "reason"),
+    ("parts", "status", "reason"),
     [
         (
-            [report(OrderStatus.SUBMITTED)],
+            [part(OrderStatus.SUBMITTED)],
             OrderStatus.FAILED,
             "still working at the broker after a cancel request, check Shioaji: submitted 1000",
         ),
         (
-            [report(OrderStatus.CANCELLED), report(OrderStatus.FAILED, 500)],
+            [part(OrderStatus.CANCELLED), part(OrderStatus.FAILED, 500)],
             OrderStatus.FAILED,
             "unexplained broker result: cancelled 1000; failed 500",
         ),
-        ([report(OrderStatus.FILLED, dealt=400)], OrderStatus.FAILED, "unexplained broker result: filled 1000"),
+        ([part(OrderStatus.FILLED, dealt=400)], OrderStatus.FAILED, "unexplained broker result: filled 1000"),
         (
-            [report(OrderStatus.REJECTED), report(OrderStatus.REJECTED, 500)],
+            [part(OrderStatus.REJECTED), part(OrderStatus.REJECTED, 500)],
             OrderStatus.REJECTED,
             "BROKER_REFUSED: rejected 1000; rejected 500",
         ),
-        ([report(OrderStatus.CANCELLED)], OrderStatus.CANCELLED, "IOC unfilled: filled 0 of 1500; cancelled 1000"),
+        ([part(OrderStatus.CANCELLED)], OrderStatus.CANCELLED, "IOC unfilled: filled 0 of 1500; cancelled 1000"),
         (
-            [report(OrderStatus.CANCELLED), report(OrderStatus.REJECTED, 500)],
+            [part(OrderStatus.CANCELLED), part(OrderStatus.REJECTED, 500)],
             OrderStatus.CANCELLED,
             "IOC unfilled: filled 0 of 1500; cancelled 1000; rejected 500",
         ),
     ],
 )
 def test_the_parts_reports_give_an_unfilled_order_its_final_status(
-    reports: list[BrokerOrderReport], status: OrderStatus, reason: str
+    parts: list[ExchangeOrder], status: OrderStatus, reason: str
 ) -> None:
     order = new_order()
 
-    OUTCOME.apply(order, reports, NOW)
+    OUTCOME.apply(order, parts, NOW)
 
     assert (order.status, order.reason, order.updated_at) == (status, reason, NOW)
 
@@ -179,9 +192,10 @@ def test_the_parts_reports_give_an_unfilled_order_its_final_status(
 def test_a_partly_filled_order_is_cancelled_with_what_filled() -> None:
     order = new_order()
     order.submit(now=NOW)
-    order.fill(1000, 100, COSTS.apply(TradeAction.BUY, "2330", 100, 1000, now=NOW), now=NOW)
+    cost = COSTS.apply(TradeAction.BUY, "2330", 100, 1000, now=NOW)
+    order.fill(1000, 100, cost.fee, cost.tax, now=NOW)
 
-    OUTCOME.apply(order, [report(OrderStatus.FILLED, dealt=1000), report(OrderStatus.REJECTED, 500)], NOW)
+    OUTCOME.apply(order, [part(OrderStatus.FILLED, dealt=1000), part(OrderStatus.REJECTED, 500)], NOW)
 
     assert (order.status, order.filled_quantity, order.reason) == (
         OrderStatus.CANCELLED,

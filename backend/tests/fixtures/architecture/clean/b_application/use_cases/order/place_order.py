@@ -9,7 +9,7 @@ class PlaceOrderUseCase:
         self._repository = repository
         self._free_shipping = FreeShippingRule(settings.minimum_total, settings.excluded_regions)
 
-    async def execute(self, status: PipelineStatus) -> None:
+    async def execute(self, status: PipelineStatus) -> bool:
         order = status.require_order()
-        status.free_shipping = self._free_shipping.apply(order, status.region)
         await self._repository.save(order)
+        return self._free_shipping.apply(order, status.region)

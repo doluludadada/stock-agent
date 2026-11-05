@@ -1,147 +1,158 @@
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from math import isfinite
+from typing import Annotated, Literal, Self
 
-from a_domain.model.indicators.adx import Adx
-from a_domain.model.indicators.atr import Atr
-from a_domain.model.indicators.bollinger_bands import BollingerBands
-from a_domain.model.indicators.indicator_parameters import IndicatorParameters
-from a_domain.model.indicators.macd import Macd
-from a_domain.model.indicators.mfi import Mfi
-from a_domain.model.indicators.moving_averages import MovingAverages
-from a_domain.model.indicators.obv import Obv
-from a_domain.model.indicators.rsi import Rsi
-from a_domain.model.indicators.stochastic import Stochastic
-from a_domain.model.indicators.technical_indicators import TechnicalIndicators
+from pydantic import ConfigDict, Field, model_validator
+from pydantic.dataclasses import dataclass
+
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.rules.technical.calculation.formulas import (
-    latest_adx,
-    latest_atr,
+    adx_series,
+    atr_series,
     latest_bollinger,
-    latest_macd,
     latest_mfi,
-    latest_obv,
-    latest_rsi,
     latest_sma,
     latest_stochastic,
+    macd_series,
+    obv_series,
+    rsi_series,
 )
+from a_domain.types.enums import IndicatorKind, IndicatorOutput
+from a_domain.types.values import IndicatorPeriod
 
 
-class TechnicalIndicatorCalculator:
-    def __init__(self, indicators: IndicatorParameters):
-        self._indicators = indicators
+@dataclass(frozen=True, config=ConfigDict(extra="forbid"))
+class MovingAverageIndicator:
+    """`sma` averages the daily closes, `volume_sma` the daily volumes. Both include the bar they are read at."""
 
-    def apply(self, data: Sequence[Ohlcv]) -> TechnicalIndicators:
-        bars = sorted(data, key=lambda bar: bar.ts)
-        if not bars:
-            return TechnicalIndicators()
+    kind: Literal[IndicatorKind.SMA, IndicatorKind.VOLUME_SMA]
+    period: IndicatorPeriod
 
-        closes = [bar.close for bar in bars]
-        volumes = [float(bar.volume) for bar in bars]
+    @property
+    def required_bars(self) -> int:
+        return self.period
 
-        return TechnicalIndicators(
-            rsi=self._create_rsi(closes),
-            macd=self._create_macd(closes),
-            ma=self._create_moving_averages(closes, volumes),
-            bollinger=self._create_bollinger(closes),
-            stochastic=self._create_stochastic(bars),
-            adx=self._create_adx(bars),
-            atr=self._create_atr(bars, closes[-1]),
-            obv=self._create_obv(closes, volumes),
-            mfi=self._create_mfi(bars),
-        )
 
-    def _create_rsi(self, closes: Sequence[float]) -> Rsi | None:
-        value = latest_rsi(closes, self._indicators.rsi_period)
-        if value is None:
-            return None
+@dataclass(frozen=True, config=ConfigDict(extra="forbid"))
+class PeriodIndicator:
+    kind: Literal[IndicatorKind.RSI, IndicatorKind.ADX, IndicatorKind.ATR, IndicatorKind.OBV, IndicatorKind.MFI]
+    period: IndicatorPeriod
 
-        return Rsi(period=self._indicators.rsi_period, value=value)
+    @property
+    def required_bars(self) -> int:
+        match self.kind:
+            case IndicatorKind.ADX:
+                return self.period * 2
+            case IndicatorKind.OBV:
+                return self.period
+            case _:
+                return self.period + 1
 
-    def _create_moving_averages(self, closes: Sequence[float], volumes: Sequence[float]) -> MovingAverages | None:
-        indicators = self._indicators
-        price_ma = {
-            period: value
-            for period in sorted(indicators.price_ma_periods)
-            if (value := latest_sma(closes, period)) is not None and value > 0
-        }
-        volume_ma = {
-            period: value
-            for period in sorted(indicators.volume_ma_periods)
-            if (value := latest_sma(volumes, period)) is not None and value > 0
-        }
 
-        if not price_ma and not volume_ma:
-            return None
+@dataclass(frozen=True, config=ConfigDict(extra="forbid"))
+class MacdIndicator:
+    kind: Literal[IndicatorKind.MACD]
+    fast: IndicatorPeriod
+    slow: IndicatorPeriod
+    signal: IndicatorPeriod
 
-        return MovingAverages(price_ma=price_ma, volume_ma=volume_ma)
+    @model_validator(mode="after")
+    def _periods_are_ordered(self) -> Self:
+        if self.fast >= self.slow:
+            raise ValueError("the MACD slow period must be longer than the fast one")
 
-    def _create_macd(self, closes: Sequence[float]) -> Macd | None:
-        indicators = self._indicators
-        values = latest_macd(closes, indicators.macd_fast, indicators.macd_slow, indicators.macd_signal)
-        if values is None:
-            return None
+        return self
 
-        line, signal, histogram = values
-        return Macd(
-            fast=indicators.macd_fast,
-            slow=indicators.macd_slow,
-            signal_period=indicators.macd_signal,
-            line=line,
-            signal=signal,
-            histogram=histogram,
-        )
+    @property
+    def required_bars(self) -> int:
+        return self.slow + self.signal - 1
 
-    def _create_bollinger(self, closes: Sequence[float]) -> BollingerBands | None:
-        indicators = self._indicators
-        values = latest_bollinger(closes, indicators.bb_period, indicators.bb_std)
-        if values is None:
-            return None
 
-        upper, middle, lower, bandwidth, percent_b = values
-        return BollingerBands(
-            period=indicators.bb_period,
-            std=indicators.bb_std,
-            upper=upper,
-            middle=middle,
-            lower=lower,
-            bandwidth=bandwidth,
-            percent_b=percent_b,
-        )
+@dataclass(frozen=True, config=ConfigDict(extra="forbid"))
+class BollingerIndicator:
+    kind: Literal[IndicatorKind.BOLLINGER]
+    period: IndicatorPeriod
+    std: Annotated[float, Field(gt=0, le=10, allow_inf_nan=False, strict=True)]
 
-    def _create_stochastic(self, bars: Sequence[Ohlcv]) -> Stochastic | None:
-        indicators = self._indicators
-        values = latest_stochastic(bars, indicators.stoch_k, indicators.stoch_d)
-        if values is None:
-            return None
+    @property
+    def required_bars(self) -> int:
+        return self.period
 
-        percent_k, percent_d = values
-        return Stochastic(k_period=indicators.stoch_k, d_period=indicators.stoch_d, percent_k=percent_k, percent_d=percent_d)
 
-    def _create_adx(self, bars: Sequence[Ohlcv]) -> Adx | None:
-        values = latest_adx(bars, self._indicators.adx_period)
-        if values is None:
-            return None
+@dataclass(frozen=True, config=ConfigDict(extra="forbid"))
+class StochasticIndicator:
+    kind: Literal[IndicatorKind.STOCHASTIC]
+    k_period: IndicatorPeriod
+    d_period: IndicatorPeriod
 
-        adx, plus_di, minus_di = values
-        return Adx(period=self._indicators.adx_period, adx=adx, plus_di=plus_di, minus_di=minus_di)
+    @property
+    def required_bars(self) -> int:
+        return self.k_period + self.d_period - 1
 
-    def _create_atr(self, bars: Sequence[Ohlcv], latest_close: float) -> Atr | None:
-        value = latest_atr(bars, self._indicators.atr_period)
-        if value is None or latest_close <= 0:
-            return None
 
-        return Atr(period=self._indicators.atr_period, value=value, percent=value / latest_close)
+type IndicatorParameters = Annotated[
+    MovingAverageIndicator | PeriodIndicator | MacdIndicator | BollingerIndicator | StochasticIndicator, Field(discriminator="kind")
+]
+"""One indicator's kind and parameters, such as `{"kind": "sma", "period": 37}`. required_bars is the history it reads."""
 
-    def _create_obv(self, closes: Sequence[float], volumes: Sequence[float]) -> Obv | None:
-        values = latest_obv(closes, volumes, self._indicators.ma_mid)
-        if values is None:
-            return None
 
-        value, moving_average = values
-        return Obv(ma_period=self._indicators.ma_mid, value=value, moving_average=moving_average)
+def indicator_outputs(parameters: IndicatorParameters, bars: Sequence[Ohlcv]) -> dict[IndicatorOutput, float]:
+    """The indicator's outputs at the last of `bars`. An output the bars cannot give, or that is not finite, is absent."""
+    return finite(calculated_outputs(parameters, bars, [bar.close for bar in bars], [float(bar.volume) for bar in bars]))
 
-    def _create_mfi(self, bars: Sequence[Ohlcv]) -> Mfi | None:
-        value = latest_mfi(bars, self._indicators.mfi_period)
-        if value is None:
-            return None
 
-        return Mfi(period=self._indicators.mfi_period, value=value)
+def indicator_series(parameters: IndicatorParameters, bars: Sequence[Ohlcv]) -> list[dict[IndicatorOutput, float]]:
+    """
+    The indicator's outputs at each of `bars`, each equal to indicator_outputs over the bars up to that one: what a
+    chart draws. An indicator that reads only its last required_bars bars is read over that window at each bar; one
+    that carries a state from bar to bar is computed in one pass.
+    """
+    closes, volumes = [bar.close for bar in bars], [float(bar.volume) for bar in bars]
+
+    match parameters:
+        case MovingAverageIndicator() | BollingerIndicator() | StochasticIndicator() | PeriodIndicator(kind=IndicatorKind.MFI):
+            windows = ((max(0, end - parameters.required_bars), end) for end in range(1, len(bars) + 1))
+            series = [calculated_outputs(parameters, bars[start:end], closes[start:end], volumes[start:end]) for start, end in windows]
+        case PeriodIndicator() | MacdIndicator():
+            series = running_series(parameters, bars, closes, volumes)
+
+    return [finite(outputs) for outputs in series]
+
+
+def finite(outputs: Mapping[IndicatorOutput, float | None]) -> dict[IndicatorOutput, float]:
+    return {output: value for output, value in outputs.items() if value is not None and isfinite(value)}
+
+
+def calculated_outputs(
+    parameters: IndicatorParameters, bars: Sequence[Ohlcv], closes: Sequence[float], volumes: Sequence[float]
+) -> Mapping[IndicatorOutput, float | None]:
+    """Each output at the last bar by name. A one-output indicator's value is None when the bars cannot give it."""
+    match parameters:
+        case MovingAverageIndicator(kind=kind, period=period):
+            return {IndicatorOutput.VALUE: latest_sma(closes if kind == IndicatorKind.SMA else volumes, period)}
+        case PeriodIndicator(kind=IndicatorKind.MFI, period=period):
+            return {IndicatorOutput.VALUE: latest_mfi(bars, period)}
+        case BollingerIndicator(period=period, std=std):
+            return latest_bollinger(closes, period, std)
+        case StochasticIndicator(k_period=k_period, d_period=d_period):
+            return latest_stochastic(bars, k_period, d_period)
+        case PeriodIndicator() | MacdIndicator():
+            series = running_series(parameters, bars, closes, volumes)
+            return series[-1] if series else {}
+
+
+def running_series(
+    parameters: PeriodIndicator | MacdIndicator, bars: Sequence[Ohlcv], closes: Sequence[float], volumes: Sequence[float]
+) -> Sequence[Mapping[IndicatorOutput, float | None]]:
+    """Each bar's outputs of an indicator that carries a state from one bar to the next, computed in one pass."""
+    match parameters:
+        case PeriodIndicator(kind=IndicatorKind.RSI, period=period):
+            return [{IndicatorOutput.VALUE: value} for value in rsi_series(closes, period)]
+        case PeriodIndicator(kind=IndicatorKind.ATR, period=period):
+            return [{IndicatorOutput.VALUE: value} for value in atr_series(bars, period)]
+        case PeriodIndicator(kind=IndicatorKind.ADX, period=period):
+            return adx_series(bars, period)
+        case PeriodIndicator(period=period):
+            return obv_series(closes, volumes, period)
+        case MacdIndicator(fast=fast, slow=slow, signal=signal):
+            return macd_series(closes, fast, slow, signal)

@@ -5,9 +5,8 @@ from support.trading_rules import COSTS, sizing_rule
 
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
-from a_domain.model.trading.account import Account
-from a_domain.model.trading.position import Position
-from a_domain.rules.trading.valuation import EquityRule, ValuationRule
+from a_domain.model.trading.account import Account, Position
+from a_domain.rules.trading.account_value import AccountValueRule, PositionValueRule
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 
 QUOTED_AT = datetime(2026, 10, 19, 10, 0, tzinfo=TAIWAN_TIMEZONE)
@@ -53,6 +52,7 @@ def test_equity_marks_each_position_at_its_quote_else_its_last_daily_close_else_
         Stock(stock_id="2603"),
     ]
 
-    equity = EquityRule(valuation_rule=ValuationRule(cost_rule=COSTS)).apply(Account(cash=100_000, positions=positions), stocks)
+    value_rule = AccountValueRule(position_value_rule=PositionValueRule(cost_rule=COSTS))
+    equity = value_rule.apply(Account(cash=100_000, positions=positions), stocks).equity
 
     assert equity == 100_000 + 1000 * 100 + 1000 * 95 + 1000 * 90

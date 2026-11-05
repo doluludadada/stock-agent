@@ -1,5 +1,3 @@
-# backend/src/a_domain/ports/system/market_clock.py
-
 from datetime import date, datetime
 from typing import Protocol
 

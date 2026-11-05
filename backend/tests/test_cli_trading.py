@@ -97,8 +97,19 @@ async def test_the_menu_accepts_exactly_the_options_it_prints(screen: io.StringI
         await interactive.interactive_menu()
 
     printed = [line.split("]")[0].removeprefix("[") for line in screen.getvalue().splitlines() if line[:1] == "[" and "] " in line]
-    assert printed == ["1", "2", "3", "4", "5", "6", "7", "0"]
-    assert asked == [["0", "1", "2", "3", "4", "5", "6", "7"]]
+    assert printed == ["1", "2", "3", "4", "5", "6", "7", "8", "0"]
+    assert asked == [["0", "1", "2", "3", "4", "5", "6", "7", "8"]]
+
+
+async def test_specific_stock_analysis_during_a_listing_outage_says_so_and_returns_to_the_menu(screen: io.StringIO) -> None:
+    harness = build_harness()
+
+    with patch.object(Prompt, "ask", lambda *args, **kwargs: "2330"):
+        assert await interactive.run_menu_option("4", harness.runtime) is None
+
+    assert "The TWSE and TPEX listings could not be loaded." in screen.getvalue()
+    assert "Stock not found" not in screen.getvalue()
+    assert harness.broker.placed == []
 
 
 async def test_ctrl_d_at_a_yes_no_prompt_cancels_the_option_and_places_no_order(screen: io.StringIO) -> None:

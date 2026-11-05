@@ -107,6 +107,7 @@ def test_an_order_priced_from_a_float32_quote_takes_an_exchange_fill_at_that_pri
     order = RULE.apply(signal_at(NOW, yahoo_quote, action), new_run_id(), now=NOW, phase=TradingPhase.CONTINUOUS)
 
     order.submit(now=NOW)
-    order.fill(1000, exchange_price, COSTS.apply(action, "2330", exchange_price, 1000, now=NOW), now=NOW)
+    cost = COSTS.apply(action, "2330", exchange_price, 1000, now=NOW)
+    order.fill(1000, exchange_price, cost.fee, cost.tax, now=NOW)
 
     assert (order.status, repr(order.limit_price)) == (OrderStatus.FILLED, repr(exchange_price))

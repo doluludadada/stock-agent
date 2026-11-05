@@ -1,11 +1,46 @@
-from dataclasses import dataclass
-from datetime import date
+from collections.abc import Mapping
+from datetime import date, datetime
 
-from a_domain.model.fundamentals.eps import Eps
-from a_domain.model.fundamentals.eps_unavailable import EpsUnavailable
-from a_domain.model.fundamentals.fiscal_quarter import FiscalQuarter
-from a_domain.model.fundamentals.quarter_eps import EpsFilings, QuarterEps
+from pydantic.dataclasses import dataclass
+
+from a_domain.model.fundamentals.eps import Eps, EpsUnavailable
 from a_domain.types.enums import EpsBasis, EpsKind, EpsUnavailableReason, InformationSource
+from a_domain.types.values import FiscalQuarter
+
+
+@dataclass(frozen=True)
+class QuarterEps:
+    """Cumulative year-to-date basic EPS as filed for one quarter: one market's MOPS page, or every market merged."""
+
+    quarter: FiscalQuarter
+    cumulative_eps: Mapping[str, float]
+    fetched_at: datetime
+    refresh_failed: bool = False
+    """The page was due for a refresh that failed, so it is the last one fetched and may miss later filings."""
+
+
+type EpsFilings = Mapping[FiscalQuarter, QuarterEps | None]
+"""One entry per requested quarter. None means the quarter could not be fetched."""
+
+
+def filing_candidates(day: date) -> tuple[FiscalQuarter, FiscalQuarter]:
+    """
+    Newest first: the last quarter that ended before `day`, which may still be being filed, and the one before it.
+    On 2026-10-30 and 2026-10-01 they are 2026Q3 and 2026Q2; on 2026-09-30 they are 2026Q2 and 2026Q1.
+
+    Two suffice: each quarter's filing deadline falls on or before the end of the next quarter, so while one
+    quarter is being filed, the quarter before it is complete.
+    """
+    latest = FiscalQuarter(day.year, (day.month - 1) // 3 + 1).previous()
+    return (latest, latest.previous())
+
+
+def ttm_inputs(quarter: FiscalQuarter) -> tuple[FiscalQuarter, ...]:
+    """Cumulative reports a TTM ending at `quarter` needs: Q4 is the annual report; otherwise (Y,n), (Y-1,4), (Y-1,n)."""
+    if quarter.quarter == 4:
+        return (quarter,)
+
+    return (quarter, FiscalQuarter(quarter.year - 1, 4), FiscalQuarter(quarter.year - 1, quarter.quarter))
 
 
 @dataclass(frozen=True)
@@ -18,7 +53,7 @@ class TrailingEpsRule:
     """
 
     def apply(self, stock_id: str, filings: EpsFilings, today: date) -> Eps | EpsUnavailable:
-        candidates = FiscalQuarter.filing_candidates(today)
+        candidates = filing_candidates(today)
         newer: list[FiscalQuarter] = []
 
         for candidate in candidates:
@@ -38,7 +73,7 @@ class TrailingEpsRule:
         self, stock_id: str, filing: QuarterEps, filings: EpsFilings, newer: tuple[FiscalQuarter, ...]
     ) -> Eps | EpsUnavailable:
         value = filing.cumulative_eps[stock_id]
-        prior_year = filing.quarter.ttm_inputs[1:]
+        prior_year = ttm_inputs(filing.quarter)[1:]
 
         for needed, sign in zip(prior_year, (1, -1), strict=False):
             prior = filings.get(needed)
@@ -61,3 +96,11 @@ class TrailingEpsRule:
             fetched_at=filing.fetched_at,
             newer_quarters=newer,
         )
+
+
+@dataclass(frozen=True)
+class TrailingEpsQuartersRule:
+    """The cumulative reports TrailingEpsRule reads on `today`: each candidate quarter's and the prior-year ones it nets against."""
+
+    def apply(self, today: date) -> frozenset[FiscalQuarter]:
+        return frozenset(quarter for candidate in filing_candidates(today) for quarter in ttm_inputs(candidate))

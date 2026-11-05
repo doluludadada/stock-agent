@@ -1,4 +1,6 @@
+import asyncio
 import math
+from copy import deepcopy
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, NamedTuple, override
 
@@ -18,18 +20,20 @@ STOCK_CODE_LENGTH = 4
 
 
 class ListingFields(NamedTuple):
-    """Where one exchange's daily-quotes listing keeps a stock's code, name and daily bar."""
+    """Where one exchange's daily-quotes listing keeps a stock's code, name and daily bar with its change."""
 
     code: str
     name: str
-    bar: tuple[str, str, str, str, str, str]
+    bar: tuple[str, str, str, str, str, str, str]
 
 
 LISTING_FIELDS = {
     MarketType.TWSE: ListingFields(
-        "Code", "Name", ("Date", "OpeningPrice", "HighestPrice", "LowestPrice", "ClosingPrice", "TradeVolume")
+        "Code", "Name", ("Date", "OpeningPrice", "HighestPrice", "LowestPrice", "ClosingPrice", "TradeVolume", "Change")
     ),
-    MarketType.TPEX: ListingFields("SecuritiesCompanyCode", "CompanyName", ("Date", "Open", "High", "Low", "Close", "TradingShares")),
+    MarketType.TPEX: ListingFields(
+        "SecuritiesCompanyCode", "CompanyName", ("Date", "Open", "High", "Low", "Close", "TradingShares", "Change")
+    ),
 }
 
 
@@ -39,7 +43,7 @@ class TaiwanStockProvider(ITaiwanStockProvider):
     Results are cached with a TTL since the listed stock universe rarely changes.
     The same listings carry each stock's latest official close, cached with the universe.
 
-    Every call returns new Stock and Ohlcv objects. Workflows fill a Stock with articles, prices and reports,
+    Every call returns new Stock objects. Workflows fill a Stock with articles, prices and reports,
     so handing out the cached instances would carry one workflow's data into the next.
     """
 
@@ -52,34 +56,37 @@ class TaiwanStockProvider(ITaiwanStockProvider):
         self._cache: list[Stock] = []
         self._closes: dict[str, Ohlcv] = {}
         self._cache_expiry = datetime.min.replace(tzinfo=UTC)
+        # Reads that find the list empty or expired at once wait for one download instead of each downloading it.
+        self._listing_lock = asyncio.Lock()
 
     @override
     async def get_all(self) -> list[Stock]:
         stocks = await self.cached_stocks()
-        return [stock.model_copy(deep=True) for stock in stocks]
+        return [deepcopy(stock) for stock in stocks]
 
     @override
     async def get_by_id(self, stock_id: str) -> Stock | None:
         for stock in await self.cached_stocks():
             if stock.stock_id == stock_id:
-                return stock.model_copy(deep=True)
+                return deepcopy(stock)
         return None
 
     @override
     async def get_latest_closes(self) -> dict[str, Ohlcv]:
         await self.cached_stocks()
-        return {stock_id: close.model_copy() for stock_id, close in self._closes.items()}
+        return dict(self._closes)
 
     @override
     async def cached_stocks(self) -> list[Stock]:
-        now = self._clock.now()
-        if self._cache and now < self._cache_expiry:
-            self._logger.debug(f"Returning cached stock list ({len(self._cache)} stocks)")
-            return self._cache
+        async with self._listing_lock:
+            now = self._clock.now()
+            if self._cache and now < self._cache_expiry:
+                self._logger.debug(f"Returning cached stock list ({len(self._cache)} stocks)")
+                return self._cache
 
-        self._cache, self._closes = await self.fetch_listings()
-        self._cache_expiry = now + self._cache_ttl
-        return self._cache
+            self._cache, self._closes = await self.fetch_listings()
+            self._cache_expiry = now + self._cache_ttl
+            return self._cache
 
     @override
     async def fetch_listings(self) -> tuple[list[Stock], dict[str, Ohlcv]]:
@@ -130,8 +137,8 @@ class TaiwanStockProvider(ITaiwanStockProvider):
         return date(int(text[:-4]) + ROC_YEAR_OFFSET, int(text[-4:-2]), int(text[-2:]))
 
     @override
-    def parse_daily_close(self, row: dict[str, Any], fields: tuple[str, str, str, str, str, str]) -> Ohlcv | None:
-        date_field, open_field, high_field, low_field, close_field, volume_field = fields
+    def parse_daily_close(self, row: dict[str, Any], fields: tuple[str, str, str, str, str, str, str]) -> Ohlcv | None:
+        date_field, open_field, high_field, low_field, close_field, volume_field, change_field = fields
 
         try:
             session = self.parse_roc_date(row.get(date_field, ""))
@@ -145,4 +152,21 @@ class TaiwanStockProvider(ITaiwanStockProvider):
         if not all(math.isfinite(price) and price > 0 for price in (open_, high, low, close)):
             return None
 
-        return Ohlcv(ts=self._clock.session_close(session), open=open_, high=high, low=low, close=close, volume=volume)
+        return Ohlcv(
+            ts=self._clock.session_close(session),
+            open=open_,
+            high=high,
+            low=low,
+            close=close,
+            volume=volume,
+            change=self.parse_change(row.get(change_field, ""), close),
+        )
+
+    @override
+    def parse_change(self, text: str, close: float) -> float | None:
+        try:
+            change = float(text.replace(",", ""))
+        except ValueError:
+            return None
+
+        return change if math.isfinite(change) and close - change > 0 else None

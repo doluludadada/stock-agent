@@ -3,7 +3,6 @@ from datetime import UTC, datetime
 from typing import Any, override
 
 import httpx
-from icontract import require
 from openai import AsyncOpenAI, OpenAIError
 
 from a_domain.model.chat.message import Message, MessageRole
@@ -15,8 +14,10 @@ from c_infrastructure.ai_models.base import BaseAIAdapter
 class GrokAdapter(BaseAIAdapter):
     """xAI Grok through its OpenAI-compatible API, with live search and inline citations when the settings turn them on."""
 
-    @require(lambda config: bool(config.ai.grok_api_key), "Missing grok_api_key in configuration.")
     def __init__(self, config: AppConfig, logger: ILoggingProvider, model_name: str) -> None:
+        if not config.ai.grok_api_key:
+            raise ValueError("Missing grok_api_key in configuration.")
+
         super().__init__(config, logger, model_name)
         self._client = AsyncOpenAI(
             api_key=config.ai.grok_api_key,

@@ -1,12 +1,11 @@
 from collections.abc import Sequence, Set as AbstractSet
-from dataclasses import dataclass
+from dataclasses import replace
 from datetime import datetime
 
-from icontract import ensure, require
+from pydantic.dataclasses import dataclass
 
 from a_domain.model.market.stock import Stock
-from a_domain.model.trading.account import Account
-from a_domain.model.trading.position import Position
+from a_domain.model.trading.account import Account, Position
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.rules.trading.entry import EntryRule
 from a_domain.rules.trading.exit import BlockedStockRule, ExitRule
@@ -45,8 +44,9 @@ class DecisionCandidatesRule:
     technical verdict, so a position that fails the strategy still has its exit decided.
     """
 
-    def apply(self, technical_candidates: Sequence[Stock], survivors: Sequence[Stock], account: Account) -> list[Stock]:
-        held = [stock for stock in technical_candidates if account.position_for(stock.stock_id) is not None]
+    def apply(self, technical_candidates: Sequence[Stock], survivors: Sequence[Stock], held_stocks: Sequence[Stock]) -> list[Stock]:
+        held_stock_ids = {stock.stock_id for stock in held_stocks}
+        held = [stock for stock in technical_candidates if stock.stock_id in held_stock_ids]
 
         return list({stock.stock_id: stock for stock in [*survivors, *held]}.values())
 
@@ -64,8 +64,6 @@ class DecisionRule:
     entry_rule: EntryRule
     exit_rule: ExitRule
 
-    @ensure(lambda result: len(result.stock_id) > 0, "Signal must have a stock_id")
-    @ensure(lambda result: result.quantity >= 0, "Signal quantity must be non-negative")
     def apply(self, stock: Stock, account: Account, position: Position | None = None, *, equity: float, now: datetime) -> TradeSignal:
         if position is None:
             return self.entry_rule.apply(stock=stock, account=account, equity=equity, now=now)
@@ -93,15 +91,19 @@ class RunDecisionsRule:
     decision_rule: DecisionRule
     buy_cost_rule: BuyCostRule
 
-    @require(lambda stocks: all(stock.composite_score is not None for stock in stocks), "Every stock needs a composite score")
-    @require(lambda stocks: len({stock.stock_id for stock in stocks}) == len(stocks), "One decision per stock")
     def apply(self, stocks: Sequence[Stock], account: Account, equity: float, *, now: datetime) -> list[TradeSignal]:
+        if any(stock.composite_score is None for stock in stocks):
+            raise ValueError("Every stock needs a composite score")
+
+        if len({stock.stock_id for stock in stocks}) != len(stocks):
+            raise ValueError("One decision per stock")
+
         cash = account.cash
         signals: list[TradeSignal] = []
 
         for stock in sorted(stocks, key=lambda stock: (-(stock.composite_score or 0), stock.stock_id)):
             position = account.position_for(stock.stock_id)
-            signal = self.decision_rule.apply(stock, account.model_copy(update={"cash": cash}), position, equity=equity, now=now)
+            signal = self.decision_rule.apply(stock, replace(account, cash=cash), position, equity=equity, now=now)
 
             if signal.action == TradeAction.BUY:
                 cash -= self.buy_cost_rule.apply(signal.stock_id, signal.price_at_signal, signal.quantity, now=now)

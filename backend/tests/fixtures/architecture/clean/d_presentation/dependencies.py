@@ -7,6 +7,7 @@ from b_application.pipeline import Pipeline
 from b_application.use_cases.order.load_order import LoadOrderUseCase
 from b_application.use_cases.order.place_order import PlaceOrderUseCase
 from c_infrastructure.database.order_repository import SqlOrderRepository
+from c_infrastructure.system.loguru_logger import LoguruLogger
 
 
 @lru_cache
@@ -20,4 +21,4 @@ def get_session() -> AsyncSession:
 
 def get_pipeline() -> Pipeline:
     repository = SqlOrderRepository(get_session())
-    return Pipeline(LoadOrderUseCase(repository), PlaceOrderUseCase(repository, get_settings().shipping))
+    return Pipeline(LoadOrderUseCase(repository), PlaceOrderUseCase(repository, get_settings().shipping), LoguruLogger())

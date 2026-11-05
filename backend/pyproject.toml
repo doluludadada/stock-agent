@@ -25,7 +25,8 @@ dependencies = [
     "yfinance>=1.2.0",
     "beautifulsoup4>=4.14.3",
     "lxml>=6.0.2",
-    "icontract>=2.7.3",
+    "anthropic>=2.4.0",
+    "ruamel-yaml>=0.18",
 ]
 
 [dependency-groups]
@@ -48,7 +49,7 @@ target-version = "py314"
 extend-exclude = ["tests/fixtures/architecture"]
 
 [tool.ruff.lint]
-select = ["B", "E", "F", "FAST", "I", "UP", "SIM"]
+select = ["B", "C90", "E", "F", "FAST", "I", "UP", "SIM"]
 fixable = ["ALL"]
 
 [tool.ruff.lint.isort]
@@ -66,6 +67,7 @@ include = ["src"]
 pythonVersion = "3.14"
 typeCheckingMode = "standard"
 reportImplicitOverride = "error"
+reportDeprecated = "error"
 # SQLModel declares __tablename__ as a declared_attr, so every table DTO that names its table would trip this rule.
 executionEnvironments = [{ root = "src/c_infrastructure/database/models", extraPaths = ["src"], reportIncompatibleVariableOverride = "none" }]
 

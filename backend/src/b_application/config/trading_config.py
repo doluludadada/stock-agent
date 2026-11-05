@@ -1,19 +1,22 @@
 from datetime import date
 from decimal import Decimal
-from typing import Self
+from functools import cached_property
+from math import ceil
+from typing import Annotated, Self
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
+from a_domain.rules.trading.account_value import AccountValueRule, PositionValueRule
 from a_domain.rules.trading.cost import TradingCostRule
 from a_domain.rules.trading.tick import LimitPriceRule, TickSizeRule
 from a_domain.types.enums import ExecutionProvider, OrderMode
+from a_domain.types.values import FormulaId, NonEmptyText
 
 
 class AnalysisConfig(BaseModel):
     """Cross-analysis weighting and trading parameters. Every value comes from the `analysis` section of config/appsetting.yaml."""
-
-    lookback_days: int = Field(ge=30)
 
     technical_weight: float = Field(ge=0, le=1)
     ai_weight: float = Field(ge=0, le=1)
@@ -32,6 +35,20 @@ class AnalysisConfig(BaseModel):
 
     article_fetch_limit: int = Field(ge=1, le=100)
 
+    lookback_days: int = Field(ge=30)
+    """The shortest daily-history window fetched, in calendar days."""
+
+    history_calendar_days_per_bar: float = Field(ge=1, allow_inf_nan=False)
+    """
+    Calendar days fetched for each daily bar a strategy needs. Weekends, holidays and trading halts have no bar, so a
+    strategy that needs 84 bars fetches max(lookback_days, 84 x this) calendar days. The window is only an estimate:
+    a stock that still has fewer bars than the strategy needs fails the technical step instead of being scored.
+    """
+
+    def history_days(self, required_bars: int) -> int:
+        """The calendar days of daily history to fetch for a strategy that needs required_bars bars."""
+        return max(self.lookback_days, ceil(required_bars * self.history_calendar_days_per_bar))
+
     @model_validator(mode="after")
     def validate_weights(self) -> Self:
         total_weight = self.technical_weight + self.ai_weight
@@ -40,6 +57,38 @@ class AnalysisConfig(BaseModel):
             raise ValueError("technical_weight and ai_weight must sum to 1.0")
 
         return self
+
+
+class TechnicalConfig(BaseModel):
+    """
+    Where technical strategies come from. Every value comes from the `technical` section of config/appsetting.yaml;
+    load_settings reads each built-in strategy from config/strategies/<id>.json.
+    """
+
+    owner_id: NonEmptyText
+    """
+    Whose saved technical settings the CLI and the Web API read and write. This installation has one owner. A future
+    service with sign-in takes the owner from the signed-in account instead, and never from what a client sends.
+    """
+
+    built_in_strategies: Annotated[tuple[TechnicalStrategy, ...], Field(min_length=1)]
+    """The developer's strategies, in menu order. Saving settings never changes them."""
+
+    initial_strategy_id: FormulaId
+    """What an owner's first settings select for every workflow."""
+
+    @model_validator(mode="after")
+    def validate_initial_strategy(self) -> Self:
+        _ = self.initial_settings
+
+        return self
+
+    @cached_property
+    def initial_settings(self) -> TechnicalSettings:
+        """An owner's first settings: an independent copy of every built-in strategy, the initial one selected."""
+        return TechnicalSettings(
+            active_strategy_id=self.initial_strategy_id, buzz_strategy_id=self.initial_strategy_id, strategies=self.built_in_strategies
+        )
 
 
 class MarketConfig(BaseModel):
@@ -77,6 +126,12 @@ class MarketConfig(BaseModel):
             min_fee=self.min_fee,
             bond_etf_tax_exempt_until=self.bond_etf_tax_exempt_until,
         )
+
+    def position_value_rule(self) -> PositionValueRule:
+        return PositionValueRule(cost_rule=self.cost_rule())
+
+    def account_value_rule(self) -> AccountValueRule:
+        return AccountValueRule(position_value_rule=self.position_value_rule())
 
     def limit_price_rule(self) -> LimitPriceRule:
         tick_size_rule = TickSizeRule(

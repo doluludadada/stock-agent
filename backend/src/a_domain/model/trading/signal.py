@@ -1,17 +1,19 @@
 from datetime import datetime
 from typing import Self
 
-from pydantic import model_validator
-from sqlmodel import Field, SQLModel
+from pydantic import Field, NonNegativeInt, model_validator
+from pydantic.dataclasses import dataclass
 
 from a_domain.model.analysis.ai_analysis_report import AiAnalysisReport
 from a_domain.model.analysis.technical_report import TechnicalReport
 from a_domain.model.market.stock import Stock
 from a_domain.types.enums import SignalSource, TradeAction
 from a_domain.types.ids import DecisionId, new_decision_id
+from a_domain.types.values import NonEmptyText, PositiveFiniteFloat
 
 
-class TradeSignal(SQLModel):
+@dataclass(frozen=True, kw_only=True)
+class TradeSignal:
     """
     A trading decision and the evidence it was made on.
 
@@ -22,16 +24,16 @@ class TradeSignal(SQLModel):
 
     decision_id: DecisionId = Field(default_factory=new_decision_id)
 
-    stock_id: str
+    stock_id: NonEmptyText
     action: TradeAction
     source: SignalSource
     score: int
     reason: str
-    quantity: int = Field(default=0, ge=0)
-    stop_loss_price: float | None = Field(default=None)
+    quantity: NonNegativeInt = 0
+    stop_loss_price: float | None = None
     generated_at: datetime
 
-    price_at_signal: float = Field(gt=0)
+    price_at_signal: PositiveFiniteFloat
     price_observed_at: datetime
     """Timestamp of the quote behind price_at_signal (the realtime bar, or the last daily bar without one)."""
 

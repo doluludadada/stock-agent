@@ -16,7 +16,7 @@ from support.settings import shipped_config
 from trading_stack import MONDAY_10_00, MovableClock, SilentLogger
 
 import c_infrastructure.database.models
-from a_domain.model.trading.watchlist_entry import WatchlistEntry
+from a_domain.model.trading.watchlist import WatchlistEntry
 from a_domain.types.enums import WatchlistType
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.repositories.watchlist_repository import WatchlistRepository

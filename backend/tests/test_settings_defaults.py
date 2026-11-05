@@ -4,7 +4,7 @@ import settings_defaults
 from support.settings import APPSETTING
 
 from b_application.config.app_config import AppConfig
-from d_presentation.dependencies import load_yaml
+from b_application.config.settings_loader import load_yaml
 
 
 def test_no_code_default_disagrees_with_the_shipped_settings() -> None:

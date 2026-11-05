@@ -12,27 +12,63 @@ A file's layer is the first folder in its path named a_domain, b_application, c_
 d_presentation. Rules that name a folder apply below that folder; the others apply to every file.
 
 How the rules measure:
-- FUNC-LENGTH counts physical lines from the `def` line (decorators excluded) to the last line of
-  the body, minus the lines of the docstring. Blank lines and comments inside the body count. A
-  nested function is measured on its own and also counts toward the function that holds it.
-- COMPLEXITY is McCabe complexity counted the way ruff's C901 counts it: 1, plus 1 for each `if`,
-  `elif`, `for`, `while`, `except`, `try ... else`, `case` and nested function. A last `case` that
-  always matches is free. Boolean operators and comprehensions add nothing.
-- RULE-APPLY treats every method whose name does not start with `_` as public, properties, static
-  methods and class methods included. Dataclass fields are not methods.
+- FUNC-LENGTH counts physical lines from the `def` line (decorators excluded) to the last line of the
+  body, minus the lines of the docstring. Blank lines and comments inside the body count. A nested
+  function is measured on its own and also counts toward the function that holds it. It skips
+  dependencies.py, whose builders are flat lists of constructor arguments. It skips the Pipeline too,
+  whose operations are flat lists of use case calls. The same inline five-line loop sends orders five
+  times there, twice in Buzz, twice in Intraday and once in the manual BUY, and splitting an operation
+  would hide the order of its steps. Cyclomatic complexity is ruff's C901, which checks both files.
+- RULE-APPLY never counts a method decorated `@property`, so a rule may expose read-only values derived
+  from its fields. A property's setter still counts. A method is public when its name does not start
+  with `_`. A class with no public method is a value of the rule in its file. Every other class has
+  `apply` and no other public method, static methods and class methods included. Dataclass fields are
+  not methods.
 - USECASE-EXECUTE allows only `__init__` and `execute`, and one class per use case file.
 - INFRA-OVERRIDE lets `__init__` go unmarked, requires `@override` on every other public or dunder
   method, and forbids `_name` and `__name` methods. It skips DTOs (`table=True`, or any class under
   c_infrastructure/database/models/), enums, exceptions and value holders (`BaseModel`, `SQLModel`,
   `BaseSettings`, `TypedDict`, `NamedTuple`, `@dataclass`, and their subclasses).
+- PORT-PROTOCOL treats every top-level class in a_domain/ports as a port, except a pydantic dataclass: that is a
+  type only its port and the port's adapters use, and it lives in the port's file.
 - FACTORY-ONLY treats a called name that starts with an upper-case letter as a class.
-- PRESENTATION-DECIDES-NOTHING checks d_presentation except dependencies.py. A setting read is an attribute chain
-  on a name or attribute called `config`, such as `runtime.config.line.channel_secret`. The chain must equal or
-  extend an entry of PRESENTATION_SETTINGS for the file's folder; a file in no listed folder may read none. Every
-  class in d_presentation/web/schemas.py must define no method.
-- STRATEGY-FROM-SETTINGS treats a call whose called name is TechnicalStrategy or TechnicalRule as building one.
+- PRESENTATION-DECIDES-NOTHING checks d_presentation except dependencies.py. An import of a_domain.rules is a
+  finding unless it is annotation-only: a `from` import whose every name the file uses, and uses only inside the
+  annotation of a parameter, a return or an annotated assignment. A call, an attribute read or a name passed as a
+  value is a finding. A setting read is an attribute chain on a name or attribute called `config`, such as
+  `runtime.config.line.channel_secret`. The chain must equal or extend an entry of the first PRESENTATION_SETTINGS
+  key the file is under, a file key before its folder's; a file under no listed key may read none. Every class in
+  d_presentation/web/schemas.py must define no method.
+- STRATEGY-FROM-SETTINGS treats a call whose called name is TechnicalStrategy or TechnicalRule as building one, in
+  any file. Strategies come from config/strategies/<id>.json and from the owner's saved settings, and pydantic
+  validates them, so no source file calls either constructor.
 - STORY-ID looks for `US-<number>`, any to-do marker and `#<number>` in comments and docstrings.
 - HARDCODED-URL ignores docstrings.
+- PATH-COMMENT reports a comment that holds the file's path from its layer folder down.
+- DOMAIN-STYLE forbids icontract and the standard `dataclass` anywhere in a_domain. Below a_domain/model and
+  a_domain/rules, every top-level class except enums, exceptions and Protocols is decorated with
+  `pydantic.dataclasses.dataclass`, subclasses no BaseModel, RootModel or SQLModel, and has no `__post_init__`.
+- MODULE-CONSTANT checks a_domain, b_application/use_cases, b_application/schemas and the Pipeline. Every top-level
+  assignment other than `__all__`, `NewType` and `TypeVar` is a finding, an old-style alias included.
+- PIPELINE-FIELDS allows only the class `Pipeline` in b_application/pipeline.py. Each annotated field's type must be
+  imported from b_application.use_cases, or be the logging port.
+- RULE-CALLERS checks a_domain, b_application and dependencies.py: only a_domain/rules, a_domain/ports (a port may
+  name a rule's input or result type), b_application/use_cases and b_application/config (a settings class builds
+  each rule from its own values, so a rule is configured in one place) there may import a_domain.rules. The Pipeline
+  may also import it annotation-only, as PRESENTATION-DECIDES-NOTHING defines it. The rest of d_presentation is left
+  to PRESENTATION-DECIDES-NOTHING, and infrastructure is not checked.
+- USECASE-STATUS treats `status`, and every parameter annotated `PipelineStatus`, as the run's status. Below
+  b_application/use_cases it reports an assignment or deletion under any field but `stats`, a mutating collection
+  method called on such a field, and a status method whose name does not start with `require_`.
+- MODEL-COPY compares every class in a_domain/model and b_application/schemas that has at least two annotated fields
+  with every class in a_domain/model. When at least 80% of its field names are fields or properties of another
+  model, it copies that model, for storage, transport or a screen. Store, send and show the model itself; a DTO in
+  c_infrastructure or a response in d_presentation holds only what the model lacks or must hide. Classes in
+  a_domain/rules are not compared: sibling variants of one rule value share fields on purpose. COPY_EXEMPT names the
+  classes left as they are, each with its reason. In d_presentation/web/schemas.py it reports only exact copies: a
+  class whose field names are exactly those of a class in a_domain/model, a_domain/types or a_domain/ports, with no
+  field typed by a name the module defines (another response, which hides part of a model, or PublicText, which
+  redacts). A route answers with that domain class itself.
 - PYRIGHT (with --pyright) counts pyright errors, using `[tool.pyright]` from the current folder.
 """
 
@@ -81,7 +117,6 @@ DOMAIN_FORBIDDEN_LIBRARIES = frozenset(
     }
 )
 MAX_FUNCTION_LINES = 30
-MAX_COMPLEXITY = 10
 LOOP_INDEX_NAMES = frozenset({"i", "j", "k"})
 ENUM_BASES = frozenset({"Enum", "IntEnum", "StrEnum", "Flag", "IntFlag", "ReprEnum"})
 VALUE_HOLDER_BASES = frozenset({"BaseModel", "RootModel", "SQLModel", "BaseSettings", "TypedDict", "NamedTuple"})
@@ -91,16 +126,53 @@ BUILTIN_EXCEPTIONS = frozenset(
 FACTORY_MODULE = PurePosixPath("d_presentation/dependencies.py")
 FACTORY_TARGETS = ("c_infrastructure", "b_application.use_cases", "b_application.pipeline")
 PRESENTATION_SETTINGS = {
-    # The LINE webhook checks each request's signature with the channel secret.
-    "d_presentation/web": frozenset({"line.channel_secret"}),
-    # The menu prints the trading setup, so the user sees whether an order would reach a real account.
+    # The account endpoint says whose account it shows, so the page never labels a Shioaji account as the mock one.
+    "d_presentation/web/routers/account.py": frozenset({"trading.execution_provider", "trading.order_mode"}),
+    "d_presentation/web": frozenset(
+        {
+            # The LINE webhook checks each request's signature with the channel secret.
+            "line.channel_secret",
+            # The built-in-strategies endpoint lists the strategies that ship in config/strategies.
+            "technical.built_in_strategies",
+        }
+    ),
+    # The menu prints the trading setup, so the user sees whether an order would reach a real account. Menus 5 and 6
+    # print how undervaluation is computed, its caveat and when a close turns stale.
     "d_presentation/cli": frozenset(
-        {"environment", "trading.execution_provider", "trading.order_mode", "mock_trading.account_id", "shioaji.simulation"}
+        {
+            "environment",
+            "trading.execution_provider",
+            "trading.order_mode",
+            "mock_trading.account_id",
+            "shioaji.simulation",
+            "valuation.undervaluation_formula",
+            "valuation.low_pe_caveat",
+            "freshness.daily_close_max_missed_sessions",
+            # The load-built-in-strategy menu lists the built-in strategies to choose from.
+            "technical.built_in_strategies",
+        }
     ),
 }
 RESPONSE_MODULE = PurePosixPath("d_presentation/web/schemas.py")
+PIPELINE_MODULE = PurePosixPath("b_application/pipeline.py")
+LOGGING_PORT = "a_domain.ports.system.logging_provider.ILoggingProvider"
+PYDANTIC_DATACLASS = "pydantic.dataclasses.dataclass"
+DOMAIN_CLASS_FOLDERS = ("a_domain/model", "a_domain/rules")
+DOMAIN_FORBIDDEN_BASES = frozenset({"BaseModel", "RootModel", "SQLModel"})
+CONSTANT_FREE_FOLDERS = ("a_domain", "b_application/use_cases", "b_application/schemas", "b_application/pipeline.py")
+TYPE_FACTORIES = frozenset({"NewType", "TypeVar"})
+CONSTANT_HOMES = "a fixed name is a StrEnum member in enums.py, an alias a type statement, any other value a setting"
+RULE_USERS = ("a_domain/rules", "a_domain/ports", "b_application/use_cases", "b_application/config")
+RULE_CALLER_SCOPE = ("a_domain", "b_application", "d_presentation/dependencies.py")
+COLLECTION_MUTATORS = frozenset(
+    {"append", "extend", "insert", "add", "update", "discard", "remove", "pop", "popitem", "clear", "setdefault"}
+)
 STRATEGY_CLASSES = frozenset({"TechnicalStrategy", "TechnicalRule"})
-STRATEGY_BUILDER = PurePosixPath("c_infrastructure/technical/technical_settings_schema.py")
+COPY_SCOPE = ("a_domain/model", "b_application/schemas")
+COPY_SHARE = 0.8
+COPY_EXEMPT = frozenset({"WebSearchResult"})
+"""WebSearchResult belongs to the LINE chat, which stays unchanged until it is rebuilt as a customer-service bot."""
+ANSWER_SOURCES = ("a_domain/model", "a_domain/types", "a_domain/ports")
 STORY_ID = re.compile(r"\bUS-\d+|\bTODO\b|(?<![\w&])#\d+\b")
 TYPE_IGNORE = re.compile(r"#\s*(?:type|pyright)\s*:\s*ignore\b")
 CJK = re.compile(
@@ -287,17 +359,6 @@ def check_layer(files: Sequence[SourceFile]) -> Iterator[Finding]:
                 yield source.path, line, f"{source.layer} imports {module}"
 
 
-def check_model_one_class(files: Sequence[SourceFile]) -> Iterator[Finding]:
-    for source in files:
-        if not source.under("a_domain/model") or source.path.name == "__init__.py":
-            continue
-        classes = top_level_classes(source.tree)
-        if not classes:
-            yield source.path, 1, "model file defines no class; one class per model file"
-        for extra in classes[1:]:
-            yield source.path, extra.lineno, f"{extra.name} shares a model file with {classes[0].name}; one class per model file"
-
-
 def check_errors_location(files: Sequence[SourceFile]) -> Iterator[Finding]:
     exceptions = exception_names(files)
     for source in files:
@@ -342,7 +403,10 @@ def check_port_protocol(files: Sequence[SourceFile]) -> Iterator[Finding]:
         if not source.under("a_domain/ports"):
             continue
         init = source.path.parent / "__init__.py"
+        bound = bound_imports(source)
         for node in top_level_classes(source.tree):
+            if PYDANTIC_DATACLASS in {resolved(decorator, bound) for decorator in node.decorator_list}:
+                continue
             if "Protocol" not in base_names(node):
                 yield source.path, node.lineno, f"port {node.name} is not a typing.Protocol"
             if not re.match(r"I[A-Z]", node.name):
@@ -356,7 +420,13 @@ def check_rule_apply(files: Sequence[SourceFile]) -> Iterator[Finding]:
         if not source.under("a_domain/rules"):
             continue
         for node in top_level_classes(source.tree):
-            public = [method for method in methods(node) if not method.name.startswith("_")]
+            public = [
+                method
+                for method in methods(node)
+                if not method.name.startswith("_") and "property" not in {name_of(decorator) for decorator in method.decorator_list}
+            ]
+            if not public:
+                continue
             if "apply" not in {method.name for method in public}:
                 yield source.path, node.lineno, f"rule {node.name} has no apply method"
             for method in public:
@@ -499,9 +569,8 @@ def check_presentation_decides_nothing(files: Sequence[SourceFile]) -> Iterator[
     for source in files:
         if not source.under("d_presentation") or source.module == FACTORY_MODULE:
             continue
-        for line, module, names in imports(source):
-            if any(is_within(candidate, "a_domain.rules") for candidate in [module, *(f"{module}.{name}" for name in names)]):
-                yield source.path, line, f"imports {module}; the presentation calls the use case or workflow that runs the rule"
+        for line, module in rule_imports(source, annotations_allowed=True):
+            yield source.path, line, f"imports {module}; the presentation calls the use case or workflow that runs the rule"
         yield from setting_read_findings(source)
         if source.module == RESPONSE_MODULE:
             for node in all_classes(source.tree):
@@ -534,11 +603,14 @@ def setting_path(node: ast.Attribute, parents: dict[ast.AST, ast.AST]) -> str:
 
 def check_strategy_from_settings(files: Sequence[SourceFile]) -> Iterator[Finding]:
     for source in files:
-        if source.module == STRATEGY_BUILDER:
-            continue
         for node in ast.walk(source.tree):
             if isinstance(node, ast.Call) and (name := name_of(node.func)) in STRATEGY_CLASSES:
-                yield source.path, node.lineno, f"builds {name}; strategies come from config/technical.yaml through {STRATEGY_BUILDER}"
+                yield (
+                    source.path,
+                    node.lineno,
+                    f"builds {name}; strategies come from config/strategies/*.json or the owner's saved settings, "
+                    "validated by pydantic",
+                )
 
 
 def function_length(function: FunctionNode) -> int:
@@ -550,49 +622,12 @@ def function_length(function: FunctionNode) -> int:
 
 def check_func_length(files: Sequence[SourceFile]) -> Iterator[Finding]:
     for source in files:
+        if source.module in (FACTORY_MODULE, PIPELINE_MODULE):
+            continue
         for function in functions(source.tree):
             length = function_length(function)
             if length > MAX_FUNCTION_LINES:
                 yield source.path, function.lineno, f"{function.name} is {length} lines long (max {MAX_FUNCTION_LINES})"
-
-
-def branch_count(statements: Sequence[ast.stmt]) -> int:
-    return sum(statement_branches(statement) for statement in statements)
-
-
-def statement_branches(statement: ast.stmt) -> int:
-    match statement:
-        case ast.If() | ast.For() | ast.AsyncFor() | ast.While():
-            return 1 + branch_count(statement.body) + branch_count(statement.orelse)
-        case ast.FunctionDef() | ast.AsyncFunctionDef():
-            return 1 + branch_count(statement.body)
-        case ast.With() | ast.AsyncWith() | ast.ClassDef():
-            return branch_count(statement.body)
-        case ast.Try() | ast.TryStar():
-            handlers = sum(1 + branch_count(handler.body) for handler in statement.handlers)
-            else_branch = 1 if statement.orelse else 0
-            return handlers + else_branch + sum(map(branch_count, (statement.body, statement.orelse, statement.finalbody)))
-        case ast.Match():
-            cases = sum(1 + branch_count(case.body) for case in statement.cases)
-            last = statement.cases[-1]
-            return cases - 1 if last.guard is None and always_matches(last.pattern) else cases
-    return 0
-
-
-def always_matches(pattern: ast.pattern) -> bool:
-    if isinstance(pattern, ast.MatchAs):
-        return pattern.pattern is None or always_matches(pattern.pattern)
-    if isinstance(pattern, ast.MatchOr):
-        return any(always_matches(option) for option in pattern.patterns)
-    return False
-
-
-def check_complexity(files: Sequence[SourceFile]) -> Iterator[Finding]:
-    for source in files:
-        for function in functions(source.tree):
-            complexity = 1 + branch_count(function.body)
-            if complexity > MAX_COMPLEXITY:
-                yield source.path, function.lineno, f"{function.name} has cyclomatic complexity {complexity} (max {MAX_COMPLEXITY})"
 
 
 def bound_names(tree: ast.Module) -> Iterator[tuple[ast.AST, str]]:
@@ -657,9 +692,280 @@ def check_hardcoded_url(files: Sequence[SourceFile]) -> Iterator[Finding]:
                 yield source.path, node.lineno, f"hard-coded URL {match.group()[:80]!r}; URLs and hosts come from settings"
 
 
+def check_future_import(files: Sequence[SourceFile]) -> Iterator[Finding]:
+    for source in files:
+        for line, module, _ in imports(source):
+            if module == "__future__":
+                yield (
+                    source.path,
+                    line,
+                    "from __future__ import; Python 3.14 evaluates annotations lazily, and Self names the own class",
+                )
+
+
+def resolved(expression: ast.expr, bound: dict[str, str]) -> str | None:
+    parts = dotted(expression.func if isinstance(expression, ast.Call) else expression)
+    if not parts:
+        return None
+    return ".".join([bound.get(parts[0], parts[0]), *parts[1:]])
+
+
+def is_exempt_domain_class(node: ast.ClassDef, exceptions: frozenset[str]) -> bool:
+    bases = base_names(node)
+    return node.name in exceptions or bool(bases & ENUM_BASES) or "Protocol" in bases
+
+
+def check_model_copy(files: Sequence[SourceFile]) -> Iterator[Finding]:
+    classes = [
+        (source, node)
+        for source in files
+        if any(source.under(folder) for folder in COPY_SCOPE)
+        for node in top_level_classes(source.tree)
+    ]
+    models = [(node, field_names(node) | property_names(node)) for source, node in classes if source.under("a_domain/model")]
+    for source, node in classes:
+        fields = field_names(node)
+        if len(fields) < 2 or node.name in COPY_EXEMPT:
+            continue
+        if original := next(
+            (other for other, names in models if other is not node and len(fields & names) >= COPY_SHARE * len(fields)), None
+        ):
+            yield (
+                source.path,
+                node.lineno,
+                f"{node.name} copies the fields of {original.name}; use {original.name} itself, and let a DTO or a "
+                f"response hold only what {original.name} lacks or must hide",
+            )
+    yield from response_copies(files)
+
+
+def response_copies(files: Sequence[SourceFile]) -> Iterator[Finding]:
+    domain = [
+        node for source in files if any(source.under(folder) for folder in ANSWER_SOURCES) for node in top_level_classes(source.tree)
+    ]
+    for source in files:
+        if source.module != RESPONSE_MODULE:
+            continue
+        local = module_names(source.tree)
+        for node in top_level_classes(source.tree):
+            fields = field_names(node)
+            if len(fields) < 2 or annotation_names(node) & local:
+                continue
+            if original := next((other for other in domain if field_names(other) == fields), None):
+                yield (
+                    source.path,
+                    node.lineno,
+                    f"{node.name} copies every field of {original.name}; answer with {original.name} itself",
+                )
+
+
+def module_names(tree: ast.Module) -> set[str]:
+    names: set[str] = set()
+    for node in tree.body:
+        match node:
+            case ast.ClassDef(name=name) | ast.TypeAlias(name=ast.Name(id=name)) | ast.Assign(targets=[ast.Name(id=name)]):
+                names.add(name)
+    return names
+
+
+def annotation_names(node: ast.ClassDef) -> set[str]:
+    return {
+        name.id
+        for item in node.body
+        if isinstance(item, ast.AnnAssign)
+        for name in ast.walk(item.annotation)
+        if isinstance(name, ast.Name)
+    }
+
+
+def field_names(node: ast.ClassDef) -> set[str]:
+    return {item.target.id for item in node.body if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)}
+
+
+def property_names(node: ast.ClassDef) -> set[str]:
+    return {
+        method.name
+        for method in methods(node)
+        if {name_of(decorator) for decorator in method.decorator_list} & {"property", "cached_property"}
+    }
+
+
+def check_domain_style(files: Sequence[SourceFile]) -> Iterator[Finding]:
+    exceptions = exception_names(files)
+    for source in files:
+        if not source.under("a_domain"):
+            continue
+        for line, module, names in imports(source):
+            if module.split(".")[0] == "icontract":
+                yield (
+                    source.path,
+                    line,
+                    "imports icontract; the domain validates with Field, type aliases, model_validator and validate_call",
+                )
+            if module == "dataclasses" and "dataclass" in names:
+                yield source.path, line, f"imports the standard dataclass; domain classes use {PYDANTIC_DATACLASS}"
+        if any(source.under(folder) for folder in DOMAIN_CLASS_FOLDERS):
+            yield from domain_class_findings(source, exceptions)
+
+
+def domain_class_findings(source: SourceFile, exceptions: frozenset[str]) -> Iterator[Finding]:
+    bound = bound_imports(source)
+    for node in top_level_classes(source.tree):
+        if is_exempt_domain_class(node, exceptions):
+            continue
+        if forbidden := base_names(node) & DOMAIN_FORBIDDEN_BASES:
+            yield (
+                source.path,
+                node.lineno,
+                f"{node.name} subclasses {', '.join(sorted(forbidden))}; SQLModel belongs to infrastructure tables",
+            )
+        if PYDANTIC_DATACLASS not in {resolved(decorator, bound) for decorator in node.decorator_list}:
+            yield source.path, node.lineno, f"{node.name} is not a pydantic dataclass"
+        for method in methods(node):
+            if method.name == "__post_init__":
+                yield (
+                    source.path,
+                    method.lineno,
+                    f"{node.name}.__post_init__; a limit is a Field, a check across fields a model_validator",
+                )
+
+
+def is_constant(node: ast.stmt) -> str | None:
+    if not isinstance(node, ast.Assign | ast.AnnAssign):
+        return None
+    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+    names = [name for target in targets if (name := name_of(target)) and name != "__all__"]
+    if not names or (isinstance(node.value, ast.Call) and name_of(node.value.func) in TYPE_FACTORIES):
+        return None
+    return names[0]
+
+
+def check_module_constant(files: Sequence[SourceFile]) -> Iterator[Finding]:
+    for source in files:
+        if not any(source.under(folder) for folder in CONSTANT_FREE_FOLDERS):
+            continue
+        for node in source.tree.body:
+            if name := is_constant(node):
+                yield source.path, node.lineno, f"module-level {name}; {CONSTANT_HOMES}"
+
+
+def check_pipeline_fields(files: Sequence[SourceFile]) -> Iterator[Finding]:
+    for source in files:
+        if source.module != PIPELINE_MODULE:
+            continue
+        bound = bound_imports(source)
+        for node in top_level_classes(source.tree):
+            if node.name != "Pipeline":
+                yield source.path, node.lineno, f"{node.name} sits beside the Pipeline; the Pipeline's fields are its use cases"
+                continue
+            for field in node.body:
+                if isinstance(field, ast.AnnAssign) and (problem := pipeline_field_problem(field, bound)):
+                    yield source.path, field.lineno, problem
+
+
+def pipeline_field_problem(field: ast.AnnAssign, bound: dict[str, str]) -> str | None:
+    kind = resolved(field.annotation, bound) or ast.unparse(field.annotation)
+    if kind == LOGGING_PORT or is_within(kind, "b_application.use_cases"):
+        return None
+    field_name, field_type = ast.unparse(field.target), ast.unparse(field.annotation)
+    return f"Pipeline field {field_name} is {field_type}; the Pipeline holds only use cases and the logger"
+
+
+def check_rule_callers(files: Sequence[SourceFile]) -> Iterator[Finding]:
+    for source in files:
+        if not any(source.under(folder) for folder in RULE_CALLER_SCOPE) or any(source.under(folder) for folder in RULE_USERS):
+            continue
+        for line, module in rule_imports(source, annotations_allowed=source.module == PIPELINE_MODULE):
+            yield source.path, line, f"imports {module}; only use cases and other rules use a rule"
+
+
+def rule_imports(source: SourceFile, *, annotations_allowed: bool) -> Iterator[tuple[int, str]]:
+    exempt = annotation_only_imports(source.tree) if annotations_allowed else set()
+    for line, module, names in imports(source):
+        if line in exempt:
+            continue
+        if any(is_within(candidate, "a_domain.rules") for candidate in [module, *(f"{module}.{name}" for name in names)]):
+            yield line, module
+
+
+def annotation_only_imports(tree: ast.Module) -> set[int]:
+    """The lines of the `from` imports whose every name the file uses, and uses only inside annotations."""
+    annotations = [annotation for node in ast.walk(tree) if (annotation := annotation_of(node))]
+    inside = {id(node) for annotation in annotations for node in ast.walk(annotation)}
+    names = [node for node in ast.walk(tree) if isinstance(node, ast.Name)]
+    annotated = {name.id for name in names if id(name) in inside} - {name.id for name in names if id(name) not in inside}
+    return {
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and all((alias.asname or alias.name) in annotated for alias in node.names)
+    }
+
+
+def annotation_of(node: ast.AST) -> ast.expr | None:
+    match node:
+        case (
+            ast.arg(annotation=ast.expr() as annotation)
+            | ast.AnnAssign(annotation=annotation)
+            | ast.FunctionDef(returns=ast.expr() as annotation)
+            | ast.AsyncFunctionDef(returns=ast.expr() as annotation)
+        ):
+            return annotation
+    return None
+
+
+def status_names(tree: ast.Module) -> set[str]:
+    names = {"status"}
+    for function in functions(tree):
+        every = [*function.args.posonlyargs, *function.args.args, *function.args.kwonlyargs]
+        names |= {argument.arg for argument in every if argument.annotation and name_of(argument.annotation) == "PipelineStatus"}
+    return names
+
+
+def written_status_field(target: ast.expr, names: set[str]) -> str | None:
+    while isinstance(target, ast.Subscript):
+        target = target.value
+    parts = dotted(target)
+    if not parts or parts[0] not in names or len(parts) < 2 or parts[1] == "stats":
+        return None
+    return ".".join(parts[:2])
+
+
+def check_usecase_status(files: Sequence[SourceFile]) -> Iterator[Finding]:
+    for source in files:
+        if not source.under("b_application/use_cases"):
+            continue
+        names = status_names(source.tree)
+        for node in ast.walk(source.tree):
+            for written in status_writes(node, names):
+                yield source.path, node.lineno, f"writes {written}; a use case returns its result and adds only to status.stats"
+
+
+def status_writes(node: ast.AST, names: set[str]) -> Iterator[str]:
+    match node:
+        case ast.Assign(targets=targets) | ast.Delete(targets=targets):
+            yield from (field for target in targets if (field := written_status_field(target, names)))
+        case ast.AugAssign(target=target) | ast.AnnAssign(target=target):
+            if field := written_status_field(target, names):
+                yield field
+        case ast.Call(func=ast.Attribute() as function):
+            parts = dotted(function) or []
+            if len(parts) == 2 and parts[0] in names and not parts[1].startswith("require_"):
+                yield ".".join(parts)
+            if len(parts) > 2 and parts[0] in names and parts[1] != "stats" and parts[-1] in COLLECTION_MUTATORS:
+                yield ".".join(parts[:2])
+
+
+def check_path_comment(files: Sequence[SourceFile]) -> Iterator[Finding]:
+    for source in files:
+        if source.module is None:
+            continue
+        for line, text in source.comments:
+            if source.module.as_posix() in text:
+                yield source.path, line, "comment repeats the file's path"
+
+
 RULES: dict[str, Callable[[Sequence[SourceFile]], Iterator[Finding]]] = {
     "LAYER": check_layer,
-    "MODEL-ONE-CLASS": check_model_one_class,
     "ERRORS-LOCATION": check_errors_location,
     "ENUM-STR": check_enum_str,
     "PORT-PROTOCOL": check_port_protocol,
@@ -672,12 +978,19 @@ RULES: dict[str, Callable[[Sequence[SourceFile]], Iterator[Finding]]] = {
     "PRESENTATION-DECIDES-NOTHING": check_presentation_decides_nothing,
     "STRATEGY-FROM-SETTINGS": check_strategy_from_settings,
     "FUNC-LENGTH": check_func_length,
-    "COMPLEXITY": check_complexity,
     "NAMES": check_names,
     "STORY-ID": check_story_id,
     "TYPE-IGNORE": check_type_ignore,
     "ENGLISH": check_english,
     "HARDCODED-URL": check_hardcoded_url,
+    "FUTURE-IMPORT": check_future_import,
+    "DOMAIN-STYLE": check_domain_style,
+    "MODULE-CONSTANT": check_module_constant,
+    "PIPELINE-FIELDS": check_pipeline_fields,
+    "RULE-CALLERS": check_rule_callers,
+    "USECASE-STATUS": check_usecase_status,
+    "PATH-COMMENT": check_path_comment,
+    "MODEL-COPY": check_model_copy,
 }
 
 

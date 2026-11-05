@@ -1,0 +1,42 @@
+{
+  "sma": [
+    "value"
+  ],
+  "volume_sma": [
+    "value"
+  ],
+  "rsi": [
+    "value"
+  ],
+  "macd": [
+    "line",
+    "signal",
+    "histogram"
+  ],
+  "bollinger": [
+    "upper",
+    "middle",
+    "lower",
+    "bandwidth",
+    "percent_b"
+  ],
+  "stochastic": [
+    "percent_k",
+    "percent_d"
+  ],
+  "adx": [
+    "adx",
+    "plus_di",
+    "minus_di"
+  ],
+  "atr": [
+    "value"
+  ],
+  "obv": [
+    "value",
+    "moving_average"
+  ],
+  "mfi": [
+    "value"
+  ]
+}

@@ -1,8 +1,9 @@
+from dataclasses import replace
 from typing import override
 
 from sqlmodel import col, select
 
-from a_domain.model.analysis.sentiment_classification import SentimentClassification
+from a_domain.model.market.article import Article
 from a_domain.ports.ai.sentiment_repository import ISentimentRepository
 from a_domain.types.enums import SentimentLabel
 from c_infrastructure.database.db_connector import DatabaseConnector
@@ -14,28 +15,39 @@ class SentimentRepository(ISentimentRepository):
         self._db = db
 
     @override
-    async def find_classifications(self, stock_id: str, urls: list[str]) -> dict[str, SentimentClassification]:
+    async def find_classified(self, stock_id: str, posts: list[Article]) -> list[Article]:
+        urls = [post.url for post in posts if post.url]
+
         if not urls:
-            return {}
+            return []
 
         async with self._db.get_session() as session:
             statement = select(ArticleSentimentDTO).where(
                 ArticleSentimentDTO.stock_id == stock_id, col(ArticleSentimentDTO.article_url).in_(urls)
             )
-            rows = (await session.execute(statement)).scalars().all()
+            rows = {row.article_url: row for row in (await session.execute(statement)).scalars().all()}
 
-        return {row.article_url: SentimentClassification(label=SentimentLabel(row.label), confidence=row.confidence) for row in rows}
+        return [
+            replace(post, sentiment=SentimentLabel(rows[post.url].label), sentiment_confidence=rows[post.url].confidence)
+            for post in posts
+            if post.url in rows
+        ]
 
     @override
-    async def save_classifications(self, stock_id: str, classifications: dict[str, SentimentClassification]) -> None:
-        if not classifications:
+    async def save_classified(self, stock_id: str, posts: list[Article]) -> None:
+        rows = {
+            post.url: ArticleSentimentDTO(
+                stock_id=stock_id, article_url=post.url, label=post.sentiment, confidence=post.sentiment_confidence
+            )
+            for post in posts
+            if post.url and post.sentiment is not None and post.sentiment_confidence is not None
+        }
+
+        if not rows:
             return
 
         async with self._db.get_session() as session:
-            for url, classification in classifications.items():
-                row = ArticleSentimentDTO(
-                    stock_id=stock_id, article_url=url, label=classification.label, confidence=classification.confidence
-                )
+            for row in rows.values():
                 await session.merge(row)
 
             await session.commit()

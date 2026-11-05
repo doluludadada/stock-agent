@@ -1,11 +1,11 @@
 from datetime import UTC, datetime
 from typing import override
 
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import col, select
 
-from a_domain.model.trading.account import Account
+from a_domain.model.trading.account import Account, Position
 from a_domain.model.trading.order import Order
-from a_domain.model.trading.position import Position
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.trading.execution_provider import ISimulatedExecutionProvider
 from a_domain.rules.trading.execution import FillRule, OrderAcceptanceRule
@@ -30,8 +30,8 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
     `mock_trading.max_fill_quantity` shares per order at that price (unset: any quantity).
     Fees, tax and realized PnL come from FillRule.
 
-    Before acceptance (REJECTED): what OrderAcceptanceRule refuses (a MARKET order, ROD), a BUY without
-    cash for the whole quantity plus fee, a SELL of shares the account does not hold.
+    Before acceptance (REJECTED): what OrderAcceptanceRule refuses, which is a MARKET order, ROD, a BUY
+    without cash for the whole quantity plus fee, and a SELL of shares the account does not hold.
     After acceptance, by time in force:
     - IOC fills what the market can take now and cancels the remainder.
     - FOK fills the whole quantity now, or cancels all of it.
@@ -48,17 +48,25 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
         self._max_fill_quantity = config.mock_trading.max_fill_quantity
         self._cost_rule = config.market.cost_rule()
         self._fill_rule = FillRule(cost_rule=self._cost_rule)
-        self._acceptance_rule = OrderAcceptanceRule()
+        self._acceptance_rule = OrderAcceptanceRule(cost_rule=self._cost_rule)
 
     @override
     async def connect(self) -> None:
-        """Seeds the book with mock_trading.initial_cash the first time. Later calls find the account and change nothing."""
+        """
+        Seeds the book with mock_trading.initial_cash the first time. Later calls find the account and change nothing;
+        so does a call that loses the race to seed it, as two Web requests at once can.
+        """
         async with self._db.get_session() as session:
             if await session.get(MockCash, self._account_id) is not None:
                 return
 
             session.add(MockCash(account_id=self._account_id, current_cash=self._initial_cash, initial_cash=self._initial_cash))
-            await session.commit()
+
+            try:
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+                return
 
             self._logger.info("Mock account seeded.")
 
@@ -85,7 +93,7 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
                 self._logger.info(f"Mock order cancelled. {order.stock_id}: {order.reason}")
 
         except Exception as error:
-            if not order.is_open:
+            if not order.status.is_open:
                 raise
 
             order.fail(f"{type(error).__name__}: {error}", now=now)
@@ -109,7 +117,7 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
 
     @override
     def refusal_for(self, order: Order, account: Account) -> tuple[RejectReason, str] | None:
-        return self._acceptance_rule.apply(order) or account.refusal_for(order, self._cost_rule)
+        return self._acceptance_rule.apply(order, account)
 
     @override
     async def fill(self, order: Order, account: Account, now: datetime) -> None:
@@ -128,7 +136,7 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
             account.sell(order.stock_id, quantity, cash_delta=cost.net)
 
         await self.save_account(account, now)
-        order.fill(quantity, price, cost, realized_pnl, now=now)
+        order.fill(quantity, price, cost.fee, cost.tax, realized_pnl, now=now)
         self._logger.success(
             f"Mock order filled. {order.action} {order.stock_id} x {quantity} @ {price} "
             f"(fee {cost.fee}, tax {cost.tax}, cash {cost.net:+,.0f})"

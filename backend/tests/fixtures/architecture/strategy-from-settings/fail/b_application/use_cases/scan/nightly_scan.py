@@ -1,6 +1,6 @@
-from a_domain.model.analysis.technical_rule import TechnicalRule
+from a_domain.rules.technical.strategy import TechnicalRule
 
 
 class NightlyScan:
     async def execute(self) -> TechnicalRule:
-        return TechnicalRule(rule_id="volume_spike")
+        return TechnicalRule(name="volume_spike")

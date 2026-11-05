@@ -5,6 +5,7 @@ in dependencies.py, so a test written against CliHarness survives changes to
 use-case constructors.
 """
 
+import tempfile
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -13,28 +14,26 @@ from unittest.mock import patch
 
 from rich.prompt import Confirm, Prompt
 
-from a_domain.model.analysis.technical_rule import TechnicalRule
-from a_domain.model.analysis.technical_scoring import TechnicalScoring
-from a_domain.model.analysis.technical_settings import TechnicalSettings
-from a_domain.model.fundamentals.fiscal_quarter import FiscalQuarter
-from a_domain.model.indicators.indicator_parameters import IndicatorParameters
 from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
-from a_domain.model.trading.position import Position
-from a_domain.model.trading.watchlist_entry import WatchlistEntry
-from a_domain.rules.technical.criteria.trend import PriceAboveMaCriterion
-from a_domain.rules.technical.criteria.volume.volume import MinimumPriceCriterion
-from a_domain.rules.technical.strategy import TechnicalStrategy
+from a_domain.model.trading.account import Position
+from a_domain.model.trading.watchlist import WatchlistEntry
+from a_domain.rules.technical.calculation.calculator import MovingAverageIndicator
+from a_domain.rules.technical.formula import Comparison, IndicatorValue, LatestPrice
+from a_domain.rules.technical.strategy import TechnicalRule, TechnicalScoring, TechnicalSettings, TechnicalStrategy
 from a_domain.types.enums import (
     AiAnalysisFocus,
+    ComparisonOperator,
     ExecutionProvider,
+    IndicatorKind,
     InformationSource,
     OrderMode,
     RuleEffect,
     SystemEnvironment,
     WatchlistType,
 )
+from a_domain.types.values import FiscalQuarter
 from b_application.config.ai_config import PromptsConfig
 from b_application.config.app_config import AppConfig
 from b_application.config.chat_config import NotificationConfig
@@ -42,6 +41,7 @@ from b_application.config.market_data_config import MarketHoursConfig
 from b_application.config.trading_config import TradingConfig
 from b_application.schemas.pipeline_status import PipelineStatus
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
+from c_infrastructure.system.settings_files import SettingsFiles
 from d_presentation.cli import interactive
 from d_presentation.dependencies import ProviderDependencies, Runtime, compose_runtime, validate_trading_environment
 from support.fakes import (
@@ -74,15 +74,29 @@ STALE = timedelta(minutes=30)
 TECHNICAL_SCORE = 90
 TREND_STRATEGY = TechnicalStrategy(
     strategy_id="trend",
-    indicators=IndicatorParameters(),
+    name="Trend",
+    indicators={"ind_a": MovingAverageIndicator(kind=IndicatorKind.SMA, period=5)},
     scoring=TechnicalScoring(base_score=TECHNICAL_SCORE),
-    rules=(TechnicalRule(criterion=PriceAboveMaCriterion(5), effect=RuleEffect.BLOCK_ON_FAIL),),
+    rules=(
+        TechnicalRule(
+            name="Price Above MA_5",
+            effect=RuleEffect.BLOCK_ON_FAIL,
+            condition=Comparison(operator=ComparisonOperator.GT, left=LatestPrice(), right=IndicatorValue(indicator_id="ind_a")),
+        ),
+    ),
 )
 BUZZ_STRATEGY = TechnicalStrategy(
     strategy_id="buzz",
-    indicators=IndicatorParameters(),
+    name="Buzz",
+    indicators={},
     scoring=TechnicalScoring(base_score=TECHNICAL_SCORE),
-    rules=(TechnicalRule(criterion=MinimumPriceCriterion(15.0), effect=RuleEffect.BLOCK_ON_FAIL),),
+    rules=(
+        TechnicalRule(
+            name="Minimum Price Check",
+            effect=RuleEffect.BLOCK_ON_FAIL,
+            condition=Comparison(operator=ComparisonOperator.GTE, left=LatestPrice(), right=15.0),
+        ),
+    ),
 )
 
 
@@ -166,10 +180,10 @@ class CliHarness:
                 volume=1000,
             )
 
-    def publish_close(self, stock_id: str, price: float, session: date) -> None:
-        """The exchange's official close for the stock in that session, as the listing feeds publish it."""
+    def publish_close(self, stock_id: str, price: float, session: date, change: float | None = None) -> None:
+        """The exchange's official close for the stock in that session, and its change, as the listing feeds publish them."""
         ts = datetime.combine(session, MarketHoursConfig().close, TAIWAN_TIMEZONE)
-        self.stocks.closes[stock_id] = Ohlcv(ts=ts, open=price, high=price, low=price, close=price, volume=1000)
+        self.stocks.closes[stock_id] = Ohlcv(ts=ts, open=price, high=price, low=price, close=price, volume=1000, change=change)
 
     def file_eps(self, stock_id: str, cumulative_eps: dict[FiscalQuarter, float], industry: str | None = None) -> None:
         """The company's cumulative basic EPS per quarter as filed on MOPS."""
@@ -269,8 +283,16 @@ class CliHarness:
         return asked
 
 
+UNUSED_PROJECT_ROOT = Path(tempfile.gettempdir()) / "stock-agent-harness-has-no-settings-files"
+"""Where the harness's settings-file adapter points unless a test gives its own copy: never the repository's config/."""
+
+
 def build_harness(
-    *, now: datetime = MARKET_OPEN, config: AppConfig | None = None, settings: TechnicalSettings | None = None
+    *,
+    now: datetime = MARKET_OPEN,
+    config: AppConfig | None = None,
+    settings: TechnicalSettings | None = None,
+    settings_root: Path = UNUSED_PROJECT_ROOT,
 ) -> CliHarness:
     config = config or harness_config()
     validate_trading_environment(config)
@@ -289,7 +311,7 @@ def build_harness(
     chat_platform = RecordingChatPlatform()
     journal = FakeTradingJournal()
     watchlist = FakeWatchlistRepository(clock)
-    technical_settings = FakeTechnicalSettingsRepository(settings or harness_settings())
+    technical_settings = FakeTechnicalSettingsRepository({config.technical.owner_id: settings or harness_settings()})
     broker = RecordingExecutionProvider()
 
     dependencies = ProviderDependencies(
@@ -308,6 +330,7 @@ def build_harness(
         execution_provider=broker,
         notification_provider=None,
         platform_provider=chat_platform,
+        settings_files=SettingsFiles(project_root=settings_root, max_bytes=262_144, backups_kept=3, logger=logger),
     )
     return CliHarness(
         config=config,

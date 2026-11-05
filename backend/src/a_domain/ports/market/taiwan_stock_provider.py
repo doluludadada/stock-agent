@@ -26,6 +26,16 @@ class ITaiwanStockProvider(IStockProvider, Protocol):
         """'1151029' (ROC year 115) is 2026-10-29."""
         ...
 
-    def parse_daily_close(self, row: dict[str, Any], fields: tuple[str, str, str, str, str, str]) -> Ohlcv | None:
-        """The row's official daily bar, or None when the stock did not trade (TWSE leaves prices blank, TPEX writes '---')."""
+    def parse_daily_close(self, row: dict[str, Any], fields: tuple[str, str, str, str, str, str, str]) -> Ohlcv | None:
+        """
+        The row's official daily bar with its change, or None when the stock did not trade (TWSE leaves prices blank,
+        TPEX writes '---').
+        """
+        ...
+
+    def parse_change(self, text: str, close: float) -> float | None:
+        """
+        The listing's signed change from the reference price ('-10.0000', '+1.00 '), or None when it is not a number or
+        leaves no positive reference price under this close.
+        """
         ...

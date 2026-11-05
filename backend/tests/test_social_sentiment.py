@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -7,9 +8,8 @@ import pytest_asyncio
 from pydantic import ValidationError
 from support.harness import build_harness, rising_history
 from support.settings import shipped_config
-from trading_stack import run_status
+from trading_stack import run_stats
 
-from a_domain.model.analysis.sentiment_classification import SentimentClassification
 from a_domain.model.analysis.social_sentiment import SocialSentiment
 from a_domain.model.chat.message import Message
 from a_domain.model.market.article import Article
@@ -56,8 +56,12 @@ def make_post(text: str, url: str | None = None, source: InformationSource = Inf
     )
 
 
+def classified(label: SentimentLabel, confidence: float) -> Article:
+    return replace(make_post("Opinion"), sentiment=label, sentiment_confidence=confidence)
+
+
 def tally(*labels: SentimentLabel, confidence: float = 0.9) -> SocialSentiment:
-    return SENTIMENT_RULE.apply([SentimentClassification(label, confidence) for label in labels], posts=len(labels))
+    return SENTIMENT_RULE.apply([classified(label, confidence) for label in labels], post_count=len(labels))
 
 
 @pytest.mark.parametrize(
@@ -78,8 +82,11 @@ def test_stock_level_consensus(labels: list[SentimentLabel], expected: Sentiment
 
 
 class TwoBullsOneBear:
-    async def classify(self, stock_id: str, articles: list[Article]) -> list[SentimentClassification]:
-        return [SentimentClassification(BULLISH, 0.9), SentimentClassification(BULLISH, 0.9), SentimentClassification(BEARISH, 0.9)]
+    async def classify(self, stock_id: str, posts: list[Article]) -> list[Article]:
+        return [
+            replace(post, sentiment=label, sentiment_confidence=0.9)
+            for post, label in zip(posts, [BULLISH, BULLISH, BEARISH], strict=True)
+        ]
 
 
 @pytest.mark.parametrize(
@@ -95,11 +102,11 @@ class TwoBullsOneBear:
 async def test_the_sentiment_settings_decide_the_consensus(settings: SentimentConfig, expected: SentimentConsensus) -> None:
     config = shipped_config().model_copy(update={"sentiment": settings})
     stock = Stock(stock_id="2330", articles=[make_post("Up"), make_post("Up more"), make_post("Down")])
-    status = run_status(Workflow.BUZZ_SCAN)
+    sentiment_by_stock_id = await SentimentAnalyser(classifier=TwoBullsOneBear(), config=config, logger=SilentLogger()).execute(
+        [stock], run_stats(Workflow.BUZZ_SCAN)
+    )
 
-    await SentimentAnalyser(classifier=TwoBullsOneBear(), config=config, logger=SilentLogger()).execute([stock], status)
-
-    assert status.sentiment_by_stock_id["2330"].consensus == expected
+    assert sentiment_by_stock_id["2330"].consensus == expected
 
 
 @pytest.mark.parametrize("consensus_share", [0.5, 1.1])
@@ -111,19 +118,25 @@ def test_a_consensus_share_that_two_stances_could_reach_is_refused(consensus_sha
 def test_ratios_are_shares_of_opinions_and_low_confidence_counts_as_unclear() -> None:
     sentiment = SENTIMENT_RULE.apply(
         [
-            SentimentClassification(BULLISH, 0.9),
-            SentimentClassification(BULLISH, 0.8),
-            SentimentClassification(BEARISH, 0.7),
-            SentimentClassification(NEUTRAL, 0.6),
-            SentimentClassification(BEARISH, 0.3),
-            SentimentClassification(UNCLEAR, 0.9),
+            classified(BULLISH, 0.9),
+            classified(BULLISH, 0.8),
+            classified(BEARISH, 0.7),
+            classified(NEUTRAL, 0.6),
+            classified(BEARISH, 0.3),
+            classified(UNCLEAR, 0.9),
         ],
-        posts=7,
+        post_count=7,
     )
 
     assert (sentiment.bullish, sentiment.bearish, sentiment.neutral, sentiment.unclear) == (2, 1, 1, 2)
     assert (sentiment.bullish_ratio, sentiment.bearish_ratio, sentiment.neutral_ratio) == (0.5, 0.25, 0.25)
     assert (sentiment.classified, sentiment.posts) == (6, 7)
+
+
+@pytest.mark.parametrize(("sentiment", "confidence"), [(BULLISH, None), (None, 0.9)])
+def test_a_post_sentiment_and_its_confidence_are_set_together(sentiment: SentimentLabel | None, confidence: float | None) -> None:
+    with pytest.raises(ValidationError):
+        replace(make_post("Up"), sentiment=sentiment, sentiment_confidence=confidence)
 
 
 @pytest_asyncio.fixture
@@ -148,7 +161,7 @@ async def test_a_post_is_classified_once_and_then_served_from_the_cache(db: Data
     first = await classifier.classify("2330", [post])
     second = await classifier.classify("2330", [post])
 
-    assert first == second == [SentimentClassification(BULLISH, 0.8)]
+    assert first == second == [replace(post, sentiment=BULLISH, sentiment_confidence=0.8)]
     assert len(ai.prompts) == 1
 
 
@@ -177,10 +190,10 @@ async def test_a_partial_reply_keeps_valid_items_and_resends_only_the_missing_po
     first = await classifier.classify("2330", posts)
     second = await classifier.classify("2330", posts)
 
-    assert first == [SentimentClassification(BEARISH, 0.7)]
-    assert sorted(second, key=lambda item: item.label) == [
-        SentimentClassification(BEARISH, 0.7),
-        SentimentClassification(NEUTRAL, 0.6),
+    assert first == [replace(posts[0], sentiment=BEARISH, sentiment_confidence=0.7)]
+    assert sorted(second, key=lambda post: str(post.url)) == [
+        replace(posts[0], sentiment=BEARISH, sentiment_confidence=0.7),
+        replace(posts[1], sentiment=NEUTRAL, sentiment_confidence=0.6),
     ]
     assert "Dividend unchanged" in ai.prompts[1]
     assert "Margins fall" not in ai.prompts[1]
@@ -191,12 +204,12 @@ class FakeClassifier:
         self._failing_stock_ids = failing_stock_ids
         self.classified_sources: list[InformationSource] = []
 
-    async def classify(self, stock_id: str, articles: list[Article]) -> list[SentimentClassification]:
+    async def classify(self, stock_id: str, posts: list[Article]) -> list[Article]:
         if stock_id in self._failing_stock_ids:
             raise ValueError("model unavailable")
 
-        self.classified_sources.extend(article.source for article in articles)
-        return [SentimentClassification(BULLISH, 0.9) for _ in articles]
+        self.classified_sources.extend(post.source for post in posts)
+        return [replace(post, sentiment=BULLISH, sentiment_confidence=0.9) for post in posts]
 
 
 @pytest.mark.asyncio
@@ -205,16 +218,17 @@ async def test_sentiment_reads_only_social_posts_and_records_a_failed_stock() ->
     ok = Stock(stock_id="2330", articles=[make_post("Up"), make_post("Up more"), news])
     broken = Stock(stock_id="2603", articles=[make_post("Ships")])
     classifier = FakeClassifier(failing_stock_ids={"2603"})
-    status = run_status(Workflow.BUZZ_SCAN)
+    stats = run_stats(Workflow.BUZZ_SCAN)
 
     analyser = SentimentAnalyser(classifier=classifier, config=shipped_config(), logger=SilentLogger())
-    await analyser.execute([ok, broken], status)
+    sentiment_by_stock_id = await analyser.execute([ok, broken], stats)
 
     assert classifier.classified_sources == [InformationSource.PTT_STOCK, InformationSource.PTT_STOCK]
-    assert status.sentiment_by_stock_id["2330"].consensus == SentimentConsensus.BULLISH
-    assert status.sentiment_by_stock_id["2330"].posts == 2
-    assert "2603" not in status.sentiment_by_stock_id
-    assert status.stats.errors == ["Sentiment analysis failed for 2603: model unavailable"]
+    assert sentiment_by_stock_id["2330"].consensus == SentimentConsensus.BULLISH
+    assert sentiment_by_stock_id["2330"].posts == 2
+    assert "2603" not in sentiment_by_stock_id
+    assert stats.errors == ["Sentiment analysis failed for 2603: model unavailable"]
+    assert stats.sentiment_analysed == 1
 
 
 @pytest.mark.parametrize("label", [BULLISH, BEARISH])
@@ -248,7 +262,7 @@ TRADING_PATHS = [
     "a_domain/model/market/stock.py",
     "b_application/use_cases/ship",
     "b_application/use_cases/trade",
-    "b_application/use_cases/process/composite_scorer.py",
+    "b_application/use_cases/process/ai_analyser.py",
 ]
 
 

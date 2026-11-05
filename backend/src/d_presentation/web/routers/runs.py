@@ -4,17 +4,23 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
 
+from a_domain.model.trading.order import Order
 from a_domain.types.ids import RunId
 from b_application.schemas.pipeline_status import PipelineStatus
-from d_presentation.dependencies import RuntimeDependency, WorkflowRunsDependency, WritePermission
-from d_presentation.web.schemas import Confirmed, OrderResponse, RunAccepted, RunResponse, SignalResponse, StockIdsRequest
+from d_presentation.dependencies import ApiToken, MockBroker, RuntimeDependency, WorkflowRunsDependency
+from d_presentation.web.schemas import Confirmed, RunAccepted, RunResponse, SignalResponse, StockIdsRequest
 from d_presentation.web.workflow_runs import RunInProgress, WorkflowRuns
 
-router = APIRouter(prefix="/runs", tags=["Workflow runs"])
+router = APIRouter(prefix="/runs", tags=["Workflow runs"], dependencies=[ApiToken])
 
 STARTED: dict[int | str, dict[str, Any]] = {
     status.HTTP_202_ACCEPTED: {"description": "The run started; poll GET /v1/runs/{run_id}."},
     status.HTTP_409_CONFLICT: {"description": "Another run started by this server is still running."},
+}
+
+MOCK_ONLY: dict[int | str, dict[str, Any]] = {
+    **STARTED,
+    status.HTTP_403_FORBIDDEN: {"description": "The execution provider is not the mock broker; use the CLI."},
 }
 
 
@@ -26,31 +32,52 @@ def start(runs: WorkflowRuns, workflow: Callable[[RunId], Awaitable[PipelineStat
         raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
 
 
-@router.post("/full-cycle", status_code=status.HTTP_202_ACCEPTED, dependencies=[WritePermission], responses=STARTED)
+@router.post("/full-cycle", status_code=status.HTTP_202_ACCEPTED, responses=STARTED)
 async def start_full_cycle(body: Confirmed, runtime: RuntimeDependency, runs: WorkflowRunsDependency) -> RunAccepted:
-    """Starts menu 1: the after-market full-universe analysis. It never orders."""
+    """Starts menu 1: the after-market full-universe analysis. One AI call per stock that passes the strategy. It never orders."""
     return start(runs, lambda run_id: runtime.pipeline.run_full_cycle(run_id=run_id))
 
 
-@router.post("/specific-stocks", status_code=status.HTTP_202_ACCEPTED, dependencies=[WritePermission], responses=STARTED)
+@router.post("/specific-stocks", status_code=status.HTTP_202_ACCEPTED, responses=STARTED)
 async def start_specific_stock_analysis(
     body: StockIdsRequest, runtime: RuntimeDependency, runs: WorkflowRunsDependency
 ) -> RunAccepted:
     """Starts menu 4's analysis of the given stocks. Each stock is one AI call. It never orders; the API offers no manual BUY."""
-    return start(runs, lambda run_id: runtime.pipeline.analyse_specific_stocks(body.stock_ids, run_id=run_id))
+    stock_ids = body.stock_ids
+    return start(runs, lambda run_id: runtime.pipeline.analyse_specific_stocks(stock_ids, run_id=run_id))
+
+
+@router.post("/buzz-scan", status_code=status.HTTP_202_ACCEPTED, dependencies=[MockBroker], responses=MOCK_ONLY)
+async def start_buzz_scan(body: Confirmed, runtime: RuntimeDependency, runs: WorkflowRunsDependency) -> RunAccepted:
+    """
+    Starts menu 2, Social Buzz, on the mock broker only. Its decisions go through the same order gates and trading
+    journal as the CLI's: a stop-loss SELL or a qualified BUY becomes a mock order. One AI call per qualified stock.
+    """
+    return start(runs, lambda run_id: runtime.pipeline.run_buzz_scan(run_id=run_id))
+
+
+@router.post("/intraday", status_code=status.HTTP_202_ACCEPTED, dependencies=[MockBroker], responses=MOCK_ONLY)
+async def start_intraday(body: Confirmed, runtime: RuntimeDependency, runs: WorkflowRunsDependency) -> RunAccepted:
+    """Starts menu 3, Intraday, on the mock broker only, through the same order gates and journal as the CLI's."""
+    return start(runs, lambda run_id: runtime.pipeline.run_intraday(run_id=run_id))
 
 
 @router.get("")
 async def list_runs(
-    runtime: RuntimeDependency, runs: WorkflowRunsDependency, limit: Annotated[int, Query(ge=1, le=200)] = 20
+    runtime: RuntimeDependency,
+    runs: WorkflowRunsDependency,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
 ) -> list[RunResponse]:
-    """The latest recorded runs, newest first, whichever entry point (CLI or API) started them."""
-    records = await runtime.journal.recent_runs(limit)
+    """Recorded runs, newest first, whichever entry point (CLI or API) started them. Ask for limit + 1 to know of a next page."""
+    records = await runtime.journal.recent_runs(limit, offset)
     return [response for record in records if (response := runs.describe(record.run_id, record)) is not None]
 
 
 async def find_run(run_id: UUID, runtime: RuntimeDependency, runs: WorkflowRunsDependency) -> RunResponse:
-    response = runs.describe(RunId(run_id), await runtime.journal.find_run(RunId(run_id)))
+    record = await runtime.journal.find_run(RunId(run_id))
+    reports = await runtime.journal.stock_reports_of(RunId(run_id)) if record is not None else []
+    response = runs.describe(RunId(run_id), record, reports)
 
     if response is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"No run {run_id}.")
@@ -68,11 +95,11 @@ async def get_run_signals(run_id: UUID, runtime: RuntimeDependency, runs: Workfl
     """Every decision the run made, HOLD included, with the evidence it was made on."""
     await find_run(run_id, runtime, runs)
     signals = await runtime.journal.signals_of(RunId(run_id))
-    return [SignalResponse.model_validate({**signal.model_dump(), "run_id": run_id}) for signal in signals]
+    return [SignalResponse.model_validate(signal) for signal in signals]
 
 
 @router.get("/{run_id}/orders")
-async def get_run_orders(run_id: UUID, runtime: RuntimeDependency, runs: WorkflowRunsDependency) -> list[OrderResponse]:
+async def get_run_orders(run_id: UUID, runtime: RuntimeDependency, runs: WorkflowRunsDependency) -> list[Order]:
     """Every order the run sent or refused, with its status, reason, fee, tax and realized PnL."""
     await find_run(run_id, runtime, runs)
-    return [OrderResponse.model_validate(order) for order in await runtime.journal.orders_of(RunId(run_id))]
+    return await runtime.journal.orders_of(RunId(run_id))

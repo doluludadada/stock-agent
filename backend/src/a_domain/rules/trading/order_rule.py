@@ -1,22 +1,12 @@
-from dataclasses import dataclass
 from datetime import datetime
 
-from icontract import ensure
+from pydantic.dataclasses import dataclass
 
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.rules.collect.freshness import DataFreshnessRule
 from a_domain.rules.trading.tick import LimitPriceRule
-from a_domain.types.enums import (
-    ExecutionProvider,
-    OrderMode,
-    OrderStatus,
-    OrderType,
-    RejectReason,
-    TimeInForce,
-    TradeAction,
-    TradingPhase,
-)
+from a_domain.types.enums import ExecutionProvider, OrderMode, OrderType, RejectReason, TimeInForce, TradeAction, TradingPhase
 from a_domain.types.ids import RunId
 
 
@@ -80,7 +70,6 @@ class OrderRule:
     gate_rule: OrderGateRule
     limit_price_rule: LimitPriceRule
 
-    @ensure(lambda result: result.status in {OrderStatus.PENDING, OrderStatus.REJECTED})
     def apply(self, signal: TradeSignal, run_id: RunId, now: datetime, phase: TradingPhase) -> Order:
         action = signal.action
 

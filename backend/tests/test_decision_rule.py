@@ -5,7 +5,6 @@ from support.trading_rules import COSTS, run_decisions_rule
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.account import Account
-from a_domain.model.trading.position import Position
 from a_domain.rules.trading.decision import DecisionCandidatesRule
 from a_domain.types.enums import TradeAction
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
@@ -67,10 +66,10 @@ def test_every_buy_of_a_run_risks_a_share_of_the_same_equity_and_the_cash_left_c
 
 def test_intraday_decides_on_every_survivor_first_then_each_other_held_stock_once() -> None:
     held_failing, survivor, held_survivor, failing = (Stock(stock_id=stock_id) for stock_id in ("1101", "2603", "2330", "2454"))
-    positions = [Position(stock_id=stock_id, quantity=1000, average_cost=95) for stock_id in ("1101", "2330")]
+    held_unscreened = Stock(stock_id="3008")
 
     candidates = DecisionCandidatesRule().apply(
-        [held_failing, survivor, held_survivor, failing], [survivor, held_survivor], Account(cash=0, positions=positions)
+        [held_failing, survivor, held_survivor, failing], [survivor, held_survivor], [held_unscreened, held_survivor, held_failing]
     )
 
     assert [stock.stock_id for stock in candidates] == ["2603", "2330", "1101"]

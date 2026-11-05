@@ -1,9 +1,9 @@
 from a_domain.model.market.stock import Stock
+from a_domain.model.system.stats import SystemStats
 from a_domain.ports.market.news_provider import INewsProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.rules.collect import ArticleQualityRule
 from b_application.config.app_config import AppConfig
-from b_application.schemas.pipeline_status import PipelineStatus
 
 
 class NewsFeed:
@@ -23,7 +23,7 @@ class NewsFeed:
         self._article_fetch_limit = config.analysis.article_fetch_limit
         self._logger = logger
 
-    async def execute(self, stocks: list[Stock], status: PipelineStatus) -> None:
+    async def execute(self, stocks: list[Stock], stats: SystemStats) -> None:
         self._logger.info(f"Collecting news for {len(stocks)} stocks.")
 
         for stock in stocks:
@@ -40,6 +40,6 @@ class NewsFeed:
             except Exception as error:
                 message = f"Failed to collect news for {stock.stock_id}: {error}"
                 self._logger.error(message)
-                status.stats.add_error(message)
+                stats.add_error(message)
 
         self._logger.info("News collection complete.")

@@ -1,17 +1,16 @@
-from dataclasses import dataclass
+from pydantic.dataclasses import dataclass
 
-from icontract import invariant
+from a_domain.types.values import Score
 
 
-@invariant(lambda self: 0 <= self.score <= 100, "AI score must be 0-100")
-@dataclass
+@dataclass(frozen=True)
 class AiAnalysisReport:
     """
     Structured output from the LLM.
     Value Object inside Stock.
     """
 
-    score: int  # 0-100
+    score: Score[int]
     bullish_factors: list[str]
     bearish_factors: list[str]
     summary: str

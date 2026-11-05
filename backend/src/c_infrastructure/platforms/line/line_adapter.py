@@ -1,7 +1,6 @@
 from typing import override
 
 import httpx
-from icontract import require
 
 from a_domain.model.chat.message import Message
 from a_domain.ports.chat.platform_provider import IPlatformProvider
@@ -10,11 +9,10 @@ from b_application.config.app_config import AppConfig
 
 
 class LinePlatformAdapter(IPlatformProvider):
-    @require(
-        lambda config: bool(config.line.channel_access_token),
-        "Missing line_channel_access_token in configuration. Cannot send messages.",
-    )
     def __init__(self, config: AppConfig, logger: ILoggingProvider):
+        if not config.line.channel_access_token:
+            raise ValueError("Missing line_channel_access_token in configuration. Cannot send messages.")
+
         self._channel_access_token = config.line.channel_access_token
         self._timeout = config.ai.connection_timeout
         self._logger = logger

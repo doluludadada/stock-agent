@@ -221,7 +221,8 @@ async def test_intraday_analyses_unblocked_candidates_with_history_and_decides_o
     assert sorted(harness.prices.history_requests) == ["1101", "2454", "2603", "3008"], (
         "a stop-loss sale and a stale quote are not analysed"
     )
-    assert [stock.stock_id for stock in status.survivors] == ["2603"], "a stock without daily history gets no technical verdict"
+    assert status.stats.passed_technical == 1, "a stock without daily history gets no technical verdict"
+    assert stock_ids(status.survivors) == ["2603", "1101"], "the held stock that failed still gets its exit decided"
     assert sorted(harness.ai.analysed_stock_ids) == ["1101", "2603"], "a held stock that fails the strategy, not one without history"
     assert sorted(signal.stock_id for signal in harness.journal.signals) == ["1101", "2330", "2603"]
 
@@ -297,6 +298,24 @@ async def test_intraday_records_each_decision_and_the_brokers_answer_to_its_orde
         signal.quantity,
     )
     assert harness.journal.runs[run_id].orders_submitted == 1
+
+
+@pytest.mark.asyncio
+async def test_a_run_record_names_its_strategy_and_ai_model_and_counts_its_fills() -> None:
+    harness = build_harness()
+    harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
+    harness.watch("2330", WatchlistType.TECHNICAL)
+    ai = harness.config.ai
+    saved = harness.technical_settings.saved[harness.config.technical.owner_id]
+
+    status = await harness.run_menu("3")
+
+    record = harness.journal.runs[status.stats.run_id]
+    assert (record.technical_strategy_id, record.ai_model, record.orders_filled) == (
+        saved.active_strategy.strategy_id,
+        ai.available_models[ai.active_model],
+        1,
+    )
 
 
 @pytest.mark.asyncio

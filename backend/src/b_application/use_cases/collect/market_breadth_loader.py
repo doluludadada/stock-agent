@@ -1,0 +1,22 @@
+from a_domain.ports.market.fundamentals_provider import IFundamentalsProvider
+from a_domain.ports.market.stock_provider import IStockProvider
+from a_domain.rules.market.breadth import MarketBreadth, MarketBreadthRule
+from a_domain.types.errors import ListingUnavailableError
+
+
+class MarketBreadthLoader:
+    """The latest session's advancers, decliners and unchanged stocks in the exchange listing, overall and per industry."""
+
+    def __init__(self, stock_provider: IStockProvider, fundamentals_provider: IFundamentalsProvider) -> None:
+        self._stock_provider = stock_provider
+        self._fundamentals_provider = fundamentals_provider
+        self._breadth_rule = MarketBreadthRule()
+
+    async def execute(self) -> MarketBreadth:
+        closes = await self._stock_provider.get_latest_closes()
+        breadth = self._breadth_rule.apply(closes, await self._fundamentals_provider.fetch_industries())
+
+        if breadth is None:
+            raise ListingUnavailableError("The TWSE and TPEX listings could not be loaded.")
+
+        return breadth

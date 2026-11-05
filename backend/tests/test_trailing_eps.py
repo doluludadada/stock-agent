@@ -1,17 +1,16 @@
+from copy import deepcopy
 from datetime import date, datetime
 
 import pytest
 
-from a_domain.model.fundamentals.eps import Eps
-from a_domain.model.fundamentals.eps_unavailable import EpsUnavailable
-from a_domain.model.fundamentals.fiscal_quarter import FiscalQuarter
-from a_domain.model.fundamentals.quarter_eps import QuarterEps
+from a_domain.model.fundamentals.eps import Eps, EpsUnavailable
 from a_domain.model.market.stock import Stock
 from a_domain.rules.collect.freshness import DailyCloseFreshnessRule, MissedSessionsRule
-from a_domain.rules.fundamentals.filing_warning import FilingWarningRule
-from a_domain.rules.fundamentals.trailing_eps import TrailingEpsRule
-from a_domain.rules.fundamentals.trailing_eps_quarters import TrailingEpsQuartersRule
+from a_domain.rules.fundamentals.filing import FilingDeadlineRule, FilingWarningRule, FinalFilingsRule
+from a_domain.rules.fundamentals.trailing_eps import QuarterEps, TrailingEpsQuartersRule, TrailingEpsRule, filing_candidates
 from a_domain.types.enums import EpsKind, EpsUnavailableReason
+from a_domain.types.values import FiscalQuarter
+from b_application.config.sources_config import SourcesConfig
 
 FETCHED_AT = datetime(2026, 10, 30, 18, 6)
 Q = FiscalQuarter
@@ -27,6 +26,7 @@ MOPS_CUMULATIVE_EPS = {
 
 RULE = TrailingEpsRule()
 TODAY = date(2026, 10, 30)
+MOPS = SourcesConfig.from_appsetting().mops
 
 
 def filings(**overrides: dict[str, float] | None) -> dict[FiscalQuarter, QuarterEps | None]:
@@ -40,14 +40,14 @@ def filings(**overrides: dict[str, float] | None) -> dict[FiscalQuarter, Quarter
 
 
 def test_window_on_2026_10_30_is_the_quarter_being_filed_and_the_one_before() -> None:
-    assert FiscalQuarter.filing_candidates(TODAY) == (Q(2026, 3), Q(2026, 2))
+    assert filing_candidates(TODAY) == (Q(2026, 3), Q(2026, 2))
     assert TrailingEpsQuartersRule().apply(TODAY) == {Q(2026, 3), Q(2026, 2), Q(2025, 4), Q(2025, 3), Q(2025, 2)}
 
 
 def test_window_in_january_uses_the_annual_report_being_filed() -> None:
     january = date(2027, 1, 15)
 
-    assert FiscalQuarter.filing_candidates(january) == (Q(2026, 4), Q(2026, 3))
+    assert filing_candidates(january) == (Q(2026, 4), Q(2026, 3))
     assert TrailingEpsQuartersRule().apply(january) == {Q(2026, 4), Q(2026, 3), Q(2025, 4), Q(2025, 3)}
 
 
@@ -138,6 +138,25 @@ def test_eps_text_always_carries_its_period_kind_basis_and_source() -> None:
     assert eps.describe() == "86.28 TWD (TTM, 2025Q3–2026Q2, actual, MOPS, fetched 2026-10-30 18:06)"
 
 
+@pytest.mark.parametrize(
+    ("missing", "text"),
+    [
+        (EpsUnavailable(EpsUnavailableReason.NOT_LOADED), "Insufficient data: no financial statements were loaded"),
+        (
+            EpsUnavailable(EpsUnavailableReason.NOT_REPORTED, Q(2026, 2)),
+            "Insufficient data: no filing for this code since 2026Q2 (an ETF, a DR, a new listing or a company that has not filed)",
+        ),
+        (
+            EpsUnavailable(EpsUnavailableReason.INCOMPLETE_HISTORY, Q(2025, 4)),
+            "Insufficient data: the cumulative EPS for 2025Q4 is missing, so the TTM EPS cannot be computed",
+        ),
+        (EpsUnavailable(EpsUnavailableReason.SOURCE_FAILED, Q(2025, 2)), "Insufficient data: the 2025Q2 filings could not be fetched"),
+    ],
+)
+def test_missing_eps_text_names_its_reason_and_quarter(missing: EpsUnavailable, text: str) -> None:
+    assert missing.describe() == text
+
+
 def test_a_warning_names_each_failed_or_stale_quarter_oldest_first() -> None:
     stale = QuarterEps(quarter=Q(2026, 3), cumulative_eps={"1232": 8.03}, fetched_at=FETCHED_AT, refresh_failed=True)
     warnings = FilingWarningRule().apply({**filings(q2025_4=None), Q(2026, 3): stale})
@@ -150,16 +169,18 @@ def test_a_warning_names_each_failed_or_stale_quarter_oldest_first() -> None:
 
 
 def test_quarter_is_final_a_week_after_the_latest_filing_deadline() -> None:
-    assert not Q(2026, 3).is_final_on(date(2026, 12, 6))
-    assert Q(2026, 3).is_final_on(date(2026, 12, 7))
-    assert Q(2025, 4).filing_deadline == date(2026, 3, 31)
+    final_filings = FinalFilingsRule(filing_deadline_rule=FilingDeadlineRule(MOPS.filing_deadlines), grace_days=MOPS.filing_grace_days)
+
+    assert not final_filings.apply(Q(2026, 3), date(2026, 12, 6))
+    assert final_filings.apply(Q(2026, 3), date(2026, 12, 7))
+    assert FilingDeadlineRule(MOPS.filing_deadlines).apply(Q(2025, 4)) == date(2026, 3, 31)
 
 
 def test_stock_eps_defaults_to_unavailable_not_zero() -> None:
     stock = Stock(stock_id="2330")
 
     assert stock.eps == EpsUnavailable(EpsUnavailableReason.NOT_LOADED)
-    assert stock.model_copy(deep=True).eps == stock.eps
+    assert deepcopy(stock).eps == stock.eps
 
 
 @pytest.mark.parametrize(

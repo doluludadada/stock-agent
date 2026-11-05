@@ -3,32 +3,34 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import override
 
-from sqlalchemy import inspect, select
+from sqlalchemy import Connection, event, inspect, select
 from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
 from a_domain.ports.system.database_connector import IDatabaseConnector
 from a_domain.ports.system.logging_provider import ILoggingProvider
+from a_domain.types.enums import DatabaseBackend
 from b_application.config.app_config import AppConfig
-from c_infrastructure.database.models.schema_version_dto import SCHEMA_VERSION, SchemaVersionDTO
+from c_infrastructure.database.models.schema_version_dto import SCHEMA_VERSION, SchemaVersionDTO, upgrade
 
 
 class OutdatedDatabaseError(RuntimeError):
     """
-    The database holds tables of another schema version, or of none, or a table with columns other than its SQLModel
-    class declares. create_all never alters an existing table.
+    The database holds tables of a schema version no upgrade reaches, or of none, or a table with columns other than its
+    SQLModel class declares. create_all never alters an existing table. Only startup raises it, and the CLI and the Web API
+    catch it to print the remedy, so it belongs to this adapter rather than to the domain's errors.
     """
 
 
 class DatabaseConnector(IDatabaseConnector[AsyncSession]):
-    """Local SQLite (aiosqlite) by default; PostgreSQL (asyncpg) when AppConfig has its credentials."""
+    """The explicitly selected local SQLite or service PostgreSQL database; credentials never select the backend."""
 
     def __init__(self, config: AppConfig, logger: ILoggingProvider) -> None:
         self._logger = logger
         self._sqlite_path: Path | None = None
 
-        if all([config.db.user, config.db.password, config.db.host, config.db.name]):
+        if config.db.backend == DatabaseBackend.POSTGRESQL:
             self._logger.info("Initialising PostgreSQL (asyncpg) connection...")
             connection_url = URL.create(
                 drivername="postgresql+asyncpg",
@@ -43,28 +45,37 @@ class DatabaseConnector(IDatabaseConnector[AsyncSession]):
             self._logger.info("Initialising local SQLite (aiosqlite) connection...")
             self._sqlite_path = config.project_root / "stock_agent.db"
             self._engine = create_async_engine(f"sqlite+aiosqlite:///{self._sqlite_path}", echo=False)
+            # SQLite ignores foreign keys unless each connection turns them on; PostgreSQL always checks them.
+            event.listen(
+                self._engine.sync_engine, "connect", lambda connection, _: connection.cursor().execute("PRAGMA foreign_keys=ON")
+            )
 
         self._session_factory = async_sessionmaker(bind=self._engine, class_=AsyncSession, expire_on_commit=False, autoflush=False)
 
     @override
     async def init_db(self) -> None:
         """
-        Create the tables that do not exist yet; a new database first gets its schema version stamp. Raise
-        OutdatedDatabaseError, and change nothing, when the database is not new and its stamp is missing or another
-        version's, or when an existing table's columns differ from its SQLModel class.
+        Create the tables that do not exist yet; a new database first gets its schema version stamp, and a database of
+        an older version first runs the upgrade steps from its version, in the same transaction. Raise
+        OutdatedDatabaseError, and change nothing, when the database is not new and its stamp is missing or of a version
+        no upgrade reaches, or when an existing table's columns differ from its SQLModel class.
         """
         stamp_table = SQLModel.metadata.tables[SchemaVersionDTO.__tablename__]
 
+        def live_layout(sync_connection: Connection) -> dict[str, frozenset[str]]:
+            tables = inspect(sync_connection)
+            return {table: frozenset(column["name"] for column in tables.get_columns(table)) for table in tables.get_table_names()}
+
         async with self._engine.begin() as connection:
-            live_columns = await connection.run_sync(
-                lambda sync_connection: {
-                    table: frozenset(column["name"] for column in inspect(sync_connection).get_columns(table))
-                    for table in inspect(sync_connection).get_table_names()
-                }
-            )
+            live_columns = await connection.run_sync(live_layout)
             stamps = (
                 list((await connection.execute(select(stamp_table.c.version))).scalars()) if stamp_table.name in live_columns else []
             )
+
+            if len(stamps) == 1 and 1 <= stamps[0] < SCHEMA_VERSION:
+                self._logger.info(f"Upgrading the database from schema version {stamps[0]} to {SCHEMA_VERSION}...")
+                await upgrade(connection, stamps[0])
+                live_columns, stamps = await connection.run_sync(live_layout), [SCHEMA_VERSION]
 
             if outdated := self.outdated_tables(live_columns, stamps):
                 raise OutdatedDatabaseError(self.outdated_message(outdated, stamps))
@@ -115,7 +126,7 @@ class DatabaseConnector(IDatabaseConnector[AsyncSession]):
 
         return "\n".join(
             [
-                "The database has tables from an older version of stock-agent, and startup never alters a table:",
+                "The database has tables from another version of stock-agent that startup cannot upgrade in place:",
                 *(f"  - {table}" for table in outdated),
                 *version,
                 f"Remedy: {reset}drop the tables named above. The next start recreates them empty.",

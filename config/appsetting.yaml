@@ -3,14 +3,19 @@
 environment: dev
 
 ai:
-  active_model: grok
+  # claude reads ANTHROPIC_API_KEY. nvidia (NVIDIA_API_KEY) is configured too; its deepseek model did not answer on
+  # 2026-11-03, so Claude Haiku is active.
+  active_model: claude
   connection_timeout: 60
   temperature: 0.7
+  max_output_tokens: 16000
   available_models:
     openai: gpt-5.5-mini
     grok: grok-4.7
     gemini: gemini-2.5-flash
     groq: openai/gpt-oss-20b
+    nvidia: deepseek-ai/deepseek-v4.1-flash
+    claude: claude-haiku-5-5
   article_content_length: 500
 
 behavior:
@@ -19,13 +24,42 @@ behavior:
   enable_x_search: false
   enable_inline_citations: true
   web_search_max_results: 3
-  web_search_triggers: ["latest", "recent", "news", "current", "today", "stock", "weather", "時事", "今天", "最新", "新聞", "查詢"]
+  web_search_triggers:
+    [
+      "latest",
+      "recent",
+      "news",
+      "current",
+      "today",
+      "stock",
+      "weather",
+      "時事",
+      "今天",
+      "最新",
+      "新聞",
+      "查詢",
+    ]
 
 db:
+  # sqlite keeps everything in stock_agent.db at the project root. postgresql reads DB_USER, DB_PASSWORD, DB_HOST,
+  # DB_PORT and DB_NAME from .env, and refuses to start without them instead of falling back to SQLite.
+  backend: sqlite
   chroma_persist_path: "chroma_data"
+
+chat:
   reset_commands:
     - clear
     - reset
+  reset_reply: "✨ Memory cleared. Let's start over."
+
+technical:
+  # Whose saved technical settings the CLI and the Web API read and write. This installation has one owner. A future
+  # service with sign-in takes the owner from the signed-in account, never from this file or from a client.
+  owner_id: local
+  # The developer's strategies, in menu order: each is config/strategies/<id>.json. Saving settings never changes them.
+  built_in_strategies: [conservative, balanced, aggressive]
+  # An owner's first settings copy every built-in strategy and select this one for every workflow.
+  initial_strategy_id: balanced
 
 folder:
   news_archive_dir: "news_archive"
@@ -37,7 +71,12 @@ tavily:
   connection_timeout: 30
 
 analysis:
+  # Daily history is fetched by calendar days, but a strategy counts trading days (bars). About 1.5 calendar days pass
+  # per trading day; 1.9 leaves room for the Lunar New Year closure and trading halts. The window is the larger of
+  # lookback_days and the strategy's bars x 1.9, so the built-in strategies (61 bars, 116 days) keep the 120-day window.
+  # A stock that still gets too few bars fails the technical step; it is never scored on partial history.
   lookback_days: 120
+  history_calendar_days_per_bar: 1.9
 
   technical_weight: 0.5
   ai_weight: 0.5
@@ -119,8 +158,9 @@ market:
   # of the band's tick, or the exchange refuses the order. Sources, read 2026-10-31: the TWSE trading mechanism page,
   # regular trading, tick sizes (https://www.twse.com.tw/zh/products/system/trading.html), and the TPEx trading system
   # overview, section 4, tick sizes (https://www.tpex.org.tw/zh-tw/mainboard/trading/rules/system.html).
-  stock_ticks: {0: "0.01", 10: "0.05", 50: "0.1", 100: "0.5", 500: "1", 1000: "5"}
-  etf_ticks: {0: "0.01", 50: "0.05"}
+  stock_ticks:
+    { 0: "0.01", 10: "0.05", 50: "0.1", 100: "0.5", 500: "1", 1000: "5" }
+  etf_ticks: { 0: "0.01", 50: "0.05" }
   # A quote this close to a tick, as a fraction of the tick, is that tick carried through a binary float: Yahoo serves
   # float32 prices, so 28.35 arrives as 28.350000381469727.
   tick_float_tolerance: "0.01"
@@ -189,6 +229,15 @@ watchlist:
 valuation:
   scenario_spread: 0.2
   max_scan_explanations: 3
+  # The sentences of the valuation report (menus 5 and 6).
+  not_investment_advice: "This report is only a valuation estimate based on a specified P/E and a summary of the data. It is not investment advice. The result depends on the assumed P/E and is not an objective true value."
+  low_pe_caveat: "A low P/E can reflect falling earnings growth, one-off gains that inflate EPS, or market and industry risk; a low P/E alone is not a buy signal."
+  ai_not_provided: "(not provided by the AI)"
+  undervaluation_formula: "Undervaluation = (fair price − current price) ÷ current price; positive is undervalued, negative is overvalued"
+  # The rules the valuation explanation prompt gives the AI. {reason} is why the P/E does not apply.
+  no_fair_price_prompt_rule: "No fair price was computed because: {reason}. Do not estimate any fair price, target price, price range, EPS or P/E."
+  keep_scenarios_prompt_rule: "Explain the three scenarios. Do not change any P/E, price or percentage, and do not add new ones."
+  low_pe_prompt_rule: "At the user's target P/E this stock looks undervalued. Explain that a low P/E can come from falling earnings growth, one-off gains that inflate EPS, or market and sector risk, and that a low P/E alone is not a buy signal."
 
 # Where each outside service lives, the text formats its pages use (MOPS column headers, PTT markers), and the
 # headers each scraper sends.
@@ -197,23 +246,81 @@ sources:
     twse_daily_quotes_url: "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
     tpex_daily_quotes_url: "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes"
     mis_quotes_url: "https://mis.twse.com.tw/stock/api/getStockInfo.jsp"
+  yahoo:
+    # Yahoo Finance's symbol for each market index. It serves no TPEX index: ^TWOII answers "possibly delisted".
+    index_symbols: { taiex: "^TWII" }
   mops:
     eps_url: "https://mopsov.twse.com.tw/mops/web/ajax_t163sb04"
-    eps_form_fields: {"encodeURIComponent": "1", "step": "1", "firstin": "1", "off": "1", "isQuery": "Y"}
+    eps_form_fields:
+      {
+        "encodeURIComponent": "1",
+        "step": "1",
+        "firstin": "1",
+        "off": "1",
+        "isQuery": "Y",
+      }
     twse_market_code: "sii"
     tpex_market_code: "otc"
     company_id_header: "公司代號"
     eps_header_prefix: "基本每股盈餘"
     no_data_marker: "查詢無資料"
-    twse_industries_url: "https://openapi.twse.com.tw/v1/opendata/t187ap14_L"
+    # The company profiles list every listed and OTC company with its industry code. The income-statement summaries
+    # list only the companies that filed the latest quarter, a few percent of them early in each filing window.
+    twse_industries_url: "https://openapi.twse.com.tw/v1/opendata/t187ap03_L"
     twse_industry_company_field: "公司代號"
-    tpex_industries_url: "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap14_O"
+    twse_industry_field: "產業別"
+    tpex_industries_url: "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O"
     tpex_industry_company_field: "SecuritiesCompanyCode"
-    industry_field: "產業別"
+    tpex_industry_field: "SecuritiesIndustryCode"
+    # The names the TWSE ISIN listing (isin.twse.com.tw) gives the codes in use on 2026-11-04. A code not listed here,
+    # such as 91 for depositary receipts, leaves the company without an industry.
+    industry_names:
+      {
+        "01": "水泥工業",
+        "02": "食品工業",
+        "03": "塑膠工業",
+        "04": "紡織纖維",
+        "05": "電機機械",
+        "06": "電器電纜",
+        "08": "玻璃陶瓷",
+        "09": "造紙工業",
+        "10": "鋼鐵工業",
+        "11": "橡膠工業",
+        "12": "汽車工業",
+        "14": "建材營造業",
+        "15": "航運業",
+        "16": "觀光餐旅",
+        "17": "金融保險業",
+        "18": "貿易百貨業",
+        "20": "其他業",
+        "21": "化學工業",
+        "22": "生技醫療業",
+        "23": "油電燃氣業",
+        "24": "半導體業",
+        "25": "電腦及週邊設備業",
+        "26": "光電業",
+        "27": "通信網路業",
+        "28": "電子零組件業",
+        "29": "電子通路業",
+        "30": "資訊服務業",
+        "31": "其他電子業",
+        "32": "文化創意業",
+        "33": "農業科技業",
+        "35": "綠能環保",
+        "36": "數位雲端",
+        "37": "運動休閒",
+        "38": "居家生活",
+      }
     request_interval_seconds: 2.0
     timeout_seconds: 60.0
     provisional_page_max_age_hours: 6
     industry_max_age_hours: 24
+    # The latest statutory filing deadline of each quarter across company types, as [month, day]. Financial holdings
+    # file last, and the Q4 (annual) report is due in the following year.
+    filing_deadlines: { 1: [5, 30], 2: [8, 31], 3: [11, 29], 4: [3, 31] }
+    # A deadline on a holiday moves to the next business day, so a quarter's filings count as final only this many
+    # days after its deadline.
+    filing_grace_days: 7
   ptt:
     base_url: "https://www.ptt.cc"
     search_path: "/bbs/Stock/search"
@@ -247,6 +354,7 @@ sources:
   ai:
     grok_base_url: "https://api.x.ai/v1"
     groq_base_url: "https://api.groq.com/openai/v1"
+    nvidia_base_url: "https://integrate.api.nvidia.com/v1"
     tavily_search_url: "https://api.tavily.com/search"
   line:
     push_url: "https://api.line.me/v2/bot/message/push"

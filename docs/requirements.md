@@ -337,7 +337,7 @@ Manual watchlist membership and Manual BUY remain independent actions.
 - Technical failure remains visible through `hard_failures`.
 - NewsFeed processes every `manual_stock`.
 - AiAnalyser processes every `manual_stock`.
-- CompositeScorer processes every completely analysed `manual_stock`.
+- AiAnalyser gives every completely analysed `manual_stock` its composite score.
 - A technically failed manual stock may still receive an AI score and
   composite score.
 - A technically failed manual stock may still be added to
@@ -373,9 +373,7 @@ TechnicalReport
                          ↓
                 NewsFeed
                          ↓
-                AiAnalyser
-                         ↓
-                CompositeScorer
+                AiAnalyser (AI score, then composite score)
                          ↓
                 Complete Report
                          ↓

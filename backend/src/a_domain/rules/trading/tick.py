@@ -1,10 +1,11 @@
-import math
-from dataclasses import dataclass
 from decimal import ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_EVEN, Decimal
+from typing import Literal
 
-from icontract import ensure, require
+from pydantic import validate_call
+from pydantic.dataclasses import dataclass
 
 from a_domain.types.enums import SecurityKind, TradeAction
+from a_domain.types.values import PositiveFiniteFloat
 
 
 @dataclass(frozen=True)
@@ -39,10 +40,8 @@ class LimitPriceRule:
     tick_size_rule: TickSizeRule
     float_tolerance: Decimal
 
-    @require(lambda action: action != TradeAction.HOLD, "HOLD is not an order")
-    @require(lambda price: math.isfinite(price) and price > 0)
-    @ensure(lambda self, stock_id, result: Decimal(repr(result)) % self.tick_size_rule.apply(stock_id, Decimal(repr(result))) == 0)
-    def apply(self, action: TradeAction, stock_id: str, price: float) -> float:
+    @validate_call
+    def apply(self, action: Literal[TradeAction.BUY, TradeAction.SELL], stock_id: str, price: PositiveFiniteFloat) -> float:
         exact = Decimal(repr(price))
         tick = self.tick_size_rule.apply(stock_id, exact)
         ticks = exact / tick

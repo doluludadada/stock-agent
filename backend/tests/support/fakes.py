@@ -7,30 +7,30 @@ behind that port would observe: rows written, prompts sent, orders placed.
 import json
 import re
 from collections.abc import Collection
-from dataclasses import dataclass, field
+from copy import deepcopy
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from uuid import UUID
 
-from a_domain.model.analysis.sentiment_classification import SentimentClassification
-from a_domain.model.analysis.technical_settings import TechnicalSettings
 from a_domain.model.chat.conversation import Conversation
 from a_domain.model.chat.message import Message
-from a_domain.model.fundamentals.fiscal_quarter import FiscalQuarter
-from a_domain.model.fundamentals.quarter_eps import EpsFilings, QuarterEps
 from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.model.system.stats import SystemStats
-from a_domain.model.trading.account import Account
-from a_domain.model.trading.account_snapshot import AccountSnapshot
+from a_domain.model.trading.account import Account, AccountSnapshot, Position
 from a_domain.model.trading.order import Order
-from a_domain.model.trading.position import Position
 from a_domain.model.trading.signal import TradeSignal
-from a_domain.model.trading.watchlist_entry import WatchlistEntry
+from a_domain.model.trading.watchlist import WatchlistEntry
+from a_domain.rules.fundamentals.trailing_eps import EpsFilings, QuarterEps
+from a_domain.rules.technical.strategy import TechnicalSettings
 from a_domain.rules.trading.cost import TradingCostRule
-from a_domain.types.enums import AiAnalysisFocus, MessageRole, SentimentLabel, TradeAction, WatchlistType
+from a_domain.types.enums import AiAnalysisFocus, MarketIndex, MessageRole, SentimentLabel, TradeAction, WatchlistType
+from a_domain.types.errors import TechnicalSettingsConflictError
 from a_domain.types.ids import DecisionId, RunId
+from a_domain.types.values import FiscalQuarter
 from b_application.config.market_data_config import MarketHoursConfig
+from c_infrastructure.database.models.trading_journal_dto import RunStockReportDTO
 from c_infrastructure.system.market_clock import TaiwanMarketClock
 
 PROMPT_TEMPLATES = {
@@ -91,14 +91,14 @@ class FakeStockProvider:
         self.closes: dict[str, Ohlcv] = {}
 
     async def get_all(self) -> list[Stock]:
-        return [stock.model_copy(deep=True) for stock in self.stocks.values()]
+        return [deepcopy(stock) for stock in self.stocks.values()]
 
     async def get_by_id(self, stock_id: str) -> Stock | None:
         stock = self.stocks.get(stock_id)
-        return stock.model_copy(deep=True) if stock is not None else None
+        return deepcopy(stock) if stock is not None else None
 
     async def get_latest_closes(self) -> dict[str, Ohlcv]:
-        return {stock_id: bar.model_copy() for stock_id, bar in self.closes.items()}
+        return dict(self.closes)
 
 
 class FakeFundamentalsProvider:
@@ -133,21 +133,21 @@ class FakeFundamentalsProvider:
 class FakeOhlcvProvider:
     def __init__(self) -> None:
         self.history: dict[str, list[Ohlcv]] = {}
+        self.index_history: dict[MarketIndex, list[Ohlcv]] = {}
         self.realtime: dict[str, Ohlcv] = {}
         self.history_requests: list[str] = []
         self.realtime_requests: list[str] = []
 
     async def fetch_history(self, stocks: list[Stock], start_date: datetime, end_date: datetime) -> dict[str, list[Ohlcv]]:
         self.history_requests.extend(stock.stock_id for stock in stocks)
-        return {
-            stock.stock_id: [bar.model_copy() for bar in self.history[stock.stock_id]]
-            for stock in stocks
-            if stock.stock_id in self.history
-        }
+        return {stock.stock_id: list(self.history[stock.stock_id]) for stock in stocks if stock.stock_id in self.history}
+
+    async def fetch_index_history(self, index: MarketIndex, start_date: datetime, end_date: datetime) -> list[Ohlcv]:
+        return list(self.index_history.get(index, []))
 
     async def fetch_realtime_bars(self, stocks: list[Stock]) -> dict[str, Ohlcv]:
         self.realtime_requests.extend(stock.stock_id for stock in stocks)
-        return {stock.stock_id: self.realtime[stock.stock_id].model_copy() for stock in stocks if stock.stock_id in self.realtime}
+        return {stock.stock_id: self.realtime[stock.stock_id] for stock in stocks if stock.stock_id in self.realtime}
 
 
 class FakeNewsProvider:
@@ -157,7 +157,7 @@ class FakeNewsProvider:
 
     async def fetch_news(self, stock_id: str, limit: int = 10) -> list[Article]:
         self.requested.append(stock_id)
-        return [article.model_copy() for article in self.articles.get(stock_id, [])[:limit]]
+        return [replace(article) for article in self.articles.get(stock_id, [])[:limit]]
 
     def save_as_md_file(self, stock_id: str, articles: list[Article]) -> None:
         return None
@@ -168,7 +168,7 @@ class FakeSocialMediaProvider:
         self.articles: list[Article] = []
 
     async def fetch_social_articles(self, limit: int) -> list[Article]:
-        return [article.model_copy() for article in self.articles[:limit]]
+        return [replace(article) for article in self.articles[:limit]]
 
     def save_social_media_data(self, articles: list[Article]) -> None:
         return None
@@ -282,26 +282,34 @@ class FakeTradingJournal:
     signal_runs: dict[DecisionId, RunId] = field(default_factory=dict)
     orders: dict[UUID, Order] = field(default_factory=dict)
     account_snapshots: list[AccountSnapshot] = field(default_factory=list)
+    stock_reports: dict[RunId, list[RunStockReportDTO]] = field(default_factory=dict)
 
     async def save_run(self, run: SystemStats) -> None:
-        self.runs[run.run_id] = run.model_copy(deep=True)
+        self.runs[run.run_id] = replace(run)
 
     async def save_signals(self, run_id: RunId, signals: list[TradeSignal]) -> None:
         for signal in signals:
-            self.signals.append(signal.model_copy())
+            self.signals.append(signal)
             self.signal_runs[signal.decision_id] = run_id
 
     async def save_order(self, order: Order) -> None:
-        self.orders[order.id] = order.model_copy()
+        self.orders[order.id] = replace(order)
 
     async def save_snapshot(self, snapshot: AccountSnapshot) -> None:
-        self.account_snapshots.append(snapshot.model_copy(deep=True))
+        self.account_snapshots.append(snapshot)
 
     async def snapshots(self) -> list[AccountSnapshot]:
         return sorted(self.account_snapshots, key=lambda snapshot: snapshot.taken_at)
 
-    async def recent_runs(self, limit: int) -> list[SystemStats]:
-        return sorted(self.runs.values(), key=lambda run: run.start_time, reverse=True)[:limit]
+    async def save_stock_reports(self, run_id: RunId, stocks: list[Stock]) -> None:
+        """Keeps each stock as the SQL journal stores it, so a later change to the Stock object is not seen."""
+        self.stock_reports[run_id] = [RunStockReportDTO.from_domain(run_id, position, stock) for position, stock in enumerate(stocks)]
+
+    async def stock_reports_of(self, run_id: RunId) -> list[Stock]:
+        return [row.to_domain() for row in self.stock_reports.get(run_id, [])]
+
+    async def recent_runs(self, limit: int, offset: int = 0) -> list[SystemStats]:
+        return sorted(self.runs.values(), key=lambda run: run.start_time, reverse=True)[offset : offset + limit]
 
     async def find_run(self, run_id: RunId) -> SystemStats | None:
         return self.runs.get(run_id)
@@ -332,6 +340,10 @@ class FakeWatchlistRepository:
         for entry in entries:
             self.entries[(entry.stock_id, entry.watchlist_type)] = entry
 
+    async def remove(self, stock_ids: list[str], watchlist_type: WatchlistType) -> list[str]:
+        removed = [stock_id for stock_id in stock_ids if self.entries.pop((stock_id, watchlist_type), None) is not None]
+        return removed
+
 
 class FakeSentimentClassifier:
     """Labels every post with the label set for its stock and records which posts each stock sent."""
@@ -340,10 +352,10 @@ class FakeSentimentClassifier:
         self.labels: dict[str, SentimentLabel] = {}
         self.classified: list[tuple[str, list[str]]] = []
 
-    async def classify(self, stock_id: str, articles: list[Article]) -> list[SentimentClassification]:
-        self.classified.append((stock_id, [article.title for article in articles]))
+    async def classify(self, stock_id: str, posts: list[Article]) -> list[Article]:
+        self.classified.append((stock_id, [post.title for post in posts]))
         label = self.labels.get(stock_id, SentimentLabel.NEUTRAL)
-        return [SentimentClassification(label=label, confidence=0.9) for _ in articles]
+        return [replace(post, sentiment=label, sentiment_confidence=0.9) for post in posts]
 
 
 class RecordingExecutionProvider:
@@ -358,7 +370,7 @@ class RecordingExecutionProvider:
         )
 
     async def place_order(self, order: Order) -> Order:
-        self.placed.append(order.model_copy())
+        self.placed.append(replace(order))
         assert order.limit_price is not None, "the app sends LIMIT orders only"
 
         cost = self._cost_rule.apply(order.action, order.stock_id, order.limit_price, order.quantity, now=datetime.now(UTC))
@@ -366,25 +378,36 @@ class RecordingExecutionProvider:
         realized_pnl = held.profit_on_sale(order.quantity, cost.net) if order.action == TradeAction.SELL and held else None
 
         order.submit(now=datetime.now(UTC))
-        order.fill(order.quantity, order.limit_price, cost, realized_pnl, now=datetime.now(UTC))
+        order.fill(order.quantity, order.limit_price, cost.fee, cost.tax, realized_pnl, now=datetime.now(UTC))
         return order
 
     async def get_account(self) -> Account:
-        return Account(cash=self.cash, positions=[position.model_copy() for position in self.positions])
+        return Account(cash=self.cash, positions=[replace(position) for position in self.positions])
 
 
 class FakeTechnicalSettingsRepository:
-    """Like the YAML repository: load returns the saved settings when there are any, else the template."""
+    """
+    Like the SQL repository: each owner's saved settings, the initial ones saved on an owner's first load, and a save
+    refused, changing nothing, when the revision it carries is no longer the saved one. The next interrupted_loads
+    loads fail as a load does when a save lands between its reads.
+    """
 
-    def __init__(self, template: TechnicalSettings) -> None:
-        self.template = template
-        self.saved: TechnicalSettings | None = None
+    def __init__(self, saved: dict[str, TechnicalSettings] | None = None) -> None:
+        self.saved = dict(saved or {})
+        self.interrupted_loads = 0
 
-    async def load(self) -> TechnicalSettings:
-        return self.saved or self.template
+    async def load(self, owner_id: str, initial: TechnicalSettings) -> TechnicalSettings:
+        if self.interrupted_loads:
+            self.interrupted_loads -= 1
+            raise TechnicalSettingsConflictError(f"The technical settings of {owner_id} changed while being read. Read them again.")
 
-    async def save(self, settings: TechnicalSettings) -> None:
-        self.saved = settings
+        return self.saved.setdefault(owner_id, replace(initial, revision=0))
 
-    async def reset(self) -> None:
-        self.saved = None
+    async def save(self, owner_id: str, settings: TechnicalSettings) -> TechnicalSettings:
+        current = self.saved.get(owner_id)
+
+        if current is None or current.revision != settings.revision:
+            raise TechnicalSettingsConflictError("The technical settings changed after they were read.")
+
+        self.saved[owner_id] = replace(settings, revision=settings.revision + 1)
+        return self.saved[owner_id]

@@ -1,7 +1,10 @@
+from datetime import date
 from typing import Self, override
 
-from pydantic import BaseModel
+from pydantic import BaseModel, NonNegativeInt, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict, YamlConfigSettingsSource
+
+from a_domain.types.enums import MarketIndex
 
 
 class ExchangeSources(BaseModel):
@@ -12,11 +15,24 @@ class ExchangeSources(BaseModel):
     mis_quotes_url: str
 
 
+class YahooSources(BaseModel):
+    """Yahoo Finance, which serves the daily history: the symbol of each market index."""
+
+    index_symbols: dict[MarketIndex, str]
+
+    @model_validator(mode="after")
+    def _every_index_has_a_symbol(self) -> Self:
+        if missing := set(MarketIndex) - set(self.index_symbols):
+            raise ValueError(f"sources.yahoo.index_symbols needs a symbol for {', '.join(sorted(missing))}")
+
+        return self
+
+
 class MopsSources(BaseModel):
     """
-    MOPS: the bulk income statements (cumulative EPS) and the income-statement summaries that carry each company's
-    industry. The headers are the Chinese column names those pages and feeds use. The form fields and market codes
-    are what the income-statement form posts, and the ages and intervals say how often MOPS is asked.
+    MOPS: the bulk income statements (cumulative EPS) and the company profiles that carry each company's industry
+    code. The headers are the Chinese column names those pages and feeds use. The form fields and market codes are what
+    the income-statement form posts, and the ages and intervals say how often MOPS is asked.
     """
 
     eps_url: str
@@ -30,9 +46,13 @@ class MopsSources(BaseModel):
     no_data_marker: str
     twse_industries_url: str
     twse_industry_company_field: str
+    twse_industry_field: str
     tpex_industries_url: str
     tpex_industry_company_field: str
-    industry_field: str
+    tpex_industry_field: str
+    industry_names: dict[str, str]
+    """The exchanges' industry codes, which both company profiles use, and the industry name of each."""
+
     request_interval_seconds: float
     """A cold load sends ten requests to a shared public service, so they go one at a time, this far apart."""
 
@@ -41,6 +61,21 @@ class MopsSources(BaseModel):
     """A page that is not final yet is downloaded again once it is this old."""
 
     industry_max_age_hours: float
+    filing_deadlines: dict[int, tuple[int, int]]
+    """Each quarter's latest statutory filing deadline across company types, as (month, day)."""
+
+    filing_grace_days: NonNegativeInt
+    """A quarter's filings are final this many days after its deadline, since a deadline on a holiday moves."""
+
+    @model_validator(mode="after")
+    def _every_quarter_has_a_real_deadline(self) -> Self:
+        if set(self.filing_deadlines) != {1, 2, 3, 4}:
+            raise ValueError("sources.mops.filing_deadlines needs a deadline for each of the quarters 1 to 4")
+
+        for month, day in self.filing_deadlines.values():
+            date(2025, month, day)
+
+        return self
 
 
 class PttSources(BaseModel):
@@ -97,10 +132,11 @@ class NewsSources(BaseModel):
 
 
 class AiSources(BaseModel):
-    """The OpenAI-compatible endpoints of Grok and Groq, and Tavily search."""
+    """The OpenAI-compatible endpoints of Grok, Groq and NVIDIA, and Tavily search."""
 
     grok_base_url: str
     groq_base_url: str
+    nvidia_base_url: str
     tavily_search_url: str
 
 
@@ -126,6 +162,7 @@ class SourcesConfig(BaseSettings):
     )
 
     exchange: ExchangeSources
+    yahoo: YahooSources
     mops: MopsSources
     ptt: PttSources
     news: NewsSources

@@ -1,21 +1,17 @@
-from __future__ import annotations
-
-import math
-from dataclasses import dataclass
 from datetime import datetime
 
-from icontract import invariant
+from pydantic import ConfigDict, FiniteFloat
+from pydantic.dataclasses import dataclass
 
-from a_domain.model.fundamentals.fiscal_quarter import FiscalQuarter
-from a_domain.types.enums import EpsBasis, EpsKind, InformationSource
+from a_domain.types.enums import EpsBasis, EpsKind, EpsUnavailableReason, InformationSource
+from a_domain.types.values import FiscalQuarter
 
 
-@invariant(lambda self: math.isfinite(self.value))
 @dataclass(frozen=True)
 class Eps:
     """An EPS figure that always carries its period, kind, basis, source and fetch time."""
 
-    value: float
+    value: FiniteFloat
     kind: EpsKind
     period_end: FiscalQuarter
     basis: EpsBasis
@@ -47,8 +43,16 @@ class Eps:
         """The only text form of an EPS. It never shows the number without its period."""
         return (
             f"{self.value:,.2f} TWD ({self.kind.label}, {self.period_label}, {self.basis.label}, "
-            f"{SOURCE_LABELS[self.source]}, fetched {self.fetched_at:%Y-%m-%d %H:%M})"
+            f"{self.source.label}, fetched {self.fetched_at:%Y-%m-%d %H:%M})"
         )
 
 
-SOURCE_LABELS = {InformationSource.TWSE_MOPS: "MOPS"}
+@dataclass(frozen=True, config=ConfigDict(json_schema_serialization_defaults_required=True))
+class EpsUnavailable:
+    """Missing EPS. It is never 0, and the report shows "Insufficient data" with the reason."""
+
+    reason: EpsUnavailableReason
+    quarter: FiscalQuarter | None = None
+
+    def describe(self) -> str:
+        return f"Insufficient data: {self.reason.label.format(quarter=self.quarter)}"

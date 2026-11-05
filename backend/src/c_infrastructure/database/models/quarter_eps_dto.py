@@ -4,9 +4,9 @@ from typing import ClassVar, Self
 from sqlalchemy import JSON, Column
 from sqlmodel import Field, SQLModel
 
-from a_domain.model.fundamentals.fiscal_quarter import FiscalQuarter
-from a_domain.model.fundamentals.quarter_eps import QuarterEps
+from a_domain.rules.fundamentals.trailing_eps import QuarterEps
 from a_domain.types.enums import MarketType
+from a_domain.types.values import FiscalQuarter
 from c_infrastructure.database.utc_datetime import UtcDateTime
 
 

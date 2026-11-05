@@ -8,7 +8,7 @@ a_domain/rules/trading/
     tick.py
     order_rule.py
     execution.py
-    valuation.py
+    account_value.py
 
 Each rule makes one decision in `apply`:
 
@@ -35,14 +35,15 @@ Each rule makes one decision in `apply`:
 |                 | `LimitPriceRule`          | An order's limit price: the decided price as a tick, up for a BUY and down for a SELL      |
 | `order_rule.py` | `OrderGateRule`           | Why an order may not be sent now: order mode, continuous trading, quote age                |
 |                 | `OrderRule`               | The order for a decision: LIMIT IOC at its limit price, or REJECTED with the gate's reason |
-| `execution.py`  | `OrderAcceptanceRule`     | Why any broker refuses an order before sending it: LIMIT orders only, never ROD            |
+| `execution.py`  | `OrderAcceptanceRule`     | Why any broker refuses an order unsent: not LIMIT, ROD, or more than the account covers    |
 |                 | `LotSplitRule`            | An order's shares as the exchange trades them: one board-lot part and one odd-lot part     |
 |                 | `FillRule`                | What one fill settles: its fee and tax, and a SELL's realized PnL                          |
 |                 | `BrokerOutcomeRule`       | The final status of a real broker's order once every lot part it sent has reported         |
-| `valuation.py`  | `ValuationRule`           | Positions marked to market, unrealized PnL net of the selling costs                        |
+| `account_value.py` | `AccountValueRule`     | Positions marked to market, unrealized PnL net of the selling costs                        |
 |                 | `EquityRule`              | The equity a run sizes its BUYs on: cash plus positions at the run's latest prices         |
-|                 | `SnapshotValuationRule`   | A snapshot's account marked at a day's closes                                              |
-|                 | `EquityCurveRule`         | One equity point per trading day since the first snapshot                                  |
+|                 | `SnapshotValueRule`       | A snapshot's account marked at a day's closes                                              |
+|                 | `FillSnapshotRule`        | The account right after a fill: the filled stock at its fill price, others at the latest   |
+|                 | `EquityCurveRule`         | The account at the end of each trading day since the first snapshot                        |
 |                 | `AccountAsOfRule`         | The account at the end of a day                                                            |
 |                 | `LatestMarkRule`          | Each stock's latest price: its realtime quote, else its last daily close                   |
 |                 | `PriceHistoryStartRule`   | Where the daily prices the account history needs start                                     |

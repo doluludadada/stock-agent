@@ -1,11 +1,10 @@
 from a_domain.model.market.stock import Stock
+from a_domain.model.system.stats import SystemStats
 from a_domain.ports.market.fundamentals_provider import IFundamentalsProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
-from a_domain.rules.fundamentals.filing_warning import FilingWarningRule
-from a_domain.rules.fundamentals.trailing_eps import TrailingEpsRule
-from a_domain.rules.fundamentals.trailing_eps_quarters import TrailingEpsQuartersRule
-from b_application.schemas.pipeline_status import PipelineStatus
+from a_domain.rules.fundamentals.filing import FilingWarningRule
+from a_domain.rules.fundamentals.trailing_eps import TrailingEpsQuartersRule, TrailingEpsRule
 
 
 class FundamentalsFeed:
@@ -23,7 +22,7 @@ class FundamentalsFeed:
         self._trailing_eps = TrailingEpsRule()
         self._filing_warnings = FilingWarningRule()
 
-    async def execute(self, stocks: list[Stock], status: PipelineStatus) -> None:
+    async def execute(self, stocks: list[Stock], stats: SystemStats) -> None:
         if not stocks:
             return
 
@@ -34,7 +33,7 @@ class FundamentalsFeed:
 
         for warning in self._filing_warnings.apply(filings):
             self._logger.warning(warning)
-            status.stats.add_error(warning)
+            stats.add_error(warning)
 
         for stock in stocks:
             stock.eps = self._trailing_eps.apply(stock.stock_id, filings, today)

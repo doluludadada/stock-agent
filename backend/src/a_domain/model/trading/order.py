@@ -1,37 +1,17 @@
-import math
-from collections.abc import Mapping
 from datetime import datetime
 from typing import Literal, Self
 
-from pydantic import model_validator
-from sqlmodel import Field, SQLModel
+from pydantic import ConfigDict, Field, FiniteFloat, NonNegativeInt, PositiveInt, model_validator, validate_call
+from pydantic.dataclasses import dataclass
 
-from a_domain.model.trading.trade_cost import TradeCost
 from a_domain.types.enums import OrderStatus, OrderType, RejectReason, TimeInForce, TradeAction
 from a_domain.types.errors import IllegalOrderTransition
 from a_domain.types.ids import DecisionId, OrderId, RunId, new_order_id
-
-ORDER_TRANSITIONS: Mapping[OrderStatus, frozenset[OrderStatus]] = {
-    OrderStatus.PENDING: frozenset({OrderStatus.SUBMITTED, OrderStatus.REJECTED, OrderStatus.FAILED, OrderStatus.CANCELLED}),
-    OrderStatus.SUBMITTED: frozenset({OrderStatus.SUBMITTED, OrderStatus.FILLED, OrderStatus.CANCELLED, OrderStatus.FAILED}),
-    OrderStatus.FILLED: frozenset(),
-    OrderStatus.CANCELLED: frozenset(),
-    OrderStatus.REJECTED: frozenset(),
-    OrderStatus.FAILED: frozenset(),
-}
-"""
-Every legal status change. SUBMITTED -> SUBMITTED is a partial fill that leaves the rest working.
-
-- PENDING: built by the app, not yet accepted by a broker.
-- SUBMITTED: accepted and working; may hold a partial fill.
-- FILLED: the whole quantity executed.
-- CANCELLED: stopped before the whole quantity executed (by a cancel, an IOC remainder, or a FOK kill); may hold a partial fill.
-- REJECTED: refused by a business or validation rule before acceptance (gate refused, invalid order, insufficient cash or shares).
-- FAILED: a technical error (exception, broker unreachable), whatever state the order was in.
-"""
+from a_domain.types.values import NonEmptyText, PositiveFiniteFloat
 
 
-class Order(SQLModel):
+@dataclass(config=ConfigDict(validate_assignment=True, json_schema_serialization_defaults_required=True), kw_only=True)
+class Order:
     """
     The app's record of one order: the decision it executes, what went to (or was refused before)
     the broker, and how it ended. OrderPreparation saves it in the `orders` table before it is sent, and OrderExecution
@@ -42,20 +22,20 @@ class Order(SQLModel):
     run_id: RunId
     decision_id: DecisionId
 
-    stock_id: str = Field(min_length=1)
+    stock_id: NonEmptyText
     action: Literal[TradeAction.BUY, TradeAction.SELL]
     order_type: OrderType
-    quantity: int = Field(gt=0)
-    limit_price: float | None = Field(default=None, gt=0)
+    quantity: PositiveInt
+    limit_price: PositiveFiniteFloat | None = None
     time_in_force: TimeInForce
 
     status: OrderStatus = OrderStatus.PENDING
     reason: str | None = None
 
-    filled_quantity: int = Field(default=0, ge=0)
-    average_filled_price: float | None = Field(default=None, gt=0)
-    fee: int = Field(default=0, ge=0)
-    tax: int = Field(default=0, ge=0)
+    filled_quantity: NonNegativeInt = 0
+    average_filled_price: PositiveFiniteFloat | None = None
+    fee: NonNegativeInt = 0
+    tax: NonNegativeInt = 0
     realized_pnl: float | None = None
     """SELL only: proceeds net of fee and tax minus the cost basis (buy fees included) of the shares sold."""
 
@@ -74,11 +54,6 @@ class Order(SQLModel):
         return self.quantity - self.filled_quantity
 
     @property
-    def is_open(self) -> bool:
-        """PENDING or SUBMITTED: ORDER_TRANSITIONS still lists a move out of the order's status."""
-        return bool(ORDER_TRANSITIONS[self.status])
-
-    @property
     def summary(self) -> str:
         """One log line: the status, what was ordered and filled at what limit, the costs, and the reason when there is one."""
         text = (
@@ -92,18 +67,22 @@ class Order(SQLModel):
         """The broker accepted the order."""
         self._move_to(OrderStatus.SUBMITTED, now)
 
-    def fill(self, quantity: int, price: float, cost: TradeCost, realized_pnl: float | None = None, *, now: datetime) -> None:
-        """Records one execution. The order becomes FILLED when nothing remains, otherwise it keeps working."""
+    @validate_call
+    def fill(
+        self,
+        quantity: PositiveInt,
+        price: PositiveFiniteFloat,
+        fee: NonNegativeInt,
+        tax: NonNegativeInt,
+        realized_pnl: FiniteFloat | None = None,
+        *,
+        now: datetime,
+    ) -> None:
+        """Records one execution and what it cost. The order becomes FILLED when nothing remains, otherwise it keeps working."""
         self._check_move(OrderStatus.FILLED)
 
-        if not 0 < quantity <= self.remaining_quantity:
-            raise ValueError(f"Fill quantity {quantity} must be between 1 and the remaining {self.remaining_quantity}")
-
-        if not math.isfinite(price) or price <= 0:
-            raise ValueError("Filled price must be positive")
-
-        if cost.action != self.action:
-            raise ValueError(f"{cost.action} cost cannot settle a {self.action} order")
+        if quantity > self.remaining_quantity:
+            raise ValueError(f"Fill quantity {quantity} is more than the remaining {self.remaining_quantity}")
 
         if self.limit_price is not None and self.action == TradeAction.BUY and price > self.limit_price:
             raise ValueError("BUY fill price cannot exceed limit_price")
@@ -113,11 +92,10 @@ class Order(SQLModel):
 
         filled_quantity = self.filled_quantity + quantity
         self._move_to(OrderStatus.FILLED if filled_quantity == self.quantity else OrderStatus.SUBMITTED, now)
-
         self.average_filled_price = ((self.average_filled_price or 0) * self.filled_quantity + price * quantity) / filled_quantity
         self.filled_quantity = filled_quantity
-        self.fee += cost.fee
-        self.tax += cost.tax
+        self.fee += fee
+        self.tax += tax
 
         if realized_pnl is not None:
             self.realized_pnl = (self.realized_pnl or 0) + realized_pnl
@@ -133,11 +111,11 @@ class Order(SQLModel):
 
     def fail_if_open(self, reason: str, *, now: datetime) -> None:
         """FAILS an order that is still open; an order that already ended keeps its status."""
-        if self.is_open:
+        if self.status.is_open:
             self.fail(reason, now=now)
 
     def _check_move(self, status: OrderStatus) -> None:
-        if status not in ORDER_TRANSITIONS[self.status]:
+        if status not in self.status.next_statuses:
             raise IllegalOrderTransition(f"Cannot move order from {self.status} to {status}")
 
     def _move_to(self, status: OrderStatus, now: datetime, reason: str | None = None) -> None:
@@ -149,3 +127,36 @@ class Order(SQLModel):
         self.status = status
         self.reason = reason
         self.updated_at = now
+
+
+@dataclass(frozen=True, kw_only=True)
+class ExchangeOrder:
+    """
+    One exchange order, a part of an Order: a domain order goes to the exchange as one exchange order per lot part
+    (round lots and an odd-lot remainder). It says where that part is in the order lifecycle and what executed so far,
+    in shares, as the broker reported it.
+    """
+
+    stock_id: str
+    status: OrderStatus
+    ordered_shares: int
+
+    dealt_shares: int
+    """The shares in the broker's list of deals, which is what an order records as filled."""
+
+    reported_dealt_shares: int
+    """The shares the broker's status counts as dealt. More than dealt_shares while deals are still on their way."""
+
+    fill_price: float | None
+    """The deals' volume-weighted price. None while nothing is dealt."""
+
+    description: str
+    """The broker's own words for the exchange order, for logs and for the reason the order ends with."""
+
+    @property
+    def deals_missing(self) -> bool:
+        """The deals cannot be the whole story: fewer than the broker counts, or fewer than a FILLED order's quantity."""
+        if self.dealt_shares < self.reported_dealt_shares:
+            return True
+
+        return self.status == OrderStatus.FILLED and self.dealt_shares < self.ordered_shares

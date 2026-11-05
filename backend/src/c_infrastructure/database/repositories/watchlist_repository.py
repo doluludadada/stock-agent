@@ -1,9 +1,9 @@
 from typing import override
 
-from sqlalchemy import or_
+from sqlalchemy import delete, or_
 from sqlmodel import col, select
 
-from a_domain.model.trading.watchlist_entry import WatchlistEntry
+from a_domain.model.trading.watchlist import WatchlistEntry
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
@@ -50,3 +50,19 @@ class WatchlistRepository(IWatchlistRepository):
             await session.commit()
 
         self._logger.debug(f"Saved {len(entries)} watchlist entries.")
+
+    @override
+    async def remove(self, stock_ids: list[str], watchlist_type: WatchlistType) -> list[str]:
+        if not stock_ids:
+            return []
+
+        matching = (col(WatchlistDTO.stock_id).in_(stock_ids), col(WatchlistDTO.type) == watchlist_type)
+
+        async with self._db.get_session() as session:
+            present = list((await session.execute(select(WatchlistDTO.stock_id).where(*matching))).scalars())
+            await session.execute(delete(WatchlistDTO).where(*matching))
+            await session.commit()
+
+        self._logger.debug(f"Removed {len(present)} {watchlist_type.value} watchlist entries.")
+
+        return [stock_id for stock_id in stock_ids if stock_id in present]

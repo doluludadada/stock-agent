@@ -2,10 +2,10 @@ from datetime import datetime
 
 import pytest
 from support.fakes import FakeMarketClock, FakeStockProvider, FakeWatchlistRepository
-from trading_stack import SilentLogger, run_status
+from trading_stack import SilentLogger, run_stats
 
 from a_domain.model.market.stock import Stock
-from a_domain.model.trading.watchlist_entry import WatchlistEntry
+from a_domain.model.trading.watchlist import WatchlistEntry
 from a_domain.types.enums import MarketType, WatchlistType
 from b_application.use_cases.collect.intraday_candidates import IntradayCandidates
 from b_application.use_cases.collect.stock_lookup import StockLookup
@@ -23,25 +23,13 @@ def listed(*stock_ids: str) -> FakeStockProvider:
 
 
 async def test_lookup_loads_each_requested_stock_once_and_reports_unknown_ids() -> None:
-    status = run_status()
+    stats = run_stats()
 
-    stocks = await StockLookup(listed("2330", "2603"), SilentLogger()).execute([" 2330", "9999", "2330 ", "", "2603"], status)
+    stocks = await StockLookup(listed("2330", "2603"), SilentLogger()).execute([" 2330", "9999", "2330 ", "", "2603"], stats)
 
     assert [stock.stock_id for stock in stocks] == ["2330", "2603"]
     assert stocks[0].market == MarketType.TPEX
-    assert status.stats.errors == ["Stock not found: 9999"]
-    assert status.stocks_cache == {"2330": stocks[0], "2603": stocks[1]}
-
-
-async def test_lookup_reuses_the_stock_this_run_already_loaded() -> None:
-    status = run_status()
-    held = Stock(stock_id="2330", name="held")
-    status.stocks_cache["2330"] = held
-
-    stocks = await StockLookup(listed("2330"), SilentLogger()).execute(["2330"], status)
-
-    assert stocks == [held]
-    assert stocks[0] is held
+    assert stats.errors == ["Stock not found: 9999"]
 
 
 async def test_intraday_candidates_are_held_stocks_plus_the_active_watchlist() -> None:
@@ -58,15 +46,15 @@ async def test_intraday_candidates_are_held_stocks_plus_the_active_watchlist() -
             ]
         ]
     )
-    status = run_status()
+    stats = run_stats()
     held = Stock(stock_id="2330")
-    status.held_stocks = [held, Stock(stock_id="2317")]
-    status.stocks_cache["2330"] = held
 
-    candidates = await IntradayCandidates(listed("2330", "2603"), watchlist, SilentLogger()).execute(status)
+    candidates = await IntradayCandidates(listed("2330", "2603"), watchlist, SilentLogger()).execute(
+        [held, Stock(stock_id="2317")], stats
+    )
 
     assert [stock.stock_id for stock in candidates] == ["2330", "2317", "2603"]
     assert candidates[0] is held
     assert held.watchlist_types == {WatchlistType.TECHNICAL, WatchlistType.BUZZ}
-    assert [stock.stock_id for stock in status.watchlist.willing_stocks] == ["2330", "2603"]
-    assert status.stats.errors == ["Stock not found: 9999"]
+    assert [stock.watchlist_types for stock in candidates[1:]] == [set(), {WatchlistType.MANUAL}]
+    assert (stats.total_scanned, stats.errors) == (3, ["Stock not found: 9999"])

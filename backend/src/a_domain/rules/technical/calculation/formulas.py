@@ -2,6 +2,7 @@ from collections.abc import Sequence
 from math import sqrt
 
 from a_domain.model.market.ohlcv import Ohlcv
+from a_domain.types.enums import IndicatorOutput
 
 
 def latest_sma(values: Sequence[float], period: int) -> float | None:
@@ -27,9 +28,10 @@ def ema_series(values: Sequence[float], period: int) -> list[float | None]:
     return series
 
 
-def latest_rsi(closes: Sequence[float], period: int) -> float | None:
+def rsi_series(closes: Sequence[float], period: int) -> list[float | None]:
+    series: list[float | None] = [None] * len(closes)
     if period <= 0 or len(closes) <= period:
-        return None
+        return series
 
     gains: list[float] = []
     losses: list[float] = []
@@ -41,6 +43,7 @@ def latest_rsi(closes: Sequence[float], period: int) -> float | None:
 
     average_gain = sum(gains) / period
     average_loss = sum(losses) / period
+    series[period] = _oscillator_from_average_gain_loss(average_gain, average_loss)
 
     for index in range(period + 1, len(closes)):
         change = closes[index] - closes[index - 1]
@@ -48,38 +51,32 @@ def latest_rsi(closes: Sequence[float], period: int) -> float | None:
         loss = max(-change, 0)
         average_gain = ((average_gain * (period - 1)) + gain) / period
         average_loss = ((average_loss * (period - 1)) + loss) / period
+        series[index] = _oscillator_from_average_gain_loss(average_gain, average_loss)
 
-    return _oscillator_from_average_gain_loss(average_gain, average_loss)
+    return series
 
 
-def latest_macd(closes: Sequence[float], fast: int, slow: int, signal_period: int) -> tuple[float, float, float] | None:
+def macd_series(closes: Sequence[float], fast: int, slow: int, signal_period: int) -> list[dict[IndicatorOutput, float]]:
+    series: list[dict[IndicatorOutput, float]] = [{} for _ in closes]
     if min(fast, slow, signal_period) <= 0 or fast == slow:
-        return None
+        return series
 
-    fast_ema = ema_series(closes, fast)
-    slow_ema = ema_series(closes, slow)
-
-    macd_values = [
-        fast_value - slow_value
-        for fast_value, slow_value in zip(fast_ema, slow_ema, strict=False)
+    lines = [
+        (index, fast_value - slow_value)
+        for index, (fast_value, slow_value) in enumerate(zip(ema_series(closes, fast), ema_series(closes, slow), strict=True))
         if fast_value is not None and slow_value is not None
     ]
 
-    if len(macd_values) < signal_period:
-        return None
+    for (index, line), signal in zip(lines, ema_series([line for _, line in lines], signal_period), strict=True):
+        if signal is not None:
+            series[index] = {IndicatorOutput.LINE: line, IndicatorOutput.SIGNAL: signal, IndicatorOutput.HISTOGRAM: line - signal}
 
-    signal_values = ema_series(macd_values, signal_period)
-    signal = signal_values[-1]
-    if signal is None:
-        return None
-
-    line = macd_values[-1]
-    return line, signal, line - signal
+    return series
 
 
-def latest_bollinger(closes: Sequence[float], period: int, std_multiplier: float) -> tuple[float, float, float, float, float] | None:
+def latest_bollinger(closes: Sequence[float], period: int, std_multiplier: float) -> dict[IndicatorOutput, float]:
     if period <= 0 or std_multiplier <= 0 or len(closes) < period:
-        return None
+        return {}
 
     window = closes[-period:]
     middle = sum(window) / period
@@ -91,12 +88,18 @@ def latest_bollinger(closes: Sequence[float], period: int, std_multiplier: float
     bandwidth = 0.0 if middle == 0 else width / middle
     percent_b = 0.5 if width == 0 else (closes[-1] - lower) / width
 
-    return upper, middle, lower, bandwidth, percent_b
+    return {
+        IndicatorOutput.UPPER: upper,
+        IndicatorOutput.MIDDLE: middle,
+        IndicatorOutput.LOWER: lower,
+        IndicatorOutput.BANDWIDTH: bandwidth,
+        IndicatorOutput.PERCENT_B: percent_b,
+    }
 
 
-def latest_stochastic(bars: Sequence[Ohlcv], k_period: int, d_period: int) -> tuple[float, float] | None:
+def latest_stochastic(bars: Sequence[Ohlcv], k_period: int, d_period: int) -> dict[IndicatorOutput, float]:
     if min(k_period, d_period) <= 0 or len(bars) < k_period + d_period - 1:
-        return None
+        return {}
 
     k_values: list[float] = []
 
@@ -109,42 +112,40 @@ def latest_stochastic(bars: Sequence[Ohlcv], k_period: int, d_period: int) -> tu
         k_values.append(max(0.0, min(100.0, percent_k)))
 
     if len(k_values) < d_period:
-        return None
+        return {}
 
-    return k_values[-1], sum(k_values[-d_period:]) / d_period
+    return {IndicatorOutput.PERCENT_K: k_values[-1], IndicatorOutput.PERCENT_D: sum(k_values[-d_period:]) / d_period}
 
 
-def latest_atr(bars: Sequence[Ohlcv], period: int) -> float | None:
+def atr_series(bars: Sequence[Ohlcv], period: int) -> list[float | None]:
+    series: list[float | None] = [None] * len(bars)
     if period <= 0 or len(bars) <= period:
-        return None
+        return series
 
     ranges = _true_ranges(bars)
-    if len(ranges) < period:
-        return None
-
     atr = sum(ranges[:period]) / period
-    for value in ranges[period:]:
-        atr = ((atr * (period - 1)) + value) / period
+    series[period] = atr
 
-    return atr
+    for index in range(period, len(ranges)):
+        atr = ((atr * (period - 1)) + ranges[index]) / period
+        series[index + 1] = atr
+
+    return series
 
 
-def latest_adx(bars: Sequence[Ohlcv], period: int) -> tuple[float, float, float] | None:
+def adx_series(bars: Sequence[Ohlcv], period: int) -> list[dict[IndicatorOutput, float]]:
     if period <= 0 or len(bars) < period * 2:
-        return None
+        return [{} for _ in bars]
 
-    true_ranges = _true_ranges(bars)
     plus_dms, minus_dms = _directional_movements(bars)
-
-    if len(true_ranges) < (period * 2) - 1:
-        return None
-
-    return _smoothed_adx(true_ranges, plus_dms, minus_dms, period)
+    return [{}, *_smoothed_adx(_true_ranges(bars), plus_dms, minus_dms, period)]
 
 
-def latest_obv(closes: Sequence[float], volumes: Sequence[float], ma_period: int) -> tuple[float, float] | None:
-    if ma_period <= 0 or len(closes) < ma_period or len(closes) != len(volumes):
-        return None
+def obv_series(closes: Sequence[float], volumes: Sequence[float], ma_period: int) -> list[dict[IndicatorOutput, float]]:
+    """On-balance volume and its moving average at each bar, from the first bar's zero."""
+    series: list[dict[IndicatorOutput, float]] = [{} for _ in closes]
+    if ma_period <= 0 or len(closes) != len(volumes):
+        return series
 
     current_obv = 0.0
     obv_values = [current_obv]
@@ -157,11 +158,11 @@ def latest_obv(closes: Sequence[float], volumes: Sequence[float], ma_period: int
 
         obv_values.append(current_obv)
 
-    moving_average = latest_sma(obv_values, ma_period)
-    if moving_average is None:
-        return None
+    for index in range(ma_period - 1, len(closes)):
+        moving_average = sum(obv_values[index + 1 - ma_period : index + 1]) / ma_period
+        series[index] = {IndicatorOutput.VALUE: obv_values[index], IndicatorOutput.MOVING_AVERAGE: moving_average}
 
-    return current_obv, moving_average
+    return series
 
 
 def latest_mfi(bars: Sequence[Ohlcv], period: int) -> float | None:
@@ -207,15 +208,15 @@ def _directional_movements(bars: Sequence[Ohlcv]) -> tuple[list[float], list[flo
 
 def _smoothed_adx(
     true_ranges: Sequence[float], plus_dms: Sequence[float], minus_dms: Sequence[float], period: int
-) -> tuple[float, float, float] | None:
+) -> list[dict[IndicatorOutput, float]]:
+    """The ADX and the directional indicators at each true range, once `period` directional indexes average into an ADX."""
+    series: list[dict[IndicatorOutput, float]] = [{} for _ in true_ranges]
     smoothed_tr = sum(true_ranges[:period])
     smoothed_plus_dm = sum(plus_dms[:period])
     smoothed_minus_dm = sum(minus_dms[:period])
 
     dx_values: list[float] = []
     adx: float | None = None
-    latest_plus_di = 0.0
-    latest_minus_di = 0.0
 
     for index in range(period - 1, len(true_ranges)):
         if index >= period:
@@ -223,7 +224,7 @@ def _smoothed_adx(
             smoothed_plus_dm = smoothed_plus_dm - (smoothed_plus_dm / period) + plus_dms[index]
             smoothed_minus_dm = smoothed_minus_dm - (smoothed_minus_dm / period) + minus_dms[index]
 
-        dx, latest_plus_di, latest_minus_di = _directional_index(smoothed_tr, smoothed_plus_dm, smoothed_minus_dm)
+        dx, plus_di, minus_di = _directional_index(smoothed_tr, smoothed_plus_dm, smoothed_minus_dm)
         dx_values.append(dx)
 
         if len(dx_values) == period:
@@ -231,10 +232,10 @@ def _smoothed_adx(
         elif len(dx_values) > period and adx is not None:
             adx = ((adx * (period - 1)) + dx) / period
 
-    if adx is None:
-        return None
+        if adx is not None:
+            series[index] = {IndicatorOutput.ADX: adx, IndicatorOutput.PLUS_DI: plus_di, IndicatorOutput.MINUS_DI: minus_di}
 
-    return adx, latest_plus_di, latest_minus_di
+    return series
 
 
 def _directional_index(smoothed_tr: float, smoothed_plus_dm: float, smoothed_minus_dm: float) -> tuple[float, float, float]:

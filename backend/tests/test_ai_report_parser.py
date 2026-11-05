@@ -1,18 +1,17 @@
 import pytest
 from support.settings import shipped_config
-from trading_stack import MONDAY_10_00, MovableClock, run_status
+from trading_stack import MONDAY_10_00, MovableClock, run_stats
 
 from a_domain.model.analysis.technical_report import TechnicalReport
 from a_domain.model.chat.message import Message
 from a_domain.model.market.stock import Stock
+from a_domain.model.system.stats import SystemStats
 from a_domain.rules.ai.parser import parse_ai_report
 from a_domain.types.enums import AiAnalysisFocus, MessageRole, Workflow
 from a_domain.types.errors import AiReportParseError
 from b_application.config.ai_config import PromptsConfig
 from b_application.config.app_config import AppConfig
-from b_application.schemas.pipeline_status import PipelineStatus
 from b_application.use_cases.process.ai_analyser import AiAnalyser
-from b_application.use_cases.process.composite_scorer import CompositeScorer
 
 
 class SilentLogger:
@@ -43,31 +42,29 @@ def make_config() -> AppConfig:
     )
 
 
-async def analyse_and_score(reply: str) -> tuple[Stock, PipelineStatus]:
+async def analyse_and_score(reply: str) -> tuple[Stock, SystemStats]:
     stock = Stock(stock_id="2330", technical_report=TechnicalReport(score=80))
-    status = run_status(Workflow.SPECIFIC_STOCKS)
-    config = make_config()
+    stats = run_stats(Workflow.SPECIFIC_STOCKS)
     analyser = AiAnalyser(
         ai_provider=ScriptedAiProvider(reply),
         knowledge_repository=NoHistory(),
-        config=config,
+        config=make_config(),
         logger=SilentLogger(),
         market_clock=MovableClock(MONDAY_10_00),
     )
 
-    await analyser.execute([stock], status, AiAnalysisFocus.FUNDAMENTAL)
-    CompositeScorer(config=config, logger=SilentLogger()).execute([stock])
+    await analyser.execute([stock], AiAnalysisFocus.FUNDAMENTAL, stats)
 
-    return stock, status
+    return stock, stats
 
 
 @pytest.mark.asyncio
 async def test_a_parsed_ai_score_feeds_the_composite_score() -> None:
-    stock, status = await analyse_and_score('{"confidence_score": 60, "bullish_factors": ["EPS up"], "summary": "Solid."}')
+    stock, stats = await analyse_and_score('{"confidence_score": 60, "bullish_factors": ["EPS up"], "summary": "Solid."}')
 
     assert stock.ai_score == 60
     assert stock.composite_score == 70
-    assert status.stats.ai_analysed == 1
+    assert stats.ai_analysed == 1
 
 
 @pytest.mark.parametrize(
@@ -85,12 +82,12 @@ async def test_a_parsed_ai_score_feeds_the_composite_score() -> None:
 )
 @pytest.mark.asyncio
 async def test_an_unusable_ai_response_leaves_the_stock_without_ai_or_composite_score(reply: str) -> None:
-    stock, status = await analyse_and_score(reply)
+    stock, stats = await analyse_and_score(reply)
 
     assert stock.ai_report is None
     assert stock.composite_score is None
-    assert status.stats.ai_analysed == 0
-    assert len(status.stats.errors) == 1
+    assert stats.ai_analysed == 0
+    assert len(stats.errors) == 1
 
 
 def test_the_report_is_read_from_json_wrapped_in_prose_or_code_fences() -> None:

@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, date, datetime
 
 import pytest
@@ -183,3 +184,14 @@ async def test_a_technical_error_fails_the_order(tmp_path) -> None:
     assert placed.status == OrderStatus.FAILED
     assert placed.reason is not None and "OperationalError" in placed.reason
     await db.close()
+
+
+async def test_two_first_reads_at_once_seed_the_account_once(tmp_path) -> None:
+    """Two Web requests can read a brand-new mock account at the same moment; neither may fail."""
+    db, broker = await open_broker(tmp_path)
+
+    try:
+        await asyncio.wait_for(asyncio.gather(broker.connect(), broker.connect(), broker.get_account()), timeout=30)
+        assert await cash(broker) == 1_000_000
+    finally:
+        await db.close()

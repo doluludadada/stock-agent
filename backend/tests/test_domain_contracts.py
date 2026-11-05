@@ -1,17 +1,16 @@
 from datetime import UTC, date, datetime
 
 import pytest
-from icontract.errors import ViolationError
+from pydantic import ValidationError
 from support.trading_rules import EXIT_REASON, entry_rule, sizing_rule
 
-from a_domain.model.trading.account import Account
+from a_domain.model.trading.account import Account, Position
 from a_domain.model.trading.order import Order
-from a_domain.model.trading.position import Position
 from a_domain.rules.scoring import CompositeScoreRule
-from a_domain.rules.technical.criteria.trend import MaAlignmentCriterion, PriceAboveMaCriterion
+from a_domain.rules.technical.calculation.calculator import MacdIndicator, MovingAverageIndicator
 from a_domain.rules.trading.cost import TradingCostRule
 from a_domain.rules.trading.exit import StopLossRule
-from a_domain.types.enums import OrderStatus, OrderType, TimeInForce, TradeAction
+from a_domain.types.enums import IndicatorKind, OrderStatus, OrderType, TimeInForce, TradeAction
 from a_domain.types.ids import new_decision_id, new_run_id
 
 NOW = datetime(2026, 10, 19, 10, 0, tzinfo=UTC)
@@ -37,34 +36,33 @@ def limit_order(action: TradeAction = TradeAction.BUY) -> Order:
 
 
 def test_trading_rules_reject_invalid_config() -> None:
-    rule = sizing_rule(risk_per_trade_pct=0)
-    with pytest.raises(ViolationError):
-        rule.apply(account=Account(cash=1000), equity=1000, stock_id="2330", price=10, now=NOW)
+    with pytest.raises(ValidationError):
+        sizing_rule(risk_per_trade_pct=0)
 
-    with pytest.raises(ViolationError):
+    with pytest.raises(ValidationError):
         StopLossRule(stop_loss_pct=0, reason_rule=EXIT_REASON)
 
 
-def test_technical_criteria_reject_invalid_periods() -> None:
-    with pytest.raises(ViolationError):
-        PriceAboveMaCriterion(0)
+def test_indicators_reject_invalid_periods() -> None:
+    with pytest.raises(ValidationError):
+        MovingAverageIndicator(kind=IndicatorKind.SMA, period=0)
 
-    with pytest.raises(ViolationError):
-        MaAlignmentCriterion(20, 20)
+    with pytest.raises(ValidationError):
+        MacdIndicator(kind=IndicatorKind.MACD, fast=26, slow=26, signal=9)
 
 
 def test_entry_rule_rejects_invalid_threshold() -> None:
-    with pytest.raises(ViolationError):
+    with pytest.raises(ValidationError):
         entry_rule(buy_threshold=101)
 
 
 def test_sizing_rule_rejects_invalid_price() -> None:
-    with pytest.raises(ViolationError):
+    with pytest.raises(ValidationError):
         sizing_rule(risk_per_trade_pct=0.02).apply(account=Account(cash=1000), equity=1000, stock_id="2330", price=0, now=NOW)
 
 
 def test_composite_rule_rejects_zero_total_weight() -> None:
-    with pytest.raises(ViolationError):
+    with pytest.raises(ValidationError):
         CompositeScoreRule(technical_weight=0, ai_weight=0)
 
 
@@ -87,9 +85,11 @@ def test_order_fill_applies_limit_price_rules() -> None:
     order.submit(now=NOW)
 
     with pytest.raises(ValueError, match="BUY fill price cannot exceed limit_price"):
-        order.fill(1, 101, COSTS.apply(TradeAction.BUY, "2330", 101, 1, now=NOW), now=NOW)
+        cost = COSTS.apply(TradeAction.BUY, "2330", 101, 1, now=NOW)
+        order.fill(1, 101, cost.fee, cost.tax, now=NOW)
 
-    order.fill(1, 99, COSTS.apply(TradeAction.BUY, "2330", 99, 1, now=NOW), now=NOW)
+    cost = COSTS.apply(TradeAction.BUY, "2330", 99, 1, now=NOW)
+    order.fill(1, 99, cost.fee, cost.tax, now=NOW)
 
     assert order.status == OrderStatus.FILLED
     assert order.average_filled_price == 99

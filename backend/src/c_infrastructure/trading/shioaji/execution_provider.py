@@ -11,10 +11,8 @@ from shioaji.contracts import Stock as StockContract
 from shioaji.order import Order as BrokerOrder, StockOrder, Trade
 from shioaji.position import SettlementV1, StockPosition
 
-from a_domain.model.trading.account import Account
-from a_domain.model.trading.broker_order_report import BrokerOrderReport
-from a_domain.model.trading.order import Order
-from a_domain.model.trading.position import Position
+from a_domain.model.trading.account import Account, Position
+from a_domain.model.trading.order import ExchangeOrder, Order
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.trading.execution_provider import IBrokerExecutionProvider
 from a_domain.rules.trading.execution import BrokerOutcomeRule, FillRule, LotSplitRule, OrderAcceptanceRule
@@ -54,7 +52,7 @@ ORDER_STATUS: Mapping[Status, OrderStatus] = {
     Status.Inactive: OrderStatus.FAILED,
 }
 """
-What each Shioaji status means in the domain order lifecycle (ORDER_TRANSITIONS).
+What each Shioaji status means in the domain order lifecycle (OrderStatus.next_statuses).
 
 - PendingSubmit: on its way, not acknowledged yet.
 - PreSubmitted: a reservation the broker holds until the session opens, so it is working.
@@ -75,8 +73,8 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
     limit price. FOK is refused for a quantity with odd shares, because an ROD odd-lot part cannot fill or fail with
     the whole quantity.
 
-    Before sending, the order must be one the app sends (OrderAcceptanceRule) and the account must cover it
-    (Account.refusal_for, with the cash that `cash` reads). A stock Shioaji has no contract for is refused first.
+    Before sending, the order must be one the app sends and the account must cover it (OrderAcceptanceRule, with the
+    cash that `cash` reads). A stock Shioaji has no contract for is refused first.
 
     After sending, the adapter refreshes each broker order until ORDER_STATUS says it is done. One still
     working after the polls is cancelled and refreshed again; BrokerOutcomeRule then gives the domain order
@@ -98,7 +96,7 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
         self._fill_rule = FillRule(cost_rule=self._cost_rule)
         self._lot_split_rule = LotSplitRule(board_lot_shares=config.market.board_lot_shares)
         self._outcome_rule = BrokerOutcomeRule(broker=BROKER)
-        self._acceptance_rule = OrderAcceptanceRule()
+        self._acceptance_rule = OrderAcceptanceRule(cost_rule=self._cost_rule)
         self._shares_per_unit = {StockOrderLot.Common: config.market.board_lot_shares, StockOrderLot.IntradayOdd: 1}
         self._poll_interval_seconds = config.shioaji.poll_interval_seconds
         self._max_polls = config.shioaji.max_polls
@@ -178,11 +176,11 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
                 self._logger.warning(f"Shioaji order not sent: {order.action} {order.stock_id}: {order.reason}")
                 return order
 
-            reports = await self.send(contract, order, account.position_for(order.stock_id))
-            self._outcome_rule.apply(order, reports, datetime.now(UTC))
+            parts = await self.send(contract, order, account.position_for(order.stock_id))
+            self._outcome_rule.apply(order, parts, datetime.now(UTC))
 
         except Exception as error:
-            if not order.is_open:
+            if not order.status.is_open:
                 raise
 
             order.fail(f"{type(error).__name__}: {error}", now=datetime.now(UTC))
@@ -192,7 +190,7 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
 
     @override
     def refusal_for(self, order: Order, account: Account) -> tuple[RejectReason, str] | None:
-        refusal = self._acceptance_rule.apply(order)
+        refusal = self._acceptance_rule.apply(order, account)
 
         if refusal is not None:
             return refusal
@@ -205,7 +203,7 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
                 f"FOK cannot cover {order.quantity} shares: the exchange takes intraday odd lots as ROD only",
             )
 
-        return account.refusal_for(order, self._cost_rule)
+        return None
 
     @override
     async def cash(self, broker_account: StockAccount) -> float:
@@ -230,7 +228,7 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
         await asyncio.to_thread(self._client.update_status, account=broker_account)
         trades = await asyncio.to_thread(self._client.list_trades)
         dealt_buys = [
-            self.report_of(trade)
+            self.exchange_order_of(trade)
             for trade in trades
             if trade.order.account == broker_account
             and trade.order.action == Action.Buy
@@ -238,38 +236,38 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
         ]
         now = datetime.now(UTC)
         bought_today = math.fsum(
-            -self._cost_rule.apply(TradeAction.BUY, report.stock_id, report.fill_price, report.dealt_shares, now=now).net
-            for report in dealt_buys
-            if report.fill_price is not None
+            -self._cost_rule.apply(TradeAction.BUY, part.stock_id, part.fill_price, part.dealt_shares, now=now).net
+            for part in dealt_buys
+            if part.fill_price is not None
         )
 
         return max(balance.acc_balance + math.fsum(payments_due) - bought_today, 0)
 
     @override
-    async def send(self, contract: StockContract, order: Order, held: Position | None) -> list[BrokerOrderReport]:
-        reports: list[BrokerOrderReport] = []
+    async def send(self, contract: StockContract, order: Order, held: Position | None) -> list[ExchangeOrder]:
+        parts: list[ExchangeOrder] = []
 
         for index, (lot, shares) in enumerate(self._lot_split_rule.apply(order.quantity)):
             trade = await self.refresh(await self.place(contract, order, lot, shares, index))
 
-            if not self.report_of(trade).is_done:
+            if self.exchange_order_of(trade).status.is_open:
                 trade = await self.cancel(trade)
 
-            report = self.report_of(trade)
-            reports.append(report)
-            self._logger.info(f"Shioaji order {trade.order.custom_field}: {report.description}")
+            part = self.exchange_order_of(trade)
+            parts.append(part)
+            self._logger.info(f"Shioaji order {trade.order.custom_field}: {part.description}")
 
-            if report.fill_price is not None:
+            if part.fill_price is not None:
                 now = datetime.now(UTC)
-                cost, realized_pnl = self._fill_rule.apply(order, report.dealt_shares, report.fill_price, held, now=now)
+                cost, realized_pnl = self._fill_rule.apply(order, part.dealt_shares, part.fill_price, held, now=now)
                 # The first fill submits the order; a later part's fill finds it SUBMITTED, which may stay SUBMITTED.
                 order.submit(now=now)
-                order.fill(report.dealt_shares, report.fill_price, cost, realized_pnl, now=now)
+                order.fill(part.dealt_shares, part.fill_price, cost.fee, cost.tax, realized_pnl, now=now)
 
-            if not report.is_done:
+            if part.status.is_open:
                 break
 
-        return reports
+        return parts
 
     @override
     async def place(self, contract: StockContract, order: Order, lot: LotKind, shares: int, index: int) -> Trade:
@@ -329,7 +327,7 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
 
             trade = next((known for known in listed if known.order.custom_field == tag), trade)
 
-            if self.report_of(trade).is_done:
+            if not self.exchange_order_of(trade).status.is_open:
                 break
 
         return trade
@@ -364,7 +362,7 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
         return next((trade for trade in listed if trade.order.custom_field == tag), None)
 
     @override
-    def report_of(self, trade: Trade) -> BrokerOrderReport:
+    def exchange_order_of(self, trade: Trade) -> ExchangeOrder:
         """Shares are the order's units times the shares in one unit of its lot. Deals at one price fill at exactly that price."""
         broker_order = trade.order
 
@@ -386,7 +384,7 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
             f"{trade.status.status.value}, dealt {dealt_units * shares_per_unit} shares"
         )
 
-        return BrokerOrderReport(
+        return ExchangeOrder(
             stock_id=trade.contract.code,
             status=ORDER_STATUS[trade.status.status],
             ordered_shares=broker_order.quantity * shares_per_unit,

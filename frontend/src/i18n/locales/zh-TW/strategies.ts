@@ -1,0 +1,102 @@
+import type en from '../en/strategies'
+import type { DictionaryShape } from '../../types'
+
+const strategies: DictionaryShape<typeof en> = {
+  untitled: '未命名策略',
+  copyName: '{{name}} 副本',
+  bars: '{{count}} 根日 K',
+  effect: {
+    block_on_fail: '未通過即排除',
+    reduce_score_on_fail: '未通過扣分',
+    increase_score_on_pass: '通過加分',
+  },
+  builtin: {
+    conservative: {
+      apiName: 'Conservative',
+      name: '保守型',
+      purpose: '23 條規則。11 條必須通過：股價站上 20 日與 60 日均線、均線多頭排列、MACD 與 RSI 50–65、KD 與布林不過熱、流動性與量能。',
+    },
+    balanced: {
+      apiName: 'Balanced',
+      name: '平衡型',
+      purpose: '23 條規則。趨勢、MACD、RSI 50–80 與流動性必須通過；ADX、布林、MFI、ATR 調整分數，黃金交叉或 OBV 走揚加分。',
+    },
+    aggressive: {
+      apiName: 'Aggressive',
+      name: '積極型',
+      purpose: '20 條規則。只要求股價站上 20 日均線、MACD 在訊號線上、RSI 低於 85 與流動性；動能與量能決定加減分。',
+    },
+  },
+  library: {
+    title: '策略庫',
+    description: '選擇各流程使用的策略，或複製內建策略後調整。',
+    builtinTitle: '內建策略',
+    builtinNote: '內建策略唯讀；要修改請先複製。',
+    customTitle: '我的策略',
+    emptyTitle: '還沒有策略',
+    emptyDescription: '複製一套內建策略再調整，或從頭設計。',
+    emptyCopy: '複製平衡型',
+    loadFailed: '無法載入策略。',
+    selectionNote: '全市場、指定股票、盤中與估值使用「使用中」的策略；社群熱度另選一套。',
+  },
+  card: {
+    builtin: '內建',
+    official: '正式 · 唯讀',
+    custom: '自訂',
+    active: '使用中',
+    buzz: '社群熱度',
+    noDescription: '沒有說明。',
+    preview: '規則預覽',
+    moreRules: '還有 {{count}} 條規則',
+    rules: '規則',
+    indicators: '指標',
+    bars: '所需 K 線',
+  },
+  action: {
+    activate: '使用這套策略',
+    setBuzz: '用於社群熱度',
+    inUse: '使用中',
+    edit: '編輯',
+    viewRules: '查看規則',
+    copyToCustom: '複製到我的策略',
+    duplicate: '建立副本',
+    copyNamed: '複製 {{name}}',
+    deleteNamed: '刪除 {{name}}',
+    createBlank: '新增空白策略',
+    createShort: '新增',
+  },
+  sheet: {
+    noDescription: '沒有說明。',
+    rules: '{{count}} 條規則',
+    indicators: '指標設定',
+    requiredBars: '需要的完整日 K 數',
+    baseScore: '基礎分數',
+  },
+  panel: {
+    title: '使用中的策略',
+    openLibrary: '策略庫',
+    meta: '{{rules}} 條規則 · 需要 {{bars}} 根日 K',
+    none: '沒有使用中的策略。',
+    others: '其他策略',
+    noOthers: '沒有其他已儲存的策略。',
+    ruleCount: '{{count}} 條規則',
+  },
+  toast: {
+    activated: '已改用「{{name}}」',
+    buzz: '社群熱度改用「{{name}}」',
+    deleted: '已刪除「{{name}}」',
+    saved: '已儲存，版本 {{revision}}',
+    conflict: '其他分頁或裝置先儲存了，已載入最新設定；請再做一次你的變更。',
+    failed: '沒有儲存：{{reason}}',
+  },
+  delete: {
+    title: '要刪除「{{name}}」嗎？',
+    description: '策略會被刪除，內建策略不受影響。',
+    cancel: '保留',
+    confirm: '刪除',
+    selected: '使用中的策略不能刪除，請先改選其他策略。',
+    last: '最後一套策略不能刪除。',
+  },
+}
+
+export default strategies

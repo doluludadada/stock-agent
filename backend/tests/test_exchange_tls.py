@@ -11,8 +11,8 @@ import pytest
 from support.settings import shipped_config
 from trading_stack import MONDAY_10_00, MovableClock, SilentLogger, StockDirectory
 
-from a_domain.model.fundamentals.fiscal_quarter import FiscalQuarter
 from a_domain.model.market.stock import Stock
+from a_domain.types.values import FiscalQuarter
 from b_application.config.market_data_config import MarketDataConfig, MarketHoursConfig
 from b_application.config.sources_config import SourcesConfig
 from c_infrastructure.database.db_connector import DatabaseConnector

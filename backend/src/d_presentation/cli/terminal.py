@@ -1,8 +1,10 @@
 """
-The terminal every CLI view shares: the one console, the prompts, and how values print. Views use `terminal.console`
-through this module, so a test or a harness that swaps the console here sees every view's output.
+The terminal every CLI view shares: the one console, the prompts, how values print, and what one CLI session
+remembers between menu options. Views use `terminal.console` through this module, so a test or a harness that swaps
+the console here sees every view's output.
 """
 
+from dataclasses import dataclass
 from datetime import datetime
 from signal import SIGINT, default_int_handler, signal as set_signal_handler
 
@@ -12,6 +14,17 @@ from rich.prompt import Confirm, Prompt
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 
 console = Console()
+
+
+@dataclass
+class CliSession:
+    """
+    What one CLI session remembers between menu options: the built-in strategy the user loaded for the runs it starts,
+    or None for the saved settings. It lives only as long as the CLI process: no saved setting and no Web API request
+    sees it.
+    """
+
+    built_in_strategy_id: str | None = None
 
 
 def ask_user(question: str, choices: list[str] | None = None) -> str | None:

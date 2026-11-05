@@ -26,7 +26,6 @@ def sizing_rule(risk_per_trade_pct: float, stop_loss_pct: float = 0.10, lot_size
         lot_size=lot_size,
         limit_price_rule=LIMIT_PRICE,
         affordable_quantity_rule=AffordableQuantityRule(cost_rule=COSTS),
-        buy_cost_rule=BuyCostRule(limit_price_rule=LIMIT_PRICE, cost_rule=COSTS),
     )
 
 
