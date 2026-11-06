@@ -185,11 +185,13 @@ class ShioajiLogin(BaseModel):
 
 class ShioajiConfig(BaseSettings):
     """
-    Shioaji (Sinopac) broker login, used when trading.execution_provider is shioaji.
+    The Shioaji (Sinopac) login of a personal site: its realtime quotes, and its broker when
+    trading.execution_provider is shioaji.
 
     Credentials come from the environment or .env only, each field from its ShioajiCredential variable. Which ones a
-    login reads, and whether it is simulation, is SystemEnvironment's table: test logs in to Shioaji's paper-trading
-    server with the *_TEST key pair, prod to the real account with the production key pair and CA certificate.
+    login reads, and whether it is simulation, is SystemEnvironment's table: dev and test log in to Shioaji's
+    simulation server with the *_TEST key pair, prod to the real account with the production key pair and CA
+    certificate.
     """
 
     model_config = SettingsConfigDict(env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore", env_prefix="SHIOAJI_")
@@ -221,15 +223,14 @@ class ShioajiConfig(BaseSettings):
             if isinstance(field.validation_alias, str) and getattr(self, name) is not None
         )
 
-    def login(self, environment: SystemEnvironment) -> ShioajiLogin:
+    def login(self, environment: SystemEnvironment) -> ShioajiLogin | None:
         """
-        The login with the environment's own credentials, each by name. validate_trading_environment refuses a start
-        with one of them missing, so a missing one here fails validation as a bug.
+        The login with the environment's own credentials, each by name, or None while its key pair is not set. The
+        realtime quotes need only the key pair; validate_trading_environment refuses Shioaji as the broker without every
+        credential the environment reads.
         """
         match environment:
-            case SystemEnvironment.DEV:
-                raise ValueError("environment dev never logs in to Shioaji")
-            case SystemEnvironment.TEST:
+            case SystemEnvironment.DEV | SystemEnvironment.TEST:
                 credentials = {"api_key": self.api_key_test, "secret_key": self.secret_key_test}
             case SystemEnvironment.PROD:
                 credentials = {
@@ -239,6 +240,9 @@ class ShioajiConfig(BaseSettings):
                     "ca_password": self.ca_password,
                     "person_id": self.person_id,
                 }
+
+        if credentials["api_key"] is None or credentials["secret_key"] is None:
+            return None
 
         return ShioajiLogin.model_validate({"simulation": environment.shioaji_simulation, **credentials})
 

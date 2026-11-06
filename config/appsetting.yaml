@@ -1,14 +1,18 @@
 # config/appsetting.yaml
 
 # dev: a developer's machine, the mock broker only. test: staging before launch, Shioaji only in simulation with the
-# *_TEST key pair. prod: the live service, PostgreSQL only, the only environment for order_mode live. dev and test refuse
-# to start while a production Shioaji credential is set. Neither the Web editor nor a reload changes it: restart.
+# *_TEST key pair. prod: the live service, PostgreSQL only, the only environment for order_mode live. A personal site's
+# realtime quotes come from Shioaji: in dev and test from its simulation server with the *_TEST key pair, in prod from
+# production. dev and test refuse to start while a production Shioaji credential is set. Neither the Web editor nor a
+# reload changes it: restart.
 environment: dev
 
-# personal: the owner's own machine, with Yahoo's daily history, TWSE MIS realtime quotes and any broker the environment
-# allows. public: a free public website on open-licensed data only. Its daily history and index trend come from the
-# open-data archive of the TWSE and TPEX OpenAPI closes, it has no realtime quote, so Buzz, Intraday and manual BUY are
-# refused, and it trades on the mock broker only.
+# personal: the owner's own machine, with Shioaji's daily history and realtime quotes and any broker the environment
+# allows. Without the environment's Shioaji key pair its daily history and index trend come from the open-data archive,
+# and it has no realtime quote, so Buzz and Intraday are refused and it orders nothing. public: a
+# free public website on open-licensed data only. Its daily history and index trend come from the open-data archive of
+# the TWSE and TPEX OpenAPI closes, it has no realtime quote, so Buzz, Intraday and manual BUY are refused, and it trades
+# on the mock broker only.
 audience: personal
 
 ai:
@@ -173,8 +177,8 @@ market:
   stock_ticks:
     { 0: "0.01", 10: "0.05", 50: "0.1", 100: "0.5", 500: "1", 1000: "5" }
   etf_ticks: { 0: "0.01", 50: "0.05" }
-  # A quote this close to a tick, as a fraction of the tick, is that tick carried through a binary float: Yahoo serves
-  # float32 prices, so 28.35 arrives as 28.350000381469727.
+  # A quote this close to a tick, as a fraction of the tick, is that tick carried through a binary float: a float32
+  # price source serves 28.35 as 28.350000381469727.
   tick_float_tolerance: "0.01"
 
 freshness:
@@ -196,21 +200,27 @@ market_hours:
   closing_auction_start: "13:25"
   close: "13:30"
   # A session's daily bar is final in every price source from this time: the after-hours fixed-price session ends at
-  # 14:30, and delayed feeds such as Yahoo's run 20 minutes behind.
+  # 14:30, and a source may publish the session's bars later still.
   settled: "15:00"
 
 # How the price and listing adapters pace, batch and cache their requests.
 market_data:
-  # TWSE MIS realtime quotes: it answers 100 channels per request and refuses 200, and asks for 5 s between requests.
-  quote_batch_size: 50
-  quote_request_interval_seconds: 5.0
+  # Shioaji realtime quotes: at most 500 stocks per snapshots request, and 50 market-data queries per 10 s, after which
+  # it stops answering for a minute.
+  quote_batch_size: 500
+  quote_request_interval_seconds: 0.2
   quote_timeout_seconds: 10.0
-  # Yahoo daily history.
-  history_batch_size: 50
-  history_batch_delay_seconds: 1.5
-  # A history that lacks the last settled session is asked for again at most this often.
+  # Daily history on a site with a Shioaji login: one daily-quotes request per session holds every listed stock, and an
+  # index's history is its one-minute bars, at most 30 days per request. Shioaji documents no limit of the daily
+  # quotes' own, so each request waits a second after the one before.
+  history_request_interval_seconds: 1.0
+  # Sessions the Web API's timer keeps for every stock: the stock page's one-year chart (250 sessions and the one
+  # before them). A strategy that needs older sessions fetches them when it runs.
+  history_backfill_bars: 251
+  index_minutes_window_days: 30
+  # A question Shioaji answered with nothing new, such as a session it does not serve yet, or one that failed, as every
+  # request does while the login is down, is asked again at most this often.
   history_retry_hours: 2
-  history_save_chunk_size: 5000
   # The TWSE and TPEX listings, with each stock's latest official close.
   listing_cache_hours: 6
   listing_timeout_seconds: 30.0
@@ -246,10 +256,11 @@ accounts:
   # Web workflow runs at once, every user's together; each user runs one at a time.
   max_concurrent_runs: 2
 
-# Used only with trading.execution_provider: shioaji. The environment above decides the server and the credentials,
-# which come from the environment or .env only: test logs in to Shioaji's paper-trading server with
-# SHIOAJI_API_KEY_TEST and SHIOAJI_SECRET_KEY_TEST; prod logs in to the real account with SHIOAJI_API_KEY,
-# SHIOAJI_SECRET_KEY, SHIOAJI_CA_PATH, SHIOAJI_CA_PASSWORD and SHIOAJI_PERSON_ID; dev never uses Shioaji.
+# The Shioaji login of a personal site: its realtime quotes, and its orders with trading.execution_provider: shioaji.
+# The environment above decides the server and the credentials, which come from the environment or .env only: dev and
+# test log in to Shioaji's simulation server with SHIOAJI_API_KEY_TEST and SHIOAJI_SECRET_KEY_TEST; prod logs in to the
+# real account with SHIOAJI_API_KEY and SHIOAJI_SECRET_KEY, and orders also need SHIOAJI_CA_PATH, SHIOAJI_CA_PASSWORD
+# and SHIOAJI_PERSON_ID.
 shioaji:
   # Seconds between two reads of an order's status at the broker.
   poll_interval_seconds: 0.5
@@ -506,7 +517,6 @@ sources:
       link: "Url"
       date: "Date"
       stock_code_pattern: "[（(：:]\\s*([0-9]{4,6}[A-Z]?)\\s*[)）]"
-    mis_quotes_url: "https://mis.twse.com.tw/stock/api/getStockInfo.jsp"
   # The credit the Open Government Data License v1 asks for, in the form of its annex (https://data.gov.tw/license):
   # each providing agency and the datasets the app reads from it, the license's notice, and its name and address.
   # A use that does not show it holds no license (Article 3, paragraph 2). List every dataset read above.
@@ -558,9 +568,10 @@ sources:
     notice: "此開放資料依政府資料開放授權條款 (Open Government Data License) 進行公眾釋出，使用者於遵守本條款各項規定之前提下，得利用之。"
     license: "政府資料開放授權條款－第1版"
     license_url: "https://data.gov.tw/license"
-  yahoo:
-    # Yahoo Finance's symbol for each market index. It serves no TPEX index: ^TWOII answers "possibly delisted".
-    index_symbols: { taiex: "^TWII" }
+  shioaji:
+    # Shioaji's contract code of each exchange's own index, whose one-minute bars make its daily history on a site with
+    # a Shioaji login: TSE001, the TAIEX, and OTC101, the TPEx Index.
+    index_codes: { twse: "001", tpex: "101" }
   mops:
     eps_url: "https://mopsov.twse.com.tw/mops/web/ajax_t163sb04"
     eps_form_fields:

@@ -70,6 +70,14 @@ describe('the market overview', () => {
     expect(within(warmUp).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '2')
   })
 
+  it('says on the owner’s site without a Shioaji login how far the archive its history comes from has come', async () => {
+    await renderOverview({ ...PERSONAL_SITE, realtime_quotes: false })
+    const warmUp = await screen.findByRole('region', { name: 'Open-data archive' })
+
+    expect(warmUp.textContent).toContain('Data accumulating 2/61')
+    expect(warmUp.textContent).toContain('Without a Shioaji login, this site reads its daily history from the exchanges’ open data')
+  })
+
   it('shows no warm-up on the owner’s site', async () => {
     await renderOverview(PERSONAL_SITE)
 

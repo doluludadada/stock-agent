@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from datetime import datetime
 from typing import Protocol
 
@@ -16,14 +17,9 @@ class IExecutionProvider(Protocol):
     """
 
     async def connect(self) -> None:
-        """Opens the broker session before the first order or account read. Raises saying what failed."""
-        ...
-
-    async def close(self) -> None:
         """
-        Gives back what connect() took: the broker session, once a login connect() began has ended, whether it
-        succeeded, failed or is still running when the caller gave up. The runtime that built the broker calls it when
-        it closes, so a runtime a settings change retired does not keep a login open beside the new one's.
+        Readies the broker before the first order or account read: the mock seeds its book, Shioaji checks the account
+        on the login the realtime quotes hold and activates its certificate. Raises saying what failed.
         """
         ...
 
@@ -52,12 +48,29 @@ class ISimulatedExecutionProvider(IExecutionProvider, Protocol):
         """Writes the account's cash and positions to the book."""
         ...
 
+    async def reset(self, initial_cash: float, now: datetime) -> Account:
+        """
+        Opens the book again in one transaction: every position gone, the cash and the cash it opened with set to
+        `initial_cash`, and its opening at `now`. Returns the account as it now stands.
+        """
+        ...
+
 
 class IBrokerExecutionProvider[BrokerAccount, Contract, Trade](IExecutionProvider, Protocol):
     """
     A real broker reached through its SDK client. BrokerAccount is the SDK's stock account, Contract its stock contract
-    and Trade its record of one exchange order. An order goes to the exchange as one exchange order per lot part.
+    and Trade its record of one exchange order. An order goes to the exchange as one exchange order per lot part. Every
+    call of the SDK is a request, so its failure says only the error's type and the server's status.
     """
+
+    async def request[**Arguments, Answer](
+        self, call: Callable[Arguments, Answer], *args: Arguments.args, **kwargs: Arguments.kwargs
+    ) -> Answer:
+        """
+        Makes one request, `call` with its arguments in a worker thread. Its failure raises RuntimeError saying what the
+        broker quote provider's failure_of says of the SDK's error, never the error's text.
+        """
+        ...
 
     async def cash(self, broker_account: BrokerAccount) -> float:
         """The cash the account can still pay for a BUY with. Never more than the broker will settle."""

@@ -213,9 +213,9 @@ function StartPanel({ kinds }: { kinds: readonly Kind[] }) {
   )
 }
 
-/** The newest run that ended, if any; a running run has no decisions yet. */
+/** The newest analysis that ended, if any; a running run has no decisions yet, and a follow only copies another's. */
 function LatestResult() {
-  const latest = useRunsPage(0).data?.runs.find((run) => run.state !== 'running')
+  const latest = useRunsPage(0).data?.runs.find((run) => run.state !== 'running' && run.summary?.workflow !== 'follow')
   return latest ? <LatestRun run={latest} /> : null
 }
 

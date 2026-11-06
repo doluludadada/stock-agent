@@ -25,10 +25,12 @@ src/
     market-overview/   the research target's trend (the TAIEX unless `?target=` names a stock or ETF), the most
                        traded stocks, the session's breadth and industry moves, the strategy slot
     strategies/        strategy model, API mapping, library, formula designer
-    runs/              start runs, follow their state, history and run details
+    runs/              start runs, follow their state, history and run details; a finished Full Cycle's follow into
+                       the mock account, and each decision marked followed or open
     valuation/         P/E valuation, undervalued scan, AI explanation on request
     watchlist/         server watchlist and its toggle button
-    account/           mock account, positions and equity curve
+    account/           mock account: the total P&L since it opened, positions, equity curve, the trades with the run
+                       each came from, and the mock account panel of My settings (starting capital and the reset)
     admin-settings/    appsetting.yaml as a form and every settings file as text, two views of one draft: the
                        server's check as you edit, a save with the password, edits made on disk, history and restore
     stock-research/    stock page, backend evaluation and readings, the archived financials
@@ -41,7 +43,8 @@ src/
 
 - Dependencies point `app -> features -> shared`. `i18n` and `styles` are foundations.
 - A feature never imports another feature. `app/router/routes/*` passes render slots between them; for example the
-  run detail page receives `renderWatch` from the watchlist feature. URL builders are shared config
+  run detail page receives `renderWatch` from the watchlist feature, and My settings receives `mockAccount` from the
+  account feature. URL builders are shared config
   (`shared/config/paths.ts`): features link with them, and routes pass no hrefs.
 - Code outside a feature uses only its `index.ts`.
 - `shared` and `i18n` never import `app` or a feature.
@@ -87,9 +90,12 @@ the contract by `catalog.test.ts`.
 | The open data's providers, datasets and license | `attribution/api.ts` | `/v1/market/attribution` |
 | Built-in strategies, owner settings, saves with revisions | `strategies/api/queries.ts` | `/v1/technical-settings` |
 | Runs, decisions, orders | `runs/api.ts` | `/v1/runs` |
+| A run's follow into the mock account: what is open, the refusal, the follows so far; starting one | `runs/api.ts` | `/v1/runs/{run_id}/follow` |
 | Watchlist | `watchlist/api.ts` | `/v1/watchlist` |
 | Valuation | `valuation/api.ts` | `/v1/valuation` |
-| Account | `account/api.ts` | `/v1/account/history` |
+| Account: now, the curve, the opening and the total P&L | `account/api.ts` | `/v1/account/history` |
+| The trades since the opening, each with the run whose decision it carried out (the followed run for a follow) | `account/api.ts` | `/v1/account/trades` |
+| The reset of the mock account with a new starting capital | `account/api.ts` | `/v1/account/reset` |
 | Settings files: the overview (polled), a revision's text (read once), checks, saves, backups, reload | `admin-settings/api.ts` | `/v1/admin/settings`, `/v1/admin/audit` |
 | The settings form: a text's settings and their schema, and a change written into the text | `admin-settings/api.ts` | `/v1/admin/settings/appsetting/form` |
 | Who is signed in, setup, sign-in, registration, sign-out | `auth/api.ts` | `/v1/auth` |
@@ -110,8 +116,9 @@ says on each private page what signing in opens there, and tells a user without 
 administrators. Hiding a page is never the protection: the server checks every request. Answers the backend computes with the saved strategy
 (the stock page's evaluation, the valuation scan) start with `['owner', 'strategy-results']`
 (`shared/api/query-keys.ts`); every strategy save, switch or 409 resets them, so no page shows a result of the strategy
-that was replaced. The mock account and the watchlist start with `['owner', 'run-results']`, and the poll that sees a run
-end reloads them. A failed request shows its error; nothing falls back to generated data.
+that was replaced. The mock account, the watchlist and what a run leaves open to follow start with `['owner', 'run-results']`, and the
+poll that sees a run end reloads them. Starting a follow and a reset reload them too: a follow can end before its page
+first asks, and a reset opens every decision to follow again. A failed request shows its error; nothing falls back to generated data.
 
 Many stocks at once (the watchlist's quotes, the mock account's names) come from `useStockQuotes` and `useListedNames`:
 each code's listing answers at once, and each daily history is asked under the stock page's own key, one after
@@ -121,10 +128,11 @@ the listing's day and the history's last bar, and keeps its session, so a page n
 ## What the site's audience allows
 
 One codebase runs as the owner's personal site and as a public site on open data only. `GET /v1/market/audience`
-answers the server's table of what its audience allows (`open_data_only`, `realtime_quotes`, `news_articles`, `mops`),
-read once per tab. A navigation item (`NavItem.requires`) or a run kind (`KINDS` in `RunsPage.tsx`) names the capability
+answers the server's table of what its audience allows (`open_data_only`, `realtime_quotes`, `news_articles`, `mops`)
+and how it prices an order (`order_pricing`), read once per tab. A follow of a run says its price from it: a realtime
+quote, only in continuous trading, or the official close of the last session, only while no session trades. A navigation item (`NavItem.requires`) or a run kind (`KINDS` in `RunsPage.tsx`) names the capability
 it needs, and shows only once the server said the site has it, so a public visitor never sees Buzz, Intraday, the Buzz
-strategy choice or the valuation, even for a moment. A link to a page the site does not offer opens a short reason
+strategy choice, the watchlist's Social buzz source or the valuation, even for a moment. A link to a page the site does not offer opens a short reason
 (`RequireCapability` in `app/router/RouteFallbacks.tsx`), not a page whose requests the server refuses. Hiding is never
 the protection: the server refuses each of them. On open data only, the market overview and the run results say how far
 the archive has come (`ArchiveWarmUp`) until it holds the sessions the strategies need. Every page's footer says nothing
@@ -183,11 +191,11 @@ settings files hold no secret: the server refuses one written into them.
   form's sections and settings are one table, `FORM_SECTIONS` in `admin-settings/form.ts`: each names its dotted path,
   and its control comes from the server's JSON schema there (a boolean is a switch, a choice a select, a list of
   choices checkboxes, a number a number field with the schema's bounds, a text a text field). Its label is
-  `admin:form.field.<path>` in both locales, and its help is the setting's description in the schema, the settings
-  class's docstring. The server writes each change into the draft's text in place, so the YAML tab shows it with its
+  `admin:form.field.<path>` and its help `admin:form.help.<path>`, both in both locales, so a reader never sees
+  Chinese labels over English help. The server writes each change into the draft's text in place, so the YAML tab shows it with its
   comments, and the check, the review and the save are the editor's own. A problem the check places at a setting shows
-  beside it. To offer another setting, add its path to the table and its label to both dictionaries; `i18n.test.ts`
-  fails while a label is missing.
+  beside it. To offer another setting, add its path to the table and its label and help to both dictionaries;
+  `i18n.test.ts` fails while either is missing.
 - Price and volume are two synced charts (`shared/ui/price-volume-chart.tsx`), never one chart
   with two y-axes. The moving averages' colors pass the dataviz validator against both price colors.
 - Motion respects `prefers-reduced-motion` through `MotionConfig reducedMotion="user"` and a CSS fallback.
@@ -206,9 +214,13 @@ source exists, and that dynamic key families resolve. Dates and numbers use `Int
 `Asia/Taipei` time zone (`shared/lib/format.ts`).
 
 The built-in strategies' rule names are text, not keys, because they hold `.` and `:`.
-`locales/zh-TW/rule-names.ts` maps each English name to its Chinese name, and `useStrategyLabels().rule` shows it.
-A copy of a built-in saves the names in the reader's language. `i18n.test.ts` fails when a rule in `config/strategies`
-has no Chinese name.
+`locales/zh-TW/rule-names.ts` maps each English name to its Chinese name. A rule's name is the owner's text and shows
+as typed, with one exception: `useStrategyLabels().rule(strategyId, name)` reads a rule of a strategy with a built-in id
+in the reader's language while its name is one the built-ins ship. It keys on the strategy, never on the name alone, so
+a name the owner typed in their own strategy stays as typed even when a built-in rule has it; the run page reads the
+run's strategy from `summary.technical_strategy_id`. The formula designer always shows the names as its fields hold
+them, in the rule list and the preview alike, since that is the text a save keeps. A copy of a built-in saves the
+names in the reader's language. `i18n.test.ts` fails when a rule in `config/strategies` has no Chinese name.
 
 ## Checks
 
@@ -225,5 +237,5 @@ has no Chinese name.
 every page at 375, 768, 1024 and 1440 px in both themes, with an audit of each (sideways scroll, controls under 44 px
 on a phone, text cut off, page errors) in `audit.json`.
 
-CI runs the first four plus E2E in `.github/workflows/frontend.yml`. The root `just frontend-check`
-runs the first four locally.
+CI runs the first four in `.github/workflows/frontend.yml`, and the root `just frontend-check` runs them locally.
+E2E needs a real backend, so it runs only on your machine. [README.md](../README.md#browser-flows-e2e) says how and why.

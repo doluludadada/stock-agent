@@ -6,7 +6,7 @@ import type { components } from './schema.gen'
 
 type Schemas = components['schemas']
 export type ListedStock = Schemas['ListedStockResponse']
-export type DailyBar = Schemas['DailyBarResponse']
+export type DailyBar = Schemas['Ohlcv']
 export type StockHistory = Schemas['StockHistoryResponse']
 export type IndexHistory = Schemas['IndexHistoryResponse']
 export type MarketIndex = Schemas['MarketIndex']

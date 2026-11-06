@@ -65,8 +65,8 @@ class OpenedRuntime:
 
     def close_when_unused(self) -> None:
         """
-        Starts the close once, in the background, so the request that released the last hold does not wait for a broker
-        logout. The task is kept here, so it is not collected before it ends.
+        Starts the close once, in the background, so the request that released the last hold does not wait for the
+        database and the other adapters to close. The task is kept here, so it is not collected before it ends.
         """
         if self.retired and self.holds == 0 and self.closing is None:
             self.closing = asyncio.get_running_loop().create_task(self.exit_stack.aclose())
@@ -184,6 +184,25 @@ class RuntimeSwitch:
 
             self.publish(opened)
             return SettingsReloaded(dict(opened.runtime.config.settings_revisions), running, datetime.now(UTC))
+
+    async def log_in_again(self) -> None:
+        """
+        The Web API timer's new Shioaji login: while the current runtime's login is down, because it failed when the
+        runtime opened or Shioaji reported its session down since, a runtime opened from the settings files as a reload
+        opens one, which logs in again on a new client, becomes current. A runtime that would not open leaves the current
+        one serving, and the next interval tries again.
+        """
+        async with self.lock:
+            if not self.opened[-1].runtime.login_down:
+                return
+
+            try:
+                opened = await self.open_candidate({}, None)
+            except InvalidSettingsError as error:
+                self.logger.warning(f"The Shioaji login is down, and a runtime to log in again would not open:\n{error}")
+                return
+
+            self.publish(opened)
 
     async def retry(self) -> SettingsReload | None:
         """
@@ -332,22 +351,31 @@ async def watch_settings(switch: RuntimeSwitch) -> None:
             switch.logger.info(f"Settings reloaded from disk: {describe(reload)}.")
 
 
-async def archive_closes(switch: RuntimeSwitch) -> None:
+async def collect_daily_data(switch: RuntimeSwitch) -> None:
     """
-    The Web API's collection of the TWSE and TPEX open data the OpenAPI serves only for its latest session, day, month
-    or quarter: closes, material information, EPS statistics, valuation ratios, balance sheets, income statements,
-    monthly revenue and TWSE news. At the start, then every api.archive_interval_hours of the current settings, on the
-    current runtime. It never stops on an error of its own: it logs it and tries again at the next interval. The
-    lifespan cancels it at shutdown.
+    The Web API's collection of the daily data, at the start, then every api.archive_interval_hours of the current
+    settings, on the current runtime: first the TWSE and TPEX open data the OpenAPI serves only for its latest session,
+    day, month or quarter (closes, material information, EPS statistics, valuation ratios, balance sheets, income
+    statements, monthly revenue and TWSE news) into the archive, then, on a site with a broker login, the broker's daily
+    quotes of the sessions its history cache lacks. Before them, a Shioaji login that is down is made again
+    (RuntimeSwitch.log_in_again). A step never stops it on an error of its own: it logs it, goes on to the next and
+    tries again at the next interval. The lifespan cancels it at shutdown and waits until the step it stopped has ended.
     """
     while True:
+        await switch.log_in_again()
+
         with switch.hold() as opened:
             interval = opened.runtime.config.api.archive_interval_hours
+            pipeline = opened.runtime.signed_out
 
-            try:
-                await opened.runtime.signed_out.archive_daily_closes()
-            except Exception as error:
-                switch.logger.error(f"The open data could not be archived: {type(error).__name__}: {error}")
+            for step, failure in (
+                (pipeline.archive_daily_closes, "The open data could not be archived"),
+                (pipeline.refresh_daily_history, "The broker's daily history could not be refreshed"),
+            ):
+                try:
+                    await step()
+                except Exception as error:
+                    switch.logger.error(f"{failure}: {type(error).__name__}: {error}")
 
         await asyncio.sleep(interval * 3600)
 

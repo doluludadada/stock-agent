@@ -1,10 +1,12 @@
 """
-A runtime closes what it opened, once its owner is done with it or a later startup step fails: the broker logs out,
-after every login it began, whether that login succeeded, failed, timed out or was cancelled.
+A runtime closes what it opened, once its owner is done with it or a later startup step fails. The Shioaji login is the
+process's: the first runtime logs in, every later one reuses the login, and nothing logs out, since shioaji 1.3.1
+segfaults at the next garbage collection after a logout.
 """
 
 import asyncio
-import threading
+import gc
+import weakref
 from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -12,21 +14,22 @@ from pathlib import Path
 import pytest
 import shioaji
 from pydantic import SecretStr
+from support.fake_broker import FakeBrokerQuotes, session_bar
 from support.fake_shioaji import FakeShioaji
+from support.fakes import RecordingLogger
 from support.settings import environment_setup
 from trading_stack import SilentLogger
 
 from a_domain.model.market.article import Article
-from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.rules.fundamentals.trailing_eps import QuarterEps
 from a_domain.types.enums import ExecutionProvider, InformationSource, MarketType, OrderMode, SentimentLabel, SystemEnvironment
 from a_domain.types.values import FiscalQuarter
 from b_application.config.app_config import AppConfig, DbConfig
+from b_application.pipeline import Pipeline
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.repositories.sentiment_repository import SentimentRepository
 from c_infrastructure.database.repositories.user_store import AccountsKeyError, SqlUserStore
-from c_infrastructure.market.yahoo_finance_adapter import YahooFinanceProvider
 from c_infrastructure.system.attempt_log import MemoryAttemptLog
 from c_infrastructure.system.market_clock import TaiwanMarketClock
 from d_presentation.dependencies import (
@@ -37,6 +40,7 @@ from d_presentation.dependencies import (
     load_settings,
     open_runtime,
 )
+from d_presentation.live_runtime import RuntimeSwitch, collect_daily_data
 
 pytestmark = pytest.mark.asyncio
 
@@ -51,11 +55,21 @@ def clients(monkeypatch: pytest.MonkeyPatch) -> list[FakeShioaji]:
     return made
 
 
-def shioaji_test_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AppConfig:
-    """The shipped settings on Shioaji in test, over a SQLite file and a Chroma folder in tmp_path."""
+def shioaji_test_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, environment: SystemEnvironment = SystemEnvironment.TEST
+) -> AppConfig:
+    """
+    The shipped settings with the environment's Shioaji key pair, over a SQLite file and a Chroma folder in tmp_path: on
+    Shioaji as the broker in test, on the mock broker in dev, the environment the shipped files name.
+    """
     monkeypatch.setenv("ANTHROPIC_API_KEY", "placeholder")
     shipped = load_settings(get_project_root()).model_copy(update={"project_root": tmp_path})
-    config = environment_setup(shipped, SystemEnvironment.TEST, ExecutionProvider.SHIOAJI, OrderMode.DISABLED)
+    broker, mode = (
+        (ExecutionProvider.SHIOAJI, OrderMode.DISABLED)
+        if environment == SystemEnvironment.TEST
+        else (ExecutionProvider.MOCK, OrderMode.MOCK_ONLY)
+    )
+    config = environment_setup(shipped, environment, broker, mode)
     config.accounts.key = KEY
     config.db = DbConfig(_env_file=None, backend=config.db.backend, chroma_persist_path=str(tmp_path / "chroma"))
     return config
@@ -65,35 +79,41 @@ def process() -> ProcessState:
     return ProcessState(logger=SilentLogger(), attempt_log=MemoryAttemptLog(), cache_writes=asyncio.Lock())
 
 
-async def test_each_runtime_logs_out_of_the_broker_it_logged_in_to_when_it_closes(
+async def test_the_runtimes_of_one_process_share_one_shioaji_login_and_never_log_out(
     clients: list[FakeShioaji], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = shioaji_test_config(tmp_path, monkeypatch)
     shared = process()
 
-    for opened in (1, 2):
+    for _ in ("startup", "reload"):
         async with open_runtime(config, shared):
-            assert [client.logouts for client in clients] == [1] * (opened - 1) + [0]
+            pass
 
-    assert [(len(client.logins), client.logouts) for client in clients] == [(1, 1), (1, 1)]
+    assert [(len(client.logins), client.logouts) for client in clients] == [(1, 0)]
 
 
-async def test_a_startup_step_that_fails_after_the_login_still_logs_out(
+async def test_a_startup_step_that_fails_after_the_login_leaves_it_for_the_next_runtime(
     clients: list[FakeShioaji], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def wrong_key(store: SqlUserStore) -> None:
         raise AccountsKeyError("Restore the original secrets/accounts.key")
 
-    monkeypatch.setattr(SqlUserStore, "check_key", wrong_key)
+    config, shared = shioaji_test_config(tmp_path, monkeypatch), process()
 
-    with pytest.raises(AccountsKeyError):
-        async with open_runtime(shioaji_test_config(tmp_path, monkeypatch), process()):
-            pass
+    with monkeypatch.context() as patched:
+        patched.setattr(SqlUserStore, "check_key", wrong_key)
 
-    assert [(len(client.logins), client.logouts) for client in clients] == [(1, 1)]
+        with pytest.raises(AccountsKeyError):
+            async with open_runtime(config, shared):
+                pass
+
+    async with open_runtime(config, shared):
+        pass
+
+    assert [(len(client.logins), client.logouts) for client in clients] == [(1, 0)]
 
 
-async def test_a_broker_whose_check_after_the_login_fails_logs_out_each_time(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_broker_whose_check_after_the_login_fails_refuses_each_start(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     made: list[FakeShioaji] = []
 
     def client(simulation: bool) -> FakeShioaji:
@@ -101,62 +121,14 @@ async def test_a_broker_whose_check_after_the_login_fails_logs_out_each_time(tmp
         return fake
 
     monkeypatch.setattr(shioaji, "Shioaji", client)
+    shared = process()
 
     for _ in range(3):
         with pytest.raises(TradingSetupError, match="the login returned no stock account"):
-            async with open_runtime(shioaji_test_config(tmp_path, monkeypatch), process()):
+            async with open_runtime(shioaji_test_config(tmp_path, monkeypatch), shared):
                 pass
 
-    assert [(len(fake.logins), fake.logouts) for fake in made] == [(1, 1)] * 3
-
-
-class SlowLogin(FakeShioaji):
-    """A login that waits in its thread until the test lets it end, as a slow broker's does."""
-
-    def __init__(self, simulation: bool) -> None:
-        super().__init__(simulation)
-        self.started, self.release, self.ended = threading.Event(), threading.Event(), threading.Event()
-
-    def login(self, *args, **kwargs):
-        self.started.set()
-        self.release.wait(10)
-
-        try:
-            return super().login(*args, **kwargs)
-        finally:
-            self.ended.set()
-
-
-@pytest.mark.parametrize("stop", ["timeout", "cancel"])
-async def test_a_login_cut_short_logs_out_once_its_thread_ends(stop: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    made: list[SlowLogin] = []
-    monkeypatch.setattr(shioaji, "Shioaji", lambda simulation: made.append(SlowLogin(simulation)) or made[-1])
-    config, deadlines = shioaji_test_config(tmp_path, monkeypatch), []
-
-    async def open_once() -> None:
-        async with asyncio.timeout(None) as deadline:
-            deadlines.append(deadline)
-
-            async with open_runtime(config, process()):
-                pass
-
-    opening = asyncio.create_task(open_once())
-
-    while not made or not made[0].started.is_set():
-        await asyncio.sleep(0.01)
-
-    if stop == "timeout":
-        deadlines[0].reschedule(asyncio.get_running_loop().time())
-    else:
-        opening.cancel()
-
-    made[0].release.set()
-
-    with pytest.raises(TimeoutError if stop == "timeout" else asyncio.CancelledError):
-        await opening
-
-    await asyncio.to_thread(made[0].ended.wait, 10)
-    assert [(len(fake.logins), fake.logouts) for fake in made] == [(1, 1)]
+    assert [(len(fake.logins), fake.logouts) for fake in made] == [(1, 0)]
 
 
 async def test_two_runtimes_of_one_process_save_the_same_cached_rows_at_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -167,21 +139,18 @@ async def test_two_runtimes_of_one_process_save_the_same_cached_rows_at_once(tmp
     shared, clock = process(), TaiwanMarketClock(config.market_hours)
     start, end = clock.history_window(30)
     settled = datetime.combine(clock.last_settled_session(), config.market_hours.close, clock.now().tzinfo)
-
-    async def download(provider, stocks: list[Stock], start_date: datetime, end_date: datetime) -> dict[str, list[Ohlcv]]:
-        await asyncio.sleep(0)
-        return {
-            stock.stock_id: [Ohlcv(ts=settled - timedelta(days=day), close=100.0, volume=1000) for day in range(20)]
-            for stock in stocks
-        }
-
-    monkeypatch.setattr(YahooFinanceProvider, "fetch_history", download)
+    sessions = [day for day in (settled.date() - timedelta(days=offset) for offset in range(20)) if day.weekday() < 5]
+    stocks = [f"23{attempt:02d}" for attempt in range(10)]
+    broker = FakeBrokerQuotes(
+        sessions={day: {stock: session_bar(day, 100.0) for stock in stocks} for day in sessions},
+        index={market: sorted(sessions) for market in MarketType},
+    )
     databases = [DatabaseConnector(config=config, logger=SilentLogger()) for _ in range(2)]
     runtimes = []
 
     for database in databases:
         await database.init_db()
-        runtimes.append(await build_provider_dependencies(config, database, shared, clock, KEY, None))
+        runtimes.append(await build_provider_dependencies(config, database, shared, clock, KEY, broker, None))
 
     failures = []
 
@@ -215,3 +184,69 @@ async def test_two_runtimes_of_one_process_save_the_same_cached_rows_at_once(tmp
         await database.close()
 
     assert failures == []
+
+
+async def test_a_login_shioaji_reports_down_answers_no_realtime_quote_until_a_runtime_logs_in_again_on_a_new_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every client stays referenced, never logged out: shioaji 1.3.1 segfaults at the next garbage collection after a logout."""
+    made: list[weakref.ref[FakeShioaji]] = []
+
+    def client(simulation: bool) -> FakeShioaji:
+        fake = FakeShioaji(simulation)
+        made.append(weakref.ref(fake))
+        return fake
+
+    monkeypatch.setattr(shioaji, "Shioaji", client)
+    config, shared = shioaji_test_config(tmp_path, monkeypatch), process()
+
+    async with open_runtime(config, shared) as first:
+        at_open = first.realtime_quotes
+        dead = made[0]()
+        assert dead is not None
+        dead.session_down()
+        after_down = first.realtime_quotes
+        del dead
+
+    async with open_runtime(config, shared) as second:
+        gc.collect()
+        clients = [fake for ref in made if (fake := ref()) is not None]
+        clients[0].session_down()
+        assert (at_open, after_down, second.realtime_quotes) == (True, False, True)
+
+    assert [(len(fake.logins), fake.logouts) for fake in clients] == [(1, 0), (1, 0)]
+
+
+async def test_the_web_apis_timer_logs_in_again_once_shioaji_reported_the_login_down(
+    clients: list[FakeShioaji], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The timer's runtime loads the shipped settings files, in tmp_path so that no .env of the machine reaches them."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ACCOUNTS_KEY", KEY.get_secret_value())
+    config, shared, refreshed = shioaji_test_config(tmp_path, monkeypatch, SystemEnvironment.DEV), process(), asyncio.Event()
+
+    async def archive(pipeline: Pipeline) -> None:
+        return None
+
+    async def refresh(pipeline: Pipeline) -> None:
+        refreshed.set()
+
+    monkeypatch.setattr(Pipeline, "archive_daily_closes", archive)
+    monkeypatch.setattr(Pipeline, "refresh_daily_history", refresh)
+    logger = RecordingLogger()
+    switch = RuntimeSwitch(lambda _: open_runtime(config, shared), get_project_root(), logger)
+    await switch.start(config)
+
+    try:
+        clients[0].session_down()
+        timer = asyncio.get_running_loop().create_task(collect_daily_data(switch))
+        await asyncio.wait_for(refreshed.wait(), 10)
+        timer.cancel()
+
+        with switch.hold() as current:
+            realtime_quotes = current.runtime.realtime_quotes
+    finally:
+        await switch.close()
+
+    assert realtime_quotes, logger.records
+    assert [(len(fake.logins), fake.logouts) for fake in clients] == [(1, 0), (1, 0)]

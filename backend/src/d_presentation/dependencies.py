@@ -1,7 +1,8 @@
 import asyncio
 from collections.abc import AsyncGenerator, Callable, Mapping
 from contextlib import AsyncExitStack, asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
 import chromadb
 from chromadb.api import ClientAPI
@@ -14,6 +15,8 @@ from a_domain.ports.ai.sentiment_classifier import ISentimentClassifier
 from a_domain.ports.analysis.technical_settings_repository import ITechnicalSettingsRepository
 from a_domain.ports.chat.conversation_repository import IConversationRepository
 from a_domain.ports.chat.platform_provider import IPlatformProvider
+from a_domain.ports.market.broker_quote_provider import IBrokerQuoteProvider
+from a_domain.ports.market.cached_price_provider import ICachedPriceProvider
 from a_domain.ports.market.daily_close_archive import IDailyCloseArchive
 from a_domain.ports.market.fundamentals_provider import IFundamentalsProvider
 from a_domain.ports.market.news_provider import INewsProvider
@@ -25,7 +28,7 @@ from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.notification_provider import INotificationProvider
 from a_domain.ports.system.settings_files import ISettingsFiles
 from a_domain.ports.system.user_store import IUserStore
-from a_domain.ports.trading.execution_provider import IExecutionProvider
+from a_domain.ports.trading.execution_provider import IExecutionProvider, ISimulatedExecutionProvider
 from a_domain.ports.trading.trading_journal import ITradingJournal
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
 from a_domain.types.enums import AiProvider, ExecutionProvider, Permission
@@ -39,6 +42,7 @@ from b_application.config.settings_loader import (
     get_project_root,
     load_settings,
 )
+from b_application.config.trading_config import ShioajiLogin
 from b_application.pipeline import Pipeline
 from b_application.use_cases.admin.editor_access import EditorAccess
 from b_application.use_cases.admin.settings_audit import SettingsAudit
@@ -53,6 +57,7 @@ from b_application.use_cases.chat.dispatcher import Dispatcher
 from b_application.use_cases.collect.archive_warm_up import ArchiveWarmUp
 from b_application.use_cases.collect.buzz_scanner import BuzzScanner
 from b_application.use_cases.collect.daily_close_archiver import DailyCloseArchiver
+from b_application.use_cases.collect.daily_history_refresh import DailyHistoryRefresh
 from b_application.use_cases.collect.financials_lookup import FinancialsLookup
 from b_application.use_cases.collect.fundamentals_feed import FundamentalsFeed
 from b_application.use_cases.collect.index_history_loader import IndexHistoryLoader
@@ -83,10 +88,14 @@ from b_application.use_cases.trade.account_history import AccountHistory
 from b_application.use_cases.trade.account_loader import AccountLoader
 from b_application.use_cases.trade.account_risk_check import AccountRiskCheck
 from b_application.use_cases.trade.active_watchlist import ActiveWatchlist
+from b_application.use_cases.trade.follow_candidates import FollowCandidates
+from b_application.use_cases.trade.follow_signals import FollowSignals
 from b_application.use_cases.trade.manual_signal import ManualSignal
+from b_application.use_cases.trade.mock_account_reset import MockAccountReset
 from b_application.use_cases.trade.order_execution import OrderExecution
 from b_application.use_cases.trade.order_outcome import OrderOutcome
 from b_application.use_cases.trade.order_preparation import OrderPreparation
+from b_application.use_cases.trade.trade_history import TradeHistory
 from b_application.use_cases.trade.unwatch_stocks import UnwatchStocks
 from b_application.use_cases.trade.watch_stocks import WatchStocks
 from b_application.use_cases.users.ai_model_choice import AiModelChoice
@@ -129,10 +138,8 @@ from c_infrastructure.feed.news_provider import NewsProvider
 from c_infrastructure.feed.ptt_provider import PttProvider
 from c_infrastructure.feed.tavily_provider import TavilySearchAdapter
 from c_infrastructure.market.cached_price_provider import CachedPriceProvider
-from c_infrastructure.market.mis_quote_provider import MisQuoteProvider
 from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider
 from c_infrastructure.market.twse_provider import TaiwanStockProvider
-from c_infrastructure.market.yahoo_finance_adapter import YahooFinanceProvider
 from c_infrastructure.platforms.line.line_adapter import LinePlatformAdapter
 from c_infrastructure.platforms.line.line_notification_adapter import LineNotificationAdapter
 from c_infrastructure.system.attempt_log import MemoryAttemptLog
@@ -143,6 +150,11 @@ from c_infrastructure.system.settings_files import SettingsFiles
 from c_infrastructure.technical.sql_technical_settings_repository import SqlTechnicalSettingsRepository
 from c_infrastructure.trading.mock.mock_execution_provider import MockExecutionProvider
 from d_presentation.web.market_valuation_cache import MarketValuationCache
+
+if TYPE_CHECKING:
+    from shioaji import Shioaji
+
+    from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,6 +177,24 @@ class Runtime:
 
     config: AppConfig
     logger: ILoggingProvider
+    broker_market_data: bool
+    """Whether the runtime's daily history and realtime quotes are the broker's: its Shioaji login was up when it opened."""
+    shioaji: ShioajiConnection | None
+    """The process's Shioaji login of the site's key pair, up or not; None where the site makes none (ProviderDependencies)."""
+
+    @property
+    def realtime_quotes(self) -> bool:
+        """
+        Whether the runtime has a realtime quote to order on now: its market data is the broker's and Shioaji has not
+        reported the login down. Without one, Buzz, Intraday and a follow priced on realtime quotes could only refuse
+        every order, so the Web API refuses to start them.
+        """
+        return self.broker_market_data and self.shioaji is not None and self.shioaji.up
+
+    @property
+    def login_down(self) -> bool:
+        """Whether the site's Shioaji login failed or went down, which the Web API's timer opens a runtime to make again."""
+        return self.shioaji is not None and not self.shioaji.up
 
     def become_current(self) -> None:
         """What the process takes from the settings of the runtime that serves new work: the log level of its one logger."""
@@ -186,6 +216,12 @@ class ProcessState:
     One save at a time of the price history, the MOPS EPS pages and the classified posts, across every runtime: a
     retired runtime still finishing a run and the current one would otherwise insert the same row at once.
     """
+    shioaji_connections: dict[ShioajiLogin, ShioajiConnection] = field(default_factory=dict)
+    """
+    The Shioaji connection of each login the process made: its client, logged in once and again only after the login
+    failed or went down, every earlier client, never logged out, and the one request pacer of the login. Every later
+    runtime reuses it; shioaji 1.3.1 segfaults at the next garbage collection after a logout.
+    """
 
 
 @dataclass(slots=True)
@@ -199,7 +235,7 @@ class OwnedPorts:
     watchlist_repository: IWatchlistRepository
     technical_settings_repository: ITechnicalSettingsRepository
     knowledge_repository: IKnowledgeRepository
-    mock_broker: IExecutionProvider
+    mock_broker: ISimulatedExecutionProvider
     ai_provider: IAiProvider
     """
     The user's counted provider, on the AI model the user chose while the site offers it, else on ai.active_model,
@@ -215,7 +251,19 @@ class ProviderDependencies:
 
     stock_provider: TaiwanStockProvider
     price_provider: IOhlcvProvider
-    """The daily history and realtime quotes the audience may use: create_price_provider."""
+    """The daily history and realtime quotes the site may use: the broker's history cache, else the open-data archive."""
+    history_cache: ICachedPriceProvider | None
+    """The broker's history cache when price_provider is one, which the Web API's timer refreshes; None for the archive."""
+    broker_market_data: bool
+    """
+    Whether the site's daily history and realtime quotes are its broker login's market data. Without it, price_provider
+    is the open-data archive, which serves no quote.
+    """
+    shioaji: ShioajiConnection | None
+    """
+    The process's Shioaji login of the environment's key pair on an audience with realtime quotes, whether it is up or
+    not: a login that failed at the start has one too. None on a public site and without the key pair.
+    """
     daily_close_archive: IDailyCloseArchive
     fundamentals_provider: IFundamentalsProvider | None
     """MOPS, or None for an audience that reads no MOPS (public): its valuation is refused."""
@@ -234,7 +282,7 @@ class ProviderDependencies:
     user_store: IUserStore
     attempt_log: IAttemptLog
     real_broker: IExecutionProvider | None
-    """Shioaji, logged in at startup when trading.execution_provider is shioaji; None on the mock broker."""
+    """Shioaji, on the login connect_shioaji made at startup, when trading.execution_provider is shioaji; None on the mock broker."""
     owned_ports: Callable[[User | None], OwnedPorts]
     """A user, or None signed out -> the adapters that hold that user's data. The order-gate check passes fakes."""
 
@@ -284,36 +332,88 @@ def create_groq_provider(config: AppConfig, logger: ILoggingProvider, model_name
     )
 
 
-@asynccontextmanager
-async def open_real_broker(config: AppConfig, logger: ILoggingProvider) -> AsyncGenerator[IExecutionProvider | None]:
-    """
-    The logged-in Shioaji provider, which only administrators' pipelines hold, or None on the mock broker. It logs out
-    when the caller is done, and when the login or a check after it fails, times out or is cancelled.
-    """
-    if config.trading.execution_provider == ExecutionProvider.MOCK:
-        yield None
-        return
+def import_shioaji() -> type[Shioaji]:
+    """The SDK's client class, imported with its reporting off unless the environment turns it on (sdk_reporting)."""
+    import c_infrastructure.trading.shioaji.sdk_reporting  # noqa: F401
 
-    # Imported only for Shioaji: importing shioaji creates shioaji.log in the working directory and logs a warning.
+    # isort: split
     from shioaji import Shioaji
 
+    return Shioaji
+
+
+def site_login(config: AppConfig) -> ShioajiLogin | None:
+    """The login the site's market data needs: the environment's key pair on an audience with realtime quotes, else None."""
+    return config.shioaji.login(config.environment) if config.audience.realtime_quotes else None
+
+
+async def connect_shioaji(
+    config: AppConfig, process: ProcessState, market_clock: TaiwanMarketClock
+) -> tuple[IBrokerQuoteProvider[Any] | None, IExecutionProvider | None]:
+    """
+    The market data and the broker of a runtime on the process's Shioaji login: the broker when
+    trading.execution_provider is shioaji, which only administrators' pipelines hold, else None for the mock broker.
+    Both read the client of the environment's key pair, simulation in dev and test, production in prod, which the
+    process logs in once and every later runtime of it reuses, until the login fails or Shioaji reports it down: then
+    the next runtime logs in again on a new client (ShioajiQuoteProvider.connect).
+
+    An audience without realtime quotes (public) builds no Shioaji adapter. A personal site without the key pair, or
+    whose login fails on the mock broker, gets no market data: its daily history is the open-data archive's, and it has
+    no quote, so nothing is ordered. A login or an account check that fails with Shioaji as the broker refuses the start.
+    """
+    logger = process.logger
+    login = site_login(config)
+
+    if login is None:
+        if config.audience.realtime_quotes:
+            logger.warning(
+                f"No Shioaji key pair for environment {config.environment.value}: daily history from the open-data archive, "
+                "and no realtime quote, so no order"
+            )
+
+        return None, None
+
+    client_class = import_shioaji()
+
+    from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection, ShioajiQuoteProvider
     from c_infrastructure.trading.shioaji.execution_provider import ShioajiExecutionProvider
 
-    login = config.shioaji.login(config.environment)
-    broker = "simulation" if login.simulation else "production"
-    provider = ShioajiExecutionProvider(client=Shioaji(simulation=login.simulation), login=login, config=config, logger=logger)
+    if login not in process.shioaji_connections:
+        process.shioaji_connections[login] = ShioajiConnection(client=client_class(simulation=login.simulation))
+
+    connection = process.shioaji_connections[login]
+    quotes = ShioajiQuoteProvider(
+        connection=connection,
+        new_client=lambda: client_class(simulation=login.simulation),
+        login=login,
+        market_clock=market_clock,
+        market_data=config.market_data,
+        sources=config.sources.shioaji,
+        board_lot_shares=config.market.board_lot_shares,
+        logger=logger,
+    )
+    server, reused = "simulation" if login.simulation else "production", connection.up
+    broker = None
 
     try:
-        try:
-            await provider.connect()
-        except Exception as error:
-            raise TradingSetupError(f"Shioaji {broker} login failed: {type(error).__name__}: {error}") from error
+        await quotes.connect()
 
-        logger.info(f"Logged in to Shioaji {broker}. Order mode: {config.trading.order_mode.value}")
-        yield provider
+        if config.trading.execution_provider == ExecutionProvider.SHIOAJI:
+            broker = ShioajiExecutionProvider(client=connection.client, quotes=quotes, login=login, config=config, logger=logger)
+            await broker.connect()
 
-    finally:
-        await provider.close()
+    except Exception as error:
+        failure = f"Shioaji {server} login failed: {error}"
+
+        if config.trading.execution_provider == ExecutionProvider.SHIOAJI:
+            raise TradingSetupError(failure) from error
+
+        logger.warning(f"{failure}. Daily history from the open-data archive, and no realtime quote, so no order")
+        return None, None
+
+    login_line = f"Reused the process's Shioaji {server} login" if reused else f"Logged in to Shioaji {server}"
+    logger.info(f"{login_line} for daily history and realtime quotes. Broker: {config.trading.execution_provider.value}")
+    return quotes, broker
 
 
 def create_news_provider(config: AppConfig, logger: ILoggingProvider, archive: IDailyCloseArchive) -> INewsProvider:
@@ -359,26 +459,29 @@ def create_notification_provider(config: AppConfig, logger: ILoggingProvider) ->
     return LineNotificationAdapter(config=config, logger=logger)
 
 
-def create_price_provider(
-    config: AppConfig, db: DatabaseConnector, process: ProcessState, market_clock: TaiwanMarketClock, archive: IDailyCloseArchive
-) -> IOhlcvProvider:
+def create_history_cache(
+    config: AppConfig,
+    db: DatabaseConnector,
+    process: ProcessState,
+    market_clock: TaiwanMarketClock,
+    quotes: IBrokerQuoteProvider[Any] | None,
+    archive: IDailyCloseArchive,
+) -> CachedPriceProvider | None:
     """
-    The open-data archive alone for an open-data audience, which never builds the Yahoo or the TWSE MIS adapter;
-    otherwise Yahoo daily history cached in the database, and TWSE MIS realtime quotes.
+    The broker's daily history, kept in the database, and its realtime quotes over the Shioaji login connect_shioaji
+    made, or None without one: an open-data audience, which builds no Shioaji adapter, and a personal site without the
+    key pair read the open-data archive instead.
     """
-    if config.audience.open_data_only:
-        return archive
+    if quotes is None:
+        return None
 
-    logger = process.logger
     return CachedPriceProvider(
-        history_provider=YahooFinanceProvider(
-            market_clock=market_clock, market_data=config.market_data, yahoo=config.sources.yahoo, logger=logger
-        ),
-        quote_provider=MisQuoteProvider(exchange=config.sources.exchange, market_data=config.market_data, logger=logger),
+        broker=quotes,
+        archive=archive,
         db=db,
-        market_data=config.market_data,
-        logger=logger,
         market_clock=market_clock,
+        market_data=config.market_data,
+        logger=process.logger,
         write_lock=process.cache_writes,
     )
 
@@ -389,6 +492,7 @@ async def build_provider_dependencies(
     process: ProcessState,
     market_clock: TaiwanMarketClock,
     accounts_key: SecretStr,
+    quotes: IBrokerQuoteProvider[Any] | None,
     real_broker: IExecutionProvider | None,
 ) -> ProviderDependencies:
     logger = process.logger
@@ -401,10 +505,15 @@ async def build_provider_dependencies(
 
     ai_providers = {provider: create_ai_provider(config, logger, provider) for provider in config.ai.offered_models}
     archive = SqlDailyCloseArchive(db, market_clock, config.sources.exchange, config.analysis.material_information_days, logger)
+    history_cache = create_history_cache(config, db, process, market_clock, quotes, archive)
+    login = site_login(config)
 
     return ProviderDependencies(
         stock_provider=stock_provider,
-        price_provider=create_price_provider(config, db, process, market_clock, archive),
+        price_provider=archive if history_cache is None else history_cache,
+        history_cache=history_cache,
+        broker_market_data=history_cache is not None,
+        shioaji=process.shioaji_connections.get(login) if login is not None else None,
         daily_close_archive=archive,
         fundamentals_provider=create_fundamentals_provider(config, db, process, market_clock),
         news_provider=create_news_provider(config, logger, archive),
@@ -455,7 +564,7 @@ def create_owned_ports(
             watchlist_repository=WatchlistRepository(owners_db, logger, market_clock),
             technical_settings_repository=SqlTechnicalSettingsRepository(owners_db),
             knowledge_repository=ChromaKnowledgeRepository(chroma_client, knowledge_collection(owner_id), logger),
-            mock_broker=MockExecutionProvider(owners_db, config, logger),
+            mock_broker=MockExecutionProvider(owners_db, config, market_clock, logger),
             ai_provider=counted,
             sentiment_classifier=AiSentimentClassifier(counted, sentiment_repository, config, logger),
         )
@@ -507,7 +616,7 @@ def build_pipeline(
         dependencies.notification_provider if user is not None and Permission.NOTIFY_RECIPIENTS in user.permissions else None
     )
     stocks, prices = dependencies.stock_provider, dependencies.price_provider
-    history_archive = dependencies.daily_close_archive if config.audience.open_data_only else None
+    history_archive = None if dependencies.broker_market_data else dependencies.daily_close_archive
     journal, broker = owned.journal, broker_for(dependencies, owned, user)
     chat_styler = ChatStylerService(config.sources.line.sentence_endings, config.sources.line.max_message_length)
 
@@ -529,6 +638,7 @@ def build_pipeline(
         data_collector=MarketDataCollector(prices, history_archive, market_clock, config, logger),
         official_change_feed=OfficialChangeFeed(stocks),
         daily_close_archiver=DailyCloseArchiver(stocks, dependencies.daily_close_archive, logger),
+        daily_history_refresh=DailyHistoryRefresh(dependencies.history_cache, market_clock, config),
         archive_warm_up=ArchiveWarmUp(dependencies.daily_close_archive, config),
         financials_lookup=FinancialsLookup(dependencies.daily_close_archive),
         realtime_quote_feed=RealtimeQuoteFeed(prices, market_clock, config, logger),
@@ -548,6 +658,13 @@ def build_pipeline(
         order_preparation=OrderPreparation(journal, market_clock, config, logger),
         order_execution=OrderExecution(broker, journal, market_clock, logger),
         order_outcome=OrderOutcome(broker, journal, market_clock, logger),
+        mock_account_loader=AccountLoader(owned.mock_broker, stocks, logger),
+        mock_order_execution=OrderExecution(owned.mock_broker, journal, market_clock, logger),
+        mock_order_outcome=OrderOutcome(owned.mock_broker, journal, market_clock, logger),
+        follow_candidates=FollowCandidates(journal, owned.mock_broker, market_clock, config),
+        follow_signals=FollowSignals(journal, market_clock, logger),
+        trade_history=TradeHistory(broker, journal),
+        mock_account_reset=MockAccountReset(owned.mock_broker, market_clock),
         reporting=Reporting(notifications, config, logger),
         run_reports=RunReports(journal, logger),
         recent_runs=RecentRuns(journal),
@@ -597,6 +714,8 @@ def compose_runtime(
         market_valuation_cache=MarketValuationCache(signed_out.load_market_valuation, config.api.valuation_cache_minutes * 60),
         config=config,
         logger=logger,
+        broker_market_data=dependencies.broker_market_data,
+        shioaji=dependencies.shioaji,
     )
 
 
@@ -617,10 +736,10 @@ def create_process_state(config: AppConfig) -> ProcessState:
 async def open_runtime(config: AppConfig, process: ProcessState) -> AsyncGenerator[Runtime]:
     """
     The whole startup for settings startup_settings passed: the accounts key (secrets/accounts.key created on the first
-    start where the environment allows it), the database (opened and brought to the current schema), the broker login,
-    every adapter and the check that the key opens the saved users. It raises one of STARTUP_REFUSALS for a setup it
-    refuses, before any workflow runs. Whatever it opened closes when the caller is done, or at once when a later step
-    fails: the broker logs out, then the database closes.
+    start where the environment allows it), the database (opened and brought to the current schema), the Shioaji login
+    that the realtime quotes and a Shioaji broker share (once per process, see ProcessState.shioaji_connections), every
+    adapter and the check that the key opens the saved users. It raises one of STARTUP_REFUSALS for a setup it
+    refuses, before any workflow runs. The database closes when the caller is done, or at once when a later step fails.
     """
     accounts_key = load_accounts_key(config, process.logger)
     market_clock = TaiwanMarketClock(config.market_hours)
@@ -629,8 +748,8 @@ async def open_runtime(config: AppConfig, process: ProcessState) -> AsyncGenerat
         db = DatabaseConnector(config=config, logger=process.logger)
         opened.push_async_callback(db.close)
         await db.init_db()
-        real_broker = await opened.enter_async_context(open_real_broker(config, process.logger))
-        dependencies = await build_provider_dependencies(config, db, process, market_clock, accounts_key, real_broker)
+        quotes, real_broker = await connect_shioaji(config, process, market_clock)
+        dependencies = await build_provider_dependencies(config, db, process, market_clock, accounts_key, quotes, real_broker)
         await dependencies.user_store.check_key()
         yield compose_runtime(config, process.logger, market_clock, dependencies)
 
@@ -647,6 +766,31 @@ async def open_database() -> AsyncGenerator[DatabaseConnector]:
 
     try:
         yield database
+
+    finally:
+        await database.close()
+
+
+@asynccontextmanager
+async def open_archiver(config: AppConfig) -> AsyncGenerator[DailyCloseArchiver]:
+    """
+    The archive's one step over the database and the TWSE and TPEX OpenAPI alone, for `just archive-closes`: no broker
+    login, no accounts key and no AI key, which a personal setup would otherwise need just to archive. The database is
+    opened and brought to the current schema as startup does, so an outdated one raises OutdatedDatabaseError.
+    """
+    logger = LoggerService(level=config.behavior.log_level)
+    market_clock = TaiwanMarketClock(config.market_hours)
+    database = DatabaseConnector(config=config, logger=logger)
+
+    try:
+        await database.init_db()
+        exchange = TaiwanStockProvider(
+            exchange=config.sources.exchange, market_clock=market_clock, market_data=config.market_data, logger=logger
+        )
+        archive = SqlDailyCloseArchive(
+            database, market_clock, config.sources.exchange, config.analysis.material_information_days, logger
+        )
+        yield DailyCloseArchiver(exchange, archive, logger)
 
     finally:
         await database.close()

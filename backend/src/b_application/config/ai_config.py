@@ -4,6 +4,7 @@ from typing import Annotated, Literal
 from pydantic import AfterValidator, BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from a_domain.ports.system.settings_files import SettingsProblem
 from a_domain.types.enums import AiProvider
 
 
@@ -81,11 +82,11 @@ class AiConfig(BaseSettings):
 
         return choice
 
-    def missing_keys(self) -> dict[str, str]:
+    def missing_keys(self) -> dict[str, SettingsProblem]:
         """
         What each offered provider still needs before the app may start, by the setting that offers it (ai.active_model,
-        or ai.user_selectable.<index>): its model id under available_models or its API key's environment variable, by
-        name only. Empty when every offered provider has both.
+        or ai.user_selectable.<index>): its model id under available_models (ai_model_id_missing) or its API key's
+        environment variable (ai_key_missing), by name only. Empty when every offered provider has both.
         """
         keys = {
             AiProvider.OPENAI: ("OPENAI_API_KEY", self.openai_api_key),
@@ -104,9 +105,14 @@ class AiConfig(BaseSettings):
             name, key = keys[provider]
 
             if provider not in self.available_models:
-                missing[path] = f"{provider.value} needs its model id under ai.available_models.{provider.value}"
+                message = f"{provider.value} needs its model id under ai.available_models.{provider.value}"
+                missing[path] = SettingsProblem(
+                    message=message, path=path, code="ai_model_id_missing", params={"provider": provider.value}
+                )
             elif not (key and key.strip()):
-                missing[path] = f"{provider.value} needs {name} in the environment or .env"
+                message = f"{provider.value} needs {name} in the environment or .env"
+                params: dict[str, str | int | float] = {"provider": provider.value, "variable": name}
+                missing[path] = SettingsProblem(message=message, path=path, code="ai_key_missing", params=params)
 
         return missing
 

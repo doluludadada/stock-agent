@@ -24,6 +24,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/account/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reset Mock Account
+         * @description Opens the user's mock account again with `initial_cash` and no positions; its equity curve and trades start anew
+         *     and every decision is open to follow again. No run, decision or order is deleted. 409 while a run of the user
+         *     runs, which could order on the account meanwhile.
+         */
+        post: operations["reset_mock_account_v1_account_reset_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/trades": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Trades
+         * @description Every order that filled at least one share since the mock account opened, newest first, each with the run whose
+         *     decision it carried out: a follow's with the run it followed. Ask for limit + 1 to know of a next page.
+         */
+        get: operations["get_trades_v1_account_trades_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/audit": {
         parameters: {
             query?: never;
@@ -456,7 +499,8 @@ export interface paths {
         /**
          * Get Audience
          * @description Whom the site serves, personal or public, and what that allows, from the one table of each audience's capabilities.
-         *     The web app shows only what the site can do by it; the server still refuses the rest. Public.
+         *     Realtime quotes also need this runtime's Shioaji login, which a personal site may lack. The web app shows only what
+         *     the site can do by it; the server still refuses the rest. Public.
          */
         get: operations["get_audience_v1_market_audience_get"];
         put?: never;
@@ -497,8 +541,9 @@ export interface paths {
         };
         /**
          * Get Index History
-         * @description One market index's completed daily bars, oldest first, from the daily history the stock pages share: the Yahoo
-         *     cache, or the open-data archive on a public site. Public. Like a stock's history, it fetches no realtime quote.
+         * @description One market index's completed daily bars, oldest first, from the daily history the stock pages share: the broker's
+         *     history cache on a site with a Shioaji login, else the open-data archive. Public. Like a stock's history, it
+         *     fetches no realtime quote.
          */
         get: operations["get_index_history_v1_market_indexes__index__get"];
         put?: never;
@@ -727,6 +772,33 @@ export interface paths {
         get: operations["get_run_v1_runs__run_id__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/runs/{run_id}/follow": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Run Follow
+         * @description What a follow of the run into the user's mock account may take now, and every follow of it so far. Records nothing.
+         */
+        get: operations["get_run_follow_v1_runs__run_id__follow_get"];
+        put?: never;
+        /**
+         * Follow Run
+         * @description Follows the run's open decisions into the user's mock account, as a run of its own: each BUY with its shares, each
+         *     SELL with at most the shares held, priced again now, through the same order gates and journal as every order. A
+         *     second follow takes only the decisions no follow order of which filled since the account opened. A site that prices
+         *     orders on realtime quotes refuses it while it has no Shioaji login, as it does Buzz and Intraday.
+         */
+        post: operations["follow_run_v1_runs__run_id__follow_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1008,7 +1080,23 @@ export interface components {
             execution_provider: components["schemas"]["ExecutionProvider"];
             /** Live Stock Ids */
             live_stock_ids: string[];
+            opening: components["schemas"]["AccountOpening"] | null;
             order_mode: components["schemas"]["OrderMode"];
+            /** Profit */
+            profit: number | null;
+        };
+        /**
+         * AccountOpening
+         * @description When a mock account opened, at its first read or its last reset, and the cash it opened with. Its account page, the
+         *     equity curve and the trades start there. A real broker reports none.
+         */
+        AccountOpening: {
+            initial_cash: components["schemas"]["NonNegativeFiniteFloat"];
+            /**
+             * Opened At
+             * Format: date-time
+             */
+            opened_at: string;
         };
         /** AccountValueResponse */
         AccountValueResponse: {
@@ -1137,6 +1225,7 @@ export interface components {
             news_articles: boolean;
             /** Open Data Only */
             open_data_only: boolean;
+            order_pricing: components["schemas"]["OrderPricing"];
             /** Realtime Quotes */
             realtime_quotes: boolean;
         };
@@ -1254,29 +1343,6 @@ export interface components {
              */
             confirm: true;
         };
-        /**
-         * DailyBarResponse
-         * @description One completed daily bar (Ohlcv): `ts` is its session's 13:30 close in Asia/Taipei, volume is in shares.
-         */
-        DailyBarResponse: {
-            /** Change */
-            change: number | null;
-            /** Close */
-            close: number;
-            /** High */
-            high: number;
-            /** Low */
-            low: number;
-            /** Open */
-            open: number;
-            /**
-             * Ts
-             * Format: date-time
-             */
-            ts: string;
-            /** Volume */
-            volume: number;
-        };
         "DataReference-Input": components["schemas"]["MarketValue"] | components["schemas"]["LatestPrice"] | components["schemas"]["IndicatorValue"];
         "DataReference-Output": components["schemas"]["MarketValue"] | components["schemas"]["LatestPrice"] | components["schemas"]["IndicatorValue"];
         /**
@@ -1333,7 +1399,7 @@ export interface components {
          *     refused file, a user who is not an administrator and an installation on a real broker.
          * @enum {string}
          */
-        ErrorCode: "sign_in_required" | "sign_in_refused" | "sign_in_throttled" | "registration_closed" | "setup_code_refused" | "already_set_up" | "user_exists" | "last_administrator" | "unknown_host" | "app_request_required" | "administrators_only" | "real_broker_refused" | "mock_broker_only" | "realtime_quotes_unavailable" | "mops_unavailable" | "password_required" | "password_refused" | "settings_file_refused" | "settings_file_missing" | "settings_conflict" | "settings_edit_refused" | "settings_refused" | "technical_settings_conflict" | "ai_model_not_offered" | "run_in_progress" | "too_many_runs" | "listing_unavailable" | "not_found" | "invalid_request" | "body_too_large" | "request_refused";
+        ErrorCode: "sign_in_required" | "sign_in_refused" | "sign_in_throttled" | "registration_closed" | "setup_code_refused" | "already_set_up" | "user_exists" | "last_administrator" | "unknown_host" | "app_request_required" | "administrators_only" | "real_broker_refused" | "mock_broker_only" | "realtime_quotes_unavailable" | "mops_unavailable" | "password_required" | "password_refused" | "settings_file_refused" | "settings_file_missing" | "settings_conflict" | "settings_edit_refused" | "settings_refused" | "technical_settings_conflict" | "ai_model_not_offered" | "run_in_progress" | "too_many_runs" | "nothing_to_follow" | "outside_follow_window" | "listing_unavailable" | "not_found" | "invalid_request" | "body_too_large" | "request_refused";
         /**
          * ErrorResponse
          * @description Every refusal: `detail` in words for a person, `code` for the client to switch on.
@@ -1379,6 +1445,31 @@ export interface components {
             /** Year */
             year: number;
         };
+        /**
+         * FollowItem
+         * @description One follow of a decision: the follow's decision, priced when it was followed, and its order.
+         */
+        FollowItem: {
+            decision: components["schemas"]["SignalResponse"];
+            order: components["schemas"]["Order"];
+        };
+        /**
+         * FollowRefusal
+         * @description Why a run's decisions cannot be followed into the user's mock account now. The Web API answers each as its code.
+         * @enum {string}
+         */
+        FollowRefusal: "nothing_to_follow" | "outside_follow_window";
+        /**
+         * FollowResponse
+         * @description What a follow of the run may take now, and what it took so far.
+         */
+        FollowResponse: {
+            /** Follows */
+            follows: components["schemas"]["FollowItem"][];
+            /** Open Decision Ids */
+            open_decision_ids: string[];
+            refusal: components["schemas"]["FollowRefusal"] | null;
+        };
         FormulaId: string;
         /**
          * GroupOperator
@@ -1393,7 +1484,7 @@ export interface components {
         /** IndexHistoryResponse */
         IndexHistoryResponse: {
             /** Bars */
-            bars: components["schemas"]["DailyBarResponse"][];
+            bars: components["schemas"]["Ohlcv"][];
             index: components["schemas"]["MarketIndex"];
         };
         /**
@@ -1451,7 +1542,7 @@ export interface components {
             name: string | null;
             /** Stock Id */
             stock_id: string;
-            today: components["schemas"]["DailyBarResponse"] | null;
+            today: components["schemas"]["Ohlcv"] | null;
         };
         /** MacdIndicator */
         MacdIndicator: {
@@ -1485,7 +1576,7 @@ export interface components {
         MarketField: "open" | "high" | "low" | "close" | "volume";
         /**
          * MarketIndex
-         * @description A market index with a daily history. Yahoo Finance serves it under the symbol `sources.yahoo.index_symbols` names.
+         * @description A market index with a daily history: the own index of the exchange `market` names, kept under that market.
          * @enum {string}
          */
         MarketIndex: "taiex";
@@ -1585,6 +1676,50 @@ export interface components {
         "NumericExpression-Input": components["schemas"]["Number"] | (components["schemas"]["DataReference-Input"] | components["schemas"]["Arithmetic-Input"]);
         "NumericExpression-Output": components["schemas"]["Number"] | (components["schemas"]["DataReference-Output"] | components["schemas"]["Arithmetic-Output"]);
         /**
+         * Ohlcv
+         * @description One bar of trading. A daily bar is stamped at its session's 13:30 close in Asia/Taipei, and its volume is in shares.
+         *     Every field is in every answer, so the Web API's schema requires each one.
+         */
+        Ohlcv: {
+            /**
+             * Change
+             * @description The exchange's official change from the session's reference price: the previous close, adjusted on an ex-rights or
+             *     ex-dividend day. The TWSE and TPEX listings and the broker's snapshots report it; a bar without one has None.
+             */
+            change: number | null;
+            /**
+             * Close
+             * @default 0
+             */
+            close: number;
+            /**
+             * High
+             * @default 0
+             */
+            high: number;
+            /**
+             * Low
+             * @default 0
+             */
+            low: number;
+            /**
+             * Open
+             * @default 0
+             */
+            open: number;
+            /**
+             * Ts
+             * Format: date-time
+             * @description Timestamp of the candle
+             */
+            ts: string;
+            /**
+             * Volume
+             * @default 0
+             */
+            volume: number;
+        };
+        /**
          * OpenDataAttribution
          * @description The credit the Open Government Data License v1 asks of every use, in the form of its annex: each providing agency
          *     with its datasets, the license's notice, and the license's name and address. A use that does not give it holds no
@@ -1671,6 +1806,13 @@ export interface components {
          * @enum {string}
          */
         OrderMode: "mock_only" | "live" | "disabled";
+        /**
+         * OrderPricing
+         * @description What prices an order of this deployment, in which phase of the trading day it may be placed and on which brokers.
+         *     Audience.order_pricing picks one; OrderGateRule and the follow's window read it, and nothing else decides by it.
+         * @enum {string}
+         */
+        OrderPricing: "realtime_quote" | "official_close";
         /**
          * OrderStatus
          * @description Order lifecycle. Each status lists the statuses that may follow it in next_statuses.
@@ -1809,6 +1951,15 @@ export interface components {
             /** Title */
             title: string;
         };
+        /** ResetRequest */
+        ResetRequest: {
+            /**
+             * Confirm
+             * @constant
+             */
+            confirm: true;
+            initial_cash: components["schemas"]["PositiveFiniteFloat"];
+        };
         Revision: string;
         /**
          * Role
@@ -1827,6 +1978,23 @@ export interface components {
              * Format: uuid
              */
             run_id: string;
+        };
+        /**
+         * RunReference
+         * @description Which run a trade came from, as the account page names it.
+         */
+        RunReference: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /**
+             * Start Time
+             * Format: date-time
+             */
+            start_time: string;
+            workflow: components["schemas"]["Workflow"];
         };
         /** RunResponse */
         RunResponse: {
@@ -1864,6 +2032,8 @@ export interface components {
             /** Execution Log */
             execution_log: components["schemas"]["PublicText"][];
             execution_provider: components["schemas"]["ExecutionProvider"];
+            /** Followed Run Id */
+            followed_run_id?: string | null;
             order_mode: components["schemas"]["OrderMode"];
             /** Orders Refused */
             orders_refused: number;
@@ -1880,6 +2050,8 @@ export interface components {
              * Format: date-time
              */
             start_time: string;
+            /** Technical Strategy Id */
+            technical_strategy_id: string | null;
             /** Total Scanned */
             total_scanned: number;
             workflow: components["schemas"]["Workflow"];
@@ -2051,6 +2223,8 @@ export interface components {
          *     pydantic's own text can quote the input, which can be a secret from .env.
          */
         SettingsProblem: {
+            /** Code */
+            code?: string | null;
             /** Column */
             column?: number | null;
             file?: components["schemas"]["SettingsFile"] | null;
@@ -2058,6 +2232,10 @@ export interface components {
             line?: number | null;
             /** Message */
             message: string;
+            /** Params */
+            params?: {
+                [key: string]: string | number;
+            };
             /** Path */
             path?: string | null;
         };
@@ -2131,6 +2309,8 @@ export interface components {
              * Format: uuid
              */
             decision_id: string;
+            /** Followed Decision Id */
+            followed_decision_id?: string | null;
             /**
              * Generated At
              * Format: date-time
@@ -2163,7 +2343,7 @@ export interface components {
          * @description Which decision path produced a signal.
          * @enum {string}
          */
-        SignalSource: "combined" | "stop_loss" | "manual";
+        SignalSource: "combined" | "stop_loss" | "manual" | "follow";
         /** StochasticIndicator */
         StochasticIndicator: {
             d_period: components["schemas"]["IndicatorPeriod"];
@@ -2190,7 +2370,7 @@ export interface components {
         /** StockHistoryResponse */
         StockHistoryResponse: {
             /** Bars */
-            bars: components["schemas"]["DailyBarResponse"][];
+            bars: components["schemas"]["Ohlcv"][];
             /** Notes */
             notes: components["schemas"]["PublicText"][];
             stock: components["schemas"]["ListedStockResponse"];
@@ -2249,7 +2429,7 @@ export interface components {
          * @description One stock's valuation before any user assumption (StockValuation).
          */
         StockValuationResponse: {
-            close: components["schemas"]["DailyBarResponse"] | null;
+            close: components["schemas"]["Ohlcv"] | null;
             /** Close Is Fresh */
             close_is_fresh: boolean;
             /** Current Pe */
@@ -2416,6 +2596,14 @@ export interface components {
          */
         TradeAction: "buy" | "sell" | "hold";
         /**
+         * TradeResponse
+         * @description An order that filled at least one share, and the run whose decision it carried out: the followed run for a follow.
+         */
+        TradeResponse: {
+            order: components["schemas"]["Order"];
+            run: components["schemas"]["RunReference"];
+        };
+        /**
          * User
          * @description A person who signs in, and the owner of their own mock account, watchlist, records and strategies. It holds no
          *     credential: the user store keeps the password hash and the encrypted username and email, and hands back this model
@@ -2574,7 +2762,7 @@ export interface components {
          * @description The user-facing operation a run belongs to. Each run has one run id.
          * @enum {string}
          */
-        Workflow: "full_cycle" | "buzz_scan" | "intraday" | "specific_stocks" | "manual_buy" | "valuation" | "research";
+        Workflow: "full_cycle" | "buzz_scan" | "intraday" | "specific_stocks" | "manual_buy" | "follow" | "valuation" | "research";
     };
     responses: never;
     parameters: never;
@@ -2602,6 +2790,89 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AccountHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_mock_account_v1_account_reset_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountOpening"];
+                };
+            };
+            /** @description mock_broker_only: the execution provider is not the mock broker. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description run_in_progress: a run of the user is still running. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_trades_v1_account_trades_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TradeResponse"][];
                 };
             };
             /** @description Validation Error */
@@ -3615,7 +3886,7 @@ export interface operations {
                     "application/json": components["schemas"]["RunAccepted"];
                 };
             };
-            /** @description mock_broker_only: the execution provider is not the mock broker; use the CLI. realtime_quotes_unavailable: the site uses open data only (audience public), which has no realtime quotes. */
+            /** @description mock_broker_only: the execution provider is not the mock broker; use the CLI. realtime_quotes_unavailable: the site has no realtime quotes: it uses open data only (audience public), or it has no Shioaji login. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -3726,7 +3997,7 @@ export interface operations {
                     "application/json": components["schemas"]["RunAccepted"];
                 };
             };
-            /** @description mock_broker_only: the execution provider is not the mock broker; use the CLI. realtime_quotes_unavailable: the site uses open data only (audience public), which has no realtime quotes. */
+            /** @description mock_broker_only: the execution provider is not the mock broker; use the CLI. realtime_quotes_unavailable: the site has no realtime quotes: it uses open data only (audience public), or it has no Shioaji login. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -3842,6 +4113,126 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_follow_v1_runs__run_id__follow_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FollowResponse"];
+                };
+            };
+            /** @description mock_broker_only: the execution provider is not the mock broker. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The user has no such run. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    follow_run_v1_runs__run_id__follow_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Confirmed"];
+            };
+        };
+        responses: {
+            /** @description The run started; poll GET /v1/runs/{run_id}. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunAccepted"];
+                };
+            };
+            /** @description mock_broker_only: the execution provider is not the mock broker. realtime_quotes_unavailable: the site prices orders on realtime quotes and has no Shioaji login now. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The user has no such run. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description nothing_to_follow: no decision of the run is left to follow. outside_follow_window: the market is in a phase in which this site places no order. run_in_progress: another run of this user is still running. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The server runs its most workflows at once; start yours later. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

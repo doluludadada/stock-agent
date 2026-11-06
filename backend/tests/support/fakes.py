@@ -25,7 +25,7 @@ from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.model.system.stats import SystemStats
 from a_domain.model.system.user import User, UserSession
-from a_domain.model.trading.account import Account, AccountSnapshot, Position
+from a_domain.model.trading.account import Account, AccountOpening, AccountSnapshot, Position
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.model.trading.watchlist import WatchlistEntry
@@ -479,8 +479,9 @@ class FakeTradingJournal:
     async def save_snapshot(self, snapshot: AccountSnapshot) -> None:
         self.account_snapshots.append(snapshot)
 
-    async def snapshots(self) -> list[AccountSnapshot]:
-        return sorted(self.account_snapshots, key=lambda snapshot: snapshot.taken_at)
+    async def snapshots(self, since: datetime | None = None) -> list[AccountSnapshot]:
+        kept = [snapshot for snapshot in self.account_snapshots if since is None or snapshot.taken_at >= since]
+        return sorted(kept, key=lambda snapshot: snapshot.taken_at)
 
     async def save_stock_reports(self, run_id: RunId, stocks: list[Stock]) -> None:
         """Keeps each stock as the SQL journal stores it, so a later change to the Stock object is not seen."""
@@ -502,6 +503,21 @@ class FakeTradingJournal:
 
     async def orders_of(self, run_id: RunId) -> list[Order]:
         return [order for order in self.orders.values() if order.run_id == run_id]
+
+    async def follows_of(self, run_id: RunId) -> list[tuple[TradeSignal, Order]]:
+        followed = {signal.decision_id for signal in await self.signals_of(run_id)}
+        orders = {order.decision_id: order for order in self.orders.values()}
+        follows = [(signal, orders[signal.decision_id]) for signal in self.signals if signal.followed_decision_id in followed]
+        return sorted((follow for follow in follows if follow[0].decision_id in orders), key=lambda follow: follow[1].created_at)
+
+    async def trades(self, since: datetime | None, limit: int, offset: int) -> list[tuple[Order, SystemStats]]:
+        filled = [
+            order for order in self.orders.values() if order.filled_quantity > 0 and (since is None or order.created_at >= since)
+        ]
+        newest = sorted(filled, key=lambda order: order.created_at, reverse=True)[offset : offset + limit]
+        runs = {order.run_id: self.runs[order.run_id] for order in newest}
+        sources = {run_id: self.runs.get(run.followed_run_id, run) if run.followed_run_id else run for run_id, run in runs.items()}
+        return [(order, sources[order.run_id]) for order in newest]
 
 
 class FakeWatchlistRepository:
@@ -546,9 +562,9 @@ class RecordingExecutionProvider:
 
     def __init__(self, cash: float = 1_000_000.0, cost_rule: TradingCostRule | None = None) -> None:
         self.cash = cash
+        self.opening: AccountOpening | None = None
         self.positions: list[Position] = []
         self.placed: list[Order] = []
-        self.closed = False
         self._cost_rule = cost_rule or TradingCostRule(
             fee_rate=0.001425, tax_rate=0.003, etf_tax_rate=0.001, min_fee=20, bond_etf_tax_exempt_until=date(2026, 12, 31)
         )
@@ -566,10 +582,11 @@ class RecordingExecutionProvider:
         return order
 
     async def get_account(self) -> Account:
-        return Account(cash=self.cash, positions=[replace(position) for position in self.positions])
+        return Account(cash=self.cash, positions=[replace(position) for position in self.positions], opening=self.opening)
 
-    async def close(self) -> None:
-        self.closed = True
+    async def reset(self, initial_cash: float, now: datetime) -> Account:
+        self.cash, self.positions, self.opening = initial_cash, [], AccountOpening(initial_cash=initial_cash, opened_at=now)
+        return await self.get_account()
 
 
 class FakeTechnicalSettingsRepository:

@@ -17,7 +17,8 @@ class RunHistory:
     finished; one that ended by an exception keeps it as its failure. A failed save is logged in the run; the run goes
     on, because nothing acts on a decision whose own save failed.
 
-    A caller that must name the run before it starts (the Web API answers with the run id at once) passes that id.
+    A caller that must name the run before it starts (the Web API answers with the run id at once) passes that id. A
+    follow names the run it follows.
     `ai_model` is the AI model the Pipeline's AI provider runs on, so the record names the model the run used.
     """
 
@@ -32,10 +33,13 @@ class RunHistory:
         self._logger = logger
 
     @asynccontextmanager
-    async def execute(self, workflow: Workflow, run_id: RunId | None = None) -> AsyncGenerator[SystemStats]:
+    async def execute(
+        self, workflow: Workflow, run_id: RunId | None = None, followed_run_id: RunId | None = None
+    ) -> AsyncGenerator[SystemStats]:
         stats = SystemStats(
             run_id=run_id or new_run_id(),
             workflow=workflow,
+            followed_run_id=followed_run_id,
             execution_provider=self._execution_provider,
             order_mode=self._order_mode,
             ai_model=self._ai_model,
@@ -46,7 +50,6 @@ class RunHistory:
             await self._journal.save_run(stats)
         except Exception as error:
             self._logger.error(stats.add_error(f"Run record not saved: {stats.run_id}, error={error}"))
-
         try:
             yield stats
         except BaseException as error:
@@ -55,10 +58,8 @@ class RunHistory:
             raise
         finally:
             stats.finish(now=self._market_clock.now())
-
             try:
                 await self._journal.save_run(stats)
             except Exception as error:
                 self._logger.error(stats.add_error(f"Run record not saved: {stats.run_id}, error={error}"))
-
             self._logger.info(f"Run {workflow.value} finished. Signals={stats.signals_generated}, Orders={stats.orders_submitted}.")

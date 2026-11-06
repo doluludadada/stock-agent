@@ -122,13 +122,16 @@ class IDailyCloseArchive(IOhlcvProvider, INewsProvider, Protocol):
     session, day, month or quarter, so that a public site may show what it computes from them: every session's official
     closes, the material information each company announced, the companies' year-to-date EPS, balance sheets and income
     statements of each quarter, their revenue of each month, each session's valuation ratios and TWSE's own news. What
-    the archive did not save in time is lost. It is kept apart from the cached daily history, whose source forbids
-    redistribution, so the two never mix.
+    the archive did not save in time is lost. It is kept apart from the broker's cached daily history, which may not be
+    redistributed, so the two never mix.
 
-    It is the only price source of an open-data deployment (Audience.open_data_only): fetch_history serves the stocks'
-    archived closes and fetch_index_history an index's, each bar stamped at its session's close. An index's report
-    gives its close only, so its bar's open, high and low are that close and its volume 0. The archive holds no
-    realtime quote: fetch_realtime_bars raises RealtimeQuotesUnavailable.
+    It is the only price source of an open-data deployment (Audience.open_data_only), and of a personal one without a
+    broker login: fetch_history serves the stocks' archived closes and fetch_index_history an index's, each bar stamped
+    at its session's close. The archive keeps each stock's bars as its exchange listed them, and fetch_history serves
+    them adjusted for the corporate actions between them (HistoryAdjustmentRule), checked against the index closes of
+    the sessions it holds; an index needs no adjustment. An index's report gives its close only, so its bar's open, high
+    and low are that close and its volume 0. The archive holds no realtime quote: fetch_realtime_bars raises
+    RealtimeQuotesUnavailable.
 
     It is also the only news source of an audience without news articles (Audience.news_articles): fetch_news serves a
     stock's archived material information and the TWSE news whose title names its code, of the last
@@ -164,6 +167,10 @@ class IDailyCloseArchive(IOhlcvProvider, INewsProvider, Protocol):
         by the columns sources.exchange.financial_reports.summary names for their industry format, and its revenue of
         every month the archive holds; both oldest first.
         """
+        ...
+
+    async def official_changes(self, stock_ids: list[str], first: date, last: date) -> dict[tuple[str, date], float]:
+        """Each stock's change of each session from first to last that the archive holds one of, as its exchange listed it."""
         ...
 
     async def session_count(self) -> int:

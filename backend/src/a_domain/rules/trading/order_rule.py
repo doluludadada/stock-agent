@@ -6,25 +6,69 @@ from a_domain.model.trading.order import Order
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.rules.collect.freshness import DataFreshnessRule
 from a_domain.rules.trading.tick import LimitPriceRule
-from a_domain.types.enums import ExecutionProvider, OrderMode, OrderType, RejectReason, TimeInForce, TradeAction, TradingPhase
+from a_domain.types.enums import (
+    ExecutionProvider,
+    OrderMode,
+    OrderPricing,
+    OrderType,
+    RejectReason,
+    TimeInForce,
+    TradeAction,
+    TradingPhase,
+)
 from a_domain.types.ids import RunId
+
+
+@dataclass(frozen=True)
+class OrderPriceRule:
+    """
+    Why the decision's price may not price an order at `now`, or None. A realtime quote counts while it is at most
+    `price_freshness` old, measured to `now`, so a quote that was fresh when fetched but aged while the run analysed
+    other stocks is refused. An official close counts only as the close of the last closed session (`last_close`, the
+    time a daily bar of that session is stamped with): an older one is no longer the newest price, and a newer one
+    does not exist yet.
+    """
+
+    pricing: OrderPricing
+    price_freshness: DataFreshnessRule
+
+    def apply(self, signal: TradeSignal, now: datetime, last_close: datetime) -> tuple[RejectReason, str] | None:
+        match self.pricing:
+            case OrderPricing.REALTIME_QUOTE:
+                fresh = self.price_freshness.apply(signal.price_observed_at, now)
+                limit = f"the limit is {int(self.price_freshness.max_lag.total_seconds() // 60)} min"
+            case OrderPricing.OFFICIAL_CLOSE:
+                fresh = signal.price_observed_at >= last_close
+                limit = f"only the close of {last_close:%Y-%m-%d} prices an order now"
+
+        if fresh:
+            return None
+
+        age_minutes = int((now - signal.price_observed_at).total_seconds() // 60)
+        detail = (
+            f"price {signal.price_at_signal:.2f} was quoted at {signal.price_observed_at:%Y-%m-%d %H:%M}, "
+            f"{age_minutes} min before {now:%H:%M}; {limit}"
+        )
+        return RejectReason.STALE_PRICE, detail
 
 
 @dataclass(frozen=True)
 class OrderGateRule:
     """
     Why the app may not send an order for this decision now, or None. The gates run per decision right before
-    submission, against one reading of the clock: the order mode and execution provider, continuous trading (the
-    opening and closing call auctions take ROD only, and the app sends IOC), and the price age. The age is measured
-    from the quote behind the decision to `now`, so a quote that was fresh when fetched but aged while the run
-    analysed other stocks is refused.
+    submission, against one reading of the clock: the order mode and execution provider, the brokers and the trading
+    phase the order pricing allows (a realtime quote prices an order in continuous trading only, since the opening and
+    closing call auctions take ROD only and the app sends IOC; an official close prices a mock order only while no
+    session trades), and the price's age (OrderPriceRule).
     """
 
     order_mode: OrderMode
     execution_provider: ExecutionProvider
-    price_freshness: DataFreshnessRule
+    price_rule: OrderPriceRule
 
-    def apply(self, signal: TradeSignal, now: datetime, phase: TradingPhase) -> tuple[RejectReason, str] | None:
+    def apply(self, signal: TradeSignal, now: datetime, phase: TradingPhase, last_close: datetime) -> tuple[RejectReason, str] | None:
+        pricing = self.price_rule.pricing
+
         if self.order_mode == OrderMode.DISABLED:
             return RejectReason.ORDER_MODE_DISABLED, "trading.order_mode is disabled"
 
@@ -34,20 +78,16 @@ class OrderGateRule:
         if self.order_mode == OrderMode.LIVE and self.execution_provider == ExecutionProvider.MOCK:
             return RejectReason.ORDER_MODE_MISMATCH, "live order mode cannot use the mock execution provider"
 
-        if phase != TradingPhase.CONTINUOUS:
-            detail = f"{now:%a %Y-%m-%d %H:%M} falls in the market's {phase} phase; IOC orders trade only in continuous trading"
-            return RejectReason.MARKET_CLOSED, detail
+        if self.execution_provider not in pricing.brokers:
+            return RejectReason.ORDER_MODE_MISMATCH, f"{pricing} orders go to the mock broker only"
 
-        if self.price_freshness.apply(signal.price_observed_at, now):
-            return None
+        if phase != pricing.trading_phase:
+            detail = (
+                f"{now:%a %Y-%m-%d %H:%M} falls in the market's {phase} phase; {pricing} orders go in its {pricing.trading_phase} only"
+            )
+            return pricing.outside_phase, detail
 
-        age_minutes = int((now - signal.price_observed_at).total_seconds() // 60)
-        limit_minutes = int(self.price_freshness.max_lag.total_seconds() // 60)
-        detail = (
-            f"price {signal.price_at_signal:.2f} was quoted at {signal.price_observed_at:%Y-%m-%d %H:%M}, "
-            f"{age_minutes} min before {now:%H:%M}; the limit is {limit_minutes} min"
-        )
-        return RejectReason.STALE_PRICE, detail
+        return self.price_rule.apply(signal, now, last_close)
 
 
 @dataclass(frozen=True)
@@ -70,7 +110,7 @@ class OrderRule:
     gate_rule: OrderGateRule
     limit_price_rule: LimitPriceRule
 
-    def apply(self, signal: TradeSignal, run_id: RunId, now: datetime, phase: TradingPhase) -> Order:
+    def apply(self, signal: TradeSignal, run_id: RunId, now: datetime, phase: TradingPhase, last_close: datetime) -> Order:
         action = signal.action
 
         if action == TradeAction.HOLD:
@@ -88,7 +128,7 @@ class OrderRule:
             created_at=now,
             updated_at=now,
         )
-        refusal = self.gate_rule.apply(signal, now, phase)
+        refusal = self.gate_rule.apply(signal, now, phase, last_close)
 
         if refusal is not None:
             order.reject(*refusal, now=now)

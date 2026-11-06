@@ -16,8 +16,11 @@ export function useFormulaText(): FormulaText {
 
 /**
  * A strategy's name is the owner's own text. The three built-in ids also get a translated name, while the name is
- * still the built-in's, and a translated purpose: the backend stores no description. A rule named as a built-in rule
- * reads in the reader's language; the name the backend matches stays as it is.
+ * still the built-in's, and a translated purpose: the backend stores no description. A rule's name is the owner's text
+ * too, shown as typed, except a built-in strategy's own rule: in a strategy with a built-in id, a rule that still has
+ * a name the built-ins ship reads in the reader's language. The strategy's id decides, never the name alone, so a
+ * name the owner typed in their own strategy stays as typed even when a built-in rule has it. The name the backend
+ * matches stays as it is.
  */
 export function useStrategyLabels() {
   const { t } = useTranslation('strategies')
@@ -30,7 +33,8 @@ export function useStrategyLabels() {
         return strategy.name.trim() || t('untitled')
       },
       purpose: (strategy: Strategy) => (builtIn(strategy) ? t(`builtin.${strategy.id}.purpose`) : ''),
-      rule: (name: string) => builtInRuleName(locale, name),
+      rule: (strategyId: string | null | undefined, name: string) =>
+        strategyId && isBuiltInId(strategyId) ? builtInRuleName(locale, name) : name,
     }
   }, [t, locale])
 }

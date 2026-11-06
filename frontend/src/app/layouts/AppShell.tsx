@@ -61,7 +61,7 @@ export function AppShell() {
           <SearchField onOpen={() => setSearching(true)} className="hidden md:flex" />
           <div className="ml-auto flex items-center gap-1">
             <PreferenceMenu />
-            <UserMenu adminLinks={{ users: paths.users, settings: paths.adminSettings }} onSignedOut={() => navigate(paths.runs)} />
+            <UserMenu onSignedOut={() => navigate(paths.runs)} />
           </div>
         </header>
 

@@ -1,4 +1,5 @@
 from dataclasses import asdict
+from datetime import datetime
 from typing import override
 
 from pydantic import TypeAdapter
@@ -63,10 +64,14 @@ class TradingJournal(ITradingJournal):
             await session.commit()
 
     @override
-    async def snapshots(self) -> list[AccountSnapshot]:
+    async def snapshots(self, since: datetime | None = None) -> list[AccountSnapshot]:
+        statement = select(AccountSnapshotDTO).order_by(col(AccountSnapshotDTO.taken_at))
+
+        if since is not None:
+            statement = statement.where(col(AccountSnapshotDTO.taken_at) >= since)
+
         async with self._db.owner_session() as session:
-            result = await session.execute(select(AccountSnapshotDTO).order_by(col(AccountSnapshotDTO.taken_at)))
-            rows = result.scalars().all()
+            rows = (await session.execute(statement)).scalars().all()
 
         return [row.to_domain() for row in rows]
 
@@ -120,3 +125,39 @@ class TradingJournal(ITradingJournal):
             rows = (await session.execute(statement)).scalars().all()
 
         return [Order(**row.model_dump()) for row in rows]
+
+    @override
+    async def follows_of(self, run_id: RunId) -> list[tuple[TradeSignal, Order]]:
+        followed = select(TradeSignalDTO.decision_id).where(col(TradeSignalDTO.run_id) == run_id)
+        statement = (
+            select(TradeSignalDTO, OrderDTO)
+            .join(OrderDTO, col(OrderDTO.decision_id) == col(TradeSignalDTO.decision_id))
+            .where(col(TradeSignalDTO.followed_decision_id).in_(followed))
+            .order_by(col(OrderDTO.created_at))
+        )
+
+        async with self._db.owner_session() as session:
+            rows = (await session.execute(statement)).all()
+
+        return [(TradeSignal(**signal.model_dump(exclude={"run_id"})), Order(**order.model_dump())) for signal, order in rows]
+
+    @override
+    async def trades(self, since: datetime | None, limit: int, offset: int) -> list[tuple[Order, SystemStats]]:
+        statement = (
+            select(OrderDTO, WorkflowRunDTO)
+            .join(WorkflowRunDTO, col(WorkflowRunDTO.run_id) == col(OrderDTO.run_id))
+            .where(col(OrderDTO.filled_quantity) > 0)
+            .order_by(col(OrderDTO.created_at).desc())
+        )
+
+        if since is not None:
+            statement = statement.where(col(OrderDTO.created_at) >= since)
+
+        async with self._db.owner_session() as session:
+            rows = (await session.execute(statement.offset(offset).limit(limit))).all()
+            pairs = [(Order(**order.model_dump()), SystemStats(**run.model_dump())) for order, run in rows]
+            followed_ids = [run.followed_run_id for _, run in pairs if run.followed_run_id is not None]
+            followed_rows = await session.execute(select(WorkflowRunDTO).where(col(WorkflowRunDTO.run_id).in_(followed_ids)))
+            followed = {row.run_id: SystemStats(**row.model_dump()) for row in followed_rows.scalars()}
+
+        return [(order, followed.get(run.followed_run_id, run) if run.followed_run_id else run) for order, run in pairs]

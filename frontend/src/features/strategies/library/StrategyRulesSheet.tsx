@@ -35,7 +35,7 @@ export function StrategyRulesSheet({ strategy, onOpenChange }: StrategyRulesShee
               <div className="space-y-6 p-4">
                 <section>
                   <h3 className="eyebrow mb-3">{t('sheet.rules', { count: strategy.rules.length })}</h3>
-                  <RuleSummaryList strategy={strategy} named />
+                  <RuleSummaryList strategy={strategy} ruleName={(name) => labels.rule(strategy.id, name)} />
                 </section>
                 <section>
                   <h3 className="eyebrow mb-3">{t('sheet.indicators')}</h3>

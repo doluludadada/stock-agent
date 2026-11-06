@@ -3,7 +3,7 @@ from datetime import UTC, date, datetime
 
 import pytest
 from support.settings import shipped_config
-from trading_stack import SilentLogger
+from trading_stack import MONDAY_10_00, MovableClock, SilentLogger
 
 from a_domain.model.trading.order import Order
 from a_domain.types.enums import OrderStatus, OrderType, TimeInForce, TradeAction
@@ -33,7 +33,10 @@ async def open_broker(
     if create_tables:
         await db.init_db()
 
-    return db, MockExecutionProvider(db=db.for_owner(LEGACY_OWNER_ID), config=config, logger=SilentLogger())
+    broker = MockExecutionProvider(
+        db=db.for_owner(LEGACY_OWNER_ID), config=config, market_clock=MovableClock(MONDAY_10_00), logger=SilentLogger()
+    )
+    return db, broker
 
 
 def order(

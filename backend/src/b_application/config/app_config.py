@@ -9,7 +9,7 @@ from a_domain.rules.trading.cost import AffordableQuantityRule
 from a_domain.rules.trading.decision import DecisionRule, RunDecisionsRule
 from a_domain.rules.trading.entry import EntryRule, ManualEntryRule
 from a_domain.rules.trading.exit import ExitRule, StopLossRule
-from a_domain.rules.trading.order_rule import OrderGateRule, OrderRule
+from a_domain.rules.trading.order_rule import OrderGateRule, OrderPriceRule, OrderRule
 from a_domain.rules.trading.reason import AnalysisSummaryRule, EntryReasonRule, ExitReasonRule
 from a_domain.rules.trading.sizing import BuyCostRule, SizingRule
 from a_domain.types.enums import Audience, DatabaseBackend, ExecutionProvider, SettingsFile, SystemEnvironment
@@ -154,10 +154,9 @@ class AppConfig(BaseSettings):
         return ManualEntryRule(sizing_rule=self.sizing_rule())
 
     def order_rule(self) -> OrderRule:
+        price_rule = OrderPriceRule(pricing=self.audience.order_pricing, price_freshness=self.freshness.realtime_rule())
         gate_rule = OrderGateRule(
-            order_mode=self.trading.order_mode,
-            execution_provider=self.trading.execution_provider,
-            price_freshness=self.freshness.realtime_rule(),
+            order_mode=self.trading.order_mode, execution_provider=self.trading.execution_provider, price_rule=price_rule
         )
 
         return OrderRule(gate_rule=gate_rule, limit_price_rule=self.market.limit_price_rule())

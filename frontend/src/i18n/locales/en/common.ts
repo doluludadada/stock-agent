@@ -82,6 +82,7 @@ const common = {
     rangeHigh: 'High',
     rangeLow: 'Low',
     empty: 'No daily prices to chart.',
+    tooFew: 'One session so far: the chart draws from the second.',
     summary: '{{name}}: {{change}}% over {{range}}',
   },
   close: 'Close',
@@ -98,6 +99,8 @@ const common = {
     count: '{{sessions}}/{{needed}}',
     description:
       'This site uses only the exchanges’ open data, which serves the latest session alone, so it keeps each session from its first day. The strategies read {{needed}} sessions of closes; until the archive holds them, an analysis finds no candidate.',
+    withoutLogin:
+      'Without a Shioaji login, this site reads its daily history from the exchanges’ open data, which serves the latest session alone, so it keeps each session from its first day. The strategies read {{needed}} sessions of closes; until the archive holds them, an analysis finds no candidate.',
   },
   notFound: {
     title: 'This page does not exist',

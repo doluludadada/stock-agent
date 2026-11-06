@@ -3,7 +3,7 @@ from typing import Self
 
 from pydantic import BaseModel, NonNegativeInt, model_validator
 
-from a_domain.types.enums import FinancialStatement, IndustryFormat, MarketIndex, MarketType
+from a_domain.types.enums import FinancialStatement, IndustryFormat, MarketType
 
 
 class TwseIndexFields(BaseModel):
@@ -168,7 +168,7 @@ class ExchangeSources(BaseModel):
     The TWSE and TPEX OpenAPI: the listings with each stock's latest official close, the daily index reports, the
     company profiles with each company's industry, and the reports it serves only for their latest day, month or
     quarter: the material information, the EPS statistics, the valuation ratios, the balance sheets and income
-    statements, the monthly revenue and TWSE's own news. Also the TWSE realtime quotes (MIS).
+    statements, the monthly revenue and TWSE's own news.
     """
 
     twse_daily_quotes_url: str
@@ -189,7 +189,6 @@ class ExchangeSources(BaseModel):
     financial_reports: FinancialReportFeeds
     monthly_revenue: dict[MarketType, MonthlyRevenueFeed]
     exchange_news: ExchangeNewsFeed
-    mis_quotes_url: str
 
     @model_validator(mode="after")
     def _every_feed_serves_both_markets(self) -> Self:
@@ -208,15 +207,15 @@ class ExchangeSources(BaseModel):
         return self
 
 
-class YahooSources(BaseModel):
-    """Yahoo Finance, which serves the daily history: the symbol of each market index."""
+class ShioajiSources(BaseModel):
+    """Sinopac's Shioaji market data: the contract code of each exchange's own index, whose one-minute bars make its daily history."""
 
-    index_symbols: dict[MarketIndex, str]
+    index_codes: dict[MarketType, str]
 
     @model_validator(mode="after")
-    def _every_index_has_a_symbol(self) -> Self:
-        if missing := set(MarketIndex) - set(self.index_symbols):
-            raise ValueError(f"sources.yahoo.index_symbols needs a symbol for {', '.join(sorted(missing))}")
+    def _every_market_has_an_index(self) -> Self:
+        if missing := set(MarketType) - set(self.index_codes):
+            raise ValueError(f"sources.shioaji.index_codes needs a code for {', '.join(sorted(missing))}")
 
         return self
 
@@ -362,7 +361,7 @@ class SourcesConfig(BaseModel):
 
     exchange: ExchangeSources
     attribution: OpenDataAttribution
-    yahoo: YahooSources
+    shioaji: ShioajiSources
     mops: MopsSources
     ptt: PttSources
     news: NewsSources

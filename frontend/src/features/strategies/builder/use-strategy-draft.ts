@@ -24,7 +24,7 @@ export function resolveDraftSource(
   mode: BuilderMode,
   owned: readonly Strategy[],
   builtIns: readonly Strategy[],
-  labels: { copyName: (source: Strategy) => string; ruleName: (name: string) => string },
+  labels: { copyName: (source: Strategy) => string; ruleName: (strategyId: string, name: string) => string },
 ): DraftSource {
   if (mode.type === 'blank') return { status: 'ready', strategy: createBlankStrategy(draftIds), isNew: true }
   if (mode.type === 'edit') {
@@ -35,7 +35,7 @@ export function resolveDraftSource(
   if (!original) return { status: 'missing' }
   const copy = copyStrategy(original, { ids: draftIds, name: labels.copyName(original) })
   if (mode.source === 'owned') return { status: 'ready', strategy: copy, isNew: true }
-  const rules = copy.rules.map((rule) => ({ ...rule, name: labels.ruleName(rule.name) }))
+  const rules = copy.rules.map((rule) => ({ ...rule, name: labels.ruleName(original.id, rule.name) }))
   return { status: 'ready', strategy: { ...copy, rules }, isNew: true }
 }
 

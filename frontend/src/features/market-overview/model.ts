@@ -68,7 +68,7 @@ export function heatLevel(averageChangePercent: number): HeatLevel {
  * A listed stock's change in its latest session: the exchange's own change against its reference price, which an
  * ex-dividend day lowers below the previous close. Null when the listing gave none.
  */
-export function listedChange(today: Schemas['DailyBarResponse'] | null | undefined): { value: number; ratio: number } | null {
+export function listedChange(today: Schemas['Ohlcv'] | null | undefined): { value: number; ratio: number } | null {
   if (!today || today.change === null) return null
   const reference = today.close - today.change
   return { value: today.change, ratio: reference === 0 ? 0 : today.change / reference }

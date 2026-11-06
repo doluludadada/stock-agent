@@ -1,7 +1,8 @@
 """
 `just archive-closes`: saves the official closes, material information, EPS statistics, valuation ratios, balance sheets,
 income statements, monthly revenue and TWSE news the TWSE and TPEX OpenAPI serve now into the archive once, as the Web
-API does at its start and on its timer, then prints every date, quarter and month the archive holds.
+API does at its start and on its timer, then prints every date, quarter and month the archive holds. It opens only the
+database and the exchange's OpenAPI, so it needs no broker login, accounts key or AI key.
 """
 
 import asyncio
@@ -10,16 +11,14 @@ import os
 from rich.table import Table
 
 from a_domain.types.errors import ListingUnavailableError
-from b_application.config.settings_loader import get_project_root, startup_settings
+from b_application.config.settings_loader import get_project_root, load_settings
 from d_presentation.cli import terminal
-from d_presentation.dependencies import STARTUP_REFUSALS, create_process_state, open_runtime
+from d_presentation.dependencies import STARTUP_REFUSALS, open_archiver
 
 
 async def archive_closes() -> int:
-    config = startup_settings(get_project_root())
-
-    async with open_runtime(config, create_process_state(config)) as runtime:
-        sessions, quarters, months = await runtime.signed_out.archive_daily_closes()
+    async with open_archiver(load_settings(get_project_root())) as archiver:
+        sessions, quarters, months = await archiver.execute()
 
     columns = ("Date", "Stocks", "Indexes", "Valuation ratios", "Material information", "TWSE news")
     table = Table(*columns, title=f"The archive holds {len(sessions)} dates")
@@ -49,5 +48,9 @@ if __name__ == "__main__":
         exit_code = asyncio.run(archive_closes())
     except (*STARTUP_REFUSALS, ListingUnavailableError) as error:
         terminal.console.print(str(error), style="red", markup=False, highlight=False)
+    except Exception:
+        terminal.console.print_exception()
     finally:
+        # The database's aiosqlite worker thread outlives close() and would hold the interpreter at exit, so the process
+        # ends here; anything unexpected is printed above first, since nothing prints after this.
         os._exit(exit_code)

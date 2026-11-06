@@ -195,16 +195,33 @@ table decides what each may use (`Audience` in `backend/src/a_domain/types/enums
 
 | `audience` | Daily history and index trend | Realtime quotes | Buzz, Intraday, manual BUY | Articles for the AI step | Valuation (menus 5, 6) | Brokers |
 | --- | --- | --- | --- | --- | --- | --- |
-| `personal` (the owner's machine) | Yahoo, cached in `ohlcv_data` | TWSE MIS | Yes | cnyes and Yahoo news, and Tavily web search | MOPS EPS | those the environment allows |
+| `personal` (the owner's machine) | Shioaji's daily quotes and index one-minute bars, kept in `ohlcv_data`; without the environment's key pair, the open-data archive | Shioaji snapshots, on the environment's key pair | Yes; without the key pair the Web answers 403 `realtime_quotes_unavailable` to Buzz and Intraday | cnyes and Yahoo news, and Tavily web search | MOPS EPS | those the environment allows |
 | `public` (a free public website) | the open-data archive only | none | Refused: the Web answers 403 `realtime_quotes_unavailable`, the CLI refuses menus 2 and 3 and offers no manual BUY | the archived material information and the TWSE news naming the stock, of the last `analysis.material_information_days` (30), only | Refused: the Web answers 403 `mops_unavailable`, the CLI refuses menus 5 and 6 | `mock` only; startup refuses any other |
 
-A public deployment never builds the Yahoo history, TWSE MIS, cnyes, Yahoo news, PTT, MOPS, Tavily or Shioaji adapter:
-Yahoo's terms forbid automated collection, cnyes forbids reproduction without consent, MOPS's robots.txt disallows
-every path and TWSE's terms forbid its automated download, and PTT is read only by Buzz. Its AI step reads a stock's
+A public deployment never builds the Shioaji, cnyes, Yahoo news, PTT, MOPS or Tavily adapter: Shioaji's market data
+comes with the owner's own broker login, Yahoo's terms forbid automated collection, cnyes forbids reproduction without
+consent, MOPS's robots.txt disallows every path and TWSE's terms forbid its automated download, and PTT is read only by
+Buzz. Its AI step reads a stock's
 archived material information and the TWSE news naming it; a stock with none of them and no archived financials is not
 sent to the AI, its run log says so, and its decision rests on its technical score alone. On every audience the AI
 prompt also carries the stock's archived financials: its latest two archived quarters and its latest month's revenue. Its strategies need 61 sessions of closes, so until the archive holds them every run
 says how many it holds and finds no candidate. LINE is not part of the table and works as on a personal deployment.
+
+A personal deployment with the environment's Shioaji key pair reads its daily history from Shioaji, on the login the
+realtime quotes use. One `daily_quotes` request answers every listed stock's official bar of a session, and each
+exchange's own index (TSE001, OTC101) comes from its one-minute bars, at most 30 days per request; both are paced a
+second apart (`market_data.history_request_interval_seconds`), since Shioaji documents no limit of the daily quotes'
+own. The bars are kept in `ohlcv_data` as served, never in the open-data archive. The Web API's timer brings them to
+the last settled session over the stock page's one-year chart (`market_data.history_backfill_bars`, 251 sessions) at its
+start and then every `api.archive_interval_hours`, asking only for the sessions it lacks; a run fetches the sessions of
+its own window it lacks, older ones included. The daily quotes carry no change from the session's reference price, so a
+backfilled session gives no adjustment: a split, a capital reduction or a dividend inside the backfill shows as the gap
+it traded at. The last settled session takes each stock's change from its Shioaji snapshot, which shows that session
+until the next one opens, so from the first refresh on a read adjusts the bars before every corporate action, whatever
+its kind, as the archive's are (`HistoryAdjustmentRule`). Without the key pair the daily history and the index trend
+come from the open-data archive and there is no realtime quote. The SDK's Sentry reporting (`LOG_SENTRY`) and its
+`shioaji.log` (`SJ_LOG_PATH`) are off unless the environment sets them. Schema version 5 (`just db-migrate`) drops the
+Yahoo bars the cache held before.
 
 The audience, like the environment, changes only when the app restarts: a reload or a Web save that changes it is
 refused, and the settings form shows it read-only. `GET /v1/market/audience` answers the audience and the table's
@@ -221,9 +238,16 @@ the app may trade on, with which credentials, from one table (`SystemEnvironment
 
 | `environment` | Brokers | Order modes | Shioaji server and credentials | Database |
 | --- | --- | --- | --- | --- |
-| `dev` (a developer's machine) | `mock` | `mock_only`, `disabled` | none: no Shioaji variable is read | SQLite or PostgreSQL |
+| `dev` (a developer's machine) | `mock` | `mock_only`, `disabled` | simulation, for realtime quotes only, with `SHIOAJI_API_KEY_TEST` and `SHIOAJI_SECRET_KEY_TEST` only | SQLite or PostgreSQL |
 | `test` (staging before launch) | `mock`, `shioaji` | `mock_only`, `disabled` | simulation, with `SHIOAJI_API_KEY_TEST` and `SHIOAJI_SECRET_KEY_TEST` only | SQLite or PostgreSQL |
 | `prod` (the live service) | `mock`, `shioaji` | `mock_only`, `disabled`, `live` | production, with `SHIOAJI_API_KEY`, `SHIOAJI_SECRET_KEY`, `SHIOAJI_CA_PATH`, `SHIOAJI_CA_PASSWORD` and `SHIOAJI_PERSON_ID` only | PostgreSQL only |
+
+A personal site reads its realtime quotes from Shioaji's snapshots, each stamped with the exchange's time of the stock's
+last trade, over one login per process that a Shioaji broker shares. Dev and test log in to the simulation server,
+which serves the same exchange data; prod logs in to production and needs only the key pair for quotes. Without the key
+pair, or when that login fails on the mock broker, the site starts with no realtime quote: every quote is refused and
+nothing is ordered. Shioaji allows 50 market-data queries per 10 seconds and 500 stocks per snapshots request, which
+`market_data.quote_*` keeps to.
 
 `dev` and `test` refuse to start while any of the five production variables is set in the environment or `.env`, so the
 production key lives only on the production machine; the refusal names the variables, never their values. Nothing
@@ -340,6 +364,8 @@ Access: public (sign-in, registration, the first-time setup, the built-in strate
 | `GET /v1/admin/users`, `PATCH /v1/admin/users/{id}` | administrator | The users; change a role, deactivate or reactivate, set a new password. The last active administrator stays (409). |
 | `POST /v1/runs/full-cycle`, `/v1/runs/specific-stocks` | signed in | Start menu 1 or menu 4's analysis (at most 20 stock ids) in the background: 202 with the run id, 409 while the user's own run runs. They never order. |
 | `POST /v1/runs/buzz-scan`, `/v1/runs/intraday` | signed in | Start menus 2 and 3 only while the execution provider is the mock broker (403 otherwise). Their orders go through the same gates and journal as the CLI's. |
+| `GET`/`POST /v1/runs/{id}/follow` | signed in | Follow a finished Full Cycle into the user's mock account, mock broker only (403 otherwise): what is still open to follow and why a follow may not start now; start one in the background (202 with the follow's run id). Each open decision is priced again: at a fresh realtime quote in continuous trading (personal), or at the last session's official close while no session trades (public). A decision is followed once a follow order of it filled since the account opened; 409 `nothing_to_follow` or `outside_follow_window` records nothing. |
+| `GET /v1/account/trades?limit&offset`, `POST /v1/account/reset` | signed in | The trades since the mock account opened, each with the run it came from; reopen the mock account with a new starting capital (mock broker only, 409 while the user's run runs). |
 | `GET /v1/runs?limit&offset`, `/v1/runs/{id}`, `.../signals`, `.../orders` | signed in | Runs newest first, a run's state, record and saved stock reports, its decisions and orders. |
 | `GET /v1/watchlist`, `POST /v1/watchlist/manual`, `POST /v1/watchlist/manual/remove` | signed in | Active entries with names; add or remove MANUAL entries only. |
 | `GET`/`PUT /v1/technical-settings` | signed in | The user's strategies with the `revision` a save must carry (409 when stale, 422 when invalid). |
@@ -361,7 +387,7 @@ One workflow runs at a time per server process; a second start answers 409. Run 
 
 Tables are created with `create_all`, which never changes an existing table. A new database also gets a `schema_version` row, the code's `SCHEMA_VERSION` (`backend/src/c_infrastructure/database/models/schema_version_dto.py`), which says how its rows are stored. Startup never upgrades a database. When the database's schema version is older than the code's, the app stops, changing nothing, and names `just db-migrate`, which backs the database up and then upgrades it in one transaction, keeping every row (see [Database migrations](#database-migrations)). The app also stops when the database is not new and its schema version is missing or one no upgrade reaches, or when an existing table's columns differ from the code. That message names each table to drop. A `stock_agent.db` made before the schema version existed is refused for every table, because several of its tables hold Taiwan wall-clock times that the current code reads as UTC. Delete that file, or drop the tables the message names; the next start recreates them empty. Cached prices and EPS refill themselves, while the mock account, watchlist and trading rows in a dropped table are lost. Such a file's `mock_positions` also hold average costs without the buy fee, and its unused `mock_orders` table can be dropped.
 
-The open-data archive is `daily_close_archive` (each stock's official daily bar per session), `index_close_archive` (the TAIEX and the TPEx Index per session), `material_information_archive` (each company's material information announcement under the time it was announced, its subject, clause and text as served), `quarter_eps_archive` (each company's year-to-date basic EPS per quarter, as served), `valuation_ratio_archive` (each stock's P/E, dividend yield and P/B per session), `financial_report_archive` (each company's balance sheet and income statement per quarter, from the report of its industry format, every field as served in a JSON column), `monthly_revenue_archive` (each company's revenue per month with its changes, as served) and `exchange_news_archive` (TWSE's own news items, under their address). Its source is the TWSE and TPEX OpenAPI, which publish under the Open Government Data License v1 and serve only their latest session, day, month or quarter, so what is not saved while they serve it is lost. Every row is kept under the date or period its own payload row names. The Web API saves them at its start and then every `api.archive_interval_hours` (3); `just archive-closes` saves once and prints every date, quarter and month the archive holds. A quarter's figures are read from its archived statements by the columns `sources.exchange.financial_reports.summary` names for their industry format, so the reading can change while the rows stay as served; `GET /v1/market/stocks/{stock_id}/financials` answers them with the monthly revenue, public. Saving the same data again changes nothing. The Yahoo bars of `ohlcv_data` never go into it. A public deployment reads its daily history and index trend from it alone (see Personal or public deployment); `GET /v1/market/archive-status` says how many sessions it holds and how many the built-in strategies need.
+The open-data archive is `daily_close_archive` (each stock's official daily bar per session), `index_close_archive` (the TAIEX and the TPEx Index per session), `material_information_archive` (each company's material information announcement under the time it was announced, its subject, clause and text as served), `quarter_eps_archive` (each company's year-to-date basic EPS per quarter, as served), `valuation_ratio_archive` (each stock's P/E, dividend yield and P/B per session), `financial_report_archive` (each company's balance sheet and income statement per quarter, from the report of its industry format, every field as served in a JSON column), `monthly_revenue_archive` (each company's revenue per month with its changes, as served) and `exchange_news_archive` (TWSE's own news items, under their address). Its source is the TWSE and TPEX OpenAPI, which publish under the Open Government Data License v1 and serve only their latest session, day, month or quarter, so what is not saved while they serve it is lost. Every row is kept under the date or period its own payload row names. The Web API saves them at its start and then every `api.archive_interval_hours` (3); `just archive-closes` saves once and prints every date, quarter and month the archive holds; it opens only the database and the OpenAPI, so it needs no broker login, accounts key or AI key. A report that serves rows none of which can be read, as when an exchange renames a field, is logged as an error naming the report and how many rows it served; one that serves no rows is logged as information. The bars are kept as listed, and a stock's history is read adjusted for the corporate actions whose reference price the exchange gives in the bar's change, such as a split, across no session the archive missed and, on TPEX, across no session the stock did not trade, since TPEX then compares to a reference it moved; TWSE writes `X0.00` on an ex-dividend, ex-rights or capital-reduction day, so those days stay as listed. A quarter's figures are read from its archived statements by the columns `sources.exchange.financial_reports.summary` names for their industry format, so the reading can change while the rows stay as served; `GET /v1/market/stocks/{stock_id}/financials` answers them with the monthly revenue, public. Saving the same data again changes nothing. The broker's bars of `ohlcv_data` never go into it. A public deployment reads its daily history and index trend from it alone (see Personal or public deployment); `GET /v1/market/archive-status` says how many sessions it holds and how many the built-in strategies need.
 - `backups/`: the database backups that `just db-backup`, `just db-migrate` and `just db-restore` write, owner-only and ignored by git.
 - `chroma_data/`: Chroma persistence.
 - `news_archive/`: archived news payloads.

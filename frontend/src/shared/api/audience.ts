@@ -4,16 +4,23 @@ import type { components } from './schema.gen'
 
 /** Whom the site serves and what that allows, from the server's one table of each audience's capabilities. */
 export type Audience = components['schemas']['AudienceResponse']
-export type Capability = Exclude<keyof Audience, 'audience'>
+/** What the audience allows or not; `order_pricing` says how the site prices an order instead. */
+export type Capability = { [K in keyof Audience]: Audience[K] extends boolean ? K : never }[keyof Audience]
 
-/** The audience changes only when the server restarts, so the tab asks once. */
 const audienceKey = ['public', 'audience'] as const
 
+/**
+ * The audience changes only when the server restarts, but `realtime_quotes` also needs the runtime's Shioaji login,
+ * which can go down and come back at a reload or at the server's next daily collection. So the tab asks again when it
+ * is back in focus a minute later, and every few minutes while it stays open.
+ */
 export function useAudience() {
   return useQuery({
     queryKey: audienceKey,
     queryFn: ({ signal }) => apiRequest('get', '/v1/market/audience', { signal }),
-    staleTime: Infinity,
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
+    refetchInterval: 5 * 60_000,
   })
 }
 

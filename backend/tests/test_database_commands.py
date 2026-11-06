@@ -102,6 +102,10 @@ async def current_database(backend: DatabaseBackend, folder: Path) -> DatabaseCo
     return connector
 
 
+YAHOO_HISTORY = frozenset({"ohlcv_data", "ohlcv_fetches", "ohlcv_windows"})
+"""The Yahoo history and its download records, which version 5 drops; the next start makes ohlcv_data anew."""
+
+
 def printed_rows(printed: str) -> dict[str, list[str]]:
     """The row-count lines a command printed: table name, then one count per column."""
     return {
@@ -205,15 +209,17 @@ async def test_migrate_backs_up_then_upgrades_version_1_keeping_every_row(
     assert f"Backed up to {backup}" in printed
     assert (
         f"Migrated from version 1 to {SCHEMA_VERSION}:\n  1 -> 2 record_run_failures\n  2 -> 3 give_rows_their_owner\n"
-        "  3 -> 4 add_user_ai_model"
+        "  3 -> 4 add_user_ai_model\n  4 -> 5 add_follows_and_drop_yahoo_history"
     ) in printed
     assert after["schema_version"][1] == [(str(SCHEMA_VERSION),)]
-    assert {table: len(rows) for table, (_, rows) in after.items() if table in before} == {
-        table: len(rows) for table, (_, rows) in before.items()
+    kept = before.keys() - YAHOO_HISTORY
+    assert {table: len(rows) for table, (_, rows) in after.items() if table in kept} == {
+        table: len(rows) for table, (_, rows) in before.items() if table in kept
     }
-    assert {table: counts for table, counts in printed_rows(printed).items() if table in before} == {
-        table: [str(len(rows)), str(len(rows))] for table, (_, rows) in before.items()
+    assert {table: counts for table, counts in printed_rows(printed).items() if table in kept} == {
+        table: [str(len(rows)), str(len(rows))] for table, (_, rows) in before.items() if table in kept
     }
+    assert YAHOO_HISTORY.isdisjoint(after)
     runs = after["workflow_runs"]
     assert [row[runs[0].index("failure")] for row in runs[1]] == ["RuntimeError: Yahoo hung"]
     assert backup.parent == tmp_path / "backups"

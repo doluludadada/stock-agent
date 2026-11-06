@@ -8,9 +8,10 @@ import { changeLocale, initI18n, type Locale } from '@/i18n'
 import { session } from '@/shared/api'
 import { TEST_USER } from '@/test/users'
 import { RunRoute } from './router/routes/runs'
-import { NewStrategyRoute, StrategyLibraryRoute } from './router/routes/strategies'
+import { EditStrategyRoute, NewStrategyRoute, StrategyLibraryRoute } from './router/routes/strategies'
 
 const RUN = '22222222-2222-4222-8222-222222222222'
+const MY_RUN = '33333333-3333-4333-8333-333333333333'
 const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
 const i18n = initI18n('zh-TW')
 
@@ -26,11 +27,33 @@ const report = {
   composite_score: null,
 }
 
+/** A specific-stock run's record that applied the strategy `strategyId`. */
+const summary = (strategyId: string) => ({
+  workflow: 'specific_stocks',
+  execution_provider: 'mock',
+  order_mode: 'mock_only',
+  start_time: '2026-11-05T01:00:00Z',
+  end_time: '2026-11-05T01:01:00Z',
+  total_scanned: 0,
+  buzz_scanned: 0,
+  buzz_qualified: 0,
+  passed_technical: 0,
+  ai_analysed: 0,
+  signals_generated: 0,
+  orders_submitted: 0,
+  orders_refused: 0,
+  stale_market_data_count: 0,
+  technical_strategy_id: strategyId,
+  errors: [],
+  execution_log: [],
+})
+
 function serve() {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (url === '/v1/technical-settings/built-in-strategies') return json([balanced])
     if (url === '/v1/technical-settings') return json({ active_strategy_id: 'mine', buzz_strategy_id: 'mine', strategies: [mine], revision: 1 })
-    if (url === `/v1/runs/${RUN}`) return json({ run_id: RUN, state: 'finished', error: null, summary: null, reports: [report] })
+    if (url === `/v1/runs/${RUN}`) return json({ run_id: RUN, state: 'finished', error: null, summary: summary('balanced'), reports: [report] })
+    if (url === `/v1/runs/${MY_RUN}`) return json({ run_id: MY_RUN, state: 'finished', error: null, summary: summary('mine'), reports: [report] })
     return json([])
   }))
 }
@@ -78,11 +101,25 @@ describe('the built-in strategies’ rule names', () => {
     expect(within(await screen.findByRole('dialog')).getByText('Price Above MA_20')).toBeVisible()
   })
 
-  it('read in Chinese among a zh-TW run’s exclusions, while a name the owner typed stays as typed', async () => {
-    const runRoute = [{ path: '/runs/:runId', element: <RunRoute /> }]
-    await open('zh-TW', runRoute, `/runs/${RUN}`)
+  it('read in Chinese among the exclusions of a zh-TW run on the built-in strategy', async () => {
+    await open('zh-TW', [{ path: '/runs/:runId', element: <RunRoute /> }], `/runs/${RUN}`)
     const excluded = (await screen.findByText('被 2 條規則排除')).parentElement!
     expect(within(excluded).getAllByRole('listitem').map((item) => item.textContent)).toEqual(['股價站上 20 日均線', 'My own rule'])
+  })
+
+  it('stay as the owner typed them in a zh-TW run on the owner’s own strategy, even one a built-in rule is named', async () => {
+    await open('zh-TW', [{ path: '/runs/:runId', element: <RunRoute /> }], `/runs/${MY_RUN}`)
+    const excluded = (await screen.findByText('被 2 條規則排除')).parentElement!
+    expect(within(excluded).getAllByRole('listitem').map((item) => item.textContent)).toEqual(['Price Above MA_20', 'My own rule'])
+  })
+
+  it('read in the designer’s preview exactly as its name fields hold them', async () => {
+    await open('zh-TW', [{ path: '/strategies/:id/edit', element: <EditStrategyRoute /> }], '/strategies/mine/edit')
+    const fields = (await screen.findAllByLabelText('規則名稱')).map((input) => (input as HTMLInputElement).value)
+    expect(fields).toEqual(['Price Above MA_20', 'My own rule'])
+    const preview = await screen.findByRole('region', { name: '公式預覽' })
+    expect(within(preview).getByText('Price Above MA_20')).toBeVisible()
+    expect(preview.textContent).not.toContain('股價站上 20 日均線')
   })
 
   it('stay in English among an English run’s exclusions', async () => {

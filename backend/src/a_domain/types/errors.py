@@ -66,9 +66,10 @@ class RealBrokerRefused(PermissionError):
 
 class RealtimeQuotesUnavailable(PermissionError):
     """
-    The deployment uses open data only (audience public), which has no realtime quote, and every order is priced on
-    one. The open-data archive raises it when asked for a quote, and the Web answers it with 403 before Buzz or
-    Intraday starts. The CLI refuses those menus with the same code.
+    The deployment uses open data only (audience public), which has no realtime quote, or it has no Shioaji login, and
+    every order is priced on one. The open-data archive, and the price source of a personal site without a Shioaji
+    login, raise it when asked for a quote. On a public site the Web answers it with 403 before Buzz or Intraday
+    starts, and the CLI refuses those menus with the same code.
     """
 
 

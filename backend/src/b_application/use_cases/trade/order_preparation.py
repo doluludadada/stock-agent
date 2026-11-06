@@ -31,7 +31,8 @@ class OrderPreparation:
         if signal.action == TradeAction.HOLD or signal.decision_id in {order.decision_id for order in orders}:
             return None
 
-        order = self._order_rule.apply(signal, stats.run_id, self._market_clock.now(), self._market_clock.trading_phase())
+        last_close = self._market_clock.session_close(self._market_clock.last_closed_session())
+        order = self._order_rule.apply(signal, stats.run_id, self._market_clock.now(), self._market_clock.trading_phase(), last_close)
 
         try:
             await self._journal.save_order(order)

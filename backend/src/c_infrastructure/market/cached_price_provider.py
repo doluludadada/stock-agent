@@ -1,251 +1,276 @@
 import asyncio
-from dataclasses import asdict
-from datetime import date, datetime, time, timedelta, tzinfo
-from typing import override
+from collections.abc import Mapping
+from dataclasses import asdict, replace
+from datetime import date, datetime, timedelta
+from typing import Any, override
 
+from sqlalchemy import func
 from sqlmodel import col, select
 
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
-from a_domain.ports.market.cached_price_provider import HistoryDownload, ICachedPriceProvider
-from a_domain.ports.market.price_provider import IPriceHistoryProvider, IRealtimeQuoteProvider
+from a_domain.ports.market.broker_quote_provider import IBrokerQuoteProvider
+from a_domain.ports.market.cached_price_provider import ICachedPriceProvider
+from a_domain.ports.market.daily_close_archive import IDailyCloseArchive
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
-from a_domain.types.enums import MarketIndex
+from a_domain.rules.market.listing import HistoryAdjustmentRule
+from a_domain.types.enums import MarketIndex, MarketType
 from b_application.config.market_data_config import MarketDataConfig
-from c_infrastructure.database.db_connector import DatabaseConnector
-from c_infrastructure.database.models.ohlcv_dto import OhlcvDTO, OhlcvFetchDTO, OhlcvWindowDTO
+from c_infrastructure.database.db_connector import UPSERT, DatabaseConnector
+from c_infrastructure.database.models.ohlcv_dto import OhlcvDTO
 
 
 class CachedPriceProvider(ICachedPriceProvider):
     """
-    Daily history from the history source, cached in SQLite. Realtime quotes go to the quote source and are never cached.
-
-    The cache keys each stock's bars by its stock_id and an index's by `^` and its MarketIndex value, which no stock_id
-    can be.
+    The history cache in ohlcv_data over the broker's market data. A sync takes one index range or one session at a
+    time under the cache's lock, so a read that needs a few sessions waits for at most one request of a backfill that
+    is running; the process's write lock orders the saves of every runtime's cache. A sync that the broker fails stops
+    there, and the read serves what the cache holds.
     """
 
     def __init__(
         self,
-        history_provider: IPriceHistoryProvider,
-        quote_provider: IRealtimeQuoteProvider,
+        broker: IBrokerQuoteProvider[Any],
+        archive: IDailyCloseArchive,
         db: DatabaseConnector,
+        market_clock: IMarketClock,
         market_data: MarketDataConfig,
         logger: ILoggingProvider,
-        market_clock: IMarketClock,
         write_lock: asyncio.Lock,
-    ):
-        self._history_provider = history_provider
-        self._quote_provider = quote_provider
+    ) -> None:
+        self._broker = broker
+        self._archive = archive
         self._db = db
-        self._save_chunk_size = market_data.history_save_chunk_size
+        self._clock = market_clock
         self._retry_interval = timedelta(hours=market_data.history_retry_hours)
         self._start_slack = timedelta(days=market_data.history_start_slack_days)
-        # Two requests that fetch the same new stock would both insert its rows; one at a time, the second updates them.
-        # The lock is the process's, so a retired runtime still finishing a run writes one at a time with the new one.
-        self._write_lock = write_lock
-        self._downloads: dict[tuple[str, date, date], asyncio.Future[dict[str, list[Ohlcv]]]] = {}
         self._logger = logger
-        self._clock = market_clock
+        # A retired runtime still finishing a run and the current one write one at a time.
+        self._write_lock = write_lock
+        self._sync_lock = asyncio.Lock()
+        self._asked: dict[str, datetime] = {}
+        self._adjustment = HistoryAdjustmentRule()
 
     @override
     async def fetch_realtime_bars(self, stocks: list[Stock]) -> dict[str, Ohlcv]:
-        return await self._quote_provider.fetch_realtime_bars(stocks)
+        return await self._broker.fetch_realtime_bars(stocks)
 
     @override
     async def fetch_history(self, stocks: list[Stock], start_date: datetime, end_date: datetime) -> dict[str, list[Ohlcv]]:
-        by_id = {stock.stock_id: stock for stock in stocks}
+        if not stocks:
+            return {}
 
-        async def download(due: list[str]) -> dict[str, list[Ohlcv]]:
-            return await self._history_provider.fetch_history([by_id[stock_id] for stock_id in due], start_date, end_date)
+        first, last = await self.sync(start_date, end_date)
+        stored = await self.stored_bars([stock.stock_id for stock in stocks], first, last)
+        held = await self.held_sessions(first, last)
+        indexes = {
+            market: [bar for bar in bars if self._clock.to_trading_date(bar.ts) in held]
+            for market, bars in (await self.index_sessions(first, last)).items()
+        }
+        unadjustable = {bar.ts for bars in stored.values() for bar in bars[1:] if bar.change is None}
 
-        return await self.cached_history(list(by_id), start_date, end_date, download)
+        self._logger.info(f"Daily history from the broker's daily quotes: {len(stored)}/{len(stocks)} stocks, {len(held)} sessions")
+        if unadjustable:
+            self._logger.warning(
+                f"Daily history from {first} to {last}: {len(unadjustable)} sessions hold bars with no change from the snapshots "
+                "or the open-data archive, so a split, a capital reduction or a dividend there shows as the gap it traded at"
+            )
+
+        return {
+            stock.stock_id: self._adjustment.apply(stored[stock.stock_id], indexes.get(stock.market, []), stock.market)
+            for stock in stocks
+            if stock.stock_id in stored
+        }
 
     @override
     async def fetch_index_history(self, index: MarketIndex, start_date: datetime, end_date: datetime) -> list[Ohlcv]:
-        key = f"^{index.value}"
+        first, last = self.sessions_of(start_date, end_date)
 
-        async def download(due: list[str]) -> dict[str, list[Ohlcv]]:
-            return {key: await self._history_provider.fetch_index_history(index, start_date, end_date)}
+        try:
+            await self.sync_index(index.market, first, last)
+        except Exception as error:
+            self._logger.warning(f"The broker's index bars failed ({type(error).__name__}: {error}); serving the cached ones")
 
-        return (await self.cached_history([key], start_date, end_date, download)).get(key, [])
-
-    @override
-    async def cached_history(
-        self, stock_ids: list[str], start_date: datetime, end_date: datetime, download: HistoryDownload
-    ) -> dict[str, list[Ohlcv]]:
-        if not stock_ids:
-            return {}
-
-        now = self._clock.now()
-        # Daily history holds settled sessions only. Yahoo also returns the session in progress, and a closed session's
-        # bar keeps changing until it settles; caching either would freeze a provisional price as that day's close.
-        first_session, last_session = self._clock.to_trading_date(start_date), self._clock.to_trading_date(end_date)
-        last_settled_session = min(last_session, self._clock.last_settled_session())
-        cached_bars = await self.load_cached_bars(stock_ids, first_session, last_session, now.tzinfo)
-        cached, asked_from = self.settled_bars(cached_bars, last_settled_session), await self.load_windows(list(cached_bars))
-        stale = await self.stocks_due(self.stocks_behind(stock_ids, cached, last_settled_session), last_settled_session, now)
-        due = list(dict.fromkeys([*self.stocks_short_of(stock_ids, cached, asked_from, first_session), *stale]))
-
-        if not due:
-            self._logger.info(f"History cache hit: {len(stock_ids)} stocks")
-            return cached
-
-        self._logger.info(f"History cache miss: {len(due)}/{len(stock_ids)} stocks")
-        fresh = self.settled_bars(await self.download_once(due, first_session, last_settled_session, download), last_settled_session)
-
-        async with self._write_lock:
-            await self.save_bars(fresh)
-            # An index that came back empty is asked again at the next call: the overview has no other source for it.
-            await self.save_fetches([key for key in due if key in fresh or not key.startswith("^")], now, last_settled_session)
-            await self.save_windows([stock_id for stock_id in due if stock_id in fresh], first_session, asked_from)
-
-        return cached | fresh
+        return (await self.index_sessions(first, last)).get(index.market, [])
 
     @override
-    async def download_once(
-        self, stock_ids: list[str], first_session: date, last_session: date, download: HistoryDownload
-    ) -> dict[str, list[Ohlcv]]:
-        downloads = {
-            stock_id: running
-            for stock_id in stock_ids
-            if (running := self._downloads.get((stock_id, first_session, last_session))) is not None
-        }
-
-        if new := [stock_id for stock_id in stock_ids if stock_id not in downloads]:
-            started = asyncio.ensure_future(download(new))
-            keys = [(stock_id, first_session, last_session) for stock_id in new]
-            self._downloads |= dict.fromkeys(keys, started)
-            started.add_done_callback(lambda _: [self._downloads.pop(key) for key in keys])
-            downloads |= dict.fromkeys(new, started)
-
-        # Shielded: a caller that stops leaves the download running for the others that wait on it.
-        tasks = list(set(downloads.values()))
-        answers = dict(zip(tasks, await asyncio.gather(*(asyncio.shield(task) for task in tasks)), strict=True))
-        return {stock_id: answers[task][stock_id] for stock_id, task in downloads.items() if stock_id in answers[task]}
+    def sessions_of(self, start_date: datetime, end_date: datetime) -> tuple[date, date]:
+        last = min(self._clock.to_trading_date(end_date), self._clock.last_settled_session())
+        return self._clock.to_trading_date(start_date), last
 
     @override
-    def stocks_behind(self, stock_ids: list[str], cached: dict[str, list[Ohlcv]], last_settled_session: date) -> list[str]:
-        return [
-            stock_id
-            for stock_id in stock_ids
-            if stock_id not in cached or self._clock.to_trading_date(cached[stock_id][-1].ts) < last_settled_session
-        ]
+    async def sync(self, start_date: datetime, end_date: datetime) -> tuple[date, date]:
+        first, last = self.sessions_of(start_date, end_date)
+
+        try:
+            for market in MarketType:
+                await self.sync_index(market, first, last)
+
+            index = await self.index_sessions(first, last)
+            sessions = {self._clock.to_trading_date(bar.ts) for bars in index.values() for bar in bars}
+            missing = sorted(sessions - await self.held_sessions(first, last), reverse=True)
+            saved = [session for session in missing if await self.sync_session(session)]
+
+            if last == self._clock.last_settled_session():
+                await self.sync_changes(last)
+        except Exception as error:
+            self._logger.warning(f"The broker's daily history failed ({type(error).__name__}: {error}); reading what the cache holds")
+            return first, last
+
+        if missing:
+            self._logger.info(f"Daily history: {len(saved)}/{len(missing)} sessions the cache lacked saved from the broker")
+
+        return first, last
 
     @override
-    def stocks_short_of(
-        self, stock_ids: list[str], cached: dict[str, list[Ohlcv]], asked_from: dict[str, date], first_session: date
-    ) -> list[str]:
-        return [
-            stock_id
-            for stock_id in stock_ids
-            if stock_id in cached
-            and (asked_from.get(stock_id) or self._clock.to_trading_date(cached[stock_id][0].ts)) > first_session + self._start_slack
-        ]
+    async def sync_index(self, market: MarketType, first: date, last: date) -> None:
+        async with self._sync_lock:
+            for start, end in await self.index_gaps(market, first, last):
+                question = f"index {market.value} from {start} to {end}"
+
+                if not self.due(question, self._clock.now()):
+                    continue
+
+                self._asked[question] = self._clock.now()
+                bars = await self._broker.fetch_index_bars(market, start, end)
+
+                async with self._write_lock:
+                    await self.save_bars({f"^{market.value}": bars})
 
     @override
-    async def load_windows(self, stock_ids: list[str]) -> dict[str, date]:
-        async with self._db.get_session() as session:
-            result = await session.execute(select(OhlcvWindowDTO).where(col(OhlcvWindowDTO.stock_id).in_(stock_ids)))
-            return {row.stock_id: row.first_session for row in result.scalars().all()}
-
-    @override
-    async def save_windows(self, stock_ids: list[str], first_session: date, asked_from: dict[str, date]) -> None:
-        earlier = [stock_id for stock_id in stock_ids if stock_id not in asked_from or first_session < asked_from[stock_id]]
+    async def index_gaps(self, market: MarketType, first: date, last: date) -> list[tuple[date, date]]:
+        """Each range runs from or to a session the cache holds, so that session's answer gives the next its change."""
+        span = select(func.min(col(OhlcvDTO.ts)), func.max(col(OhlcvDTO.ts))).where(col(OhlcvDTO.stock_id) == f"^{market.value}")
 
         async with self._db.get_session() as session:
-            for stock_id in earlier:
-                await session.merge(OhlcvWindowDTO(stock_id=stock_id, first_session=first_session))
+            earliest, latest = (await session.execute(span)).one()
 
-            await session.commit()
+        if earliest is None or latest is None:
+            return [(first, last)] if first <= last else []
+
+        earliest, latest = self._clock.to_trading_date(earliest), self._clock.to_trading_date(latest)
+        before = [(first, earliest)] if first + self._start_slack < earliest else []
+        return before + ([(latest, last)] if latest < last else [])
 
     @override
-    async def stocks_due(self, behind: list[str], last_settled_session: date, now: datetime) -> list[str]:
-        if not behind:
-            return []
+    async def sync_session(self, session: date) -> bool:
+        question = f"daily quotes of {session}"
+
+        async with self._sync_lock:
+            if session in await self.held_sessions(session, session) or not self.due(question, self._clock.now()):
+                return False
+
+            self._asked[question] = self._clock.now()
+            bars = await self._broker.fetch_session_bars(session)
+
+            async with self._write_lock:
+                await self.save_bars({stock_id: [bar] for stock_id, bar in bars.items()})
+
+        return bool(bars)
+
+    @override
+    async def sync_changes(self, session: date) -> None:
+        question = f"changes of {session}"
+        lacking = (
+            select(OhlcvDTO)
+            .where(col(OhlcvDTO.ts) == self._clock.session_close(session), col(OhlcvDTO.change).is_(None))
+            .where(col(OhlcvDTO.stock_id).not_like("^%"))
+        )
+
+        async with self._sync_lock:
+            async with self._db.get_session() as db_session:
+                rows = (await db_session.execute(lacking)).scalars().all()
+
+            if not rows or not self.due(question, self._clock.now()):
+                return
+
+            self._asked[question] = self._clock.now()
+            changes = await self._broker.fetch_session_changes(session, [row.stock_id for row in rows])
+            bars = {
+                row.stock_id: [Ohlcv(**row.model_dump(exclude={"stock_id", "change"}), change=changes[row.stock_id])]
+                for row in rows
+                if row.stock_id in changes
+            }
+
+            async with self._write_lock:
+                await self.save_bars(bars)
+
+        self._logger.info(f"Daily history of {session}: {len(bars)}/{len(rows)} stocks without a change took it from the snapshots")
+
+    @override
+    def due(self, question: str, now: datetime) -> bool:
+        asked = self._asked.get(question)
+        return asked is None or now - asked >= self._retry_interval
+
+    @override
+    async def held_sessions(self, first: date, last: date) -> set[date]:
+        stamps = (
+            select(col(OhlcvDTO.ts))
+            .distinct()
+            .where(col(OhlcvDTO.ts).between(self._clock.session_close(first), self._clock.session_close(last)))
+            .where(col(OhlcvDTO.stock_id).not_like("^%"))
+        )
 
         async with self._db.get_session() as session:
-            result = await session.execute(select(OhlcvFetchDTO).where(col(OhlcvFetchDTO.stock_id).in_(behind)))
-            fetches = {fetch.stock_id: fetch for fetch in result.scalars().all()}
-
-        # A history behind the last settled session is asked for once that session settled, then at most every
-        # retry interval: Yahoo can leave a session without a close for hours, and asking on every call downloaded the
-        # whole market again on every run.
-        due = [
-            stock_id
-            for stock_id in behind
-            if (fetch := fetches.get(stock_id)) is None
-            or fetch.settled_session < last_settled_session
-            or now - fetch.fetched_at >= self._retry_interval
-        ]
-
-        if len(due) < len(behind):
-            self._logger.info(
-                f"History cache: {len(behind) - len(due)} stocks lack the {last_settled_session} session, "
-                f"and the history source was asked for them less than {self._retry_interval} ago"
-            )
-
-        return due
+            return {self._clock.to_trading_date(stamp) for stamp in (await session.execute(stamps)).scalars()}
 
     @override
-    async def load_cached_bars(
-        self, stock_ids: list[str], start_day: date, end_day: date, zone: tzinfo | None
-    ) -> dict[str, list[Ohlcv]]:
+    async def index_sessions(self, first: date, last: date) -> dict[MarketType, list[Ohlcv]]:
+        keys = {f"^{market.value}": market for market in MarketType}
+        statement = (
+            select(OhlcvDTO)
+            .where(col(OhlcvDTO.stock_id).in_(keys))
+            .where(col(OhlcvDTO.ts).between(self._clock.session_close(first), self._clock.session_close(last)))
+            .order_by(col(OhlcvDTO.ts))
+        )
+
         async with self._db.get_session() as session:
-            stmt = (
-                select(OhlcvDTO)
-                .where(col(OhlcvDTO.stock_id).in_(stock_ids))
-                .where(col(OhlcvDTO.ts) >= datetime.combine(start_day, time.min, tzinfo=zone))
-                .where(col(OhlcvDTO.ts) <= datetime.combine(end_day, time.max, tzinfo=zone))
-                .order_by(col(OhlcvDTO.stock_id), col(OhlcvDTO.ts))
-            )
+            rows = (await session.execute(statement)).scalars().all()
 
-            result = await session.execute(stmt)
-            records = result.scalars().all()
+        indexes: dict[MarketType, list[Ohlcv]] = {}
 
-        bars_by_stock: dict[str, list[Ohlcv]] = {}
+        for row in rows:
+            indexes.setdefault(keys[row.stock_id], []).append(Ohlcv(**row.model_dump(exclude={"stock_id"})))
 
-        for record in records:
-            bars_by_stock.setdefault(record.stock_id, []).append(Ohlcv(**record.model_dump(exclude={"stock_id"})))
-
-        return bars_by_stock
+        return indexes
 
     @override
-    async def save_bars(self, bars_by_stock: dict[str, list[Ohlcv]]) -> None:
-        total = sum(len(bars) for bars in bars_by_stock.values())
+    async def stored_bars(self, stock_ids: list[str], first: date, last: date) -> dict[str, list[Ohlcv]]:
+        statement = (
+            select(OhlcvDTO)
+            .where(col(OhlcvDTO.stock_id).in_(stock_ids))
+            .where(col(OhlcvDTO.ts).between(self._clock.session_close(first), self._clock.session_close(last)))
+            .order_by(col(OhlcvDTO.stock_id), col(OhlcvDTO.ts))
+        )
 
-        if total == 0:
+        async with self._db.get_session() as session:
+            rows = (await session.execute(statement)).scalars().all()
+
+        lacking = sorted({row.stock_id for row in rows if row.change is None})
+        official = await self._archive.official_changes(lacking, first, last) if lacking else {}
+        bars: dict[str, list[Ohlcv]] = {}
+
+        for row in rows:
+            bar = Ohlcv(**row.model_dump(exclude={"stock_id"}))
+            change = official.get((row.stock_id, self._clock.to_trading_date(bar.ts))) if bar.change is None else bar.change
+            bars.setdefault(row.stock_id, []).append(replace(bar, change=change))
+
+        return bars
+
+    @override
+    async def save_bars(self, bars: Mapping[str, list[Ohlcv]]) -> None:
+        """One upsert. A bar saved without a change keeps the change the cache holds of it."""
+        rows = [OhlcvDTO(stock_id=key, **asdict(bar)).model_dump() for key, key_bars in bars.items() for bar in key_bars]
+
+        if not rows:
             return
 
-        self._logger.info(f"Saving OHLCV cache: {total} bars")
-        saved_count = 0
-
         async with self._db.get_session() as session:
-            for stock_id, bars in bars_by_stock.items():
-                for bar in bars:
-                    await session.merge(OhlcvDTO(stock_id=stock_id, **asdict(bar)))
-                    saved_count += 1
-
-                    if saved_count % self._save_chunk_size == 0:
-                        await session.commit()
-                        self._logger.info(f"Saved OHLCV cache progress: {saved_count}/{total}")
-
+            statement = UPSERT[session.get_bind().dialect.name](OhlcvDTO)
+            prices = {name: statement.excluded[name] for name in ("open", "high", "low", "close", "volume")}
+            change = func.coalesce(statement.excluded["change"], statement.table.c.change)
+            await session.execute(
+                statement.on_conflict_do_update(index_elements=["stock_id", "ts"], set_=prices | {"change": change}), rows
+            )
             await session.commit()
-
-        self._logger.info(f"Saved OHLCV cache completed: {saved_count}/{total}")
-
-    @override
-    async def save_fetches(self, stock_ids: list[str], fetched_at: datetime, settled_session: date) -> None:
-        async with self._db.get_session() as session:
-            for stock_id in stock_ids:
-                await session.merge(OhlcvFetchDTO(stock_id=stock_id, fetched_at=fetched_at, settled_session=settled_session))
-
-            await session.commit()
-
-    @override
-    def settled_bars(self, bars_by_stock: dict[str, list[Ohlcv]], last_settled_session: date) -> dict[str, list[Ohlcv]]:
-        settled = {
-            stock_id: [bar for bar in bars if self._clock.to_trading_date(bar.ts) <= last_settled_session]
-            for stock_id, bars in bars_by_stock.items()
-        }
-        return {stock_id: bars for stock_id, bars in settled.items() if bars}

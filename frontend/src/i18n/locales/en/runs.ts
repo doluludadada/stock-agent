@@ -68,6 +68,7 @@ const runs = {
     reason: 'Reason',
     status: 'Status',
     costs: 'Fee + tax',
+    follow: 'Follow',
   },
   state: { running: 'Running', finished: 'Finished', failed: 'Failed', unfinished: 'Interrupted' },
   workflow: {
@@ -76,6 +77,7 @@ const runs = {
     intraday: 'Intraday',
     specific_stocks: 'Specific stocks',
     manual_buy: 'Manual BUY',
+    follow: 'Follow',
     valuation: 'Valuation',
     research: 'Research',
   },
@@ -113,6 +115,49 @@ const runs = {
   action: { buy: 'BUY', sell: 'SELL', hold: 'HOLD' },
   orderStatus: { pending: 'Pending', submitted: 'Submitted', filled: 'Filled', cancelled: 'Cancelled', failed: 'Failed', rejected: 'Rejected' },
   logTitle: 'Execution log',
+  followOf: 'This run follows the decisions of another run into your mock account.',
+  followOfLink: 'Open that run',
+  followMark: { open: 'Open', followed: 'Followed' },
+  follow: {
+    title: 'Follow in your mock account',
+    question: 'How this run’s decisions would do if you had followed them',
+    ready: {
+      realtime_quote: 'Places the decisions of this run still open ({{count}}) in your mock account at a realtime quote now.',
+      official_close: 'Places the decisions of this run still open ({{count}}) in your mock account at the official close of the last session.',
+    },
+    window: {
+      realtime_quote: 'Not now. This site follows at a realtime quote, so only in continuous trading: Monday to Friday, 09:00 to 13:25 Taipei time.',
+      official_close:
+        'Not now. This site follows at the official close, so only while no session trades: after the close is published, until the next open at 09:00 Taipei time.',
+    },
+    noQuotes: 'Not now. This site follows at a realtime quote, and it has no Shioaji login now to take one from.',
+    allFollowed: 'Every BUY and SELL of this run is in your mock account already. A reset of the mock account in My settings opens them again.',
+    noDecisions: 'This run made no BUY or SELL, so there is nothing to follow.',
+    button: 'Follow in my mock account',
+    confirm: {
+      title: 'Follow this run in your mock account?',
+      realtime_quote: 'Each decision below becomes a mock order at a realtime quote now. Only your mock account changes; no real money moves.',
+      official_close: 'Each decision below becomes a mock order filled at the official close of the last session. Only your mock account changes; no real money moves.',
+      list: 'Decisions to follow',
+      sellNote: 'A SELL sells only the shares you hold then.',
+      go: 'Follow',
+    },
+    shares: '{{count}} shares',
+    started: 'Follow started',
+    refused: {
+      nothing: 'Nothing is left to follow in this run.',
+      window: 'This site places no order now. Follow the run when its window opens.',
+      quotes: 'This site has no realtime quote now, so it cannot follow.',
+    },
+    failed: 'The follow did not start: {{reason}}',
+    loadFailed: 'The follow could not be loaded.',
+    followsLabel: 'Follows of this run',
+    column: { followedAt: 'Followed', outcome: 'Outcome' },
+    openFollow: 'Open the follow of {{time}}',
+    filled: 'Filled {{shares}} @ {{price}}',
+    filledPart: 'Filled {{shares}} of {{ordered}} @ {{price}}',
+    unfilled: '{{status}}: {{reason}}',
+  },
 }
 
 export default runs

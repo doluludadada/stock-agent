@@ -1,5 +1,5 @@
 """
-Every HTTPS client that reads TWSE, TPEX, MOPS, MIS, cnyes, Yahoo or PTT data verifies the server's certificate, and
+Every HTTPS client that reads TWSE, TPEX, MOPS, cnyes, Yahoo or PTT data verifies the server's certificate, and
 the news and PTT clients send the headers the `sources` settings name.
 """
 
@@ -12,14 +12,12 @@ import pytest
 from support.settings import shipped_config
 from trading_stack import MONDAY_10_00, MovableClock, SilentLogger, StockDirectory
 
-from a_domain.model.market.stock import Stock
 from a_domain.types.values import FiscalQuarter
 from b_application.config.market_data_config import MarketDataConfig, MarketHoursConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.feed.news.cnyes_news_provider import CnyesNewsProvider
 from c_infrastructure.feed.news.yahoo_tw_news_provider import YahooTwNewsProvider
 from c_infrastructure.feed.ptt_provider import PttProvider
-from c_infrastructure.market.mis_quote_provider import MisQuoteProvider
 from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider
 from c_infrastructure.market.twse_provider import TaiwanStockProvider
 from c_infrastructure.system.market_clock import TaiwanMarketClock
@@ -38,8 +36,6 @@ def clients(monkeypatch) -> list[dict[str, Any]]:
     def answer(request: httpx.Request) -> httpx.Response:
         if request.method == "POST":
             return httpx.Response(200, text="<html>查詢無資料</html>")
-        if str(request.url).startswith(SOURCES.exchange.mis_quotes_url):
-            return httpx.Response(200, json={"rtcode": "0000", "msgArray": []})
         return httpx.Response(200, json=[])
 
     def open_client(**kwargs) -> httpx.AsyncClient:
@@ -72,12 +68,11 @@ async def test_exchange_clients_keep_certificate_verification_on(clients: list[d
         await exchange.fetch_quarter_eps()
         await exchange.fetch_valuation_ratios()
         await mops.fetch_cumulative_eps([FiscalQuarter(2026, 3)])
-        await MisQuoteProvider(SOURCES.exchange, MarketDataConfig(), SilentLogger()).fetch_realtime_bars([Stock(stock_id="2330")])
     finally:
         await db.close()
 
-    assert len(clients) == 8
-    assert [client.get("verify", True) for client in clients] == [True] * 8
+    assert len(clients) == 7
+    assert [client.get("verify", True) for client in clients] == [True] * 7
 
 
 async def test_news_and_ptt_clients_keep_certificate_verification_on(clients: list[dict[str, Any]], tmp_path: Path) -> None:

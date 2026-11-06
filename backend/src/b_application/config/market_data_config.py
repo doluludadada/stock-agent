@@ -36,31 +36,44 @@ class MarketDataConfig(BaseModel):
 
     model_config = ConfigDict(use_attribute_docstrings=True)
 
-    quote_batch_size: int = Field(default=50, gt=0)
-    """Stocks per TWSE MIS request. MIS answers 100 channels per request and refuses 200."""
+    quote_batch_size: int = Field(default=500, gt=0, le=500)
+    """Stocks per Shioaji snapshots request. Shioaji answers at most 500."""
 
-    quote_request_interval_seconds: float = Field(default=5.0, ge=0)
-    """MIS asks clients to wait its userDelay (5000 ms) between requests; faster polling is reported to get blocked."""
+    quote_request_interval_seconds: float = Field(default=0.2, ge=0)
+    """
+    Least time between two Shioaji quote requests. Shioaji allows 50 market-data queries per 10 seconds, and stops
+    answering for a minute after one more.
+    """
 
     quote_timeout_seconds: float = Field(default=10.0, gt=0)
 
-    history_batch_size: int = Field(default=50, gt=0)
-    """Stocks per Yahoo daily-history download."""
+    history_request_interval_seconds: float = Field(default=1.0, ge=0)
+    """
+    Least time between a daily-history request to Shioaji (a session's daily quotes, an index's one-minute bars) and
+    the market-data request before it. Shioaji documents no limit of the daily quotes' own, so they are paced well
+    inside the 50 market-data queries per 10 seconds.
+    """
 
-    history_batch_delay_seconds: float = Field(default=1.5, ge=0)
-    """Pause after each Yahoo download."""
+    history_backfill_bars: int = Field(default=251, gt=0)
+    """
+    Sessions of daily history the Web API's timer keeps for every listed stock on a site with a Shioaji login: the
+    stock page's one-year chart. A strategy that needs older sessions fetches them when it runs.
+    """
+
+    index_minutes_window_days: int = Field(default=30, gt=0, le=30)
+    """Calendar days per request of an index's one-minute bars. Shioaji refuses a range of more than 30 days."""
 
     history_retry_hours: float = Field(default=2, gt=0)
-    """A history behind the last settled session is asked for again at most this often."""
+    """
+    A question Shioaji answered with nothing new, such as the daily quotes of a session it does not serve yet, or one
+    that failed, as every request does while the login is down, is asked again at most this often.
+    """
 
     history_start_slack_days: int = Field(default=14, ge=0)
     """
-    A cached history that starts more than this many calendar days after the window asked for is fetched again, at
-    most every retry interval: holidays such as the Lunar New Year closure leave up to about ten days without a bar.
+    An index history that starts more than this many calendar days after the window asked for is fetched further back:
+    holidays such as the Lunar New Year closure leave up to about ten days without a session.
     """
-
-    history_save_chunk_size: int = Field(default=5_000, gt=0)
-    """Cached daily bars written per database commit."""
 
     listing_cache_hours: float = Field(default=6, gt=0)
     """How long the TWSE and TPEX listings, with each stock's latest official close, are reused."""

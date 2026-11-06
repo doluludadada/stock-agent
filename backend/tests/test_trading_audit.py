@@ -278,7 +278,8 @@ async def test_order_execution_sends_only_a_pending_order(tmp_path, ending: str 
     account = await stack.broker.get_account()
     signal = stack.config.manual_entry_rule().apply(stock, account, equity=account.cash, now=stack.clock.now())
     stats = run_stats(Workflow.MANUAL_BUY)
-    order = stack.config.order_rule().apply(signal, stats.run_id, stack.clock.now(), stack.clock.trading_phase())
+    last_close = stack.clock.session_close(stack.clock.last_closed_session())
+    order = stack.config.order_rule().apply(signal, stats.run_id, stack.clock.now(), stack.clock.trading_phase(), last_close)
 
     if ending == "rejected":
         order.reject(RejectReason.ORDER_MODE_DISABLED, "order mode disabled", now=stack.clock.now())

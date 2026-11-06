@@ -47,7 +47,7 @@ const watchlist = {
   list: { title: 'Stocks' },
   sources: {
     title: 'Where the list comes from',
-    question: 'Three ways a stock gets here',
+    question: '{{count}} ways a stock gets here',
     manual: 'Added by you, from here or from a stock page. It stays until you remove it.',
     technical: 'Added by a Full Cycle run when its technical strategy passed the stock. It expires at the next session’s close.',
     buzz: 'Added by a Social Buzz scan. It expires on its own as well.',

@@ -94,6 +94,17 @@ class Position:
         self.mark = None
 
 
+@dataclass(frozen=True)
+class AccountOpening:
+    """
+    When a mock account opened, at its first read or its last reset, and the cash it opened with. Its account page, the
+    equity curve and the trades start there. A real broker reports none.
+    """
+
+    initial_cash: NonNegativeFiniteFloat
+    opened_at: datetime
+
+
 @dataclass(config=ConfigDict(validate_assignment=True))
 class Account:
     """
@@ -112,6 +123,9 @@ class Account:
 
     cash: NonNegativeFiniteFloat = 0.0
     positions: list[Position] = Field(default_factory=list)
+
+    opening: AccountOpening | None = None
+    """The mock book's opening. None at a real broker."""
 
     @property
     def stock_ids(self) -> frozenset[str]:
@@ -132,6 +146,16 @@ class Account:
     def equity(self) -> float:
         """Cash plus market value: gross, before the costs of selling."""
         return self.cash + self.market_value
+
+    @property
+    def opened_at(self) -> datetime | None:
+        """When the mock book opened; None at a real broker, whose history has no start the app knows."""
+        return self.opening.opened_at if self.opening else None
+
+    @property
+    def profit(self) -> float | None:
+        """Equity minus the cash it opened with: the profit or loss since the opening. None without an opening."""
+        return None if self.opening is None else self.equity - self.opening.initial_cash
 
     @validate_call
     def can_afford(self, amount: NonNegativeFiniteFloat) -> bool:

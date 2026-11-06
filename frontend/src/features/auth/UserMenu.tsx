@@ -1,7 +1,8 @@
-import { ChevronDown, LogIn, LogOut, Settings2, UsersRound } from 'lucide-react'
+import { ChevronDown, LogIn, LogOut, Settings2, SlidersHorizontal, UsersRound } from 'lucide-react'
 import { Link, useLocation } from 'react-router'
 import { useTranslation } from '@/i18n'
 import { hasPermission, useSession } from '@/shared/api'
+import { paths } from '@/shared/config/paths'
 import { cn } from '@/shared/lib/utils'
 import { Avatar } from '@/shared/ui/avatar'
 import { Button } from '@/shared/ui/button'
@@ -26,14 +27,11 @@ export function RoleBadge({ kind, className }: { kind: Role; className?: string 
   )
 }
 
-interface UserMenuProps {
-  /** The administrator's pages; a user without the permission never sees them. */
-  adminLinks: { users: string; settings: string }
-  onSignedOut: () => void
-}
-
-/** The header's account control: who is signed in, their role, the admin pages and sign-out; sign-in otherwise. */
-export function UserMenu({ adminLinks, onSignedOut }: UserMenuProps) {
+/**
+ * The header's account control: who is signed in, their role, My settings, the administrator's pages to a user with the
+ * permission, and sign-out; sign-in otherwise.
+ */
+export function UserMenu({ onSignedOut }: { onSignedOut: () => void }) {
   const { t } = useTranslation('auth')
   const current = useSession()
   const links = useAuthLinks()
@@ -83,10 +81,16 @@ export function UserMenu({ adminLinks, onSignedOut }: UserMenuProps) {
             <RoleBadge kind={user.role} />
           </span>
         </DropdownMenuLabel>
-        {(manageUsers || editSettings) && <DropdownMenuSeparator />}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem asChild>
+          <Link to={paths.mySettings}>
+            <SlidersHorizontal aria-hidden />
+            {t('settings.title')}
+          </Link>
+        </DropdownMenuItem>
         {manageUsers && (
           <DropdownMenuItem asChild>
-            <Link to={adminLinks.users}>
+            <Link to={paths.users}>
               <UsersRound aria-hidden />
               {t('menu.users')}
             </Link>
@@ -94,7 +98,7 @@ export function UserMenu({ adminLinks, onSignedOut }: UserMenuProps) {
         )}
         {editSettings && (
           <DropdownMenuItem asChild>
-            <Link to={adminLinks.settings}>
+            <Link to={paths.adminSettings}>
               <Settings2 aria-hidden />
               {t('menu.settings')}
             </Link>

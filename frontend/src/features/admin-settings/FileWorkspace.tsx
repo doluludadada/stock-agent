@@ -146,10 +146,10 @@ export function FileWorkspace({ status, overview, owner, reveal, throttledUntil,
   const editing = draft !== null
   const refusal = disk.kind === 'refused' ? disk.refusal : null
   const problems = useMemo(() => {
-    if (refused?.text) return locatedIn(refused.problems, file)
-    if (editing) return locatedIn(check.data?.problems ?? [], file)
-    return refusal ? locatedIn(refusal.problems, file) : []
-  }, [refused, editing, check.data, refusal, file])
+    if (refused?.text) return locatedIn(refused.problems, file, t)
+    if (editing) return locatedIn(check.data?.problems ?? [], file, t)
+    return refusal ? locatedIn(refusal.problems, file, t) : []
+  }, [refused, editing, check.data, refusal, file, t])
 
   const edit = (text: string) => {
     if (!shown.data) return

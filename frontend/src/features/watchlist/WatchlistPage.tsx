@@ -3,7 +3,7 @@ import { useId, useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
 import { useTranslation } from '@/i18n'
-import { isApiError, useStockQuotes, type Loadable, type StockQuote } from '@/shared/api'
+import { isApiError, useAllows, useStockQuotes, type Loadable, type StockQuote } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
 import { directionOf } from '@/shared/lib/direction'
 import { useFormat } from '@/shared/lib/format'
@@ -25,7 +25,7 @@ import { Stat } from '@/shared/ui/stat'
 import { StateBlock } from '@/shared/ui/state-block'
 import { StockPicker } from '@/shared/ui/stock-picker'
 import { useWatchlistChange, useWatchlistEntries, type WatchlistEntry } from './api'
-import { byStock, daySummary, latestSession, shownRows, SORT_KEYS, SOURCE_FILTERS, type Mover, type Quotes, type SortKey, type SourceFilter, type WatchRow } from './model'
+import { byStock, daySummary, latestSession, shownRows, SORT_KEYS, watchlistSources, type Mover, type Quotes, type SortKey, type SourceFilter, type WatchRow } from './model'
 
 export function WatchlistPage() {
   const { t } = useTranslation('watchlist')
@@ -148,7 +148,8 @@ function StockList({ rows, quotes, trends, className }: StockListProps) {
   const [editing, setEditing] = useState(false)
   const shown = shownRows(rows, quotes, filter, query, sort)
   const latest = latestSession(quotes)
-  const counts = Object.fromEntries(SOURCE_FILTERS.map((key) => [key, key === 'all' ? rows.length : rows.filter((row) => row.entries.some((entry) => entry.watchlist_type === key)).length]))
+  const filters: readonly SourceFilter[] = ['all', ...watchlistSources(useAllows('realtime_quotes'))]
+  const counts = Object.fromEntries(filters.map((key) => [key, key === 'all' ? rows.length : rows.filter((row) => row.entries.some((entry) => entry.watchlist_type === key)).length]))
 
   const remove = (row: WatchRow) =>
     change.mutate(
@@ -248,7 +249,7 @@ function StockList({ rows, quotes, trends, className }: StockListProps) {
           value={filter}
           onChange={setFilter}
           label={t('filter.label')}
-          options={SOURCE_FILTERS.map((key) => ({ value: key, label: t(key === 'all' ? 'filter.all' : `type.${key}`), count: counts[key] }))}
+          options={filters.map((key) => ({ value: key, label: t(key === 'all' ? 'filter.all' : `type.${key}`), count: counts[key] }))}
         />
         <div className="flex gap-2 @2xl:ml-auto">
           <span className="relative min-w-0 flex-1 @2xl:w-48 @2xl:flex-none">
@@ -302,10 +303,11 @@ function Close({ state, latest }: { state: Loadable<StockQuote> | undefined; lat
 /** Where the list comes from, beside it on a wide screen. */
 function SourcesPanel({ className }: { className?: string }) {
   const { t } = useTranslation('watchlist')
+  const sources = watchlistSources(useAllows('realtime_quotes'))
   return (
-    <Panel className={className} title={t('sources.title')} description={t('sources.question')}>
+    <Panel className={className} title={t('sources.title')} description={t('sources.question', { count: sources.length })}>
       <dl className="space-y-3.5 text-sm">
-        {(['manual', 'technical', 'buzz'] as const).map((type) => (
+        {sources.map((type) => (
           <div key={type} className="space-y-1">
             <dt>
               <Badge variant="outline" className="font-normal">

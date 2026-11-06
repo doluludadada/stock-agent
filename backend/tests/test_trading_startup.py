@@ -1,3 +1,4 @@
+import asyncio
 import io
 from itertools import product
 from pathlib import Path
@@ -15,13 +16,21 @@ from trading_stack import SilentLogger
 
 from a_domain.types.enums import DatabaseBackend, ExecutionProvider, OrderMode, ShioajiCredential, SystemEnvironment
 from b_application.config.app_config import AppConfig
+from b_application.config.market_data_config import MarketHoursConfig
 from b_application.config.settings_loader import validate_trading_environment
 from b_application.config.trading_config import ShioajiConfig, TradingConfig
+from c_infrastructure.system.attempt_log import MemoryAttemptLog
+from c_infrastructure.system.market_clock import TaiwanMarketClock
 from c_infrastructure.trading.shioaji.execution_provider import ShioajiExecutionProvider
 from d_presentation.cli import interactive, terminal
-from d_presentation.dependencies import TradingSetupError, get_project_root, load_settings, open_real_broker
+from d_presentation.dependencies import ProcessState, TradingSetupError, connect_shioaji, get_project_root, load_settings
 
 pytestmark = pytest.mark.asyncio
+
+
+def process() -> ProcessState:
+    return ProcessState(logger=SilentLogger(), attempt_log=MemoryAttemptLog(), cache_writes=asyncio.Lock())
+
 
 DEV, TEST, PROD = SystemEnvironment.DEV, SystemEnvironment.TEST, SystemEnvironment.PROD
 MOCK, SHIOAJI = ExecutionProvider.MOCK, ExecutionProvider.SHIOAJI
@@ -69,8 +78,8 @@ async def test_each_environment_provider_and_order_mode_either_starts_or_is_refu
 
     validate_trading_environment(config)
 
-    async with open_real_broker(config, logger=SilentLogger()) as broker:
-        assert (broker is None) if provider == MOCK else type(broker) is ShioajiExecutionProvider
+    _, broker = await connect_shioaji(config, process(), TaiwanMarketClock(MarketHoursConfig()))
+    assert (broker is None) if provider == MOCK else type(broker) is ShioajiExecutionProvider
 
 
 @pytest.mark.parametrize(
@@ -124,9 +133,7 @@ async def test_a_production_credential_in_dot_env_stops_a_test_machine_too(tmp_p
     assert SECRET not in str(refused.value)
 
 
-async def test_a_test_machine_with_only_the_test_pair_starts_and_ignores_it_on_the_mock_broker(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_dev_and_test_machines_with_only_the_test_pair_start_on_the_mock_broker(monkeypatch: pytest.MonkeyPatch) -> None:
     for credential in TEST.shioaji_credentials:
         monkeypatch.setenv(credential.value, SECRET)
 
@@ -138,8 +145,7 @@ async def test_the_test_environment_logs_in_to_simulation_with_only_the_test_pai
     clients: list[FakeShioaji] = []
     monkeypatch.setattr(shioaji, "Shioaji", lambda simulation: clients.append(FakeShioaji(simulation)) or clients[-1])
 
-    async with open_real_broker(trading_config(TEST, SHIOAJI, OrderMode.DISABLED), logger=SilentLogger()):
-        pass
+    await connect_shioaji(trading_config(TEST, SHIOAJI, OrderMode.DISABLED), process(), TaiwanMarketClock(MarketHoursConfig()))
 
     [client] = clients
     assert (client.simulation, client.ca_activations) == (True, [])
@@ -150,8 +156,7 @@ async def test_prod_never_logs_in_to_simulation_and_activates_its_certificate(mo
     clients: list[FakeShioaji] = []
     monkeypatch.setattr(shioaji, "Shioaji", lambda simulation: clients.append(FakeShioaji(simulation)) or clients[-1])
 
-    async with open_real_broker(trading_config(PROD, SHIOAJI, OrderMode.LIVE), logger=SilentLogger()):
-        pass
+    await connect_shioaji(trading_config(PROD, SHIOAJI, OrderMode.LIVE), process(), TaiwanMarketClock(MarketHoursConfig()))
 
     [client] = clients
     assert client.simulation is False
@@ -192,9 +197,8 @@ async def test_a_failed_shioaji_login_stops_startup_with_the_broker_reason(monke
     monkeypatch.setattr(shioaji, "Shioaji", lambda simulation: FakeShioaji(simulation, login_error=TokenError(401, "bad api key")))
     config = trading_config(PROD, SHIOAJI, OrderMode.LIVE)
 
-    with pytest.raises(TradingSetupError, match="Shioaji production login failed: TokenError: StatusCode: 401, Detail: bad api key"):
-        async with open_real_broker(config, logger=SilentLogger()):
-            pass
+    with pytest.raises(TradingSetupError, match="^Shioaji production login failed: TokenError, status 401$"):
+        await connect_shioaji(config, process(), TaiwanMarketClock(MarketHoursConfig()))
 
 
 async def test_the_mock_broker_in_mock_only_mode_on_dev_is_the_default() -> None:

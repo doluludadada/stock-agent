@@ -3,7 +3,7 @@ import { useId, useState } from 'react'
 import { useTranslation } from '@/i18n'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
-import { parseDiff, sortProblems, type SettingsEdit, type SettingsFileId, type SettingsProblem } from './model'
+import { parseDiff, problemMessage, sortProblems, type SettingsEdit, type SettingsFileId, type SettingsProblem } from './model'
 
 /** Puts the caret on a 1-based line and column of the open file. */
 export type Reveal = (line: number, column: number) => void
@@ -29,7 +29,7 @@ export function ProblemList({ problems, file, onReveal }: { problems: readonly S
               <span className="tabular text-xs font-medium text-destructive">{place}</span>
               {problem.path && <code className="font-mono text-xs break-all text-muted-foreground">{problem.path}</code>}
             </span>
-            <span className="block text-sm text-pretty break-words">{problem.message}</span>
+            <span className="block text-sm text-pretty break-words">{problemMessage(problem, t)}</span>
           </>
         )
         const line = problem.file === file ? problem.line : null

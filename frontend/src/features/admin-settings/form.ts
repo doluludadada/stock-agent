@@ -12,7 +12,10 @@ export interface FormSection {
   id: string
   /** Settings shown, not edited: each changes only outside the form. */
   readOnly?: true
-  /** Dotted paths in appsetting.yaml. A label is `admin:form.field.<path>`; the control comes from the schema there. */
+  /**
+   * Dotted paths in appsetting.yaml. A label is `admin:form.field.<path>` and its help `admin:form.help.<path>`, in
+   * every locale; the control comes from the schema there.
+   */
   fields: readonly string[]
 }
 
@@ -54,7 +57,7 @@ export const FORM_SECTIONS: readonly FormSection[] = [
   },
   {
     id: 'market_data',
-    fields: ['market_data.quote_request_interval_seconds', 'market_data.history_batch_delay_seconds', 'market_data.history_retry_hours', 'market_data.listing_cache_hours'],
+    fields: ['market_data.quote_request_interval_seconds', 'market_data.history_request_interval_seconds', 'market_data.history_backfill_bars', 'market_data.history_retry_hours', 'market_data.listing_cache_hours'],
   },
 ]
 
@@ -74,8 +77,6 @@ export type RowView = { kind: 'control'; control: Control } | { kind: 'readOnly'
 
 export interface FormRow {
   path: string
-  /** The setting's own description in the schema: its docstring in the settings class. */
-  description: string | null
   view: RowView
 }
 
@@ -102,7 +103,7 @@ function resolved(root: SchemaNode, node: SchemaNode): SchemaNode {
   return isSchemaNode(branch) ? resolved(root, { ...branch, ...rest }) : node
 }
 
-/** The schema's property at a dotted path, unresolved, so its description is the setting's own and not its type's. */
+/** The schema's property at a dotted path as the schema writes it; controlOf resolves its type. */
 function propertyAt(root: SchemaNode, path: string): SchemaNode | null {
   let property: SchemaNode | null = null
   let section: SchemaNode = root
@@ -156,12 +157,11 @@ export function controlOf(root: SchemaNode, property: SchemaNode, value: unknown
 export function rowsOf(section: FormSection, root: SchemaNode, values: Readonly<Record<string, unknown>>): FormRow[] {
   return section.fields.map((path) => {
     const property = propertyAt(root, path)
-    const description = typeof property?.description === 'string' ? property.description : null
-    if (!Object.hasOwn(values, path)) return { path, description, view: { kind: 'missing' } }
+    if (!Object.hasOwn(values, path)) return { path, view: { kind: 'missing' } }
     const value = values[path]
-    if (section.readOnly) return { path, description, view: { kind: 'readOnly', value: String(value) } }
+    if (section.readOnly) return { path, view: { kind: 'readOnly', value: String(value) } }
     const control = property ? controlOf(root, property, value) : null
-    return { path, description, view: control ? { kind: 'control', control } : { kind: 'yamlOnly' } }
+    return { path, view: control ? { kind: 'control', control } : { kind: 'yamlOnly' } }
   })
 }
 

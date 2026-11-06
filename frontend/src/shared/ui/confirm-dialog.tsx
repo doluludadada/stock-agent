@@ -15,6 +15,8 @@ interface ConfirmDialogProps {
   onOpenChange?: (open: boolean) => void
   title: ReactNode
   description: ReactNode
+  /** What the yes covers in detail, such as a list, under the description, which is one paragraph. */
+  children?: ReactNode
   cancel: string
   confirm: string
   onConfirm: () => void
@@ -24,7 +26,7 @@ interface ConfirmDialogProps {
 }
 
 /** A question that needs an explicit yes before something costly or irreversible happens. */
-export function ConfirmDialog({ open, onOpenChange, title, description, cancel, confirm, onConfirm, onCancel, destructive = false }: ConfirmDialogProps) {
+export function ConfirmDialog({ open, onOpenChange, title, description, children, cancel, confirm, onConfirm, onCancel, destructive = false }: ConfirmDialogProps) {
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
@@ -32,6 +34,7 @@ export function ConfirmDialog({ open, onOpenChange, title, description, cancel, 
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
+        {children}
         <AlertDialogFooter>
           <AlertDialogCancel onClick={onCancel}>{cancel}</AlertDialogCancel>
           <AlertDialogAction variant={destructive ? 'destructive' : 'default'} onClick={onConfirm}>

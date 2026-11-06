@@ -1,6 +1,6 @@
 import asyncio
 import math
-from collections.abc import Mapping
+from collections.abc import Callable, Collection, Mapping
 from copy import deepcopy
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, NamedTuple, override
@@ -112,7 +112,9 @@ class TaiwanStockProvider(ITaiwanStockProvider):
                     self._logger.debug(f"Fetching {market} stocks...")
                     response = await client.get(url)
                     response.raise_for_status()
-                    listed, listed_closes = self.parse_listing(response.json(), market)
+                    rows = response.json()
+                    listed, listed_closes = self.parse_listing(rows, market)
+                    self.log_unread(url, rows, len(listed_closes))
                     stocks.extend(listed)
                     closes.update(listed_closes)
 
@@ -204,6 +206,31 @@ class TaiwanStockProvider(ITaiwanStockProvider):
         return reports
 
     @override
+    async def read_reports[Readings: Collection[Any]](
+        self, urls: Mapping[MarketType, str], read: Callable[[list[dict[str, Any]], MarketType], Readings]
+    ) -> dict[MarketType, Readings]:
+        read_by_market: dict[MarketType, Readings] = {}
+
+        for market, rows in (await self.fetch_reports(urls)).items():
+            read_by_market[market] = read(rows, market)
+            self.log_unread(urls[market], rows, len(read_by_market[market]))
+
+        return read_by_market
+
+    @override
+    def log_unread(self, url: str, rows: list[dict[str, Any]], read: int) -> None:
+        if read:
+            return
+
+        served = [row for row in rows if sum(1 for value in row.values() if str(value).strip()) > 1]
+
+        if not served:
+            self._logger.info(f"Open data feed {url} served no rows")
+            return
+
+        self._logger.error(f"Open data feed {url} served {len(served)} rows and none could be read")
+
+    @override
     async def fetch_industries(self) -> dict[str, str]:
         now = self._clock.now()
         stale = {
@@ -230,13 +257,13 @@ class TaiwanStockProvider(ITaiwanStockProvider):
     @override
     async def fetch_material_information(self) -> list[Article]:
         fetched_at = self._clock.now()
-        reports = await self.fetch_reports({market: feed.url for market, feed in self._exchange.material_information.items()})
-        return [
-            announcement
-            for market, rows in reports.items()
-            for row in rows
-            if (announcement := self.parse_announcement(row, market, fetched_at)) is not None
-        ]
+        reports = await self.read_reports(
+            {market: feed.url for market, feed in self._exchange.material_information.items()},
+            lambda rows, market: [
+                announcement for row in rows if (announcement := self.parse_announcement(row, market, fetched_at)) is not None
+            ],
+        )
+        return [announcement for announcements in reports.values() for announcement in announcements]
 
     @override
     def parse_announcement(self, row: dict[str, Any], market: MarketType, fetched_at: datetime) -> Article | None:
@@ -267,8 +294,10 @@ class TaiwanStockProvider(ITaiwanStockProvider):
 
     @override
     async def fetch_quarter_eps(self) -> dict[str, Eps]:
-        reports = await self.fetch_reports({market: feed.url for market, feed in self._exchange.quarter_eps.items()})
-        return {stock_id: eps for market, rows in reports.items() for stock_id, eps in self.parse_quarter_eps(rows, market).items()}
+        reports = await self.read_reports(
+            {market: feed.url for market, feed in self._exchange.quarter_eps.items()}, self.parse_quarter_eps
+        )
+        return {stock_id: eps for filed in reports.values() for stock_id, eps in filed.items()}
 
     @override
     def parse_quarter_eps(self, rows: list[dict[str, Any]], market: MarketType) -> dict[str, Eps]:
@@ -297,8 +326,10 @@ class TaiwanStockProvider(ITaiwanStockProvider):
 
     @override
     async def fetch_valuation_ratios(self) -> list[ValuationRatios]:
-        reports = await self.fetch_reports({market: feed.url for market, feed in self._exchange.valuation_ratios.items()})
-        return [ratios for market, rows in reports.items() for ratios in self.parse_valuation_ratios(rows, market)]
+        reports = await self.read_reports(
+            {market: feed.url for market, feed in self._exchange.valuation_ratios.items()}, self.parse_valuation_ratios
+        )
+        return [ratios for published in reports.values() for ratios in published]
 
     @override
     def parse_valuation_ratios(self, rows: list[dict[str, Any]], market: MarketType) -> list[ValuationRatios]:
@@ -330,13 +361,15 @@ class TaiwanStockProvider(ITaiwanStockProvider):
 
         for statement in FinancialStatement:
             for industry_format in IndustryFormat:
-                served = await self.fetch_reports({market: urls[statement][industry_format] for market, urls in feeds.urls.items()})
-                reports.extend(
-                    report
-                    for market, rows in served.items()
-                    for row in rows
-                    if (report := self.parse_financial_report(row, market, statement, industry_format)) is not None
+                served = await self.read_reports(
+                    {market: urls[statement][industry_format] for market, urls in feeds.urls.items()},
+                    lambda rows, market, statement=statement, industry_format=industry_format: [
+                        report
+                        for row in rows
+                        if (report := self.parse_financial_report(row, market, statement, industry_format)) is not None
+                    ],
                 )
+                reports.extend(report for filed in served.values() for report in filed)
 
         return reports
 
@@ -373,13 +406,11 @@ class TaiwanStockProvider(ITaiwanStockProvider):
 
     @override
     async def fetch_monthly_revenues(self) -> list[MonthlyRevenue]:
-        reports = await self.fetch_reports({market: feed.url for market, feed in self._exchange.monthly_revenue.items()})
-        return [
-            revenue
-            for market, rows in reports.items()
-            for row in rows
-            if (revenue := self.parse_monthly_revenue(row, market)) is not None
-        ]
+        reports = await self.read_reports(
+            {market: feed.url for market, feed in self._exchange.monthly_revenue.items()},
+            lambda rows, market: [revenue for row in rows if (revenue := self.parse_monthly_revenue(row, market)) is not None],
+        )
+        return [revenue for revenues in reports.values() for revenue in revenues]
 
     @override
     def parse_monthly_revenue(self, row: dict[str, Any], market: MarketType) -> MonthlyRevenue | None:
@@ -414,8 +445,11 @@ class TaiwanStockProvider(ITaiwanStockProvider):
 
     @override
     async def fetch_exchange_news(self) -> list[ExchangeNews]:
-        reports = await self.fetch_reports({MarketType.TWSE: self._exchange.exchange_news.url})
-        return [news for rows in reports.values() for row in rows if (news := self.parse_exchange_news(row)) is not None]
+        reports = await self.read_reports(
+            {MarketType.TWSE: self._exchange.exchange_news.url},
+            lambda rows, market: [news for row in rows if (news := self.parse_exchange_news(row)) is not None],
+        )
+        return [news for items in reports.values() for news in items]
 
     @override
     def parse_exchange_news(self, row: dict[str, Any]) -> ExchangeNews | None:
@@ -439,10 +473,10 @@ class TaiwanStockProvider(ITaiwanStockProvider):
     @override
     async def fetch_index_closes(self) -> dict[MarketType, list[Ohlcv]]:
         parsers = {MarketType.TWSE: self.parse_twse_index, MarketType.TPEX: self.parse_tpex_index}
-        reports = await self.fetch_reports(
-            {MarketType.TWSE: self._exchange.twse_index_url, MarketType.TPEX: self._exchange.tpex_index_url}
+        return await self.read_reports(
+            {MarketType.TWSE: self._exchange.twse_index_url, MarketType.TPEX: self._exchange.tpex_index_url},
+            lambda rows, market: parsers[market](rows),
         )
-        return {market: parsers[market](rows) for market, rows in reports.items()}
 
     @override
     def parse_twse_index(self, rows: list[dict[str, Any]]) -> list[Ohlcv]:

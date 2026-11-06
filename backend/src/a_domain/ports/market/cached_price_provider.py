@@ -1,76 +1,87 @@
-from collections.abc import Awaitable, Callable
-from datetime import date, datetime, tzinfo
+from collections.abc import Mapping
+from datetime import date, datetime
 from typing import Protocol
 
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.ports.market.price_provider import IOhlcvProvider
-
-type HistoryDownload = Callable[[list[str]], Awaitable[dict[str, list[Ohlcv]]]]
-"""Asks the history source for the bars of the keys it is given."""
+from a_domain.types.enums import MarketType
 
 
 class ICachedPriceProvider(IOhlcvProvider, Protocol):
     """
-    Daily history from a history source, cached in the database, and realtime quotes passed through uncached.
+    A personal site's daily history from its broker, kept in the database, and the broker's realtime quotes passed
+    through uncached.
 
-    The cache holds settled sessions only, and a stock whose cached history lacks the last settled session is asked
-    for again at most once per retry interval. An index's history is cached the same way, under a key of its own.
+    The broker serves every listed stock's daily bar of one session per request, without the change from the
+    session's reference price, and each exchange's own index from its one-minute bars. The cache holds settled sessions
+    only: the index sessions it lacks first, then the stocks of every index session it holds no stock of, newest first.
+    The last settled session's bars that hold no change get each stock's change from the broker's snapshots, which show
+    that session until the next one opens; a bar of an older session reads the open-data archive's official change of
+    its stock and session where the broker gave none. A read adjusts each stock's bars for the corporate actions those
+    changes show (HistoryAdjustmentRule), against the index sessions that hold the stocks, and warns how many of its
+    sessions hold a bar with no change, which no factor crosses. The broker is asked the same question at most once per
+    market_data.history_retry_hours, answered or failed, so a session it does not serve yet, an index range without a
+    new session, or a broker whose login is down is not asked at every read. An index's bars are kept under `^` and its
+    market, which no stock id can be.
     """
 
-    async def cached_history(
-        self, stock_ids: list[str], start_date: datetime, end_date: datetime, download: HistoryDownload
-    ) -> dict[str, list[Ohlcv]]:
-        """The cached bars per key, after `download` fetched those of the keys the cache is behind or short of."""
+    def sessions_of(self, start_date: datetime, end_date: datetime) -> tuple[date, date]:
+        """The window's first session and its last, which is never after the last settled session."""
         ...
 
-    async def download_once(
-        self, stock_ids: list[str], first_session: date, last_session: date, download: HistoryDownload
-    ) -> dict[str, list[Ohlcv]]:
+    async def sync(self, start_date: datetime, end_date: datetime) -> tuple[date, date]:
         """
-        What the history source returns for `stock_ids` from first_session to last_session. A stock that another call is
-        downloading over the same sessions comes from that download, and `download` runs once for the rest, so loads of
-        one stock at once ask the source once while loads of different stocks still run side by side.
+        Fetches what the cache lacks of the window's sessions, up to the last settled session, and returns the window's
+        first and last session.
         """
         ...
 
-    def stocks_behind(self, stock_ids: list[str], cached: dict[str, list[Ohlcv]], last_settled_session: date) -> list[str]:
-        """The stocks whose cached history lacks the last settled session."""
-        ...
-
-    def stocks_short_of(
-        self, stock_ids: list[str], cached: dict[str, list[Ohlcv]], asked_from: dict[str, date], first_session: date
-    ) -> list[str]:
+    async def sync_index(self, market: MarketType, first: date, last: date) -> None:
         """
-        The cached stocks never asked for from as early as `first_session` (`asked_from`, else their first cached bar,
-        with the configured slack for holidays): a strategy that needs more history than earlier runs cached gets it at
-        once instead of failing on too few bars. A stock with a short history is asked once per earlier window.
+        Fetches the market's index sessions the cache lacks from first to last: after the latest it holds, and before the
+        earliest when that is more than market_data.history_start_slack_days after first, since holidays leave days
+        without a session.
         """
         ...
 
-    async def load_windows(self, stock_ids: list[str]) -> dict[str, date]:
-        """The earliest session the history source was asked for, per stock that was ever asked."""
+    async def index_gaps(self, market: MarketType, first: date, last: date) -> list[tuple[date, date]]:
+        """The ranges of the market's index sessions from first to last that sync_index asks the broker for."""
         ...
 
-    async def save_windows(self, stock_ids: list[str], first_session: date, asked_from: dict[str, date]) -> None:
-        """Records `first_session` for each stock it is earlier for than `asked_from` holds."""
+    async def sync_session(self, session: date) -> bool:
+        """
+        Fetches and saves one session's bars unless the cache holds it or the broker was asked for it within the retry
+        interval. Returns whether it saved any.
+        """
         ...
 
-    async def stocks_due(self, behind: list[str], last_settled_session: date, now: datetime) -> list[str]:
-        """The stocks behind the last settled session that the history source may be asked for now."""
+    async def sync_changes(self, session: date) -> None:
+        """
+        Gives each stock's bar of the session that holds no change its change from the broker's snapshots, unless they
+        were asked within the retry interval. The caller asks only while the snapshots still show the session: it is the
+        last settled session.
+        """
         ...
 
-    async def load_cached_bars(
-        self, stock_ids: list[str], start_day: date, end_day: date, zone: tzinfo | None
-    ) -> dict[str, list[Ohlcv]]:
-        """Cached daily bars per stock from start_day to end_day in `zone`, oldest first."""
+    def due(self, question: str, now: datetime) -> bool:
+        """Whether the broker may be asked `question` now: it never was, or was a retry interval ago."""
         ...
 
-    async def save_bars(self, bars_by_stock: dict[str, list[Ohlcv]]) -> None: ...
-
-    async def save_fetches(self, stock_ids: list[str], fetched_at: datetime, settled_session: date) -> None:
-        """Records that the history source was asked for these stocks at fetched_at, when settled_session was the last settled one."""
+    async def held_sessions(self, first: date, last: date) -> set[date]:
+        """The sessions from first to last the cache holds stocks' bars of."""
         ...
 
-    def settled_bars(self, bars_by_stock: dict[str, list[Ohlcv]], last_settled_session: date) -> dict[str, list[Ohlcv]]:
-        """Only the bars of sessions up to last_settled_session; a stock left with none is dropped."""
+    async def index_sessions(self, first: date, last: date) -> dict[MarketType, list[Ohlcv]]:
+        """Each market's index bars from first to last, oldest first."""
+        ...
+
+    async def stored_bars(self, stock_ids: list[str], first: date, last: date) -> dict[str, list[Ohlcv]]:
+        """
+        Each stock's bars from first to last as the broker served them, oldest first, a bar without a change with the
+        open-data archive's official change of its stock and session where the archive holds one.
+        """
+        ...
+
+    async def save_bars(self, bars: Mapping[str, list[Ohlcv]]) -> None:
+        """Saves each key's bars, replacing what the cache holds of the same key and session."""
         ...

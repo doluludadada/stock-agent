@@ -51,3 +51,25 @@ export function moveBetween(from: EquityPoint | undefined, to: EquityPoint | und
   if (!from || !to || from.value === 0) return null
   return { change: to.value - from.value, ratio: (to.value - from.value) / from.value }
 }
+
+export interface TotalReturn {
+  /** Equity minus the starting capital. */
+  profit: number
+  /** The profit over the starting capital. */
+  ratio: number
+  /** When the account opened, at its first read or its last reset. */
+  since: string
+}
+
+/** The mock account's result since it opened; null at a real broker, which reports no opening. */
+export function totalReturn(history: AccountHistory): TotalReturn | null {
+  if (!history.opening || history.profit === null) return null
+  const { initial_cash, opened_at } = history.opening
+  return { profit: history.profit, ratio: initial_cash ? history.profit / initial_cash : 0, since: opened_at }
+}
+
+/** A starting capital typed by the user: a finite amount above zero, or null. */
+export function parseStartingCapital(text: string): number | null {
+  const amount = Number(text)
+  return text.trim() !== '' && Number.isFinite(amount) && amount > 0 ? amount : null
+}

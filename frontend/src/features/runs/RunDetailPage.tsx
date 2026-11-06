@@ -1,6 +1,6 @@
-import { ArrowLeft, ClipboardList, ReceiptText, SearchX } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ClipboardList, ReceiptText, SearchX } from 'lucide-react'
 import type { UseQueryResult } from '@tanstack/react-query'
-import type { ReactNode } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { useLocale, useTranslation } from '@/i18n'
 import { paths } from '@/shared/config/paths'
@@ -16,7 +16,9 @@ import { Skeleton } from '@/shared/ui/skeleton'
 import { Stat } from '@/shared/ui/stat'
 import { StateBlock } from '@/shared/ui/state-block'
 import { RequireSignIn } from '@/shared/ui/require-sign-in'
-import { useRun, useRunOrders, useRunSignals, type Order, type Run, type Signal } from './api'
+import { useRun, useRunFollow, useRunOrders, useRunSignals, type Order, type Run, type Signal } from './api'
+import { FollowPanel } from './FollowPanel'
+import { followMarks, type FollowMark } from './model'
 import { RunStateBadge } from './RunStateBadge'
 
 interface RunDetailPageProps {
@@ -41,6 +43,12 @@ function RunDetail({ runId, renderWatch, ruleName }: RunDetailPageProps) {
   const ended = run.data !== undefined && run.data.state !== 'running'
   const signals = useRunSignals(runId, ended)
   const orders = useRunOrders(runId, ended)
+  /** Only a finished analysis records decisions it never ordered, which a user may follow into the mock account. */
+  const followable = run.data?.state === 'finished' && run.data.summary?.workflow === 'full_cycle'
+  const follow = useRunFollow(runId, followable)
+  const marks = useMemo(() => follow.data && followMarks(follow.data), [follow.data])
+  const reports = run.data?.reports
+  const names = useMemo(() => new Map((reports ?? []).flatMap((report) => (report.name ? [[report.stock_id, report.name] as const] : []))), [reports])
 
   const back = (
     <Link to={paths.runs} className="-ml-1 inline-flex min-h-11 items-center gap-1.5 rounded-md px-1 text-sm text-muted-foreground hover:text-foreground md:min-h-8">
@@ -75,10 +83,11 @@ function RunDetail({ runId, renderWatch, ruleName }: RunDetailPageProps) {
         </p>
       )}
       {run.data.summary && <Summary summary={run.data.summary} />}
+      {followable && <FollowPanel runId={runId} follow={follow} decisions={signals.data} names={names} />}
       {(run.data.reports ?? []).length > 0 && <Reports reports={run.data.reports ?? []} renderWatch={renderWatch} ruleName={ruleName} />}
       {ended && (
         <div className="grid items-start gap-4 lg:gap-5 xl:grid-cols-2">
-          <Signals query={signals} />
+          <Signals query={signals} marks={marks} />
           <Orders query={orders} />
         </div>
       )}
@@ -106,6 +115,15 @@ function Header({ run }: { run: Run }) {
         {summary && <span>{t('timing', { start: formatDateTime(locale, summary.start_time), end: summary.end_time ? formatDateTime(locale, summary.end_time) : '—' })}</span>}
         <span className="font-mono">{run.run_id}</span>
       </p>
+      {summary?.followed_run_id && (
+        <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
+          {t('followOf')}
+          <Link to={paths.run(summary.followed_run_id)} className="inline-flex min-h-11 items-center gap-1 font-medium text-brand hover:underline md:min-h-0">
+            {t('followOfLink')}
+            <ArrowRight aria-hidden className="size-3.5" />
+          </Link>
+        </p>
+      )}
     </header>
   )
 }
@@ -180,7 +198,7 @@ function Reports({ reports, renderWatch, ruleName }: { reports: NonNullable<Run[
   )
 }
 
-function Signals({ query }: { query: UseQueryResult<Signal[]> }) {
+function Signals({ query, marks }: { query: UseQueryResult<Signal[]>; marks: ReadonlyMap<string, FollowMark> | undefined }) {
   const { t } = useTranslation('runs')
   const locale = useLocale()
   if (query.isPending) return <Skeleton className="h-32 rounded-2xl" />
@@ -197,6 +215,7 @@ function Signals({ query }: { query: UseQueryResult<Signal[]> }) {
       ),
     },
     { key: 'action', header: t('column.action'), cell: (signal) => t(`action.${signal.action}`) },
+    ...(marks ? [{ key: 'follow', header: t('column.follow'), cell: (signal: Signal) => <FollowBadge mark={marks.get(signal.decision_id)} /> }] : []),
     { key: 'score', header: t('column.score'), numeric: true, cell: (signal) => signal.score },
     { key: 'quantity', header: t('column.quantity'), numeric: true, from: 'sm', cell: (signal) => formatNumber(locale, signal.quantity) },
     { key: 'price', header: t('column.price'), numeric: true, from: 'sm', cell: (signal) => formatPrice(locale, signal.price_at_signal) },
@@ -210,6 +229,16 @@ function Signals({ query }: { query: UseQueryResult<Signal[]> }) {
         <StateBlock icon={ClipboardList} title={t('noSignals')} className="py-4" />
       )}
     </Panel>
+  )
+}
+
+function FollowBadge({ mark }: { mark: FollowMark | undefined }) {
+  const { t } = useTranslation('runs')
+  if (!mark) return null
+  return (
+    <Badge variant={mark === 'followed' ? 'secondary' : 'outline'} className="font-normal">
+      {t(`followMark.${mark}`)}
+    </Badge>
   )
 }
 

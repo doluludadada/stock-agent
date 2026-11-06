@@ -193,9 +193,60 @@ async def add_user_ai_model(connection: AsyncConnection) -> None:
         await connection.execute(text(statement))
 
 
+FOLLOW_STEP = {
+    "sqlite": (
+        "ALTER TABLE workflow_runs ADD COLUMN followed_run_id CHAR(32)",
+        "ALTER TABLE trade_signals ADD COLUMN followed_decision_id CHAR(32)",
+    ),
+    "postgresql": (
+        "ALTER TYPE workflow ADD VALUE 'FOLLOW' AFTER 'MANUAL_BUY'",
+        "ALTER TYPE signalsource ADD VALUE 'FOLLOW'",
+        "ALTER TABLE workflow_runs ADD COLUMN followed_run_id UUID",
+        "ALTER TABLE trade_signals ADD COLUMN followed_decision_id UUID",
+    ),
+}
+"""
+Version 4 to 5's first part, per database backend: workflow_runs.followed_run_id and trade_signals.followed_decision_id, stored as
+SQLModel stores a UUID (CHAR(32) on SQLite, UUID on PostgreSQL), and the member FOLLOW of the enums workflow and
+signalsource. On SQLite an enum is a VARCHAR as long as its longest name, which FOLLOW does not lengthen, so only
+PostgreSQL's named ENUM types change.
+"""
+
+
+async def add_follows(connection: AsyncConnection) -> None:
+    """
+    Version 4 to 5, first part: a run may follow another run's decisions. workflow_runs gains followed_run_id and
+    trade_signals followed_decision_id, NULL for every existing row, and the workflow and signal source enums gain FOLLOW.
+    """
+    for statement in FOLLOW_STEP[connection.dialect.name]:
+        await connection.execute(text(statement))
+
+
+async def drop_yahoo_history(connection: AsyncConnection) -> None:
+    """
+    Version 4 to 5, second part: the history cache holds the broker's daily quotes, with each bar's change from its
+    session's reference, instead of Yahoo's bars, which Yahoo adjusted for splits and capital reductions where the
+    broker's are as traded. ohlcv_data is dropped with its Yahoo bars, which no read may mix with the broker's, and so are
+    ohlcv_fetches and ohlcv_windows, which recorded each stock's Yahoo downloads where the broker answers one session
+    of every stock at once. The next start's create_all makes ohlcv_data anew, and the cache fills it from the broker.
+    """
+    for name in ("ohlcv_windows", "ohlcv_fetches", "ohlcv_data"):
+        await connection.execute(text(f"DROP TABLE IF EXISTS {name}"))
+
+
+async def add_follows_and_drop_yahoo_history(connection: AsyncConnection) -> None:
+    """
+    Version 4 to 5, in two parts: add_follows, so a run may follow another run's decisions, then drop_yahoo_history, so
+    the history cache holds the broker's daily quotes in place of Yahoo's bars. Version 5 is both, so one step runs them
+    in the caller's transaction, and a failure in either leaves the database at version 4.
+    """
+    await add_follows(connection)
+    await drop_yahoo_history(connection)
+
+
 type UpgradeStep = Callable[[AsyncConnection], Awaitable[None]]
 
-UPGRADES: tuple[UpgradeStep, ...] = (record_run_failures, give_rows_their_owner, add_user_ai_model)
+UPGRADES: tuple[UpgradeStep, ...] = (record_run_failures, give_rows_their_owner, add_user_ai_model, add_follows_and_drop_yahoo_history)
 """
 The steps that upgrade an older database in place, oldest first: UPGRADES[n - 1] turns version n into version n + 1. A
 step names the tables and columns it reads as they were at its version, never through today's SQLModel classes.

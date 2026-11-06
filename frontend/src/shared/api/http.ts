@@ -66,6 +66,8 @@ const ERROR_CODES = {
   ai_model_not_offered: true,
   run_in_progress: true,
   too_many_runs: true,
+  nothing_to_follow: true,
+  outside_follow_window: true,
   listing_unavailable: true,
   not_found: true,
   invalid_request: true,

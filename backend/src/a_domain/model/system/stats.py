@@ -25,6 +25,9 @@ class SystemStats:
     start_time: datetime
     end_time: datetime | None = None
 
+    followed_run_id: RunId | None = None
+    """A follow's run: the run whose decisions it followed. None for every other workflow."""
+
     technical_strategy_id: FormulaId | None = None
     """The technical strategy the run applied. None until TechnicalFilter applies one."""
 

@@ -33,7 +33,7 @@ class LimitPriceRule:
     of the band above, so rounding up across it stays on the grid.
 
     A quote within `float_tolerance` of a tick, as a fraction of the tick, is that tick carried through a binary float:
-    Yahoo serves float32 prices, so 28.35 arrives as 28.350000381469727. No exchange price lies that close to a tick
+    a float32 price source serves 28.35 as 28.350000381469727. No exchange price lies that close to a tick
     without being one.
     """
 

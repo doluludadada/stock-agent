@@ -158,7 +158,7 @@ class FailingQuoteFeed:
 
     async def fetch_realtime_bars(self, stocks: list[Stock]) -> dict[str, Ohlcv]:
         self.requests.append([stock.stock_id for stock in stocks])
-        raise ConnectionError("MIS unreachable")
+        raise ConnectionError("quote source unreachable")
 
 
 async def test_a_failed_quote_fetch_blocks_every_asked_stock_once(tmp_path) -> None:
@@ -172,7 +172,7 @@ async def test_a_failed_quote_fetch_blocks_every_asked_stock_once(tmp_path) -> N
     assert feed.requests == [["2330", "2317"], ["2330", "2317"]]
     assert stale_stock_ids == {"2330", "2317"}
     assert stats.stale_market_data_count == 2
-    assert stats.errors == ["Failed to fetch realtime market data: MIS unreachable"] * 2
+    assert stats.errors == ["Failed to fetch realtime market data: quote source unreachable"] * 2
 
 
 async def test_a_fresh_quote_is_not_asked_for_again_and_clears_the_stale_mark(tmp_path) -> None:

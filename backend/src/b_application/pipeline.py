@@ -10,6 +10,8 @@ from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.model.system.stats import SystemStats
 from a_domain.model.system.user import User, UserSession
+from a_domain.model.trading.account import Account
+from a_domain.model.trading.order import Order
 from a_domain.model.valuation.scan import MarketValuation, ScanCriteria, ValuationScan
 from a_domain.model.valuation.valuation import ReportSection, StockValuation, ValuationReport
 from a_domain.ports.market.daily_close_archive import ArchivedMonth, ArchivedQuarter, ArchivedSession
@@ -42,6 +44,7 @@ from b_application.use_cases.chat.dispatcher import Dispatcher
 from b_application.use_cases.collect.archive_warm_up import ArchiveWarmUp
 from b_application.use_cases.collect.buzz_scanner import BuzzScanner
 from b_application.use_cases.collect.daily_close_archiver import DailyCloseArchiver
+from b_application.use_cases.collect.daily_history_refresh import DailyHistoryRefresh
 from b_application.use_cases.collect.financials_lookup import FinancialsLookup
 from b_application.use_cases.collect.fundamentals_feed import FundamentalsFeed
 from b_application.use_cases.collect.index_history_loader import IndexHistoryLoader
@@ -72,10 +75,14 @@ from b_application.use_cases.trade.account_history import AccountHistory
 from b_application.use_cases.trade.account_loader import AccountLoader
 from b_application.use_cases.trade.account_risk_check import AccountRiskCheck
 from b_application.use_cases.trade.active_watchlist import ActiveWatchlist
+from b_application.use_cases.trade.follow_candidates import FollowCandidates
+from b_application.use_cases.trade.follow_signals import FollowSignals
 from b_application.use_cases.trade.manual_signal import ManualSignal
+from b_application.use_cases.trade.mock_account_reset import MockAccountReset
 from b_application.use_cases.trade.order_execution import OrderExecution
 from b_application.use_cases.trade.order_outcome import OrderOutcome
 from b_application.use_cases.trade.order_preparation import OrderPreparation
+from b_application.use_cases.trade.trade_history import TradeHistory
 from b_application.use_cases.trade.unwatch_stocks import UnwatchStocks
 from b_application.use_cases.trade.watch_stocks import WatchStocks
 from b_application.use_cases.users.ai_model_choice import AiModelChoice
@@ -108,12 +115,13 @@ class Pipeline:
     run id and a saved run record; the Web API starts Full Cycle and specific-stock analysis under a run id it already
     returned to its caller. The valuation operations record no run and read only fields that cannot order.
 
-    Buzz, Intraday and manual BUY send orders with the same four lines: each decision of the run that has no order yet,
+    Buzz, Intraday, manual BUY and a follow send orders with the same four lines: each decision of the run that has no order yet,
     one at a time in decision order. OrderPreparation gates it and records its order right before the send, so OrderRule
     measures the quote's age at submission; OrderExecution sends it only when it is PENDING and records the broker's
     answer; OrderOutcome re-reads the account after a fill; and the order joins status.orders before the next decision
     is prepared, so a decision never gets a second order. Buzz and Intraday send twice: right after the stop-loss check,
-    while those quotes are fresh, and at the end. Full Cycle, specific-stock analysis and valuation never send.
+    while those quotes are fresh, and at the end. Full Cycle, specific-stock analysis and valuation never send; a
+    follow sends a finished Full Cycle's decisions, priced again, into the user's mock account.
 
     A built-in strategy id, the CLI session's choice, makes a run use that built-in strategy instead of the saved one.
 
@@ -137,6 +145,7 @@ class Pipeline:
     data_collector: MarketDataCollector
     official_change_feed: OfficialChangeFeed
     daily_close_archiver: DailyCloseArchiver
+    daily_history_refresh: DailyHistoryRefresh
     archive_warm_up: ArchiveWarmUp
     financials_lookup: FinancialsLookup
     realtime_quote_feed: RealtimeQuoteFeed
@@ -154,6 +163,13 @@ class Pipeline:
     order_preparation: OrderPreparation
     order_execution: OrderExecution
     order_outcome: OrderOutcome
+    mock_account_loader: AccountLoader
+    mock_order_execution: OrderExecution
+    mock_order_outcome: OrderOutcome
+    follow_candidates: FollowCandidates
+    follow_signals: FollowSignals
+    trade_history: TradeHistory
+    mock_account_reset: MockAccountReset
     reporting: Reporting
     run_reports: RunReports
     recent_runs: RecentRuns
@@ -350,6 +366,62 @@ class Pipeline:
 
         return status
 
+    async def follow_run(self, followed_run_id: RunId, run_id: RunId | None = None) -> PipelineStatus:
+        """
+        The user's follow of one of their finished runs into their mock account, as its own recorded run that names the
+        run it follows. Each decision still open to follow is priced again at the price this site orders at now: a
+        fresh realtime quote in continuous trading where the site has them, else the official close of the last closed
+        session while no session trades. A decision that gets no follow decision now stays open; one whose follow order
+        fills is followed. A follow that may not start (FollowCandidates' refusal) records the refusal and sends nothing.
+        Every step that reads the account or sends an order holds the user's mock book (mock_account_loader,
+        mock_order_execution, mock_order_outcome), never the broker the other operations order on, so no follow reaches a
+        real account whatever the installation's broker.
+        """
+        async with self.run_history.execute(Workflow.FOLLOW, run_id, followed_run_id) as stats:
+            status = PipelineStatus(stats=stats)
+            (
+                status.followed_run,
+                status.followable_signals,
+                status.follows,
+                status.follow_refusal,
+            ) = await self.follow_candidates.execute(followed_run_id)
+
+            if status.follow_refusal is not None:
+                return status
+
+            status.manual_stocks = await self.stock_lookup.execute(status.followable_stock_ids, status.stats)
+            status.account, status.held_stocks = await self.mock_account_loader.execute(status.stocks)
+            await self.data_collector.execute(status.manual_stocks, 1, status.stats)
+            status.stale_stock_ids = await self.realtime_quote_feed.execute(status.manual_stocks, status.stale_stock_ids, status.stats)
+            status.signals = await self.follow_signals.execute(status.followable_signals, status.stocks, status.account, status.stats)
+            for signal in status.signals:
+                if order := await self.order_preparation.execute(signal, status.orders, status.stats):
+                    order = await self.mock_order_execution.execute(order, status.stats)
+                    status.account = await self.mock_order_outcome.execute(order, status.account, status.stocks, status.stats)
+                    status.orders.append(order)
+
+        return status
+
+    async def load_follow(self, run_id: RunId) -> PipelineStatus:
+        """
+        The run page's follow panel, and the check before a follow starts: the run, its decisions still open to follow,
+        every follow of them so far with its order, and why a follow may not start now. It records no run.
+        """
+        status = PipelineStatus.read_only(Workflow.FOLLOW)
+        status.followed_run, status.followable_signals, status.follows, status.follow_refusal = await self.follow_candidates.execute(
+            run_id
+        )
+
+        return status
+
+    async def load_trades(self, limit: int, offset: int) -> list[tuple[Order, SystemStats]]:
+        """The account page's trades since the mock account opened, newest first, each with the run whose decision it carried out."""
+        return await self.trade_history.execute(limit, offset)
+
+    async def reset_mock_account(self, initial_cash: PositiveFiniteFloat) -> Account:
+        """My settings' reset: the user's mock account opens again with `initial_cash` and no positions. It records no run."""
+        return await self.mock_account_reset.execute(initial_cash)
+
     async def watch_manually(self, stock_ids: list[str]) -> tuple[list[Stock], WatchlistAddition | None]:
         """
         Menu 4 and the watchlist endpoint: the listed stocks join the MANUAL watchlist, which never expires. When the
@@ -453,11 +525,20 @@ class Pipeline:
 
     async def archive_daily_closes(self) -> tuple[list[ArchivedSession], list[ArchivedQuarter], list[ArchivedMonth]]:
         """
-        The Web API's timer and `just archive-closes`: the official closes, material information, EPS statistics,
-        valuation ratios, balance sheets, income statements, monthly revenue and TWSE news the TWSE and TPEX OpenAPI
-        serve now, saved into the archive, then every date, quarter and month it holds. No run record.
+        The Web API's timer: the official closes, material information, EPS statistics, valuation ratios, balance
+        sheets, income statements, monthly revenue and TWSE news the TWSE and TPEX OpenAPI serve now, saved into the
+        archive, then every date, quarter and month it holds. No run record. `just archive-closes` runs the same step
+        without a Pipeline, which would need every adapter (open_archiver).
         """
         return await self.daily_close_archiver.execute()
+
+    async def refresh_daily_history(self) -> tuple[date, date] | None:
+        """
+        The Web API's timer on a site with a broker login: the broker's daily quotes of every session the history cache
+        lacks over the stock page's longest chart, and the window's first and last session; None where the daily
+        history is the open-data archive's. No run record.
+        """
+        return await self.daily_history_refresh.execute()
 
     async def load_financials(self, stock_id: str) -> tuple[list[QuarterFinancials], list[MonthlyRevenue]]:
         """A stock's page: its archived quarters' figures and monthly revenue, oldest first. No run record."""

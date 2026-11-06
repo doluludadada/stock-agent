@@ -1,4 +1,4 @@
-from collections.abc import Mapping
+from collections.abc import Callable, Collection, Mapping
 from datetime import date, datetime
 from typing import Any, Protocol
 
@@ -51,6 +51,25 @@ class ITaiwanStockProvider(IStockProvider, Protocol):
         """
         Each exchange's report at its URL, its rows as served but for the NUL characters in their text, which PostgreSQL's
         text refuses. A report that fails to load is logged and left out.
+        """
+        ...
+
+    async def read_reports[Readings: Collection[Any]](
+        self, urls: Mapping[MarketType, str], read: Callable[[list[dict[str, Any]], MarketType], Readings]
+    ) -> dict[MarketType, Readings]:
+        """
+        Each exchange's report at its URL (fetch_reports), as `read` reads its rows. A report of which nothing was read
+        is logged (log_unread).
+        """
+        ...
+
+    def log_unread(self, url: str, rows: list[dict[str, Any]], read: int) -> None:
+        """
+        Logs a report of which nothing was read. One that served rows none of which could be read, as when the exchange
+        renames a field, is an error: what it serves now is lost to the archive, since the OpenAPI serves only its latest
+        period. One that served no rows is logged as information: a row holding nothing but the day it was served is how
+        the OpenAPI serves nothing, as for an industry format no company has filed yet. A report that failed to load is
+        logged by fetch_reports.
         """
         ...
 

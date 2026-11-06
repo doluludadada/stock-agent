@@ -50,7 +50,15 @@ class AdministratorsOnly(PermissionError):
 
 
 class MockBrokerOnly(PermissionError):
-    """Buzz or Intraday on an installation whose broker is not the mock. 403."""
+    """Buzz, Intraday, a follow or a reset of the mock account on an installation whose broker is not the mock. 403."""
+
+
+class NothingToFollow(Exception):
+    """FollowRefusal.NOTHING_TO_FOLLOW: no decision of the run is left to follow. 409."""
+
+
+class OutsideFollowWindow(Exception):
+    """FollowRefusal.OUTSIDE_FOLLOW_WINDOW: the site places no order in the market's phase now. 409."""
 
 
 class SetupCodeRefused(PermissionError):
@@ -144,23 +152,40 @@ def require_app_request(request: Request) -> None:
 
 def require_mock_broker(runtime: RuntimeDependency) -> None:
     """
-    Buzz and Intraday send orders. The Web API starts them only on the mock broker, so a browser never reaches a
-    real account: 403 for any other execution provider, whatever the order mode.
+    Buzz, Intraday and a follow send orders, and a reset reopens the mock account. The Web API runs them only on the
+    mock broker, so a browser never reaches a real account: 403 for any other execution provider, whatever the order
+    mode.
     """
     if runtime.config.trading.execution_provider != ExecutionProvider.MOCK:
         raise MockBrokerOnly(
-            "The Web API starts Buzz and Intraday only on the mock broker. Use the CLI for another execution provider."
+            "The Web API runs Buzz, Intraday, follows and the mock account's reset only on the mock broker. Use the CLI for "
+            "another execution provider."
         )
 
 
 def require_realtime_quotes(runtime: RuntimeDependency) -> None:
     """
     Buzz and Intraday order on realtime quotes. A deployment on open data only (audience public) has none, so it
-    refuses them with 403 before any run starts.
+    refuses them with 403 before any run starts, and a personal site refuses them while it has no login (require_quote_login).
     """
     if not runtime.config.audience.realtime_quotes:
         raise RealtimeQuotesUnavailable(
             "This site uses open data only, which has no realtime quotes, so it cannot run Buzz or Intraday: both order on one."
+        )
+
+    require_quote_login(runtime)
+
+
+def require_quote_login(runtime: RuntimeDependency) -> None:
+    """
+    A site that prices its orders on realtime quotes (personal) needs its Shioaji login for them. Without the key pair,
+    or while the login is down, every such order could only be refused as STALE_PRICE, so Buzz, Intraday and a follow
+    are refused with 403 before any run starts. A site that prices orders at the official close (public) needs none.
+    """
+    if runtime.config.audience.realtime_quotes and not runtime.realtime_quotes:
+        raise RealtimeQuotesUnavailable(
+            "This site has no Shioaji login now, so it has no realtime quote to price an order on. Without the environment's "
+            "Shioaji key pair, set it and restart; a login that went down is made again at the next daily data collection."
         )
 
 
@@ -272,6 +297,7 @@ KnownHost = Depends(require_known_host)
 AppRequest = Depends(require_app_request)
 MockBroker = Depends(require_mock_broker)
 RealtimeQuotes = Depends(require_realtime_quotes)
+QuoteLogin = Depends(require_quote_login)
 Mops = Depends(require_mops)
 PrivateAccess = Depends(require_private_access)
 ManageUsers = Depends(requires(Permission.MANAGE_USERS))

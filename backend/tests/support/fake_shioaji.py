@@ -1,5 +1,5 @@
 """
-The subset of shioaji.Shioaji (1.3.1) that ShioajiExecutionProvider calls, without the network.
+The subset of shioaji.Shioaji (1.3.1) that ShioajiExecutionProvider and ShioajiQuoteProvider call, without the network.
 
 Method signatures and defaults are copied from shioaji/shioaji.py, and every value it returns is the library's
 own model (Trade, OrderStatus, Deal, StockPosition, AccountBalance, SettlementV1, StockAccount, Stock), so the
@@ -7,11 +7,17 @@ adapter reads exactly the shapes the real client hands it. A test scripts what t
 """
 
 import datetime
+import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
+import c_infrastructure.trading.shioaji.sdk_reporting  # noqa: F401
+
+# isort: split
 from shioaji.account import Account, StockAccount
-from shioaji.constant import Action, Exchange, Status, StockOrderCond, StockOrderLot, Unit
-from shioaji.contracts import Contract, Stock
+from shioaji.constant import Action, ChangeType, Exchange, Status, StockOrderCond, StockOrderLot, TickType, Unit
+from shioaji.contracts import Contract, Index, Stock
+from shioaji.data import DailyQuotes, Kbars, Snapshot
 from shioaji.order import Deal, Order, OrderStatus, Trade
 from shioaji.position import AccountBalance, SettlementV1, StockPosition
 
@@ -25,6 +31,7 @@ class Report:
     status: Status
     deals: tuple[tuple[float, int], ...] = ()
     msg: str = ""
+    status_code: str = ""
     deal_quantity: int | None = None
     """What OrderStatus.deal_quantity says; unset, the sum of the deals."""
 
@@ -60,6 +67,39 @@ def position(code: str, shares: int, price: float, direction: Action = Action.Bu
     )
 
 
+def snapshot(code: str, traded_at: datetime.datetime, close: float, total_volume: int, change: float = 0.0) -> Snapshot:
+    """
+    One stock's snapshot as Shioaji serves it: stamped with the last trade's Taipei wall-clock time as nanoseconds since
+    the epoch read as UTC, volumes in board lots. Measured on 2026-11-06 after the session: 2330 at 14:30:00 (its
+    after-hours fixed-price trade), 2135.0, 97065 lots.
+    """
+    wall_clock = traded_at.replace(tzinfo=datetime.UTC)
+    return Snapshot(
+        ts=int(wall_clock.timestamp()) * 1_000_000_000 + wall_clock.microsecond * 1_000,
+        code=code,
+        exchange="TSE",
+        open=close,
+        high=close,
+        low=close,
+        close=close,
+        tick_type=TickType.Sell,
+        change_price=change,
+        change_rate=0.0,
+        change_type=ChangeType.Unchanged,
+        average_price=close,
+        volume=1 if total_volume else 0,
+        total_volume=total_volume,
+        amount=0,
+        total_amount=0,
+        yesterday_volume=0.0,
+        buy_price=close,
+        buy_volume=1.0,
+        sell_price=close,
+        sell_volume=1,
+        volume_ratio=0.0,
+    )
+
+
 class FakeStocks:
     """Contracts.Stocks: indexing by code returns the contract, or None for an unknown code like the library."""
 
@@ -70,9 +110,30 @@ class FakeStocks:
         return self._contracts.get(code)
 
 
+def index(code: str, exchange: Exchange = Exchange.TSE) -> Index:
+    return Index(exchange=exchange, code=code, symbol=f"{exchange.value}{code}", name=code)
+
+
+def daily_quotes(day: datetime.date, rows: dict[str, tuple[float, float, float, float, int]]) -> DailyQuotes:
+    """Shioaji's daily quotes of one date: per code its open, high, low, close and shares, NaN prices for no trade."""
+    columns = list(zip(*rows.values(), strict=True)) or [[], [], [], [], []]
+    return DailyQuotes(
+        Date=[day] * len(rows),
+        Code=list(rows),
+        Open=list(columns[0]),
+        High=list(columns[1]),
+        Low=list(columns[2]),
+        Close=list(columns[3]),
+        Volume=list(columns[4]),
+        Transaction=[1] * len(rows),
+        Amount=[0] * len(rows),
+    )
+
+
 @dataclass
 class FakeContracts:
     Stocks: FakeStocks
+    Indexs: FakeStocks = field(default_factory=lambda: FakeStocks({"001": index("001"), "101": index("101", Exchange.OTC)}))
 
 
 @dataclass
@@ -85,6 +146,8 @@ class FakeShioaji:
         )
     )
     login_error: Exception | None = None
+    login_gate: threading.Event | None = None
+    """When set, a login waits in its thread until the test sets the event, as a slow server keeps it waiting."""
     ca_activates: bool = True
     ca_error: Exception | None = None
 
@@ -99,8 +162,25 @@ class FakeShioaji:
     honours_cancel: bool = True
     place_error: Exception | None = None
     place_error_after_accepting: bool = False
+    refusals: dict[str, Exception] = field(default_factory=dict)
+    """What each named method of the account and its orders raises instead of answering, as the SDK does for a server's refusal."""
+    refuses_once_placed: bool = False
+    """True: the refusals start once an order was placed, so the account read before it still answers."""
     updates_in_place: bool = True
     """False: place_order returns a copy, and update_status refreshes only the trade that list_trades holds."""
+
+    market_data_error: Exception | None = None
+    """What snapshots, daily_quotes and kbars raise instead of answering, as the SDK does for a server's refusal."""
+    session_down_callback: Callable[[], None] | None = None
+    """The one callback the SDK keeps: a second registration replaces the first."""
+    snapshot_answers: dict[str, Snapshot] = field(default_factory=dict)
+    """What snapshots answers for each code; a code without one gets no snapshot."""
+    snapshot_requests: list[list[str]] = field(default_factory=list)
+    daily_answers: dict[datetime.date, DailyQuotes] = field(default_factory=dict)
+    """What daily_quotes answers for each date; another date gets no rows, as a weekend or a holiday does."""
+    minute_bars: dict[str, list[tuple[datetime.datetime, float, float, float, float, int]]] = field(default_factory=dict)
+    """Each index code's one-minute bars in Taipei wall-clock time: open, high, low, close and lots."""
+    history_requests: list[tuple[str, ...]] = field(default_factory=list)
 
     stock_account: StockAccount | None = None
     logins: list[dict] = field(default_factory=list)
@@ -123,11 +203,64 @@ class FakeShioaji:
     ) -> list[Account]:
         self.logins.append({"api_key": api_key, "secret_key": secret_key, "subscribe_trade": subscribe_trade})
 
+        if self.login_gate is not None:
+            self.login_gate.wait(timeout=5)
+
         if self.login_error is not None:
             raise self.login_error
 
         self.stock_account = self.account_at_login
         return [self.stock_account] if self.stock_account else []
+
+    def set_session_down_callback(self, func: Callable[[], None]) -> None:
+        self.session_down_callback = func
+
+    def session_down(self) -> None:
+        """What Solace does once its reconnects gave up: calls the session-down callback, from a thread of its own."""
+        if self.session_down_callback is not None:
+            caller = threading.Thread(target=self.session_down_callback)
+            caller.start()
+            caller.join()
+
+    def snapshots(self, contracts: list[Contract], timeout: int = 30000, cb=None) -> list[Snapshot]:
+        assert len(self.logins) > self.logouts, "snapshots outside a login"
+
+        if self.market_data_error is not None:
+            raise self.market_data_error
+        self.snapshot_requests.append([contract.code for contract in contracts])
+        return [self.snapshot_answers[contract.code] for contract in contracts if contract.code in self.snapshot_answers]
+
+    def daily_quotes(self, date: datetime.date, exclude: bool = True, timeout: int = 5000, cb=None) -> DailyQuotes:
+        assert len(self.logins) > self.logouts, "daily quotes outside a login"
+        self.history_requests.append(("daily_quotes", date.isoformat()))
+
+        if self.market_data_error is not None:
+            raise self.market_data_error
+
+        return self.daily_answers.get(date, daily_quotes(date, {}))
+
+    def kbars(self, contract: Contract, start: str, end: str, timeout: int = 30000, cb=None) -> Kbars:
+        """Refuses a range over 30 days, as the server answers 400 'Kbars date range must not exceed 30 days.'"""
+        first, last = datetime.date.fromisoformat(start), datetime.date.fromisoformat(end)
+        self.history_requests.append(("kbars", contract.code, start, end))
+
+        if self.market_data_error is not None:
+            raise self.market_data_error
+
+        if (last - first).days >= 30:
+            raise Exception({"status": {"status_code": 400}, "response": {"detail": "Kbars date range must not exceed 30 days."}})
+
+        rows = [row for row in self.minute_bars.get(contract.code, []) if first <= row[0].date() <= last]
+        stamps = [int(row[0].replace(tzinfo=datetime.UTC).timestamp()) * 1_000_000_000 for row in rows]
+        return Kbars(
+            ts=stamps,
+            Open=[row[1] for row in rows],
+            High=[row[2] for row in rows],
+            Low=[row[3] for row in rows],
+            Close=[row[4] for row in rows],
+            Volume=[row[5] for row in rows],
+            Amount=[0.0] * len(rows),
+        )
 
     def logout(self) -> bool:
         self.logouts += 1
@@ -161,6 +294,7 @@ class FakeShioaji:
         return trade if self.updates_in_place else trade.model_copy(deep=True)
 
     def update_status(self, account: Account = None, trade: Trade = None, timeout: int = 5000, cb=None) -> None:
+        self._fail_if_told("update_status")
         seqnos = {trade.order.seqno} if trade else {known.order.seqno for known in self.placed if known.order.account == account}
         cancel_requested = {cancelled.order.seqno for cancelled in self.cancelled}
 
@@ -174,22 +308,27 @@ class FakeShioaji:
                 self._report(known, Report(Status.Cancelled, tuple((deal.price, deal.quantity) for deal in known.status.deals)))
 
     def cancel_order(self, trade: Trade, timeout: int = 5000, cb=None) -> Trade:
+        self._fail_if_told("cancel_order")
         self.cancelled.append(trade)
         self._queued[trade.order.seqno].clear()
         return trade
 
     def list_trades(self) -> list[Trade]:
+        self._fail_if_told("list_trades")
         return list(self.placed)
 
     def list_positions(self, account: Account = None, unit: Unit = Unit.Common, timeout: int = 5000, cb=None) -> list[StockPosition]:
+        self._fail_if_told("list_positions")
         self.position_units.append(unit)
         lots = unit == Unit.Common
         return [row.model_copy(update={"quantity": row.quantity // 1000}) if lots else row.model_copy() for row in self.holdings]
 
     def account_balance(self, timeout: int = 5000, cb=None) -> AccountBalance:
+        self._fail_if_told("account_balance")
         return self.balance
 
     def settlements(self, account: Account = None, timeout: int = 5000, cb=None) -> list[SettlementV1]:
+        self._fail_if_told("settlements")
         today = datetime.date(2026, 10, 19)
         return [
             SettlementV1(date=today + datetime.timedelta(days=offset), amount=amount, T=offset)
@@ -199,8 +338,13 @@ class FakeShioaji:
     def _report(self, trade: Trade, report: Report) -> None:
         trade.status.status = report.status
         trade.status.msg = report.msg
+        trade.status.status_code = report.status_code
         trade.status.deals = [
             Deal(seq=str(index), price=price, quantity=quantity, ts=0.0) for index, (price, quantity) in enumerate(report.deals)
         ]
         dealt = sum(quantity for _, quantity in report.deals)
         trade.status.deal_quantity = dealt if report.deal_quantity is None else report.deal_quantity
+
+    def _fail_if_told(self, method: str) -> None:
+        if method in self.refusals and (self.placed or not self.refuses_once_placed):
+            raise self.refusals[method]

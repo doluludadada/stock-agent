@@ -48,12 +48,14 @@ from b_application.config.trading_config import TradingConfig
 from b_application.pipeline import Pipeline
 from b_application.schemas.pipeline_status import PipelineStatus
 from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
+from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection
 from c_infrastructure.system.attempt_log import MemoryAttemptLog
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 from c_infrastructure.system.settings_files import SettingsFiles
 from d_presentation.cli import interactive, terminal
 from d_presentation.dependencies import OwnedPorts, ProviderDependencies, Runtime, compose_runtime
 from d_presentation.live_runtime import RuntimeSwitch
+from support.fake_shioaji import FakeShioaji
 from support.fakes import (
     PROMPT_TEMPLATES,
     VALUATION_PROMPT_TEMPLATE,
@@ -340,8 +342,14 @@ def build_harness(
     config: AppConfig | None = None,
     settings: TechnicalSettings | None = None,
     settings_root: Path = UNUSED_PROJECT_ROOT,
+    realtime_quotes: bool | None = None,
 ) -> CliHarness:
+    """
+    realtime_quotes is whether the runtime has a broker login, as the audience allows unless the test says otherwise:
+    False on a personal site is one without a Shioaji login.
+    """
     config = config or harness_config()
+    login = config.audience.realtime_quotes if realtime_quotes is None else realtime_quotes
     validate_trading_environment(config)
 
     if not config.settings_revisions:
@@ -393,6 +401,9 @@ def build_harness(
     dependencies = ProviderDependencies(
         stock_provider=stocks,
         price_provider=prices,
+        history_cache=None,
+        broker_market_data=login,
+        shioaji=ShioajiConnection(client=FakeShioaji(), up=True) if login else None,
         daily_close_archive=archive,
         fundamentals_provider=fundamentals if config.audience.mops else None,
         news_provider=news if config.audience.news_articles else archive,

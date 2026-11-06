@@ -25,12 +25,36 @@ bun run lint
 bun run typecheck
 bun run test
 bun run build
-bun run e2e        # Playwright against a running backend; first run: bunx playwright install chromium
 ```
 
-`just frontend-check` runs the first five from the repository root. `bun tools/capture-screens.ts <out-dir> --url <app>`
+`just frontend-check` runs these from the repository root, and CI runs the same steps in
+`.github/workflows/frontend.yml`. `bun tools/capture-screens.ts <out-dir> --url <app>`
 signs in through the API and saves every page at 375, 768, 1024 and 1440 px in both themes, with an audit of each in
 `audit.json`; besides signing in, it only reads.
+
+## Browser flows (E2E)
+
+`bun run e2e` runs the Playwright suite in `e2e/` against a real backend. Nothing in it mocks the API. Run it on your
+machine before you merge a change to a page:
+
+1. Start a backend with a disposable database and its own copy of `config/`. The local `verify-stock-agent` skill
+   does this from the repository root: `prepare <run-id>`, then `serve <run-id> 8810`, both through
+   `.claude/skills/verify-stock-agent/bin/verify-stock-agent`. On its first start the backend prints
+   `No administrator yet. Set one up in the web app with the setup code <code>`.
+2. Install the browser once: `bunx playwright install chromium`.
+3. Run the suite:
+
+   ```bash
+   E2E_API_URL=http://127.0.0.1:8810 E2E_SETUP_CODE=<code> \
+     E2E_SETTINGS_DIR=~/.cache/stock-agent-verify/runs/<run-id>/app/config bun run e2e
+   ```
+
+   Playwright starts the dev server on port 5199 and reuses one that is already there. Without `E2E_SETTINGS_DIR`
+   it skips the two tests that edit a settings file on disk.
+
+The suite is not in CI. Its specs read real market data from the backend (daily bars, the TAIEX, the TWSE and TPEX
+OpenAPI archive) and start an analysis run that calls the AI provider. A CI runner would depend on those
+third-party sites, and their answers change every session. Without a backend and its setup code, every test fails.
 
 ## Stack
 

@@ -40,10 +40,20 @@ export interface LocatedProblem {
   path: string | null
 }
 
-export function locatedIn(problems: readonly SettingsProblem[], file: SettingsFileId): LocatedProblem[] {
+export function locatedIn(problems: readonly SettingsProblem[], file: SettingsFileId, t: Wording): LocatedProblem[] {
   return problems.flatMap((problem) =>
-    problem.file === file && problem.line ? [{ line: problem.line, column: problem.column ?? 1, message: problem.message, path: problem.path ?? null }] : [],
+    problem.file === file && problem.line ? [{ line: problem.line, column: problem.column ?? 1, message: problemMessage(problem, t), path: problem.path ?? null }] : [],
   )
+}
+
+type Wording = (key: string, options: Record<string, unknown>) => string
+
+/**
+ * What a problem says, in the reader's language: `admin:refusal.<code>` with the server's params for a code this app
+ * words, such as pydantic's less_than_equal, else the server's own English.
+ */
+export function problemMessage(problem: SettingsProblem, t: Wording): string {
+  return problem.code ? t(`refusal.${problem.code}`, { ...problem.params, defaultValue: problem.message }) : problem.message
 }
 
 /** Reading order: the open file's problems by line, then the other file's, then those no file sets (.env, the database). */

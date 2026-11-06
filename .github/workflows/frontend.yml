@@ -1,10 +1,12 @@
 name: Frontend
 
+# The Playwright suite (bun run e2e) is not here: it drives a real backend with live market data and an AI key.
+# frontend/README.md says how to run it locally.
 on:
     push:
-        paths: ["frontend/**", ".github/workflows/frontend.yml"]
+        paths: ["frontend/**", "config/strategies/**", ".github/workflows/frontend.yml"]
     pull_request:
-        paths: ["frontend/**", ".github/workflows/frontend.yml"]
+        paths: ["frontend/**", "config/strategies/**", ".github/workflows/frontend.yml"]
 
 jobs:
     check:
@@ -14,7 +16,7 @@ jobs:
             run:
                 working-directory: frontend
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v7
             - uses: oven-sh/setup-bun@v2
               with:
                   bun-version: 1.4.2
@@ -23,24 +25,3 @@ jobs:
             - run: bun run typecheck
             - run: bun run test
             - run: bun run build
-
-    e2e:
-        name: Browser flows (Playwright)
-        runs-on: ubuntu-latest
-        needs: check
-        defaults:
-            run:
-                working-directory: frontend
-        steps:
-            - uses: actions/checkout@v4
-            - uses: oven-sh/setup-bun@v2
-              with:
-                  bun-version: 1.4.2
-            - run: bun install --frozen-lockfile
-            - run: bunx playwright install --with-deps chromium
-            - run: bun run e2e
-            - if: failure()
-              uses: actions/upload-artifact@v4
-              with:
-                  name: playwright-results
-                  path: frontend/test-results

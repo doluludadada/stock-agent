@@ -130,7 +130,13 @@ function TrendPanel({ target, history, onTarget }: { target: TrendTarget; histor
       ) : !history.data ? (
         <ErrorState error={history.error} title={t('trend.failed')} onRetry={() => void history.refetch()} />
       ) : (
-        <PriceTrend key={target.kind === 'index' ? target.index : target.id} bars={history.data.bars} name={name} kind={target.kind === 'index' ? 'index' : 'price'} />
+        <PriceTrend
+          key={target.kind === 'index' ? target.index : target.id}
+          bars={history.data.bars}
+          name={name}
+          kind={target.kind === 'index' ? 'index' : 'price'}
+          warmUp={false}
+        />
       )}
     </Panel>
   )

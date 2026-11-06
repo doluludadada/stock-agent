@@ -332,14 +332,6 @@ async def connect(owners: Owners) -> None:
     assert (await owners.alice.mock_broker.get_account()).cash < 1_000_000
 
 
-async def close(owners: Owners) -> None:
-    await alice_buys(owners)
-    await owners.bob.mock_broker.close()
-
-    assert (await owners.alice.mock_broker.get_account()).cash < 1_000_000
-    assert (await owners.bob.mock_broker.get_account()).cash == 1_000_000
-
-
 async def get_account(owners: Owners) -> None:
     await alice_buys(owners)
     bobs = await owners.bob.mock_broker.get_account()
@@ -373,6 +365,17 @@ async def fill(owners: Owners) -> None:
 
     assert (await owners.bob.mock_broker.get_account()).positions == []
     assert [position.stock_id for position in (await owners.alice.mock_broker.get_account()).positions] == ["2330"]
+
+
+async def reset(owners: Owners) -> None:
+    await alice_buys(owners)
+    bobs = await owners.bob.mock_broker.get_account()
+
+    await owners.alice.mock_broker.reset(250_000, AT)
+
+    assert await owners.bob.mock_broker.get_account() == bobs
+    alices = await owners.alice.mock_broker.get_account()
+    assert (alices.cash, alices.positions, alices.opening and alices.opening.initial_cash) == (250_000, [], 250_000)
 
 
 async def save_account(owners: Owners) -> None:
@@ -438,6 +441,29 @@ async def classify(owners: Owners) -> None:
     assert owners.vendor.calls == DAILY_CALLS + 1
 
 
+async def follows_of(owners: Owners) -> None:
+    recorded = await alice_records_a_run(owners)
+    follow = run_stats()
+    followed = replace(decision(), source=SignalSource.FOLLOW, followed_decision_id=recorded.signal.decision_id)
+    await owners.alice.journal.save_run(follow)
+    await owners.alice.journal.save_signals(follow.run_id, [followed])
+    await owners.alice.journal.save_order(order_of(follow.run_id, followed))
+
+    assert await owners.bob.journal.follows_of(recorded.run_id) == []
+    assert [signal.decision_id for signal, _ in await owners.alice.journal.follows_of(recorded.run_id)] == [followed.decision_id]
+
+
+async def trades(owners: Owners) -> None:
+    recorded = await alice_records_a_run(owners)
+    filled = replace(recorded.order)
+    filled.submit(now=AT)
+    filled.fill(filled.quantity, 100.0, 142, 0, now=AT)
+    await owners.alice.journal.save_order(filled)
+
+    assert await owners.bob.journal.trades(None, 10, 0) == []
+    assert [(order.id, run.run_id) for order, run in await owners.alice.journal.trades(None, 10, 0)] == [(filled.id, recorded.run_id)]
+
+
 type Case = Callable[[Owners], Awaitable[None]]
 
 CASES: dict[str, dict[str, Case]] = {
@@ -453,6 +479,8 @@ CASES: dict[str, dict[str, Case]] = {
         "find_run": find_run,
         "signals_of": signals_of,
         "orders_of": orders_of,
+        "follows_of": follows_of,
+        "trades": trades,
     },
     "watchlist_repository": {"get_active": get_active, "save": save, "remove": remove},
     "technical_settings_repository": {"load": load, "save": save_settings},
@@ -463,12 +491,12 @@ CASES: dict[str, dict[str, Case]] = {
     },
     "mock_broker": {
         "connect": connect,
-        "close": close,
         "get_account": get_account,
         "place_order": place_order,
         "refusal_for": refusal_for,
         "fill": fill,
         "save_account": save_account,
+        "reset": reset,
     },
     "ai_provider": {"generate_reply": generate_reply, "save_response": save_response},
     "sentiment_classifier": {"classify": classify},

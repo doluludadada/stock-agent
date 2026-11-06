@@ -10,7 +10,7 @@ import { AdminSettingsPage } from './AdminSettingsPage'
 import { drafts } from './drafts'
 
 type FileId = 'appsetting' | 'instructions'
-type Problem = { message: string; file: FileId | null; path: string | null; line: number | null; column: number | null }
+type Problem = { message: string; code?: string; params?: Record<string, string | number>; file: FileId | null; path: string | null; line: number | null; column: number | null }
 
 const PASSWORD = 'correct horse battery'
 const APPSETTING = 'environment: dev\nai:\n  temperature: 0.7\ntrading:\n  order_mode: mock_only\n'
@@ -131,8 +131,12 @@ function fakeServer() {
   const problemsOf = (file: FileId, text: string): Problem[] =>
     text.split('\n').flatMap((line, index): Problem[] => {
       if (/:\s*\[[^\]]*$/.test(line)) return [{ message: "YAML: expected ',' or ']', but got '<stream end>'", file, path: null, line: index + 1, column: line.indexOf('[') + 1 }]
-      if (line.includes('order_mode: sometimes')) return [{ message: "Input should be 'mock_only', 'live' or 'disabled'", file, path: 'trading.order_mode', line: index + 1, column: 3 }]
-      if (line.includes('temperature: 5')) return [{ message: 'Input should be less than or equal to 2', file, path: 'ai.temperature', line: index + 1, column: 3 }]
+      if (line.includes('order_mode: sometimes')) {
+        const expected = "'mock_only', 'live' or 'disabled'"
+        return [{ message: `Input should be ${expected}`, code: 'enum', params: { expected }, file, path: 'trading.order_mode', line: index + 1, column: 3 }]
+      }
+      if (line.includes('temperature: 5')) return [{ message: 'Input should be less than or equal to 2', code: 'less_than_equal', params: { le: 2 }, file, path: 'ai.temperature', line: index + 1, column: 3 }]
+      if (line.includes('temperature: 6')) return [{ message: 'Value error, the app words this one only in English', code: 'value_error', params: {}, file, path: 'ai.temperature', line: index + 1, column: 3 }]
       return []
     })
   const edit = (file: FileId, text: string) => {
@@ -228,8 +232,10 @@ function fakeServer() {
   return { state, sent, fetch }
 }
 
-function renderPage(server: ReturnType<typeof fakeServer>, user = TEST_ADMIN) {
+function renderPage(server: ReturnType<typeof fakeServer>, user = TEST_ADMIN, locale: 'en' | 'zh-TW' = 'en') {
   vi.stubGlobal('fetch', server.fetch)
+  const i18n = initI18n(locale)
+  void i18n.changeLanguage(locale)
   session.signIn(user)
   const router = createMemoryRouter(
     [
@@ -239,7 +245,7 @@ function renderPage(server: ReturnType<typeof fakeServer>, user = TEST_ADMIN) {
     { initialEntries: ['/admin/settings'] },
   )
   render(
-    <I18nextProvider i18n={initI18n('en')}>
+    <I18nextProvider i18n={i18n}>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <RouterProvider router={router} />
       </QueryClientProvider>
@@ -330,6 +336,38 @@ describe('the settings editor', { timeout: 90_000 }, () => {
     expect(within(form).getAllByText(/^Not in the file, so the app uses its default\./).length).toBeGreaterThan(0)
   })
 
+  it('explains each setting in the reader’s language, as its label is, never in the schema’s English', async () => {
+    const server = fakeServer()
+    server.state.files.appsetting = FORM_TEXT
+    renderPage(server, TEST_ADMIN, 'zh-TW')
+
+    const form = await screen.findByRole('tabpanel', { name: '表單' })
+    const temperature = await within(form).findByRole('spinbutton', { name: '溫度' })
+    expect(temperature).toHaveAccessibleDescription(/ai\.temperature.*模型措辭的自由度/)
+    expect(within(form).getByRole('switch', { name: '開放註冊' })).toHaveAccessibleDescription(/已有管理員時，任何人都能註冊/)
+    expect(within(form).queryByText(/likeliest words|Anyone may register/)).not.toBeInTheDocument()
+  })
+
+  it('words a refusal in the reader’s language by its code, and keeps the server’s words for one it has no words for', async () => {
+    const server = fakeServer()
+    server.state.files.appsetting = FORM_TEXT
+    renderPage(server, TEST_ADMIN, 'zh-TW')
+    const user = userEvent.setup()
+    const form = await screen.findByRole('tabpanel', { name: '表單' })
+
+    const temperature = await within(form).findByRole('spinbutton', { name: '溫度' })
+    await user.clear(temperature)
+    await user.type(temperature, '5')
+    await user.tab()
+    expect(await within(form).findByText('必須小於或等於 2。')).toBeInTheDocument()
+    expect(within(form).queryByText(/less than or equal/)).not.toBeInTheDocument()
+
+    await user.clear(temperature)
+    await user.type(temperature, '6')
+    await user.tab()
+    expect(await within(form).findByText('Value error, the app words this one only in English')).toBeInTheDocument()
+  })
+
   it('makes each change the unsaved text, keeps the comments, checks it, shows it in the YAML, and saves it through the review', async () => {
     const server = fakeServer()
     server.state.files.appsetting = FORM_TEXT
@@ -374,7 +412,7 @@ describe('the settings editor', { timeout: 90_000 }, () => {
     expect(server.sent.some(writesAChange), 'nothing is written while typing').toBe(false)
     await user.tab()
 
-    expect(await within(form).findByText('Input should be less than or equal to 2')).toBeInTheDocument()
+    expect(await within(form).findByText('Must be at most 2.')).toBeInTheDocument()
     expect(within(form).getByRole('spinbutton', { name: 'Temperature' })).toHaveAttribute('aria-invalid', 'true')
     expect(saveButton()).toBeDisabled()
 

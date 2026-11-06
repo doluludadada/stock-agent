@@ -1,19 +1,23 @@
 import asyncio
 import math
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
-from functools import partial
 from typing import override
 
+import c_infrastructure.trading.shioaji.sdk_reporting  # noqa: F401
+
+# isort: split
 from shioaji import Shioaji
 from shioaji.account import StockAccount
 from shioaji.constant import Action, OrderType as BrokerTimeInForce, Status, StockOrderCond, StockOrderLot, StockPriceType, Unit
 from shioaji.contracts import Stock as StockContract
+from shioaji.data import Snapshot
 from shioaji.order import Order as BrokerOrder, StockOrder, Trade
 from shioaji.position import SettlementV1, StockPosition
 
 from a_domain.model.trading.account import Account, Position
 from a_domain.model.trading.order import ExchangeOrder, Order
+from a_domain.ports.market.broker_quote_provider import IBrokerQuoteProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.trading.execution_provider import IBrokerExecutionProvider
 from a_domain.rules.trading.execution import BrokerOutcomeRule, FillRule, LotSplitRule, OrderAcceptanceRule
@@ -67,7 +71,8 @@ What each Shioaji status means in the domain order lifecycle (OrderStatus.next_s
 
 class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContract, Trade]):
     """
-    The Sinopac broker through the Shioaji client, simulation or production as the login's environment says.
+    The Sinopac broker through the Shioaji client, simulation or production as the login's environment says. The client
+    is the one ShioajiQuoteProvider logged in once for the process, so quotes and orders share one login.
 
     The client is synchronous, so every call runs in a worker thread. Quantities are shares in the domain:
     LotSplitRule splits them into the whole lots, sent as a board-lot order with the order's time in force (IOC or
@@ -88,10 +93,17 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
 
     Executions come from the broker's deals: one Order.fill per broker order at its volume-weighted price.
     Fee and tax are TradingCostRule's, which may differ from the broker's discounted fee.
+
+    The server's words can repeat the login's person id, its address and the account number, so nothing the adapter
+    logs, raises or records quotes them: a failed SDK call says what the quote provider's failure_of says, and an
+    exchange order the broker gave a message for says its status code instead of the message.
     """
 
-    def __init__(self, client: Shioaji, login: ShioajiLogin, config: AppConfig, logger: ILoggingProvider) -> None:
+    def __init__(
+        self, client: Shioaji, quotes: IBrokerQuoteProvider[Snapshot], login: ShioajiLogin, config: AppConfig, logger: ILoggingProvider
+    ) -> None:
         self._client = client
+        self._quotes = quotes
         self._login = login
         self._logger = logger
         self._cost_rule = config.market.cost_rule()
@@ -102,21 +114,19 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
         self._shares_per_unit = {StockOrderLot.Common: config.market.board_lot_shares, StockOrderLot.IntradayOdd: 1}
         self._poll_interval_seconds = config.shioaji.poll_interval_seconds
         self._max_polls = config.shioaji.max_polls
-        self._session: asyncio.Future[object] | None = None
-        """The login connect() began, in its thread: close() waits for it, then logs out."""
 
     @override
     async def connect(self) -> None:
-        """Logs in, then in production activates the CA certificate that signs orders. Raises saying what failed."""
-        login = self._login
-        api_key, secret_key = login.api_key.get_secret_value(), login.secret_key.get_secret_value()
-        call = partial(self._client.login, api_key=api_key, secret_key=secret_key, subscribe_trade=False)
-        self._session = asyncio.get_running_loop().run_in_executor(None, call)
-        await asyncio.shield(self._session)
+        """
+        Checks the login ShioajiQuoteProvider holds on the shared client: the stock account, and in production the CA
+        certificate that signs orders, which it activates. Raises saying what failed.
+        """
         account = self._client.stock_account
 
         if account is None:
             raise RuntimeError("the login returned no stock account")
+
+        login = self._login
 
         if login.simulation:
             return
@@ -126,41 +136,21 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
         if ca_path is None or ca_password is None or person_id is None:
             raise RuntimeError("Shioaji production needs the CA certificate's path, its password and the person id")
 
-        if not await asyncio.to_thread(
-            self._client.activate_ca, ca_path, ca_password.get_secret_value(), person_id.get_secret_value()
-        ):
+        if not await self.request(self._client.activate_ca, ca_path, ca_password.get_secret_value(), person_id.get_secret_value()):
             raise RuntimeError(f"the CA certificate at {ca_path} was not activated")
 
         if not account.signed:
-            raise RuntimeError(f"stock account {account.account_id} has not signed Shioaji's API trading agreement")
-
-    @override
-    async def close(self) -> None:
-        """
-        Logs out once the login has ended: a login a timeout or a cancel left running in its thread is waited for, and
-        a failed one is logged out too, in case the broker opened a session before it failed. A provider that never
-        began a login has nothing to log out of. A logout that fails is logged and ignored: the runtime closes anyway,
-        and the session expires.
-        """
-        if self._session is None:
-            return
-
-        await asyncio.wait([self._session])
-
-        try:
-            await asyncio.to_thread(self._client.logout)
-        except Exception as error:
-            self._logger.warning(f"Shioaji logout failed: {type(error).__name__}: {error}")
+            raise RuntimeError("the stock account has not signed Shioaji's API trading agreement")
 
     @override
     async def get_account(self) -> Account:
         stock_account = self._client.stock_account
 
         if stock_account is None:
-            raise RuntimeError("Shioaji has no stock account: connect() logs in first")
+            raise RuntimeError("Shioaji has no stock account: ShioajiQuoteProvider.connect() logs in first")
 
         cash = await self.cash(stock_account)
-        rows = await asyncio.to_thread(self._client.list_positions, stock_account, unit=Unit.Share)
+        rows = await self.request(self._client.list_positions, stock_account, unit=Unit.Share)
         stock_rows = [row for row in rows if isinstance(row, StockPosition)]
 
         if len(stock_rows) < len(rows):
@@ -184,7 +174,7 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
     async def place_order(self, order: Order) -> Order:
         try:
             account = await self.get_account()
-            contract = await asyncio.to_thread(lambda: self._client.Contracts.Stocks[order.stock_id])
+            contract = await self.request(lambda: self._client.Contracts.Stocks[order.stock_id])
             refusal = (
                 self.refusal_for(order, account)
                 if isinstance(contract, StockContract)
@@ -234,19 +224,19 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
         subtracted twice, and pending receipts from sales are not counted, so cash can be understated, never overstated,
         as long as the broker reports payments as negative settlement amounts.
         """
-        balance = await asyncio.to_thread(self._client.account_balance)
+        balance = await self.request(self._client.account_balance)
 
         if balance.errmsg:
-            raise RuntimeError(f"Shioaji account balance unavailable: {balance.errmsg}")
+            raise RuntimeError("Shioaji answered the account balance with an error message")
 
-        settlements = await asyncio.to_thread(self._client.settlements, broker_account)
+        settlements = await self.request(self._client.settlements, broker_account)
         payments_due = [min(settlement.amount, 0) for settlement in settlements if isinstance(settlement, SettlementV1)]
 
         if len(payments_due) < len(settlements):
             raise RuntimeError("Shioaji listed a settlement without an amount")
 
-        await asyncio.to_thread(self._client.update_status, account=broker_account)
-        trades = await asyncio.to_thread(self._client.list_trades)
+        await self.request(self._client.update_status, account=broker_account)
+        trades = await self.request(self._client.list_trades)
         dealt_buys = [
             self.exchange_order_of(trade)
             for trade in trades
@@ -312,14 +302,14 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
         )
 
         try:
-            return await asyncio.to_thread(self._client.place_order, contract, broker_order)
+            return await self.request(self._client.place_order, contract, broker_order)
 
         except Exception as error:
             trade = await self.find_trade(broker_order.custom_field)
 
             if trade is None:
                 raise RuntimeError(
-                    f"Shioaji did not confirm the order tagged {broker_order.custom_field} ({type(error).__name__}: {error}). "
+                    f"Shioaji did not confirm the order tagged {broker_order.custom_field} ({error}). "
                     "It may have reached the exchange: check the broker's order list"
                 ) from error
 
@@ -338,11 +328,11 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
                 await asyncio.sleep(self._poll_interval_seconds)
 
             try:
-                await asyncio.to_thread(self._client.update_status, trade=trade)
-                listed = await asyncio.to_thread(self._client.list_trades)
+                await self.request(self._client.update_status, trade=trade)
+                listed = await self.request(self._client.list_trades)
 
             except Exception as error:
-                self._logger.warning(f"Shioaji status refresh failed: {type(error).__name__}: {error}")
+                self._logger.warning(f"Shioaji status refresh failed: {error}")
                 continue
 
             trade = next((known for known in listed if known.order.custom_field == tag), trade)
@@ -355,12 +345,10 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
     @override
     async def cancel(self, trade: Trade) -> Trade:
         try:
-            await asyncio.to_thread(self._client.cancel_order, trade)
+            await self.request(self._client.cancel_order, trade)
 
         except Exception as error:
-            self._logger.error(
-                f"Shioaji cancel of the order tagged {trade.order.custom_field} failed: {type(error).__name__}: {error}"
-            )
+            self._logger.error(f"Shioaji cancel of the order tagged {trade.order.custom_field} failed: {error}")
 
         return await self.refresh(trade)
 
@@ -372,11 +360,11 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
             return None
 
         try:
-            await asyncio.to_thread(self._client.update_status, account=stock_account)
-            listed = await asyncio.to_thread(self._client.list_trades)
+            await self.request(self._client.update_status, account=stock_account)
+            listed = await self.request(self._client.list_trades)
 
         except Exception as error:
-            self._logger.error(f"Shioaji lookup of the order tagged {tag} failed: {type(error).__name__}: {error}")
+            self._logger.error(f"Shioaji lookup of the order tagged {tag} failed: {error}")
             return None
 
         return next((trade for trade in listed if trade.order.custom_field == tag), None)
@@ -411,5 +399,14 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
             dealt_shares=dealt_units * shares_per_unit,
             reported_dealt_shares=trade.status.deal_quantity * shares_per_unit,
             fill_price=fill_price,
-            description=f"{text} ({trade.status.msg})" if trade.status.msg else text,
+            description=f"{text} (status {trade.status.status_code})" if trade.status.msg else text,
         )
+
+    @override
+    async def request[**Arguments, Answer](
+        self, call: Callable[Arguments, Answer], *args: Arguments.args, **kwargs: Arguments.kwargs
+    ) -> Answer:
+        try:
+            return await asyncio.to_thread(call, *args, **kwargs)
+        except Exception as error:
+            raise RuntimeError(f"Shioaji answered {self._quotes.failure_of(error)}") from None

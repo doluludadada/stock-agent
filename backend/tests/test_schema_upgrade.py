@@ -2,7 +2,10 @@
 The upgrades on a real database of each backend. From schema version 2 (one owner, no owner columns) to 3 (rows have
 owners): every row is kept and becomes the legacy owner's, which is what the first administrator takes at setup; a
 second start changes nothing; and a failure inside the step leaves the database exactly as version 2 left it. From 3
-to 4 (a user's AI model): every user keeps their row and signs in as before on the site's default model.
+to 4 (a user's AI model): every user keeps their row and signs in as before on the site's default model. From 4 to 5
+(follows, and the broker's daily history in place of Yahoo's): every run keeps its record and follows nothing, a follow
+run and its FOLLOW decision save afterwards, the Yahoo bars are gone and the next start makes the broker's cache, and a
+failure after both parts leaves the database exactly as version 4 left it.
 """
 
 import json
@@ -14,12 +17,14 @@ from uuid import UUID
 import pytest
 from pydantic import SecretStr
 from sqlalchemy import Connection, inspect, text
-from support.databases import BACKENDS, create_version_2_tables, create_version_3_tables, database_config, empty_database, raw_engine
+from support.databases import BACKENDS, create_version_2_tables, create_version_tables, database_config, empty_database, raw_engine
 from support.harness import MARKET_OPEN
 from trading_stack import MovableClock, SilentLogger
 
 import c_infrastructure.database.models.schema_version_dto as schema_version
-from a_domain.types.enums import AiProvider, DatabaseBackend, Role
+from a_domain.model.system.stats import SystemStats
+from a_domain.model.trading.signal import TradeSignal
+from a_domain.types.enums import AiProvider, DatabaseBackend, ExecutionProvider, OrderMode, Role, SignalSource, TradeAction, Workflow
 from a_domain.types.ids import RunId, UserId
 from c_infrastructure.database.db_connector import DatabaseCommandError, DatabaseConnector
 from c_infrastructure.database.models.schema_version_dto import SCHEMA_VERSION
@@ -33,6 +38,10 @@ pytestmark = pytest.mark.asyncio
 
 RUN, DECISION, ORDER, SNAPSHOT = (UUID(int=number) for number in (1, 2, 3, 4))
 AT = datetime(2026, 11, 3, 6, 0)
+YAHOO_HISTORY = frozenset({"ohlcv_data", "ohlcv_fetches", "ohlcv_windows"})
+"""The Yahoo history and its download records, which version 5 drops; the next start makes ohlcv_data anew, empty."""
+FOLLOW_COLUMNS = {"workflow_runs": {"followed_run_id"}, "trade_signals": {"followed_decision_id"}}
+"""The columns version 5 adds so that a run may follow another run's decisions, NULL in every row it keeps."""
 JOURNAL_TABLES = ("workflow_runs", "trade_signals", "orders", "account_snapshots", "run_stock_reports")
 
 # fmt: off
@@ -170,15 +179,15 @@ async def test_a_version_2_database_keeps_every_row_and_gives_it_to_the_legacy_o
             connector.for_owner(LEGACY_OWNER_ID), SilentLogger(), MovableClock(MARKET_OPEN)
         ).get_active()
         account = await MockExecutionProvider(
-            connector.for_owner(LEGACY_OWNER_ID), database_config(backend, tmp_path), SilentLogger()
+            connector.for_owner(LEGACY_OWNER_ID), database_config(backend, tmp_path), MovableClock(MARKET_OPEN), SilentLogger()
         ).get_account()
         strangers_run = await TradingJournal(connector.for_owner(UserId("someone-else"))).find_run(RunId(RUN))
     finally:
         await connector.close()
 
     assert after["schema_version"][1] == [(str(SCHEMA_VERSION),)]
-    assert {table: len(rows) for table, (_, rows) in after.items() if table in before} == {
-        table: len(rows) for table, (_, rows) in before.items()
+    assert {table: len(rows) for table, (_, rows) in after.items() if table in before.keys() - YAHOO_HISTORY} == {
+        table: len(rows) for table, (_, rows) in before.items() if table not in YAHOO_HISTORY
     }
     for table in (*JOURNAL_TABLES, "watchlists", "mock_cash", "mock_positions", "technical_settings", "technical_strategies"):
         owners = {row[after[table][0].index("owner_id")] for row in after[table][1]}
@@ -312,7 +321,7 @@ ACCOUNTS_KEY = SecretStr("A" * 43)
 async def version_3_database(backend: DatabaseBackend, folder: Path) -> DatabaseConnector:
     """A database as version 3 left it: its tables, the stamp 3, the administrator and a user, and the administrator's run."""
     connector = await empty_database(backend, folder)
-    await create_version_3_tables(backend, folder)
+    await create_version_tables(backend, folder, 3)
     keys, engine = UserKeys(ACCOUNTS_KEY), raw_engine(backend, folder)
     users = [(LEGACY_OWNER_ID, "owner", "ADMINISTRATOR"), ("u-member", "member", "USER")]
     run = {"owner_id": LEGACY_OWNER_ID, **dict(LEGACY_ROWS)["workflow_runs"]}
@@ -364,10 +373,10 @@ async def test_a_version_3_database_gains_the_ai_model_and_keeps_every_user_on_t
         await connector.close()
 
     after = await database_snapshot(backend, tmp_path)
-    assert list(migration.before.pending) == ["3 -> 4 add_user_ai_model"]
+    assert list(migration.before.pending) == ["3 -> 4 add_user_ai_model", "4 -> 5 add_follows_and_drop_yahoo_history"]
     assert after["schema_version"][1] == [(str(SCHEMA_VERSION),)]
-    assert {table: len(rows) for table, (_, rows) in after.items() if table in before} == {
-        table: len(rows) for table, (_, rows) in before.items()
+    assert {table: len(rows) for table, (_, rows) in after.items() if table in before.keys() - YAHOO_HISTORY} == {
+        table: len(rows) for table, (_, rows) in before.items() if table not in YAHOO_HISTORY
     }
     assert set(after["users"][0]) - set(before["users"][0]) == {"ai_model"}
     assert [(user.username, user.role, user.ai_model) for user in upgraded] == [
@@ -400,3 +409,127 @@ async def test_a_failure_after_the_ai_model_step_leaves_the_version_3_database_a
     after = await database_snapshot(backend, tmp_path)
     assert after == before
     assert after["schema_version"][1] == [("3",)]
+
+
+async def version_4_database(backend: DatabaseBackend, folder: Path) -> DatabaseConnector:
+    """
+    A database as version 4 left it: its tables, the stamp 4, the administrator's finished Full Cycle run, and a Yahoo bar
+    with its download window.
+    """
+    connector = await empty_database(backend, folder)
+    await create_version_tables(backend, folder, 4)
+    engine = raw_engine(backend, folder)
+    run = {"owner_id": LEGACY_OWNER_ID, **dict(LEGACY_ROWS)["workflow_runs"]}
+
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(f"INSERT INTO workflow_runs ({', '.join(run)}) VALUES ({', '.join(f':{column}' for column in run)})"),
+            {column: stored(backend, value) for column, value in run.items()},
+        )
+        await connection.execute(
+            text(
+                "INSERT INTO ohlcv_data (ts, open, high, low, close, volume, adj_close, stock_id) "
+                "VALUES (:ts, 1, 2, 1, 2, 9, 2, '2330')"
+            ),
+            {"ts": stored(backend, AT)},
+        )
+        await connection.execute(text("INSERT INTO ohlcv_windows (stock_id, first_session) VALUES ('2330', :day)"), {"day": AT.date()})
+
+    await engine.dispose()
+    return connector
+
+
+def follow_of(run_id: RunId) -> tuple[SystemStats, TradeSignal]:
+    """A follow of `run_id` and its one decision, as a follow saves them."""
+    at = AT.replace(tzinfo=UTC)
+    follow = SystemStats(
+        workflow=Workflow.FOLLOW,
+        execution_provider=ExecutionProvider.MOCK,
+        order_mode=OrderMode.MOCK_ONLY,
+        start_time=at,
+        followed_run_id=run_id,
+    )
+    decision = TradeSignal(
+        stock_id="2330",
+        action=TradeAction.BUY,
+        source=SignalSource.FOLLOW,
+        score=80,
+        reason="follows",
+        quantity=1000,
+        generated_at=at,
+        price_at_signal=101.0,
+        price_observed_at=at,
+    )
+    return follow, decision
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+async def test_a_version_4_database_keeps_every_run_following_nothing_and_then_saves_a_follow(
+    backend: DatabaseBackend, tmp_path: Path
+) -> None:
+    connector = await version_4_database(backend, tmp_path)
+    follow, decision = follow_of(RunId(RUN))
+
+    try:
+        migration = await connector.migrate()
+        await connector.init_db()
+        journal = TradingJournal(connector.for_owner(LEGACY_OWNER_ID))
+        kept = await journal.find_run(RunId(RUN))
+        await journal.save_run(follow)
+        await journal.save_signals(follow.run_id, [decision])
+        saved, [saved_decision] = await journal.find_run(follow.run_id), await journal.signals_of(follow.run_id)
+    finally:
+        await connector.close()
+
+    assert list(migration.before.pending) == ["4 -> 5 add_follows_and_drop_yahoo_history"]
+    assert kept is not None and (kept.workflow, kept.followed_run_id, kept.orders_filled) == (Workflow.FULL_CYCLE, None, 1)
+    assert saved is not None and (saved.workflow, saved.followed_run_id) == (Workflow.FOLLOW, RUN)
+    assert saved_decision.source == SignalSource.FOLLOW
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+async def test_a_version_4_database_loses_its_yahoo_bars_and_the_next_start_makes_the_brokers_cache(
+    backend: DatabaseBackend, tmp_path: Path
+) -> None:
+    connector = await version_4_database(backend, tmp_path)
+    before = await database_snapshot(backend, tmp_path)
+
+    try:
+        migration = await connector.migrate()
+        await connector.init_db()
+    finally:
+        await connector.close()
+
+    after = await database_snapshot(backend, tmp_path)
+    kept = set(before) - YAHOO_HISTORY - {"schema_version"}
+    gained = {table: set(after[table][0]) - set(before[table][0]) for table in kept}
+    assert list(migration.before.pending) == ["4 -> 5 add_follows_and_drop_yahoo_history"]
+    assert after["ohlcv_data"] == (["change", "close", "high", "low", "open", "stock_id", "ts", "volume"], [])
+    assert {"ohlcv_fetches", "ohlcv_windows"}.isdisjoint(after)
+    assert {table: len(after[table][1]) for table in kept} == {table: len(before[table][1]) for table in kept}
+    assert {table: columns for table, columns in gained.items() if columns} == FOLLOW_COLUMNS
+    assert after["schema_version"][1] == [(str(SCHEMA_VERSION),)]
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+async def test_a_failure_after_both_parts_of_the_version_5_step_leaves_the_version_4_database_as_it_was(
+    backend: DatabaseBackend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connector = await version_4_database(backend, tmp_path)
+    before = await database_snapshot(backend, tmp_path)
+
+    async def fails_after_both_parts(connection: Any) -> None:
+        await schema_version.add_follows_and_drop_yahoo_history(connection)
+        raise RuntimeError("the upgrade stopped after both parts")
+
+    monkeypatch.setattr(schema_version, "UPGRADES", (*schema_version.UPGRADES[:3], fails_after_both_parts))
+
+    try:
+        with pytest.raises(DatabaseCommandError, match="after both parts"):
+            await connector.migrate()
+    finally:
+        await connector.close()
+
+    after = await database_snapshot(backend, tmp_path)
+    assert after == before
+    assert after["schema_version"][1] == [("4",)]

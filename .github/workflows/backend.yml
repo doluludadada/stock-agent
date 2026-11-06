@@ -1,0 +1,41 @@
+name: Backend
+
+on:
+    push:
+        paths: ["backend/**", "config/**", ".github/workflows/backend.yml"]
+    pull_request:
+        paths: ["backend/**", "config/**", ".github/workflows/backend.yml"]
+
+jobs:
+    check:
+        name: Format, lint, architecture & tests
+        runs-on: ubuntu-latest
+        defaults:
+            run:
+                working-directory: backend
+        services:
+            postgres:
+                image: postgres:18
+                env:
+                    POSTGRES_USER: ciunit
+                    POSTGRES_PASSWORD: ciunit
+                    POSTGRES_DB: ciunit
+                ports: ["5432:5432"]
+                options: >-
+                    --health-cmd "pg_isready -U ciunit"
+                    --health-interval 5s
+                    --health-timeout 5s
+                    --health-retries 10
+        env:
+            STOCK_AGENT_TEST_POSTGRES_URL: postgresql://ciunit:ciunit@localhost:5432/ciunit
+        steps:
+            - uses: actions/checkout@v7
+            # setup-uv publishes no floating major tag, so this names the release.
+            - uses: astral-sh/setup-uv@v10.3.3
+            # uv installs the Python that backend/.python-version names.
+            - run: uv sync --frozen
+            - run: uv run ruff format --check
+            - run: uv run ruff check
+            # Exits 1 unless the count ends at TOTAL 0.
+            - run: uv run python tools/architecture_check.py src --pyright
+            - run: uv run pytest -q

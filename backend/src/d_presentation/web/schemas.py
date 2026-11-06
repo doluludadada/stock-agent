@@ -18,6 +18,9 @@ from a_domain.model.analysis.technical_report import TechnicalReport
 from a_domain.model.fundamentals.eps import EpsUnavailable
 from a_domain.model.fundamentals.monthly_revenue import MonthlyRevenue
 from a_domain.model.fundamentals.quarter_financials import QuarterFinancials
+from a_domain.model.market.ohlcv import Ohlcv
+from a_domain.model.trading.account import AccountOpening
+from a_domain.model.trading.order import Order
 from a_domain.model.valuation.scan import ScanCriteria
 from a_domain.model.valuation.valuation import PeMedian, ReportSection
 from a_domain.ports.system.settings_files import Revision, SettingChange, SettingsProblem
@@ -30,11 +33,13 @@ from a_domain.types.enums import (
     EpsKind,
     ErrorCode,
     ExecutionProvider,
+    FollowRefusal,
     IndicatorOutput,
     InformationSource,
     MarketIndex,
     MarketType,
     OrderMode,
+    OrderPricing,
     PeNotApplicableReason,
     Role,
     ScanStep,
@@ -48,7 +53,7 @@ from a_domain.types.enums import (
     WatchlistType,
     Workflow,
 )
-from a_domain.types.values import EmailAddress, NewPassword, Username
+from a_domain.types.values import EmailAddress, NewPassword, PositiveFiniteFloat, Username
 from d_presentation.live_runtime import ReloadRefused
 
 StockId = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=10, pattern=r"^[0-9A-Za-z]+$")]
@@ -58,6 +63,15 @@ REDACTIONS = (
     (re.compile(r"(?i)([?&][\w-]*(?:key|token|secret|sig)[\w-]*=)[^&\s]+"), r"\1[redacted]"),
     (re.compile(r"\b(?:sk|xai|gsk|nvapi|tvly)-[A-Za-z0-9_-]{8,}"), "[redacted]"),
     (re.compile(r"(?:(?<=\s)|^|(?<=[('\"]))(?:/Users|/home|/root|/var|/opt|/private|/tmp|[A-Za-z]:\\)[^\s'\")]*"), "[path]"),
+    (re.compile(r"\b[A-Z][12]\d{8}\b"), "[person id]"),
+    (re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"), "[address]"),
+    (
+        re.compile(
+            r"(?i)(?<![\w:])(?:(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}|(?:[0-9a-f]{1,4}:)+:(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4})*)?"
+            r"|::[0-9a-f]{1,4}(?::[0-9a-f]{1,4})*)(?![\w:])"
+        ),
+        "[address]",
+    ),
 )
 
 
@@ -66,9 +80,9 @@ PUBLIC_TEXT_LIMIT = 600
 
 def public_text(text: str) -> str:
     """
-    A server message as a browser may see it: credentials, key-like query parameters and file system paths are
-    replaced, so an upstream error that quotes them leaks nothing, and a long one is cut. The full text stays in the
-    server log.
+    A server message as a browser may see it: credentials, key-like query parameters, file system paths, Taiwan person
+    ids and IP addresses are replaced, so an upstream error that quotes them leaks nothing, and a long one is cut. The
+    full text stays in the server log.
     """
     for pattern, replacement in REDACTIONS:
         text = pattern.sub(replacement, text)
@@ -146,6 +160,9 @@ class RunSummary(Response):
     order_mode: OrderMode
     start_time: datetime
     end_time: datetime | None
+    followed_run_id: UUID | None = None
+    """A follow's run: the run whose decisions it followed."""
+
     total_scanned: int
     buzz_scanned: int
     buzz_qualified: int
@@ -155,6 +172,9 @@ class RunSummary(Response):
     orders_submitted: int
     orders_refused: int
     stale_market_data_count: int
+    technical_strategy_id: str | None
+    """The technical strategy the run applied, by its id; None for a run that applied none."""
+
     errors: list[PublicText]
     execution_log: list[PublicText]
 
@@ -206,6 +226,31 @@ class SignalResponse(Response):
     history_until: datetime | None
     technical_report: TechnicalReport | None
     ai_report: AiReportResponse | None
+    followed_decision_id: UUID | None = None
+    """A follow's decision: the decision of the followed run it carries out again."""
+
+
+class FollowItem(BaseModel):
+    """One follow of a decision: the follow's decision, priced when it was followed, and its order."""
+
+    decision: SignalResponse
+    order: Order
+
+
+class FollowResponse(BaseModel):
+    """What a follow of the run may take now, and what it took so far."""
+
+    refusal: FollowRefusal | None
+    """Why a follow may not start now; None when it may."""
+
+    open_decision_ids: list[UUID]
+    """
+    The run's decisions still open to follow, at most one per stock. A decision is followed once a follow order of it
+    filled since the mock account opened.
+    """
+
+    follows: list[FollowItem]
+    """Every follow of the run's decisions so far, oldest first."""
 
 
 # ---------------------------------------------------------------------------- #
@@ -262,6 +307,26 @@ class AccountValueResponse(Response):
     positions: list[PositionValueResponse]
 
 
+class RunReference(Response):
+    """Which run a trade came from, as the account page names it."""
+
+    run_id: UUID
+    workflow: Workflow
+    start_time: datetime
+
+
+class TradeResponse(BaseModel):
+    """An order that filled at least one share, and the run whose decision it carried out: the followed run for a follow."""
+
+    order: Order
+    run: RunReference
+
+
+class ResetRequest(Confirmed):
+    initial_cash: PositiveFiniteFloat
+    """The cash the mock account opens with again."""
+
+
 class AccountAsOfResponse(BaseModel):
     last_fill_at: datetime
     value: AccountValueResponse
@@ -281,6 +346,12 @@ class AccountHistoryResponse(BaseModel):
     execution_provider: ExecutionProvider
     """mock: the paper account of the mock broker, not a real brokerage account."""
 
+    opening: AccountOpening | None
+    """When the mock account opened, at its first read or its last reset, and the cash it opened with. None at a real broker."""
+
+    profit: float | None
+    """The account's equity now minus the cash it opened with. None at a real broker."""
+
     order_mode: OrderMode
 
 
@@ -289,33 +360,20 @@ class AccountHistoryResponse(BaseModel):
 # ---------------------------------------------------------------------------- #
 
 
-class DailyBarResponse(Response):
-    """One completed daily bar (Ohlcv): `ts` is its session's 13:30 close in Asia/Taipei, volume is in shares."""
-
-    ts: datetime
-    open: float
-    high: float
-    low: float
-    close: float
-    volume: int
-    change: float | None
-    """The exchange's official change from the session's reference price; None when the listing does not report it."""
-
-
 class ListedStockResponse(Response):
     """A listed stock (Stock). `today` is its official bar of the listing's latest session; None when it did not trade."""
 
     stock_id: str
     name: str | None
     market: MarketType
-    today: DailyBarResponse | None
+    today: Ohlcv | None
 
 
 class StockHistoryResponse(BaseModel):
     stock: ListedStockResponse
     """Its `today` is the latest completed daily bar of the history."""
 
-    bars: list[DailyBarResponse]
+    bars: list[Ohlcv]
     """Completed daily bars, oldest first. Empty when the history is unavailable or stale; `notes` says why."""
 
     notes: list[PublicText]
@@ -323,10 +381,11 @@ class StockHistoryResponse(BaseModel):
 
 class IndexHistoryResponse(BaseModel):
     index: MarketIndex
-    bars: list[DailyBarResponse]
+    bars: list[Ohlcv]
     """
-    Completed daily bars, oldest first, as Yahoo Finance reports the index, or on a public site as the open-data archive
-    keeps its close: such a bar's open, high and low are its close and its volume 0. Empty when none is in the window.
+    Completed daily bars, oldest first, as the index's one-minute bars on Shioaji make them on a site with a Shioaji
+    login, else as the open-data archive keeps its close: such a bar's open, high and low are its close and its volume
+    0. Empty when none is in the window.
     """
 
 
@@ -352,11 +411,19 @@ class AudienceResponse(BaseModel):
     open_data_only: bool
     """Daily history and the index trend come from the open-data archive alone: a run finds no candidate until it holds enough."""
     realtime_quotes: bool
-    """Buzz, Intraday and the manual BUY, which order on realtime quotes."""
+    """
+    Buzz, Intraday and the manual BUY, which order on realtime quotes: where the audience allows them and this runtime
+    has a Shioaji login.
+    """
     news_articles: bool
     """The news sites' articles and the AI's web search."""
     mops: bool
     """The valuation, which reads MOPS's income statements."""
+    order_pricing: OrderPricing
+    """
+    What prices an order, a follow's included: a realtime quote in continuous trading, or the official close of the
+    last closed session while no session trades, on the mock broker only.
+    """
 
 
 class StockFinancialsResponse(BaseModel):
@@ -448,7 +515,7 @@ class StockValuationResponse(Response):
     """One stock's valuation before any user assumption (StockValuation)."""
 
     stock: ValuedStockResponse
-    close: DailyBarResponse | None
+    close: Ohlcv | None
     close_is_fresh: bool
     eps: EpsResponse | EpsUnavailable
     current_pe: PeRatioResponse | PeNotApplicableReason

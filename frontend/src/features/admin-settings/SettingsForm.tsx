@@ -121,7 +121,7 @@ interface RowViewProps {
   onChange: (change: SettingChange) => void
 }
 
-/** One setting: its label, the path in the YAML, its description, the control, and what the check says about it. */
+/** One setting: its label, the path in the YAML, its help, the control, and what the check says about it. */
 function RowView({ row, problems, refused, onChange }: RowViewProps) {
   const { t } = useTranslation('admin')
   const id = useId()
@@ -151,7 +151,7 @@ function RowView({ row, problems, refused, onChange }: RowViewProps) {
         {labelled ? <Label htmlFor={id}>{label}</Label> : <p className="text-sm leading-none font-medium">{label}</p>}
         <div id={noteId} className="space-y-1 text-xs text-pretty text-muted-foreground">
           <p className="font-mono break-all">{row.path}</p>
-          {row.description && <p>{row.description}</p>}
+          <p>{t(`form.help.${row.path}`)}</p>
           {row.view.kind === 'readOnly' && <p>{t(`form.readOnly.${row.path}`)}</p>}
         </div>
       </div>

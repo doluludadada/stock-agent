@@ -1,335 +1,230 @@
 import asyncio
-import sqlite3
-from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 
 import pytest
-import pytest_asyncio
+from support.fake_broker import FakeBrokerQuotes, session_bar
+from support.fakes import RecordingLogger
 from support.settings import shipped_config
-from trading_stack import MONDAY_10_00, MovableClock, QuoteFeed, SilentLogger, bar
+from trading_stack import MovableClock, SilentLogger
 
-from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
-from a_domain.types.enums import MarketIndex, TradingPhase
+from a_domain.ports.system.logging_provider import ILoggingProvider
+from a_domain.types.enums import MarketIndex, MarketType
 from b_application.config.market_data_config import MarketDataConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
+from c_infrastructure.database.models.daily_close_archive_dto import DailyCloseDTO
+from c_infrastructure.database.repositories.daily_close_archive import SqlDailyCloseArchive
 from c_infrastructure.market.cached_price_provider import CachedPriceProvider
+from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 
 pytestmark = pytest.mark.asyncio
 
-
-class CountingYahoo:
-    """Serves the closed sessions plus, while a session runs, its in-progress bar at the latest price, as Yahoo does."""
-
-    def __init__(self, clock: MovableClock) -> None:
-        self.clock = clock
-        self.calls = 0
-
-    async def fetch_history(self, stocks: list[Stock], start_date: datetime, end_date: datetime) -> dict[str, list[Ohlcv]]:
-        self.calls += 1
-        last_close = datetime.combine(self.clock.last_closed_session(), time(13, 30), tzinfo=self.clock.current.tzinfo)
-        bars = [bar(last_close - timedelta(days=day), 100) for day in range(3, -1, -1)]
-
-        if self.clock.trading_phase() in {TradingPhase.CONTINUOUS, TradingPhase.CLOSING_AUCTION}:
-            bars.append(bar(self.clock.current.replace(hour=13, minute=30), 110))
-
-        return {stock.stock_id: list(bars) for stock in stocks}
-
-
-@dataclass
-class ScriptedYahoo:
-    """Serves the daily bars the test sets, as Yahoo would after dropping rows without a close, and records who was asked for."""
-
-    daily: dict[str, list[Ohlcv]] = field(default_factory=dict)
-    asked: list[str] = field(default_factory=list)
-    index_daily: dict[MarketIndex, list[Ohlcv]] = field(default_factory=dict)
-
-    async def fetch_history(self, stocks: list[Stock], start_date: datetime, end_date: datetime) -> dict[str, list[Ohlcv]]:
-        self.asked.extend(stock.stock_id for stock in stocks)
-        return {stock.stock_id: list(self.daily[stock.stock_id]) for stock in stocks if stock.stock_id in self.daily}
-
-    async def fetch_index_history(self, index: MarketIndex, start_date: datetime, end_date: datetime) -> list[Ohlcv]:
-        self.asked.append(index.value)
-        return list(self.index_daily.get(index, []))
-
-
-def session_close(day: date, close: float) -> Ohlcv:
-    return bar(datetime.combine(day, time(13, 30), tzinfo=MONDAY_10_00.tzinfo), close)
-
-
-THURSDAY, FRIDAY = date(2026, 10, 22), date(2026, 10, 23)
+MONDAY = date(2026, 11, 9)
+TYPHOON = date(2026, 10, 23)
+SESSIONS = [
+    day for day in (date(2026, 10, 12) + timedelta(days=offset) for offset in range(29)) if day.weekday() < 5 and day != TYPHOON
+]
+"""The weekday sessions from 2026-10-12 to MONDAY but the typhoon day, which the exchanges closed."""
+STOCKS = [Stock(stock_id="2330", market=MarketType.TWSE), Stock(stock_id="6488", market=MarketType.TPEX)]
 
 
 def at(day: date, hour: int, minute: int = 0) -> datetime:
-    return datetime.combine(day, time(hour, minute), tzinfo=MONDAY_10_00.tzinfo)
+    return datetime.combine(day, time(hour, minute), tzinfo=TAIWAN_TIMEZONE)
 
 
-def cache_over(yahoo: ScriptedYahoo, db: DatabaseConnector, clock: MovableClock) -> CachedPriceProvider:
+def broker_of(sessions: list[date], closes: dict[str, float]) -> FakeBrokerQuotes:
+    return FakeBrokerQuotes(
+        sessions={day: {stock_id: session_bar(day, close) for stock_id, close in closes.items()} for day in sessions},
+        index={MarketType.TWSE: list(sessions), MarketType.TPEX: list(sessions)},
+    )
+
+
+def cache_over(
+    broker: FakeBrokerQuotes, db: DatabaseConnector, clock: MovableClock, logger: ILoggingProvider | None = None
+) -> CachedPriceProvider:
+    archive = SqlDailyCloseArchive(db, clock, shipped_config().sources.exchange, 7, SilentLogger())
     return CachedPriceProvider(
-        history_provider=yahoo,
-        quote_provider=QuoteFeed(),
+        broker=broker,
+        archive=archive,
         db=db,
-        market_data=MarketDataConfig(),
-        logger=SilentLogger(),
         market_clock=clock,
+        market_data=MarketDataConfig(),
+        logger=logger or SilentLogger(),
         write_lock=asyncio.Lock(),
     )
 
 
-async def last_bars(cache: CachedPriceProvider, clock: MovableClock, *stock_ids: str) -> dict[str, tuple[str, float]]:
-    history = await cache.fetch_history([Stock(stock_id=stock_id) for stock_id in stock_ids], *clock.history_window(30))
-    return {stock_id: (clock.to_trading_date(bars[-1].ts).isoformat(), bars[-1].close) for stock_id, bars in history.items()}
+def split_on_monday(clock: MovableClock) -> FakeBrokerQuotes:
+    """2330 at 100 until a 1:2 split on MONDAY, whose first session closes at 51 against the converted reference 50."""
+    broker = broker_of(SESSIONS[:-1], {"2330": 100.0})
+    broker.sessions[MONDAY] = {"2330": session_bar(MONDAY, 51.0, volume=4000)}
+    broker.index = {MarketType.TWSE: SESSIONS, MarketType.TPEX: SESSIONS}
+    return broker
 
 
-@pytest_asyncio.fixture
-async def db(tmp_path):
-    connector = DatabaseConnector(config=shipped_config(tmp_path), logger=SilentLogger())
-    await connector.init_db()
-    yield connector
-    await connector.close()
+@pytest.fixture
+def db(database: DatabaseConnector) -> DatabaseConnector:
+    """The cache's database on each backend: SQLite, and PostgreSQL when the suite has one."""
+    return database
 
 
-async def test_history_holds_settled_sessions_and_is_refetched_when_a_newer_one_settles(db: DatabaseConnector) -> None:
-    clock = MovableClock(MONDAY_10_00 + timedelta(days=1))
-    yahoo = CountingYahoo(clock)
-    cache = CachedPriceProvider(
-        history_provider=yahoo,
-        quote_provider=QuoteFeed(),
-        db=db,
-        market_data=MarketDataConfig(),
-        logger=SilentLogger(),
-        market_clock=clock,
-        write_lock=asyncio.Lock(),
-    )
-    seen = []
+async def test_a_read_fills_the_cache_from_the_broker_and_a_second_read_asks_it_nothing(db: DatabaseConnector) -> None:
+    clock = MovableClock(at(MONDAY, 16))
+    broker = broker_of(SESSIONS, {"2330": 500.0, "6488": 300.0})
+    cache = cache_over(broker, db, clock)
 
-    for moment in ["Tue 10:00", "Tue 11:00", "Tue 14:00", "Tue 15:00", "Sat 10:00", "Sat 12:00"]:
-        day, hour = moment.split()
-        clock.current = (MONDAY_10_00 + timedelta(days=["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].index(day))).replace(
-            hour=int(hour[:2])
-        )
-        start, end = clock.history_window(30)
-        bars = (await cache.fetch_history([Stock(stock_id="2330")], start, end))["2330"]
-        seen.append((moment, yahoo.calls, clock.to_trading_date(bars[-1].ts).isoformat(), bars[-1].close))
+    first = await cache.fetch_history(STOCKS, *clock.history_window(30))
+    asked_first = list(broker.asked)
+    second = await cache.fetch_history(STOCKS, *clock.history_window(30))
 
-    assert seen == [
-        ("Tue 10:00", 1, "2026-10-19", 100),
-        ("Tue 11:00", 1, "2026-10-19", 100),
-        ("Tue 14:00", 1, "2026-10-19", 100),
-        ("Tue 15:00", 2, "2026-10-20", 100),
-        ("Sat 10:00", 3, "2026-10-23", 100),
-        ("Sat 12:00", 3, "2026-10-23", 100),
-    ]
+    assert asked_first[:2] == ["index twse 2026-10-10 2026-11-09", "index tpex 2026-10-10 2026-11-09"]
+    assert [question for question in asked_first if question.startswith("quotes")] == [f"quotes {day}" for day in reversed(SESSIONS)]
+    assert broker.asked == asked_first
+    assert first == second
+    assert [clock.to_trading_date(bar.ts) for bar in first["2330"]] == SESSIONS
+    assert {bar.close for bar in first["6488"]} == {300.0}
 
 
-async def test_realtime_quotes_come_from_the_quote_source_and_are_never_cached(db: DatabaseConnector) -> None:
-    clock = MovableClock(MONDAY_10_00)
-    quotes = QuoteFeed(realtime={"2330": bar(MONDAY_10_00, 101)})
-    cache = CachedPriceProvider(
-        history_provider=CountingYahoo(clock),
-        quote_provider=quotes,
-        db=db,
-        market_data=MarketDataConfig(),
-        logger=SilentLogger(),
-        market_clock=clock,
-        write_lock=asyncio.Lock(),
-    )
-
-    first = await cache.fetch_realtime_bars([Stock(stock_id="2330")])
-    quotes.realtime["2330"] = bar(MONDAY_10_00 + timedelta(minutes=1), 102)
-    second = await cache.fetch_realtime_bars([Stock(stock_id="2330")])
-
-    assert (first["2330"].close, second["2330"].close) == (101, 102)
-
-
-async def test_a_refetched_session_replaces_its_bar_and_stays_one_row(db: DatabaseConnector, tmp_path) -> None:
-    clock = MovableClock(MONDAY_10_00 + timedelta(days=1))
-    monday, tuesday = (
-        datetime.combine(day, time(13, 30), tzinfo=clock.current.tzinfo) for day in (date(2026, 10, 19), date(2026, 10, 20))
-    )
-    yahoo = ScriptedYahoo(daily={"2330": [bar(monday, 100)]})
-    cache = cache_over(yahoo, db, clock)
-
-    await cache.fetch_history([Stock(stock_id="2330")], *clock.history_window(30))
-    yahoo.daily["2330"] = [bar(monday, 101), bar(tuesday, 102)]
-    clock.current = clock.current.replace(hour=15)
-    history = await cache.fetch_history([Stock(stock_id="2330")], *clock.history_window(30))
-
-    assert [(one.ts, one.close) for one in history["2330"]] == [(monday, 101), (tuesday, 102)]
-    with sqlite3.connect(tmp_path / "stock_agent.db") as connection:
-        rows = connection.execute("SELECT ts, close FROM ohlcv_data ORDER BY ts").fetchall()
-    assert rows == [("2026-10-19 05:30:00.000000", 101.0), ("2026-10-20 05:30:00.000000", 102.0)]
-
-
-async def test_a_close_fetched_before_yahoo_settles_it_is_not_cached_as_final(db: DatabaseConnector) -> None:
-    clock = MovableClock(at(FRIDAY, 13, 35))
-    yahoo = ScriptedYahoo(daily={"2330": [session_close(THURSDAY, 100), session_close(FRIDAY, 105)]})
-    cache = cache_over(yahoo, db, clock)
-
-    seen = [await last_bars(cache, clock, "2330")]
-    yahoo.daily["2330"][-1] = session_close(FRIDAY, 110)
-    clock.current = at(FRIDAY, 20)
-    seen.append(await last_bars(cache, clock, "2330"))
-    clock.current = at(FRIDAY + timedelta(days=1), 10)
-    seen.append(await last_bars(cache, clock, "2330"))
-
-    assert seen == [{"2330": ("2026-10-22", 100)}, {"2330": ("2026-10-23", 110)}, {"2330": ("2026-10-23", 110)}]
-    assert yahoo.asked == ["2330", "2330"]
-
-
-async def test_a_session_yahoo_has_not_published_is_asked_for_again_only_every_two_hours(db: DatabaseConnector) -> None:
-    clock = MovableClock(at(FRIDAY, 16))
-    yahoo = ScriptedYahoo(daily={"2330": [session_close(THURSDAY, 100)]})
-    asked = []
-
-    for moment, cache in [
-        (at(FRIDAY, 16), cache_over(yahoo, db, clock)),
-        (at(FRIDAY, 17), cache_over(yahoo, db, clock)),
-        (at(FRIDAY, 17, 59), cache_over(yahoo, db, clock)),
-        (at(FRIDAY, 18), cache_over(yahoo, db, clock)),
-    ]:
-        clock.current = moment
-        yahoo.asked.clear()
-        served = await last_bars(cache, clock, "2330", "9999")
-        asked.append((moment.strftime("%H:%M"), list(yahoo.asked), served))
-        yahoo.daily["2330"] = [session_close(THURSDAY, 100), session_close(FRIDAY, 110)]
-
-    assert asked == [
-        ("16:00", ["2330", "9999"], {"2330": ("2026-10-22", 100)}),
-        ("17:00", [], {"2330": ("2026-10-22", 100)}),
-        ("17:59", [], {"2330": ("2026-10-22", 100)}),
-        ("18:00", ["2330", "9999"], {"2330": ("2026-10-23", 110)}),
-    ]
-
-
-async def test_a_window_earlier_than_any_asked_before_is_fetched_once_and_a_short_history_is_not_asked_again(
+async def test_the_last_settled_session_takes_its_change_from_the_snapshots_and_a_split_adjusts_the_bars_before_it(
     db: DatabaseConnector,
 ) -> None:
-    """A strategy that needs more history than earlier runs cached gets it; a stock that has no older bars is not asked again."""
-    clock = MovableClock(MONDAY_10_00 + timedelta(days=1))
-    yahoo = CountingYahoo(clock)
-    cache = CachedPriceProvider(
-        history_provider=yahoo,
-        quote_provider=QuoteFeed(),
-        db=db,
-        market_data=MarketDataConfig(),
-        logger=SilentLogger(),
-        market_clock=clock,
-        write_lock=asyncio.Lock(),
-    )
-    calls = []
+    clock = MovableClock(at(MONDAY, 16))
+    broker = broker_of(SESSIONS[:-1], {"2330": 100.0})
+    broker.sessions[MONDAY] = {"2330": session_bar(MONDAY, 51.0, volume=4000)}
+    broker.index = {MarketType.TWSE: SESSIONS, MarketType.TPEX: SESSIONS}
+    broker.snapshot_changes = {MONDAY: {"2330": 1.0}}
 
-    for days in (30, 30, 400, 400, 120):
-        start, end = clock.history_window(days)
-        await cache.fetch_history([Stock(stock_id="2330")], start, end)
-        calls.append(yahoo.calls)
+    history = (await cache_over(broker, db, clock).fetch_history(STOCKS[:1], *clock.history_window(30)))["2330"]
 
-    assert calls == [1, 1, 2, 2, 2]
+    assert [(bar.close, bar.volume) for bar in history[-3:]] == [(50.0, 2000), (50.0, 2000), (51.0, 4000)]
+    assert [bar.change for bar in history] == [None] * (len(SESSIONS) - 1) + [1.0]
+    assert [question for question in broker.asked if question.startswith("changes")] == [f"changes {MONDAY}"]
 
 
-async def test_a_window_is_recorded_only_for_stocks_the_source_answered(db: DatabaseConnector) -> None:
-    """A stock Yahoo skipped (a rate limit, a delisting) is asked again for the window instead of counting as covered."""
-    clock = MovableClock(at(FRIDAY + timedelta(days=1), 10))
-    yahoo = ScriptedYahoo(daily={"2330": [session_close(THURSDAY, 100), session_close(FRIDAY, 110)]})
-    cache = cache_over(yahoo, db, clock)
-    start, end = clock.history_window(400)
+async def test_a_session_the_broker_does_not_serve_yet_is_asked_again_only_after_the_retry_interval(db: DatabaseConnector) -> None:
+    clock = MovableClock(at(MONDAY, 15, 30))
+    broker = broker_of(SESSIONS[:-1], {"2330": 100.0})
+    broker.index = {MarketType.TWSE: SESSIONS, MarketType.TPEX: SESSIONS}
+    cache = cache_over(broker, db, clock)
+    last_sessions = []
 
-    await cache.fetch_history([Stock(stock_id="2330"), Stock(stock_id="9999")], start, end)
+    for moment in (at(MONDAY, 15, 30), at(MONDAY, 17), at(MONDAY, 17, 31)):
+        clock.current = moment
 
-    assert set(await cache.load_windows(["2330", "9999"])) == {"2330"}
+        if moment == at(MONDAY, 17, 31):
+            broker.sessions[MONDAY] = {"2330": session_bar(MONDAY, 101.0)}
 
+        history = await cache.fetch_history(STOCKS[:1], *clock.history_window(30))
+        last_sessions.append((broker.asked.count(f"quotes {MONDAY}"), clock.to_trading_date(history["2330"][-1].ts)))
 
-async def test_an_index_history_is_cached_like_a_stocks_and_never_mixes_with_one(db: DatabaseConnector) -> None:
-    """The TAIEX is asked for once its cache lacks a settled session, as a stock is; its bars stay its own."""
-    clock = MovableClock(at(FRIDAY + timedelta(days=1), 10))
-    index_bars = [session_close(THURSDAY, 44000), session_close(FRIDAY, 45000)]
-    yahoo = ScriptedYahoo(daily={"2330": [session_close(FRIDAY, 100)]}, index_daily={MarketIndex.TAIEX: index_bars})
-    window = clock.history_window(30)
-
-    first = await cache_over(yahoo, db, clock).fetch_index_history(MarketIndex.TAIEX, *window)
-    again = await cache_over(yahoo, db, clock).fetch_index_history(MarketIndex.TAIEX, *window)
-    stocks = await cache_over(yahoo, db, clock).fetch_history([Stock(stock_id="2330")], *window)
-
-    assert first == again == index_bars
-    assert yahoo.asked == ["taiex", "2330"]
-    assert [one.close for one in stocks["2330"]] == [100]
+    assert last_sessions == [(1, SESSIONS[-2]), (1, SESSIONS[-2]), (2, MONDAY)]
 
 
-class GatedYahoo:
-    """Holds every history request until `release` is set, as a slow download does, and records who was asked for."""
+async def test_a_broker_that_fails_leaves_the_read_to_the_sessions_the_cache_holds(db: DatabaseConnector) -> None:
+    clock = MovableClock(at(MONDAY, 16))
+    broker = broker_of(SESSIONS, {"2330": 100.0})
+    cache = cache_over(broker, db, clock)
+    await cache.fetch_history(STOCKS[:1], *clock.history_window(30))
 
-    def __init__(self) -> None:
-        self.asked: list[list[str]] = []
-        self.release = asyncio.Event()
+    clock.current = at(MONDAY + timedelta(days=1), 16)
+    broker.failure = ConnectionError("Sinopac unreachable")
+    history = await cache.fetch_history(STOCKS[:1], *clock.history_window(30))
 
-    async def fetch_history(self, stocks: list[Stock], start_date: datetime, end_date: datetime) -> dict[str, list[Ohlcv]]:
-        self.asked.append([stock.stock_id for stock in stocks])
-        await self.release.wait()
-        return {stock.stock_id: [session_close(THURSDAY, 100), session_close(FRIDAY, 101)] for stock in stocks}
-
-
-async def until(condition, timeout: float = 2.0) -> None:
-    async with asyncio.timeout(timeout):
-        while not condition():
-            await asyncio.sleep(0.001)
+    assert clock.to_trading_date(history["2330"][-1].ts) == MONDAY
+    assert broker.asked[-1] == f"index twse {MONDAY} {MONDAY + timedelta(days=1)}"
 
 
-async def test_loads_at_once_of_one_stock_and_window_ask_the_history_source_once(db: DatabaseConnector) -> None:
-    clock = MovableClock(at(FRIDAY, 16))
-    yahoo = GatedYahoo()
-    cache = cache_over(yahoo, db, clock)
-    first = asyncio.create_task(last_bars(cache, clock, "2330"))
-    await until(lambda: yahoo.asked)
-    second = asyncio.create_task(last_bars(cache, clock, "2330", "2317"))
-    await until(lambda: len(yahoo.asked) == 2)
-    yahoo.release.set()
+async def test_an_index_history_asks_only_after_the_latest_session_it_holds_and_keeps_that_sessions_change(
+    db: DatabaseConnector,
+) -> None:
+    clock = MovableClock(at(MONDAY, 16))
+    tuesday = MONDAY + timedelta(days=1)
+    broker = FakeBrokerQuotes(index={MarketType.TWSE: SESSIONS})
+    cache = cache_over(broker, db, clock)
+    first = await cache.fetch_index_history(MarketIndex.TAIEX, *clock.history_window(30))
 
-    assert await first == {"2330": ("2026-10-23", 101)}
-    assert await second == {"2330": ("2026-10-23", 101), "2317": ("2026-10-23", 101)}
-    assert yahoo.asked == [["2330"], ["2317"]]
-    assert await last_bars(cache, clock, "2330", "2317") == await second
-    assert len(yahoo.asked) == 2
+    clock.current = at(tuesday, 16)
+    broker.index[MarketType.TWSE] = [*SESSIONS, tuesday]
+    second = await cache.fetch_index_history(MarketIndex.TAIEX, *clock.history_window(30))
 
-
-async def test_loads_of_different_stocks_at_once_download_side_by_side(db: DatabaseConnector) -> None:
-    clock = MovableClock(at(FRIDAY, 16))
-    yahoo = GatedYahoo()
-    cache = cache_over(yahoo, db, clock)
-    loads = [asyncio.create_task(last_bars(cache, clock, stock_id)) for stock_id in ("2330", "2317")]
-
-    await until(lambda: len(yahoo.asked) == 2)
-    yahoo.release.set()
-
-    assert [await load for load in loads] == [{"2330": ("2026-10-23", 101)}, {"2317": ("2026-10-23", 101)}]
+    assert broker.asked == ["index twse 2026-10-10 2026-11-09", f"index twse {MONDAY} {tuesday}"]
+    assert [clock.to_trading_date(bar.ts) for bar in first] == SESSIONS
+    assert [(bar.close, bar.change) for bar in second[-2:]] == [(109.0, 3.0), (110.0, 1.0)]
+    assert first[0].change is None
 
 
-async def test_a_load_that_stops_leaves_the_download_to_the_load_that_joined_it(db: DatabaseConnector) -> None:
-    clock = MovableClock(at(FRIDAY, 16))
-    yahoo = GatedYahoo()
-    cache = cache_over(yahoo, db, clock)
-    first = asyncio.create_task(last_bars(cache, clock, "2330"))
-    await until(lambda: yahoo.asked)
-    second = asyncio.create_task(last_bars(cache, clock, "2330"))
-    await asyncio.sleep(0.05)
+async def test_realtime_quotes_go_to_the_broker_uncached(db: DatabaseConnector) -> None:
+    quote = session_bar(MONDAY, 512.0)
+    broker = FakeBrokerQuotes(realtime={"6488": quote})
 
-    first.cancel()
-    yahoo.release.set()
-
-    assert await second == {"2330": ("2026-10-23", 101)}
-    assert first.cancelled() and yahoo.asked == [["2330"]]
+    assert await cache_over(broker, db, MovableClock(at(MONDAY, 10))).fetch_realtime_bars(STOCKS) == {"6488": quote}
+    assert broker.asked == []
 
 
-async def test_a_failed_index_download_is_asked_again_at_the_next_call_not_two_hours_later(db: DatabaseConnector) -> None:
-    """The overview's only index source is Yahoo: one empty answer must not leave the chart empty until the retry interval."""
-    clock = MovableClock(at(FRIDAY + timedelta(days=1), 10))
-    yahoo = ScriptedYahoo()
-    window = clock.history_window(30)
+async def test_a_session_saved_without_its_change_asks_the_snapshots_again_while_they_still_show_it(db: DatabaseConnector) -> None:
+    clock = MovableClock(at(MONDAY, 16))
+    broker = split_on_monday(clock)
+    cache = cache_over(broker, db, clock)
+    before = (await cache.fetch_history(STOCKS[:1], *clock.history_window(30)))["2330"]
 
-    failed = await cache_over(yahoo, db, clock).fetch_index_history(MarketIndex.TAIEX, *window)
-    clock.current = at(FRIDAY + timedelta(days=1), 10, 1)
-    yahoo.index_daily[MarketIndex.TAIEX] = [session_close(THURSDAY, 44000), session_close(FRIDAY, 45000)]
-    recovered = await cache_over(yahoo, db, clock).fetch_index_history(MarketIndex.TAIEX, *window)
+    broker.snapshot_changes = {MONDAY: {"2330": 1.0}}
+    clock.current = at(MONDAY, 18, 1)
+    after = (await cache.fetch_history(STOCKS[:1], *clock.history_window(30)))["2330"]
 
-    assert failed == []
-    assert [one.close for one in recovered] == [44000, 45000]
-    assert yahoo.asked == ["taiex", "taiex"]
+    assert [bar.close for bar in before[-2:]] == [100.0, 51.0]
+    assert [(bar.close, bar.volume, bar.change) for bar in after[-2:]] == [(50.0, 2000, None), (51.0, 4000, 1.0)]
+    assert [question for question in broker.asked if question.startswith("changes")] == [f"changes {MONDAY}"] * 2
+
+
+async def test_a_session_the_snapshots_no_longer_show_takes_the_archives_official_change(db: DatabaseConnector) -> None:
+    tuesday_morning = at(MONDAY + timedelta(days=1), 9)
+    clock = MovableClock(tuesday_morning)
+    broker = split_on_monday(clock)
+    async with db.get_session() as session:
+        session.add(
+            DailyCloseDTO(
+                stock_id="2330",
+                session_date=MONDAY,
+                market="twse",
+                open=51.0,
+                high=51.0,
+                low=51.0,
+                close=51.0,
+                volume=4000,
+                change=1.0,
+            )
+        )
+        await session.commit()
+
+    history = (await cache_over(broker, db, clock).fetch_history(STOCKS[:1], *clock.history_window(30)))["2330"]
+
+    assert [(bar.close, bar.volume, bar.change) for bar in history[-2:]] == [(50.0, 2000, None), (51.0, 4000, 1.0)]
+
+
+async def test_a_read_warns_how_many_sessions_of_its_window_stay_without_a_change(db: DatabaseConnector) -> None:
+    clock = MovableClock(at(MONDAY, 16))
+    logger = RecordingLogger()
+    broker = broker_of(SESSIONS, {"2330": 100.0, "6488": 300.0})
+    broker.snapshot_changes = {MONDAY: {"2330": 0.0, "6488": 0.0}}
+
+    await cache_over(broker, db, clock, logger).fetch_history(STOCKS, *clock.history_window(30))
+
+    warnings = [message for level, message in logger.records if level == "warning"]
+    assert len(warnings) == 1 and f"{len(SESSIONS) - 2} sessions" in warnings[0]
+
+
+async def test_a_question_the_broker_failed_is_not_asked_again_before_the_retry_interval(db: DatabaseConnector) -> None:
+    clock = MovableClock(at(MONDAY, 16))
+    broker = broker_of(SESSIONS, {"2330": 100.0})
+    broker.failure = ConnectionError("the session is down")
+    cache = cache_over(broker, db, clock)
+
+    asked = []
+
+    for moment in (at(MONDAY, 16), at(MONDAY, 16, 30), at(MONDAY, 17), at(MONDAY, 18, 1)):
+        clock.current = moment
+        await cache.fetch_history(STOCKS[:1], *clock.history_window(30))
+        asked.append(broker.asked[len(sum(asked, [])) :])
+
+    twse, tpex = "index twse 2026-10-10 2026-11-09", "index tpex 2026-10-10 2026-11-09"
+    assert asked == [[twse], [tpex], [], [twse]]

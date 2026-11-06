@@ -85,6 +85,7 @@ const common: DictionaryShape<typeof en> = {
     rangeHigh: '區間最高',
     rangeLow: '區間最低',
     empty: '目前沒有可繪製的日線資料。',
+    tooFew: '目前只有一個交易日，第二個交易日起開始繪製走勢圖。',
     summary: '{{name}} {{range}}漲跌 {{change}}%',
   },
   close: '關閉',
@@ -100,6 +101,7 @@ const common: DictionaryShape<typeof en> = {
     title: '資料累積中',
     count: '{{sessions}}/{{needed}}',
     description: '本站只使用證交所與櫃買中心的開放資料，它們只提供最近一個交易日，所以本站從開站那天起逐日保存。策略要讀 {{needed}} 個交易日的收盤，存滿之前，分析找不到候選股。',
+    withoutLogin: '沒有 Shioaji 登入時，本站從證交所與櫃買中心的開放資料讀取日線，它們只提供最近一個交易日，所以本站從開站那天起逐日保存。策略要讀 {{needed}} 個交易日的收盤，存滿之前，分析找不到候選股。',
   },
   notFound: {
     title: '找不到這個頁面',

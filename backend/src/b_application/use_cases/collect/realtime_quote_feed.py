@@ -13,6 +13,8 @@ class RealtimeQuoteFeed:
     A stock whose quote is still fresh is not asked for again. It returns the run's stale stocks after this refresh: a
     stock left without a fresh quote, because the fetch failed, the source had no trade or the quote is too old, joins
     them and counts once in stats.stale_market_data_count while it stays; a stock that got a fresh quote leaves them.
+    An audience without realtime quotes (public) asks for none, since its orders are priced at the official close, and
+    the stale stocks stay as they were.
     """
 
     def __init__(
@@ -21,11 +23,12 @@ class RealtimeQuoteFeed:
         self._quote_provider = quote_provider
         self._market_clock = market_clock
         self._quote_rule = config.freshness.realtime_quote_rule()
+        self._realtime_quotes = config.audience.realtime_quotes
         self._logger = logger
 
     async def execute(self, stocks: list[Stock], stale_stock_ids: set[str], stats: SystemStats) -> set[str]:
         asked_at = self._market_clock.now()
-        unique_stocks = {stock.stock_id: stock for stock in stocks}.values()
+        unique_stocks = {stock.stock_id: stock for stock in stocks}.values() if self._realtime_quotes else ()
         pending = [stock for stock in unique_stocks if self._quote_rule.apply(stock.realtime_bar, asked_at) is not None]
 
         if not pending:

@@ -1,12 +1,14 @@
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import override
 
+from sqlalchemy import delete
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
-from a_domain.model.trading.account import Account, Position
+from a_domain.model.trading.account import Account, AccountOpening, Position
 from a_domain.model.trading.order import Order
 from a_domain.ports.system.logging_provider import ILoggingProvider
+from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.execution_provider import ISimulatedExecutionProvider
 from a_domain.rules.trading.execution import FillRule, OrderAcceptanceRule
 from a_domain.types.enums import RejectReason, TimeInForce, TradeAction
@@ -42,8 +44,9 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
     An unexpected exception FAILS the order and leaves the book untouched.
     """
 
-    def __init__(self, db: DatabaseConnector, config: AppConfig, logger: ILoggingProvider) -> None:
+    def __init__(self, db: DatabaseConnector, config: AppConfig, market_clock: IMarketClock, logger: ILoggingProvider) -> None:
         self._db = db
+        self._market_clock = market_clock
         self._logger = logger
         self._initial_cash = config.mock_trading.initial_cash
         self._max_fill_quantity = config.mock_trading.max_fill_quantity
@@ -52,21 +55,26 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
         self._acceptance_rule = OrderAcceptanceRule(cost_rule=self._cost_rule)
 
     @override
-    async def close(self) -> None:
-        """The mock broker holds no session: its book is in the database, which closes with the runtime."""
-        return None
-
-    @override
     async def connect(self) -> None:
         """
-        Seeds the book with mock_trading.initial_cash the first time. Later calls find the account and change nothing;
+        Seeds the book with mock_trading.initial_cash the first time, opening it at the market clock's now, the clock
+        every journal row is stamped by. Later calls find the account and change nothing;
         so does a call that loses the race to seed it, as two Web requests at once can.
         """
         async with self._db.owner_session() as session:
             if await session.get(MockCash, self._db.owner_id) is not None:
                 return
 
-            session.add(MockCash(owner_id=self._db.owner_id, current_cash=self._initial_cash, initial_cash=self._initial_cash))
+            now = self._market_clock.now()
+            session.add(
+                MockCash(
+                    owner_id=self._db.owner_id,
+                    current_cash=self._initial_cash,
+                    initial_cash=self._initial_cash,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
 
             try:
                 await session.commit()
@@ -78,7 +86,7 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
 
     @override
     async def place_order(self, order: Order) -> Order:
-        now = datetime.now(UTC)
+        now = self._market_clock.now()
 
         try:
             account = await self.get_account()
@@ -119,7 +127,8 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
                 for row in result.scalars().all()
             ]
 
-        return Account(account_id=cash.owner_id, cash=cash.current_cash, positions=positions)
+        opening = AccountOpening(initial_cash=cash.initial_cash, opened_at=cash.created_at)
+        return Account(account_id=cash.owner_id, cash=cash.current_cash, positions=positions, opening=opening)
 
     @override
     def refusal_for(self, order: Order, account: Account) -> tuple[RejectReason, str] | None:
@@ -180,3 +189,19 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
             cash.current_cash = account.cash
             cash.updated_at = now
             await session.commit()
+
+    @override
+    async def reset(self, initial_cash: float, now: datetime) -> Account:
+        """mock_cash.created_at is the opening: a reset replaces the owner's row, so the account opens anew."""
+        async with self._db.owner_session() as session:
+            await session.execute(delete(MockPosition))
+            await session.execute(delete(MockCash))
+            session.add(
+                MockCash(
+                    owner_id=self._db.owner_id, current_cash=initial_cash, initial_cash=initial_cash, created_at=now, updated_at=now
+                )
+            )
+            await session.commit()
+
+        self._logger.info(f"Mock account reset to {initial_cash:,.0f}.")
+        return await self.get_account()

@@ -1,7 +1,7 @@
 import type { Schemas } from '@/shared/api'
 import { HISTORY_BARS, pricePoints, summarize } from './chart-range'
 
-type DailyBar = Schemas['DailyBarResponse']
+type DailyBar = Schemas['Ohlcv']
 
 function bars(closes: number[], extremes: Partial<Record<number, { high?: number; low?: number; open?: number }>> = {}): DailyBar[] {
   const start = Date.UTC(2026, 0, 5, 5, 30)

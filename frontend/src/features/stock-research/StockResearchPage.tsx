@@ -38,8 +38,8 @@ interface StockResearchPageProps {
   strategyName: (strategy: StrategyRef) => string
   /** Each rule of the strategy as a sentence in the reader's language, keyed by the rule name a report uses. */
   ruleSentences?: (strategy: StrategyRef) => ReadonlyMap<string, string>
-  /** A rule's name in the reader's language; the report's name stays the key. */
-  ruleName: (name: string) => string
+  /** A rule's name as the reader sees it, by the strategy that holds it; the report's name stays the key. */
+  ruleName: (strategy: StrategyRef, name: string) => string
 }
 
 export function StockResearchPage({ code, actions, strategyName, ruleSentences, ruleName }: StockResearchPageProps) {
@@ -245,15 +245,16 @@ function VerdictCount({ label, count, tone }: { label: string; count: number; to
 function EvaluationDetails({ technical, ruleSentences, ruleName }: { technical: StockTechnical } & Pick<StockResearchPageProps, 'ruleSentences' | 'ruleName'>) {
   const { t } = useTranslation('research')
   const sentences = useMemo(() => ruleSentences?.(technical.strategy) ?? new Map<string, string>(), [ruleSentences, technical.strategy])
+  const name = (rule: string) => ruleName(technical.strategy, rule)
   if (!technical.report) return null
   const checks = reportChecks(technical.report)
   return (
     <div id="evaluation-details" className="scroll-mt-20 space-y-4 lg:space-y-5">
       <Panel title={t('evaluation.detailsTitle')} description={t('evaluation.detailsQuestion')}>
         <div className="grid gap-x-8 gap-y-6 @2xl:grid-cols-2 @5xl:grid-cols-3">
-          <CheckList icon={CircleX} tone="text-destructive" title={t('evaluation.hard')} checks={checks.hard} sentences={sentences} ruleName={ruleName} />
-          <CheckList icon={CircleMinus} tone="text-gold" title={t('evaluation.soft')} checks={checks.soft} sentences={sentences} ruleName={ruleName} />
-          <CheckList icon={CirclePlus} tone="text-brand" title={t('evaluation.observations')} checks={checks.observations} sentences={sentences} ruleName={ruleName} />
+          <CheckList icon={CircleX} tone="text-destructive" title={t('evaluation.hard')} checks={checks.hard} sentences={sentences} ruleName={name} />
+          <CheckList icon={CircleMinus} tone="text-gold" title={t('evaluation.soft')} checks={checks.soft} sentences={sentences} ruleName={name} />
+          <CheckList icon={CirclePlus} tone="text-brand" title={t('evaluation.observations')} checks={checks.observations} sentences={sentences} ruleName={name} />
         </div>
       </Panel>
       <IndicatorPanel technical={technical} />

@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 from schema_snapshot import REGENERATE, SNAPSHOT, STEP_NEEDED, added_tables, changed_tables, declared_tables, schema_snapshot
-from sqlalchemy import Column, Date, Enum, Integer, MetaData, String, Table
+from sqlalchemy import Column, Date, Enum, Index, Integer, MetaData, String, Table
 
 from c_infrastructure.database.models.schema_version_dto import SCHEMA_VERSION
 
@@ -69,9 +69,15 @@ def declared_copy() -> MetaData:
             id="enum member",
         ),
         pytest.param(
-            lambda tables: tables["ohlcv_fetches"].metadata.remove(tables["ohlcv_fetches"]),
-            "ohlcv_fetches (removed)",
+            lambda tables: tables["index_close_archive"].metadata.remove(tables["index_close_archive"]),
+            "index_close_archive (removed)",
             id="removed table",
+        ),
+        pytest.param(
+            lambda tables: tables["daily_close_archive"].indexes.clear(), "daily_close_archive (indexes)", id="dropped index"
+        ),
+        pytest.param(
+            lambda tables: Index("ix_watchlists_probe", tables["watchlists"].c.stock_id), "watchlists (indexes)", id="added index"
         ),
     ],
 )

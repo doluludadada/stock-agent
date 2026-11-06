@@ -158,8 +158,13 @@ All bodies are JSON. `revision` is the SHA-256 the page read (64 hex characters)
   proposed text's; after a save, the file's), `running_revision`, `changed` (every setting path whose value differs,
   removed or added ones included; an empty list when the text does not parse, and `problems` then holds the parse
   problem), `diff` (unified diff lines), `problems`, `saved`, and `applied` (the server runs on this revision now).
-- A problem is `{message, file, path, line, column}`; `file`, `path`, `line` and `column` may be `null` (a value from
-  `.env`, the database or the broker). Lines and columns are 1-based: put the caret there. No message holds a value.
+- A problem is `{message, file, path, line, column, code, params}`; `file`, `path`, `line` and `column` may be `null` (a
+  value from `.env`, the database or the broker). Lines and columns are 1-based: put the caret there. No message holds a
+  value. `code` names the refusal so a page can word it in its own language: pydantic's error type (`less_than_equal`,
+  `enum`, `missing`, ...) or the app's own (`ai_key_missing`, `ai_model_id_missing`, `search_on_open_data`), with the
+  values its words need in `params` (the schema's limits, a provider or a variable name, never the input). The app's
+  other refusals have `code` `null` for now, and a page shows `message` for any code it has no words for, such as
+  `value_error`, whose words are a validator's own.
 - Every error answer of the API is `{detail, code}`: `detail` in words for a person, `code` a stable `ErrorCode` the
   page switches on (one per refusal, from `ERROR_ANSWERS` in `web/app.py`; never switch on `detail`). The editor's:
   403 `password_required` (no password), 403 `password_refused` (a wrong one; the session stays), 403
@@ -178,6 +183,12 @@ Full Cycle, specific-stock analysis, valuation and market data never order. `POS
 manual BUY. The order-gate check drives both routes with their real dependency and route function (menus `B` and
 `I`) and adds `P8_WEB_MOCK_ONLY`; a mutant that removes the guard is caught.
 
+`POST /v1/runs/{id}/follow` follows a finished Full Cycle into the user's mock account, on the mock broker only, as a
+run of its own (`Workflow.FOLLOW`) through the same order loop. `Audience.order_pricing` decides the price: a fresh
+realtime quote in continuous trading on a personal site; on a public site, which has no realtime quote, the official
+close of the last closed session while no session trades, on the mock broker only (`OrderPricing.OFFICIAL_CLOSE`).
+The order-gate check drives it as route `F` on both audiences, with `P11_OFFICIAL_CLOSE` and `P12_FOLLOW_ONCE`.
+
 One run at a time holds per server process only. A CLI on the same database can run beside it; on the mock broker
 that can race the mock account's cash, which `formal-verify-order-gate` lists as not covered.
 
@@ -190,7 +201,7 @@ that can race the mock account's cash, which `formal-verify-order-gate` lists as
 | Buzz and Intraday runs | Live on the mock broker only; refused for any other broker. |
 | Watchlist | Live: names, types and expiry; MANUAL add and remove with rollback on refusal. |
 | Stock search and stock page | Live: listing search, cached daily bars, the active strategy's evaluation and indicator readings from the backend. No realtime quote on the Web. |
-| Market overview | Live: the TAIEX daily trend over 1M to 1Y (Yahoo Finance `^TWII`, cached like a stock's history; any listed stock or ETF can replace it through `?target=`), the latest session's most traded stocks, and its breadth: advancers, decliners and unchanged stocks from the TWSE and TPEX listings' own change, and each industry's counts and average change, industries from the company profiles. Yahoo serves no TPEX index, so there is none. |
+| Market overview | Live: the TAIEX daily trend over 1M to 1Y (Shioaji's TSE001 one-minute bars, kept like a stock's history, or the open-data archive without a Shioaji login; any listed stock or ETF can replace it through `?target=`), the latest session's most traded stocks, and its breadth: advancers, decliners and unchanged stocks from the TWSE and TPEX listings' own change, and each industry's counts and average change, industries from the company profiles. The TPEx Index is kept only to adjust the TPEX stocks' history, and not shown. |
 | Valuation | Live: market reference, specific stocks at a target P/E, undervalued scan with an explicit technical step, AI explanation per confirmed click. |
 | Mock account | Live: positions, P&L, equity curve and as-of, labelled with the broker and order mode. |
 | Settings administration | Live: each settings file whole in a code editor that loads with the administrator's page only, checked by the server as it is typed with each problem at its line and column, saved with the administrator's password; the edits made on disk, the history and restore on the same page. Unsaved text survives a reload of that tab. |
@@ -300,11 +311,12 @@ more in total is mostly the year of 0050 daily bars.
 
 - `bun audit` still lists deepmerge (low, no fixed release) and minimatch (moderate) under the `shadcn` CLI, a
   development tool that never reaches the browser or the production install (`bun audit --prod` finds nothing).
-- pip-audit still lists chromadb (no fixed release), curl-cffi (pinned by yfinance), filelock (fix needs a major) and
+- pip-audit still lists chromadb (no fixed release), filelock (fix needs a major) and
   urllib3 (pinned by kubernetes, reached through chromadb and the Google SDK, not by the app's own HTTP, which uses
   httpx).
-- `GET /v1/market/stocks/{id}` and `/v1/market/indexes/{index}` are public and fetch an uncached history from Yahoo at
-  most once per retry interval; put a rate limit in the reverse proxy before exposing them.
+- `GET /v1/market/stocks/{id}` and `/v1/market/indexes/{index}` are public and, on a site with a Shioaji login, fetch
+  the sessions the history cache lacks from Shioaji, each question at most once per retry interval; put a rate limit in
+  the reverse proxy before exposing them.
 - A settings save that answers 409 reloads the file, and the administrator's unsaved changes go with it; the message
   says to make the change again. The strategy designer keeps its draft instead.
 - Settings saves and reloads are serialized by the runtime switch's lock inside one server process, and the revision is

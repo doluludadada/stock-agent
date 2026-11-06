@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import cast
 
 import chromadb
+from support.fake_shioaji import FakeShioaji
 from support.fakes import (
     FakeAiProvider,
     FakeConversationRepository,
@@ -27,6 +28,7 @@ from a_domain.model.market.stock import Stock
 from a_domain.model.system.stats import SystemStats
 from a_domain.model.system.user import User
 from a_domain.model.trading.signal import TradeSignal
+from a_domain.ports.trading.execution_provider import IExecutionProvider
 from a_domain.types.enums import ExecutionProvider, OrderMode, Workflow
 from b_application.config.app_config import AppConfig
 from b_application.config.market_data_config import MarketHoursConfig
@@ -37,6 +39,7 @@ from b_application.use_cases.trade.order_execution import OrderExecution
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
 from c_infrastructure.database.repositories.trading_journal import TradingJournal
+from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection
 from c_infrastructure.system.attempt_log import MemoryAttemptLog
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
 from c_infrastructure.system.settings_files import SettingsFiles
@@ -83,8 +86,10 @@ class QuoteFeed:
 
 
 class StockDirectory:
+    """The exchange listing: every stock id the stack's tests trade, each a new identity-only Stock per call."""
+
     async def get_all(self) -> list[Stock]:
-        return []
+        return [Stock(stock_id=stock_id) for stock_id in ("2330", "2603")]
 
     async def get_by_id(self, stock_id: str) -> Stock | None:
         return Stock(stock_id=stock_id)
@@ -130,7 +135,9 @@ class TradingStack:
     watchlist: FakeWatchlistRepository
 
 
-async def open_stack(tmp_path: Path, configure=lambda config: None, journal: TradingJournal | None = None) -> TradingStack:
+async def open_stack(
+    tmp_path: Path, configure=lambda config: None, journal: TradingJournal | None = None, real_broker: IExecutionProvider | None = None
+) -> TradingStack:
     """The stack's owner gets the journal and the mock broker the production factory builds, and fakes for the rest."""
     prompts = harness_config().prompts.model_copy(update={"social_sentiment": "Stock {stock_id}\n{posts_text}"})
     config = shipped_config(tmp_path).model_copy(update={"prompts": prompts})
@@ -169,6 +176,9 @@ async def open_stack(tmp_path: Path, configure=lambda config: None, journal: Tra
     dependencies = ProviderDependencies(
         stock_provider=stocks,
         price_provider=quotes,
+        history_cache=None,
+        broker_market_data=True,
+        shioaji=ShioajiConnection(client=FakeShioaji(), up=True),
         daily_close_archive=FakeDailyCloseArchive(),
         fundamentals_provider=FakeFundamentalsProvider(),
         news_provider=FakeNewsProvider(),
@@ -180,7 +190,7 @@ async def open_stack(tmp_path: Path, configure=lambda config: None, journal: Tra
         settings_files=SettingsFiles(project_root=UNUSED_PROJECT_ROOT, max_bytes=1, backups_kept=1, logger=logger),
         user_store=users,
         attempt_log=MemoryAttemptLog(),
-        real_broker=None,
+        real_broker=real_broker,
         owned_ports=owned_ports,
     )
     pipeline = compose_runtime(config, logger, clock, dependencies).pipeline_for(users.by_id[LEGACY_OWNER_ID])

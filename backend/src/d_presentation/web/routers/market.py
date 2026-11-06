@@ -8,7 +8,6 @@ from b_application.config.sources_config import OpenDataAttribution
 from d_presentation.web.schemas import (
     ArchiveStatusResponse,
     AudienceResponse,
-    DailyBarResponse,
     IndexHistoryResponse,
     ListedStockResponse,
     StockFinancialsResponse,
@@ -54,12 +53,13 @@ async def get_market_breadth(pipeline: SignedOutPipeline) -> MarketBreadth:
 @router.get("/indexes/{index}")
 async def get_index_history(index: MarketIndex, pipeline: SignedOutPipeline, bars: BarCount = 250) -> IndexHistoryResponse:
     """
-    One market index's completed daily bars, oldest first, from the daily history the stock pages share: the Yahoo
-    cache, or the open-data archive on a public site. Public. Like a stock's history, it fetches no realtime quote.
+    One market index's completed daily bars, oldest first, from the daily history the stock pages share: the broker's
+    history cache on a site with a Shioaji login, else the open-data archive. Public. Like a stock's history, it
+    fetches no realtime quote.
     """
     history = await pipeline.load_index_history(index, bars)
 
-    return IndexHistoryResponse(index=index, bars=[DailyBarResponse.model_validate(bar) for bar in history])
+    return IndexHistoryResponse(index=index, bars=history)
 
 
 @router.get("/archive-status")
@@ -77,16 +77,18 @@ async def get_archive_status(pipeline: SignedOutPipeline) -> ArchiveStatusRespon
 async def get_audience(runtime: RuntimeDependency) -> AudienceResponse:
     """
     Whom the site serves, personal or public, and what that allows, from the one table of each audience's capabilities.
-    The web app shows only what the site can do by it; the server still refuses the rest. Public.
+    Realtime quotes also need this runtime's Shioaji login, which a personal site may lack. The web app shows only what
+    the site can do by it; the server still refuses the rest. Public.
     """
     audience = runtime.config.audience
 
     return AudienceResponse(
         audience=audience,
         open_data_only=audience.open_data_only,
-        realtime_quotes=audience.realtime_quotes,
+        realtime_quotes=audience.realtime_quotes and runtime.realtime_quotes,
         news_articles=audience.news_articles,
         mops=audience.mops,
+        order_pricing=audience.order_pricing,
     )
 
 
@@ -114,9 +116,7 @@ async def get_stock_history(stock_id: StockIdPath, pipeline: SignedOutPipeline, 
     stock = result.manual_stocks[0]
 
     return StockHistoryResponse(
-        stock=ListedStockResponse.model_validate(stock),
-        bars=[DailyBarResponse.model_validate(bar) for bar in stock.ohlcv],
-        notes=[*result.stats.errors, *result.stats.execution_log],
+        stock=ListedStockResponse.model_validate(stock), bars=stock.ohlcv, notes=[*result.stats.errors, *result.stats.execution_log]
     )
 
 

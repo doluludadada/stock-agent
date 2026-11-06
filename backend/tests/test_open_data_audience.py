@@ -1,12 +1,13 @@
 """
 A public deployment (audience public) runs on open-licensed data only. Through the real wiring it never builds the
-Yahoo, TWSE MIS, news site, PTT, MOPS, web search or Shioaji adapter and reads its daily history and index trend from
-the open-data archive alone, with Yahoo's cache beside it untouched; a specific-stock run completes without an
+broker history cache, news site, PTT, MOPS, web search or Shioaji adapter and reads its daily history and index trend
+from the open-data archive alone, with the broker's cache beside it untouched; a specific-stock run completes without an
 article and without an AI call. Startup refuses it on a real broker. Its Web API and its CLI refuse Buzz and Intraday,
 which order on realtime quotes, and the valuation, which reads MOPS; menu 4 offers no manual BUY. Its AI step reads a
 stock's archived material information and financials, and decides a stock with neither on its technical score alone.
 Its runs say how far the archive's warm-up has come, and the market overview can read it, a stock's archived financials
-and the open data's attribution. A personal deployment keeps every source and says nothing of the archive.
+and the open data's attribution. A personal deployment keeps every source; without a Shioaji login it reads its daily
+history from the archive too, and its Web API refuses Buzz and Intraday as a public one does.
 """
 
 import asyncio
@@ -54,18 +55,20 @@ from b_application.config.settings_loader import (
     startup_settings,
     validate_trading_environment,
 )
+from b_application.config.trading_config import ShioajiConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.ohlcv_dto import OhlcvDTO
 from c_infrastructure.feed.news.cnyes_news_provider import CnyesNewsProvider
 from c_infrastructure.feed.news.yahoo_tw_news_provider import YahooTwNewsProvider
 from c_infrastructure.feed.ptt_provider import PttProvider
 from c_infrastructure.feed.tavily_provider import TavilySearchAdapter
-from c_infrastructure.market.mis_quote_provider import MisQuoteProvider
+from c_infrastructure.market.cached_price_provider import CachedPriceProvider
 from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider
-from c_infrastructure.market.yahoo_finance_adapter import YahooFinanceProvider
+from c_infrastructure.market.shioaji_quote_provider import ShioajiQuoteProvider
 from c_infrastructure.system.attempt_log import MemoryAttemptLog
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
-from d_presentation.cli import terminal
+from d_presentation import dependencies
+from d_presentation.cli import archive_closes as archive_command, terminal
 from d_presentation.dependencies import ProcessState, open_runtime
 from d_presentation.web.schemas import AudienceResponse
 
@@ -117,15 +120,18 @@ def asked(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
 
 CLOSED_SOURCES = (
-    YahooFinanceProvider,
-    MisQuoteProvider,
+    CachedPriceProvider,
+    ShioajiQuoteProvider,
     CnyesNewsProvider,
     YahooTwNewsProvider,
     PttProvider,
     MopsFundamentalsProvider,
     TavilySearchAdapter,
 )
-"""Every adapter of a source whose terms a public site breaks: Yahoo, TWSE MIS, cnyes, Yahoo news, PTT, MOPS, Tavily."""
+"""
+Every adapter of a source whose terms a public site breaks: Shioaji's history and quotes, cnyes, Yahoo news, PTT, MOPS,
+Tavily.
+"""
 
 
 @pytest.fixture
@@ -172,8 +178,8 @@ def process() -> ProcessState:
     return ProcessState(logger=SilentLogger(), attempt_log=MemoryAttemptLog(), cache_writes=asyncio.Lock())
 
 
-async def cache_yahoo_bars(config: AppConfig, bars: dict[str, list[Ohlcv]]) -> None:
-    """Bars in Yahoo's cache (ohlcv_data), as a personal deployment's runs left them."""
+async def cache_broker_bars(config: AppConfig, bars: dict[str, list[Ohlcv]]) -> None:
+    """Bars in the broker's history cache (ohlcv_data), as a personal deployment with a Shioaji login left them."""
     database = DatabaseConnector(config=config, logger=SilentLogger())
     await database.init_db()
 
@@ -192,8 +198,8 @@ async def test_a_public_deployment_builds_no_closed_source_adapter_and_completes
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, asked: list[str], refused_adapters: list[str]
 ) -> None:
     config = deployment(tmp_path, monkeypatch, Audience.PUBLIC)
-    yahoo = [Ohlcv(ts=close_of(date(2026, 10, day)), open=1.0, high=1.0, low=1.0, close=1.0, volume=1) for day in (28, 29)]
-    await cache_yahoo_bars(config, {"2330": yahoo, "^taiex": yahoo})
+    cached = [Ohlcv(ts=close_of(date(2026, 10, day)), open=1.0, high=1.0, low=1.0, close=1.0, volume=1) for day in (28, 29)]
+    await cache_broker_bars(config, {"2330": cached, "^twse": cached})
 
     async with open_runtime(config, process()) as runtime:
         await runtime.signed_out.archive_daily_closes()
@@ -218,6 +224,27 @@ async def test_a_public_deployment_builds_no_closed_source_adapter_and_completes
     assert refused_adapters == []
 
 
+async def test_a_personal_deployment_without_a_shioaji_login_reads_its_history_from_the_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, asked: list[str]
+) -> None:
+    config = deployment(tmp_path, monkeypatch, Audience.PERSONAL)
+    config.shioaji = ShioajiConfig(_env_file=None, **config.shioaji.model_dump(include={"poll_interval_seconds", "max_polls"}))
+    cached = [Ohlcv(ts=close_of(date(2026, 10, day)), open=1.0, high=1.0, low=1.0, close=1.0, volume=1) for day in (28, 29)]
+    await cache_broker_bars(config, {"2330": cached, "^twse": cached})
+
+    async with open_runtime(config, process()) as runtime:
+        await runtime.signed_out.archive_daily_closes()
+        refreshed = await runtime.signed_out.refresh_daily_history()
+        history = await runtime.signed_out.load_stock_history("2330", 20)
+        taiex = await runtime.signed_out.load_index_history(MarketIndex.TAIEX, 20)
+
+    [stock] = history.manual_stocks
+    assert (runtime.realtime_quotes, refreshed) == (False, None)
+    assert [(bar.ts, bar.open, bar.close) for bar in stock.ohlcv] == [(close_of(date(2026, 10, 29)), 2420.0, 2415.0)]
+    assert [(bar.ts, bar.close) for bar in taiex] == [(close_of(date(2026, 11, 5)), 41574.72)]
+    assert "The open-data archive holds 2 of the 20 sessions needed" in " ".join(history.stats.errors)
+
+
 async def test_a_personal_deployment_builds_the_closed_source_adapters(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, refused_adapters: list[str]
 ) -> None:
@@ -226,6 +253,28 @@ async def test_a_personal_deployment_builds_the_closed_source_adapters(
             pass
 
     assert refused_adapters != []
+
+
+async def test_just_archive_closes_opens_no_broker_no_accounts_key_and_no_ai_on_a_personal_setup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, asked: list[str], refused_adapters: list[str], screen: io.StringIO
+) -> None:
+    personal = deployment(tmp_path, monkeypatch, Audience.PERSONAL)
+    config = environment_setup(personal, SystemEnvironment.DEV, ExecutionProvider.SHIOAJI, OrderMode.MOCK_ONLY)
+    config.ai = config.ai.model_copy(
+        update={"anthropic_api_key": None, "groq_api_key": None, "openai_api_key": None, "nvidia_api_key": None}
+    )
+
+    def refuse_the_accounts_key(*args: object) -> None:
+        raise AssertionError("read the accounts key")
+
+    monkeypatch.setattr(dependencies, "load_accounts_key", refuse_the_accounts_key)
+    monkeypatch.setattr(archive_command, "load_settings", lambda root: config, raising=False)
+    monkeypatch.setattr(archive_command, "startup_settings", lambda root: config, raising=False)
+
+    assert await archive_command.archive_closes() == 0
+
+    assert refused_adapters == []
+    assert "The archive holds 7 dates" in screen.getvalue()
 
 
 @pytest.mark.parametrize("environment", [SystemEnvironment.TEST, SystemEnvironment.PROD])
@@ -295,11 +344,25 @@ async def test_a_personal_run_says_nothing_of_the_archive() -> None:
     [
         (
             Audience.PUBLIC,
-            {"audience": "public", "open_data_only": True, "realtime_quotes": False, "news_articles": False, "mops": False},
+            {
+                "audience": "public",
+                "open_data_only": True,
+                "realtime_quotes": False,
+                "news_articles": False,
+                "mops": False,
+                "order_pricing": "official_close",
+            },
         ),
         (
             Audience.PERSONAL,
-            {"audience": "personal", "open_data_only": False, "realtime_quotes": True, "news_articles": True, "mops": True},
+            {
+                "audience": "personal",
+                "open_data_only": False,
+                "realtime_quotes": True,
+                "news_articles": True,
+                "mops": True,
+                "order_pricing": "realtime_quote",
+            },
         ),
     ],
 )
@@ -312,6 +375,22 @@ async def test_the_web_app_reads_what_the_sites_audience_allows_signed_out(audie
     assert (response.status_code, response.json()) == (200, answer)
 
 
+@pytest.mark.parametrize(
+    ("audience", "login", "realtime_quotes"),
+    [(Audience.PERSONAL, True, True), (Audience.PERSONAL, False, False), (Audience.PUBLIC, True, False)],
+    ids=["personal with a Shioaji login", "personal without one", "public whatever the runtime holds"],
+)
+async def test_the_audience_answer_offers_realtime_quotes_only_where_the_audience_allows_them_and_the_runtime_has_them(
+    audience: Audience, login: bool, realtime_quotes: bool
+) -> None:
+    harness = build_harness(config=harness_config().model_copy(update={"audience": audience}), realtime_quotes=login)
+
+    async with serve(harness, authorized=False) as client:
+        response = await client.get("/v1/market/audience")
+
+    assert (response.status_code, response.json()["realtime_quotes"]) == (200, realtime_quotes)
+
+
 async def test_the_audience_answer_carries_every_capability_of_the_audience_table() -> None:
     capabilities = {
         name
@@ -319,7 +398,7 @@ async def test_the_audience_answer_carries_every_capability_of_the_audience_tabl
         if isinstance(member, property) and isinstance(getattr(Audience.PUBLIC, name), bool)
     }
 
-    assert set(AudienceResponse.model_fields) == {"audience", *capabilities}
+    assert set(AudienceResponse.model_fields) == {"audience", "order_pricing", *capabilities}
 
 
 async def test_the_market_overview_reads_the_archive_warm_up() -> None:
@@ -343,6 +422,20 @@ async def test_the_public_web_api_refuses_buzz_and_intraday_and_still_starts_a_f
 
     assert (refused.status_code, refused.json()["code"]) == (403, "realtime_quotes_unavailable")
     assert (runs_after_refusal, harness.broker.placed) == ({}, [])
+    assert started.status_code == 202
+
+
+@pytest.mark.parametrize("path", ["/v1/runs/buzz-scan", "/v1/runs/intraday"])
+async def test_a_personal_web_api_without_a_shioaji_login_refuses_buzz_and_intraday(path: str) -> None:
+    harness = build_harness(realtime_quotes=False)
+    harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
+
+    async with serve(harness) as client:
+        refused = await write(client, "POST", path, {})
+        started = await write(client, "POST", "/v1/runs/full-cycle", {})
+
+    assert (refused.status_code, refused.json()["code"]) == (403, "realtime_quotes_unavailable")
+    assert "no Shioaji login" in refused.json()["detail"]
     assert started.status_code == 202
 
 

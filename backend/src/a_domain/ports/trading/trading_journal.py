@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Protocol
 
 from a_domain.model.market.stock import Stock
@@ -26,8 +27,8 @@ class ITradingJournal(Protocol):
 
     async def save_snapshot(self, snapshot: AccountSnapshot) -> None: ...
 
-    async def snapshots(self) -> list[AccountSnapshot]:
-        """Every account snapshot, oldest first."""
+    async def snapshots(self, since: datetime | None = None) -> list[AccountSnapshot]:
+        """Every account snapshot taken at or after `since` (every one for None), oldest first."""
         ...
 
     async def save_stock_reports(self, run_id: RunId, stocks: list[Stock]) -> None:
@@ -56,4 +57,16 @@ class ITradingJournal(Protocol):
 
     async def orders_of(self, run_id: RunId) -> list[Order]:
         """The run's orders, oldest first."""
+        ...
+
+    async def follows_of(self, run_id: RunId) -> list[tuple[TradeSignal, Order]]:
+        """Every decision, of any run, that follows a decision of this run and got an order, with that order, oldest first."""
+        ...
+
+    async def trades(self, since: datetime | None, limit: int, offset: int) -> list[tuple[Order, SystemStats]]:
+        """
+        `limit` orders that filled at least one share, created at or after `since`, newest first, after the `offset`
+        newest. Each comes with the run whose decision it carried out: a follow's order with the run it followed,
+        every other order with its own run.
+        """
         ...

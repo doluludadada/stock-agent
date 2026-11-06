@@ -1,7 +1,7 @@
 # Clean Architecture Guide
 
 How Hsiu structures a Python backend, written so that it works for any project. It comes from
-three projects (accdatacontrol, stock-agent, Duoary) and from the review of stock-agent on
+three projects (accdatacontrol, stock-agent, Duoary) and from the reviews of stock-agent since
 2026-11-01 (section 11).
 
 This guide is the only rulebook. A project's `AGENTS.md` points here and adds facts about that
@@ -202,6 +202,12 @@ class OrderStatus(StrEnum):
 `Order` checks `status in self.status.next_statuses` before it moves, and raises
 `IllegalOrderTransition` from `errors.py` when the move is not listed.
 
+What depends on a kind lives on that kind's enum in the same way. In stock-agent, `Audience` names
+the kind of site a deployment is, and its properties say what that site may use, such as
+`realtime_quotes`, `news_articles` and `brokers`. The wiring, the routes and the CLI ask those
+properties. No code outside the enum compares a member, as in `audience is Audience.PUBLIC`, so a
+new kind of site is one new member and its answers.
+
 ### 3.4 Ports (`a_domain/ports/<area>/`)
 
 A port is a promise: "someone will give me this". The domain says what it needs; the
@@ -325,6 +331,9 @@ async def checkout(self, cart_id: CartId) -> PipelineStatus:
 - A pydantic settings class loaded from a YAML file, with secrets from `.env`.
 - Every constant that is not an enum member lives there (3.3), and so does every value a
   business person might want to change.
+- A setting that decides which adapters exist, such as the environment or the kind of site,
+  changes only when the app restarts. A reload or a save that changes it is refused and names the
+  setting. Every other setting may reload while the app runs (6).
 
 ---
 
@@ -355,6 +364,13 @@ async def checkout(self, cart_id: CartId) -> PipelineStatus:
 - A query lives in the repository for the table it is about.
 - Logging goes through the logging port (for example a loguru adapter). Log ids and counts, never
   private user content.
+- Text from a third party can repeat what a person sent it: a broker's refusal may quote the
+  person's id and IP address. The adapter removes ids, IP addresses, account numbers and tokens
+  from such text before it logs, raises or saves it. Removing them after the text is written is
+  too late.
+- Save what a source served, as it served it. A value derived from it, such as a price history
+  adjusted for a split, is computed on read by a rule. A fix to the rule then fixes every row saved
+  before it, and no stored row keeps a past mistake.
 
 ---
 
@@ -367,8 +383,14 @@ async def checkout(self, cart_id: CartId) -> PipelineStatus:
   directly. No other command or route calls a port.
 - Presentation code may name a domain type in a request, a response or a signature, even a type
   from a rule file, but it never runs a rule.
-- `dependencies.py` is the only place that creates objects. Plain functions are enough; cache
-  shared adapters with `@lru_cache()`.
+- `dependencies.py` is the only place that creates objects. Plain functions are enough. Each
+  object lives as long as what it holds:
+  - The process holds what must exist once whatever the settings: the logger, a lock shared by
+    runs on old and new settings, and a third-party login that every runtime shares.
+  - A runtime holds the adapters built from one set of settings. A settings change builds a new
+    runtime for new work, and runs already on the old one finish there.
+  - An adapter that holds one user's data is built for that user. No object that holds a user's
+    data is shared by two users, so one user's operation cannot reach another user's data.
 - Request and response classes exist only for the reasons in 3.2.
 
 ---
@@ -380,9 +402,9 @@ async def checkout(self, cart_id: CartId) -> PipelineStatus:
   - The builders in `dependencies.py`. One constructor argument per line is wiring, not logic,
     and splitting it would add groups.
   - The operations in the Pipeline (4.2). An operation is a flat list of use case calls.
-    stock-agent's operations send orders with the same inline five-line loop five times: twice in
-    Buzz, twice in Intraday and once in the manual BUY. Splitting an operation would hide the
-    order of its steps.
+    stock-agent's operations send orders with the same inline five-line loop six times: twice in
+    Buzz, twice in Intraday, once in the manual BUY and once in a follow. Splitting an operation
+    would hide the order of its steps.
 - Reduce nesting only with early returns.
 - Names say what something is. No single-letter names except `i`, `j`, `k` in loops. No
   abbreviations (`membership`, not `mship`; `configuration` or `config`, but pick one).
@@ -487,6 +509,13 @@ From the review of the user accounts on 2026-11-04:
   special case into a domain port, only to obey "an adapter's helper is a method on the port". The
   wiring computes the name and passes it to the adapter.
 
+From the work of 2026-11-06 and 2026-11-07:
+
+- A broker refused a login, and its error quoted the person's id and IP address. A script printed
+  and saved the error and removed them afterwards, which was too late. The review then found that
+  the SDK's error text could reach the logs and the run records unchanged. Section 5 now says the
+  adapter removes them first.
+
 ---
 
 ## Checklist
@@ -516,6 +545,11 @@ Copy this list for a review.
       `status.stats`, has no private methods, and calls no other use case.
 - [ ] One `Pipeline` whose fields are only use cases and the logger. One `PipelineStatus`.
 - [ ] Infrastructure classes implement a port and mark every method `@override`.
+- [ ] An adapter removes ids, IP addresses, account numbers and tokens from a third party's text
+      before it logs, raises or saves it.
+- [ ] What depends on a kind is a property of its enum. No code outside the enum compares members.
+- [ ] Each object in `dependencies.py` lives as long as what it holds: the process, a runtime or a
+      user.
 - [ ] Only `dependencies.py` creates objects.
 - [ ] Python 3.14 style from section 2.
 - [ ] Functions ≤ 30 lines, complexity ≤ 10, early returns, no single-letter or shortened names.

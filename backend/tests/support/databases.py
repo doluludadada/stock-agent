@@ -84,19 +84,19 @@ async def create_version_2_tables(backend: DatabaseBackend, folder: Path, stamp:
     await engine.dispose()
 
 
-async def create_version_3_tables(backend: DatabaseBackend, folder: Path) -> None:
+async def create_version_tables(backend: DatabaseBackend, folder: Path, version: int) -> None:
     """
-    Every table as schema version 3 created it on the backend, stamped 3: fixtures/schema/version_3.<backend>.sql, the
-    statements version 3's create_all ran.
+    Every table as schema version `version` (3 or later) created it on the backend, stamped `version`:
+    fixtures/schema/version_<version>.<backend>.sql, the statements that version's create_all ran.
     """
-    statements = (SCHEMA_FIXTURES / f"version_3.{backend.value}.sql").read_text().split(";\n\n")
+    statements = (SCHEMA_FIXTURES / f"version_{version}.{backend.value}.sql").read_text().split(";\n\n")
     engine = raw_engine(backend, folder)
 
     async with engine.begin() as connection:
         for statement in statements:
             await connection.execute(text(statement.strip().removesuffix(";")))
 
-        await connection.execute(text("INSERT INTO schema_version (version) VALUES (3)"))
+        await connection.execute(text("INSERT INTO schema_version (version) VALUES (:version)"), {"version": version})
 
     await engine.dispose()
 

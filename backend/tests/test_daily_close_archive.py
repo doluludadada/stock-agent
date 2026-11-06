@@ -26,13 +26,14 @@ from support.fakes import RecordingLogger
 from support.harness import build_harness, harness_config
 from support.settings import shipped_config
 from support.web import app_of
+from test_history_adjustment import SPLIT_0050, TAIEX_2025_06, bars, taiex
 from trading_stack import SilentLogger
 
 from a_domain.model.fundamentals.monthly_revenue import MonthlyRevenue
 from a_domain.model.fundamentals.quarter_financials import QuarterFinancials
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
-from a_domain.ports.market.daily_close_archive import ArchivedMonth, ArchivedQuarter, ArchivedSession
+from a_domain.ports.market.daily_close_archive import ArchivedMonth, ArchivedQuarter, ArchivedSession, OpenDataDownload
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.types.enums import (
     ContentType,
@@ -640,6 +641,129 @@ async def test_the_archive_serves_its_stock_and_index_closes_as_daily_history_an
     ]
 
 
+async def test_a_report_whose_rows_none_can_be_read_is_an_error_and_one_that_serves_none_is_not(
+    tmp_path: Path, payloads: dict[str, list[dict[str, str]]]
+) -> None:
+    listing, ratios, news = (
+        SOURCES.exchange.twse_daily_quotes_url,
+        SOURCES.exchange.valuation_ratios[MarketType.TWSE].url,
+        SOURCES.exchange.exchange_news.url,
+    )
+    payloads[listing] = [
+        {("Close" if name == "ClosingPrice" else name): value for name, value in row.items()} for row in payloads[listing]
+    ]
+    payloads[ratios] = [{("StockCode" if name == "Code" else name): value for name, value in row.items()} for row in payloads[ratios]]
+    payloads[news] = []
+    logger = RecordingLogger()
+    connector = await started_database(DatabaseBackend.SQLITE, tmp_path)
+    provider = TaiwanStockProvider(SOURCES.exchange, TaiwanMarketClock(MarketHoursConfig()), MarketDataConfig(), logger)
+
+    try:
+        await DailyCloseArchiver(provider, sql_archive(connector), SilentLogger()).execute()
+    finally:
+        await connector.close()
+
+    feeds = [(level, message) for level, message in logger.records if message.startswith("Open data feed")]
+    assert [message for level, message in feeds if level == "error"] == [
+        f"Open data feed {listing} served {len(payloads[listing])} rows and none could be read",
+        f"Open data feed {ratios} served {len(payloads[ratios])} rows and none could be read",
+    ]
+    assert ("info", f"Open data feed {news} served no rows") in feeds
+    assert (
+        "info",
+        f"Open data feed {REPORTS[MarketType.TWSE][FinancialStatement.BALANCE_SHEET][IndustryFormat.BANK]} served no rows",
+    ) in feeds
+
+
+def split_download(missed: date | None) -> OpenDataDownload:
+    """0050's split as listed, and 2330's close of every session but `missed`, so the archive holds TWSE's closes of those."""
+    split, other = Stock(stock_id="0050", market=MarketType.TWSE), Stock(stock_id="2330", market=MarketType.TWSE)
+    split.load_history(bars(SPLIT_0050))
+    other.load_history([replace(bar, volume=1) for bar in taiex(TAIEX_2025_06) if bar.ts.date() != missed])
+    reports = {"material_information": [], "quarter_eps": {}, "valuation_ratios": [], "financial_reports": []}
+    return OpenDataDownload(
+        stocks=[split, other], indexes={MarketType.TWSE: taiex(TAIEX_2025_06)}, monthly_revenues=[], exchange_news=[], **reports
+    )
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+@pytest.mark.parametrize(
+    ("missed", "served"),
+    [(None, [45.92, 47.16, 47.57, 47.10]), (date(2025, 6, 12), [183.70, 188.65, 47.57, 47.10])],
+    ids=["every session held", "the closes of one session missed"],
+)
+async def test_the_archive_keeps_each_bar_as_listed_and_serves_the_history_adjusted(
+    backend: DatabaseBackend, tmp_path: Path, missed: date | None, served: list[float]
+) -> None:
+    connector = await started_database(backend, tmp_path)
+    archive, clock = sql_archive(connector), TaiwanMarketClock(MarketHoursConfig())
+    window = (clock.session_close(date(2025, 6, 1)), clock.session_close(date(2025, 6, 30)))
+
+    try:
+        await archive.save(split_download(missed))
+        history = await archive.fetch_history([Stock(stock_id="0050", market=MarketType.TWSE)], *window)
+
+        async with connector.get_session() as session:
+            listed = (
+                (await session.execute(text("SELECT close FROM daily_close_archive WHERE stock_id = '0050' ORDER BY session_date")))
+                .scalars()
+                .all()
+            )
+    finally:
+        await connector.close()
+
+    assert [round(bar.close, 2) for bar in history["0050"]] == served
+    assert listed == [183.70, 188.65, 47.57, 47.10]
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+async def test_a_stock_that_moved_from_tpex_to_twse_is_checked_against_each_market_it_was_listed_on(
+    backend: DatabaseBackend, tmp_path: Path
+) -> None:
+    clock = TaiwanMarketClock(MarketHoursConfig())
+
+    def listed(stock_id: str, market: MarketType, closes: dict[int, tuple[float, float]]) -> Stock:
+        stock = Stock(stock_id=stock_id, market=market)
+        stamps = {day: clock.session_close(date(2025, 6, day)) for day in closes}
+        stock.load_history(
+            [
+                Ohlcv(ts=stamps[day], open=close, high=close, low=close, close=close, volume=1, change=change)
+                for day, (close, change) in closes.items()
+            ]
+        )
+        return stock
+
+    twse_every_session = listed("2330", MarketType.TWSE, {bar.ts.day: (1000.0, 0.0) for bar in taiex(TAIEX_2025_06)})
+    tpex_without_06_10 = listed("6488", MarketType.TPEX, {9: (500.0, 0.0), 11: (500.0, 0.0)})
+    moved = [
+        listed("4743", MarketType.TPEX, {9: (100.0, 1.0), 11: (110.0, 2.0)}),
+        listed("4743", MarketType.TWSE, {12: (111.0, 1.0), 13: (112.0, 1.0)}),
+    ]
+    tpex_index = [
+        Ohlcv(ts=clock.session_close(date(2025, 6, day)), close=close, change=change)
+        for day, close, change in ((9, 250.0, 1.0), (10, 252.0, 2.0), (11, 251.0, -1.0))
+    ]
+    download = replace(
+        split_download(None),
+        stocks=[twse_every_session, tpex_without_06_10, *moved],
+        indexes={MarketType.TWSE: taiex(TAIEX_2025_06), MarketType.TPEX: tpex_index},
+    )
+    connector = await started_database(backend, tmp_path)
+    archive = sql_archive(connector)
+
+    try:
+        await archive.save(download)
+        history = await archive.fetch_history(
+            [Stock(stock_id="4743", market=MarketType.TWSE)],
+            clock.session_close(date(2025, 6, 1)),
+            clock.session_close(date(2025, 6, 30)),
+        )
+    finally:
+        await connector.close()
+
+    assert [bar.close for bar in history["4743"]] == [100.0, 110.0, 111.0, 112.0]
+
+
 async def until(condition: Callable[[], bool]) -> None:
     for _ in range(300):
         if condition():
@@ -674,6 +798,29 @@ async def test_the_web_api_archives_again_at_every_interval_after_a_run_that_fai
         await until(lambda: harness.archive.saves >= 2)
 
     assert await harness.archive.sessions() == [archived_on(date(2026, 11, 6), indexes=1)]
+
+
+async def test_the_web_api_shuts_down_only_after_the_archive_run_it_stopped_has_ended() -> None:
+    harness = build_harness()
+    downloading, ended = asyncio.Event(), asyncio.Event()
+
+    async def slow_download() -> dict[MarketType, list[Ohlcv]]:
+        downloading.set()
+
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.sleep(0.05)
+            ended.set()
+
+        return {}
+
+    harness.stocks.fetch_index_closes = slow_download
+
+    async with app_of(harness):
+        await downloading.wait()
+
+    assert ended.is_set(), "the shutdown went on while the archive run it cancelled was still ending"
 
 
 @pytest.mark.parametrize("backend", BACKENDS)

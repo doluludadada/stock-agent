@@ -40,16 +40,30 @@ class MarketType(StrEnum):
     TWSE = auto()
     TPEX = auto()
 
+    @property
+    def changes_from_a_moved_reference(self) -> bool:
+        """
+        Whether a stock's change on its first trade after a session it did not trade is from a reference the exchange
+        moved to that session's last bid or ask. TPEX's is: 2064 closed at 11.80 on 2026-10-13, did not trade on
+        2026-10-14 and closed at 11.70 on 2026-10-15 with a change of -0.15. TWSE writes X0.00 there instead: 1213 on
+        2026-10-20. Such a change cannot tell a corporate action from that move.
+        """
+        match self:
+            case MarketType.TPEX:
+                return True
+            case MarketType.TWSE:
+                return False
+
 
 class MarketIndex(StrEnum):
-    """A market index with a daily history. Yahoo Finance serves it under the symbol `sources.yahoo.index_symbols` names."""
+    """A market index with a daily history: the own index of the exchange `market` names, kept under that market."""
 
     TAIEX = auto()
     """The TWSE Capitalization Weighted Stock Index."""
 
     @property
     def market(self) -> MarketType:
-        """The exchange that publishes it, under which the open-data archive keeps its closes."""
+        """The exchange that publishes it, under which the open-data archive and the broker's history cache keep its closes."""
         match self:
             case MarketIndex.TAIEX:
                 return MarketType.TWSE
@@ -91,6 +105,9 @@ class SignalSource(StrEnum):
 
     MANUAL = auto()
     """The user confirmed a manual BUY override."""
+
+    FOLLOW = auto()
+    """The user followed a decision another run recorded: same stock, action and shares, priced again when followed."""
 
 
 class OrderType(StrEnum):
@@ -144,6 +161,9 @@ class RejectReason(StrEnum):
     ORDER_MODE_DISABLED = auto()
     ORDER_MODE_MISMATCH = auto()
     MARKET_CLOSED = auto()
+    SESSION_IN_PROGRESS = auto()
+    """An official close prices an order only while no session trades: during one, that close is no longer the price."""
+
     STALE_PRICE = auto()
     INSUFFICIENT_CASH = auto()
     POSITION_NOT_FOUND = auto()
@@ -183,6 +203,62 @@ class TradingPhase(StrEnum):
 
     CLOSING_AUCTION = auto()
     """Orders queue for the closing call auction, which takes limit ROD orders only."""
+
+
+class OrderPricing(StrEnum):
+    """
+    What prices an order of this deployment, in which phase of the trading day it may be placed and on which brokers.
+    Audience.order_pricing picks one; OrderGateRule and the follow's window read it, and nothing else decides by it.
+    """
+
+    REALTIME_QUOTE = auto()
+    """A realtime quote at most freshness.realtime_max_lag_minutes old, in continuous trading, on any broker."""
+
+    OFFICIAL_CLOSE = auto()
+    """
+    The official close of the last closed session, while no session trades, on the mock broker only: the newest price
+    that exists, so a follow of an old run never buys at that run's price. Taiwan's after-hours fixed-price trading
+    fills at the same close.
+    """
+
+    @property
+    def trading_phase(self) -> TradingPhase:
+        """The one phase in which an order priced this way may be placed."""
+        match self:
+            case OrderPricing.REALTIME_QUOTE:
+                return TradingPhase.CONTINUOUS
+            case OrderPricing.OFFICIAL_CLOSE:
+                return TradingPhase.CLOSED
+
+    @property
+    def brokers(self) -> frozenset[ExecutionProvider]:
+        match self:
+            case OrderPricing.REALTIME_QUOTE:
+                return frozenset(ExecutionProvider)
+            case OrderPricing.OFFICIAL_CLOSE:
+                return frozenset({ExecutionProvider.MOCK})
+
+    @property
+    def outside_phase(self) -> RejectReason:
+        """Why an order placed in any other phase is refused."""
+        match self:
+            case OrderPricing.REALTIME_QUOTE:
+                return RejectReason.MARKET_CLOSED
+            case OrderPricing.OFFICIAL_CLOSE:
+                return RejectReason.SESSION_IN_PROGRESS
+
+
+class FollowRefusal(StrEnum):
+    """Why a run's decisions cannot be followed into the user's mock account now. The Web API answers each as its code."""
+
+    NOTHING_TO_FOLLOW = auto()
+    """
+    The run has no decision left to follow: it is not a finished Full Cycle, it decided no BUY and no SELL of a stock
+    the account holds, or a follow order of each filled since the mock account opened.
+    """
+
+    OUTSIDE_FOLLOW_WINDOW = auto()
+    """The market is in a phase in which this site's order pricing places no order (OrderPricing.trading_phase)."""
 
 
 class TimeInForce(StrEnum):
@@ -280,7 +356,7 @@ class ShioajiCredential(StrEnum):
     CA_PASSWORD = "SHIOAJI_CA_PASSWORD"
     PERSON_ID = "SHIOAJI_PERSON_ID"
     API_KEY_TEST = "SHIOAJI_API_KEY_TEST"
-    """The paper-trading key pair, which only environment test reads."""
+    """The simulation key pair, which environments dev and test read."""
 
     SECRET_KEY_TEST = "SHIOAJI_SECRET_KEY_TEST"
 
@@ -298,7 +374,7 @@ class SystemEnvironment(StrEnum):
     """
 
     DEV = auto()
-    """A developer's machine: the mock broker only, and no Shioaji credential is read."""
+    """A developer's machine: the mock broker only. Realtime quotes come from Shioaji's simulation server, with the *_TEST key pair."""
 
     TEST = auto()
     """Staging before launch: Shioaji only in simulation, with the *_TEST key pair only, or the mock broker."""
@@ -336,12 +412,11 @@ class SystemEnvironment(StrEnum):
     def shioaji_credentials(self) -> tuple[ShioajiCredential, ...]:
         """
         The variables a Shioaji login reads here: the API key and the secret key, and in production the CA certificate's
-        path, its password and the person id. ShioajiConfig.login reads each by name.
+        path, its password and the person id. ShioajiConfig.login reads each by name. The realtime quotes need only the
+        key pair; Shioaji as the broker needs them all.
         """
         match self:
-            case SystemEnvironment.DEV:
-                return ()
-            case SystemEnvironment.TEST:
+            case SystemEnvironment.DEV | SystemEnvironment.TEST:
                 return (ShioajiCredential.API_KEY_TEST, ShioajiCredential.SECRET_KEY_TEST)
             case SystemEnvironment.PROD:
                 return (
@@ -390,21 +465,22 @@ class Audience(StrEnum):
 
     PERSONAL = auto()
     """
-    The owner on their own machine: Yahoo's daily history, TWSE MIS realtime quotes, the news sites, the AI's web
-    search, MOPS, PTT and any broker the environment allows.
+    The owner on their own machine: Shioaji's daily history and realtime quotes on the owner's own login, the news
+    sites, the AI's web search, MOPS, PTT and any broker the environment allows. Without that login its daily history
+    is the open-data archive's, and it has no realtime quote.
     """
 
     PUBLIC = auto()
     """
     A free public website: only open-licensed data, the TWSE and TPEX OpenAPI as the open-data archive keeps them (Open
-    Government Data License v1), and the mock broker. Yahoo's terms forbid redistribution and automated collection, TWSE
-    MIS needs a contract to show others, cnyes forbids reproduction without consent, MOPS disallows every robot and
-    TWSE's terms forbid its automated download, and nobody may trade in a visitor's account.
+    Government Data License v1), and the mock broker. Shioaji's market data comes with the owner's own broker login,
+    Yahoo's terms forbid automated collection, cnyes forbids reproduction without consent, MOPS disallows every robot
+    and TWSE's terms forbid its automated download, and nobody may trade in a visitor's account.
     """
 
     @property
     def open_data_only(self) -> bool:
-        """Daily history and the index trend come from the open-data archive alone, never from Yahoo or TWSE MIS."""
+        """Daily history and the index trend come from the open-data archive alone, never from Shioaji."""
         match self:
             case Audience.PERSONAL:
                 return False
@@ -414,8 +490,9 @@ class Audience(StrEnum):
     @property
     def realtime_quotes(self) -> bool:
         """
-        TWSE MIS realtime quotes, which price every order: Buzz, Intraday and manual BUY need them. Open data has none.
-        Without them Buzz never runs, so neither does PTT, which only Buzz reads.
+        Shioaji's realtime quotes, which price every order: Buzz, Intraday and manual BUY need them. Open data has none.
+        Without them Buzz never runs, so neither does PTT, which only Buzz reads. A personal site without a Shioaji
+        login has none either: every quote is refused, so nothing is ordered.
         """
         return not self.open_data_only
 
@@ -443,6 +520,11 @@ class Audience(StrEnum):
             case Audience.PUBLIC:
                 return frozenset({ExecutionProvider.MOCK})
 
+    @property
+    def order_pricing(self) -> OrderPricing:
+        """How its orders are priced: a realtime quote where it has them, else the official close."""
+        return OrderPricing.REALTIME_QUOTE if self.realtime_quotes else OrderPricing.OFFICIAL_CLOSE
+
 
 class Workflow(StrEnum):
     """The user-facing operation a run belongs to. Each run has one run id."""
@@ -452,11 +534,25 @@ class Workflow(StrEnum):
     INTRADAY = auto()
     SPECIFIC_STOCKS = auto()
     MANUAL_BUY = auto()
+    FOLLOW = auto()
+    """
+    The user's follow of a finished run's decisions into their mock account, as its own recorded run that names the run
+    it followed.
+    """
+
     VALUATION = auto()
     """Menus 5 and 6. Read-only: no run record, no order."""
 
     RESEARCH = auto()
     """The Web stock page's technical evaluation, and the account history. Read-only: no run record, no AI call, no order."""
+
+    @property
+    def followable(self) -> bool:
+        """
+        Its decisions are recorded and never ordered, so a user may follow them into their mock account. Buzz, Intraday,
+        the manual BUY and a follow already ordered theirs: following one would order the same decisions twice.
+        """
+        return self == Workflow.FULL_CYCLE
 
 
 class OrderMode(StrEnum):
@@ -859,6 +955,12 @@ class ErrorCode(StrEnum):
     AI_MODEL_NOT_OFFERED = auto()
     RUN_IN_PROGRESS = auto()
     TOO_MANY_RUNS = auto()
+    NOTHING_TO_FOLLOW = auto()
+    """FollowRefusal.NOTHING_TO_FOLLOW: no decision of the run is left to follow."""
+
+    OUTSIDE_FOLLOW_WINDOW = auto()
+    """FollowRefusal.OUTSIDE_FOLLOW_WINDOW: the site places no order in the market's phase now."""
+
     LISTING_UNAVAILABLE = auto()
     NOT_FOUND = auto()
     INVALID_REQUEST = auto()

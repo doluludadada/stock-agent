@@ -28,6 +28,14 @@ class SettingsProblem:
 
     line: Annotated[int, Field(ge=1)] | None = None
     column: Annotated[int, Field(ge=1)] | None = None
+    code: str | None = None
+    """
+    The refusal's stable name, for a client to word it in its own language: pydantic's error type, such as
+    greater_than, or the app's own, such as ai_key_missing. None for the app's other refusals, worded only in `message`.
+    """
+
+    params: dict[str, str | int | float] = Field(default_factory=dict)
+    """The values the code's words need, by name, such as gt, expected or provider: the schema's or the app's, never the input."""
 
     @override
     def __str__(self) -> str:

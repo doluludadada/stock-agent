@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { useAccountHistory } from '@/features/account/api'
-import { runKeys, useRun } from '@/features/runs/api'
+import { runKeys, useFollowRun, useRun } from '@/features/runs/api'
 import { useWatchlistEntries } from '@/features/watchlist/api'
 import { session } from '@/shared/api'
 import { TEST_USER } from '@/test/users'
@@ -13,8 +14,12 @@ const RUN = '11111111-1111-4111-8111-111111111111'
 function fakeBackend() {
   const server = { running: true }
   const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
-  const fetch = vi.fn(async (input: string) => {
+  const fetch = vi.fn(async (input: string, init?: RequestInit) => {
     const url = String(input)
+    if (url === `/v1/runs/${RUN}/follow` && init?.method === 'POST') {
+      server.running = false
+      return json({ run_id: '22222222-2222-4222-8222-222222222222' })
+    }
     if (url === `/v1/runs/${RUN}`) return json({ run_id: RUN, state: server.running ? 'running' : 'finished', error: null, summary: null, reports: [] })
     if (url.startsWith('/v1/account/history')) {
       const value = { cash: server.running ? 1000 : 400, market_value: 0, unrealized_pnl: 0, equity: 1000, positions: [] }
@@ -30,6 +35,15 @@ function Holdings() {
   const account = useAccountHistory(null)
   const watchlist = useWatchlistEntries()
   return <p>{account.data && watchlist.data ? `cash ${account.data.current.cash}, watching ${watchlist.data.length}` : 'loading'}</p>
+}
+
+function FollowButton() {
+  const follow = useFollowRun(RUN)
+  return (
+    <button type="button" onClick={() => follow.mutate()}>
+      {follow.isSuccess ? 'followed' : 'follow'}
+    </button>
+  )
 }
 
 function RunState() {
@@ -59,6 +73,26 @@ describe('a run that ends', () => {
     backend.server.running = false
     await act(() => client.refetchQueries({ queryKey: runKeys.run(RUN) }))
     expect(await screen.findByText('finished')).toBeInTheDocument()
+
+    render(<Holdings />, { wrapper })
+    expect(await screen.findByText('cash 400, watching 1')).toBeInTheDocument()
+  })
+
+  it('makes them load again after a follow starts, even when the follow ends before its page first asks', async () => {
+    const backend = fakeBackend()
+    vi.stubGlobal('fetch', backend.fetch)
+    session.signIn(TEST_USER)
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 60_000 } } })
+    const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
+
+    const before = render(<Holdings />, { wrapper })
+    expect(await screen.findByText('cash 1000, watching 0')).toBeInTheDocument()
+    before.unmount()
+
+    const follow = render(<FollowButton />, { wrapper })
+    await userEvent.setup().click(screen.getByRole('button', { name: 'follow' }))
+    expect(await screen.findByRole('button', { name: 'followed' })).toBeInTheDocument()
+    follow.unmount()
 
     render(<Holdings />, { wrapper })
     expect(await screen.findByText('cash 400, watching 1')).toBeInTheDocument()

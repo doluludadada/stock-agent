@@ -9,7 +9,7 @@ from a_domain.model.trading.account import Account, AccountSnapshot
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.model.trading.watchlist import WatchlistEntry
-from a_domain.types.enums import ExecutionProvider, IndicatorOutput, OrderMode, Workflow
+from a_domain.types.enums import ExecutionProvider, FollowRefusal, IndicatorOutput, OrderMode, Workflow
 from a_domain.types.values import FormulaId
 
 
@@ -67,7 +67,7 @@ class PipelineStatus:
     manual_stocks: list[Stock] = field(default_factory=list)
     """
     StockLookup, or the stock buy_manually was given. They stay here whatever their technical verdict, so that
-    specific-stock analysis goes on through news and AI.
+    specific-stock analysis goes on through news and AI. A follow's: the stocks of the decisions it may take.
     """
 
     survivors: list[Stock] = field(default_factory=list)
@@ -90,6 +90,18 @@ class PipelineStatus:
 
     orders: list[Order] = field(default_factory=list)
     """The order step: one per orderable decision, sent or refused, as OrderExecution returned it."""
+
+    followed_run: SystemStats | None = None
+    """FollowCandidates: the run a follow takes decisions of. None when the journal holds no such run."""
+
+    followable_signals: list[TradeSignal] = field(default_factory=list)
+    """FollowCandidates: the followed run's decisions still open to follow, at most one per stock."""
+
+    follows: list[tuple[TradeSignal, Order]] = field(default_factory=list)
+    """FollowCandidates: every follow of the followed run's decisions so far, each with its order."""
+
+    follow_refusal: FollowRefusal | None = None
+    """FollowCandidates: why a follow may not start now. None when it may."""
 
     manual_buy_refusal: str | None = None
     """ManualSignal: why the confirmed manual BUY of this run sent no order. Unset when it made an orderable decision."""
@@ -126,6 +138,11 @@ class PipelineStatus:
             stocks.setdefault(stock.stock_id, stock)
 
         return stocks
+
+    @property
+    def followable_stock_ids(self) -> list[str]:
+        """The stocks of the decisions a follow may take, in decision order."""
+        return [signal.stock_id for signal in self.followable_signals]
 
     @property
     def blocked_stock_ids(self) -> frozenset[str]:

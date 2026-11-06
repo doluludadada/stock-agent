@@ -161,7 +161,17 @@ async def test_the_technical_evaluation_is_private_and_applies_the_active_strate
         ("Authorization: Bearer abcdef123456", "abcdef123456"),
         ("FileNotFoundError: /Users/someone/stock-agent/config/x.yaml missing", "/Users/someone"),
         ("openai said sk-proj-ABCDEFGHIJKLMNOP", "sk-proj-ABCDEFGHIJKLMNOP"),
+        ("TokenError: StatusCode: 401, Detail: person A123456789 refused", "A123456789"),
+        ("Solace session to 203.0.113.7:55443 is down", "203.0.113.7"),
+        ("Solace session to [2001:db8::17]:55443 is down", "2001:db8::17"),
+        ("Solace session to fe80:0:0:0:0:0:0:1 is down", "fe80:0:0:0:0:0:0:1"),
     ],
 )
 async def test_server_messages_reach_the_browser_without_credentials_or_paths(message: str, hidden: str) -> None:
     assert hidden not in public_text(message)
+
+
+async def test_a_session_time_and_a_stock_id_are_not_taken_for_an_address_or_a_person_id() -> None:
+    message = "Market data blocked: 2330, last trade 2026-11-06T13:30:00+08:00, stale; order 1a2b3c4d5e"
+
+    assert public_text(message) == message

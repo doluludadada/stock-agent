@@ -1,5 +1,5 @@
 import { ArrowRight } from 'lucide-react'
-import { useId } from 'react'
+import { useId, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { useTranslation } from '@/i18n'
 import { isApiError } from '@/shared/api'
@@ -14,8 +14,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/shared/ui/skeleton'
 import { useAiModels, useChooseAiModel, type AiModels, type AiProvider } from './api'
 
-/** The signed-in user's own settings: the AI model of their runs, and where their active strategy is chosen. */
-export function MySettingsPage() {
+interface MySettingsPageProps {
+  /** The account feature's mock account panel: its starting capital and the reset. */
+  mockAccount?: ReactNode
+}
+
+/** The signed-in user's own settings: the AI model of their runs, their mock account, and where their active strategy is chosen. */
+export function MySettingsPage({ mockAccount }: MySettingsPageProps) {
   const { t } = useTranslation('auth')
   return (
     <div className="space-y-5 lg:space-y-6">
@@ -23,6 +28,7 @@ export function MySettingsPage() {
       <RequireSignIn layout="page" reason={t('settings.signIn')}>
         <div className="grid max-w-3xl gap-4 lg:gap-5">
           <AiModelPanel />
+          {mockAccount}
           <Panel title={t('settings.strategy.title')} description={t('settings.strategy.description')}>
             <Button asChild variant="outline" size="sm">
               <Link to={paths.strategies}>

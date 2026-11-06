@@ -121,7 +121,7 @@ async def test_old_ohlcv_cache_layout_stops_startup_and_says_the_cache_refills(t
         await init_db(tmp_path)
 
     message = str(refused.value)
-    assert "ohlcv_data (missing columns: none; columns no longer used: trading_date)" in message
+    assert "ohlcv_data (missing columns: change; columns no longer used: adj_close, trading_date)" in message
     assert "Cached prices and EPS refill themselves" in message
 
 
@@ -280,18 +280,19 @@ async def test_a_version_1_database_is_upgraded_in_place_and_keeps_every_row(tmp
     await init_db(current)
     assert sqlite_layout(db_path) == sqlite_layout(current / "stock_agent.db")
     assert stored_schema_versions(db_path) == [SCHEMA_VERSION]
-    kept = set(before) - {"schema_version", "workflow_runs", "watchlists", "mock_cash"}
+    kept = set(before) - {"schema_version", "workflow_runs", "watchlists", "mock_cash", "ohlcv_data", "ohlcv_fetches", "ohlcv_windows"}
     assert {table: after[table] for table in kept} == {table: before[table] for table in kept}
     assert after["watchlists"] == [{"owner_id": "local", **row} for row in before["watchlists"]]
     assert after["mock_cash"] == [
         {"owner_id": "local", **{column: value for column, value in row.items() if column != "account_id"}}
         for row in before["mock_cash"]
     ]
-    assert [{**row, "failure": None, "owner_id": "local"} for row in before["workflow_runs"]] == [
+    assert [{**row, "failure": None, "owner_id": "local", "followed_run_id": None} for row in before["workflow_runs"]] == [
         {**row, "failure": None} for row in after["workflow_runs"]
     ]
     assert [row["failure"] for row in after["workflow_runs"]] == ["RuntimeError: Yahoo hung", None, "CancelledError: "]
     assert len(before["watchlists"]) == len(before["mock_cash"]) == 1
+    assert after["ohlcv_data"] == [] and {"ohlcv_fetches", "ohlcv_windows"}.isdisjoint(after)
 
 
 async def test_a_version_1_database_whose_table_changed_is_refused_and_the_upgrade_rolls_back(tmp_path: Path) -> None:
@@ -299,13 +300,13 @@ async def test_a_version_1_database_whose_table_changed_is_refused_and_the_upgra
     version_1_database(db_path)
 
     with sqlite3.connect(db_path) as connection:
-        connection.execute("ALTER TABLE ohlcv_data ADD COLUMN trading_date DATE")
+        connection.execute("ALTER TABLE mops_quarter_eps ADD COLUMN trading_date DATE")
 
     before = sqlite_layout(db_path), table_rows(db_path)
 
     with pytest.raises(DatabaseCommandError) as refused:
         await migrate_then_start(tmp_path)
 
-    assert named_tables(str(refused.value)) == ["ohlcv_data"]
+    assert named_tables(str(refused.value)) == ["mops_quarter_eps"]
     assert (sqlite_layout(db_path), table_rows(db_path)) == before
     assert stored_schema_versions(db_path) == [1]

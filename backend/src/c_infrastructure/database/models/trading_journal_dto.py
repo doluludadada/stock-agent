@@ -48,9 +48,12 @@ class WorkflowRunDTO(SQLModel, table=True):
     failure: str | None = None
     owner_id: str = Field(exclude=True)
     """
-    The user the run belongs to. Every owned table ends with this column, as the upgrade to version 3 added it. It never
+    The user the run belongs to. Every owned table ended with this column, as the upgrade to version 3 added it. It never
     leaves the row: model_dump(), which reads the row back into its domain model, leaves it out.
     """
+
+    followed_run_id: UUID | None = None
+    """A follow's run: the run whose decisions it followed. Last, as the upgrade to version 5 added it."""
 
 
 class TradeSignalDTO(SQLModel, table=True):
@@ -76,6 +79,8 @@ class TradeSignalDTO(SQLModel, table=True):
     technical_report: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     ai_report: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     owner_id: str = Field(exclude=True)
+    followed_decision_id: UUID | None = None
+    """A follow's decision: the decision of another run it follows. Last, as the upgrade to version 5 added it."""
 
 
 class OrderDTO(SQLModel, table=True):

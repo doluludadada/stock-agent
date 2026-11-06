@@ -34,8 +34,9 @@ class OpenAIAdapter(BaseAIAdapter):
     @override
     async def generate_reply(self, messages: tuple[Message, ...]) -> Message:
         """
-        The model's streamed reply. An API error, or a network failure before or during the stream, becomes an apology
-        the user can read; any other error raises, and the caller records it with its cause.
+        The model's streamed reply. A chunk without choices adds nothing: NVIDIA ends its stream with one that carries
+        only the token usage. An API error, or a network failure before or during the stream, becomes an apology the
+        user can read; any other error raises, and the caller records it with its cause.
         """
         api_messages: list[ChatCompletionMessageParam] = [
             {"role": "system", "content": message.content}
@@ -51,7 +52,7 @@ class OpenAIAdapter(BaseAIAdapter):
             stream = await self._client.chat.completions.create(
                 model=self._model_name, messages=api_messages, temperature=self._config.ai.temperature, stream=True
             )
-            content = "".join([chunk.choices[0].delta.content or "" async for chunk in stream])
+            content = "".join([chunk.choices[0].delta.content or "" async for chunk in stream if chunk.choices])
         except (OpenAIError, httpx.HTTPError) as error:
             self._logger.error(f"{self._provider.label} API error for model {self._model_name}: {error}")
             content = f"I'm sorry, I'm having trouble connecting to {self._provider.label} right now. Please try again in a moment."

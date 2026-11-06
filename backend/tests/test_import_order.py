@@ -34,14 +34,15 @@ print("\\n".join(failures))
 """
 
 
-def test_every_module_imports_when_it_is_the_first_project_module_loaded() -> None:
+def test_every_module_imports_when_it_is_the_first_project_module_loaded(tmp_path: Path) -> None:
     """
     An import cycle stays hidden while some other module happens to load first, then breaks the one entry point that
-    loads it first (main.py and the API once died this way). Each module is imported here with no project module loaded.
+    loads it first (main.py and the API once died this way). Each module is imported here with no project module loaded,
+    in a folder of its own, so nothing an import writes lands in the repository.
     """
     result = subprocess.run(
         [sys.executable, "-c", IMPORT_EACH_MODULE_FIRST, str(SRC)],
-        cwd=SRC.parent,
+        cwd=tmp_path,
         env={"PYTHONPATH": str(SRC), "PATH": "/usr/bin:/bin"},
         capture_output=True,
         text=True,

@@ -74,6 +74,11 @@ class WorkflowRuns:
 
         return run_id
 
+    def running(self, owner_id: UserId) -> RunId | None:
+        """The run this server runs for the user now, or None."""
+        running = self._running.get(owner_id)
+        return running[0] if running is not None and not running[1].done() else None
+
     def describe(
         self, owner_id: UserId, run_id: RunId, record: SystemStats | None, stocks: list[Stock] | None = None
     ) -> RunResponse | None:

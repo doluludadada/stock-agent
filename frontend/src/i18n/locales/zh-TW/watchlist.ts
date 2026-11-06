@@ -50,7 +50,7 @@ const watchlist: DictionaryShape<typeof en> = {
   list: { title: '股票' },
   sources: {
     title: '清單從哪裡來',
-    question: '股票加入觀察清單的三種方式',
+    question: '股票加入觀察清單的 {{count}} 種方式',
     manual: '你自己加入的，從這裡或個股頁加入。會一直保留，直到你移除。',
     technical: '完整流程中技術策略通過的股票，到下一個交易日收盤時自動到期。',
     buzz: '社群熱度掃描找到的股票，同樣會自動到期。',

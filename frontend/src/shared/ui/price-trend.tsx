@@ -6,6 +6,7 @@ import { DEFAULT_RANGE, pricePoints, summarize, type ChartRange } from '@/shared
 import { directionOf, type Direction } from '@/shared/lib/direction'
 import { useFormat } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
+import { ArchiveWarmUp } from './archive-warm-up'
 import { ChangeValue } from './change-value'
 import type { ChartOverlay } from './price-volume-chart'
 import { QuoteHeadline } from './quote-headline'
@@ -30,10 +31,19 @@ interface PriceTrendProps {
   overlays?: readonly TrendOverlay[]
   /** The close and its change above the chart; a page that shows them in its header turns them off. */
   quote?: boolean
+  /**
+   * While there are too few sessions to draw, the charts' place says how far a public site's archive has come; a page
+   * that says so above it, as the market overview does, turns this off.
+   */
+  warmUp?: boolean
 }
 
-/** A daily series over a chosen range: the latest close and change, the price and volume charts, and the range's figures. */
-export function PriceTrend({ bars, name, kind, overlays = [], quote = true }: PriceTrendProps) {
+/**
+ * A daily series over a chosen range: the latest close and change, the price and volume charts, and the range's figures.
+ * A line needs two sessions, so with one the charts' place says why there is none yet: how far a public site's archive
+ * has come, or that the chart starts at the second session.
+ */
+export function PriceTrend({ bars, name, kind, overlays = [], quote = true, warmUp = true }: PriceTrendProps) {
   const { t } = useTranslation()
   const format = useFormat()
   const [range, setRange] = useState<ChartRange>(DEFAULT_RANGE)
@@ -60,18 +70,28 @@ export function PriceTrend({ bars, name, kind, overlays = [], quote = true }: Pr
         <RangeTabs value={range} onChange={setRange} label={t('trend.range')} />
       </div>
       {quote && overlays.length > 0 && <Legend direction={direction} close={t('trend.close', { name })} overlays={overlays} />}
-      <Suspense fallback={<Skeleton className="h-[calc(var(--chart-price-height)+var(--chart-volume-height))] rounded-lg" />}>
-        <PriceVolumeChart
-          data={data}
-          direction={direction}
-          valueLabel={t('trend.close', { name })}
-          volumeLabel={t('trend.lastVolume')}
-          overlays={overlays}
-          formatValue={level}
-          formatAxisValue={(value) => format.number(value, value >= 100 ? 0 : 2)}
-          formatVolume={volume}
-        />
-      </Suspense>
+      {data.length < 2 ? (
+        <div className="grid h-[calc(var(--chart-price-height)+var(--chart-volume-height))] place-items-center rounded-lg border border-dashed px-4">
+          {warmUp ? (
+            <ArchiveWarmUp className="w-full max-w-md" fallback={<StateBlock icon={LineChart} title={t('trend.tooFew')} />} />
+          ) : (
+            <StateBlock icon={LineChart} title={t('trend.tooFew')} />
+          )}
+        </div>
+      ) : (
+        <Suspense fallback={<Skeleton className="h-[calc(var(--chart-price-height)+var(--chart-volume-height))] rounded-lg" />}>
+          <PriceVolumeChart
+            data={data}
+            direction={direction}
+            valueLabel={t('trend.close', { name })}
+            volumeLabel={t('trend.lastVolume')}
+            overlays={overlays}
+            formatValue={level}
+            formatAxisValue={(value) => format.number(value, value >= 100 ? 0 : 2)}
+            formatVolume={volume}
+          />
+        </Suspense>
+      )}
       <p className="sr-only" aria-live="polite">
         {t('trend.summary', { name, range: rangeName, change: format.number(summary.rangeChangeRatio * 100, 2) })}
       </p>

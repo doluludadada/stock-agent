@@ -36,13 +36,15 @@ from a_domain.types.errors import (
 )
 from b_application.config.settings_loader import InvalidSettingsError
 from d_presentation.dependencies import Runtime
-from d_presentation.live_runtime import RuntimeSwitch, archive_closes, watch_settings
+from d_presentation.live_runtime import RuntimeSwitch, collect_daily_data, watch_settings
 from d_presentation.web.routers.api_v1 import router as api_v1_router
 from d_presentation.web.session import (
     AdministratorsOnly,
     AppRequestRequired,
     MockBrokerOnly,
     NotFound,
+    NothingToFollow,
+    OutsideFollowWindow,
     SetupCodeRefused,
     UnknownHost,
     create_setup_code,
@@ -62,13 +64,17 @@ sends the header `X-Requested-With: stock-agent`, and every write but sign-in, s
 repeats `"confirm": true` in its body.
 
 Orders. Full Cycle, specific-stock analysis, valuation and market data never order. Buzz and Intraday send orders
-through the same gates and trading journal as the CLI, and the API starts them only while the execution provider is
-the mock broker (403 otherwise). No endpoint places, cancels or modifies an order by itself, and the API offers no
-manual BUY.
+through the same gates and trading journal as the CLI, and so does a follow (`POST /v1/runs/{run_id}/follow`), which
+places a finished Full Cycle's open decisions in the user's mock account, priced again: at a fresh realtime quote in
+continuous trading, or on a site without realtime quotes at the last session's official close while no session
+trades. The API starts them only while the execution provider is the mock broker (403 otherwise).
+No endpoint places, cancels or modifies an order by itself, and the API offers no manual BUY.
 
 Open data. A public site (`audience: public`) uses only the TWSE and TPEX OpenAPI data the server archives: daily
 history and the index trend come from that archive, it has no realtime quote, so Buzz and Intraday answer 403
-`realtime_quotes_unavailable`, and it trades on the mock broker only. It reads no news site and no MOPS: the AI step
+`realtime_quotes_unavailable`, and it trades on the mock broker only. A personal site without a Shioaji login reads its
+daily history and index trend from the same archive and has no realtime quote either, so it answers Buzz and Intraday
+the same way. It reads no news site and no MOPS: the AI step
 reads the archived material information, the TWSE news naming the stock and its archived financials, a stock with none
 of them is decided on its technical score alone, and every valuation endpoint answers 403 `mops_unavailable`. `GET
 /v1/market/audience` answers the site's audience and what it allows, so the web app offers only that. `GET
@@ -140,6 +146,8 @@ ERROR_ANSWERS: dict[type[Exception], tuple[int, ErrorCode]] = {
     TechnicalSettingsConflictError: (status.HTTP_409_CONFLICT, ErrorCode.TECHNICAL_SETTINGS_CONFLICT),
     SettingsConflictError: (status.HTTP_409_CONFLICT, ErrorCode.SETTINGS_CONFLICT),
     RunInProgress: (status.HTTP_409_CONFLICT, ErrorCode.RUN_IN_PROGRESS),
+    NothingToFollow: (status.HTTP_409_CONFLICT, ErrorCode.NOTHING_TO_FOLLOW),
+    OutsideFollowWindow: (status.HTTP_409_CONFLICT, ErrorCode.OUTSIDE_FOLLOW_WINDOW),
     SettingsEditError: (status.HTTP_422_UNPROCESSABLE_CONTENT, ErrorCode.SETTINGS_EDIT_REFUSED),
     AiModelNotOffered: (status.HTTP_422_UNPROCESSABLE_CONTENT, ErrorCode.AI_MODEL_NOT_OFFERED),
     InvalidSettingsError: (status.HTTP_422_UNPROCESSABLE_CONTENT, ErrorCode.SETTINGS_REFUSED),
@@ -210,9 +218,10 @@ def error_handlers() -> dict[int | type[Exception], ErrorAnswer]:
 def create_app(open_switch: Callable[[], AbstractAsyncContextManager[RuntimeSwitch]]) -> FastAPI:
     """
     The FastAPI app. Its lifespan opens the process's runtimes through the startup checks the CLI runs, offers the
-    first-time setup while no user exists, watches the settings files and archives the open-data closes on a timer. At
-    shutdown it stops the watch and the timer, cancels every running workflow while its runtime is open, so its record
-    ends as aborted, then closes every runtime.
+    first-time setup while no user exists, watches the settings files and collects the daily data on a timer: the
+    open-data archive, and the broker's daily history on a site with a broker login. At shutdown it stops the watch and
+    the timer and waits until both have ended, so a collection never outlives the runtime it holds, cancels every
+    running workflow while its runtime is open, so its record ends as aborted, then closes every runtime.
     """
 
     @asynccontextmanager
@@ -225,7 +234,7 @@ def create_app(open_switch: Callable[[], AbstractAsyncContextManager[RuntimeSwit
                 await offer_first_time_setup(app, opened.runtime)
 
             watcher = asyncio.get_running_loop().create_task(watch_settings(switch))
-            archiver = asyncio.get_running_loop().create_task(archive_closes(switch))
+            archiver = asyncio.get_running_loop().create_task(collect_daily_data(switch))
 
             try:
                 yield
@@ -233,6 +242,7 @@ def create_app(open_switch: Callable[[], AbstractAsyncContextManager[RuntimeSwit
             finally:
                 watcher.cancel()
                 archiver.cancel()
+                await asyncio.gather(watcher, archiver, return_exceptions=True)
                 await workflow_runs.stop()
 
     app = FastAPI(

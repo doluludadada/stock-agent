@@ -9,6 +9,7 @@ import json
 import sys
 from base64 import urlsafe_b64decode
 from collections.abc import Iterator, Mapping, Sequence
+from dataclasses import replace
 from functools import cache
 from pathlib import Path
 from types import UnionType
@@ -17,7 +18,7 @@ from typing import Any, Union, get_args, get_origin, override
 import yaml
 from pydantic import BaseModel, SecretStr, TypeAdapter, ValidationError
 from pydantic.json_schema import GenerateJsonSchema
-from pydantic_core import core_schema
+from pydantic_core import ErrorDetails, core_schema
 
 from a_domain.ports.system.settings_files import SettingChange, SettingsProblem, SettingValue
 from a_domain.types.enums import Audience, ExecutionProvider, InstructionKey, OrderMode, SettingsFile, SystemEnvironment
@@ -147,8 +148,18 @@ def load_settings(project_root: Path, candidates: Mapping[SettingsFile, str] | N
     try:
         return AppConfig(project_root=project_root, settings_revisions=revisions, **settings)
     except ValidationError as error:
-        located = [locate(texts, ".".join(str(part) for part in problem["loc"]), problem["msg"]) for problem in error.errors()]
-        raise InvalidSettingsError(located) from None
+        raise InvalidSettingsError([validation_problem(texts, problem) for problem in error.errors()]) from None
+
+
+def validation_problem(texts: Mapping[SettingsFile, str], error: ErrorDetails) -> SettingsProblem:
+    """
+    One of pydantic's refusals, located, with its type as the code and the schema's limits it names as the params. Only
+    those limits: the rest of pydantic's context can carry the input, which can be a secret from .env.
+    """
+    limits = ("gt", "ge", "lt", "le", "multiple_of", "expected", "min_length", "max_length", "pattern")
+    params = {key: value for key, value in error.get("ctx", {}).items() if key in limits and isinstance(value, str | int | float)}
+    problem = locate(texts, ".".join(str(part) for part in error["loc"]), error["msg"])
+    return replace(problem, code=error["type"], params=params)
 
 
 def parsed_document(file: SettingsFile, text: str) -> dict[str, Any]:
@@ -456,6 +467,15 @@ def startup_settings(
     except (TradingSetupError, AccountsSetupError) as error:
         raise InvalidSettingsError([locate(texts, error.path, str(error))]) from None
 
+    validate_ai_setup(config, texts)
+    return config
+
+
+def validate_ai_setup(config: AppConfig, texts: Mapping[SettingsFile, str]) -> None:
+    """
+    The AI's web and X search, which an audience without news articles refuses (search_on_open_data), and every offered
+    provider's model id and key: InvalidSettingsError at each setting that refuses.
+    """
     searches = {
         "behavior.enable_web_search": config.behavior.enable_web_search,
         "behavior.enable_x_search": config.behavior.enable_x_search,
@@ -463,12 +483,18 @@ def startup_settings(
 
     if not config.audience.news_articles and (searching := [path for path, enabled in searches.items() if enabled]):
         message = f"must be false on audience {config.audience.value}: a search brings news sites' and X's text, which it may not use"
-        raise InvalidSettingsError([locate(texts, path, message) for path in searching])
+        params = {"audience": config.audience.value}
+        raise InvalidSettingsError(
+            [replace(locate(texts, path, message), code="search_on_open_data", params=params) for path in searching]
+        )
 
     if missing := config.ai.missing_keys():
-        raise InvalidSettingsError([locate(texts, path, f"{need}; the app would not start") for path, need in missing.items()])
-
-    return config
+        raise InvalidSettingsError(
+            [
+                replace(locate(texts, path, f"{need.message}; the app would not start"), code=need.code, params=need.params)
+                for path, need in missing.items()
+            ]
+        )
 
 
 def validate_trading_environment(config: AppConfig) -> None:
@@ -551,8 +577,8 @@ def validate_environment_credentials(config: AppConfig) -> None:
 def validate_started_setup_unchanged(config: AppConfig, environment: SystemEnvironment, audience: Audience) -> None:
     """
     A process keeps the environment and the audience it started in: the environment decides which credentials it reads,
-    and the audience which sources it may reach and whom it may show them, so a public site never starts asking Yahoo or
-    TWSE MIS because a save said so. A settings change on disk or from the Web that changes either is refused, and the
+    and the audience which sources it may reach and whom it may show them, so a public site never starts asking a news site or
+    Shioaji because a save said so. A settings change on disk or from the Web that changes either is refused, and the
     running settings keep serving.
     """
     if config.environment != environment:

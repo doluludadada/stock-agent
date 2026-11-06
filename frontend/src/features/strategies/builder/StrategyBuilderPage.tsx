@@ -350,7 +350,6 @@ function QuickFillBar({
   onFill: (kind: QuickFillKind) => void
 }) {
   const { t } = useTranslation('builder')
-  const labels = useStrategyLabels()
   return (
     <Panel
       title={
@@ -372,7 +371,7 @@ function QuickFillBar({
               <SelectContent>
                 {strategy.rules.map((rule, index) => (
                   <SelectItem key={rule.id} value={rule.id}>
-                    {labels.rule(rule.name.trim()) || t('rule.label', { index: index + 1 })}
+                    {rule.name.trim() || t('rule.label', { index: index + 1 })}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -412,7 +411,7 @@ function PreviewCard({ strategy }: { strategy: Strategy }) {
         <p className="text-sm text-muted-foreground">{t('preview.empty')}</p>
       ) : (
         <div aria-live="polite">
-          <RuleSummaryList strategy={strategy} named />
+          <RuleSummaryList strategy={strategy} ruleName={(name) => name} />
         </div>
       )}
     </Panel>

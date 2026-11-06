@@ -43,6 +43,9 @@ class TradeSignal:
     technical_report: TechnicalReport | None = None
     ai_report: AiAnalysisReport | None = None
 
+    followed_decision_id: DecisionId | None = None
+    """On a follow's decision only: the decision of the followed run it carries out again, at its own price."""
+
     @model_validator(mode="after")
     def _orderable_signals_have_shares(self) -> Self:
         if self.action != TradeAction.HOLD and self.quantity <= 0:

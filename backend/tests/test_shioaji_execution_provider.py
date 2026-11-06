@@ -1,18 +1,27 @@
+import asyncio
+import traceback
 from datetime import UTC, datetime
 
 import pytest
+import shioaji
 from shioaji.constant import Action, OrderType as BrokerTimeInForce, Status, StockOrderCond, StockOrderLot, StockPriceType, Unit
 from shioaji.error import TimeoutError as ShioajiTimeoutError, TokenError
 from shioaji.position import AccountBalance
 from support.fake_shioaji import FakeShioaji, Report, position
-from support.settings import shipped_config
+from support.fakes import RecordingLogger
+from support.settings import environment_setup, shipped_config
 from trading_stack import SilentLogger
 
 from a_domain.model.trading.order import Order
-from a_domain.types.enums import OrderStatus, OrderType, SystemEnvironment, TimeInForce, TradeAction
+from a_domain.ports.trading.execution_provider import IExecutionProvider
+from a_domain.types.enums import ExecutionProvider, OrderMode, OrderStatus, OrderType, SystemEnvironment, TimeInForce, TradeAction
 from a_domain.types.ids import new_decision_id, new_run_id
-from b_application.config.trading_config import ShioajiConfig
+from b_application.config.trading_config import ShioajiConfig, ShioajiLogin
+from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection, ShioajiQuoteProvider
+from c_infrastructure.system.attempt_log import MemoryAttemptLog
+from c_infrastructure.system.market_clock import TaiwanMarketClock
 from c_infrastructure.trading.shioaji.execution_provider import ORDER_STATUS, ShioajiExecutionProvider
+from d_presentation.dependencies import ProcessState, TradingSetupError, connect_shioaji
 
 NOW = datetime(2026, 10, 19, 10, 0, tzinfo=UTC)
 
@@ -26,15 +35,40 @@ def provider(client: FakeShioaji) -> ShioajiExecutionProvider:
     if client.stock_account is None:
         client.stock_account = client.account_at_login
 
-    return unconnected(client, simulation=True)
+    login = login_of(simulation=True)
+    return ShioajiExecutionProvider(client=client, quotes=quotes_of(client, login), login=login, config=CONFIG, logger=SilentLogger())
 
 
-def unconnected(client: FakeShioaji, simulation: bool) -> ShioajiExecutionProvider:
-    """An adapter whose client has not logged in yet: connect() logs it in, to simulation as test does or production as prod does."""
-    environment = SystemEnvironment.TEST if simulation else SystemEnvironment.PROD
-    login = credentials().login(environment)
+def login_of(simulation: bool) -> ShioajiLogin:
+    login = credentials().login(SystemEnvironment.TEST if simulation else SystemEnvironment.PROD)
+    assert login is not None
+    return login
 
-    return ShioajiExecutionProvider(client=client, login=login, config=CONFIG, logger=SilentLogger())
+
+async def connected(client: FakeShioaji, simulation: bool) -> ShioajiExecutionProvider:
+    """
+    The broker on a client the quote provider logged in, to simulation as test does or production as prod does, once
+    its connect() checked the login: the startup's order.
+    """
+    login = login_of(simulation)
+    quotes = quotes_of(client, login)
+    broker = ShioajiExecutionProvider(client=client, quotes=quotes, login=login, config=CONFIG, logger=SilentLogger())
+    await quotes.connect()
+    await broker.connect()
+    return broker
+
+
+def quotes_of(client: FakeShioaji, login: ShioajiLogin) -> ShioajiQuoteProvider:
+    return ShioajiQuoteProvider(
+        connection=ShioajiConnection(client=client),
+        new_client=FakeShioaji,
+        login=login,
+        market_clock=TaiwanMarketClock(CONFIG.market_hours),
+        market_data=CONFIG.market_data,
+        sources=CONFIG.sources.shioaji,
+        board_lot_shares=1000,
+        logger=SilentLogger(),
+    )
 
 
 def order(
@@ -191,10 +225,10 @@ async def test_every_shioaji_status_has_a_domain_status() -> None:
             "IOC unfilled: filled 0 of 1000; Common 1 lots IOC Cancelled, dealt 0 shares",
         ),
         (
-            Report(Status.Failed, msg="price out of range"),
+            Report(Status.Failed, msg="price out of range", status_code="88"),
             OrderStatus.REJECTED,
             0,
-            "BROKER_REFUSED: Common 1 lots IOC Failed, dealt 0 shares (price out of range)",
+            "BROKER_REFUSED: Common 1 lots IOC Failed, dealt 0 shares (status 88)",
         ),
         (Report(Status.Inactive), OrderStatus.FAILED, 0, "unexplained broker result: Common 1 lots IOC Inactive, dealt 0 shares"),
     ],
@@ -268,12 +302,12 @@ async def test_deals_at_the_limit_price_fill_even_where_their_float_average_roun
 
 
 async def test_when_the_odd_lot_part_is_refused_the_board_lot_fill_stands_and_the_order_is_cancelled() -> None:
-    client = FakeShioaji(scripts={StockOrderLot.IntradayOdd: [Report(Status.Failed, msg="price out of range")]})
+    client = FakeShioaji(scripts={StockOrderLot.IntradayOdd: [Report(Status.Failed, msg="price out of range", status_code="88")]})
 
     placed = await provider(client).place_order(order(quantity=1500))
 
     assert (placed.status, placed.filled_quantity) == (OrderStatus.CANCELLED, 1000)
-    assert placed.reason is not None and "IntradayOdd 500 shares ROD Failed, dealt 0 shares (price out of range)" in placed.reason
+    assert placed.reason is not None and "IntradayOdd 500 shares ROD Failed, dealt 0 shares (status 88)" in placed.reason
 
 
 async def test_an_odd_lot_rod_part_still_working_after_the_polls_is_cancelled_and_the_order_says_so() -> None:
@@ -362,14 +396,14 @@ async def test_get_account_refuses_a_balance_the_broker_reports_as_an_error() ->
     client = FakeShioaji()
     client.balance = client.balance.model_copy(update={"errmsg": "bank link down"})
 
-    with pytest.raises(RuntimeError, match="bank link down"):
+    with pytest.raises(RuntimeError, match="^Shioaji answered the account balance with an error message$"):
         await provider(client).get_account()
 
 
 async def test_the_test_environment_logs_in_to_simulation_with_only_the_test_key_pair_and_no_ca() -> None:
     client = FakeShioaji()
 
-    await unconnected(client, simulation=True).connect()
+    await connected(client, simulation=True)
 
     logins = [(login["api_key"], login["secret_key"]) for login in client.logins]
     assert (logins, client.ca_activations) == ([("test-key", "test-secret")], [])
@@ -379,7 +413,7 @@ async def test_the_test_environment_logs_in_to_simulation_with_only_the_test_key
 async def test_the_prod_environment_logs_in_with_the_production_key_pair_and_activates_the_ca() -> None:
     client = FakeShioaji(simulation=False)
 
-    await unconnected(client, simulation=False).connect()
+    await connected(client, simulation=False)
 
     assert [(login["api_key"], login["secret_key"]) for login in client.logins] == [("key", "secret")]
     assert client.ca_activations == [{"ca_path": "/certs/Sinopac.pfx", "ca_passwd": "ca-password", "person_id": "A123456789"}]
@@ -388,15 +422,15 @@ async def test_the_prod_environment_logs_in_with_the_production_key_pair_and_act
 @pytest.mark.parametrize(
     ("client", "message"),
     [
-        (FakeShioaji(simulation=False, login_error=TokenError(401, "bad key")), "bad key"),
+        (FakeShioaji(simulation=False, login_error=TokenError(401, "bad key")), "^TokenError, status 401$"),
         (FakeShioaji(simulation=False, account_at_login=None), "no stock account"),
         (FakeShioaji(simulation=False, ca_activates=False), "CA certificate at /certs/Sinopac.pfx was not activated"),
-        (FakeShioaji(simulation=False, ca_error=ValueError("wrong CA password")), "wrong CA password"),
+        (FakeShioaji(simulation=False, ca_error=ValueError("wrong CA password")), "^Shioaji answered ValueError$"),
     ],
 )
 async def test_a_failed_login_or_ca_activation_raises_saying_what_failed(client: FakeShioaji, message: str) -> None:
     with pytest.raises(Exception, match=message):
-        await unconnected(client, simulation=False).connect()
+        await connected(client, simulation=False)
 
 
 async def test_production_refuses_an_account_that_has_not_signed_the_api_agreement() -> None:
@@ -404,7 +438,7 @@ async def test_production_refuses_an_account_that_has_not_signed_the_api_agreeme
     client.account_at_login = client.account_at_login.model_copy(update={"signed": False})
 
     with pytest.raises(RuntimeError, match="has not signed"):
-        await unconnected(client, simulation=False).connect()
+        await connected(client, simulation=False)
 
 
 async def test_a_second_buy_is_refused_when_todays_first_fill_used_the_cash() -> None:
@@ -435,3 +469,141 @@ async def test_an_order_whose_deals_lag_its_dealt_quantity_fails_instead_of_unde
 
     assert (placed.status, placed.filled_quantity) == (OrderStatus.FAILED, 1000)
     assert placed.reason is not None and placed.reason.startswith("unexplained broker result")
+
+
+SERVER_WORDS = "person A123456789 signed in from 203.0.113.7 for account 0012345"
+"""What a server's refusal may repeat: the login's person id, its address and the stock account's number (the fake's)."""
+
+PRIVATE = ("A123456789", "203.0.113.7", "0012345")
+
+
+def sdk_refusal() -> TokenError:
+    return TokenError(401, SERVER_WORDS)
+
+
+def private_parts(*texts: str | None) -> list[str]:
+    return [part for part in PRIVATE if any(part in (text or "") for text in texts)]
+
+
+def raised(error: BaseException) -> str:
+    """What a log of the error with its traceback shows: every exception of its chain."""
+    return "".join(traceback.format_exception(error))
+
+
+def said(logger: RecordingLogger) -> list[str]:
+    return [message for _, message in logger.records]
+
+
+async def broker_of(
+    client: FakeShioaji, monkeypatch: pytest.MonkeyPatch, logger: RecordingLogger, environment: SystemEnvironment
+) -> IExecutionProvider:
+    """The broker that connect_shioaji builds on `client` at the start of a site in `environment` with Shioaji as the broker."""
+    monkeypatch.setattr(shioaji, "Shioaji", lambda simulation: client)
+    polling = CONFIG.shioaji.model_copy(update={"poll_interval_seconds": 0, "max_polls": 3})
+    site = environment_setup(
+        CONFIG.model_copy(update={"shioaji": polling}), environment, ExecutionProvider.SHIOAJI, OrderMode.DISABLED
+    )
+    process = ProcessState(logger=logger, attempt_log=MemoryAttemptLog(), cache_writes=asyncio.Lock())
+    _, broker = await connect_shioaji(site, process, TaiwanMarketClock(CONFIG.market_hours))
+    assert broker is not None
+    return broker
+
+
+@pytest.mark.parametrize(
+    ("client", "says"),
+    [
+        (FakeShioaji(simulation=False, ca_error=sdk_refusal()), "TokenError, status 401"),
+        (
+            FakeShioaji(simulation=False, account_at_login=FakeShioaji().account_at_login.model_copy(update={"signed": False})),
+            "has not signed",
+        ),
+    ],
+    ids=["refused CA activation", "unsigned account"],
+)
+async def test_a_refused_production_start_says_what_failed_without_the_servers_words_or_the_account_number(
+    client: FakeShioaji, says: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    logger = RecordingLogger()
+
+    with pytest.raises(TradingSetupError) as refused:
+        await broker_of(client, monkeypatch, logger, SystemEnvironment.PROD)
+
+    assert says in str(refused.value)
+    assert private_parts(raised(refused.value), *said(logger)) == []
+
+
+ACCOUNT_READS = ("account_balance", "settlements", "update_status", "list_trades", "list_positions")
+
+
+@pytest.mark.parametrize(
+    ("client", "says"),
+    [
+        *[(FakeShioaji(refusals={read: sdk_refusal()}), "Shioaji answered TokenError, status 401") for read in ACCOUNT_READS],
+        (FakeShioaji(balance=AccountBalance(acc_balance=1_000_000.0, date="2026-10-19", errmsg=SERVER_WORDS)), "account balance"),
+    ],
+    ids=[*ACCOUNT_READS, "balance with an error message"],
+)
+async def test_a_refused_account_read_raises_and_fails_the_order_saying_only_the_error_type_and_status(
+    client: FakeShioaji, says: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    logger = RecordingLogger()
+    broker = await broker_of(client, monkeypatch, logger, SystemEnvironment.TEST)
+
+    with pytest.raises(Exception) as refused:
+        await broker.get_account()
+    failed = await broker.place_order(order())
+
+    assert (failed.status, client.placed) == (OrderStatus.FAILED, [])
+    assert says in str(refused.value) and failed.reason is not None and says in failed.reason
+    assert private_parts(raised(refused.value), failed.reason, *said(logger)) == []
+
+
+async def test_an_unconfirmed_order_whose_lookup_failed_says_only_the_error_types_and_statuses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = FakeShioaji(
+        place_error=sdk_refusal(),
+        place_error_after_accepting=True,
+        refusals={"update_status": sdk_refusal()},
+        refuses_once_placed=True,
+    )
+    logger = RecordingLogger()
+
+    failed = await (await broker_of(client, monkeypatch, logger, SystemEnvironment.TEST)).place_order(order())
+
+    assert failed.status == OrderStatus.FAILED
+    assert failed.reason is not None and "(Shioaji answered TokenError, status 401). It may have reached the exchange" in failed.reason
+    assert [message for message in said(logger) if "lookup" in message] == [
+        f"Shioaji lookup of the order tagged {failed.id.hex[:5]}0 failed: Shioaji answered TokenError, status 401"
+    ]
+    assert private_parts(failed.reason, *said(logger)) == []
+
+
+async def test_refused_status_reads_and_cancel_are_logged_saying_only_the_error_type_and_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = FakeShioaji(refusals={"update_status": sdk_refusal(), "cancel_order": sdk_refusal()}, refuses_once_placed=True)
+    logger = RecordingLogger()
+
+    failed = await (await broker_of(client, monkeypatch, logger, SystemEnvironment.TEST)).place_order(order())
+
+    assert failed.status == OrderStatus.FAILED
+    assert [message for message in said(logger) if "failed:" in message] == [
+        *["Shioaji status refresh failed: Shioaji answered TokenError, status 401"] * 3,
+        f"Shioaji cancel of the order tagged {failed.id.hex[:5]}0 failed: Shioaji answered TokenError, status 401",
+        *["Shioaji status refresh failed: Shioaji answered TokenError, status 401"] * 3,
+    ]
+    assert private_parts(failed.reason, *said(logger)) == []
+
+
+async def test_a_refused_exchange_order_gives_the_brokers_status_code_instead_of_its_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = FakeShioaji(scripts={StockOrderLot.Common: [Report(Status.Failed, msg=SERVER_WORDS, status_code="88")]})
+    logger = RecordingLogger()
+
+    refused = await (await broker_of(client, monkeypatch, logger, SystemEnvironment.TEST)).place_order(order())
+
+    assert (refused.status, refused.reason) == (
+        OrderStatus.REJECTED,
+        "BROKER_REFUSED: Common 1 lots IOC Failed, dealt 0 shares (status 88)",
+    )
+    assert private_parts(refused.reason, *said(logger)) == []

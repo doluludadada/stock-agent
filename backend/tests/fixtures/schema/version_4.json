@@ -45,6 +45,37 @@
       }
     },
     "foreign_keys": [],
+    "indexes": [
+      [
+        "ix_account_snapshots_order_id",
+        [
+          "order_id"
+        ],
+        false
+      ],
+      [
+        "ix_account_snapshots_owner_taken",
+        [
+          "owner_id",
+          "taken_at"
+        ],
+        false
+      ],
+      [
+        "ix_account_snapshots_run_id",
+        [
+          "run_id"
+        ],
+        false
+      ],
+      [
+        "ix_account_snapshots_taken_at",
+        [
+          "taken_at"
+        ],
+        false
+      ]
+    ],
     "primary_key": [
       "snapshot_id"
     ],
@@ -66,6 +97,7 @@
       }
     },
     "foreign_keys": [],
+    "indexes": [],
     "primary_key": [
       "day"
     ],
@@ -93,6 +125,7 @@
       }
     },
     "foreign_keys": [],
+    "indexes": [],
     "primary_key": [
       "owner_id",
       "day"
@@ -133,6 +166,7 @@
       }
     },
     "foreign_keys": [],
+    "indexes": [],
     "primary_key": [
       "stock_id",
       "article_url"
@@ -197,6 +231,15 @@
       }
     },
     "foreign_keys": [],
+    "indexes": [
+      [
+        "ix_daily_close_archive_session_date",
+        [
+          "session_date"
+        ],
+        false
+      ]
+    ],
     "primary_key": [
       "stock_id",
       "session_date"
@@ -225,6 +268,7 @@
       }
     },
     "foreign_keys": [],
+    "indexes": [],
     "primary_key": [
       "url"
     ],
@@ -282,6 +326,7 @@
       }
     },
     "foreign_keys": [],
+    "indexes": [],
     "primary_key": [
       "stock_id",
       "year",
@@ -318,6 +363,7 @@
       }
     },
     "foreign_keys": [],
+    "indexes": [],
     "primary_key": [
       "market",
       "session_date"
@@ -364,6 +410,7 @@
       }
     },
     "foreign_keys": [],
+    "indexes": [],
     "primary_key": [
       "stock_id",
       "announced_at"
@@ -404,6 +451,7 @@
       }
     },
     "foreign_keys": [],
+    "indexes": [],
     "primary_key": [
       "owner_id"
     ],
@@ -449,6 +497,7 @@
       }
     },
     "foreign_keys": [],
+    "indexes": [],
     "primary_key": [
       "owner_id",
       "stock_id"
@@ -555,6 +604,7 @@
       }
     },
     "foreign_keys": [],
+    "indexes": [],
     "primary_key": [
       "stock_id",
       "year",
@@ -596,6 +646,7 @@
       }
     },
     "foreign_keys": [],
+    "indexes": [],
     "primary_key": [
       "market",
       "year",
@@ -655,6 +706,7 @@
       }
     },
     "foreign_keys": [],
+    "indexes": [],
     "primary_key": [
       "ts",
       "stock_id"
@@ -683,6 +735,7 @@
       }
     },
     "foreign_keys": [],
+    "indexes": [],
     "primary_key": [
       "stock_id"
     ],
@@ -704,6 +757,7 @@
       }
     },
     "foreign_keys": [],
+    "indexes": [],
     "primary_key": [
       "stock_id"
     ],
@@ -849,14 +903,33 @@
       }
     },
     "foreign_keys": [],
+    "indexes": [
+      [
+        "ix_orders_decision_id",
+        [
+          "decision_id"
+        ],
+        true
+      ],
+      [
+        "ix_orders_run_id",
+        [
+          "run_id"
+        ],
+        false
+      ],
+      [
+        "ix_orders_stock_id",
+        [
+          "stock_id"
+        ],
+        false
+      ]
+    ],
     "primary_key": [
       "id"
     ],
-    "unique": [
-      [
-        "decision_id"
-      ]
-    ]
+    "unique": []
   },
   "quarter_eps_archive": {
     "columns": {
@@ -886,6 +959,7 @@
       }
     },
     "foreign_keys": [],
+    "indexes": [],
     "primary_key": [
       "stock_id",
       "year",
@@ -927,6 +1001,7 @@
       }
     },
     "foreign_keys": [],
+    "indexes": [],
     "primary_key": [
       "run_id",
       "position"
@@ -943,6 +1018,7 @@
       }
     },
     "foreign_keys": [],
+    "indexes": [],
     "primary_key": [
       "version"
     ],
@@ -1083,6 +1159,7 @@
         "CASCADE"
       ]
     ],
+    "indexes": [],
     "primary_key": [
       "owner_id",
       "strategy_id",
@@ -1176,6 +1253,7 @@
         "CASCADE"
       ]
     ],
+    "indexes": [],
     "primary_key": [
       "owner_id",
       "strategy_id",
@@ -1232,6 +1310,7 @@
         "CASCADE"
       ]
     ],
+    "indexes": [],
     "primary_key": [
       "owner_id",
       "strategy_id",
@@ -1267,6 +1346,7 @@
       }
     },
     "foreign_keys": [],
+    "indexes": [],
     "primary_key": [
       "owner_id"
     ],
@@ -1335,6 +1415,7 @@
         "CASCADE"
       ]
     ],
+    "indexes": [],
     "primary_key": [
       "owner_id",
       "strategy_id"
@@ -1451,6 +1532,22 @@
       }
     },
     "foreign_keys": [],
+    "indexes": [
+      [
+        "ix_trade_signals_run_id",
+        [
+          "run_id"
+        ],
+        false
+      ],
+      [
+        "ix_trade_signals_stock_id",
+        [
+          "stock_id"
+        ],
+        false
+      ]
+    ],
     "primary_key": [
       "decision_id"
     ],
@@ -1493,6 +1590,22 @@
           ]
         ],
         ""
+      ]
+    ],
+    "indexes": [
+      [
+        "ix_user_sessions_expires_at",
+        [
+          "expires_at"
+        ],
+        false
+      ],
+      [
+        "ix_user_sessions_user_id",
+        [
+          "user_id"
+        ],
+        false
       ]
     ],
     "primary_key": [
@@ -1586,6 +1699,7 @@
       }
     },
     "foreign_keys": [],
+    "indexes": [],
     "primary_key": [
       "user_id"
     ],
@@ -1632,6 +1746,7 @@
       }
     },
     "foreign_keys": [],
+    "indexes": [],
     "primary_key": [
       "stock_id",
       "session_date"
@@ -1672,6 +1787,15 @@
       }
     },
     "foreign_keys": [],
+    "indexes": [
+      [
+        "ix_watchlists_expires_at",
+        [
+          "expires_at"
+        ],
+        false
+      ]
+    ],
     "primary_key": [
       "owner_id",
       "stock_id",
@@ -1839,6 +1963,16 @@
       }
     },
     "foreign_keys": [],
+    "indexes": [
+      [
+        "ix_workflow_runs_owner_start",
+        [
+          "owner_id",
+          "start_time"
+        ],
+        false
+      ]
+    ],
     "primary_key": [
       "run_id"
     ],

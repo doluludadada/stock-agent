@@ -188,10 +188,18 @@ async def test_a_connection_that_drops_during_the_stream_is_answered_with_an_apo
     assert reply.content == "I'm sorry, I'm having trouble connecting to Groq right now. Please try again in a moment."
 
 
-async def test_a_reply_the_adapter_cannot_read_raises_for_the_caller_to_record(served_stream: list) -> None:
-    served_stream += [stream_event("Supply "), stream_event("", choices=False), b"data: [DONE]\n\n"]
+async def test_a_chunk_without_choices_such_as_nvidias_closing_usage_chunk_adds_nothing_to_the_reply(served_stream: list) -> None:
+    served_stream += [stream_event("Supply "), stream_event("is tight."), stream_event("", choices=False), b"data: [DONE]\n\n"]
 
-    with pytest.raises(IndexError):
+    reply = await nvidia(config()).generate_reply(CONVERSATION)
+
+    assert reply.content == "Supply is tight."
+
+
+async def test_a_reply_the_adapter_cannot_read_raises_for_the_caller_to_record(served_stream: list) -> None:
+    served_stream += [stream_event("Supply "), b"data: {not json\n\n", b"data: [DONE]\n\n"]
+
+    with pytest.raises(ValueError):
         await groq(config()).generate_reply(CONVERSATION)
 
 

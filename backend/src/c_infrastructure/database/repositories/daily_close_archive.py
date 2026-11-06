@@ -1,6 +1,8 @@
 import re
 from collections import Counter
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+from itertools import groupby
+from operator import attrgetter
 from typing import override
 
 from sqlalchemy import func
@@ -21,7 +23,8 @@ from a_domain.ports.market.daily_close_archive import (
 )
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
-from a_domain.types.enums import FinancialStatement, MarketIndex
+from a_domain.rules.market.listing import HistoryAdjustmentRule
+from a_domain.types.enums import FinancialStatement, MarketIndex, MarketType
 from a_domain.types.errors import RealtimeQuotesUnavailable
 from a_domain.types.values import FiscalQuarter
 from b_application.config.sources_config import ExchangeSources
@@ -45,8 +48,10 @@ class SqlDailyCloseArchive(IDailyCloseArchive):
     owner. A save is one upsert per table, so the Web API's timer and `just archive-closes` saving the same data at once
     never collide, and each table commits on its own: a table the database refuses is logged by its name, and the others
     are still saved, since the source serves the rest only until its next period. A read of history takes the sessions
-    of its window's two dates, as the market clock dates them; a read of news takes the announcements and the TWSE news
-    of the last `material_information_days`, a news item dated by its day and stamped at that day's session close.
+    of its window's two dates, as the market clock dates them, and adjusts each stock's bars of each market it was
+    listed on against the index closes of the sessions that hold that market's closes; a read of news takes the
+    announcements and the TWSE news of the last `material_information_days`, a news item dated by its day and stamped
+    at that day's session close.
     """
 
     def __init__(
@@ -63,6 +68,7 @@ class SqlDailyCloseArchive(IDailyCloseArchive):
         self._summary = exchange.financial_reports.summary
         self._stock_codes = re.compile(exchange.exchange_news.stock_code_pattern)
         self._material_information_window = timedelta(days=material_information_days)
+        self._adjustment = HistoryAdjustmentRule()
 
     @override
     async def save(self, download: OpenDataDownload) -> None:
@@ -179,6 +185,19 @@ class SqlDailyCloseArchive(IDailyCloseArchive):
         return quarters, [revenue.to_domain() for revenue in revenue_rows]
 
     @override
+    async def official_changes(self, stock_ids: list[str], first: date, last: date) -> dict[tuple[str, date], float]:
+        statement = select(DailyCloseDTO).where(
+            col(DailyCloseDTO.stock_id).in_(stock_ids),
+            col(DailyCloseDTO.session_date).between(first, last),
+            col(DailyCloseDTO.change).is_not(None),
+        )
+
+        async with self._db.get_session() as session:
+            rows = (await session.execute(statement)).scalars().all()
+
+        return {(row.stock_id, row.session_date): row.change for row in rows if row.change is not None}
+
+    @override
     async def session_count(self) -> int:
         async with self._db.get_session() as session:
             return (await session.execute(select(func.count(func.distinct(col(DailyCloseDTO.session_date)))))).scalar_one()
@@ -186,22 +205,33 @@ class SqlDailyCloseArchive(IDailyCloseArchive):
     @override
     async def fetch_history(self, stocks: list[Stock], start_date: datetime, end_date: datetime) -> dict[str, list[Ohlcv]]:
         first, last = self._market_clock.to_trading_date(start_date), self._market_clock.to_trading_date(end_date)
-        statement = (
+        closes = (
             select(DailyCloseDTO)
             .where(col(DailyCloseDTO.stock_id).in_([stock.stock_id for stock in stocks]))
             .where(col(DailyCloseDTO.session_date).between(first, last))
             .order_by(col(DailyCloseDTO.stock_id), col(DailyCloseDTO.session_date))
         )
+        held = select(DailyCloseDTO.stock_id).where(
+            col(DailyCloseDTO.market) == col(IndexCloseDTO.market), col(DailyCloseDTO.session_date) == col(IndexCloseDTO.session_date)
+        )
+        index_closes = select(IndexCloseDTO).where(col(IndexCloseDTO.session_date).between(first, last), held.exists())
 
         async with self._db.get_session() as session:
-            rows = (await session.execute(statement)).scalars().all()
+            rows = (await session.execute(closes)).scalars().all()
+            index_rows = (await session.execute(index_closes.order_by(col(IndexCloseDTO.session_date)))).scalars().all()
 
-        bars: dict[str, list[Ohlcv]] = {}
+        stamp = self._market_clock.session_close
+        indexes: dict[str, list[Ohlcv]] = {}
+        history: dict[str, list[Ohlcv]] = {}
 
-        for row in rows:
-            bars.setdefault(row.stock_id, []).append(row.to_domain(self._market_clock.session_close(row.session_date)))
+        for index_row in index_rows:
+            indexes.setdefault(index_row.market, []).append(index_row.to_domain(stamp(index_row.session_date)))
 
-        return bars
+        for (stock_id, market), run in groupby(rows, key=attrgetter("stock_id", "market")):
+            listed = [row.to_domain(stamp(row.session_date)) for row in run]
+            history.setdefault(stock_id, []).extend(self._adjustment.apply(listed, indexes.get(market, []), MarketType(market)))
+
+        return history
 
     @override
     async def fetch_index_history(self, index: MarketIndex, start_date: datetime, end_date: datetime) -> list[Ohlcv]:
@@ -220,7 +250,10 @@ class SqlDailyCloseArchive(IDailyCloseArchive):
 
     @override
     async def fetch_realtime_bars(self, stocks: list[Stock]) -> dict[str, Ohlcv]:
-        raise RealtimeQuotesUnavailable("The open-data archive holds settled daily closes only, never a realtime quote.")
+        raise RealtimeQuotesUnavailable(
+            "The open-data archive holds settled daily closes only, never a realtime quote. A personal site quotes on its "
+            "Shioaji login: set the environment's Shioaji key pair and restart."
+        )
 
     @override
     async def fetch_news(self, stock_id: str, limit: int = 10) -> list[Article]:

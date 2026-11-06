@@ -27,10 +27,15 @@ def settings_document() -> dict[str, Any]:
     return TypeAdapter(TechnicalSettings).dump_python(harness_settings(), mode="json")
 
 
-ORDERING_WRITES = [("POST", "/v1/runs/buzz-scan", {}), ("POST", "/v1/runs/intraday", {})]
+FOLLOWED_RUN = "00000000-0000-0000-0000-000000000001"
+ORDERING_WRITES = [
+    ("POST", "/v1/runs/buzz-scan", {}),
+    ("POST", "/v1/runs/intraday", {}),
+    ("POST", f"/v1/runs/{FOLLOWED_RUN}/follow", {}),
+]
 VALUATION_WRITES = [("POST", "/v1/valuation/explanation", {"stock_id": "2330", "target_pe": 15})]
 """Read-only, but each request is one paid AI call, so it is confirmed like a write."""
-"""The only writes that can lead to an order: Buzz and Intraday, which the API starts on the mock broker only."""
+"""The only writes that can lead to an order: Buzz, Intraday and a follow, which the API starts on the mock broker only."""
 
 WRITES = [
     ("POST", "/v1/runs/full-cycle", {}),
@@ -39,6 +44,8 @@ WRITES = [
     ("POST", "/v1/watchlist/manual/remove", {"stock_ids": ["2330"]}),
     ("PUT", "/v1/technical-settings", {"settings": settings_document()}),
 ]
+RESET_WRITES = [("POST", "/v1/account/reset", {"initial_cash": 500_000})]
+"""It reopens the mock account, which places no order; its positions go, so it is left out of the writes run in a row."""
 
 
 # ----------------------------------- Runs ----------------------------------- #
@@ -428,7 +435,7 @@ async def test_account_history_names_the_broker_and_order_mode_the_settings_choo
 # ---------------------------- Permission and scope -------------------------- #
 
 
-@pytest.mark.parametrize(("method", "path", "body"), WRITES + ORDERING_WRITES + VALUATION_WRITES)
+@pytest.mark.parametrize(("method", "path", "body"), WRITES + RESET_WRITES + ORDERING_WRITES + VALUATION_WRITES)
 async def test_writes_need_a_session(method: str, path: str, body: dict[str, Any]) -> None:
     harness = build_harness()
     harness.list_stock("2330", rising_history(100.0))
@@ -440,7 +447,7 @@ async def test_writes_need_a_session(method: str, path: str, body: dict[str, Any
     assert (harness.journal.runs, harness.watchlist.rows, harness.technical_settings.saved) == ({}, [], harness_settings())
 
 
-@pytest.mark.parametrize(("method", "path", "body"), WRITES + ORDERING_WRITES + VALUATION_WRITES)
+@pytest.mark.parametrize(("method", "path", "body"), WRITES + RESET_WRITES + ORDERING_WRITES + VALUATION_WRITES)
 async def test_writes_need_the_web_apps_header_so_another_site_cannot_send_them(method: str, path: str, body: dict[str, Any]) -> None:
     harness = build_harness()
     harness.list_stock("2330", rising_history(100.0))
@@ -454,7 +461,7 @@ async def test_writes_need_the_web_apps_header_so_another_site_cannot_send_them(
 
 
 @pytest.mark.parametrize("confirm", [{}, {"confirm": False}, {"confirm": "yes"}])
-@pytest.mark.parametrize(("method", "path", "body"), WRITES + ORDERING_WRITES + VALUATION_WRITES)
+@pytest.mark.parametrize(("method", "path", "body"), WRITES + RESET_WRITES + ORDERING_WRITES + VALUATION_WRITES)
 async def test_writes_need_confirm_true(method: str, path: str, body: dict[str, Any], confirm: dict[str, Any]) -> None:
     harness = build_harness()
     harness.list_stock("2330", rising_history(100.0))
@@ -520,7 +527,10 @@ async def test_the_api_writes_only_runs_watchlist_settings_and_settings_files_an
     }
     writes = {(method, path) for method, path in every_write if not path.startswith("/v1/auth")}
 
-    assert writes == {(method, path) for method, path, _ in WRITES + ORDERING_WRITES + VALUATION_WRITES}
+    assert writes == {
+        (method, path.replace(FOLLOWED_RUN, "{run_id}"))
+        for method, path, _ in WRITES + RESET_WRITES + ORDERING_WRITES + VALUATION_WRITES
+    }
     assert every_write - writes == {("POST", f"/v1/auth/{step}") for step in ("setup", "register", "sign-in", "sign-out")} | {
         ("PUT", "/v1/auth/me/ai-model")
     }

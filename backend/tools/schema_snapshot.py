@@ -1,7 +1,7 @@
 """
 Writes tests/fixtures/schema/version_<SCHEMA_VERSION>.json: every table the SQLModel classes declare at the code's
 schema version, with each column's class, its type on SQLite and on PostgreSQL, the enum members it stores and whether
-it takes NULL, and each table's primary key, unique constraints and foreign keys. tests/test_schema_snapshot.py compares
+it takes NULL, and each table's primary key, unique constraints, indexes and foreign keys. tests/test_schema_snapshot.py compares
 the classes with the snapshot of the current SCHEMA_VERSION, so a change to an existing table fails until an upgrade
 step raises SCHEMA_VERSION.
 
@@ -56,13 +56,14 @@ def column_layout(column: Column[Any]) -> dict[str, Any]:
 
 
 def table_layout(table: Table) -> dict[str, Any]:
+    """Each index, unique or not, by its name with its columns in order: an upgrade step that misses one leaves queries slow."""
     unique = [constraint.columns for constraint in table.constraints if isinstance(constraint, UniqueConstraint)]
-    unique += [index.columns for index in table.indexes if index.unique]
 
     return {
         "columns": {column.name: column_layout(column) for column in table.columns},
         "primary_key": [column.name for column in table.primary_key.columns],
         "unique": sorted(sorted(column.name for column in columns) for columns in unique),
+        "indexes": sorted([str(index.name), [column.name for column in index.columns], bool(index.unique)] for index in table.indexes),
         "foreign_keys": sorted(
             [
                 key.referred_table.name,
@@ -92,7 +93,7 @@ def changed_tables(snapshot: dict[str, Any], declared: dict[str, Any]) -> list[s
             for column in layout["columns"].keys() | declared[name]["columns"].keys()
             if layout["columns"].get(column) != declared[name]["columns"].get(column)
         )
-        keys = [key for key in ("primary_key", "unique", "foreign_keys") if layout[key] != declared[name][key]]
+        keys = [key for key in ("primary_key", "unique", "indexes", "foreign_keys") if layout.get(key) != declared[name][key]]
 
         if columns or keys:
             changed.append(f"{name} ({', '.join([*(f'column {column}' for column in columns), *keys])})")

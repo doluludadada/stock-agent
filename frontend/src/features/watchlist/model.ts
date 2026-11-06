@@ -23,7 +23,11 @@ export function byStock(entries: readonly WatchlistEntry[]): WatchRow[] {
 export type Quotes = ReadonlyMap<string, Loadable<StockQuote>>
 
 export type SourceFilter = 'all' | WatchlistType
-export const SOURCE_FILTERS: readonly SourceFilter[] = ['all', 'manual', 'technical', 'buzz']
+
+/** The ways a stock gets onto the list: a Buzz scan adds its picks only on a site with realtime quotes, which it needs. */
+export function watchlistSources(buzzRuns: boolean): readonly WatchlistType[] {
+  return buzzRuns ? ['manual', 'technical', 'buzz'] : ['manual', 'technical']
+}
 
 export type SortKey = 'change' | 'code' | 'added'
 export const SORT_KEYS: readonly SortKey[] = ['change', 'code', 'added']

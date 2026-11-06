@@ -72,12 +72,12 @@ def test_settings_that_do_not_validate_name_each_problem_and_never_a_value_from_
 
 def test_a_candidate_is_validated_by_itself_not_by_the_file_on_disk() -> None:
     shipped = (CONFIG / "appsetting.yaml").read_text(encoding="utf-8")
-    candidate = "".join(line for line in shipped.splitlines(keepends=True) if "mis_quotes_url:" not in line)
+    candidate = "".join(line for line in shipped.splitlines(keepends=True) if "tpex_index_url:" not in line)
 
     with pytest.raises(InvalidSettingsError) as refused:
         load_settings(ROOT, {SettingsFile.APPSETTING: candidate})
 
-    assert "sources.exchange.mis_quotes_url: Field required" in str(refused.value)
+    assert "sources.exchange.tpex_index_url: Field required" in str(refused.value)
 
 
 @pytest.mark.asyncio
@@ -145,6 +145,26 @@ def test_a_refused_value_is_located_at_its_key() -> None:
     )
     assert "sometimes" not in problem.message
     assert str(problem).startswith(f"appsetting.yaml line {problem.line}, column 3, trading.order_mode: Input should be")
+
+
+@pytest.mark.parametrize(
+    ("line", "edited", "code", "params"),
+    [
+        ("  order_mode: mock_only", "  order_mode: sometimes", "enum", {"expected": "'mock_only', 'live' or 'disabled'"}),
+        ("  temperature: 0.7", "  temperature: 3", "less_than_equal", {"le": 2}),
+        ("  temperature: 0.7", "  temperature: warm", "float_parsing", {}),
+    ],
+    ids=["choice", "bound", "type"],
+)
+def test_a_refusal_pydantic_words_names_its_type_and_the_schemas_limits_so_a_client_can_word_it(
+    line: str, edited: str, code: str, params: dict[str, object]
+) -> None:
+    text = SHIPPED[SettingsFile.APPSETTING].replace(line, edited, 1)
+
+    [problem] = refused(SettingsFile.APPSETTING, text)
+
+    assert (problem.code, problem.params) == (code, params)
+    assert all(value not in str(problem.params) for value in ("sometimes", "warm", "3"))
 
 
 @pytest.mark.parametrize(
@@ -221,13 +241,15 @@ def test_a_missing_ai_key_is_a_located_refusal_at_the_first_start(tmp_path: Path
 
 
 @pytest.mark.parametrize(
-    ("offered", "gemini_model", "keys", "message"),
+    ("offered", "gemini_model", "keys", "message", "code", "params"),
     [
         pytest.param(
             "[gemini, openai]",
             "\n    gemini: gemini-2.5-flash",
             {"GEMINI_API_KEY": "placeholder"},
             "openai needs OPENAI_API_KEY in the environment or .env; the app would not start",
+            "ai_key_missing",
+            {"provider": "openai", "variable": "OPENAI_API_KEY"},
             id="no-key",
         ),
         pytest.param(
@@ -235,12 +257,21 @@ def test_a_missing_ai_key_is_a_located_refusal_at_the_first_start(tmp_path: Path
             "",
             {"OPENAI_API_KEY": "placeholder", "GEMINI_API_KEY": "placeholder"},
             "gemini needs its model id under ai.available_models.gemini; the app would not start",
+            "ai_model_id_missing",
+            {"provider": "gemini"},
             id="no-model-id",
         ),
     ],
 )
 def test_a_model_offered_to_users_without_its_key_or_model_id_is_a_located_refusal(
-    offered: str, gemini_model: str, keys: dict[str, str], message: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    offered: str,
+    gemini_model: str,
+    keys: dict[str, str],
+    message: str,
+    code: str,
+    params: dict[str, str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project = away_from_the_repository_env(tmp_path)
     monkeypatch.chdir(project)
@@ -258,7 +289,7 @@ def test_a_model_offered_to_users_without_its_key_or_model_id_is_a_located_refus
     [problem] = refused.value.problems
     line = at(text, f"user_selectable: {offered}")[0]
     assert (problem.file, problem.path, problem.line) == (SettingsFile.APPSETTING, "ai.user_selectable.1", line)
-    assert problem.message == message
+    assert (problem.message, problem.code, problem.params) == (message, code, params)
 
 
 def project_with_shipped_settings(folder: Path) -> Path:
@@ -310,6 +341,7 @@ def test_a_public_site_whose_ai_would_search_the_web_or_x_is_refused_where_the_s
     [problem] = refused.value.problems
     assert (problem.file, problem.path, problem.line, problem.column) == (SettingsFile.APPSETTING, f"behavior.{flag}", *at(text, flag))
     assert problem.message.startswith("must be false on audience public")
+    assert (problem.code, problem.params) == ("search_on_open_data", {"audience": "public"})
 
 
 def test_a_personal_site_may_search_the_web_and_x(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
