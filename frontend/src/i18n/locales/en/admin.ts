@@ -31,6 +31,7 @@ const admin = {
     notInteger: 'Enter a whole number.',
     readOnly: {
       environment: 'Read only: the server keeps the environment it started in until the app restarts.',
+      audience: 'Read only: the server keeps the audience it started for until the app restarts, so a save never changes which data sources it may use.',
       db: { backend: 'Read only here: another database holds other accounts and records. Change it in the Advanced (YAML) tab only to move the site.' },
     },
     section: {
@@ -48,6 +49,7 @@ const admin = {
     },
     field: {
       environment: 'Environment',
+      audience: 'Audience',
       db: { backend: 'Database' },
       ai: {
         active_model: 'Default AI model',
@@ -113,6 +115,8 @@ const admin = {
       dev: 'Development (dev)',
       test: 'Staging (test)',
       prod: 'Production (prod)',
+      personal: 'Personal use (personal)',
+      public: 'Public website (public)',
       sqlite: 'SQLite',
       postgresql: 'PostgreSQL',
     },

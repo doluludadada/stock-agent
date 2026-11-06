@@ -86,6 +86,19 @@ const common = {
   },
   close: 'Close',
   loading: 'Loading…',
+  notAdvice: 'For research and reference only, not investment advice.',
+  footer: {
+    notAdvice: 'The analyses, scores and decisions on this site are for research and reference only and are not investment advice. Decide and invest at your own risk.',
+    attribution: 'Data sources and license',
+  },
+  audience: { failed: 'What this site offers could not be loaded.' },
+  warmUp: {
+    label: 'Open-data archive',
+    title: 'Data accumulating',
+    count: '{{sessions}}/{{needed}}',
+    description:
+      'This site uses only the exchanges’ open data, which serves the latest session alone, so it keeps each session from its first day. The strategies read {{needed}} sessions of closes; until the archive holds them, an analysis finds no candidate.',
+  },
   notFound: {
     title: 'This page does not exist',
     description: 'The link may be outdated. Go back to the market overview.',

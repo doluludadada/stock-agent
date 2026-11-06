@@ -183,10 +183,35 @@ Main files:
 
 | File | Purpose |
 | --- | --- |
-| `config/appsetting.yaml` | Active AI model (`ai.active_model`, Claude Haiku by default) and the ones a user may pick instead (`ai.user_selectable`), logging, analysis weights, thresholds, folders, mock account, the technical settings owner and built-in strategy list, and under `sources` every outside endpoint (TWSE, TPEX, MOPS, PTT, news, AI, LINE) with the text formats their pages use, their timeouts and how much of each page is read. The settings classes are in `backend/src/b_application/config/`. |
+| `config/appsetting.yaml` | Active AI model (`ai.active_model`, Claude Haiku by default) and the ones a user may pick instead (`ai.user_selectable`), logging, analysis weights, thresholds, folders, mock account, the technical settings owner and built-in strategy list, and under `sources` every outside endpoint (TWSE, TPEX, MOPS, PTT, news, AI, LINE) with the text formats their pages use (the OpenAPI's Chinese field names included), the open data's attribution, their timeouts and how much of each page is read. The settings classes are in `backend/src/b_application/config/`. |
 | `config/strategies/*.json` | The built-in technical strategies, one file each. An owner's own strategies and selections are saved in the database. |
 | `config/instructions.yaml` | AI report prompts and RAG injection prompts. |
 | `.env` | API keys, optional database credentials and the Shioaji credentials. |
+
+### Personal or public deployment
+
+One codebase runs as two deployments. `audience` in `config/appsetting.yaml` chooses, `personal` by default, and one
+table decides what each may use (`Audience` in `backend/src/a_domain/types/enums.py`):
+
+| `audience` | Daily history and index trend | Realtime quotes | Buzz, Intraday, manual BUY | Articles for the AI step | Valuation (menus 5, 6) | Brokers |
+| --- | --- | --- | --- | --- | --- | --- |
+| `personal` (the owner's machine) | Yahoo, cached in `ohlcv_data` | TWSE MIS | Yes | cnyes and Yahoo news, and Tavily web search | MOPS EPS | those the environment allows |
+| `public` (a free public website) | the open-data archive only | none | Refused: the Web answers 403 `realtime_quotes_unavailable`, the CLI refuses menus 2 and 3 and offers no manual BUY | the archived material information and the TWSE news naming the stock, of the last `analysis.material_information_days` (30), only | Refused: the Web answers 403 `mops_unavailable`, the CLI refuses menus 5 and 6 | `mock` only; startup refuses any other |
+
+A public deployment never builds the Yahoo history, TWSE MIS, cnyes, Yahoo news, PTT, MOPS, Tavily or Shioaji adapter:
+Yahoo's terms forbid automated collection, cnyes forbids reproduction without consent, MOPS's robots.txt disallows
+every path and TWSE's terms forbid its automated download, and PTT is read only by Buzz. Its AI step reads a stock's
+archived material information and the TWSE news naming it; a stock with none of them and no archived financials is not
+sent to the AI, its run log says so, and its decision rests on its technical score alone. On every audience the AI
+prompt also carries the stock's archived financials: its latest two archived quarters and its latest month's revenue. Its strategies need 61 sessions of closes, so until the archive holds them every run
+says how many it holds and finds no candidate. LINE is not part of the table and works as on a personal deployment.
+
+The audience, like the environment, changes only when the app restarts: a reload or a Web save that changes it is
+refused, and the settings form shows it read-only. `GET /v1/market/audience` answers the audience and the table's
+capabilities, and the web app hides what the site cannot do: Buzz and Intraday on the runs page, the Buzz strategy
+choice and the valuation page, whose address then says why it is not offered. `GET /v1/market/attribution` answers the credit the Open Government
+Data License v1 requires of every page that shows the open data: each provider, the datasets the site reads from it,
+the license's notice, and its name and address (`sources.attribution`).
 
 ### Real broker (Shioaji)
 
@@ -320,8 +345,11 @@ Access: public (sign-in, registration, the first-time setup, the built-in strate
 | `GET`/`PUT /v1/technical-settings` | signed in | The user's strategies with the `revision` a save must carry (409 when stale, 422 when invalid). |
 | `GET /v1/technical-settings/built-in-strategies` | public | The built-in strategies. |
 | `GET /v1/market/stocks?query`, `/v1/market/most-traded`, `/v1/market/stocks/{id}` | public | Listing search, the latest session's most traded stocks, a stock's cached daily bars. No realtime quote. |
+| `GET /v1/market/audience` | public | The site's audience (`personal` or `public`) and what it allows: `open_data_only`, `realtime_quotes`, `news_articles` and `mops`, from the `Audience` table. The web app shows only what the site can do by it. |
+| `GET /v1/market/attribution` | public | The open data's providers, datasets and license, which a page showing it must credit. |
+| `GET /v1/market/stocks/{id}/financials` | public | The stock's archived quarters (revenue, gross profit, operating income, net income and EPS of the year to the quarter's end; total assets, liabilities and equity; book value per share) and monthly revenue, oldest first. |
 | `GET /v1/market/stocks/{id}/technical` | signed in | The active strategy's evaluation of the stock and each indicator at every bar it read. |
-| `GET /v1/valuation/market`, `/stocks`, `/scan`; `POST /v1/valuation/explanation` | signed in | Menus 5 and 6, read-only. Only the explanation calls the AI, once per confirmed request. |
+| `GET /v1/valuation/market`, `/stocks`, `/scan`; `POST /v1/valuation/explanation` | signed in | Menus 5 and 6, read-only. Only the explanation calls the AI, once per confirmed request. A public site answers 403 `mops_unavailable`. |
 | `GET /v1/account/history?as_of=` | signed in | Menu 7, with the execution provider and order mode it reads. |
 | `/v1/admin/settings...`, `/v1/admin/audit` | administrator | `appsetting.yaml` and `instructions.yaml` as whole texts: read, preview, save with revision and the password again, backups, restore with the password, reload, audit; and the form's writing of a setting into a text of `appsetting.yaml`, keeping its comments. A save opens the app on the new text first, then writes it and runs on it at once; an edit on disk is loaded too. See [docs/web-integration.md](docs/web-integration.md#settings-files). |
 
@@ -332,6 +360,8 @@ One workflow runs at a time per server process; a second start answers 409. Run 
 - `stock_agent.db`: SQLite application and mock trading state. The trading record is `workflow_runs`, `trade_signals`, `orders` and `account_snapshots`; the mock broker's book is `mock_cash` and `mock_positions`. Each owner's technical settings are `technical_settings` (selections and revision), `technical_strategies`, `technical_indicators`, `technical_rules` and `technical_formula_nodes` (one row per part of a rule's formula), tied together by foreign keys.
 
 Tables are created with `create_all`, which never changes an existing table. A new database also gets a `schema_version` row, the code's `SCHEMA_VERSION` (`backend/src/c_infrastructure/database/models/schema_version_dto.py`), which says how its rows are stored. Startup never upgrades a database. When the database's schema version is older than the code's, the app stops, changing nothing, and names `just db-migrate`, which backs the database up and then upgrades it in one transaction, keeping every row (see [Database migrations](#database-migrations)). The app also stops when the database is not new and its schema version is missing or one no upgrade reaches, or when an existing table's columns differ from the code. That message names each table to drop. A `stock_agent.db` made before the schema version existed is refused for every table, because several of its tables hold Taiwan wall-clock times that the current code reads as UTC. Delete that file, or drop the tables the message names; the next start recreates them empty. Cached prices and EPS refill themselves, while the mock account, watchlist and trading rows in a dropped table are lost. Such a file's `mock_positions` also hold average costs without the buy fee, and its unused `mock_orders` table can be dropped.
+
+The open-data archive is `daily_close_archive` (each stock's official daily bar per session), `index_close_archive` (the TAIEX and the TPEx Index per session), `material_information_archive` (each company's material information announcement under the time it was announced, its subject, clause and text as served), `quarter_eps_archive` (each company's year-to-date basic EPS per quarter, as served), `valuation_ratio_archive` (each stock's P/E, dividend yield and P/B per session), `financial_report_archive` (each company's balance sheet and income statement per quarter, from the report of its industry format, every field as served in a JSON column), `monthly_revenue_archive` (each company's revenue per month with its changes, as served) and `exchange_news_archive` (TWSE's own news items, under their address). Its source is the TWSE and TPEX OpenAPI, which publish under the Open Government Data License v1 and serve only their latest session, day, month or quarter, so what is not saved while they serve it is lost. Every row is kept under the date or period its own payload row names. The Web API saves them at its start and then every `api.archive_interval_hours` (3); `just archive-closes` saves once and prints every date, quarter and month the archive holds. A quarter's figures are read from its archived statements by the columns `sources.exchange.financial_reports.summary` names for their industry format, so the reading can change while the rows stay as served; `GET /v1/market/stocks/{stock_id}/financials` answers them with the monthly revenue, public. Saving the same data again changes nothing. The Yahoo bars of `ohlcv_data` never go into it. A public deployment reads its daily history and index trend from it alone (see Personal or public deployment); `GET /v1/market/archive-status` says how many sessions it holds and how many the built-in strategies need.
 - `backups/`: the database backups that `just db-backup`, `just db-migrate` and `just db-restore` write, owner-only and ignored by git.
 - `chroma_data/`: Chroma persistence.
 - `news_archive/`: archived news payloads.

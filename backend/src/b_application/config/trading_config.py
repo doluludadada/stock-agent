@@ -37,6 +37,12 @@ class AnalysisConfig(BaseModel):
 
     article_fetch_limit: int = Field(ge=1, le=100)
 
+    material_information_days: int = Field(ge=1, le=365)
+    """
+    How many days back an audience without news articles (public) reads a stock's archived material information for
+    the AI step. A stock with none in them is decided on its technical score alone.
+    """
+
     lookback_days: int = Field(ge=30)
     """The shortest daily-history window fetched, in calendar days."""
 
@@ -85,6 +91,11 @@ class TechnicalConfig(BaseModel):
         return TechnicalSettings(
             active_strategy_id=self.initial_strategy_id, buzz_strategy_id=self.initial_strategy_id, strategies=self.built_in_strategies
         )
+
+    @cached_property
+    def required_bars(self) -> int:
+        """The daily bars every built-in strategy can run on: the most any of them needs."""
+        return max(strategy.required_bars for strategy in self.built_in_strategies)
 
 
 class MarketConfig(BaseModel):

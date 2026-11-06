@@ -3,6 +3,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { FORM_SECTIONS } from '@/features/admin-settings/form'
 import { BUILT_IN_IDS, builtInJson } from '@/features/strategies/model/built-ins.test-support'
+import { QUARTER_FIGURES } from '@/features/stock-research/model'
 import { COMPARATORS, INDICATOR_CATALOG, INDICATOR_KINDS, RULE_EFFECTS } from '@/features/strategies/model/catalog'
 import openapi from '@/shared/api/openapi.json'
 import zhRuleNames from './locales/zh-TW/rule-names'
@@ -110,6 +111,7 @@ describe('translations', () => {
       ['common', 'nav.section', ['analysis', 'research', 'mine', 'admin']],
       ['common', 'nav.tab', ['analysis', 'market', 'search', 'watchlist', 'account', 'more']],
       ['overview', 'index', openapi.components.schemas.MarketIndex.enum as string[]],
+      ['research', 'financials.figure', QUARTER_FIGURES.map((figure) => figure.key)],
     ]
     for (const [namespace, family, values] of families) {
       for (const value of values) expect(lookup(namespace, `${family}.${value}`), `${namespace}:${family}.${value}`).toBeTypeOf('string')

@@ -52,6 +52,35 @@ const research = {
     showAll: 'Show all {{count}} indicators',
     showLess: 'Show fewer',
   },
+  financials: {
+    title: 'Financials',
+    question: 'From the exchanges’ open data, as this site archived it',
+    failed: 'The financials could not be loaded.',
+    none: {
+      title: 'No financials archived yet',
+      description: 'The exchanges’ open data serves only the latest quarter and month, and this site keeps them from the day it started.',
+    },
+    month: 'Revenue of {{month}}',
+    revenue: 'Revenue',
+    monthOverMonth: 'Month over month',
+    yearOverYear: 'Year over year',
+    quartersLabel: 'Quarterly figures',
+    quarter: 'Q{{quarter}} {{year}}',
+    column: { figure: 'Figure' },
+    figure: {
+      revenue: 'Revenue',
+      gross_profit: 'Gross profit',
+      operating_income: 'Operating income',
+      net_income: 'Net income',
+      eps: 'EPS (TWD)',
+      total_assets: 'Total assets',
+      total_liabilities: 'Total liabilities',
+      equity: 'Equity',
+      book_value_per_share: 'Book value per share (TWD)',
+    },
+    units:
+      'Income figures and EPS run from the year’s start to the quarter’s end; balance figures stand at the quarter’s end. Net income and equity are those attributable to the parent. Amounts in TWD.',
+  },
 }
 
 export default research

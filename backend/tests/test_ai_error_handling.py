@@ -126,6 +126,23 @@ async def test_ai_analyser_records_provider_failure_without_counting_success() -
 
 
 @pytest.mark.asyncio
+async def test_a_failed_financials_read_is_that_stocks_error_with_no_composite_and_the_next_stock_is_still_analysed() -> None:
+    harness = build_harness()
+    harness.list_stock("2486", rising_history(100.0), realtime_price=100.0)
+    harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
+    harness.archive.financials_failures["2486"] = OSError("the archive's database is unavailable")
+
+    status = await harness.run_menu("4", stock_ids="2486 2330")
+
+    failed, analysed = status.manual_stocks
+    [error] = status.stats.errors
+    assert "2486" in error and "the archive's database is unavailable" in error
+    assert (failed.ai_report, failed.composite_score) == (None, None)
+    assert (analysed.ai_score, status.stats.ai_analysed) == (harness.ai.default_score, 1)
+    assert analysed.composite_score is not None
+
+
+@pytest.mark.asyncio
 async def test_grok_adapter_raises_on_http_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     config = SimpleNamespace(
         ai=SimpleNamespace(grok_api_key="test-key", connection_timeout=1, temperature=0.7),

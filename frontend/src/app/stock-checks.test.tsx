@@ -42,6 +42,7 @@ describe('the stock page’s checks', () => {
             notes: [],
           })
         }
+        if (url === '/v1/market/stocks/2330/financials') return json({ stock_id: '2330', quarters: [], monthly_revenues: [] })
         if (url.startsWith('/v1/market/stocks/2330')) return json({ stock: { stock_id: '2330', name: '台積電', market: 'twse', today: bars[1] }, bars, notes: [] })
         return json([])
       }),

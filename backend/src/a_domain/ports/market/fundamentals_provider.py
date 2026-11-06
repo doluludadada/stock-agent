@@ -13,8 +13,8 @@ class IFundamentalsProvider(Protocol):
 
     It returns raw cumulative EPS per quarter; the TTM rule lives in the domain. Each market's page for a quarter is
     cached, reused while it is final or recent, and downloaded otherwise.
-    No method raises: a quarter or a page that cannot be fetched maps to None, a page whose refresh failed is the last
-    one fetched with refresh_failed set, and missing industries are absent.
+    No method raises: a quarter or a page that cannot be fetched maps to None, and a page whose refresh failed is the
+    last one fetched with refresh_failed set.
     """
 
     async def fetch_cumulative_eps(self, quarters: Collection[FiscalQuarter]) -> EpsFilings:
@@ -53,14 +53,3 @@ class IFundamentalsProvider(Protocol):
     async def load_page(self, market: MarketType, quarter: FiscalQuarter) -> QuarterEps | None: ...
 
     async def save_page(self, market: MarketType, page: QuarterEps) -> None: ...
-
-    async def fetch_industries(self) -> dict[str, str]:
-        """stock_id -> industry name, every market merged. A market's list is reused until it is old."""
-        ...
-
-    async def fetch_market_industries(self, market: MarketType) -> dict[str, str] | None:
-        """
-        One market's stock_id -> industry name from its company profiles, or None when its feed fails. A company whose
-        industry code has no name in the settings is absent.
-        """
-        ...

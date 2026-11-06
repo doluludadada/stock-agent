@@ -8,7 +8,7 @@ from a_domain.types.values import Fraction
 
 @dataclass(frozen=True)
 class CompositeScoreRule:
-    """Combines technical and AI scores into one final score."""
+    """Combines technical and AI scores into one final score, or None while either is missing."""
 
     technical_weight: Fraction
     ai_weight: Fraction
@@ -20,7 +20,10 @@ class CompositeScoreRule:
 
         return self
 
-    def apply(self, technical_score: int, ai_score: int) -> int:
+    def apply(self, technical_score: int | None, ai_score: int | None) -> int | None:
+        if technical_score is None or ai_score is None:
+            return None
+
         score = technical_score * self.technical_weight + ai_score * self.ai_weight
 
         return round(score)

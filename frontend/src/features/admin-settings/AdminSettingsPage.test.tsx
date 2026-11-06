@@ -25,6 +25,7 @@ const FORM_TEXT = [
   '  order_mode: mock_only',
   'accounts:',
   '  registration_open: true',
+  'audience: public',
   '',
 ].join('\n')
 
@@ -32,12 +33,14 @@ const FORM_TEXT = [
 const SCHEMA = {
   properties: {
     environment: { $ref: '#/$defs/SystemEnvironment', default: 'dev' },
+    audience: { $ref: '#/$defs/Audience', default: 'personal' },
     ai: { $ref: '#/$defs/AiConfig' },
     trading: { $ref: '#/$defs/TradingConfig' },
     accounts: { $ref: '#/$defs/AccountsConfig' },
   },
   $defs: {
     SystemEnvironment: { enum: ['dev', 'test', 'prod'], type: 'string', description: 'Which machine the app runs on.' },
+    Audience: { enum: ['personal', 'public'], type: 'string', description: 'Whom the deployment serves.' },
     AiProvider: { enum: ['openai', 'gemini', 'claude'], type: 'string' },
     OrderMode: { enum: ['mock_only', 'live', 'disabled'], type: 'string' },
     AiConfig: {
@@ -321,6 +324,9 @@ describe('the settings editor', { timeout: 90_000 }, () => {
     expect(within(offered).getAllByRole('checkbox').map((box) => box.getAttribute('aria-checked'))).toEqual(['false', 'false', 'false'])
     expect(within(form).getByText('Development (dev)')).toBeInTheDocument()
     expect(within(form).queryByRole('combobox', { name: 'Environment' })).not.toBeInTheDocument()
+    expect(within(form).getByText('Public website (public)')).toBeInTheDocument()
+    expect(within(form).getByText(/^Read only: the server keeps the audience it started for/)).toBeInTheDocument()
+    expect(within(form).queryByRole('combobox', { name: 'Audience' })).not.toBeInTheDocument()
     expect(within(form).getAllByText(/^Not in the file, so the app uses its default\./).length).toBeGreaterThan(0)
   })
 

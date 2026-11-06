@@ -366,7 +366,9 @@ async def test_a_version_3_database_gains_the_ai_model_and_keeps_every_user_on_t
     after = await database_snapshot(backend, tmp_path)
     assert list(migration.before.pending) == ["3 -> 4 add_user_ai_model"]
     assert after["schema_version"][1] == [(str(SCHEMA_VERSION),)]
-    assert {table: len(rows) for table, (_, rows) in after.items()} == {table: len(rows) for table, (_, rows) in before.items()}
+    assert {table: len(rows) for table, (_, rows) in after.items() if table in before} == {
+        table: len(rows) for table, (_, rows) in before.items()
+    }
     assert set(after["users"][0]) - set(before["users"][0]) == {"ai_model"}
     assert [(user.username, user.role, user.ai_model) for user in upgraded] == [
         ("owner", Role.ADMINISTRATOR, None),

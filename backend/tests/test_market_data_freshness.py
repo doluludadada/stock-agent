@@ -50,7 +50,11 @@ def freshness_config(tmp_path) -> AppConfig:
 
 def collector(feed: QuoteFeed, tmp_path) -> MarketDataCollector:
     return MarketDataCollector(
-        ohlcv_provider=feed, market_clock=ClockAt(MarketHoursConfig()), config=freshness_config(tmp_path), logger=SilentLogger()
+        ohlcv_provider=feed,
+        archive=None,
+        market_clock=ClockAt(MarketHoursConfig()),
+        config=freshness_config(tmp_path),
+        logger=SilentLogger(),
     )
 
 
@@ -138,6 +142,7 @@ async def test_a_session_is_missing_only_when_none_of_an_exchanges_stocks_has_it
 
     await MarketDataCollector(
         ohlcv_provider=SessionFeed(sessions),
+        archive=None,
         market_clock=ClockAt(MarketHoursConfig()),
         config=freshness_config(tmp_path),
         logger=SilentLogger(),

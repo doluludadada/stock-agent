@@ -1,6 +1,8 @@
 from pydantic import PositiveInt, validate_call
 from pydantic.dataclasses import dataclass
 
+from a_domain.model.fundamentals.monthly_revenue import MonthlyRevenue
+from a_domain.model.fundamentals.quarter_financials import QuarterFinancials
 from a_domain.model.market.article import Article
 from a_domain.model.market.stock import Stock
 from a_domain.model.valuation.valuation import ValuationReport
@@ -12,7 +14,7 @@ from a_domain.types.values import NonEmptyText
 @dataclass(frozen=True)
 class AiReportPromptBuilder:
     """
-    Builds AI analysis prompts from stock context.
+    Builds AI analysis prompts from stock context: its articles, its archived financials and its past analysis.
 
     This is pure string construction. It does not call an AI provider.
     The workflow explicitly selects the analysis focus.
@@ -24,17 +26,32 @@ class AiReportPromptBuilder:
     max_content_length: PositiveInt
 
     @validate_call(validate_return=True)
-    def apply(self, stock: Stock, historical_context: str = "", *, focus: AiAnalysisFocus) -> NonEmptyText:
-        articles_text = format_articles(stock.articles, self.max_articles, self.max_content_length)
-
-        if historical_context:
-            articles_text += f"\n\n[Past Analysis]\n{historical_context}"
+    def apply(
+        self,
+        stock: Stock,
+        historical_context: str = "",
+        quarters: list[QuarterFinancials] | None = None,
+        monthly_revenues: list[MonthlyRevenue] | None = None,
+        *,
+        focus: AiAnalysisFocus,
+    ) -> NonEmptyText:
+        """
+        The articles, then the financials when the archive holds any: the latest archived quarter and the one archived
+        before it, oldest first, and the latest month's revenue. Then the past analysis.
+        """
+        financials = [quarter.describe() for quarter in (quarters or [])[-2:]]
+        financials += [revenue.describe() for revenue in (monthly_revenues or [])[-1:]]
+        sections = [
+            format_articles(stock.articles, self.max_articles, self.max_content_length),
+            "[Financials]\n" + "\n".join(financials) if financials else "",
+            f"[Past Analysis]\n{historical_context}" if historical_context else "",
+        ]
 
         template = self.fundamental_template
         if focus == AiAnalysisFocus.MOMENTUM:
             template = self.momentum_template
 
-        return template.format(stock_id=stock.stock_id, articles_text=articles_text)
+        return template.format(stock_id=stock.stock_id, articles_text="\n\n".join(section for section in sections if section))
 
 
 def format_articles(articles: list[Article], max_articles: int, max_content_length: int) -> str:

@@ -15,7 +15,7 @@ import yaml
 from trading_stack import SilentLogger
 
 from a_domain.ports.system.settings_files import SettingsProblem
-from a_domain.types.enums import SettingsFile, SystemEnvironment
+from a_domain.types.enums import Audience, SettingsFile, SystemEnvironment
 from b_application.config.settings_loader import InvalidSettingsError, load_settings, startup_settings
 from c_infrastructure.system.settings_files import SettingsFiles
 
@@ -199,7 +199,7 @@ def test_an_unsafe_trading_setup_is_located_at_the_setting_it_names(tmp_path: Pa
     text = SHIPPED[SettingsFile.APPSETTING].replace("  execution_provider: mock", "  execution_provider: shioaji", 1)
     files = SettingsFiles(project_root=tmp_path, max_bytes=262_144, backups_kept=3, logger=SilentLogger())
 
-    problems = files.check(SettingsFile.APPSETTING, text, SystemEnvironment.DEV, "127.0.0.1")
+    problems = files.check(SettingsFile.APPSETTING, text, SystemEnvironment.DEV, Audience.PERSONAL, "127.0.0.1")
     [problem] = [problem for problem in problems if problem.path != "ai.active_model"]
 
     assert (problem.path, problem.line) == ("trading.execution_provider", at(text, "execution_provider: shioaji")[0])
@@ -261,16 +261,66 @@ def test_a_model_offered_to_users_without_its_key_or_model_id_is_a_located_refus
     assert problem.message == message
 
 
-def test_settings_of_another_environment_than_the_process_started_in_are_refused_where_they_set_it(tmp_path: Path) -> None:
-    (tmp_path / "config").mkdir()
+def project_with_shipped_settings(folder: Path) -> Path:
+    """A project folder whose config/ holds a copy of the shipped settings files and the built-in strategies."""
+    (folder / "config").mkdir()
     for file, text in SHIPPED.items():
-        (tmp_path / "config" / file.file_name).write_text(text, encoding="utf-8")
-    (tmp_path / "config" / "strategies").symlink_to(CONFIG / "strategies")
-    text = SHIPPED[SettingsFile.APPSETTING].replace("environment: dev", "environment: test", 1)
+        (folder / "config" / file.file_name).write_text(text, encoding="utf-8")
+    (folder / "config" / "strategies").symlink_to(CONFIG / "strategies")
+    return folder
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    [
+        ("environment: dev", "environment: test", "this process started as dev: the environment changes only when the app restarts"),
+        (
+            "audience: personal",
+            "audience: public",
+            "this process started as personal: the audience changes only when the app restarts",
+        ),
+    ],
+    ids=["environment", "audience"],
+)
+def test_settings_of_another_environment_or_audience_than_the_process_started_in_are_refused_where_they_set_it(
+    tmp_path: Path, old: str, new: str, message: str
+) -> None:
+    text = SHIPPED[SettingsFile.APPSETTING].replace(old, new, 1)
 
     with pytest.raises(InvalidSettingsError) as refused:
-        startup_settings(tmp_path, {SettingsFile.APPSETTING: text}, SystemEnvironment.DEV)
+        startup_settings(
+            project_with_shipped_settings(tmp_path), {SettingsFile.APPSETTING: text}, SystemEnvironment.DEV, Audience.PERSONAL
+        )
 
-    problem = next(problem for problem in refused.value.problems if problem.path == "environment")
-    assert (problem.file, problem.line, problem.column) == (SettingsFile.APPSETTING, *at(text, "environment: test"))
-    assert problem.message.endswith("this process started as dev: the environment changes only when the app restarts")
+    [problem] = refused.value.problems
+    assert (problem.file, problem.path, problem.line, problem.column) == (SettingsFile.APPSETTING, old.split(":")[0], *at(text, new))
+    assert problem.message.endswith(message)
+
+
+@pytest.mark.parametrize("flag", ["enable_web_search", "enable_x_search"])
+def test_a_public_site_whose_ai_would_search_the_web_or_x_is_refused_where_the_search_is_turned_on(tmp_path: Path, flag: str) -> None:
+    text = SHIPPED[SettingsFile.APPSETTING].replace("audience: personal", "audience: public", 1)
+    text = text.replace(f"  {flag}: false", f"  {flag}: true", 1)
+
+    with pytest.raises(InvalidSettingsError) as refused:
+        startup_settings(
+            project_with_shipped_settings(tmp_path), {SettingsFile.APPSETTING: text}, SystemEnvironment.DEV, Audience.PUBLIC
+        )
+
+    [problem] = refused.value.problems
+    assert (problem.file, problem.path, problem.line, problem.column) == (SettingsFile.APPSETTING, f"behavior.{flag}", *at(text, flag))
+    assert problem.message.startswith("must be false on audience public")
+
+
+def test_a_personal_site_may_search_the_web_and_x(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "placeholder")
+    text = SHIPPED[SettingsFile.APPSETTING]
+    text = text.replace("  enable_web_search: false", "  enable_web_search: true", 1).replace(
+        "  enable_x_search: false", "  enable_x_search: true", 1
+    )
+
+    config = startup_settings(
+        project_with_shipped_settings(tmp_path), {SettingsFile.APPSETTING: text}, SystemEnvironment.DEV, Audience.PERSONAL
+    )
+
+    assert (config.audience, config.behavior.enable_web_search, config.behavior.enable_x_search) == (Audience.PERSONAL, True, True)

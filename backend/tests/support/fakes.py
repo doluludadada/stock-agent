@@ -17,6 +17,9 @@ from pydantic import SecretStr
 
 from a_domain.model.chat.conversation import Conversation
 from a_domain.model.chat.message import Message
+from a_domain.model.fundamentals.eps import Eps
+from a_domain.model.fundamentals.monthly_revenue import MonthlyRevenue
+from a_domain.model.fundamentals.quarter_financials import QuarterFinancials
 from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
@@ -26,13 +29,24 @@ from a_domain.model.trading.account import Account, AccountSnapshot, Position
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.model.trading.watchlist import WatchlistEntry
+from a_domain.ports.market.daily_close_archive import (
+    ArchivedMonth,
+    ArchivedQuarter,
+    ArchivedSession,
+    ExchangeNews,
+    FinancialReport,
+    OpenDataDownload,
+    ValuationRatios,
+)
 from a_domain.rules.fundamentals.trailing_eps import EpsFilings, QuarterEps
 from a_domain.rules.technical.strategy import TechnicalSettings
 from a_domain.rules.trading.cost import TradingCostRule
 from a_domain.types.enums import (
     AiAnalysisFocus,
     AiProvider,
+    FinancialStatement,
     MarketIndex,
+    MarketType,
     MessageRole,
     Role,
     SentimentLabel,
@@ -108,11 +122,22 @@ class FakeMarketClock(TaiwanMarketClock):
 
 
 class FakeStockProvider:
-    """Like TaiwanStockProvider, every call returns new copies of the listed stocks, as IStockProvider promises."""
+    """
+    Like TaiwanStockProvider, every call returns new copies of the listed stocks, as IStockProvider promises, and the
+    OpenAPI's other reports as they are served now.
+    """
 
     def __init__(self) -> None:
         self.stocks: dict[str, Stock] = {}
         self.closes: dict[str, Ohlcv] = {}
+        self.index_closes: dict[MarketType, list[Ohlcv]] = {}
+        self.industries: dict[str, str] = {}
+        self.material_information: list[Article] = []
+        self.quarter_eps: dict[str, Eps] = {}
+        self.valuation_ratios: list[ValuationRatios] = []
+        self.financial_reports: list[FinancialReport] = []
+        self.monthly_revenues: list[MonthlyRevenue] = []
+        self.exchange_news: list[ExchangeNews] = []
 
     async def get_all(self) -> list[Stock]:
         return [deepcopy(stock) for stock in self.stocks.values()]
@@ -124,13 +149,129 @@ class FakeStockProvider:
     async def get_latest_closes(self) -> dict[str, Ohlcv]:
         return dict(self.closes)
 
+    async def fetch_index_closes(self) -> dict[MarketType, list[Ohlcv]]:
+        return {market: list(bars) for market, bars in self.index_closes.items()}
+
+    async def fetch_industries(self) -> dict[str, str]:
+        return dict(self.industries)
+
+    async def fetch_material_information(self) -> list[Article]:
+        return [replace(article) for article in self.material_information]
+
+    async def fetch_quarter_eps(self) -> dict[str, Eps]:
+        return dict(self.quarter_eps)
+
+    async def fetch_valuation_ratios(self) -> list[ValuationRatios]:
+        return list(self.valuation_ratios)
+
+    async def fetch_financial_reports(self) -> list[FinancialReport]:
+        return list(self.financial_reports)
+
+    async def fetch_monthly_revenues(self) -> list[MonthlyRevenue]:
+        return list(self.monthly_revenues)
+
+    async def fetch_exchange_news(self) -> list[ExchangeNews]:
+        return list(self.exchange_news)
+
+
+class FakeDailyCloseArchive:
+    """
+    IDailyCloseArchive in memory: each stock's and each exchange index's close per session, each announcement, each
+    company's EPS per quarter, each stock's valuation ratios per session, each financial report, monthly revenue and
+    TWSE news item, and every save it got. As news it serves a stock's announcements newest first; the window of days
+    is the SQL archive's. As a stock's financials it serves what a test put in `held_financials`, which no save fills: the
+    SQL archive's tests read them from real reports. A stock in `financials_failures` raises its error instead.
+    """
+
+    def __init__(self) -> None:
+        self.stock_closes: dict[tuple[str, date], Ohlcv] = {}
+        self.index_closes: dict[tuple[MarketType, date], Ohlcv] = {}
+        self.announcements: dict[tuple[str, datetime], Article] = {}
+        self.quarter_eps: dict[tuple[str, FiscalQuarter], float] = {}
+        self.valuation_ratios: dict[tuple[str, date], ValuationRatios] = {}
+        self.financial_reports: dict[tuple[str, FiscalQuarter, FinancialStatement], FinancialReport] = {}
+        self.monthly_revenues: dict[tuple[str, int, int], MonthlyRevenue] = {}
+        self.exchange_news: dict[str, ExchangeNews] = {}
+        self.held_financials: dict[str, tuple[list[QuarterFinancials], list[MonthlyRevenue]]] = {}
+        self.financials_failures: dict[str, Exception] = {}
+        self.saves = 0
+
+    async def save(self, download: OpenDataDownload) -> None:
+        self.saves += 1
+        self.stock_closes.update({(stock.stock_id, bar.ts.date()): bar for stock in download.stocks for bar in stock.ohlcv})
+        self.index_closes.update({(market, bar.ts.date()): bar for market, bars in download.indexes.items() for bar in bars})
+        self.announcements.update({(article.stock_id, article.published_at): article for article in download.material_information})
+        self.quarter_eps.update({(stock_id, eps.period_end): eps.value for stock_id, eps in download.quarter_eps.items()})
+        self.valuation_ratios.update({(ratios.stock_id, ratios.session_date): ratios for ratios in download.valuation_ratios})
+        self.financial_reports.update(
+            {(report.stock_id, report.quarter, report.statement): report for report in download.financial_reports}
+        )
+        self.monthly_revenues.update(
+            {(revenue.stock_id, revenue.year, revenue.month): revenue for revenue in download.monthly_revenues}
+        )
+        self.exchange_news.update({news.url: news for news in download.exchange_news})
+
+    async def sessions(self) -> list[ArchivedSession]:
+        stocks = [day for _, day in self.stock_closes]
+        indexes = [day for _, day in self.index_closes]
+        ratios = [day for _, day in self.valuation_ratios]
+        announced = [moment.date() for _, moment in self.announcements]
+        news = [item.published_on for item in self.exchange_news.values()]
+        return [
+            ArchivedSession(
+                session_date=day,
+                stocks=stocks.count(day),
+                indexes=indexes.count(day),
+                valuation_ratios=ratios.count(day),
+                material_information=announced.count(day),
+                exchange_news=news.count(day),
+            )
+            for day in sorted({*stocks, *indexes, *ratios, *announced, *news})
+        ]
+
+    async def quarters(self) -> list[ArchivedQuarter]:
+        eps = [quarter for _, quarter in self.quarter_eps]
+        filed = [(quarter, statement) for _, quarter, statement in self.financial_reports]
+        return [
+            ArchivedQuarter(
+                quarter=quarter,
+                eps=eps.count(quarter),
+                balance_sheets=filed.count((quarter, FinancialStatement.BALANCE_SHEET)),
+                income_statements=filed.count((quarter, FinancialStatement.INCOME_STATEMENT)),
+            )
+            for quarter in sorted({*eps, *(quarter for quarter, _ in filed)})
+        ]
+
+    async def months(self) -> list[ArchivedMonth]:
+        months = [(year, month) for _, year, month in self.monthly_revenues]
+        return [ArchivedMonth(year=year, month=month, companies=months.count((year, month))) for year, month in sorted(set(months))]
+
+    async def financials(self, stock_id: str) -> tuple[list[QuarterFinancials], list[MonthlyRevenue]]:
+        if stock_id in self.financials_failures:
+            raise self.financials_failures[stock_id]
+
+        quarters, revenues = self.held_financials.get(stock_id, ([], []))
+        return list(quarters), list(revenues)
+
+    async def session_count(self) -> int:
+        return len({day for _, day in self.stock_closes})
+
+    async def fetch_news(self, stock_id: str, limit: int = 10) -> list[Article]:
+        held = sorted(
+            (article for (held_id, _), article in self.announcements.items() if held_id == stock_id),
+            key=lambda article: article.published_at,
+        )
+        return [replace(article) for article in reversed(held)][:limit]
+
+    def save_as_md_file(self, stock_id: str, articles: list[Article]) -> None:
+        return None
+
 
 class FakeFundamentalsProvider:
-    """MOPS stand-in: cumulative EPS filed per quarter, industries, quarters that fail to fetch, and quarters whose refresh failed."""
+    """MOPS stand-in: cumulative EPS filed per quarter, quarters that fail to fetch, and quarters whose refresh failed."""
 
     def __init__(self) -> None:
         self.cumulative_eps: dict[FiscalQuarter, dict[str, float]] = {}
-        self.industries: dict[str, str] = {}
         self.failed_quarters: set[FiscalQuarter] = set()
         self.refresh_failed_quarters: set[FiscalQuarter] = set()
         self.requested: list[set[FiscalQuarter]] = []
@@ -149,9 +290,6 @@ class FakeFundamentalsProvider:
             )
             for quarter in quarters
         }
-
-    async def fetch_industries(self) -> dict[str, str]:
-        return dict(self.industries)
 
 
 class FakeOhlcvProvider:

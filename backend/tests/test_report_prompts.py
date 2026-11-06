@@ -2,16 +2,19 @@ from collections.abc import Awaitable, Callable
 from datetime import date, datetime, time
 
 import pytest
+from support.fakes import FakeDailyCloseArchive
 from trading_stack import MONDAY_10_00, MovableClock, SilentLogger, run_stats
 
 from a_domain.model.chat.message import Message
 from a_domain.model.fundamentals.eps import Eps
+from a_domain.model.fundamentals.monthly_revenue import MonthlyRevenue
+from a_domain.model.fundamentals.quarter_financials import QuarterFinancials
 from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.rules.fundamentals.filing import FilingDeadlineRule
 from a_domain.rules.valuation.valuation import AppraisalRule, StockValuationRule
-from a_domain.types.enums import AiAnalysisFocus, EpsBasis, EpsKind, InformationSource, Workflow
+from a_domain.types.enums import AiAnalysisFocus, EpsBasis, EpsKind, InformationSource, MarketType, Workflow
 from a_domain.types.values import FiscalQuarter
 from b_application.use_cases.process.ai_analyser import AiAnalyser
 from b_application.use_cases.valuation.valuation_explainer import ValuationExplainer
@@ -70,9 +73,9 @@ def stock() -> Stock:
     return Stock(stock_id="2330", name="TSMC", industry="Semiconductors", articles=[article("capacity")])
 
 
-async def analysis_prompt(focus: AiAnalysisFocus) -> str:
+async def analysis_prompt(focus: AiAnalysisFocus, archive: FakeDailyCloseArchive | None = None) -> str:
     ai = PromptRecorder()
-    analyser = AiAnalyser(ai, NoHistory(), MovableClock(MONDAY_10_00), SHIPPED, SilentLogger())
+    analyser = AiAnalyser(ai, NoHistory(), archive or FakeDailyCloseArchive(), MovableClock(MONDAY_10_00), SHIPPED, SilentLogger())
 
     await analyser.execute([stock()], focus, run_stats(Workflow.SPECIFIC_STOCKS))
 
@@ -130,3 +133,69 @@ async def test_every_prompt_whose_answer_a_report_shows_asks_for_an_english_answ
     assert "2330" in prompt
     assert "in English" in prompt
     assert "Chinese" not in prompt
+
+
+def month_of(month: int, revenue: float, month_over_month: float, year_over_year: float) -> MonthlyRevenue:
+    return MonthlyRevenue(
+        stock_id="2330",
+        year=2026,
+        month=month,
+        market=MarketType.TWSE,
+        served_date=date(2026, month + 1, 10),
+        company_name="TSMC",
+        industry="Semiconductors",
+        revenue=revenue,
+        previous_month_revenue=None,
+        last_year_revenue=None,
+        month_over_month_percent=month_over_month,
+        year_over_year_percent=year_over_year,
+        cumulative_revenue=None,
+        last_year_cumulative_revenue=None,
+        cumulative_year_over_year_percent=None,
+        note="-",
+    )
+
+
+@pytest.mark.parametrize("focus", list(AiAnalysisFocus))
+async def test_the_analysis_prompt_shows_the_latest_two_archived_quarters_and_the_latest_months_revenue_with_their_units(
+    focus: AiAnalysisFocus,
+) -> None:
+    archive = FakeDailyCloseArchive()
+    archive.held_financials["2330"] = (
+        [
+            QuarterFinancials(quarter=FiscalQuarter(2026, 1), revenue=839253664.0),
+            QuarterFinancials(quarter=FiscalQuarter(2026, 2), revenue=1773046302.0, eps=31.27),
+            QuarterFinancials(
+                quarter=FiscalQuarter(2026, 3),
+                revenue=2763307000.0,
+                gross_profit=1640000000.0,
+                net_income=1220000000.0,
+                eps=47.06,
+                total_assets=7300000000.0,
+                equity=4500000000.0,
+                book_value_per_share=173.5,
+            ),
+        ],
+        [month_of(8, 335771000.0, -1.2, 33.8), month_of(9, 511857399.0, -0.5726, 54.6486)],
+    )
+
+    prompt = await analysis_prompt(focus, archive)
+
+    assert (
+        "[Financials]\n2026Q2: income of the year to its end in TWD thousand: revenue 1,773,046,302; per share in TWD: "
+        "basic EPS 31.27\n" in prompt
+    )
+    assert (
+        "2026Q3: income of the year to its end in TWD thousand: revenue 2,763,307,000, gross profit 1,640,000,000, net income "
+        "attributable to the parent 1,220,000,000; balance at its end in TWD thousand: total assets 7,300,000,000, equity "
+        "attributable to the parent 4,500,000,000; per share in TWD: basic EPS 47.06, book value per share 173.50\n"
+        "2026-09 (revenues in TWD thousand): revenue 511,857,399, month over month -0.57%, year over year +54.65%"
+    ) in prompt
+    assert "2026Q1" not in prompt and "2026-08" not in prompt
+    assert prompt.index("capacity content") < prompt.index("[Financials]")
+
+
+async def test_the_analysis_prompt_has_no_financials_section_while_the_archive_holds_none() -> None:
+    prompt = await fundamental_analysis_prompt()
+
+    assert "[Financials]" not in prompt and "capacity content" in prompt

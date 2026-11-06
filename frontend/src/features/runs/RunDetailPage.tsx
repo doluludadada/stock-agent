@@ -6,9 +6,11 @@ import { useLocale, useTranslation } from '@/i18n'
 import { paths } from '@/shared/config/paths'
 import { isApiError } from '@/shared/api'
 import { formatDateTime, formatNumber, formatPrice } from '@/shared/lib/format'
+import { ArchiveWarmUp } from '@/shared/ui/archive-warm-up'
 import { Badge } from '@/shared/ui/badge'
 import { DataTable, type Column } from '@/shared/ui/data-table'
 import { ErrorState } from '@/shared/ui/error-state'
+import { NotAdviceNote } from '@/shared/ui/not-advice-note'
 import { Panel } from '@/shared/ui/panel'
 import { Skeleton } from '@/shared/ui/skeleton'
 import { Stat } from '@/shared/ui/stat'
@@ -62,7 +64,9 @@ function RunDetail({ runId, renderWatch, ruleName }: RunDetailPageProps) {
       <div className="space-y-3">
         {back}
         <Header run={run.data} />
+        <NotAdviceNote />
       </div>
+      <ArchiveWarmUp />
       {run.data.state === 'running' && <p className="rounded-xl border border-brand/30 bg-brand-soft px-4 py-2.5 text-sm">{t('runningNote')}</p>}
       {run.data.state === 'unfinished' && <p className="rounded-xl border border-gold/35 bg-gold-soft px-4 py-2.5 text-sm">{t('unfinishedNote')}</p>}
       {run.data.error && (

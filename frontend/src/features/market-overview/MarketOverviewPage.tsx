@@ -20,6 +20,7 @@ import { directionOf } from '@/shared/lib/direction'
 import { formatNumber, formatSignedPercent, useFormat } from '@/shared/lib/format'
 import { isStockId } from '@/shared/lib/stock-ids'
 import { cn } from '@/shared/lib/utils'
+import { ArchiveWarmUp } from '@/shared/ui/archive-warm-up'
 import { Badge } from '@/shared/ui/badge'
 import { BreadthBar } from '@/shared/ui/breadth-bar'
 import { Button } from '@/shared/ui/button'
@@ -68,6 +69,7 @@ export function MarketOverviewPage({ strategy }: MarketOverviewPageProps) {
   return (
     <div className="space-y-5 lg:space-y-6">
       <PageHeader title={t('title')} description={session && t('session', { date: format.date(session, 'long') })} />
+      <ArchiveWarmUp />
       <div className="grid gap-4 md:grid-cols-2 lg:gap-5 xl:grid-cols-[minmax(0,1fr)_26rem] xl:items-start">
         <div className="contents xl:flex xl:min-w-0 xl:flex-col xl:gap-5">
           <TrendPanel target={target} history={history} onTarget={(id) => setParams({ target: id })} />

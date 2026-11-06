@@ -4,15 +4,17 @@ import { Link, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { useLocale, useTranslation } from '@/i18n'
 import { paths } from '@/shared/config/paths'
-import { isApiError, useSession } from '@/shared/api'
+import { allows, isApiError, useAudience, useSession, type Audience, type Capability } from '@/shared/api'
 import { formatDateTime } from '@/shared/lib/format'
 import { isAcceptedList, parseStockIds } from '@/shared/lib/stock-ids'
+import { ArchiveWarmUp } from '@/shared/ui/archive-warm-up'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { ConfirmDialog } from '@/shared/ui/confirm-dialog'
 import { DataTable, type Column } from '@/shared/ui/data-table'
 import { ErrorState } from '@/shared/ui/error-state'
 import { Input } from '@/shared/ui/input'
+import { NotAdviceNote } from '@/shared/ui/not-advice-note'
 import { PageHeader } from '@/shared/ui/page-header'
 import { Panel } from '@/shared/ui/panel'
 import { Skeleton } from '@/shared/ui/skeleton'
@@ -22,25 +24,36 @@ import { SignInActions } from '@/shared/ui/require-sign-in'
 import { PAGE_SIZE, useRunSignals, useRunsPage, useStartRun, type Run, type RunKind, type Signal } from './api'
 import { RunStateBadge } from './RunStateBadge'
 
-const KINDS: { kind: RunKind; icon: typeof Play; orders: boolean }[] = [
+/** Every analysis a run can be; one that needs a capability is offered only where the site's audience allows it. */
+const KINDS: { kind: RunKind; icon: typeof Play; orders: boolean; requires?: Capability }[] = [
   { kind: 'full-cycle', icon: Radar, orders: false },
   { kind: 'specific-stocks', icon: ScanSearch, orders: false },
-  { kind: 'buzz-scan', icon: Megaphone, orders: true },
-  { kind: 'intraday', icon: Activity, orders: true },
+  { kind: 'buzz-scan', icon: Megaphone, orders: true, requires: 'realtime_quotes' },
+  { kind: 'intraday', icon: Activity, orders: true, requires: 'realtime_quotes' },
 ]
+
+type Kind = (typeof KINDS)[number]
+
+function offeredKinds(audience: Audience): Kind[] {
+  return KINDS.filter((item) => !item.requires || allows(audience, item.requires))
+}
 
 /** The home page: start a run, read the latest result and the history; a visitor reads what the analyses do. */
 export function RunsPage() {
   const { t } = useTranslation('runs')
   const current = useSession()
+  const audience = useAudience()
+  const kinds = audience.data ? offeredKinds(audience.data) : null
   return (
     <div className="space-y-5 lg:space-y-6">
       <PageHeader eyebrow={t('common:nav.section.analysis')} title={t('title')} description={t('description')} />
-      {current.status === 'checking' && <Skeleton className="h-40 rounded-2xl" />}
-      {current.status === 'signedOut' && <Intro ended={current.ended} />}
-      {current.status === 'signedIn' && (
+      {(current.status === 'checking' || audience.isPending) && <Skeleton className="h-40 rounded-2xl" />}
+      {audience.isError && <ErrorState error={audience.error} title={t('common:audience.failed')} onRetry={() => void audience.refetch()} className="rounded-2xl border bg-card" />}
+      {kinds && current.status === 'signedOut' && <Intro ended={current.ended} kinds={kinds} />}
+      {kinds && current.status === 'signedIn' && (
         <div className="space-y-4 lg:space-y-5">
-          <StartPanel />
+          <ArchiveWarmUp />
+          <StartPanel kinds={kinds} />
           <LatestResult />
           <History />
         </div>
@@ -49,8 +62,15 @@ export function RunsPage() {
   )
 }
 
-function Intro({ ended }: { ended: boolean }) {
+/** The question over the analyses: how many there are on this site, and that one of yours runs at a time. */
+function useStartQuestion(kinds: readonly Kind[]): string {
   const { t } = useTranslation('runs')
+  return t(kinds.length === KINDS.length ? 'startQuestion' : 'startQuestionWithoutRealtime')
+}
+
+function Intro({ ended, kinds }: { ended: boolean; kinds: readonly Kind[] }) {
+  const { t } = useTranslation('runs')
+  const question = useStartQuestion(kinds)
   return (
     <section className="grid overflow-hidden rounded-2xl border bg-card shadow-card md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
       <StateBlock
@@ -71,9 +91,9 @@ function Intro({ ended }: { ended: boolean }) {
         }
       />
       <div className="border-t bg-muted/40 px-6 py-8 md:border-t-0 md:border-l md:px-10">
-        <p className="eyebrow mb-4">{t('startQuestion')}</p>
+        <p className="eyebrow mb-4">{question}</p>
         <ul className="grid gap-4">
-          {KINDS.map(({ kind, icon: Icon }) => (
+          {kinds.map(({ kind, icon: Icon }) => (
             <li key={kind} className="flex items-start gap-3">
               <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-brand-soft text-brand">
                 <Icon aria-hidden className="size-4.5" />
@@ -90,8 +110,9 @@ function Intro({ ended }: { ended: boolean }) {
   )
 }
 
-function StartPanel() {
+function StartPanel({ kinds }: { kinds: readonly Kind[] }) {
   const { t } = useTranslation('runs')
+  const question = useStartQuestion(kinds)
   const navigate = useNavigate()
   const start = useStartRun()
   const [confirming, setConfirming] = useState<RunKind | null>(null)
@@ -125,9 +146,9 @@ function StartPanel() {
   }
 
   return (
-    <Panel title={t('startTitle')} description={t('startQuestion')}>
+    <Panel title={t('startTitle')} description={question}>
       <ul className="grid gap-3 @2xl:grid-cols-2">
-        {KINDS.map(({ kind, icon: Icon, orders }) => (
+        {kinds.map(({ kind, icon: Icon, orders }) => (
           <li key={kind} className="flex flex-col gap-3 rounded-xl border bg-background/60 p-4">
             <div className="min-w-0 flex-1 space-y-1">
               <h3 className="flex flex-wrap items-center gap-2 text-sm font-semibold">
@@ -242,6 +263,7 @@ function LatestRun({ run }: { run: Run }) {
         </>
       }
       flush={strongest.length > 0}
+      footer={<NotAdviceNote className="px-2.5 py-1.5" />}
     >
       {signals.isPending && <Skeleton className="h-24 rounded-lg" />}
       {signals.isError && <ErrorState error={signals.error} title={t('signalsFailed')} onRetry={() => void signals.refetch()} />}

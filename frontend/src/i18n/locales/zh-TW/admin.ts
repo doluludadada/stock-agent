@@ -34,6 +34,7 @@ const admin: DictionaryShape<typeof en> = {
     notInteger: '請輸入整數。',
     readOnly: {
       environment: '唯讀：伺服器維持啟動時的執行環境，重新啟動應用程式才會改變。',
+      audience: '唯讀：伺服器維持啟動時的使用對象，重新啟動應用程式才會改變，所以儲存設定不會改變它可使用的資料來源。',
       db: { backend: '這裡唯讀：另一個資料庫存放的是另一組帳號與紀錄。只有搬移網站時才到「進階（YAML）」分頁修改。' },
     },
     section: {
@@ -51,6 +52,7 @@ const admin: DictionaryShape<typeof en> = {
     },
     field: {
       environment: '執行環境',
+      audience: '使用對象',
       db: { backend: '資料庫' },
       ai: {
         active_model: '預設 AI 模型',
@@ -116,6 +118,8 @@ const admin: DictionaryShape<typeof en> = {
       dev: '開發（dev）',
       test: '測試（test）',
       prod: '正式（prod）',
+      personal: '個人使用（personal）',
+      public: '公開網站（public）',
       sqlite: 'SQLite',
       postgresql: 'PostgreSQL',
     },

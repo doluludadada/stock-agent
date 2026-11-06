@@ -3,6 +3,7 @@ from pathlib import Path
 
 import chromadb
 import pytest
+from support.fakes import FakeDailyCloseArchive
 from support.settings import shipped_config
 from trading_stack import MONDAY_10_00, MovableClock, run_stats
 
@@ -142,6 +143,7 @@ async def test_ai_analysis_prompt_carries_the_analysed_stocks_own_history(knowle
     analyser = AiAnalyser(
         ai_provider=ai_provider,
         knowledge_repository=knowledge_repository,
+        archive=FakeDailyCloseArchive(),
         config=config,
         logger=SilentLogger(),
         market_clock=MovableClock(MONDAY_10_00),

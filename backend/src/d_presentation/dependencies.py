@@ -14,8 +14,12 @@ from a_domain.ports.ai.sentiment_classifier import ISentimentClassifier
 from a_domain.ports.analysis.technical_settings_repository import ITechnicalSettingsRepository
 from a_domain.ports.chat.conversation_repository import IConversationRepository
 from a_domain.ports.chat.platform_provider import IPlatformProvider
+from a_domain.ports.market.daily_close_archive import IDailyCloseArchive
 from a_domain.ports.market.fundamentals_provider import IFundamentalsProvider
+from a_domain.ports.market.news_provider import INewsProvider
 from a_domain.ports.market.news_source import INewsSource
+from a_domain.ports.market.price_provider import IOhlcvProvider
+from a_domain.ports.market.social_media_provider import ISocialMediaProvider
 from a_domain.ports.system.attempt_log import IAttemptLog
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.notification_provider import INotificationProvider
@@ -46,7 +50,10 @@ from b_application.use_cases.admin.settings_reader import SettingsReader
 from b_application.use_cases.admin.settings_save import SettingsSave
 from b_application.use_cases.chat.chat_reply import ChatReply
 from b_application.use_cases.chat.dispatcher import Dispatcher
+from b_application.use_cases.collect.archive_warm_up import ArchiveWarmUp
 from b_application.use_cases.collect.buzz_scanner import BuzzScanner
+from b_application.use_cases.collect.daily_close_archiver import DailyCloseArchiver
+from b_application.use_cases.collect.financials_lookup import FinancialsLookup
 from b_application.use_cases.collect.fundamentals_feed import FundamentalsFeed
 from b_application.use_cases.collect.index_history_loader import IndexHistoryLoader
 from b_application.use_cases.collect.intraday_candidates import IntradayCandidates
@@ -111,6 +118,7 @@ from c_infrastructure.database.chroma.knowledge_repository import ChromaKnowledg
 from c_infrastructure.database.chroma.schema import ChromaCollection
 from c_infrastructure.database.db_connector import DatabaseConnector, OutdatedDatabaseError
 from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID, load_accounts_key
+from c_infrastructure.database.repositories.daily_close_archive import SqlDailyCloseArchive
 from c_infrastructure.database.repositories.sentiment_repository import SentimentRepository
 from c_infrastructure.database.repositories.trading_journal import TradingJournal
 from c_infrastructure.database.repositories.user_store import AccountsKeyError, SqlUserStore
@@ -206,10 +214,17 @@ class ProviderDependencies:
     """The adapters shared by every owner, built once per process, and the factory of one owner's adapters."""
 
     stock_provider: TaiwanStockProvider
-    price_provider: CachedPriceProvider
-    fundamentals_provider: IFundamentalsProvider
-    news_provider: NewsProvider
-    social_media_provider: PttProvider
+    price_provider: IOhlcvProvider
+    """The daily history and realtime quotes the audience may use: create_price_provider."""
+    daily_close_archive: IDailyCloseArchive
+    fundamentals_provider: IFundamentalsProvider | None
+    """MOPS, or None for an audience that reads no MOPS (public): its valuation is refused."""
+
+    news_provider: INewsProvider
+    """The news sites, or the open-data archive's material information for an audience without news articles (public)."""
+
+    social_media_provider: ISocialMediaProvider | None
+    """PTT, or None for an audience without realtime quotes (public), which runs no Buzz, PTT's only reader."""
     ai_provider: IAiProvider
     """The installation's own provider, on ai.active_model, uncounted. Only LINE chat uses it; LINE chat stays as it is."""
     conversation_repository: IConversationRepository
@@ -248,7 +263,11 @@ def create_ai_provider(config: AppConfig, logger: ILoggingProvider, provider: Ai
 
 
 def create_groq_provider(config: AppConfig, logger: ILoggingProvider, model_name: str) -> IAiProvider:
-    """Groq, searching the web first when web search is on and TAVILY_API_KEY and the RAG injection prompt are set."""
+    """
+    Groq, searching the web first when web search is on and TAVILY_API_KEY and the RAG injection prompt are set. Startup
+    refuses web search on an audience without news articles: a search brings news sites' text, which a public site may
+    not use.
+    """
     groq = OpenAIAdapter(config, logger, model_name, AiProvider.GROQ, config.ai.groq_api_key, config.sources.ai.groq_base_url)
     results_prompt = config.ai.rag_injection_prompt
 
@@ -297,9 +316,32 @@ async def open_real_broker(config: AppConfig, logger: ILoggingProvider) -> Async
         await provider.close()
 
 
-def create_news_sources(config: AppConfig, logger: ILoggingProvider) -> tuple[INewsSource, ...]:
-    """The news sites in the order they are asked: cnyes first, then Yahoo for what cnyes did not find."""
-    return (CnyesNewsProvider(config.sources.news, logger), YahooTwNewsProvider(config.sources.news, logger))
+def create_news_provider(config: AppConfig, logger: ILoggingProvider, archive: IDailyCloseArchive) -> INewsProvider:
+    """
+    The open-data archive's material information alone for an audience without news articles, which never builds a
+    news site's adapter; otherwise the news sites in the order they are asked: cnyes first, then Yahoo for what cnyes
+    did not find.
+    """
+    if not config.audience.news_articles:
+        return archive
+
+    sources: tuple[INewsSource, ...] = (
+        CnyesNewsProvider(config.sources.news, logger),
+        YahooTwNewsProvider(config.sources.news, logger),
+    )
+    return NewsProvider(sources, config, logger)
+
+
+def create_fundamentals_provider(
+    config: AppConfig, db: DatabaseConnector, process: ProcessState, market_clock: TaiwanMarketClock
+) -> IFundamentalsProvider | None:
+    """MOPS's income statements, or None for an audience that reads no MOPS, which never builds its adapter."""
+    if not config.audience.mops:
+        return None
+
+    return MopsFundamentalsProvider(
+        db=db, market_clock=market_clock, mops=config.sources.mops, logger=process.logger, write_lock=process.cache_writes
+    )
 
 
 def create_platform_provider(config: AppConfig, logger: ILoggingProvider) -> IPlatformProvider | None:
@@ -318,9 +360,15 @@ def create_notification_provider(config: AppConfig, logger: ILoggingProvider) ->
 
 
 def create_price_provider(
-    config: AppConfig, db: DatabaseConnector, process: ProcessState, market_clock: TaiwanMarketClock
-) -> CachedPriceProvider:
-    """Yahoo daily history cached in the database, and TWSE MIS realtime quotes."""
+    config: AppConfig, db: DatabaseConnector, process: ProcessState, market_clock: TaiwanMarketClock, archive: IDailyCloseArchive
+) -> IOhlcvProvider:
+    """
+    The open-data archive alone for an open-data audience, which never builds the Yahoo or the TWSE MIS adapter;
+    otherwise Yahoo daily history cached in the database, and TWSE MIS realtime quotes.
+    """
+    if config.audience.open_data_only:
+        return archive
+
     logger = process.logger
     return CachedPriceProvider(
         history_provider=YahooFinanceProvider(
@@ -352,15 +400,17 @@ async def build_provider_dependencies(
     chroma_client = chromadb.PersistentClient(path=config.db.chroma_persist_path)
 
     ai_providers = {provider: create_ai_provider(config, logger, provider) for provider in config.ai.offered_models}
+    archive = SqlDailyCloseArchive(db, market_clock, config.sources.exchange, config.analysis.material_information_days, logger)
 
     return ProviderDependencies(
         stock_provider=stock_provider,
-        price_provider=create_price_provider(config, db, process, market_clock),
-        fundamentals_provider=MopsFundamentalsProvider(
-            db=db, market_clock=market_clock, mops=config.sources.mops, logger=logger, write_lock=process.cache_writes
+        price_provider=create_price_provider(config, db, process, market_clock, archive),
+        daily_close_archive=archive,
+        fundamentals_provider=create_fundamentals_provider(config, db, process, market_clock),
+        news_provider=create_news_provider(config, logger, archive),
+        social_media_provider=(
+            PttProvider(config=config, logger=logger, stock_provider=stock_provider) if config.audience.realtime_quotes else None
         ),
-        news_provider=NewsProvider(create_news_sources(config, logger), config, logger),
-        social_media_provider=PttProvider(config=config, logger=logger, stock_provider=stock_provider),
         ai_provider=ai_providers[config.ai.active_model],
         conversation_repository=ChromaConversationRepository(chroma_client, logger),
         notification_provider=create_notification_provider(config, logger),
@@ -457,6 +507,7 @@ def build_pipeline(
         dependencies.notification_provider if user is not None and Permission.NOTIFY_RECIPIENTS in user.permissions else None
     )
     stocks, prices = dependencies.stock_provider, dependencies.price_provider
+    history_archive = dependencies.daily_close_archive if config.audience.open_data_only else None
     journal, broker = owned.journal, broker_for(dependencies, owned, user)
     chat_styler = ChatStylerService(config.sources.line.sentence_endings, config.sources.line.max_message_length)
 
@@ -471,17 +522,22 @@ def build_pipeline(
         stock_lookup=StockLookup(stocks, logger),
         stock_search=StockSearch(stocks, config),
         most_traded=MostTraded(stocks, config),
-        market_breadth_loader=MarketBreadthLoader(stocks, dependencies.fundamentals_provider),
+        market_breadth_loader=MarketBreadthLoader(stocks),
         index_history_loader=IndexHistoryLoader(prices, market_clock, config),
         buzz_scanner=BuzzScanner(dependencies.social_media_provider, stocks, logger, config),
         intraday_candidates=IntradayCandidates(stocks, owned.watchlist_repository, logger),
-        data_collector=MarketDataCollector(prices, market_clock, config, logger),
+        data_collector=MarketDataCollector(prices, history_archive, market_clock, config, logger),
         official_change_feed=OfficialChangeFeed(stocks),
+        daily_close_archiver=DailyCloseArchiver(stocks, dependencies.daily_close_archive, logger),
+        archive_warm_up=ArchiveWarmUp(dependencies.daily_close_archive, config),
+        financials_lookup=FinancialsLookup(dependencies.daily_close_archive),
         realtime_quote_feed=RealtimeQuoteFeed(prices, market_clock, config, logger),
         technical_filter=TechnicalFilter(logger),
         indicator_readings=IndicatorReadings(),
         news_feed=NewsFeed(dependencies.news_provider, config, logger),
-        ai_analyser=AiAnalyser(owned.ai_provider, owned.knowledge_repository, market_clock, config, logger),
+        ai_analyser=AiAnalyser(
+            owned.ai_provider, owned.knowledge_repository, dependencies.daily_close_archive, market_clock, config, logger
+        ),
         sentiment_analyser=SentimentAnalyser(owned.sentiment_classifier, config, logger),
         watch_stocks=WatchStocks(owned.watchlist_repository, market_clock, config, logger),
         unwatch_stocks=UnwatchStocks(owned.watchlist_repository, logger),
@@ -498,7 +554,7 @@ def build_pipeline(
         run_lookup=RunLookup(journal),
         active_watchlist=ActiveWatchlist(owned.watchlist_repository),
         account_history=AccountHistory(broker, journal, stocks, prices, market_clock, config, logger),
-        fundamentals_feed=FundamentalsFeed(dependencies.fundamentals_provider, market_clock, logger),
+        fundamentals_feed=FundamentalsFeed(dependencies.fundamentals_provider, stocks, market_clock, logger),
         market_valuation_loader=MarketValuationLoader(stocks, market_clock, config),
         valuation_appraiser=ValuationAppraiser(config),
         valuation_screener=ValuationScreener(config),

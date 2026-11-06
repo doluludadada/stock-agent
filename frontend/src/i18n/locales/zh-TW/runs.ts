@@ -8,6 +8,7 @@ const runs: DictionaryShape<typeof en> = {
   description: '啟動分析並查看紀錄；同時只執行一個任務。',
   startTitle: '啟動任務',
   startQuestion: '四種流程，你的任務一次執行一個',
+  startQuestionWithoutRealtime: '兩種流程，你的任務一次執行一個',
   start: '啟動',
   started: '已啟動「{{kind}}」',
   busy: '還有任務在執行，請等它結束。',

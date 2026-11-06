@@ -21,7 +21,7 @@ export interface FormSection {
  * Advanced (YAML) tab: URLs, prompts, file paths, sources, chat, folders and the built-in strategies.
  */
 export const FORM_SECTIONS: readonly FormSection[] = [
-  { id: 'site', readOnly: true, fields: ['environment', 'db.backend'] },
+  { id: 'site', readOnly: true, fields: ['environment', 'audience', 'db.backend'] },
   { id: 'ai', fields: ['ai.active_model', 'ai.user_selectable', 'ai.temperature', 'ai.max_output_tokens', 'ai.connection_timeout'] },
   {
     id: 'accounts',

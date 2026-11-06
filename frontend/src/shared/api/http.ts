@@ -53,6 +53,8 @@ const ERROR_CODES = {
   administrators_only: true,
   real_broker_refused: true,
   mock_broker_only: true,
+  realtime_quotes_unavailable: true,
+  mops_unavailable: true,
   password_required: true,
   password_refused: true,
   settings_file_refused: true,

@@ -20,7 +20,7 @@ from pydantic.json_schema import GenerateJsonSchema
 from pydantic_core import core_schema
 
 from a_domain.ports.system.settings_files import SettingChange, SettingsProblem, SettingValue
-from a_domain.types.enums import ExecutionProvider, InstructionKey, OrderMode, SettingsFile, SystemEnvironment
+from a_domain.types.enums import Audience, ExecutionProvider, InstructionKey, OrderMode, SettingsFile, SystemEnvironment
 from a_domain.types.errors import SettingsEditError
 from a_domain.types.values import FormulaId
 from b_application.config.app_config import AppConfig
@@ -434,23 +434,36 @@ class TradingSetupError(RuntimeError):
 
 
 def startup_settings(
-    project_root: Path, candidates: Mapping[SettingsFile, str] | None = None, environment: SystemEnvironment | None = None
+    project_root: Path,
+    candidates: Mapping[SettingsFile, str] | None = None,
+    environment: SystemEnvironment | None = None,
+    audience: Audience | None = None,
 ) -> AppConfig:
     """
     The settings a start, a reload or a Web save opens the app on, through every check startup runs before it opens
     anything: the load (each file parsed, every key the app would not read refused, every value validated), the trading
-    setup, the environment the process started in (`environment`, None at its first start), the accounts key and every
-    offered AI provider's model id and key. Raises one InvalidSettingsError with every refusal located once, never a value.
+    setup, the environment and the audience the process started in (`environment` and `audience`, None at its first
+    start), the accounts key, the AI's web and X search on an audience without news articles, and every offered AI
+    provider's model id and key. Raises one InvalidSettingsError with every refusal located once, never a value.
     """
     texts = settings_texts(project_root, candidates)
     config = load_settings(project_root, texts)
 
     try:
         validate_trading_environment(config)
-        validate_environment_unchanged(config, environment or config.environment)
+        validate_started_setup_unchanged(config, environment or config.environment, audience or config.audience)
         validate_accounts_environment(config)
     except (TradingSetupError, AccountsSetupError) as error:
         raise InvalidSettingsError([locate(texts, error.path, str(error))]) from None
+
+    searches = {
+        "behavior.enable_web_search": config.behavior.enable_web_search,
+        "behavior.enable_x_search": config.behavior.enable_x_search,
+    }
+
+    if not config.audience.news_articles and (searching := [path for path, enabled in searches.items() if enabled]):
+        message = f"must be false on audience {config.audience.value}: a search brings news sites' and X's text, which it may not use"
+        raise InvalidSettingsError([locate(texts, path, message) for path in searching])
 
     if missing := config.ai.missing_keys():
         raise InvalidSettingsError([locate(texts, path, f"{need}; the app would not start") for path, need in missing.items()])
@@ -461,9 +474,11 @@ def startup_settings(
 def validate_trading_environment(config: AppConfig) -> None:
     """
     Refuses a setup that could send an order nobody meant to send, or use a credential the environment must not see,
-    before any broker or database is contacted. What each environment allows is SystemEnvironment's table:
+    before any broker or database is contacted. What each environment allows is SystemEnvironment's table, and what
+    each audience allows is Audience's:
 
-    - the brokers and order modes it allows (dev: the mock only; only prod: order mode live);
+    - the brokers the environment and the audience allow (dev: the mock only; public: the mock only);
+    - the order modes the environment allows (only prod: order mode live);
     - mock_only order mode needs the mock broker, live needs Shioaji;
     - dev and test refuse to start while a production Shioaji credential is set;
     - prod refuses SQLite;
@@ -471,12 +486,7 @@ def validate_trading_environment(config: AppConfig) -> None:
     Order mode disabled never orders, so in test and prod it may read a Shioaji account.
     """
     environment, provider, mode = config.environment, config.trading.execution_provider, config.trading.order_mode
-
-    if provider not in environment.brokers:
-        allowed = ", ".join(sorted(broker.value for broker in environment.brokers))
-        raise TradingSetupError(
-            f"environment {environment.value} trades only on {allowed}, not {provider.value}", "trading.execution_provider"
-        )
+    validate_brokers(config)
 
     if mode not in environment.order_modes:
         allowed = " or ".join(other.value for other in SystemEnvironment if mode in other.order_modes)
@@ -501,6 +511,24 @@ def validate_trading_environment(config: AppConfig) -> None:
     validate_environment_credentials(config)
 
 
+def validate_brokers(config: AppConfig) -> None:
+    """The broker must be one the environment allows and one the audience allows: a public site never reaches a real account."""
+    environment, audience, provider = config.environment, config.audience, config.trading.execution_provider
+
+    if provider not in environment.brokers:
+        allowed = ", ".join(sorted(broker.value for broker in environment.brokers))
+        raise TradingSetupError(
+            f"environment {environment.value} trades only on {allowed}, not {provider.value}", "trading.execution_provider"
+        )
+
+    if provider not in audience.brokers:
+        allowed = ", ".join(sorted(broker.value for broker in audience.brokers))
+        raise TradingSetupError(
+            f"audience {audience.value} trades only on {allowed}, not {provider.value}: nobody trades in a visitor's account",
+            "trading.execution_provider",
+        )
+
+
 def validate_environment_credentials(config: AppConfig) -> None:
     """The Shioaji variables the environment must not see, and those its broker needs. Names only, never a value."""
     environment, given = config.environment, config.shioaji.given()
@@ -520,16 +548,25 @@ def validate_environment_credentials(config: AppConfig) -> None:
         )
 
 
-def validate_environment_unchanged(config: AppConfig, environment: SystemEnvironment) -> None:
+def validate_started_setup_unchanged(config: AppConfig, environment: SystemEnvironment, audience: Audience) -> None:
     """
-    A process keeps the environment it started in, because the environment decides which credentials it reads: a
-    settings change on disk or from the Web that changes it is refused, and the running settings keep serving.
+    A process keeps the environment and the audience it started in: the environment decides which credentials it reads,
+    and the audience which sources it may reach and whom it may show them, so a public site never starts asking Yahoo or
+    TWSE MIS because a save said so. A settings change on disk or from the Web that changes either is refused, and the
+    running settings keep serving.
     """
     if config.environment != environment:
         raise TradingSetupError(
             f"environment is {config.environment.value} in the settings, but this process started as {environment.value}: "
             "the environment changes only when the app restarts",
             "environment",
+        )
+
+    if config.audience != audience:
+        raise TradingSetupError(
+            f"audience is {config.audience.value} in the settings, but this process started as {audience.value}: "
+            "the audience changes only when the app restarts",
+            "audience",
         )
 
 

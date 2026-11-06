@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router'
 import { Toaster } from 'sonner'
 import { initI18n } from '@/i18n'
 import { session } from '@/shared/api'
+import { PERSONAL_SITE } from '@/test/audiences'
 import { TEST_USER } from '@/test/users'
 import { RunsPage } from './RunsPage'
 
@@ -16,6 +17,7 @@ async function startRefused(status: number, refusal: { detail: string; code: str
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/v1/market/audience') return json(PERSONAL_SITE)
       if (url.startsWith('/v1/runs?')) return json([])
       if (url === '/v1/runs/full-cycle' && init?.method === 'POST') return json(refusal, status)
       return json({ detail: 'Not Found', code: 'not_found' }, 404)
@@ -84,6 +86,7 @@ function renderRuns(runs: unknown[], decisions: Record<string, unknown[]> = {}) 
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string) => {
+      if (url === '/v1/market/audience') return json(PERSONAL_SITE)
       if (url.startsWith('/v1/runs?')) return json(runs)
       const runId = url.match(/^\/v1\/runs\/([^/]+)\/signals$/)?.[1]
       if (runId && decisions[runId]) return json(decisions[runId])

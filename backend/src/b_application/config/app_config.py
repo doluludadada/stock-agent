@@ -12,7 +12,7 @@ from a_domain.rules.trading.exit import ExitRule, StopLossRule
 from a_domain.rules.trading.order_rule import OrderGateRule, OrderRule
 from a_domain.rules.trading.reason import AnalysisSummaryRule, EntryReasonRule, ExitReasonRule
 from a_domain.rules.trading.sizing import BuyCostRule, SizingRule
-from a_domain.types.enums import DatabaseBackend, ExecutionProvider, SettingsFile, SystemEnvironment
+from a_domain.types.enums import Audience, DatabaseBackend, ExecutionProvider, SettingsFile, SystemEnvironment
 from b_application.config.accounts_config import AccountsConfig
 from b_application.config.ai_config import AiConfig, BehaviorConfig, PromptsConfig, SentimentConfig, TavilyConfig
 from b_application.config.api_config import ApiConfig
@@ -80,6 +80,9 @@ class AppConfig(BaseSettings):
     """Set by load_settings, never by a settings file: `exclude` marks a field the loader sets, and the key check refuses it."""
 
     environment: SystemEnvironment = SystemEnvironment.DEV
+    audience: Audience = Audience.PERSONAL
+    """Whom this deployment serves, and with it which data and brokers it may use: Audience's table."""
+
     settings_revisions: dict[SettingsFile, str] = Field(default_factory=dict, exclude=True)
     """The revision of each settings file this configuration was loaded from, set by load_settings like project_root."""
 

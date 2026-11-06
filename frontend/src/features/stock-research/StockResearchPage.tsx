@@ -11,6 +11,7 @@ import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { ErrorState } from '@/shared/ui/error-state'
+import { NotAdviceNote } from '@/shared/ui/not-advice-note'
 import { Panel } from '@/shared/ui/panel'
 import { PriceTrend } from '@/shared/ui/price-trend'
 import { PriceValue } from '@/shared/ui/price-value'
@@ -22,6 +23,7 @@ import { Skeleton } from '@/shared/ui/skeleton'
 import { Stat } from '@/shared/ui/stat'
 import { StateBlock } from '@/shared/ui/state-block'
 import { useStockTechnical, type StockTechnical } from './api'
+import { FinancialsPanel } from './FinancialsPanel'
 import { dayQuote, latestReadings, priceOverlays, reportChecks, yearRange, type Check } from './model'
 
 const OVERLAY_COLORS = ['--chart-ma-fast', '--chart-ma-slow'] as const
@@ -109,6 +111,7 @@ function Research({ history, actions, strategyName, ruleSentences, ruleName }: O
           </div>
           {actions && <div className="flex flex-wrap gap-2">{actions({ code: history.stock.stock_id, name })}</div>}
         </div>
+        <NotAdviceNote />
       </header>
 
       <div className="grid items-start gap-4 lg:gap-5 xl:grid-cols-12">
@@ -125,6 +128,8 @@ function Research({ history, actions, strategyName, ruleSentences, ruleName }: O
           </div>
         </div>
       </div>
+
+      <FinancialsPanel stockId={history.stock.stock_id} />
 
       {signedIn && technical.data && <EvaluationDetails technical={technical.data} ruleSentences={ruleSentences} ruleName={ruleName} />}
     </div>

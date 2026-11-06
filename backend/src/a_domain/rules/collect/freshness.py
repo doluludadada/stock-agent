@@ -69,6 +69,24 @@ class MissingSessionRule:
 
 
 @dataclass(frozen=True)
+class ArchiveWarmUpRule:
+    """
+    The run error while the open-data archive, an open-data deployment's only daily history, holds fewer sessions than
+    the daily bars needed, or None once it holds enough. The archive gains one session per trading day from the day it
+    started, so until then every stock fails the technical step for too few bars, and the run says why.
+    """
+
+    def apply(self, sessions: int, required_bars: int) -> str | None:
+        if sessions >= required_bars:
+            return None
+
+        return (
+            f"The open-data archive holds {sessions} of the {required_bars} sessions needed: it saves each session's "
+            "TWSE and TPEX closes as the exchanges publish them, so every stock has too few daily bars until then."
+        )
+
+
+@dataclass(frozen=True)
 class MissedSessionsRule:
     """How many weekday sessions closed after `session`, up to and including `last_closed_session`."""
 

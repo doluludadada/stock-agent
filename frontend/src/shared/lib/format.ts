@@ -95,6 +95,11 @@ export function formatMonthDayTime(locale: string, isoDateTime: string): string 
   return dateFormat(locale, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(isoDateTime))
 }
 
+/** A calendar month: 2026年9月, September 2026. */
+export function formatYearMonth(locale: string, year: number, month: number): string {
+  return dateFormat(locale, { year: 'numeric', month: 'long' }).format(new Date(Date.UTC(year, month - 1, 15, 4)))
+}
+
 /** A bare trading date (YYYY-MM-DD) is noon in Taipei, so no time zone shifts it to another day. */
 function toMarketDate(iso: string): Date {
   return iso.length === 10 ? new Date(`${iso}T12:00:00+08:00`) : new Date(iso)
@@ -113,6 +118,7 @@ export function useFormat() {
       lots: (shares: number) => t('units.lots', { value: formatLotCount(locale, shares / SHARES_PER_LOT) }),
       date: (isoDate: string, style?: 'short' | 'long') => formatDate(locale, isoDate, style),
       monthDay: (isoDate: string) => formatMonthDay(locale, isoDate),
+      yearMonth: (year: number, month: number) => formatYearMonth(locale, year, month),
       /** The session a price closed, said where it is not the latest: "11/2 收盤". */
       closeOn: (isoDate: string) => t('units.closeOn', { date: formatMonthDay(locale, isoDate) }),
     }),

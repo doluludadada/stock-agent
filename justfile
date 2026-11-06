@@ -22,6 +22,18 @@ reset-password login:
 reset-password login:
     cd backend; $env:PYTHONPATH="src"; uv run python -m d_presentation.cli.reset_password {{login}}
 
+# Saves the official closes, material information, EPS statistics, valuation ratios, balance sheets, income statements,
+# monthly revenue and TWSE news the TWSE and TPEX OpenAPI serve now into the archive, then prints every date, quarter
+# and month it holds.
+# The Web API does the same at its start and every api.archive_interval_hours (3 by default).
+[unix]
+archive-closes:
+    cd backend && PYTHONPATH=src uv run python -m d_presentation.cli.archive_closes
+
+[windows]
+archive-closes:
+    cd backend; $env:PYTHONPATH="src"; uv run python -m d_presentation.cli.archive_closes
+
 # The database commands (docs/database-migrations.md). Each opens only the database that db.backend selects, so it also
 # works on a database that startup refuses. Backups go to backups/ (owner-only); PostgreSQL's need pg_dump and pg_restore.
 

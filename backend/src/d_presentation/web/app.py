@@ -18,9 +18,11 @@ from a_domain.types.errors import (
     AlreadySetUpError,
     LastAdministratorError,
     ListingUnavailableError,
+    MopsUnavailable,
     PasswordRefused,
     PasswordRequired,
     RealBrokerRefused,
+    RealtimeQuotesUnavailable,
     RegistrationClosed,
     SettingsConflictError,
     SettingsEditError,
@@ -34,7 +36,7 @@ from a_domain.types.errors import (
 )
 from b_application.config.settings_loader import InvalidSettingsError
 from d_presentation.dependencies import Runtime
-from d_presentation.live_runtime import RuntimeSwitch, watch_settings
+from d_presentation.live_runtime import RuntimeSwitch, archive_closes, watch_settings
 from d_presentation.web.routers.api_v1 import router as api_v1_router
 from d_presentation.web.session import (
     AdministratorsOnly,
@@ -63,6 +65,16 @@ Orders. Full Cycle, specific-stock analysis, valuation and market data never ord
 through the same gates and trading journal as the CLI, and the API starts them only while the execution provider is
 the mock broker (403 otherwise). No endpoint places, cancels or modifies an order by itself, and the API offers no
 manual BUY.
+
+Open data. A public site (`audience: public`) uses only the TWSE and TPEX OpenAPI data the server archives: daily
+history and the index trend come from that archive, it has no realtime quote, so Buzz and Intraday answer 403
+`realtime_quotes_unavailable`, and it trades on the mock broker only. It reads no news site and no MOPS: the AI step
+reads the archived material information, the TWSE news naming the stock and its archived financials, a stock with none
+of them is decided on its technical score alone, and every valuation endpoint answers 403 `mops_unavailable`. `GET
+/v1/market/audience` answers the site's audience and what it allows, so the web app offers only that. `GET
+/v1/market/archive-status` says how many sessions the archive holds and how many the built-in strategies need, `GET
+/v1/market/stocks/{stock_id}/financials` answers a stock's archived quarters and monthly revenue, and `GET
+/v1/market/attribution` names the open data's providers, datasets and license, which a page showing it must credit.
 
 Workflows run in the background, one at a time per user and a few at a time per server: a start answers 202 with the
 run id, and GET /v1/runs/{run_id} reports the run's state and its record; another user's run id answers 404. Run the
@@ -115,6 +127,8 @@ ERROR_ANSWERS: dict[type[Exception], tuple[int, ErrorCode]] = {
     AdministratorsOnly: (status.HTTP_403_FORBIDDEN, ErrorCode.ADMINISTRATORS_ONLY),
     RealBrokerRefused: (status.HTTP_403_FORBIDDEN, ErrorCode.REAL_BROKER_REFUSED),
     MockBrokerOnly: (status.HTTP_403_FORBIDDEN, ErrorCode.MOCK_BROKER_ONLY),
+    RealtimeQuotesUnavailable: (status.HTTP_403_FORBIDDEN, ErrorCode.REALTIME_QUOTES_UNAVAILABLE),
+    MopsUnavailable: (status.HTTP_403_FORBIDDEN, ErrorCode.MOPS_UNAVAILABLE),
     SettingsFileRefused: (status.HTTP_403_FORBIDDEN, ErrorCode.SETTINGS_FILE_REFUSED),
     PasswordRequired: (status.HTTP_403_FORBIDDEN, ErrorCode.PASSWORD_REQUIRED),
     PasswordRefused: (status.HTTP_403_FORBIDDEN, ErrorCode.PASSWORD_REFUSED),
@@ -196,8 +210,9 @@ def error_handlers() -> dict[int | type[Exception], ErrorAnswer]:
 def create_app(open_switch: Callable[[], AbstractAsyncContextManager[RuntimeSwitch]]) -> FastAPI:
     """
     The FastAPI app. Its lifespan opens the process's runtimes through the startup checks the CLI runs, offers the
-    first-time setup while no user exists and watches the settings files. At shutdown it stops the watch, cancels every
-    running workflow while its runtime is open, so its record ends as aborted, then closes every runtime.
+    first-time setup while no user exists, watches the settings files and archives the open-data closes on a timer. At
+    shutdown it stops the watch and the timer, cancels every running workflow while its runtime is open, so its record
+    ends as aborted, then closes every runtime.
     """
 
     @asynccontextmanager
@@ -210,12 +225,14 @@ def create_app(open_switch: Callable[[], AbstractAsyncContextManager[RuntimeSwit
                 await offer_first_time_setup(app, opened.runtime)
 
             watcher = asyncio.get_running_loop().create_task(watch_settings(switch))
+            archiver = asyncio.get_running_loop().create_task(archive_closes(switch))
 
             try:
                 yield
 
             finally:
                 watcher.cancel()
+                archiver.cancel()
                 await workflow_runs.stop()
 
     app = FastAPI(

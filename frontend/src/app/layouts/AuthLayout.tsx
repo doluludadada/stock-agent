@@ -3,6 +3,7 @@ import { Outlet } from 'react-router'
 import { useTranslation } from '@/i18n'
 import { BrandMark } from './BrandMark'
 import { PreferenceMenu } from './PreferenceMenu'
+import { SiteFooter } from './SiteFooter'
 
 const POINTS = [
   { key: 'market', icon: LineChart },
@@ -40,6 +41,7 @@ export function AuthLayout() {
         <main id="main" className="flex flex-1 justify-center px-5 pt-6 pb-14 sm:items-center sm:pt-0 md:px-8">
           <Outlet />
         </main>
+        <SiteFooter className="mx-5 mb-5 md:mx-8" />
       </div>
     </div>
   )

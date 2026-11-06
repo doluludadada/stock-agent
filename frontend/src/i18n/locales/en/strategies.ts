@@ -37,6 +37,7 @@ const strategies = {
     emptyCopy: 'Copy Balanced',
     loadFailed: 'The strategies could not be loaded.',
     selectionNote: 'Full Cycle, specific stocks, Intraday and valuation use the strategy in use; Social Buzz uses its own.',
+    selectionNoteWithoutRealtime: 'Full Cycle and specific stocks use the strategy in use.',
   },
   card: {
     builtin: 'Built-in',

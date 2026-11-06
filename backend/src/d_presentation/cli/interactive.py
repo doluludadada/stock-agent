@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from rich.panel import Panel
 
 from a_domain.model.system.user import User
-from a_domain.types.enums import ExecutionProvider, OrderMode, Permission
+from a_domain.types.enums import ErrorCode, ExecutionProvider, OrderMode, Permission
 from a_domain.types.errors import ListingUnavailableError
 from b_application.config.app_config import AppConfig
 from b_application.schemas.pipeline_status import PipelineStatus
@@ -33,6 +33,18 @@ class MenuOption:
     what the current order mode does with its orders, and a real broker's warning names it.
     """
 
+    needs_realtime_quotes: bool = False
+    """
+    The option is a workflow that orders on realtime quotes (Buzz, Intraday). An audience without them (public: open
+    data only) refuses it before it runs, and the menu says so.
+    """
+
+    needs_mops: bool = False
+    """
+    The option values stocks on MOPS's EPS (menus 5 and 6). An audience that reads no MOPS (public: open data only)
+    refuses it before it runs, and the menu says so.
+    """
+
 
 MENU = {
     "1": MenuOption(
@@ -50,12 +62,14 @@ MENU = {
         description=("Find actively discussed stocks.", "Analyse qualified buzz stocks."),
         run=trading_views.scan_social_buzz,
         may_submit_orders=True,
+        needs_realtime_quotes=True,
     ),
     "3": MenuOption(
         title="Run Intraday Trading",
         description=("Revalidate positions and active watchlist stocks.", "Generate signals."),
         run=lambda runtime, session: session.pipeline.run_intraday(built_in_strategy_id=session.built_in_strategy_id),
         may_submit_orders=True,
+        needs_realtime_quotes=True,
     ),
     "4": MenuOption(
         title="Analyse Specific Stocks",
@@ -71,6 +85,7 @@ MENU = {
             "Read-only: never touches the watchlist or orders.",
         ),
         run=valuation_views.value_specific_stocks,
+        needs_mops=True,
     ),
     "6": MenuOption(
         title="Scan Undervalued Stocks",
@@ -80,6 +95,7 @@ MENU = {
             "Read-only: never touches the watchlist or orders.",
         ),
         run=valuation_views.scan_undervalued_stocks,
+        needs_mops=True,
     ),
     "7": MenuOption(
         title="Account History",
@@ -224,6 +240,10 @@ async def run_menu_option(choice: str, runtime: Runtime, session: terminal.CliSe
     """
     option = MENU[choice]
 
+    if refusal := audience_refusal(runtime.config, option):
+        terminal.console.print(f"[red]{option.title}: {refusal}[/red]")
+        return None
+
     try:
         status = await option.run(runtime, session)
     except EOFError:
@@ -252,7 +272,9 @@ def print_menu(config: AppConfig, session: terminal.CliSession) -> None:
         for line in option.description:
             terminal.console.print(f"    {line}")
 
-        if option.may_submit_orders:
+        if refusal := audience_refusal(config, option):
+            terminal.console.print(f"    {refusal}")
+        elif option.may_submit_orders:
             terminal.console.print(f"    {order_mode_effect(config)}")
 
         terminal.console.print("")
@@ -305,7 +327,30 @@ def print_trading_setup(config: AppConfig) -> None:
     terminal.console.print(Panel(f"{broker} {server}\nOrders {mode}: {orders}", title="REAL BROKER", style="bold red"))
 
 
+def audience_refusal(config: AppConfig, option: MenuOption) -> str | None:
+    """
+    Why the option is refused here, or None: it orders on realtime quotes and the audience has none, or it values on
+    MOPS and the audience reads none.
+    """
+    if option.needs_realtime_quotes and not config.audience.realtime_quotes:
+        return (
+            f"Refused ({ErrorCode.REALTIME_QUOTES_UNAVAILABLE}): audience {config.audience.value} uses open data only, "
+            "which has no realtime quotes to order on."
+        )
+
+    if option.needs_mops and not config.audience.mops:
+        return (
+            f"Refused ({ErrorCode.MOPS_UNAVAILABLE}): audience {config.audience.value} uses open data only, "
+            "and reads no MOPS income statement to value on."
+        )
+
+    return None
+
+
 def order_mode_effect(config: AppConfig) -> str:
+    if not config.audience.realtime_quotes:
+        return f"Sends no order: audience {config.audience.value} has no realtime quote to price one, so no manual BUY."
+
     mode = terminal.format_label(config.trading.order_mode.value)
     broker = terminal.format_label(config.trading.execution_provider.value)
 

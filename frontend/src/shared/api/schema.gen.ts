@@ -403,6 +403,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/market/archive-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Archive Status
+         * @description How many sessions of TWSE and TPEX closes the server's open-data archive holds, and how many the built-in strategies
+         *     need. A public site's runs read their daily history from it, so they find no candidate until it holds enough. Public.
+         */
+        get: operations["get_archive_status_v1_market_archive_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/market/attribution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Attribution
+         * @description The credit the Open Government Data License v1 requires wherever the site shows the TWSE and TPEX open data or what
+         *     it computes from it: each providing agency with the datasets the site reads, the license's notice, and the
+         *     license's name and address. Public.
+         */
+        get: operations["get_attribution_v1_market_attribution_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/market/audience": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Audience
+         * @description Whom the site serves, personal or public, and what that allows, from the one table of each audience's capabilities.
+         *     The web app shows only what the site can do by it; the server still refuses the rest. Public.
+         */
+        get: operations["get_audience_v1_market_audience_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/market/breadth": {
         parameters: {
             query?: never;
@@ -433,8 +497,8 @@ export interface paths {
         };
         /**
          * Get Index History
-         * @description One market index's completed daily bars, oldest first, from the history cache the stock pages share. Public. Like
-         *     a stock's history, it fetches no realtime quote.
+         * @description One market index's completed daily bars, oldest first, from the daily history the stock pages share: the Yahoo
+         *     cache, or the open-data archive on a public site. Public. Like a stock's history, it fetches no realtime quote.
          */
         get: operations["get_index_history_v1_market_indexes__index__get"];
         put?: never;
@@ -498,6 +562,30 @@ export interface paths {
          *     no realtime quote: the latest bar is the last settled session's close.
          */
         get: operations["get_stock_history_v1_market_stocks__stock_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/market/stocks/{stock_id}/financials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Stock Financials
+         * @description One stock's financials from the server's open-data archive: each archived quarter's revenue, gross profit,
+         *     operating income, net income and EPS of the year to the quarter's end, its total assets, liabilities and equity at
+         *     the quarter's end and its book value per share, and each archived month's revenue with its changes. Amounts are in
+         *     thousands of TWD, per-share figures in TWD and changes in percent; a figure the company's industry format does not
+         *     report is null. Both lists are empty for a stock the archive holds nothing of. Public.
+         */
+        get: operations["get_stock_financials_v1_market_stocks__stock_id__financials_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -973,6 +1061,17 @@ export interface components {
             summary: string;
         };
         /**
+         * ArchiveStatusResponse
+         * @description The open-data archive's warm-up. A public site reads its daily history from the archive alone, so its runs find no
+         *     candidate until `sessions` reaches `needed`.
+         */
+        ArchiveStatusResponse: {
+            /** Needed */
+            needed: number;
+            /** Sessions */
+            sessions: number;
+        };
+        /**
          * Arithmetic
          * @description Two numbers combined: `{"type": "arithmetic", "operator": "multiply", "left": <25-day average volume>,
          *     "right": 1.8}` is 1.8 times that average. Either side may be another arithmetic part.
@@ -1007,6 +1106,40 @@ export interface components {
          * @enum {string}
          */
         ArithmeticOperator: "add" | "subtract" | "multiply" | "divide";
+        /**
+         * AttributedProvider
+         * @description An agency whose open data the app reads, by the name it publishes under, and the names of the datasets it reads.
+         */
+        AttributedProvider: {
+            /** Datasets */
+            datasets: string[];
+            /** Provider */
+            provider: string;
+        };
+        /**
+         * Audience
+         * @description Whom the deployment serves, and with it which data and brokers it may use. Its properties are the one table of
+         *     what each audience allows; the wiring, the trading setup check and the gates of the Web API and the CLI read them,
+         *     and nothing else decides by audience.
+         * @enum {string}
+         */
+        Audience: "personal" | "public";
+        /**
+         * AudienceResponse
+         * @description Whom the site serves and what that allows, as the Audience table says, so the web app offers only what the site can
+         *     do. The server still refuses the rest on every request.
+         */
+        AudienceResponse: {
+            audience: components["schemas"]["Audience"];
+            /** Mops */
+            mops: boolean;
+            /** News Articles */
+            news_articles: boolean;
+            /** Open Data Only */
+            open_data_only: boolean;
+            /** Realtime Quotes */
+            realtime_quotes: boolean;
+        };
         /**
          * AuthStatusResponse
          * @description What the web app shows first: the first-time setup, or sign-in with or without registration.
@@ -1200,7 +1333,7 @@ export interface components {
          *     refused file, a user who is not an administrator and an installation on a real broker.
          * @enum {string}
          */
-        ErrorCode: "sign_in_required" | "sign_in_refused" | "sign_in_throttled" | "registration_closed" | "setup_code_refused" | "already_set_up" | "user_exists" | "last_administrator" | "unknown_host" | "app_request_required" | "administrators_only" | "real_broker_refused" | "mock_broker_only" | "password_required" | "password_refused" | "settings_file_refused" | "settings_file_missing" | "settings_conflict" | "settings_edit_refused" | "settings_refused" | "technical_settings_conflict" | "ai_model_not_offered" | "run_in_progress" | "too_many_runs" | "listing_unavailable" | "not_found" | "invalid_request" | "body_too_large" | "request_refused";
+        ErrorCode: "sign_in_required" | "sign_in_refused" | "sign_in_throttled" | "registration_closed" | "setup_code_refused" | "already_set_up" | "user_exists" | "last_administrator" | "unknown_host" | "app_request_required" | "administrators_only" | "real_broker_refused" | "mock_broker_only" | "realtime_quotes_unavailable" | "mops_unavailable" | "password_required" | "password_refused" | "settings_file_refused" | "settings_file_missing" | "settings_conflict" | "settings_edit_refused" | "settings_refused" | "technical_settings_conflict" | "ai_model_not_offered" | "run_in_progress" | "too_many_runs" | "listing_unavailable" | "not_found" | "invalid_request" | "body_too_large" | "request_refused";
         /**
          * ErrorResponse
          * @description Every refusal: `detail` in words for a person, `code` for the client to switch on.
@@ -1294,7 +1427,7 @@ export interface components {
          * InformationSource
          * @enum {string}
          */
-        InformationSource: "twse_mops" | "news_media" | "ptt_stock" | "ptt_gossiping" | "reunion";
+        InformationSource: "twse_mops" | "twse_news" | "news_media" | "ptt_stock" | "ptt_gossiping" | "reunion";
         /**
          * LatestPrice
          * @description The latest price: the run's realtime quote when it has one, else the latest daily close. It has no earlier
@@ -1391,6 +1524,48 @@ export interface components {
             type: "market";
         };
         /**
+         * MonthlyRevenue
+         * @description One company's revenue of one month, as the TWSE or TPEX OpenAPI's monthly revenue summary serves it, under the
+         *     Gregorian year and the month, with the day the exchange served it. Revenues are in thousands of TWD and changes in
+         *     percent; a figure the summary leaves blank is None. The company's name, industry and note are as served.
+         */
+        MonthlyRevenue: {
+            /** Company Name */
+            company_name: string;
+            /** Cumulative Revenue */
+            cumulative_revenue: number | null;
+            /** Cumulative Year Over Year Percent */
+            cumulative_year_over_year_percent: number | null;
+            /** Industry */
+            industry: string;
+            /** Last Year Cumulative Revenue */
+            last_year_cumulative_revenue: number | null;
+            /** Last Year Revenue */
+            last_year_revenue: number | null;
+            market: components["schemas"]["MarketType"];
+            /** Month */
+            month: number;
+            /** Month Over Month Percent */
+            month_over_month_percent: number | null;
+            /** Note */
+            note: string;
+            /** Previous Month Revenue */
+            previous_month_revenue: number | null;
+            /** Revenue */
+            revenue: number | null;
+            /**
+             * Served Date
+             * Format: date
+             */
+            served_date: string;
+            /** Stock Id */
+            stock_id: string;
+            /** Year */
+            year: number;
+            /** Year Over Year Percent */
+            year_over_year_percent: number | null;
+        };
+        /**
          * MovingAverageIndicator
          * @description `sma` averages the daily closes, `volume_sma` the daily volumes. Both include the bar they are read at.
          */
@@ -1409,6 +1584,22 @@ export interface components {
         Number: number;
         "NumericExpression-Input": components["schemas"]["Number"] | (components["schemas"]["DataReference-Input"] | components["schemas"]["Arithmetic-Input"]);
         "NumericExpression-Output": components["schemas"]["Number"] | (components["schemas"]["DataReference-Output"] | components["schemas"]["Arithmetic-Output"]);
+        /**
+         * OpenDataAttribution
+         * @description The credit the Open Government Data License v1 asks of every use, in the form of its annex: each providing agency
+         *     with its datasets, the license's notice, and the license's name and address. A use that does not give it holds no
+         *     license from the start (Article 3, paragraph 2), so a page that shows open data shows this too.
+         */
+        OpenDataAttribution: {
+            /** License */
+            license: string;
+            /** License Url */
+            license_url: string;
+            /** Notice */
+            notice: string;
+            /** Providers */
+            providers: components["schemas"]["AttributedProvider"][];
+        };
         /**
          * Order
          * @description The app's record of one order: the decision it executes, what went to (or was refused before)
@@ -1559,6 +1750,34 @@ export interface components {
             problems: components["schemas"]["SettingsProblem"][];
         };
         PublicText: string;
+        /**
+         * QuarterFinancials
+         * @description One company's figures of one quarter, as its balance sheet, its income statement and its EPS statistics in the TWSE
+         *     or TPEX OpenAPI give them, in thousands of TWD: the income figures run from the year's start to the quarter's end,
+         *     the balance figures stand at the quarter's end, and the EPS and the book value per share are in TWD. A figure its
+         *     industry format does not report, or a statement the archive does not hold, is None.
+         */
+        QuarterFinancials: {
+            /** Book Value Per Share */
+            book_value_per_share?: number | null;
+            /** Eps */
+            eps?: number | null;
+            /** Equity */
+            equity?: number | null;
+            /** Gross Profit */
+            gross_profit?: number | null;
+            /** Net Income */
+            net_income?: number | null;
+            /** Operating Income */
+            operating_income?: number | null;
+            quarter: components["schemas"]["FiscalQuarter"];
+            /** Revenue */
+            revenue?: number | null;
+            /** Total Assets */
+            total_assets?: number | null;
+            /** Total Liabilities */
+            total_liabilities?: number | null;
+        };
         /** RegistrationRequest */
         RegistrationRequest: {
             email: components["schemas"]["EmailAddress"];
@@ -1954,6 +2173,19 @@ export interface components {
              * @enum {string}
              */
             kind: "stochastic";
+        };
+        /**
+         * StockFinancialsResponse
+         * @description A stock's financials as the server's open-data archive holds them. The OpenAPI serves only the latest quarter and
+         *     month, so the archive holds those it saved while they were served, and nothing before the archive started.
+         */
+        StockFinancialsResponse: {
+            /** Monthly Revenues */
+            monthly_revenues: components["schemas"]["MonthlyRevenue"][];
+            /** Quarters */
+            quarters: components["schemas"]["QuarterFinancials"][];
+            /** Stock Id */
+            stock_id: string;
         };
         /** StockHistoryResponse */
         StockHistoryResponse: {
@@ -3035,6 +3267,66 @@ export interface operations {
             };
         };
     };
+    get_archive_status_v1_market_archive_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchiveStatusResponse"];
+                };
+            };
+        };
+    };
+    get_attribution_v1_market_attribution_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenDataAttribution"];
+                };
+            };
+        };
+    };
+    get_audience_v1_market_audience_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AudienceResponse"];
+                };
+            };
+        };
+    };
     get_market_breadth_v1_market_breadth_get: {
         parameters: {
             query?: never;
@@ -3200,6 +3492,37 @@ export interface operations {
             };
         };
     };
+    get_stock_financials_v1_market_stocks__stock_id__financials_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                stock_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StockFinancialsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_stock_technical_v1_market_stocks__stock_id__technical_get: {
         parameters: {
             query?: never;
@@ -3292,7 +3615,7 @@ export interface operations {
                     "application/json": components["schemas"]["RunAccepted"];
                 };
             };
-            /** @description The execution provider is not the mock broker; use the CLI. */
+            /** @description mock_broker_only: the execution provider is not the mock broker; use the CLI. realtime_quotes_unavailable: the site uses open data only (audience public), which has no realtime quotes. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -3403,7 +3726,7 @@ export interface operations {
                     "application/json": components["schemas"]["RunAccepted"];
                 };
             };
-            /** @description The execution provider is not the mock broker; use the CLI. */
+            /** @description mock_broker_only: the execution provider is not the mock broker; use the CLI. realtime_quotes_unavailable: the site uses open data only (audience public), which has no realtime quotes. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -3694,6 +4017,15 @@ export interface operations {
                     "application/json": components["schemas"]["ValuationExplanationResponse"];
                 };
             };
+            /** @description mops_unavailable: the site uses open data only (audience public), which reads no MOPS income statement. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Not a valued stock. */
             404: {
                 headers: {
@@ -3730,6 +4062,15 @@ export interface operations {
                     "application/json": components["schemas"]["MarketValuationResponse"];
                 };
             };
+            /** @description mops_unavailable: the site uses open data only (audience public), which reads no MOPS income statement. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     scan_undervalued_v1_valuation_scan_get: {
@@ -3752,6 +4093,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ValuationScanResponse"];
+                };
+            };
+            /** @description mops_unavailable: the site uses open data only (audience public), which reads no MOPS income statement. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Validation Error */
@@ -3784,6 +4134,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ValuationReportsResponse"];
+                };
+            };
+            /** @description mops_unavailable: the site uses open data only (audience public), which reads no MOPS income statement. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Validation Error */

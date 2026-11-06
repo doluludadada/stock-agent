@@ -15,7 +15,7 @@ from pydantic import SecretStr
 
 from a_domain.model.system.user import User, UserSession
 from a_domain.types.enums import ExecutionProvider, Permission
-from a_domain.types.errors import RealBrokerRefused, SignInRequired
+from a_domain.types.errors import MopsUnavailable, RealBrokerRefused, RealtimeQuotesUnavailable, SignInRequired
 from a_domain.types.ids import RunId, SessionToken
 from b_application.pipeline import Pipeline
 from b_application.schemas.pipeline_status import PipelineStatus
@@ -153,6 +153,26 @@ def require_mock_broker(runtime: RuntimeDependency) -> None:
         )
 
 
+def require_realtime_quotes(runtime: RuntimeDependency) -> None:
+    """
+    Buzz and Intraday order on realtime quotes. A deployment on open data only (audience public) has none, so it
+    refuses them with 403 before any run starts.
+    """
+    if not runtime.config.audience.realtime_quotes:
+        raise RealtimeQuotesUnavailable(
+            "This site uses open data only, which has no realtime quotes, so it cannot run Buzz or Intraday: both order on one."
+        )
+
+
+def require_mops(runtime: RuntimeDependency) -> None:
+    """
+    The valuation reads MOPS's income statements. A deployment on open data only (audience public) reads none, so it
+    refuses every valuation endpoint with 403 before anything is loaded.
+    """
+    if not runtime.config.audience.mops:
+        raise MopsUnavailable("This site uses open data only and reads no MOPS income statement, so it offers no valuation.")
+
+
 async def current_user(runtime: RuntimeDependency, token: SessionCookie) -> User:
     """
     The user of the request's session cookie, read now: 401 when the cookie is missing, unknown or expired, or its
@@ -251,6 +271,8 @@ def check_setup_code(request: Request, code: SecretStr) -> None:
 KnownHost = Depends(require_known_host)
 AppRequest = Depends(require_app_request)
 MockBroker = Depends(require_mock_broker)
+RealtimeQuotes = Depends(require_realtime_quotes)
+Mops = Depends(require_mops)
 PrivateAccess = Depends(require_private_access)
 ManageUsers = Depends(requires(Permission.MANAGE_USERS))
 EditSystemSettings = Depends(requires(Permission.EDIT_SYSTEM_SETTINGS))

@@ -58,21 +58,26 @@ async def test_exchange_clients_keep_certificate_verification_on(clients: list[d
         db=db, market_clock=MovableClock(MONDAY_10_00), mops=unspaced, logger=SilentLogger(), write_lock=asyncio.Lock()
     )
 
+    exchange = TaiwanStockProvider(
+        exchange=SOURCES.exchange,
+        market_clock=TaiwanMarketClock(MarketHoursConfig()),
+        market_data=MarketDataConfig(),
+        logger=SilentLogger(),
+    )
+
     try:
-        await TaiwanStockProvider(
-            exchange=SOURCES.exchange,
-            market_clock=TaiwanMarketClock(MarketHoursConfig()),
-            market_data=MarketDataConfig(),
-            logger=SilentLogger(),
-        ).get_all()
-        await mops.fetch_industries()
+        await exchange.get_all()
+        await exchange.fetch_industries()
+        await exchange.fetch_material_information()
+        await exchange.fetch_quarter_eps()
+        await exchange.fetch_valuation_ratios()
         await mops.fetch_cumulative_eps([FiscalQuarter(2026, 3)])
         await MisQuoteProvider(SOURCES.exchange, MarketDataConfig(), SilentLogger()).fetch_realtime_bars([Stock(stock_id="2330")])
     finally:
         await db.close()
 
-    assert len(clients) == 6
-    assert [client.get("verify", True) for client in clients] == [True] * 6
+    assert len(clients) == 8
+    assert [client.get("verify", True) for client in clients] == [True] * 8
 
 
 async def test_news_and_ptt_clients_keep_certificate_verification_on(clients: list[dict[str, Any]], tmp_path: Path) -> None:

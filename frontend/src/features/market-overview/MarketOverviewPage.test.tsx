@@ -4,7 +4,8 @@ import userEvent from '@testing-library/user-event'
 import { I18nextProvider } from 'react-i18next'
 import { MemoryRouter } from 'react-router'
 import { initI18n } from '@/i18n'
-import type { Schemas } from '@/shared/api'
+import type { Audience, Schemas } from '@/shared/api'
+import { PERSONAL_SITE, PUBLIC_SITE } from '@/test/audiences'
 import { MarketOverviewPage } from './MarketOverviewPage'
 
 const industries = Object.fromEntries(
@@ -26,8 +27,14 @@ const taiex: Schemas['IndexHistoryResponse'] = {
   ],
 }
 
-async function renderOverview() {
-  const answers: Record<string, unknown> = { '/v1/market/indexes/taiex': taiex, '/v1/market/most-traded': [], '/v1/market/breadth': breadth }
+async function renderOverview(site: Audience = PERSONAL_SITE) {
+  const answers: Record<string, unknown> = {
+    '/v1/market/indexes/taiex': taiex,
+    '/v1/market/most-traded': [],
+    '/v1/market/breadth': breadth,
+    '/v1/market/audience': site,
+    '/v1/market/archive-status': { sessions: 2, needed: 61 },
+  }
   vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(answers[url.split('?')[0]!]), { status: 200, headers: { 'Content-Type': 'application/json' } })))
   render(
     <I18nextProvider i18n={initI18n('en')}>
@@ -53,6 +60,20 @@ describe('the market overview', () => {
     expect(within(trend).getByRole('heading', { level: 2 })).toHaveTextContent('TAIEXIndex · Default')
     expect(within(trend).getByText('44,920.14')).toBeVisible()
     expect(within(trend).queryByRole('link', { name: /TAIEX/ })).toBeNull()
+  })
+
+  it('says on a public site how far the archive its history comes from has come, and nothing of it on the owner’s site', async () => {
+    await renderOverview(PUBLIC_SITE)
+    const warmUp = await screen.findByRole('region', { name: 'Open-data archive' })
+
+    expect(warmUp.textContent).toContain('Data accumulating 2/61')
+    expect(within(warmUp).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '2')
+  })
+
+  it('shows no warm-up on the owner’s site', async () => {
+    await renderOverview(PERSONAL_SITE)
+
+    expect(screen.queryByRole('region', { name: 'Open-data archive' })).not.toBeInTheDocument()
   })
 
   it('shows the session counts in one phrase, colored by direction', async () => {

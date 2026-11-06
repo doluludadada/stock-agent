@@ -89,6 +89,18 @@ const common: DictionaryShape<typeof en> = {
   },
   close: '關閉',
   loading: '載入中…',
+  notAdvice: '僅供研究參考，不構成投資建議。',
+  footer: {
+    notAdvice: '本站的分析、分數與決策僅供研究參考，不構成投資建議；投資請自行判斷並承擔風險。',
+    attribution: '資料來源與授權',
+  },
+  audience: { failed: '無法載入本站提供的功能。' },
+  warmUp: {
+    label: '開放資料存檔',
+    title: '資料累積中',
+    count: '{{sessions}}/{{needed}}',
+    description: '本站只使用證交所與櫃買中心的開放資料，它們只提供最近一個交易日，所以本站從開站那天起逐日保存。策略要讀 {{needed}} 個交易日的收盤，存滿之前，分析找不到候選股。',
+  },
   notFound: {
     title: '找不到這個頁面',
     description: '連結可能已經過期，請回到市場總覽。',

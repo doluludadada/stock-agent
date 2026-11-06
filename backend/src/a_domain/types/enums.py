@@ -47,6 +47,13 @@ class MarketIndex(StrEnum):
     TAIEX = auto()
     """The TWSE Capitalization Weighted Stock Index."""
 
+    @property
+    def market(self) -> MarketType:
+        """The exchange that publishes it, under which the open-data archive keeps its closes."""
+        match self:
+            case MarketIndex.TAIEX:
+                return MarketType.TWSE
+
 
 class SecurityKind(StrEnum):
     """What a listed code trades as. Tick sizes and the SELL transaction tax differ by kind."""
@@ -203,6 +210,9 @@ class LotKind(StrEnum):
 
 class InformationSource(StrEnum):
     TWSE_MOPS = auto()
+    TWSE_NEWS = auto()
+    """TWSE's own news: its listing reviews, penalties and notices of corporate actions."""
+
     NEWS_MEDIA = auto()
     PTT_STOCK = auto()
     PTT_GOSSIPING = auto()
@@ -218,6 +228,8 @@ class InformationSource(StrEnum):
         match self:
             case InformationSource.TWSE_MOPS:
                 return "MOPS"
+            case InformationSource.TWSE_NEWS:
+                return "TWSE news"
             case _:
                 return self.value
 
@@ -369,6 +381,69 @@ class SystemEnvironment(StrEnum):
         )
 
 
+class Audience(StrEnum):
+    """
+    Whom the deployment serves, and with it which data and brokers it may use. Its properties are the one table of
+    what each audience allows; the wiring, the trading setup check and the gates of the Web API and the CLI read them,
+    and nothing else decides by audience.
+    """
+
+    PERSONAL = auto()
+    """
+    The owner on their own machine: Yahoo's daily history, TWSE MIS realtime quotes, the news sites, the AI's web
+    search, MOPS, PTT and any broker the environment allows.
+    """
+
+    PUBLIC = auto()
+    """
+    A free public website: only open-licensed data, the TWSE and TPEX OpenAPI as the open-data archive keeps them (Open
+    Government Data License v1), and the mock broker. Yahoo's terms forbid redistribution and automated collection, TWSE
+    MIS needs a contract to show others, cnyes forbids reproduction without consent, MOPS disallows every robot and
+    TWSE's terms forbid its automated download, and nobody may trade in a visitor's account.
+    """
+
+    @property
+    def open_data_only(self) -> bool:
+        """Daily history and the index trend come from the open-data archive alone, never from Yahoo or TWSE MIS."""
+        match self:
+            case Audience.PERSONAL:
+                return False
+            case Audience.PUBLIC:
+                return True
+
+    @property
+    def realtime_quotes(self) -> bool:
+        """
+        TWSE MIS realtime quotes, which price every order: Buzz, Intraday and manual BUY need them. Open data has none.
+        Without them Buzz never runs, so neither does PTT, which only Buzz reads.
+        """
+        return not self.open_data_only
+
+    @property
+    def news_articles(self) -> bool:
+        """
+        The news sites' articles (cnyes, Yahoo Taiwan) and the AI's web search. Without them a stock's articles are the
+        material information and the TWSE news naming it that the open-data archive holds of the last
+        analysis.material_information_days, and a stock with none of them and no archived financials is decided on its
+        technical score alone, without an AI call.
+        """
+        return not self.open_data_only
+
+    @property
+    def mops(self) -> bool:
+        """The MOPS income statements, whose EPS the valuation (menus 5 and 6) reads. Without them the valuation is refused."""
+        return not self.open_data_only
+
+    @property
+    def brokers(self) -> frozenset[ExecutionProvider]:
+        """The brokers it may trade on, within those the environment allows."""
+        match self:
+            case Audience.PERSONAL:
+                return frozenset(ExecutionProvider)
+            case Audience.PUBLIC:
+                return frozenset({ExecutionProvider.MOCK})
+
+
 class Workflow(StrEnum):
     """The user-facing operation a run belongs to. Each run has one run id."""
 
@@ -422,6 +497,33 @@ class EpsBasis(StrEnum):
     @property
     def label(self) -> str:
         return "actual" if self == EpsBasis.ACTUAL else "estimate"
+
+
+class FinancialStatement(StrEnum):
+    """A quarterly financial statement the TWSE and TPEX OpenAPI serve, in one report per industry format."""
+
+    BALANCE_SHEET = auto()
+    """The assets, liabilities and equity at the quarter's end."""
+
+    INCOME_STATEMENT = auto()
+    """The revenue, costs and income of the year to the quarter's end."""
+
+
+class IndustryFormat(StrEnum):
+    """
+    The layout a company files its financial statements in. The OpenAPI serves each format as its own report, with its
+    own columns, and names the report after the value: t187ap07_L_ci is the general format's listed balance sheets.
+    """
+
+    GENERAL = "ci"
+    BANK = "basi"
+    SECURITIES = "bd"
+    """Securities and futures firms."""
+
+    FINANCIAL_HOLDING = "fh"
+    INSURANCE = "ins"
+    OTHER = "mim"
+    """Companies whose statements fit none of the others."""
 
 
 class EpsUnavailableReason(StrEnum):
@@ -738,6 +840,12 @@ class ErrorCode(StrEnum):
     ADMINISTRATORS_ONLY = auto()
     REAL_BROKER_REFUSED = auto()
     MOCK_BROKER_ONLY = auto()
+    REALTIME_QUOTES_UNAVAILABLE = auto()
+    """The deployment uses open data only (audience public), which has no realtime quote to order on: Buzz and Intraday."""
+
+    MOPS_UNAVAILABLE = auto()
+    """The deployment uses open data only (audience public) and reads no MOPS income statement: the valuation, menus 5 and 6."""
+
     PASSWORD_REQUIRED = auto()
     PASSWORD_REFUSED = auto()
     SETTINGS_FILE_REFUSED = auto()

@@ -42,6 +42,7 @@ export const routes: RouteObject[] = [
               { path: 'admin/settings', lazy: () => import('./routes/admin').then((m) => ({ Component: m.AdminSettingsRoute })) },
               { path: 'admin/users', lazy: () => import('./routes/users').then((m) => ({ Component: m.UsersRoute })) },
               { path: 'stocks/:code', lazy: () => import('./routes/stock').then((m) => ({ Component: m.StockRoute })) },
+              { path: 'attribution', lazy: () => import('./routes/attribution').then((m) => ({ Component: m.AttributionRoute })) },
               { path: '*', element: <NotFoundRoute /> },
             ],
           },

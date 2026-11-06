@@ -12,6 +12,7 @@ from d_presentation.web.session import (
     MockBroker,
     NotFound,
     PrivateAccess,
+    RealtimeQuotes,
     RunStarter,
     UserPipeline,
     WorkflowRunsDependency,
@@ -28,9 +29,15 @@ STARTED: dict[int | str, dict[str, Any]] = {
     },
 }
 
-MOCK_ONLY: dict[int | str, dict[str, Any]] = {
+ORDERING: dict[int | str, dict[str, Any]] = {
     **STARTED,
-    status.HTTP_403_FORBIDDEN: {"model": ErrorResponse, "description": "The execution provider is not the mock broker; use the CLI."},
+    status.HTTP_403_FORBIDDEN: {
+        "model": ErrorResponse,
+        "description": (
+            "mock_broker_only: the execution provider is not the mock broker; use the CLI. realtime_quotes_unavailable: "
+            "the site uses open data only (audience public), which has no realtime quotes."
+        ),
+    },
 }
 
 
@@ -49,7 +56,7 @@ async def start_specific_stock_analysis(
     return RunAccepted(run_id=start(user, lambda run_id: pipeline.analyse_specific_stocks(stock_ids, run_id=run_id)))
 
 
-@router.post("/buzz-scan", status_code=status.HTTP_202_ACCEPTED, dependencies=[MockBroker], responses=MOCK_ONLY)
+@router.post("/buzz-scan", status_code=status.HTTP_202_ACCEPTED, dependencies=[MockBroker, RealtimeQuotes], responses=ORDERING)
 async def start_buzz_scan(body: Confirmed, pipeline: UserPipeline, user: CurrentUser, start: RunStarter) -> RunAccepted:
     """
     Starts menu 2, Social Buzz, on the mock broker only. Its decisions go through the same order gates and trading
@@ -58,7 +65,7 @@ async def start_buzz_scan(body: Confirmed, pipeline: UserPipeline, user: Current
     return RunAccepted(run_id=start(user, lambda run_id: pipeline.run_buzz_scan(run_id=run_id)))
 
 
-@router.post("/intraday", status_code=status.HTTP_202_ACCEPTED, dependencies=[MockBroker], responses=MOCK_ONLY)
+@router.post("/intraday", status_code=status.HTTP_202_ACCEPTED, dependencies=[MockBroker, RealtimeQuotes], responses=ORDERING)
 async def start_intraday(body: Confirmed, pipeline: UserPipeline, user: CurrentUser, start: RunStarter) -> RunAccepted:
     """Starts menu 3, Intraday, on the mock broker only, through the same order gates and journal as the CLI's."""
     return RunAccepted(run_id=start(user, lambda run_id: pipeline.run_intraday(run_id=run_id)))

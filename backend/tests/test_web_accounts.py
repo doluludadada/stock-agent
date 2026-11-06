@@ -304,7 +304,11 @@ PUBLIC_REQUESTS: dict[tuple[str, str], dict[str, object]] = {
     ("GET", "/v1/market/most-traded"): {},
     ("GET", "/v1/market/breadth"): {},
     ("GET", "/v1/market/indexes/{index}"): {"path": {"index": "taiex"}},
+    ("GET", "/v1/market/archive-status"): {},
+    ("GET", "/v1/market/audience"): {},
+    ("GET", "/v1/market/attribution"): {},
     ("GET", "/v1/market/stocks/{stock_id}"): {"path": {"stock_id": "2330"}},
+    ("GET", "/v1/market/stocks/{stock_id}/financials"): {"path": {"stock_id": "2330"}},
     ("GET", "/v1/technical-settings/built-in-strategies"): {},
     ("POST", "/v1/webhook/line"): {"json": {"destination": "x", "events": []}},
 }

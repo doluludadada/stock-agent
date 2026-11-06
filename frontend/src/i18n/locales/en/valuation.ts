@@ -3,6 +3,10 @@ const valuation = {
   title: 'P/E valuation',
   description: 'Fair prices at your target P/E from the latest close and trailing EPS.',
   notAdvice: 'An estimate at the P/E you assume, not investment advice. This page never orders or changes your watchlist.',
+  notOffered: {
+    title: 'This site offers no valuation',
+    reason: 'It uses only the exchanges’ open data, which has no MOPS income statements, so it has none of the EPS a P/E valuation reads.',
+  },
   marketTitle: 'Market reference',
   toolTitle: 'Value stocks',
   toolQuestion: 'Chosen stocks at your target P/E, or a scan of the whole market',

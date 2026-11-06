@@ -4,7 +4,7 @@ from typing import Annotated, Any, Protocol, override
 from pydantic import Field
 from pydantic.dataclasses import dataclass
 
-from a_domain.types.enums import SettingsAction, SettingsFile, SystemEnvironment
+from a_domain.types.enums import Audience, SettingsAction, SettingsFile, SystemEnvironment
 from a_domain.types.ids import UserId
 
 type Revision = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
@@ -178,11 +178,13 @@ class ISettingsFiles(Protocol):
         """
         ...
 
-    def check(self, file: SettingsFile, text: str, environment: SystemEnvironment, host: str) -> tuple[SettingsProblem, ...]:
+    def check(
+        self, file: SettingsFile, text: str, environment: SystemEnvironment, audience: Audience, host: str
+    ) -> tuple[SettingsProblem, ...]:
         """
         `text` as `file`, with every other settings file as it is on disk, through the checks startup runs before it
         opens anything: the settings load, the trading setup, the accounts key and the active AI provider's key, and
-        the environment `environment` the running process started in, which a save cannot change. The new settings
+        the environment and the audience the running process started in, which a save cannot change. The new settings
         must also keep the editor open to the administrator saving them, who reached it at `host`. Why the app would
         refuse it, or no problem.
         """

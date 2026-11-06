@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router'
 import { UserMenu } from '@/features/auth'
 import { useTranslation } from '@/i18n'
-import { useSession } from '@/shared/api'
+import { useAudience, useSession } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
 import { useOnline } from '@/shared/lib/use-online'
 import { cn } from '@/shared/lib/utils'
@@ -11,6 +11,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '
 import { BrandMark } from './BrandMark'
 import { isCurrent, navSections, TAB_PAGES, type NavItem, type NavSection } from './navigation'
 import { PreferenceControls, PreferenceMenu } from './PreferenceMenu'
+import { SiteFooter } from './SiteFooter'
 import { SearchField, SearchPalette } from './StockSearch'
 
 /**
@@ -24,7 +25,8 @@ export function AppShell() {
   const current = useSession()
   const [searching, setSearching] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
-  const sections = navSections(current.status === 'signedIn' ? current.user.permissions : [])
+  const audience = useAudience()
+  const sections = navSections(current.status === 'signedIn' ? current.user.permissions : [], audience.data)
 
   useEffect(() => {
     window.scrollTo({ top: 0 })
@@ -51,7 +53,7 @@ export function AppShell() {
         </div>
       </aside>
 
-      <div className="min-w-0">
+      <div className="flex min-h-dvh min-w-0 flex-col">
         <header className="sticky top-0 z-20 flex h-(--topbar-height) items-center gap-2 border-b bg-background/85 px-4 backdrop-blur-md md:px-6 lg:px-8">
           <div className="md:hidden">
             <BrandMark />
@@ -63,14 +65,11 @@ export function AppShell() {
           </div>
         </header>
 
-        <main
-          id="main"
-          tabIndex={-1}
-          className="mx-auto w-full max-w-(--content-max) px-4 pt-5 pb-[calc(var(--tabbar-height)+env(safe-area-inset-bottom)+1.5rem)] outline-none md:px-6 md:pb-10 lg:px-8 lg:pt-7"
-        >
+        <main id="main" tabIndex={-1} className="mx-auto w-full max-w-(--content-max) flex-1 px-4 pt-5 pb-8 outline-none md:px-6 md:pb-10 lg:px-8 lg:pt-7">
           <OfflineNotice />
           <Outlet />
         </main>
+        <SiteFooter className="mx-auto w-full max-w-(--content-max) px-4 pb-[calc(var(--tabbar-height)+env(safe-area-inset-bottom)+1.5rem)] md:px-6 md:pb-8 lg:px-8" />
       </div>
 
       <TabBar onSearch={() => setSearching(true)} onMore={() => setMoreOpen(true)} moreActive={!Object.values(TAB_PAGES).some((item) => isCurrent(item, location.pathname))} />

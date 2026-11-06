@@ -64,6 +64,22 @@ class RealBrokerRefused(PermissionError):
     """A user without USE_REAL_BROKER on an installation whose broker is real. The Web answers 403; the CLI never meets it."""
 
 
+class RealtimeQuotesUnavailable(PermissionError):
+    """
+    The deployment uses open data only (audience public), which has no realtime quote, and every order is priced on
+    one. The open-data archive raises it when asked for a quote, and the Web answers it with 403 before Buzz or
+    Intraday starts. The CLI refuses those menus with the same code.
+    """
+
+
+class MopsUnavailable(PermissionError):
+    """
+    The deployment uses open data only (audience public), which reads no MOPS income statement, and the valuation needs
+    their EPS. The Web answers it with 403 before any valuation endpoint runs, and the CLI refuses menus 5 and 6 with
+    the same code.
+    """
+
+
 class RegistrationClosed(PermissionError):
     """Registration is switched off, the installation trades on a real broker, or no administrator is set up yet. 403."""
 

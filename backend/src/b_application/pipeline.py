@@ -4,12 +4,15 @@ from datetime import date
 
 from pydantic import SecretStr
 
+from a_domain.model.fundamentals.monthly_revenue import MonthlyRevenue
+from a_domain.model.fundamentals.quarter_financials import QuarterFinancials
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.model.system.stats import SystemStats
 from a_domain.model.system.user import User, UserSession
 from a_domain.model.valuation.scan import MarketValuation, ScanCriteria, ValuationScan
 from a_domain.model.valuation.valuation import ReportSection, StockValuation, ValuationReport
+from a_domain.ports.market.daily_close_archive import ArchivedMonth, ArchivedQuarter, ArchivedSession
 from a_domain.ports.system.settings_files import (
     SettingChange,
     SettingsAuditEntry,
@@ -36,7 +39,10 @@ from b_application.use_cases.admin.settings_reader import SettingsReader
 from b_application.use_cases.admin.settings_save import SettingsSave
 from b_application.use_cases.chat.chat_reply import ChatReply
 from b_application.use_cases.chat.dispatcher import Dispatcher
+from b_application.use_cases.collect.archive_warm_up import ArchiveWarmUp
 from b_application.use_cases.collect.buzz_scanner import BuzzScanner
+from b_application.use_cases.collect.daily_close_archiver import DailyCloseArchiver
+from b_application.use_cases.collect.financials_lookup import FinancialsLookup
 from b_application.use_cases.collect.fundamentals_feed import FundamentalsFeed
 from b_application.use_cases.collect.index_history_loader import IndexHistoryLoader
 from b_application.use_cases.collect.intraday_candidates import IntradayCandidates
@@ -130,6 +136,9 @@ class Pipeline:
     intraday_candidates: IntradayCandidates
     data_collector: MarketDataCollector
     official_change_feed: OfficialChangeFeed
+    daily_close_archiver: DailyCloseArchiver
+    archive_warm_up: ArchiveWarmUp
+    financials_lookup: FinancialsLookup
     realtime_quote_feed: RealtimeQuoteFeed
     technical_filter: TechnicalFilter
     indicator_readings: IndicatorReadings
@@ -297,6 +306,8 @@ class Pipeline:
         """
         Complete reports for the stocks the user asked for. Every stock goes through news and AI whatever its technical
         verdict, so the user can review it before a manual BUY, and a stock without daily history gets a failing report.
+        Where the audience reads no news site, a stock with no archived article and no archived financials skips the AI
+        call.
         """
         strategy = await self.strategy_loader.execute(Workflow.SPECIFIC_STOCKS, built_in_strategy_id)
 
@@ -440,12 +451,31 @@ class Pipeline:
         """The market overview: the latest session's most traded stocks in the exchange listing."""
         return await self.most_traded.execute()
 
+    async def archive_daily_closes(self) -> tuple[list[ArchivedSession], list[ArchivedQuarter], list[ArchivedMonth]]:
+        """
+        The Web API's timer and `just archive-closes`: the official closes, material information, EPS statistics,
+        valuation ratios, balance sheets, income statements, monthly revenue and TWSE news the TWSE and TPEX OpenAPI
+        serve now, saved into the archive, then every date, quarter and month it holds. No run record.
+        """
+        return await self.daily_close_archiver.execute()
+
+    async def load_financials(self, stock_id: str) -> tuple[list[QuarterFinancials], list[MonthlyRevenue]]:
+        """A stock's page: its archived quarters' figures and monthly revenue, oldest first. No run record."""
+        return await self.financials_lookup.execute(stock_id)
+
+    async def load_archive_warm_up(self) -> tuple[int, int]:
+        """
+        The market overview's open-data archive: the sessions of stock closes it holds, and the daily bars the built-in
+        strategies need, which an open-data deployment's runs wait for. No run record.
+        """
+        return await self.archive_warm_up.execute()
+
     async def load_market_breadth(self) -> MarketBreadth:
         """The market overview: the latest session's advancers and decliners in the exchange listing, overall and per industry."""
         return await self.market_breadth_loader.execute()
 
     async def load_index_history(self, index: MarketIndex, required_bars: int) -> list[Ohlcv]:
-        """The market overview's trend: an index's daily history from the cache the stock pages share. No run record."""
+        """The market overview's trend: an index's daily history from the source the stock pages share. No run record."""
         return await self.index_history_loader.execute(index, required_bars)
 
     async def load_stock_history(self, stock_id: str, required_bars: int) -> PipelineStatus:

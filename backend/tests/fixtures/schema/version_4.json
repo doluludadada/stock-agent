@@ -139,6 +139,237 @@
     ],
     "unique": []
   },
+  "daily_close_archive": {
+    "columns": {
+      "change": {
+        "class": "Float",
+        "nullable": true,
+        "postgresql": "FLOAT",
+        "sqlite": "FLOAT"
+      },
+      "close": {
+        "class": "Float",
+        "nullable": false,
+        "postgresql": "FLOAT",
+        "sqlite": "FLOAT"
+      },
+      "high": {
+        "class": "Float",
+        "nullable": false,
+        "postgresql": "FLOAT",
+        "sqlite": "FLOAT"
+      },
+      "low": {
+        "class": "Float",
+        "nullable": false,
+        "postgresql": "FLOAT",
+        "sqlite": "FLOAT"
+      },
+      "market": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR",
+        "sqlite": "VARCHAR"
+      },
+      "open": {
+        "class": "Float",
+        "nullable": false,
+        "postgresql": "FLOAT",
+        "sqlite": "FLOAT"
+      },
+      "session_date": {
+        "class": "Date",
+        "nullable": false,
+        "postgresql": "DATE",
+        "sqlite": "DATE"
+      },
+      "stock_id": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR",
+        "sqlite": "VARCHAR"
+      },
+      "volume": {
+        "class": "BigInteger",
+        "nullable": false,
+        "postgresql": "BIGINT",
+        "sqlite": "BIGINT"
+      }
+    },
+    "foreign_keys": [],
+    "primary_key": [
+      "stock_id",
+      "session_date"
+    ],
+    "unique": []
+  },
+  "exchange_news_archive": {
+    "columns": {
+      "published_on": {
+        "class": "Date",
+        "nullable": false,
+        "postgresql": "DATE",
+        "sqlite": "DATE"
+      },
+      "title": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR",
+        "sqlite": "VARCHAR"
+      },
+      "url": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR",
+        "sqlite": "VARCHAR"
+      }
+    },
+    "foreign_keys": [],
+    "primary_key": [
+      "url"
+    ],
+    "unique": []
+  },
+  "financial_report_archive": {
+    "columns": {
+      "industry_format": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR",
+        "sqlite": "VARCHAR"
+      },
+      "items": {
+        "class": "JSON",
+        "nullable": false,
+        "postgresql": "JSON",
+        "sqlite": "JSON"
+      },
+      "market": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR",
+        "sqlite": "VARCHAR"
+      },
+      "quarter": {
+        "class": "Integer",
+        "nullable": false,
+        "postgresql": "INTEGER",
+        "sqlite": "INTEGER"
+      },
+      "served_date": {
+        "class": "Date",
+        "nullable": false,
+        "postgresql": "DATE",
+        "sqlite": "DATE"
+      },
+      "statement": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR",
+        "sqlite": "VARCHAR"
+      },
+      "stock_id": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR",
+        "sqlite": "VARCHAR"
+      },
+      "year": {
+        "class": "Integer",
+        "nullable": false,
+        "postgresql": "INTEGER",
+        "sqlite": "INTEGER"
+      }
+    },
+    "foreign_keys": [],
+    "primary_key": [
+      "stock_id",
+      "year",
+      "quarter",
+      "statement"
+    ],
+    "unique": []
+  },
+  "index_close_archive": {
+    "columns": {
+      "change": {
+        "class": "Float",
+        "nullable": true,
+        "postgresql": "FLOAT",
+        "sqlite": "FLOAT"
+      },
+      "close": {
+        "class": "Float",
+        "nullable": false,
+        "postgresql": "FLOAT",
+        "sqlite": "FLOAT"
+      },
+      "market": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR",
+        "sqlite": "VARCHAR"
+      },
+      "session_date": {
+        "class": "Date",
+        "nullable": false,
+        "postgresql": "DATE",
+        "sqlite": "DATE"
+      }
+    },
+    "foreign_keys": [],
+    "primary_key": [
+      "market",
+      "session_date"
+    ],
+    "unique": []
+  },
+  "material_information_archive": {
+    "columns": {
+      "announced_at": {
+        "class": "UtcDateTime",
+        "nullable": false,
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
+        "sqlite": "DATETIME"
+      },
+      "clause": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR",
+        "sqlite": "VARCHAR"
+      },
+      "description": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR",
+        "sqlite": "VARCHAR"
+      },
+      "fact_date": {
+        "class": "Date",
+        "nullable": true,
+        "postgresql": "DATE",
+        "sqlite": "DATE"
+      },
+      "stock_id": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR",
+        "sqlite": "VARCHAR"
+      },
+      "subject": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR",
+        "sqlite": "VARCHAR"
+      }
+    },
+    "foreign_keys": [],
+    "primary_key": [
+      "stock_id",
+      "announced_at"
+    ],
+    "unique": []
+  },
   "mock_cash": {
     "columns": {
       "created_at": {
@@ -221,6 +452,113 @@
     "primary_key": [
       "owner_id",
       "stock_id"
+    ],
+    "unique": []
+  },
+  "monthly_revenue_archive": {
+    "columns": {
+      "company_name": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR",
+        "sqlite": "VARCHAR"
+      },
+      "cumulative_revenue": {
+        "class": "Float",
+        "nullable": true,
+        "postgresql": "FLOAT",
+        "sqlite": "FLOAT"
+      },
+      "cumulative_year_over_year_percent": {
+        "class": "Float",
+        "nullable": true,
+        "postgresql": "FLOAT",
+        "sqlite": "FLOAT"
+      },
+      "industry": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR",
+        "sqlite": "VARCHAR"
+      },
+      "last_year_cumulative_revenue": {
+        "class": "Float",
+        "nullable": true,
+        "postgresql": "FLOAT",
+        "sqlite": "FLOAT"
+      },
+      "last_year_revenue": {
+        "class": "Float",
+        "nullable": true,
+        "postgresql": "FLOAT",
+        "sqlite": "FLOAT"
+      },
+      "market": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR",
+        "sqlite": "VARCHAR"
+      },
+      "month": {
+        "class": "Integer",
+        "nullable": false,
+        "postgresql": "INTEGER",
+        "sqlite": "INTEGER"
+      },
+      "month_over_month_percent": {
+        "class": "Float",
+        "nullable": true,
+        "postgresql": "FLOAT",
+        "sqlite": "FLOAT"
+      },
+      "note": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR",
+        "sqlite": "VARCHAR"
+      },
+      "previous_month_revenue": {
+        "class": "Float",
+        "nullable": true,
+        "postgresql": "FLOAT",
+        "sqlite": "FLOAT"
+      },
+      "revenue": {
+        "class": "Float",
+        "nullable": true,
+        "postgresql": "FLOAT",
+        "sqlite": "FLOAT"
+      },
+      "served_date": {
+        "class": "Date",
+        "nullable": false,
+        "postgresql": "DATE",
+        "sqlite": "DATE"
+      },
+      "stock_id": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR",
+        "sqlite": "VARCHAR"
+      },
+      "year": {
+        "class": "Integer",
+        "nullable": false,
+        "postgresql": "INTEGER",
+        "sqlite": "INTEGER"
+      },
+      "year_over_year_percent": {
+        "class": "Float",
+        "nullable": true,
+        "postgresql": "FLOAT",
+        "sqlite": "FLOAT"
+      }
+    },
+    "foreign_keys": [],
+    "primary_key": [
+      "stock_id",
+      "year",
+      "month"
     ],
     "unique": []
   },
@@ -519,6 +857,41 @@
         "decision_id"
       ]
     ]
+  },
+  "quarter_eps_archive": {
+    "columns": {
+      "eps": {
+        "class": "Float",
+        "nullable": false,
+        "postgresql": "FLOAT",
+        "sqlite": "FLOAT"
+      },
+      "quarter": {
+        "class": "Integer",
+        "nullable": false,
+        "postgresql": "INTEGER",
+        "sqlite": "INTEGER"
+      },
+      "stock_id": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR",
+        "sqlite": "VARCHAR"
+      },
+      "year": {
+        "class": "Integer",
+        "nullable": false,
+        "postgresql": "INTEGER",
+        "sqlite": "INTEGER"
+      }
+    },
+    "foreign_keys": [],
+    "primary_key": [
+      "stock_id",
+      "year",
+      "quarter"
+    ],
+    "unique": []
   },
   "run_stock_reports": {
     "columns": {
@@ -1224,6 +1597,46 @@
         "username_index"
       ]
     ]
+  },
+  "valuation_ratio_archive": {
+    "columns": {
+      "dividend_yield": {
+        "class": "Float",
+        "nullable": true,
+        "postgresql": "FLOAT",
+        "sqlite": "FLOAT"
+      },
+      "pb_ratio": {
+        "class": "Float",
+        "nullable": true,
+        "postgresql": "FLOAT",
+        "sqlite": "FLOAT"
+      },
+      "pe_ratio": {
+        "class": "Float",
+        "nullable": true,
+        "postgresql": "FLOAT",
+        "sqlite": "FLOAT"
+      },
+      "session_date": {
+        "class": "Date",
+        "nullable": false,
+        "postgresql": "DATE",
+        "sqlite": "DATE"
+      },
+      "stock_id": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR",
+        "sqlite": "VARCHAR"
+      }
+    },
+    "foreign_keys": [],
+    "primary_key": [
+      "stock_id",
+      "session_date"
+    ],
+    "unique": []
   },
   "watchlists": {
     "columns": {

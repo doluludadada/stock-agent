@@ -31,7 +31,8 @@ src/
     account/           mock account, positions and equity curve
     admin-settings/    appsetting.yaml as a form and every settings file as text, two views of one draft: the
                        server's check as you edit, a save with the password, edits made on disk, history and restore
-    stock-research/    stock page, backend evaluation and readings
+    stock-research/    stock page, backend evaluation and readings, the archived financials
+    attribution/       the open data's providers, datasets and license, which every page's footer links to
   shared/         typed HTTP transport, session and public market data (api/), URL builders (config/), generic UI,
                   formatters, theme, stock id and chart range rules
   i18n/           dictionaries per locale and namespace, language switching
@@ -80,7 +81,10 @@ the contract by `catalog.test.ts`.
 | Data | Owner | Source |
 | --- | --- | --- |
 | Listing search, most traded, breadth, stock and index bars, many stocks' quotes and names | `shared/api/market.ts` | `/v1/market` |
+| The site's audience and what it allows; the open-data archive's warm-up | `shared/api/audience.ts`, `shared/api/market.ts` | `/v1/market/audience`, `/v1/market/archive-status` |
 | A stock's evaluation by the active strategy | `stock-research/api.ts` | `/v1/market/stocks/{id}/technical` |
+| A stock's archived quarters and monthly revenue | `stock-research/api.ts` | `/v1/market/stocks/{id}/financials` |
+| The open data's providers, datasets and license | `attribution/api.ts` | `/v1/market/attribution` |
 | Built-in strategies, owner settings, saves with revisions | `strategies/api/queries.ts` | `/v1/technical-settings` |
 | Runs, decisions, orders | `runs/api.ts` | `/v1/runs` |
 | Watchlist | `watchlist/api.ts` | `/v1/watchlist` |
@@ -113,6 +117,19 @@ Many stocks at once (the watchlist's quotes, the mock account's names) come from
 each code's listing answers at once, and each daily history is asked under the stock page's own key, one after
 another, because a burst of cold histories reaches Yahoo, which answers it with empty bars. A quote is the newer of
 the listing's day and the history's last bar, and keeps its session, so a page never mixes sessions without saying so.
+
+## What the site's audience allows
+
+One codebase runs as the owner's personal site and as a public site on open data only. `GET /v1/market/audience`
+answers the server's table of what its audience allows (`open_data_only`, `realtime_quotes`, `news_articles`, `mops`),
+read once per tab. A navigation item (`NavItem.requires`) or a run kind (`KINDS` in `RunsPage.tsx`) names the capability
+it needs, and shows only once the server said the site has it, so a public visitor never sees Buzz, Intraday, the Buzz
+strategy choice or the valuation, even for a moment. A link to a page the site does not offer opens a short reason
+(`RequireCapability` in `app/router/RouteFallbacks.tsx`), not a page whose requests the server refuses. Hiding is never
+the protection: the server refuses each of them. On open data only, the market overview and the run results say how far
+the archive has come (`ArchiveWarmUp`) until it holds the sessions the strategies need. Every page's footer says nothing
+here is investment advice and links to the open data's credit, which its license requires; analysis results and the
+stock page say it again beside the result (`NotAdviceNote`).
 
 ## Rules from the contract, defaults and display counts
 

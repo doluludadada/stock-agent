@@ -1,17 +1,12 @@
-from collections.abc import Callable
-from typing import Any, override
+from typing import override
 
-from sqlalchemy.dialects import postgresql, sqlite
 from sqlmodel import col
 
 from a_domain.model.chat.message import Message
 from a_domain.ports.ai.ai_provider import IAiProvider
 from a_domain.ports.system.market_clock import IMarketClock
-from c_infrastructure.database.db_connector import DatabaseConnector
+from c_infrastructure.database.db_connector import UPSERT, DatabaseConnector
 from c_infrastructure.database.models.ai_call_dto import AiCallDTO, AiCallTotalDTO
-
-UPSERT: dict[str, Callable[..., Any]] = {"sqlite": sqlite.insert, "postgresql": postgresql.insert}
-"""Both backends count with one INSERT ... ON CONFLICT DO UPDATE ... WHERE, so two calls at once never both take the last one."""
 
 
 class AiAllowanceSpentError(RuntimeError):
@@ -27,7 +22,8 @@ class DailyCappedAiProvider(IAiProvider):
     One owner's paid AI calls, counted per Taiwan calendar day in ai_calls and every owner's together in ai_call_totals,
     before the vendor is asked, so a call that fails at the vendor still counts. A user's call is refused past
     `daily_calls` or past `daily_calls_total`, the way a vendor's own limit refuses it; with daily_calls None, an
-    administrator's, the call counts toward both and is never refused. It decides nothing about stocks.
+    administrator's, the call counts toward both and is never refused. Each count is one INSERT ... ON CONFLICT DO
+    UPDATE ... WHERE, so two calls at once never both take the last one. It decides nothing about stocks.
     """
 
     def __init__(

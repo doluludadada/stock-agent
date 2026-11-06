@@ -11,6 +11,7 @@ export type StockHistory = Schemas['StockHistoryResponse']
 export type IndexHistory = Schemas['IndexHistoryResponse']
 export type MarketIndex = Schemas['MarketIndex']
 export type MarketBreadth = Schemas['MarketBreadth']
+export type ArchiveStatus = Schemas['ArchiveStatusResponse']
 
 const SEARCH_DEBOUNCE_MS = 250
 /** The listing changes once per session close; the backend caches it for hours. */
@@ -25,6 +26,7 @@ export const marketKeys = {
   breadth: ['public', 'market', 'breadth'] as const,
   history: (stockId: string, bars: number) => ['public', 'market', 'history', stockId, bars] as const,
   index: (index: MarketIndex, bars: number) => ['public', 'market', 'index', index, bars] as const,
+  archiveStatus: ['public', 'market', 'archive-status'] as const,
 }
 
 export interface SearchState {
@@ -88,6 +90,16 @@ export function useIndexHistory(index: MarketIndex, bars: number, enabled = true
     queryKey: marketKeys.index(index, bars),
     queryFn: ({ signal }) => apiRequest('get', '/v1/market/indexes/{index}', { params: { index }, query: { bars }, signal }),
     staleTime: HISTORY_STALE_MS,
+    enabled,
+  })
+}
+
+/** How many sessions the open-data archive holds and how many the strategies need; it grows once per session. */
+export function useArchiveStatus(enabled = true) {
+  return useQuery({
+    queryKey: marketKeys.archiveStatus,
+    queryFn: ({ signal }) => apiRequest('get', '/v1/market/archive-status', { signal }),
+    staleTime: LISTING_STALE_MS,
     enabled,
   })
 }

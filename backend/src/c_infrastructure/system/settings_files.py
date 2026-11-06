@@ -13,7 +13,7 @@ from pydantic import TypeAdapter
 
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.settings_files import ISettingsFiles, SettingsAuditEntry, SettingsBackup, SettingsDocument, SettingsProblem
-from a_domain.types.enums import SettingsFile, SystemEnvironment
+from a_domain.types.enums import Audience, SettingsFile, SystemEnvironment
 from a_domain.types.errors import SettingsConflictError, SettingsEditError, SettingsFileMissing, SettingsFileRefused
 from b_application.config.settings_loader import (
     InvalidSettingsError,
@@ -192,11 +192,13 @@ class SettingsFiles(ISettingsFiles):
         return found
 
     @override
-    def check(self, file: SettingsFile, text: str, environment: SystemEnvironment, host: str) -> tuple[SettingsProblem, ...]:
+    def check(
+        self, file: SettingsFile, text: str, environment: SystemEnvironment, audience: Audience, host: str
+    ) -> tuple[SettingsProblem, ...]:
         texts = settings_texts(self._project_root, {file: text})
 
         try:
-            validate_editor_reachable(startup_settings(self._project_root, texts, environment), texts, host)
+            validate_editor_reachable(startup_settings(self._project_root, texts, environment, audience), texts, host)
         except InvalidSettingsError as error:
             return tuple(error.problems)
 

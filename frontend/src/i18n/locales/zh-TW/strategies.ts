@@ -40,6 +40,7 @@ const strategies: DictionaryShape<typeof en> = {
     emptyCopy: '複製平衡型',
     loadFailed: '無法載入策略。',
     selectionNote: '全市場、指定股票、盤中與估值使用「使用中」的策略；社群熱度另選一套。',
+    selectionNoteWithoutRealtime: '全市場與指定股票使用「使用中」的策略。',
   },
   card: {
     builtin: '內建',

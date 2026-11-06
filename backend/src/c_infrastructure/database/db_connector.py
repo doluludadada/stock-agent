@@ -1,13 +1,14 @@
-from collections.abc import AsyncGenerator, Mapping, Sequence
+from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from copy import copy
 from datetime import UTC, datetime
 from itertools import count
 from pathlib import Path
-from typing import Self, override
+from typing import Any, Self, override
 
 import sqlalchemy
 from sqlalchemy import event, func, select
+from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
@@ -28,6 +29,12 @@ from c_infrastructure.database.models.schema_version_dto import (
     pending_steps,
     upgrade,
 )
+
+UPSERT: dict[str, Callable[..., Any]] = {"sqlite": sqlite.insert, "postgresql": postgresql.insert}
+"""
+Each backend's INSERT ... ON CONFLICT DO UPDATE, by dialect name: an upsert in one statement, so two writers of the same
+row at once never both insert it.
+"""
 
 
 class DatabaseConnector(IDatabaseConnector[AsyncSession]):

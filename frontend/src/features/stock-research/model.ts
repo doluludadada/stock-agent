@@ -1,6 +1,6 @@
 import type { DailyBar } from '@/shared/api'
 import { CHART_RANGES, sessionDate } from '@/shared/lib/chart-range'
-import type { StockTechnical } from './api'
+import type { StockFinancials, StockTechnical } from './api'
 
 type TechnicalReport = NonNullable<StockTechnical['report']>
 
@@ -111,3 +111,23 @@ export function reportChecks(report: TechnicalReport): { hard: Check[]; soft: Ch
     }),
   }
 }
+
+export type QuarterFinancials = StockFinancials['quarters'][number]
+
+/**
+ * The figures of a quarter in the order a statement reads: the income of the year to the quarter's end, then the
+ * balance at its end. Amounts are in thousands of TWD, per-share figures in TWD.
+ */
+export const QUARTER_FIGURES = [
+  { key: 'revenue', unit: 'amount' },
+  { key: 'gross_profit', unit: 'amount' },
+  { key: 'operating_income', unit: 'amount' },
+  { key: 'net_income', unit: 'amount' },
+  { key: 'eps', unit: 'perShare' },
+  { key: 'total_assets', unit: 'amount' },
+  { key: 'total_liabilities', unit: 'amount' },
+  { key: 'equity', unit: 'amount' },
+  { key: 'book_value_per_share', unit: 'perShare' },
+] as const satisfies readonly { key: Exclude<keyof QuarterFinancials, 'quarter'>; unit: 'amount' | 'perShare' }[]
+
+export type QuarterFigure = (typeof QUARTER_FIGURES)[number]

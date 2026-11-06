@@ -5,6 +5,7 @@ from fastapi import APIRouter, Query, status
 from a_domain.model.valuation.scan import MarketValuation, ScanCriteria
 from a_domain.types.enums import ScanStep
 from d_presentation.web.schemas import (
+    ErrorResponse,
     ExplanationRequest,
     MarketValuationResponse,
     StockId,
@@ -13,12 +14,22 @@ from d_presentation.web.schemas import (
     ValuationReportsResponse,
     ValuationScanResponse,
 )
-from d_presentation.web.session import MarketValuationDependency, NotFound, PrivateAccess, UserPipeline
+from d_presentation.web.session import MarketValuationDependency, Mops, NotFound, PrivateAccess, UserPipeline
 
-router = APIRouter(prefix="/valuation", tags=["Valuation"], dependencies=[PrivateAccess])
+router = APIRouter(
+    prefix="/valuation",
+    tags=["Valuation"],
+    dependencies=[Mops, PrivateAccess],
+    responses={
+        status.HTTP_403_FORBIDDEN: {
+            "model": ErrorResponse,
+            "description": "mops_unavailable: the site uses open data only (audience public), which reads no MOPS income statement.",
+        }
+    },
+)
 """
 The valuation menus 5 and 6 over HTTP. Every endpoint is read-only: it records no run, writes no watchlist entry and
-never reaches order execution. Only POST /explanation calls the AI, once per request.
+never reaches order execution. Only POST /explanation calls the AI, once per request. A public site refuses every one.
 """
 
 TargetPe = Annotated[float, Query(gt=0, le=1000, allow_inf_nan=False)]

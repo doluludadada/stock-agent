@@ -45,6 +45,10 @@ async def analyse_specific_stocks(runtime: Runtime, session: terminal.CliSession
 
     await offer_manual_watchlist(stocks=status.manual_stocks, pipeline=session.pipeline)
 
+    if not runtime.config.audience.realtime_quotes:
+        terminal.console.print(f"No manual BUY: audience {runtime.config.audience.value} has no realtime quote to price one.")
+        return status
+
     await offer_manual_buy(stocks=status.manual_stocks, pipeline=session.pipeline)
 
     return status

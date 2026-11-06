@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from support.harness import ADMINISTRATOR, build_harness, runtime_for
 from trading_stack import run_stats
 
-from a_domain.types.enums import SettingsFile
+from a_domain.types.enums import Audience, SettingsFile
 from a_domain.types.ids import RunId
 from b_application.config.app_config import AppConfig
 from b_application.schemas.pipeline_status import PipelineStatus
@@ -231,6 +231,20 @@ async def test_a_refused_edit_on_disk_keeps_the_runtime_and_is_tried_again_only_
         assert reload is not None and current.runtime.config.trading.order_mode.value == "disabled"
 
     assert switch.status.refused is None
+
+
+async def test_a_reload_that_changes_the_audience_is_refused_and_the_runtime_keeps_the_audience_it_started_on(project: Path) -> None:
+    opener = RecordingOpener()
+    switch = await started(project, opener)
+
+    edit(project, "audience: personal", "audience: public")
+    refused = await switch.reload()
+
+    assert isinstance(refused, ReloadRefused) and [problem.path for problem in refused.problems] == ["audience"]
+    assert refused.problems[0].message.endswith("the audience changes only when the app restarts")
+    with switch.hold() as current:
+        assert current.runtime.config.audience == Audience.PERSONAL
+    assert len(opener.opened) == 1
 
 
 async def test_a_runtime_that_fails_to_open_closes_what_it_opened_and_the_current_one_keeps_serving(project: Path) -> None:

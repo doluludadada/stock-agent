@@ -8,6 +8,7 @@ import chromadb
 from support.fakes import (
     FakeAiProvider,
     FakeConversationRepository,
+    FakeDailyCloseArchive,
     FakeFundamentalsProvider,
     FakeNewsProvider,
     FakeSentimentClassifier,
@@ -168,6 +169,7 @@ async def open_stack(tmp_path: Path, configure=lambda config: None, journal: Tra
     dependencies = ProviderDependencies(
         stock_provider=stocks,
         price_provider=quotes,
+        daily_close_archive=FakeDailyCloseArchive(),
         fundamentals_provider=FakeFundamentalsProvider(),
         news_provider=FakeNewsProvider(),
         social_media_provider=FakeSocialMediaProvider(),

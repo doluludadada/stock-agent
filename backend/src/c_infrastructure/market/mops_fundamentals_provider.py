@@ -24,8 +24,6 @@ from c_infrastructure.market.twse_provider import ROC_YEAR_OFFSET
 class MopsFundamentalsProvider(IFundamentalsProvider):
     """
     Cumulative EPS from the MOPS bulk income statements (one page per market and quarter), cached in SQLite.
-    Industry from the company profiles on the TWSE and TPEX OpenAPI, whose industry codes `industry_names` names, cached
-    in memory.
 
     A quarter's cached page is final, and never fetched again, once it was fetched after the quarter's last filing
     deadline plus grace and is not empty. Any other page is reused for `provisional_page_max_age_hours`.
@@ -39,20 +37,13 @@ class MopsFundamentalsProvider(IFundamentalsProvider):
         self._write_lock = write_lock
         self._mops = mops
         self._market_codes = {MarketType.TWSE: mops.twse_market_code, MarketType.TPEX: mops.tpex_market_code}
-        self._industry_sources = {
-            MarketType.TWSE: (mops.twse_industries_url, mops.twse_industry_company_field, mops.twse_industry_field),
-            MarketType.TPEX: (mops.tpex_industries_url, mops.tpex_industry_company_field, mops.tpex_industry_field),
-        }
         self._provisional_page_max_age = timedelta(hours=mops.provisional_page_max_age_hours)
-        self._industry_max_age = timedelta(hours=mops.industry_max_age_hours)
         self._final_filings_rule = FinalFilingsRule(
             filing_deadline_rule=FilingDeadlineRule(mops.filing_deadlines), grace_days=mops.filing_grace_days
         )
         self._clock = market_clock
         self._logger = logger
         self._last_request_at: float | None = None
-        self._industries: dict[MarketType, dict[str, str]] = {}
-        self._industries_fetched_at: dict[MarketType, datetime] = {}
 
     @override
     async def fetch_cumulative_eps(self, quarters: Collection[FiscalQuarter]) -> EpsFilings:
@@ -204,39 +195,3 @@ class MopsFundamentalsProvider(IFundamentalsProvider):
         async with self._write_lock, self._db.get_session() as session:
             await session.merge(QuarterEpsDTO.from_domain(market, page))
             await session.commit()
-
-    @override
-    async def fetch_industries(self) -> dict[str, str]:
-        now = self._clock.now()
-
-        for market in self._industry_sources:
-            fetched_at = self._industries_fetched_at.get(market)
-
-            if fetched_at is not None and now - fetched_at < self._industry_max_age:
-                continue
-
-            industries = await self.fetch_market_industries(market)
-
-            if industries is not None:
-                self._industries[market] = industries
-                self._industries_fetched_at[market] = now
-
-        return {stock_id: industry for industries in self._industries.values() for stock_id, industry in industries.items()}
-
-    @override
-    async def fetch_market_industries(self, market: MarketType) -> dict[str, str] | None:
-        url, id_field, industry_field = self._industry_sources[market]
-        names = self._mops.industry_names
-
-        try:
-            async with httpx.AsyncClient(timeout=self._mops.timeout_seconds) as client:
-                response = await client.get(url)
-                response.raise_for_status()
-                return {
-                    str(row[id_field]).strip(): names[code]
-                    for row in response.json()
-                    if row.get(id_field) and (code := str(row.get(industry_field, "")).strip()) in names
-                }
-        except Exception as error:
-            self._logger.warning(f"MOPS industries for {market.value} unavailable: {error}")
-            return None

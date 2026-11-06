@@ -1,4 +1,5 @@
 import pytest
+from support.fakes import FakeDailyCloseArchive
 from support.settings import shipped_config
 from trading_stack import MONDAY_10_00, MovableClock, run_stats
 
@@ -48,6 +49,7 @@ async def analyse_and_score(reply: str) -> tuple[Stock, SystemStats]:
     analyser = AiAnalyser(
         ai_provider=ScriptedAiProvider(reply),
         knowledge_repository=NoHistory(),
+        archive=FakeDailyCloseArchive(),
         config=make_config(),
         logger=SilentLogger(),
         market_clock=MovableClock(MONDAY_10_00),

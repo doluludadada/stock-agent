@@ -1,8 +1,10 @@
 export { ApiError, apiRequest, isApiError, type ApiErrorKind, type ErrorCode, type FieldProblem } from './http'
 export { hasPermission, session, useHasPermission, useIsSignedIn, useSession, type Permission, type Session, type User } from './session'
 export { runResultsKey, strategyResultsKey } from './query-keys'
+export { allows, useAllows, useAudience, type Audience, type Capability } from './audience'
 export {
   marketKeys,
+  useArchiveStatus,
   useIndexHistory,
   useListedNames,
   useMarketBreadth,
@@ -10,6 +12,7 @@ export {
   useStockHistory,
   useStockQuotes,
   useStockSearch,
+  type ArchiveStatus,
   type DailyBar,
   type IndexHistory,
   type ListedStock,

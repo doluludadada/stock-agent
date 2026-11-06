@@ -1,5 +1,5 @@
 import { Activity, Calculator, Layers, LayoutDashboard, Settings2, SlidersHorizontal, Sparkles, Star, UsersRound, Wallet, type LucideIcon } from 'lucide-react'
-import type { Schemas } from '@/shared/api'
+import { allows, type Audience, type Capability, type Schemas } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
 
 type Permission = Schemas['Permission']
@@ -14,6 +14,8 @@ export interface NavItem {
   alsoUnder?: string
   /** Shown only to a user whose role has this permission; the server checks it again on every request. */
   needs?: Permission
+  /** Shown only on a site whose audience allows this; the server refuses it elsewhere. */
+  requires?: Capability
 }
 
 export interface NavSection {
@@ -35,7 +37,7 @@ const SECTIONS: readonly NavSection[] = [
       { key: 'builder', to: paths.newStrategy, icon: Sparkles, end: false },
     ],
   },
-  { key: 'research', items: [OVERVIEW, { key: 'valuation', to: paths.valuation, icon: Calculator, end: false }] },
+  { key: 'research', items: [OVERVIEW, { key: 'valuation', to: paths.valuation, icon: Calculator, end: false, requires: 'mops' }] },
   { key: 'mine', items: [WATCHLIST, ACCOUNT, { key: 'settings', to: paths.mySettings, icon: SlidersHorizontal, end: true }] },
   {
     key: 'admin',
@@ -46,9 +48,12 @@ const SECTIONS: readonly NavSection[] = [
   },
 ]
 
-/** The sections a viewer with these permissions sees; a section with nothing left disappears. */
-export function navSections(permissions: readonly Permission[]): NavSection[] {
-  return SECTIONS.map((section) => ({ ...section, items: section.items.filter((item) => !item.needs || permissions.includes(item.needs)) })).filter(
+const shown = (item: NavItem, permissions: readonly Permission[], audience: Audience | undefined) =>
+  (!item.needs || permissions.includes(item.needs)) && (!item.requires || allows(audience, item.requires))
+
+/** The sections a viewer with these permissions sees on a site of this audience; a section with nothing left disappears. */
+export function navSections(permissions: readonly Permission[], audience: Audience | undefined): NavSection[] {
+  return SECTIONS.map((section) => ({ ...section, items: section.items.filter((item) => shown(item, permissions, audience)) })).filter(
     (section) => section.items.length > 0,
   )
 }

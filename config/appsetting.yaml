@@ -5,6 +5,12 @@
 # to start while a production Shioaji credential is set. Neither the Web editor nor a reload changes it: restart.
 environment: dev
 
+# personal: the owner's own machine, with Yahoo's daily history, TWSE MIS realtime quotes and any broker the environment
+# allows. public: a free public website on open-licensed data only. Its daily history and index trend come from the
+# open-data archive of the TWSE and TPEX OpenAPI closes, it has no realtime quote, so Buzz, Intraday and manual BUY are
+# refused, and it trades on the mock broker only.
+audience: personal
+
 ai:
   # claude reads ANTHROPIC_API_KEY. nvidia (NVIDIA_API_KEY) is configured too; its deepseek model did not answer on
   # 2026-11-03, so Claude Haiku is active.
@@ -95,6 +101,9 @@ analysis:
   reason_item_limit: 3
 
   article_fetch_limit: 10
+  # A public site reads no news site: its AI step reads the material information the open-data archive holds of a
+  # stock from this many days back, and decides a stock with none on its technical score alone, without an AI call.
+  material_information_days: 30
 
 notifications:
   enabled: false
@@ -271,33 +280,17 @@ sources:
   exchange:
     twse_daily_quotes_url: "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
     tpex_daily_quotes_url: "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes"
-    mis_quotes_url: "https://mis.twse.com.tw/stock/api/getStockInfo.jsp"
-  yahoo:
-    # Yahoo Finance's symbol for each market index. It serves no TPEX index: ^TWOII answers "possibly delisted".
-    index_symbols: { taiex: "^TWII" }
-  mops:
-    eps_url: "https://mopsov.twse.com.tw/mops/web/ajax_t163sb04"
-    eps_form_fields:
-      {
-        "encodeURIComponent": "1",
-        "step": "1",
-        "firstin": "1",
-        "off": "1",
-        "isQuery": "Y",
-      }
-    twse_market_code: "sii"
-    tpex_market_code: "otc"
-    company_id_header: "公司代號"
-    eps_header_prefix: "基本每股盈餘"
-    no_data_marker: "查詢無資料"
+    twse_index_url: "https://openapi.twse.com.tw/v1/exchangeReport/MI_INDEX"
+    # MI_INDEX lists every TWSE index of its session under Chinese field names. The TAIEX is the row named taiex.
+    twse_index_fields:
+      { index: "指數", date: "日期", close: "收盤指數", sign: "漲跌", change: "漲跌點數", taiex: "發行量加權股價指數" }
+    tpex_index_url: "https://www.tpex.org.tw/openapi/v1/tpex_index"
     # The company profiles list every listed and OTC company with its industry code. The income-statement summaries
     # list only the companies that filed the latest quarter, a few percent of them early in each filing window.
-    twse_industries_url: "https://openapi.twse.com.tw/v1/opendata/t187ap03_L"
-    twse_industry_company_field: "公司代號"
-    twse_industry_field: "產業別"
-    tpex_industries_url: "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O"
-    tpex_industry_company_field: "SecuritiesCompanyCode"
-    tpex_industry_field: "SecuritiesIndustryCode"
+    company_profiles:
+      twse: { url: "https://openapi.twse.com.tw/v1/opendata/t187ap03_L", stock_id: "公司代號", industry: "產業別" }
+      tpex:
+        { url: "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O", stock_id: "SecuritiesCompanyCode", industry: "SecuritiesIndustryCode" }
     # The names the TWSE ISIN listing (isin.twse.com.tw) gives the codes in use on 2026-11-04. A code not listed here,
     # such as 91 for depositary receipts, leaves the company without an industry.
     industry_names:
@@ -337,10 +330,255 @@ sources:
         "37": "運動休閒",
         "38": "居家生活",
       }
+    industry_max_age_hours: 24
+    # The reports below hold only their latest day or quarter, so the open-data archive saves them every time it runs.
+    # Each row's date or period is the one the row names. TWSE writes its material information's subject key with a
+    # trailing space.
+    material_information:
+      twse:
+        url: "https://openapi.twse.com.tw/v1/opendata/t187ap04_L"
+        stock_id: "公司代號"
+        date: "發言日期"
+        time: "發言時間"
+        subject: "主旨 "
+        clause: "符合條款"
+        fact_date: "事實發生日"
+        description: "說明"
+      tpex:
+        url: "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap04_O"
+        stock_id: "SecuritiesCompanyCode"
+        date: "發言日期"
+        time: "發言時間"
+        subject: "主旨"
+        clause: "符合條款"
+        fact_date: "事實發生日"
+        description: "說明"
+    # Basic EPS of the year to the quarter's end, of the companies that filed the latest quarter.
+    quarter_eps:
+      twse: { url: "https://openapi.twse.com.tw/v1/opendata/t187ap14_L", stock_id: "公司代號", year: "年度", quarter: "季別", eps: "基本每股盈餘(元)" }
+      tpex:
+        { url: "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap14_O", stock_id: "SecuritiesCompanyCode", year: "Year", quarter: "季別", eps: "基本每股盈餘" }
+    # The P/E, the dividend yield in percent and the P/B of each stock on the latest session. A ratio left blank, as
+    # the P/E of a company with losses, is kept as none.
+    valuation_ratios:
+      twse:
+        { url: "https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL", stock_id: "Code", date: "Date", pe_ratio: "PEratio", dividend_yield: "DividendYield", pb_ratio: "PBratio" }
+      tpex:
+        {
+          url: "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis",
+          stock_id: "SecuritiesCompanyCode",
+          date: "Date",
+          pe_ratio: "PriceEarningRatio",
+          dividend_yield: "YieldRatio",
+          pb_ratio: "PriceBookRatio",
+        }
+    # The balance sheets (t187ap07) and income statements (t187ap06) of the companies that filed the latest quarter, one
+    # report per industry format: ci general, basi banks, bd securities and futures, fh financial holdings, ins
+    # insurance, mim the others. Each report has its own columns and names its served date, ROC year and quarter and
+    # company differently, so each of those lists every name a report gives it. Every other field is archived as served;
+    # the income figures run from the year's start, in thousands of TWD. `summary` names, per format, the columns a
+    # quarter's summary reads; a format without a figure names none.
+    financial_reports:
+      urls:
+        twse:
+          balance_sheet:
+            ci: "https://openapi.twse.com.tw/v1/opendata/t187ap07_L_ci"
+            basi: "https://openapi.twse.com.tw/v1/opendata/t187ap07_L_basi"
+            bd: "https://openapi.twse.com.tw/v1/opendata/t187ap07_L_bd"
+            fh: "https://openapi.twse.com.tw/v1/opendata/t187ap07_L_fh"
+            ins: "https://openapi.twse.com.tw/v1/opendata/t187ap07_L_ins"
+            mim: "https://openapi.twse.com.tw/v1/opendata/t187ap07_L_mim"
+          income_statement:
+            ci: "https://openapi.twse.com.tw/v1/opendata/t187ap06_L_ci"
+            basi: "https://openapi.twse.com.tw/v1/opendata/t187ap06_L_basi"
+            bd: "https://openapi.twse.com.tw/v1/opendata/t187ap06_L_bd"
+            fh: "https://openapi.twse.com.tw/v1/opendata/t187ap06_L_fh"
+            ins: "https://openapi.twse.com.tw/v1/opendata/t187ap06_L_ins"
+            mim: "https://openapi.twse.com.tw/v1/opendata/t187ap06_L_mim"
+        tpex:
+          balance_sheet:
+            ci: "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap07_O_ci"
+            basi: "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap07_O_basi"
+            bd: "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap07_O_bd"
+            fh: "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap07_O_fh"
+            ins: "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap07_O_ins"
+            mim: "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap07_O_mim"
+          income_statement:
+            ci: "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap06_O_ci"
+            basi: "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap06_O_basi"
+            bd: "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap06_O_bd"
+            fh: "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap06_O_fh"
+            ins: "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap06_O_ins"
+            mim: "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap06_O_mim"
+      served_date: ["出表日期", "Date"]
+      year: ["年度", "Year"]
+      quarter: ["季別", "Season"]
+      stock_id: ["公司代號", "SecuritiesCompanyCode"]
+      company_name: ["公司名稱", "CompanyName"]
+      # A company without subsidiaries leaves the parent's share blank, and its totals are the parent's.
+      summary:
+        ci:
+          revenue: ["營業收入"]
+          gross_profit: ["營業毛利（毛損）淨額"]
+          operating_income: ["營業利益（損失）"]
+          net_income: ["淨利（淨損）歸屬於母公司業主", "本期淨利（淨損）"]
+          total_assets: ["資產總計"]
+          total_liabilities: ["負債總計"]
+          equity: ["歸屬於母公司業主之權益合計", "權益總計"]
+          book_value_per_share: ["每股參考淨值"]
+        basi:
+          net_income: ["淨利（損）歸屬於母公司業主", "本期稅後淨利（淨損）"]
+          total_assets: ["資產總額"]
+          total_liabilities: ["負債總額"]
+          equity: ["歸屬於母公司業主之權益合計", "權益總額"]
+          book_value_per_share: ["每股參考淨值"]
+        bd:
+          revenue: ["收益"]
+          operating_income: ["營業利益"]
+          net_income: ["淨利（損）歸屬於母公司業主", "本期淨利（淨損）"]
+          total_assets: ["資產總計"]
+          total_liabilities: ["負債總計"]
+          equity: ["歸屬於母公司業主權益合計", "權益總計"]
+          book_value_per_share: ["每股參考淨值"]
+        fh:
+          revenue: ["淨收益"]
+          net_income: ["淨利（淨損）歸屬於母公司業主", "本期稅後淨利（淨損）"]
+          total_assets: ["資產總額"]
+          total_liabilities: ["負債總額"]
+          equity: ["歸屬於母公司業主之權益", "權益總額"]
+          book_value_per_share: ["每股參考淨值"]
+        ins:
+          revenue: ["營業收入"]
+          operating_income: ["營業利益（損失）"]
+          net_income: ["淨利（淨損）歸屬於母公司業主", "本期淨利（淨損）"]
+          total_assets: ["資產總計"]
+          total_liabilities: ["負債總計"]
+          equity: ["歸屬於母公司業主之權益合計", "權益總計"]
+          book_value_per_share: ["每股參考淨值"]
+        # TWSE's other-format balance sheet writes 資產總額 and 負債總額, TPEX's 資產總計 and 負債總計.
+        mim:
+          revenue: ["收入"]
+          net_income: ["淨利（淨損）歸屬於母公司業主", "本期淨利（淨損）"]
+          total_assets: ["資產總額", "資產總計"]
+          total_liabilities: ["負債總額", "負債總計"]
+          equity: ["歸屬於母公司業主之權益合計", "權益總額", "權益總計"]
+          book_value_per_share: ["每股參考淨值"]
+    # Each company's revenue of the latest month, in thousands of TWD, with the month before, the same month a year
+    # before and the year to date. The month is written in the ROC calendar, 11509 for 2026-09.
+    monthly_revenue:
+      twse:
+        url: "https://openapi.twse.com.tw/v1/opendata/t187ap05_L"
+        served_date: "出表日期"
+        year_month: "資料年月"
+        stock_id: "公司代號"
+        company_name: "公司名稱"
+        industry: "產業別"
+        revenue: "營業收入-當月營收"
+        previous_month_revenue: "營業收入-上月營收"
+        last_year_revenue: "營業收入-去年當月營收"
+        month_over_month_percent: "營業收入-上月比較增減(%)"
+        year_over_year_percent: "營業收入-去年同月增減(%)"
+        cumulative_revenue: "累計營業收入-當月累計營收"
+        last_year_cumulative_revenue: "累計營業收入-去年累計營收"
+        cumulative_year_over_year_percent: "累計營業收入-前期比較增減(%)"
+        note: "備註"
+      tpex:
+        url: "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap05_O"
+        served_date: "出表日期"
+        year_month: "資料年月"
+        stock_id: "公司代號"
+        company_name: "公司名稱"
+        industry: "產業別"
+        revenue: "營業收入-當月營收"
+        previous_month_revenue: "營業收入-上月營收"
+        last_year_revenue: "營業收入-去年當月營收"
+        month_over_month_percent: "營業收入-上月比較增減(%)"
+        year_over_year_percent: "營業收入-去年同月增減(%)"
+        cumulative_revenue: "累計營業收入-當月累計營收"
+        last_year_cumulative_revenue: "累計營業收入-去年累計營收"
+        cumulative_year_over_year_percent: "累計營業收入-前期比較增減(%)"
+        note: "備註"
+    # TWSE's own news since the start of the year: listing reviews, penalties, notices of ETF splits. A title names a
+    # stock by its code in parentheses, alone as in (0053) or after 證券代號：.
+    exchange_news:
+      url: "https://openapi.twse.com.tw/v1/news/newsList"
+      title: "Title"
+      link: "Url"
+      date: "Date"
+      stock_code_pattern: "[（(：:]\\s*([0-9]{4,6}[A-Z]?)\\s*[)）]"
+    mis_quotes_url: "https://mis.twse.com.tw/stock/api/getStockInfo.jsp"
+  # The credit the Open Government Data License v1 asks for, in the form of its annex (https://data.gov.tw/license):
+  # each providing agency and the datasets the app reads from it, the license's notice, and its name and address.
+  # A use that does not show it holds no license (Article 3, paragraph 2). List every dataset read above.
+  attribution:
+    providers:
+      - provider: "臺灣證券交易所"
+        datasets:
+          - "上市個股日成交資訊"
+          - "每日收盤行情-大盤統計資訊"
+          - "上市公司基本資料"
+          - "上市公司每日重大訊息"
+          - "上市公司各產業EPS統計資訊"
+          - "上市個股日本益比、殖利率及股價淨值比"
+          - "上市公司資產負債表(一般業)"
+          - "上市公司資產負債表(金融業)"
+          - "上市公司資產負債表(證券期貨業)"
+          - "上市公司資產負債表(金控業)"
+          - "上市公司資產負債表(保險業)"
+          - "上市公司資產負債表(異業)"
+          - "上市公司綜合損益表(一般業)"
+          - "上市公司綜合損益表(金融業)"
+          - "上市公司綜合損益表(證券期貨業)"
+          - "上市公司綜合損益表(金控業)"
+          - "上市公司綜合損益表(保險業)"
+          - "上市公司綜合損益表(異業)"
+          - "上市公司每月營業收入彙總表"
+          - "證交所新聞"
+      - provider: "證券櫃檯買賣中心"
+        datasets:
+          - "上櫃股票行情"
+          - "櫃買指數歷史資料"
+          - "上櫃股票基本資料"
+          - "上櫃公司每日重大訊息"
+          - "上櫃公司各產業EPS統計資訊"
+          - "上櫃股票個股本益比、殖利率、股價淨值比"
+          - "上櫃公司資產負債表(一般業)"
+          - "上櫃公司資產負債表(金融業)"
+          - "上櫃公司資產負債表(證券期貨業)"
+          - "上櫃公司資產負債表(金控業)"
+          - "上櫃公司資產負債表(保險業)"
+          - "上櫃公司資產負債表(異業)"
+          - "上櫃公司綜合損益表(一般業)"
+          - "上櫃公司綜合損益表(金融業)"
+          - "上櫃公司綜合損益表(證券期貨業)"
+          - "上櫃公司綜合損益表(金控業)"
+          - "上櫃公司綜合損益表(保險業)"
+          - "上櫃公司綜合損益表(異業)"
+          - "上櫃公司每月營業收入彙總表"
+    notice: "此開放資料依政府資料開放授權條款 (Open Government Data License) 進行公眾釋出，使用者於遵守本條款各項規定之前提下，得利用之。"
+    license: "政府資料開放授權條款－第1版"
+    license_url: "https://data.gov.tw/license"
+  yahoo:
+    # Yahoo Finance's symbol for each market index. It serves no TPEX index: ^TWOII answers "possibly delisted".
+    index_symbols: { taiex: "^TWII" }
+  mops:
+    eps_url: "https://mopsov.twse.com.tw/mops/web/ajax_t163sb04"
+    eps_form_fields:
+      {
+        "encodeURIComponent": "1",
+        "step": "1",
+        "firstin": "1",
+        "off": "1",
+        "isQuery": "Y",
+      }
+    twse_market_code: "sii"
+    tpex_market_code: "otc"
+    company_id_header: "公司代號"
+    eps_header_prefix: "基本每股盈餘"
+    no_data_marker: "查詢無資料"
     request_interval_seconds: 2.0
     timeout_seconds: 60.0
     provisional_page_max_age_hours: 6
-    industry_max_age_hours: 24
     # The latest statutory filing deadline of each quarter across company types, as [month, day]. Financial holdings
     # file last, and the Q4 (annual) report is due in the following year.
     filing_deadlines: { 1: [5, 30], 2: [8, 31], 3: [11, 29], 4: [3, 31] }

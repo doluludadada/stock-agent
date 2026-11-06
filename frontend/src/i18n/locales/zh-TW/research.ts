@@ -55,6 +55,34 @@ const research: DictionaryShape<typeof en> = {
     showAll: '顯示全部 {{count}} 個指標',
     showLess: '收合',
   },
+  financials: {
+    title: '財務數據',
+    question: '取自證交所與櫃買中心的開放資料，本站自開站起逐期保存',
+    failed: '無法載入財務數據。',
+    none: {
+      title: '尚未保存財務數據',
+      description: '證交所與櫃買中心的開放資料只提供最近一季與最近一個月，本站從開站那天起保存。',
+    },
+    month: '{{month}}營收',
+    revenue: '營業收入',
+    monthOverMonth: '月增率',
+    yearOverYear: '年增率',
+    quartersLabel: '季度數據',
+    quarter: '{{year}} Q{{quarter}}',
+    column: { figure: '項目' },
+    figure: {
+      revenue: '營業收入',
+      gross_profit: '營業毛利',
+      operating_income: '營業利益',
+      net_income: '本期淨利',
+      eps: '每股盈餘（元）',
+      total_assets: '資產總額',
+      total_liabilities: '負債總額',
+      equity: '權益',
+      book_value_per_share: '每股淨值（元）',
+    },
+    units: '損益項目與每股盈餘為年初至該季底的累計，資產負債項目為該季底的數字；淨利與權益為歸屬於母公司業主者。金額單位為新臺幣。',
+  },
 }
 
 export default research

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Self
 from uuid import UUID, uuid4
 
@@ -11,7 +11,10 @@ from a_domain.types.values import Fraction
 
 @dataclass(config=ConfigDict(validate_assignment=True), kw_only=True)
 class Article:
-    """A news article or social post about one stock. The two sentiment fields change together, through `dataclasses.replace`."""
+    """
+    A news article, a social post or a company's material information announcement about one stock. The two sentiment
+    fields change together, through `dataclasses.replace`.
+    """
 
     id: UUID = Field(default_factory=uuid4)
     stock_id: str
@@ -27,6 +30,12 @@ class Article:
     """Reactions and replies counted by the source platform."""
 
     raw_metadata: dict | None = None
+
+    clause: str | None = None
+    """The clause of the exchange's material information rules an announcement is filed under, as served. None for news and posts."""
+
+    fact_date: date | None = None
+    """The day the fact an announcement reports happened. None for news and posts, and when the announcement gives none."""
 
     sentiment: SentimentLabel | None = None
     """The stance the sentiment classifier read in the post. None until it is classified."""

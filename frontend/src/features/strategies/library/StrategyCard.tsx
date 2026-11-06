@@ -23,6 +23,7 @@ interface StrategyCardProps {
   copyHref: string
   editHref?: string
   onActivate?: () => void
+  /** Absent on a site that cannot run Social Buzz, which then offers no choice of its strategy. */
   onSetBuzz?: () => void
   onViewRules: () => void
   onDelete?: () => void
@@ -91,7 +92,7 @@ export function StrategyCard(props: StrategyCardProps) {
               {t('action.activate')}
             </Button>
           ))}
-        {!official && !buzz && (
+        {!official && !buzz && props.onSetBuzz && (
           <Button type="button" size="xs" variant="outline" onClick={props.onSetBuzz} disabled={busy}>
             <Megaphone aria-hidden />
             {t('action.setBuzz')}

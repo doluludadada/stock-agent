@@ -4,7 +4,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
-import httpx
 import pytest
 from support.settings import shipped_config
 
@@ -182,50 +181,3 @@ async def test_empty_page_for_a_final_quarter_is_a_failure_and_is_not_cached(tmp
     final = filings[FINAL]
     assert isinstance(final, QuarterEps)
     assert final.cumulative_eps == {"2330": 66.26, "6488": 20.10}
-
-
-@pytest.mark.asyncio
-async def test_industries_merge_every_market_and_refetch_a_market_only_once_its_list_is_a_day_old(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    provider, _, clock = await build(tmp_path, monkeypatch)
-    feeds: dict[MarketType, dict[str, str] | None] = {MarketType.TWSE: {"2330": "半導體業"}, MarketType.TPEX: None}
-    requests: list[MarketType] = []
-
-    async def fetch_market_industries(market: MarketType) -> dict[str, str] | None:
-        requests.append(market)
-        return feeds[market]
-
-    monkeypatch.setattr(provider, "fetch_market_industries", fetch_market_industries)
-
-    assert await provider.fetch_industries() == {"2330": "半導體業"}
-
-    feeds[MarketType.TPEX] = {"6488": "半導體業"}
-    clock.current += timedelta(hours=1)
-    assert await provider.fetch_industries() == {"2330": "半導體業", "6488": "半導體業"}
-
-    feeds[MarketType.TWSE] = None
-    clock.current += timedelta(hours=24)
-    assert await provider.fetch_industries() == {"2330": "半導體業", "6488": "半導體業"}
-    assert requests == [MarketType.TWSE, MarketType.TPEX, MarketType.TPEX, MarketType.TWSE, MarketType.TPEX]
-
-
-@pytest.mark.asyncio
-async def test_industries_come_from_every_companys_profile_and_name_its_industry_code(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Trimmed rows of t187ap03_L and mopsfin_t187ap03_O as served on 2026-11-04. 91 (depositary receipts) has no name."""
-    profiles = {
-        SOURCES.mops.twse_industries_url: [
-            {"公司代號": "1101", "公司簡稱": "台泥", "產業別": "01"},
-            {"公司代號": "2330", "公司簡稱": "台積電", "產業別": "24"},
-            {"公司代號": "9103", "公司簡稱": "美德醫療-DR", "產業別": "91"},
-        ],
-        SOURCES.mops.tpex_industries_url: [
-            {"SecuritiesCompanyCode": "6488", "CompanyAbbreviation": "環球晶", "SecuritiesIndustryCode": "24"},
-            {"SecuritiesCompanyCode": "8069", "CompanyAbbreviation": "元太", "SecuritiesIndustryCode": "26"},
-        ],
-    }
-    real_client = httpx.AsyncClient
-    transport = httpx.MockTransport(lambda request: httpx.Response(200, json=profiles[str(request.url)]))
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: real_client(transport=transport))
-
-    assert await parser().fetch_industries() == {"1101": "水泥工業", "2330": "半導體業", "6488": "半導體業", "8069": "光電業"}

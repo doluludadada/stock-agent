@@ -4,7 +4,7 @@ import { Link } from 'react-router'
 import { toast } from 'sonner'
 import { useTranslation } from '@/i18n'
 import { paths } from '@/shared/config/paths'
-import { isApiError } from '@/shared/api'
+import { isApiError, useAllows } from '@/shared/api'
 import { Button } from '@/shared/ui/button'
 import { ConfirmDialog } from '@/shared/ui/confirm-dialog'
 import { ErrorState } from '@/shared/ui/error-state'
@@ -21,6 +21,7 @@ import { StrategyRulesSheet } from './StrategyRulesSheet'
 
 export function StrategyLibraryPage() {
   const { t } = useTranslation('strategies')
+  const buzzRuns = useAllows('realtime_quotes')
   const [viewing, setViewing] = useState<Strategy | null>(null)
 
   return (
@@ -43,7 +44,7 @@ export function StrategyLibraryPage() {
           <h2 id="custom-title" className="text-base font-semibold">
             {t('library.customTitle')}
           </h2>
-          <p className="text-xs text-muted-foreground">{t('library.selectionNote')}</p>
+          <p className="text-xs text-muted-foreground">{t(buzzRuns ? 'library.selectionNote' : 'library.selectionNoteWithoutRealtime')}</p>
         </div>
         <RequireSignIn layout="page" reason={t('signIn')}>
           <OwnerStrategies onView={setViewing} />
@@ -95,6 +96,7 @@ function OfficialStrategies({ onView }: { onView: (strategy: Strategy) => void }
 
 function OwnerStrategies({ onView }: { onView: (strategy: Strategy) => void }) {
   const { t } = useTranslation('strategies')
+  const buzzRuns = useAllows('realtime_quotes')
   const labels = useStrategyLabels()
   const settings = useStrategySettings()
   const save = useSaveStrategySettings()
@@ -144,12 +146,12 @@ function OwnerStrategies({ onView }: { onView: (strategy: Strategy) => void }) {
               key={strategy.id}
               strategy={strategy}
               active={current.activeStrategyId === strategy.id}
-              buzz={current.buzzStrategyId === strategy.id}
+              buzz={buzzRuns && current.buzzStrategyId === strategy.id}
               busy={save.isPending}
               copyHref={paths.copyStrategy(strategy.id)}
               editHref={paths.editStrategy(strategy.id)}
               onActivate={() => submit(withSelection(current, 'active', strategy.id), t('toast.activated', { name: labels.name(strategy) }))}
-              onSetBuzz={() => submit(withSelection(current, 'buzz', strategy.id), t('toast.buzz', { name: labels.name(strategy) }))}
+              onSetBuzz={buzzRuns ? () => submit(withSelection(current, 'buzz', strategy.id), t('toast.buzz', { name: labels.name(strategy) })) : undefined}
               onViewRules={() => onView(strategy)}
               onDelete={() => setDeleting(strategy)}
               deleteBlocked={refusal === null ? undefined : t(refusal === 'selected' ? 'delete.selected' : 'delete.last')}

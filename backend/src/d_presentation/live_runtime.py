@@ -256,7 +256,7 @@ class RuntimeSwitch:
 
         try:
             async with asyncio.timeout(timeout):
-                config = startup_settings(self.project_root, candidates, current.config.environment)
+                config = startup_settings(self.project_root, candidates, current.config.environment, current.config.audience)
                 runtime = await stack.enter_async_context(self.opener(config))
                 await runtime.signed_out.confirm_editor_access(await current.signed_out.load_sign_in_options(), administrator)
         except BaseException as error:
@@ -330,6 +330,26 @@ async def watch_settings(switch: RuntimeSwitch) -> None:
 
         if isinstance(reload, SettingsReloaded):
             switch.logger.info(f"Settings reloaded from disk: {describe(reload)}.")
+
+
+async def archive_closes(switch: RuntimeSwitch) -> None:
+    """
+    The Web API's collection of the TWSE and TPEX open data the OpenAPI serves only for its latest session, day, month
+    or quarter: closes, material information, EPS statistics, valuation ratios, balance sheets, income statements,
+    monthly revenue and TWSE news. At the start, then every api.archive_interval_hours of the current settings, on the
+    current runtime. It never stops on an error of its own: it logs it and tries again at the next interval. The
+    lifespan cancels it at shutdown.
+    """
+    while True:
+        with switch.hold() as opened:
+            interval = opened.runtime.config.api.archive_interval_hours
+
+            try:
+                await opened.runtime.signed_out.archive_daily_closes()
+            except Exception as error:
+                switch.logger.error(f"The open data could not be archived: {type(error).__name__}: {error}")
+
+        await asyncio.sleep(interval * 3600)
 
 
 def describe(reload: SettingsReload) -> str:

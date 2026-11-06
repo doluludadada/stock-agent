@@ -6,16 +6,24 @@ from a_domain.ports.market.social_media_provider import ISocialMediaProvider
 from a_domain.ports.market.stock_provider import IStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.rules.collect import SocialBuzzCriteria
+from a_domain.types.errors import RealtimeQuotesUnavailable
 from b_application.config.app_config import AppConfig
 
 
 class BuzzScanner:
     """
     Loads social-buzz stocks and attaches their buzz articles. A stock this run already loaded is reused.
+
+    Without a social media provider, on an audience without realtime quotes (public), Buzz cannot order, so the wiring
+    builds no PTT reader and it raises RealtimeQuotesUnavailable; the Web API and the CLI refuse Buzz before it gets here.
     """
 
     def __init__(
-        self, social_media_provider: ISocialMediaProvider, stock_provider: IStockProvider, logger: ILoggingProvider, config: AppConfig
+        self,
+        social_media_provider: ISocialMediaProvider | None,
+        stock_provider: IStockProvider,
+        logger: ILoggingProvider,
+        config: AppConfig,
     ) -> None:
         rules = config.collect_rules
         self._social_media_provider = social_media_provider
@@ -25,6 +33,9 @@ class BuzzScanner:
         self._criteria = SocialBuzzCriteria(min_mentions=rules.buzz_min_mentions, min_engagement=rules.buzz_min_engagement)
 
     async def execute(self, known: Mapping[str, Stock], stats: SystemStats) -> list[Stock]:
+        if self._social_media_provider is None:
+            raise RealtimeQuotesUnavailable("This site has no realtime quote to order on, so it runs no Buzz and reads no posts.")
+
         self._logger.info("Scanning social media for buzz...")
         articles = await self._social_media_provider.fetch_social_articles(limit=self._article_limit)
 
@@ -46,8 +57,7 @@ class BuzzScanner:
             buzz_stocks.append(stock)
 
         stats.buzz_scanned = len({article.stock_id for article in articles})
-        stats.buzz_qualified = len(buzz_stocks)
-        stats.total_scanned = len(buzz_stocks)
+        stats.buzz_qualified = stats.total_scanned = len(buzz_stocks)
         self._logger.info(f"Buzz candidates: {stats.buzz_scanned} -> {stats.buzz_qualified}")
 
         return buzz_stocks

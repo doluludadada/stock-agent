@@ -29,3 +29,10 @@ class ApiConfig(BaseSettings):
 
     valuation_cache_minutes: Annotated[float, Field(gt=0, le=1440)] = 15
     """How long the Web API reuses a loaded market valuation (listings, MOPS EPS) across valuation requests."""
+
+    archive_interval_hours: Annotated[float, Field(gt=0, le=24)] = 3
+    """
+    How often the Web API saves the TWSE and TPEX open-data closes into the archive, from its start on. The OpenAPI
+    serves a session for about a day, until the next session's report, so a few hours never miss one while the server
+    runs. A save reads the listings as cached, so they are at most market_data.listing_cache_hours old.
+    """

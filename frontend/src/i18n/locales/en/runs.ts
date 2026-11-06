@@ -5,6 +5,7 @@ const runs = {
   description: 'Start an analysis and read what each run recorded. One run at a time.',
   startTitle: 'Start a run',
   startQuestion: 'Four workflows; one of yours runs at a time',
+  startQuestionWithoutRealtime: 'Two workflows; one of yours runs at a time',
   start: 'Start',
   started: '{{kind}} started',
   busy: 'Another run is still going. Wait for it to end.',

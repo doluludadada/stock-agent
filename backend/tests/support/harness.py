@@ -59,6 +59,7 @@ from support.fakes import (
     VALUATION_PROMPT_TEMPLATE,
     FakeAiProvider,
     FakeConversationRepository,
+    FakeDailyCloseArchive,
     FakeFundamentalsProvider,
     FakeKnowledgeRepository,
     FakeMarketClock,
@@ -159,6 +160,7 @@ class CliHarness:
     config: AppConfig
     clock: FakeMarketClock
     stocks: FakeStockProvider
+    archive: FakeDailyCloseArchive
     fundamentals: FakeFundamentalsProvider
     prices: FakeOhlcvProvider
     news: FakeNewsProvider
@@ -223,7 +225,7 @@ class CliHarness:
             self.fundamentals.cumulative_eps.setdefault(quarter, {})[stock_id] = value
 
         if industry is not None:
-            self.fundamentals.industries[stock_id] = industry
+            self.stocks.industries[stock_id] = industry
 
     def hold(self, stock_id: str, quantity: int, average_cost: float) -> None:
         self.broker.positions.append(Position(stock_id=stock_id, quantity=quantity, average_cost=average_cost))
@@ -349,6 +351,7 @@ def build_harness(
     logger = RecordingLogger()
     clock = FakeMarketClock(now=now)
     stocks = FakeStockProvider()
+    archive = FakeDailyCloseArchive()
     fundamentals = FakeFundamentalsProvider()
     prices = FakeOhlcvProvider()
     news = FakeNewsProvider()
@@ -390,9 +393,10 @@ def build_harness(
     dependencies = ProviderDependencies(
         stock_provider=stocks,
         price_provider=prices,
-        fundamentals_provider=fundamentals,
-        news_provider=news,
-        social_media_provider=social,
+        daily_close_archive=archive,
+        fundamentals_provider=fundamentals if config.audience.mops else None,
+        news_provider=news if config.audience.news_articles else archive,
+        social_media_provider=social if config.audience.realtime_quotes else None,
         ai_provider=ai,
         conversation_repository=conversations,
         notification_provider=None,
@@ -407,6 +411,7 @@ def build_harness(
         config=config,
         clock=clock,
         stocks=stocks,
+        archive=archive,
         fundamentals=fundamentals,
         prices=prices,
         news=news,

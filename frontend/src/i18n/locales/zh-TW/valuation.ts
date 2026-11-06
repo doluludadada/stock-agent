@@ -6,6 +6,10 @@ const valuation: DictionaryShape<typeof en> = {
   title: '本益比估值',
   description: '以目標本益比、最近收盤價與近四季 EPS 計算合理價。',
   notAdvice: '依你假設的本益比估算，不是投資建議；本頁不會下單，也不會改動觀察清單。',
+  notOffered: {
+    title: '本站不提供估值',
+    reason: '本站只使用證交所與櫃買中心的開放資料，沒有公開資訊觀測站的損益表，也就沒有本益比估值要讀的 EPS。',
+  },
   marketTitle: '市場參考',
   toolTitle: '估值工具',
   toolQuestion: '用你的目標本益比估值指定股票，或掃描全市場',

@@ -17,7 +17,7 @@ class SettingsEditor:
     def __init__(self, settings_files: ISettingsFiles, config: AppConfig) -> None:
         self._settings_files = settings_files
         self._change_rule = SettingsChangeRule()
-        self._environment = config.environment
+        self._environment, self._audience = config.environment, config.audience
 
     async def execute(
         self, file: SettingsFile, expected_revision: str, host: str, text: str | None = None, backup_id: str | None = None
@@ -41,6 +41,6 @@ class SettingsEditor:
             revision=self._settings_files.revision_of(proposed),
             changed=self._change_rule.apply(saved, edited),
             diff=tuple(self._settings_files.diff(file, current.text, proposed)),
-            problems=self._settings_files.check(file, proposed, self._environment, host),
+            problems=self._settings_files.check(file, proposed, self._environment, self._audience, host),
             restored_backup_id=backup_id,
         )

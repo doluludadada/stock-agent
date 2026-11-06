@@ -16,6 +16,8 @@ export const paths = {
   adminSettings: '/admin/settings',
   users: '/admin/users',
   stock: (code: string) => `/stocks/${encodeURIComponent(code)}`,
+  /** The open data's providers, datasets and license, which every page credits through its footer. */
+  attribution: '/attribution',
   setup: '/setup',
   signIn: '/sign-in',
   register: '/register',

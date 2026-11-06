@@ -1,4 +1,5 @@
 import enAccount from './locales/en/account'
+import enAttribution from './locales/en/attribution'
 import enAdmin from './locales/en/admin'
 import enAuth from './locales/en/auth'
 import enBuilder from './locales/en/builder'
@@ -11,6 +12,7 @@ import enValuation from './locales/en/valuation'
 import enStrategies from './locales/en/strategies'
 import enWatchlist from './locales/en/watchlist'
 import zhAccount from './locales/zh-TW/account'
+import zhAttribution from './locales/zh-TW/attribution'
 import zhAdmin from './locales/zh-TW/admin'
 import zhAuth from './locales/zh-TW/auth'
 import zhBuilder from './locales/zh-TW/builder'
@@ -37,6 +39,7 @@ export const resources = {
     account: enAccount,
     admin: enAdmin,
     auth: enAuth,
+    attribution: enAttribution,
   },
   'zh-TW': {
     common: zhCommon,
@@ -51,6 +54,7 @@ export const resources = {
     account: zhAccount,
     admin: zhAdmin,
     auth: zhAuth,
+    attribution: zhAttribution,
   },
 } as const
 

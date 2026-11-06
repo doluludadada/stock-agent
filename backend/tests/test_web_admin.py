@@ -221,17 +221,22 @@ async def test_a_built_in_strategy_id_is_checked_before_it_names_a_file_and_no_s
     assert str(project) not in response.text and "Errno" not in response.text
 
 
-async def test_a_save_that_changes_the_environment_is_refused_until_a_restart(project: Path) -> None:
+@pytest.mark.parametrize(
+    ("path", "old", "new"), [("environment", "dev", "test"), ("audience", "personal", "public")], ids=["environment", "audience"]
+)
+async def test_a_save_that_changes_the_environment_or_the_audience_is_refused_until_a_restart(
+    project: Path, path: str, old: str, new: str
+) -> None:
     async with serve(admin_harness(project)) as client:
         original, revision = await read(client)
-        text = original.replace("environment: dev", "environment: test", 1)
+        text = original.replace(f"{path}: {old}", f"{path}: {new}", 1)
         preview = (await client.post(f"{APPSETTING}/preview", json={"revision": revision, "text": text})).json()
         response = await save(client, revision, text)
 
     [problem] = response.json()["problems"]
     assert response.status_code == 422 and preview["problems"] == response.json()["problems"]
-    assert (problem["path"], problem["line"], problem["column"]) == ("environment", *at(text, "environment: test"))
-    assert "the environment changes only when the app restarts" in problem["message"] and text_of(project) == original
+    assert (problem["path"], problem["line"], problem["column"]) == (path, *at(text, f"{path}: {new}"))
+    assert f"the {path} changes only when the app restarts" in problem["message"] and text_of(project) == original
 
 
 async def test_every_save_needs_the_password_in_the_same_request_and_a_wrong_one_keeps_the_session(project: Path) -> None:

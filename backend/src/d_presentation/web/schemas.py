@@ -16,12 +16,15 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, SecretStr, St
 
 from a_domain.model.analysis.technical_report import TechnicalReport
 from a_domain.model.fundamentals.eps import EpsUnavailable
+from a_domain.model.fundamentals.monthly_revenue import MonthlyRevenue
+from a_domain.model.fundamentals.quarter_financials import QuarterFinancials
 from a_domain.model.valuation.scan import ScanCriteria
 from a_domain.model.valuation.valuation import PeMedian, ReportSection
 from a_domain.ports.system.settings_files import Revision, SettingChange, SettingsProblem
 from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
 from a_domain.types.enums import (
     AiProvider,
+    Audience,
     EliminationReason,
     EpsBasis,
     EpsKind,
@@ -321,7 +324,53 @@ class StockHistoryResponse(BaseModel):
 class IndexHistoryResponse(BaseModel):
     index: MarketIndex
     bars: list[DailyBarResponse]
-    """Completed daily bars, oldest first, as Yahoo Finance reports the index. Empty when it has none for the window."""
+    """
+    Completed daily bars, oldest first, as Yahoo Finance reports the index, or on a public site as the open-data archive
+    keeps its close: such a bar's open, high and low are its close and its volume 0. Empty when none is in the window.
+    """
+
+
+class ArchiveStatusResponse(BaseModel):
+    """
+    The open-data archive's warm-up. A public site reads its daily history from the archive alone, so its runs find no
+    candidate until `sessions` reaches `needed`.
+    """
+
+    sessions: int
+    """The sessions of TWSE and TPEX stock closes the archive holds: the most daily bars it can serve one stock."""
+    needed: int
+    """The daily bars the built-in strategies need: the most any of them reads."""
+
+
+class AudienceResponse(BaseModel):
+    """
+    Whom the site serves and what that allows, as the Audience table says, so the web app offers only what the site can
+    do. The server still refuses the rest on every request.
+    """
+
+    audience: Audience
+    open_data_only: bool
+    """Daily history and the index trend come from the open-data archive alone: a run finds no candidate until it holds enough."""
+    realtime_quotes: bool
+    """Buzz, Intraday and the manual BUY, which order on realtime quotes."""
+    news_articles: bool
+    """The news sites' articles and the AI's web search."""
+    mops: bool
+    """The valuation, which reads MOPS's income statements."""
+
+
+class StockFinancialsResponse(BaseModel):
+    """
+    A stock's financials as the server's open-data archive holds them. The OpenAPI serves only the latest quarter and
+    month, so the archive holds those it saved while they were served, and nothing before the archive started.
+    """
+
+    stock_id: str
+    quarters: list[QuarterFinancials]
+    """Each archived quarter's figures, oldest first."""
+
+    monthly_revenues: list[MonthlyRevenue]
+    """Each archived month's revenue, oldest first."""
 
 
 class StockTechnicalResponse(BaseModel):
