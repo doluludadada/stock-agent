@@ -14,6 +14,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from a_domain.types.enums import ErrorCode
 from a_domain.types.errors import (
+    AiModelNotOffered,
     AlreadySetUpError,
     LastAdministratorError,
     ListingUnavailableError,
@@ -126,6 +127,7 @@ ERROR_ANSWERS: dict[type[Exception], tuple[int, ErrorCode]] = {
     SettingsConflictError: (status.HTTP_409_CONFLICT, ErrorCode.SETTINGS_CONFLICT),
     RunInProgress: (status.HTTP_409_CONFLICT, ErrorCode.RUN_IN_PROGRESS),
     SettingsEditError: (status.HTTP_422_UNPROCESSABLE_CONTENT, ErrorCode.SETTINGS_EDIT_REFUSED),
+    AiModelNotOffered: (status.HTTP_422_UNPROCESSABLE_CONTENT, ErrorCode.AI_MODEL_NOT_OFFERED),
     InvalidSettingsError: (status.HTTP_422_UNPROCESSABLE_CONTENT, ErrorCode.SETTINGS_REFUSED),
     SignInThrottled: (status.HTTP_429_TOO_MANY_REQUESTS, ErrorCode.SIGN_IN_THROTTLED),
     TooManyRuns: (status.HTTP_429_TOO_MANY_REQUESTS, ErrorCode.TOO_MANY_RUNS),

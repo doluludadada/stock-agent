@@ -5,7 +5,7 @@ from a_domain.model.system.stats import SystemStats
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.trading_journal import ITradingJournal
-from a_domain.types.enums import Workflow
+from a_domain.types.enums import AiProvider, Workflow
 from a_domain.types.ids import RunId, new_run_id
 from b_application.config.app_config import AppConfig
 
@@ -18,14 +18,17 @@ class RunHistory:
     on, because nothing acts on a decision whose own save failed.
 
     A caller that must name the run before it starts (the Web API answers with the run id at once) passes that id.
+    `ai_model` is the AI model the Pipeline's AI provider runs on, so the record names the model the run used.
     """
 
-    def __init__(self, journal: ITradingJournal, market_clock: IMarketClock, config: AppConfig, logger: ILoggingProvider) -> None:
+    def __init__(
+        self, journal: ITradingJournal, market_clock: IMarketClock, config: AppConfig, logger: ILoggingProvider, ai_model: AiProvider
+    ) -> None:
         self._journal = journal
         self._market_clock = market_clock
         self._execution_provider = config.trading.execution_provider
         self._order_mode = config.trading.order_mode
-        self._ai_model = config.ai.available_models.get(config.ai.active_model)
+        self._ai_model = config.ai.available_models.get(ai_model)
         self._logger = logger
 
     @asynccontextmanager

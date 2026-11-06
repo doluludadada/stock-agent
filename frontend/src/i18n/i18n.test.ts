@@ -1,8 +1,11 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { FORM_SECTIONS } from '@/features/admin-settings/form'
+import { BUILT_IN_IDS, builtInJson } from '@/features/strategies/model/built-ins.test-support'
 import { COMPARATORS, INDICATOR_CATALOG, INDICATOR_KINDS, RULE_EFFECTS } from '@/features/strategies/model/catalog'
 import openapi from '@/shared/api/openapi.json'
+import zhRuleNames from './locales/zh-TW/rule-names'
 import { resources } from './resources'
 
 type Tree = { [key: string]: string | Tree }
@@ -33,6 +36,12 @@ describe('translations', () => {
       const zh = flatten((resources['zh-TW'] as unknown as Record<string, Tree>)[namespace]!).sort()
       expect(zh, namespace).toEqual(en)
     }
+  })
+
+  it('names every rule of the built-in strategies in zh-TW, no two alike', () => {
+    const names = new Set(BUILT_IN_IDS.flatMap((id) => builtInJson(id).rules.map((rule) => rule.name)))
+    expect([...names].filter((name) => !zhRuleNames.has(name)), 'built-in rules with no zh-TW name').toEqual([])
+    expect(new Set(zhRuleNames.values()).size, 'a report names its rules, so a copy needs a distinct name for each').toBe(zhRuleNames.size)
   })
 
   it('every literal key used in the source exists', () => {
@@ -71,8 +80,25 @@ describe('translations', () => {
       ['admin', 'fileRole', openapi.components.schemas.SettingsFile.enum as string[]],
       ['admin', 'state', ['running', 'loading', 'refused', 'unsaved', 'conflict']],
       ['admin', 'status', ['checking', 'problems', 'ready', 'failed']],
+      ['admin', 'view', ['form', 'yaml']],
+      ['admin', 'form.section', FORM_SECTIONS.map((section) => section.id)],
+      ['admin', 'form.field', FORM_SECTIONS.flatMap((section) => section.fields)],
+      ['admin', 'form.readOnly', FORM_SECTIONS.flatMap((section) => (section.readOnly ? section.fields : []))],
+      [
+        'admin',
+        'form.option',
+        [
+          ...(openapi.components.schemas.AiProvider.enum as string[]),
+          ...(openapi.components.schemas.ExecutionProvider.enum as string[]),
+          ...(openapi.components.schemas.OrderMode.enum as string[]),
+          ...(openapi.components.schemas.SystemEnvironment.enum as string[]),
+          'sqlite',
+          'postgresql',
+        ],
+      ],
       ['common', 'errors', ['unauthorized', 'forbidden', 'notFound', 'conflict', 'invalid', 'rateLimited', 'unavailable', 'network', 'server']],
       ['auth', 'role', openapi.components.schemas.Role.enum as string[]],
+      ['auth', 'settings.provider', openapi.components.schemas.AiProvider.enum as string[]],
       ['auth', 'users.status', openapi.components.schemas.UserStatus.enum as string[]],
       ['auth', 'users.change', ['makeAdmin', 'makeUser', 'deactivate', 'reactivate', 'password']],
       ['auth', 'users.done', ['makeAdmin', 'makeUser', 'deactivate', 'reactivate', 'password']],
@@ -80,7 +106,9 @@ describe('translations', () => {
       ['auth', 'users.filter', ['all', 'administrator', 'user', 'deactivated']],
       ['auth', 'problem', ['required', 'usernameFormat', 'emailFormat', 'passwordShort', 'passwordLong', 'mismatch', 'wrongCode', 'taken.username', 'taken.email']],
       ['auth', 'alert', ['failed', 'closed', 'alreadySetUp', 'rateLimited']],
-      ['common', 'nav', ['overview', 'valuation', 'watchlist', 'account', 'runs', 'strategies', 'builder', 'users', 'admin']],
+      ['common', 'nav', ['overview', 'valuation', 'watchlist', 'account', 'settings', 'runs', 'strategies', 'builder', 'users', 'admin']],
+      ['common', 'nav.section', ['analysis', 'research', 'mine', 'admin']],
+      ['common', 'nav.tab', ['analysis', 'market', 'search', 'watchlist', 'account', 'more']],
       ['overview', 'index', openapi.components.schemas.MarketIndex.enum as string[]],
     ]
     for (const [namespace, family, values] of families) {

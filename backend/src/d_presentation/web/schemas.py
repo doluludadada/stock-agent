@@ -18,9 +18,10 @@ from a_domain.model.analysis.technical_report import TechnicalReport
 from a_domain.model.fundamentals.eps import EpsUnavailable
 from a_domain.model.valuation.scan import ScanCriteria
 from a_domain.model.valuation.valuation import PeMedian, ReportSection
-from a_domain.ports.system.settings_files import Revision, SettingsProblem
+from a_domain.ports.system.settings_files import Revision, SettingChange, SettingsProblem
 from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
 from a_domain.types.enums import (
+    AiProvider,
     EliminationReason,
     EpsBasis,
     EpsKind,
@@ -462,6 +463,14 @@ class SettingsTextRequest(BaseModel):
     """The whole file. The editor refuses one larger than api.settings_file_max_bytes."""
 
 
+class SettingsFormRequest(BaseModel):
+    text: Annotated[str, Field(max_length=1_048_576)]
+    """The administrator's whole text of appsetting.yaml: their unsaved text, or the file as it is on disk."""
+
+    changes: Annotated[list[SettingChange], Field(max_length=100)] = []
+    """The settings the form writes into the text, in order; none to read the text as it is."""
+
+
 class SettingsSaveRequest(Confirmed, SettingsTextRequest):
     password: Annotated[SecretStr, Field(max_length=256)] | None = None
     """The administrator's own password, which every save needs: without it, 403. Never logged or echoed."""
@@ -595,3 +604,18 @@ class UserChangeRequest(Confirmed):
     role: Role | None = None
     status: UserStatus | None = None
     password: NewPassword | None = None
+
+
+class AiModelResponse(BaseModel):
+    """My settings' AI model: the models the site offers its users, its default among them, and the one the user's runs use."""
+
+    models: dict[AiProvider, str]
+    """Each AI model the site offers, by provider, with its model id: the site's default first, then ai.user_selectable."""
+    site_default: AiProvider
+    in_use: AiProvider
+    """The user's choice while the site offers it, else the site's default: a choice the site stopped offering falls back."""
+
+
+class AiModelRequest(Confirmed):
+    ai_model: AiProvider | None
+    """One of the offered models, or null for the site's default, which follows the administrator's later changes."""

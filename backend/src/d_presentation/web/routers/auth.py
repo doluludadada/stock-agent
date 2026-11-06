@@ -2,11 +2,20 @@ from fastapi import APIRouter, Request, Response, status
 
 from a_domain.model.system.user import User
 from a_domain.types.ids import SessionToken
-from d_presentation.web.schemas import AuthStatusResponse, RegistrationRequest, SetupRequest, SignInRequest
+from d_presentation.web.schemas import (
+    AiModelRequest,
+    AiModelResponse,
+    AuthStatusResponse,
+    RegistrationRequest,
+    SetupRequest,
+    SignInRequest,
+)
 from d_presentation.web.session import (
     CurrentUser,
+    PrivateAccess,
     SessionCookie,
     SignedOutPipeline,
+    UserPipeline,
     check_setup_code,
     clear_session_cookie,
     client_of,
@@ -14,7 +23,10 @@ from d_presentation.web.session import (
 )
 
 router = APIRouter(prefix="/auth", tags=["Sign-in"])
-"""Public, but for /me: the first-time setup, registration, sign-in and sign-out. Every write needs X-Requested-With."""
+"""
+Public, but for /me and its AI model: the first-time setup, registration, sign-in and sign-out. Every write needs
+X-Requested-With.
+"""
 
 
 @router.get("/status")
@@ -65,3 +77,24 @@ async def sign_out(request: Request, response: Response, pipeline: SignedOutPipe
 async def get_me(user: CurrentUser) -> User:
     """The signed-in user with their permissions, which the app reads to show the administration pages. 401 when signed out."""
     return user
+
+
+@router.get("/me/ai-model", dependencies=[PrivateAccess])
+async def get_ai_model(user: CurrentUser, pipeline: UserPipeline) -> AiModelResponse:
+    """My settings: the AI models the site offers, its default, and the one the user's runs use. 401 when signed out."""
+    models, site_default, in_use = pipeline.load_ai_models(user)
+    return AiModelResponse(models=models, site_default=site_default, in_use=in_use)
+
+
+@router.put(
+    "/me/ai-model",
+    dependencies=[PrivateAccess],
+    responses={status.HTTP_422_UNPROCESSABLE_CONTENT: {"description": "The site does not offer that model; nothing saved."}},
+)
+async def choose_ai_model(body: AiModelRequest, user: CurrentUser, pipeline: UserPipeline) -> AiModelResponse:
+    """
+    Chooses the AI model of the user's next runs, or null for the site's default. A run already running keeps its model.
+    A model the site stopped offering later leaves the choice saved, and the runs use the site's default meanwhile.
+    """
+    models, site_default, in_use = await pipeline.choose_ai_model(user, body.ai_model)
+    return AiModelResponse(models=models, site_default=site_default, in_use=in_use)

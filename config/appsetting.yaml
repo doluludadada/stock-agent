@@ -19,6 +19,9 @@ ai:
     groq: openai/gpt-oss-20b
     nvidia: deepseek-ai/deepseek-v4.1-flash
     claude: claude-haiku-5-5
+  # The models a user may pick for their own runs on My settings, besides active_model, the default: for example
+  # [openai, gemini]. Each needs its entry above and its API key, or the app does not start.
+  user_selectable: []
   article_content_length: 500
 
 behavior:

@@ -31,6 +31,7 @@ from a_domain.rules.technical.strategy import TechnicalSettings
 from a_domain.rules.trading.cost import TradingCostRule
 from a_domain.types.enums import (
     AiAnalysisFocus,
+    AiProvider,
     MarketIndex,
     MessageRole,
     Role,
@@ -536,13 +537,17 @@ class FakeUserStore:
         if not any(other.role == Role.ADMINISTRATOR and other.status == UserStatus.ACTIVE for other in after.values()):
             raise LastAdministratorError("At least one active administrator must remain. Nothing was saved.")
 
-        self.by_id[user.user_id] = replace(user)
+        self.by_id[user.user_id] = replace(user, ai_model=self.by_id[user.user_id].ai_model)
 
         if password is not None:
             self.passwords[user.user_id] = password.get_secret_value()
 
         if user.status != UserStatus.ACTIVE or password is not None:
             self.sessions = {token: session for token, session in self.sessions.items() if session.user_id != user.user_id}
+
+    async def save_ai_model(self, user_id: UserId, ai_model: AiProvider | None, now: datetime) -> None:
+        if user_id in self.by_id:
+            self.by_id[user_id] = replace(self.by_id[user_id], ai_model=ai_model)
 
 
 class SignedOut:

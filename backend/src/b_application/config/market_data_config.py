@@ -1,7 +1,7 @@
 from datetime import time
 from typing import Self
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class MarketHoursConfig(BaseModel):
@@ -33,6 +33,8 @@ class MarketHoursConfig(BaseModel):
 
 class MarketDataConfig(BaseModel):
     """How the price and listing adapters pace, batch and cache their requests."""
+
+    model_config = ConfigDict(use_attribute_docstrings=True)
 
     quote_batch_size: int = Field(default=50, gt=0)
     """Stocks per TWSE MIS request. MIS answers 100 channels per request and refuses 200."""

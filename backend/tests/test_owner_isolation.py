@@ -79,11 +79,12 @@ def user_named(user_id: str, role: Role = Role.USER) -> User:
 @pytest_asyncio.fixture
 async def owners(backend: DatabaseBackend, database: DatabaseConnector, tmp_path: Path) -> AsyncIterator[Owners]:
     vendor = AiVendor(reply=CLASSIFIED)
+    config = owners_config(backend, tmp_path)
     owned_ports = create_owned_ports(
-        owners_config(backend, tmp_path),
+        config,
         database,
         chromadb.PersistentClient(path=str(tmp_path / "chroma")),
-        vendor,
+        {config.ai.active_model: vendor},
         MovableClock(AT),
         SilentLogger(),
         asyncio.Lock(),
@@ -483,7 +484,8 @@ def methods_of(adapter: object) -> set[str]:
 def test_every_owned_port_method_has_an_isolation_case(tmp_path: Path) -> None:
     config = owners_config(DatabaseBackend.SQLITE, tmp_path)
     db = DatabaseConnector(config=config, logger=SilentLogger())
-    owned = create_owned_ports(config, db, chromadb.EphemeralClient(), AiVendor(), MovableClock(AT), SilentLogger(), asyncio.Lock())(
+    vendors = {config.ai.active_model: AiVendor()}
+    owned = create_owned_ports(config, db, chromadb.EphemeralClient(), vendors, MovableClock(AT), SilentLogger(), asyncio.Lock())(
         user_named("alice")
     )
 

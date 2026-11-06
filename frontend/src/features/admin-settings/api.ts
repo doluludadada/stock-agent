@@ -1,5 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiRequest, useHasPermission } from '@/shared/api'
+import type { SettingChange, SettingsForm } from './form'
 import { isLoadingFromDisk, type SettingsEdit, type SettingsFileId, type SettingsOverview } from './model'
 
 /**
@@ -10,6 +11,7 @@ export const settingsKeys = {
   overview: ['admin', 'settings', 'overview'] as const,
   text: (file: SettingsFileId, revision: string) => ['admin', 'settings', file, 'text', revision] as const,
   check: (file: SettingsFileId, revision: string, text: string) => ['admin', 'settings', file, 'check', revision, text] as const,
+  form: (text: string) => ['admin', 'settings', 'appsetting', 'form', text] as const,
   backups: (file: SettingsFileId) => ['admin', 'settings', file, 'backups'] as const,
   restore: (file: SettingsFileId, backupId: string, revision: string) => ['admin', 'settings', file, 'restore', backupId, revision] as const,
   audit: ['admin', 'settings', 'audit'] as const,
@@ -82,6 +84,32 @@ export function useSettingsCheck(file: SettingsFileId, revision: string, text: s
     retry: false,
     placeholderData: keepPreviousData,
   })
+}
+
+/** The settings form's reading of a text of appsetting.yaml: the settings it sets and what each accepts. Nothing is written. */
+export function useSettingsForm(text: string) {
+  return useQuery({
+    queryKey: settingsKeys.form(text),
+    queryFn: ({ signal }): Promise<SettingsForm> => apiRequest('post', '/v1/admin/settings/appsetting/form', { body: { text, changes: [] }, signal }),
+    enabled: useAllowed(),
+    staleTime: Infinity,
+    gcTime: 60_000,
+    retry: false,
+    placeholderData: keepPreviousData,
+  })
+}
+
+/**
+ * Writes the form's changes into a text of appsetting.yaml on the server, which answers the new text: the page makes it
+ * the draft, so the check and the save treat it as typed. The answer is the form's reading of that text too.
+ */
+export function useWriteSettingsForm() {
+  const client = useQueryClient()
+  return async (text: string, changes: SettingChange[]): Promise<SettingsForm> => {
+    const form = await apiRequest('post', '/v1/admin/settings/appsetting/form', { body: { text, changes } })
+    client.setQueryData(settingsKeys.form(form.text), form)
+    return form
+  }
 }
 
 /** The revisions this tab wrote: when the overview reports one, it is this page's own save, not news from disk. */

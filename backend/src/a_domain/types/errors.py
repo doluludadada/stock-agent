@@ -82,3 +82,7 @@ class UserExistsError(ValueError):
 
 class LastAdministratorError(RuntimeError):
     """The change would leave no active administrator, so nothing was saved. 409."""
+
+
+class AiModelNotOffered(ValueError):
+    """A user chose an AI model the site does not offer, neither ai.active_model nor one of ai.user_selectable. Nothing saved. 422."""

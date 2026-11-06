@@ -203,7 +203,10 @@ async def test_migrate_backs_up_then_upgrades_version_1_keeping_every_row(
     printed = output.getvalue()
     [backup] = backups(tmp_path)
     assert f"Backed up to {backup}" in printed
-    assert f"Migrated from version 1 to {SCHEMA_VERSION}:\n  1 -> 2 record_run_failures\n  2 -> 3 give_rows_their_owner" in printed
+    assert (
+        f"Migrated from version 1 to {SCHEMA_VERSION}:\n  1 -> 2 record_run_failures\n  2 -> 3 give_rows_their_owner\n"
+        "  3 -> 4 add_user_ai_model"
+    ) in printed
     assert after["schema_version"][1] == [(str(SCHEMA_VERSION),)]
     assert {table: len(rows) for table, (_, rows) in after.items() if table in before} == {
         table: len(rows) for table, (_, rows) in before.items()

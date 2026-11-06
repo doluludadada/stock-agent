@@ -6,6 +6,7 @@ from pydantic import Field, NonNegativeInt, PositiveInt
 from pydantic.dataclasses import dataclass
 
 from a_domain.model.market.ohlcv import Ohlcv
+from a_domain.types.enums import MarketType
 
 
 @dataclass(frozen=True)
@@ -42,25 +43,28 @@ class RealtimeQuoteRule:
 @dataclass(frozen=True)
 class MissingSessionRule:
     """
-    The run error for daily histories that end before the last settled session, or None when every history has it.
+    The run error for daily histories that end before the last settled session, or None when none is missing.
 
-    The price source has not published that session for those stocks yet. The error names at most
-    `listed_stock_limit` of them.
+    An exchange publishes a session for all its stocks at once, so a session is missing only when no stock of that
+    exchange has it. A stock without it while others of its exchange have it did not trade that session: its history
+    is complete, so that is no error. The error names at most `listed_stock_limit` of the stocks.
     """
 
     listed_stock_limit: PositiveInt
 
-    def apply(self, last_sessions: Mapping[str, date], settled_session: date) -> str | None:
-        behind = sorted(stock_id for stock_id, session in last_sessions.items() if session < settled_session)
+    def apply(self, last_sessions: Mapping[str, tuple[MarketType, date]], settled_session: date) -> str | None:
+        published = {market for market, session in last_sessions.values() if session >= settled_session}
+        behind = sorted(stock_id for stock_id, (market, _) in last_sessions.items() if market not in published)
 
         if not behind:
             return None
 
+        markets = " or ".join(sorted({last_sessions[stock_id][0].name for stock_id in behind}))
         shown = ", ".join(behind[: self.listed_stock_limit]) + (", ..." if len(behind) > self.listed_stock_limit else "")
         return (
             f"Daily history lacks the {settled_session} session for {len(behind)}/{len(last_sessions)} stocks ({shown}): "
-            "the price source has not published it, so their analysis ends at an earlier close. "
-            "An exchange holiday also reads as missing."
+            f"no {markets} stock has it, so {markets} has not published it yet, it was an exchange holiday, "
+            "or none of these stocks traded. Their analysis ends at an earlier close."
         )
 
 

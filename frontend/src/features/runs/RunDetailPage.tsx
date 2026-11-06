@@ -20,6 +20,8 @@ import { RunStateBadge } from './RunStateBadge'
 interface RunDetailPageProps {
   runId: string
   renderWatch?: (code: string, label: string) => ReactNode
+  /** A rule's name in the reader's language; the report's name stays the key. */
+  ruleName: (name: string) => string
 }
 
 export function RunDetailPage(props: RunDetailPageProps) {
@@ -31,7 +33,7 @@ export function RunDetailPage(props: RunDetailPageProps) {
   )
 }
 
-function RunDetail({ runId, renderWatch }: RunDetailPageProps) {
+function RunDetail({ runId, renderWatch, ruleName }: RunDetailPageProps) {
   const { t } = useTranslation('runs')
   const run = useRun(runId)
   const ended = run.data !== undefined && run.data.state !== 'running'
@@ -69,7 +71,7 @@ function RunDetail({ runId, renderWatch }: RunDetailPageProps) {
         </p>
       )}
       {run.data.summary && <Summary summary={run.data.summary} />}
-      {(run.data.reports ?? []).length > 0 && <Reports reports={run.data.reports ?? []} renderWatch={renderWatch} />}
+      {(run.data.reports ?? []).length > 0 && <Reports reports={run.data.reports ?? []} renderWatch={renderWatch} ruleName={ruleName} />}
       {ended && (
         <div className="grid items-start gap-4 lg:gap-5 xl:grid-cols-2">
           <Signals query={signals} />
@@ -130,7 +132,7 @@ function Summary({ summary }: { summary: NonNullable<Run['summary']> }) {
 }
 
 /** One card per stock: its scores, the price the run read, the rules that excluded it and the AI's summary. */
-function Reports({ reports, renderWatch }: { reports: NonNullable<Run['reports']>; renderWatch?: RunDetailPageProps['renderWatch'] }) {
+function Reports({ reports, renderWatch, ruleName }: { reports: NonNullable<Run['reports']> } & Pick<RunDetailPageProps, 'renderWatch' | 'ruleName'>) {
   const { t } = useTranslation('runs')
   const locale = useLocale()
   return (
@@ -160,7 +162,7 @@ function Reports({ reports, renderWatch }: { reports: NonNullable<Run['reports']
                 <ul className="flex flex-wrap gap-1.5">
                   {report.technical_report.hard_failures.map((rule) => (
                     <li key={rule} className="rounded-md border border-destructive/25 bg-danger-soft px-2 py-0.5 text-xs">
-                      {rule}
+                      {ruleName(rule)}
                     </li>
                   ))}
                 </ul>

@@ -49,10 +49,10 @@ class MarketDataCollector:
                 stats.log(message, now=self._market_clock.now())
                 self._logger.warning(message)
                 stock.ohlcv = []
-        last_sessions = {stock.stock_id: self._market_clock.to_trading_date(stock.ohlcv[-1].ts) for stock in stocks if stock.ohlcv}
-
+        last_sessions = {
+            stock.stock_id: (stock.market, self._market_clock.to_trading_date(stock.ohlcv[-1].ts)) for stock in stocks if stock.ohlcv
+        }
         if missing_session := self._missing_session.apply(last_sessions, self._market_clock.last_settled_session()):
-            self._logger.warning(missing_session)
-            stats.add_error(missing_session)
+            self._logger.warning(stats.add_error(missing_session))
         self._logger.success(f"Collected market data for {len(last_sessions)}/{len(stocks)} stocks.")
         return [stock for stock in stocks if stock.ohlcv]

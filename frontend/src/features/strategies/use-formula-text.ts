@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from 'react'
-import { useLocale, useTranslation } from '@/i18n'
+import { builtInRuleName, useLocale, useTranslation } from '@/i18n'
 import { strategyFromApi, type ApiStrategy } from './api/mapping'
 import { describeCondition, type FormulaText } from './model/describe'
 import { isBuiltInId } from './model/settings'
@@ -16,10 +16,12 @@ export function useFormulaText(): FormulaText {
 
 /**
  * A strategy's name is the owner's own text. The three built-in ids also get a translated name, while the name is
- * still the built-in's, and a translated purpose: the backend stores no description.
+ * still the built-in's, and a translated purpose: the backend stores no description. A rule named as a built-in rule
+ * reads in the reader's language; the name the backend matches stays as it is.
  */
 export function useStrategyLabels() {
   const { t } = useTranslation('strategies')
+  const locale = useLocale()
   return useMemo(() => {
     const builtIn = (strategy: { id: string }) => isBuiltInId(strategy.id)
     return {
@@ -28,8 +30,9 @@ export function useStrategyLabels() {
         return strategy.name.trim() || t('untitled')
       },
       purpose: (strategy: Strategy) => (builtIn(strategy) ? t(`builtin.${strategy.id}.purpose`) : ''),
+      rule: (name: string) => builtInRuleName(locale, name),
     }
-  }, [t])
+  }, [t, locale])
 }
 
 /**

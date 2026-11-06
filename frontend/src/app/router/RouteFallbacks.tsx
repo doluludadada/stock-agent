@@ -17,7 +17,7 @@ export function NotFoundRoute() {
         className="rounded-2xl border bg-card py-12 shadow-card"
         action={
           <Button asChild variant="outline">
-            <Link to={paths.overview}>{t('notFound.home')}</Link>
+            <Link to={paths.market}>{t('notFound.home')}</Link>
           </Button>
         }
       />
@@ -38,7 +38,7 @@ export function RouteErrorBoundary() {
         description={t('routeError.description')}
         className="rounded-2xl border bg-card py-12 shadow-card"
         action={
-          <Button type="button" variant="outline" onClick={() => window.location.assign(paths.overview)}>
+          <Button type="button" variant="outline" onClick={() => window.location.assign(paths.market)}>
             {t('routeError.reload')}
           </Button>
         }

@@ -62,7 +62,7 @@ test('a fresh site opens on the first-time setup, refuses a wrong code and signs
   await admin.getByLabel('設定碼').fill(SETUP_CODE)
   await admin.getByRole('button', { name: '建立帳號並登入' }).click()
   await admin.waitForURL((url) => url.pathname === '/')
-  await expect(admin.getByRole('heading', { name: '市場總覽', level: 1 })).toBeVisible()
+  await expect(admin.getByRole('heading', { name: '分析任務', level: 1 })).toBeVisible()
   expect(sent.length, 'setup, setup again, sign-in').toBe(3)
   for (const request of sent) expect(request.headers()['x-requested-with'], `${request.method()} ${request.url()}`).toBe('stock-agent')
 

@@ -314,7 +314,7 @@ async def test_a_hosted_provider_uses_its_own_key_and_endpoint_and_the_configure
 ) -> None:
     settings = config().model_copy(update={"ai": config().ai.model_copy(update={"active_model": provider})})
 
-    await create_ai_provider(settings, SilentLogger()).generate_reply(CONVERSATION)
+    await create_ai_provider(settings, SilentLogger(), provider).generate_reply(CONVERSATION)
 
     [client] = openai_client.clients
     [request] = openai_client.requests
@@ -344,7 +344,7 @@ async def test_groq_with_web_search_on_puts_the_search_results_into_its_request(
     )
     question = Message(role=MessageRole.USER, content="Any news on 2330?", timestamp=NOW)
 
-    await create_ai_provider(settings, SilentLogger()).generate_reply((question,))
+    await create_ai_provider(settings, SilentLogger(), AiProvider.GROQ).generate_reply((question,))
 
     [client] = openai_client.clients
     [request] = openai_client.requests

@@ -164,9 +164,38 @@ async def give_rows_their_owner(connection: AsyncConnection) -> None:
     await move_technical_settings(connection)
 
 
+AI_MODEL_STEP = {
+    "sqlite": ("ALTER TABLE users ADD COLUMN ai_model VARCHAR(6)",),
+    "postgresql": (
+        "CREATE TYPE aiprovider AS ENUM ('OPENAI', 'GROK', 'GEMINI', 'GROQ', 'NVIDIA', 'CLAUDE')",
+        "ALTER TABLE users ADD COLUMN ai_model aiprovider",
+    ),
+}
+"""
+Version 3 to 4, per database backend: users.ai_model stores an AiProvider member's name, as SQLModel stores every enum,
+in a VARCHAR as long as the longest name on SQLite and in the named ENUM type aiprovider on PostgreSQL. Version 3 had
+no column of that type, so the type is new too.
+"""
+
+
+async def add_user_ai_model(connection: AsyncConnection) -> None:
+    """
+    Version 3 to 4: users gains ai_model, the AI model a user chose. Every existing user gets NULL, the site's default.
+    A database upgraded from version 2 has no users table until its next start, whose create_all makes it with the
+    column, so there the step changes nothing.
+    """
+    tables = await connection.run_sync(lambda sync_connection: inspect(sync_connection).get_table_names())
+
+    if "users" not in tables:
+        return
+
+    for statement in AI_MODEL_STEP[connection.dialect.name]:
+        await connection.execute(text(statement))
+
+
 type UpgradeStep = Callable[[AsyncConnection], Awaitable[None]]
 
-UPGRADES: tuple[UpgradeStep, ...] = (record_run_failures, give_rows_their_owner)
+UPGRADES: tuple[UpgradeStep, ...] = (record_run_failures, give_rows_their_owner, add_user_ai_model)
 """
 The steps that upgrade an older database in place, oldest first: UPGRADES[n - 1] turns version n into version n + 1. A
 step names the tables and columns it reads as they were at its version, never through today's SQLModel classes.

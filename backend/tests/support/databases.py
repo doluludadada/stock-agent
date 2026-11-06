@@ -84,6 +84,23 @@ async def create_version_2_tables(backend: DatabaseBackend, folder: Path, stamp:
     await engine.dispose()
 
 
+async def create_version_3_tables(backend: DatabaseBackend, folder: Path) -> None:
+    """
+    Every table as schema version 3 created it on the backend, stamped 3: fixtures/schema/version_3.<backend>.sql, the
+    statements version 3's create_all ran.
+    """
+    statements = (SCHEMA_FIXTURES / f"version_3.{backend.value}.sql").read_text().split(";\n\n")
+    engine = raw_engine(backend, folder)
+
+    async with engine.begin() as connection:
+        for statement in statements:
+            await connection.execute(text(statement.strip().removesuffix(";")))
+
+        await connection.execute(text("INSERT INTO schema_version (version) VALUES (3)"))
+
+    await engine.dispose()
+
+
 async def create_version_1_tables(backend: DatabaseBackend, folder: Path) -> None:
     """
     Every table as schema version 1 created it, stamped 1. On SQLite, the tables of a database the app wrote on

@@ -1,21 +1,27 @@
 """
 How the CLI and the Web API load their settings at startup, and refuse an unsafe trading setup. The administrator's
-settings editor validates a candidate file through the same functions, so a saved file is one the app starts with.
+settings editor validates a candidate file through the same functions, so a saved file is one the app starts with, and
+its form writes a setting into the text through them too.
 """
 
 import hashlib
 import json
+import sys
 from base64 import urlsafe_b64decode
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
+from functools import cache
 from pathlib import Path
 from types import UnionType
-from typing import Any, Union, get_args, get_origin
+from typing import Any, Union, get_args, get_origin, override
 
 import yaml
 from pydantic import BaseModel, SecretStr, TypeAdapter, ValidationError
+from pydantic.json_schema import GenerateJsonSchema
+from pydantic_core import core_schema
 
-from a_domain.ports.system.settings_files import SettingsProblem
+from a_domain.ports.system.settings_files import SettingChange, SettingsProblem, SettingValue
 from a_domain.types.enums import ExecutionProvider, InstructionKey, OrderMode, SettingsFile, SystemEnvironment
+from a_domain.types.errors import SettingsEditError
 from a_domain.types.values import FormulaId
 from b_application.config.app_config import AppConfig
 
@@ -276,6 +282,131 @@ def child_node(node: yaml.Node | None, key: str) -> tuple[yaml.Node, yaml.Node] 
     return None
 
 
+class SettingsFileSchema(GenerateJsonSchema):
+    """
+    The JSON schema of the settings classes as a settings file sets them, like unread_settings reads them: no field the
+    environment owns (one with a validation alias, such as an API key) and no field the loader sets (`exclude`).
+    """
+
+    @override
+    def field_is_present(
+        self, field: core_schema.ModelField | core_schema.DataclassField | core_schema.TypedDictField | core_schema.ComputedField
+    ) -> bool:
+        return "validation_alias" not in field and not field.get("serialization_exclude") and super().field_is_present(field)
+
+
+@cache
+def settings_schema() -> dict[str, Any]:
+    """What each setting of appsetting.yaml accepts, from the settings classes: its type, its choices, its bounds, its description."""
+    return AppConfig.model_json_schema(schema_generator=SettingsFileSchema)
+
+
+def with_changes(file: SettingsFile, text: str, changes: Sequence[SettingChange]) -> str:
+    """
+    `text` with each change written over its setting's value in place, as YAML the loader reads back as that value:
+    every other character stays, comments and layout included. SettingsEditError, naming the setting but never a value,
+    for a text that does not parse, a path that names no setting the text sets (a missing key or a section), a value of
+    another kind than the one there, or a value that would not read back as written.
+    """
+    for change in changes:
+        text = with_change(file, text, change)
+
+    return text
+
+
+def with_change(file: SettingsFile, text: str, change: SettingChange) -> str:
+    path, document = ".".join(change.path), editable_document(file, text)
+    section, key, node = section_of(document, change.path), change.path[-1], value_node(text, change.path)
+
+    if section is None or key not in section or node is None or isinstance(node, yaml.MappingNode):
+        raise SettingsEditError(f"{path} is not a setting {file.file_name} sets")
+
+    if section[key] is not None and kind_of(section[key]) != kind_of(change.value):
+        raise SettingsEditError(f"{path} holds a {kind_of(section[key])} in {file.file_name}, not a {kind_of(change.value)}")
+
+    start, end = value_span(text, node)
+    written = yaml_value(change.value)
+    edited = text[:start] + (written if start < end else f" {written}") + text[end:]
+    section[key] = change.value
+
+    try:
+        read_back = parsed_document(file, edited)
+    except InvalidSettingsError:
+        read_back = None
+
+    if read_back != document:
+        raise SettingsEditError(f"{path} cannot be written in place in {file.file_name}; change it in the text")
+
+    return edited
+
+
+def editable_document(file: SettingsFile, text: str) -> dict[str, Any]:
+    try:
+        return parsed_document(file, text)
+    except InvalidSettingsError:
+        raise SettingsEditError(f"{file.file_name} does not parse: fix the text before the form writes into it") from None
+
+
+def section_of(document: dict[str, Any], path: Sequence[str]) -> dict[Any, Any] | None:
+    """The mapping that holds the setting at `path`, or None when a key above it is missing or holds no section."""
+    node: Any = document
+
+    for key in path[:-1]:
+        node = node.get(key) if isinstance(node, dict) else None
+
+    return node if isinstance(node, dict) else None
+
+
+def value_node(text: str, path: Sequence[str]) -> yaml.Node | None:
+    """The YAML node of the value at `path`, found with yaml.compose, which runs nothing; None when a key is missing."""
+    node: yaml.Node | None = yaml.compose(text)
+
+    for key in path:
+        child = child_node(node, key)
+        node = child[1] if child else None
+
+    return node
+
+
+def value_span(text: str, node: yaml.Node) -> tuple[int, int]:
+    """
+    Where `node` is written in `text`, from its first character to its last: a block list ends at its last item and a
+    block text at its last character, never at the comments and blank lines before the next key. An empty value is the
+    place right after its key.
+    """
+    last = node
+
+    while isinstance(last, yaml.CollectionNode) and not last.flow_style and last.value:
+        last = last.value[-1][1] if isinstance(last, yaml.MappingNode) else last.value[-1]
+
+    start = node.start_mark.index
+    return start, max(start, len(text[: last.end_mark.index].rstrip()))
+
+
+def yaml_value(value: SettingValue) -> str:
+    """
+    One value as flow YAML, never folded, written by the library that reads it back, so a text it would read as another
+    kind, such as `yes` or `12`, is quoted.
+    """
+    written = yaml.safe_dump(value, default_flow_style=True, allow_unicode=True, width=sys.maxsize)
+    return written.removesuffix("\n...\n").removesuffix("\n")
+
+
+def kind_of(value: object) -> str:
+    """A value's kind as JSON names it, so a whole number and a decimal are both a number and the form may write either."""
+    match value:
+        case bool():
+            return "boolean"
+        case int() | float():
+            return "number"
+        case str():
+            return "string"
+        case list():
+            return "list"
+        case _:
+            return type(value).__name__
+
+
 class InvalidSettingsError(RuntimeError):
     """
     The app would not start with the settings: config/ or .env hold a value the settings refuse, a setup the startup
@@ -308,8 +439,8 @@ def startup_settings(
     """
     The settings a start, a reload or a Web save opens the app on, through every check startup runs before it opens
     anything: the load (each file parsed, every key the app would not read refused, every value validated), the trading
-    setup, the environment the process started in (`environment`, None at its first start), the accounts key and the
-    active AI provider's key. Raises one InvalidSettingsError with every refusal located once, never a value.
+    setup, the environment the process started in (`environment`, None at its first start), the accounts key and every
+    offered AI provider's model id and key. Raises one InvalidSettingsError with every refusal located once, never a value.
     """
     texts = settings_texts(project_root, candidates)
     config = load_settings(project_root, texts)
@@ -321,9 +452,8 @@ def startup_settings(
     except (TradingSetupError, AccountsSetupError) as error:
         raise InvalidSettingsError([locate(texts, error.path, str(error))]) from None
 
-    if missing := config.ai.missing_key():
-        message = f"{config.ai.active_model.value} needs {missing} in the environment or .env; the app would not start"
-        raise InvalidSettingsError([locate(texts, "ai.active_model", message)])
+    if missing := config.ai.missing_keys():
+        raise InvalidSettingsError([locate(texts, path, f"{need}; the app would not start") for path, need in missing.items()])
 
     return config
 

@@ -220,6 +220,47 @@ def test_a_missing_ai_key_is_a_located_refusal_at_the_first_start(tmp_path: Path
     assert problem.message == "claude needs ANTHROPIC_API_KEY in the environment or .env; the app would not start"
 
 
+@pytest.mark.parametrize(
+    ("offered", "gemini_model", "keys", "message"),
+    [
+        pytest.param(
+            "[gemini, openai]",
+            "\n    gemini: gemini-2.5-flash",
+            {"GEMINI_API_KEY": "placeholder"},
+            "openai needs OPENAI_API_KEY in the environment or .env; the app would not start",
+            id="no-key",
+        ),
+        pytest.param(
+            "[openai, gemini]",
+            "",
+            {"OPENAI_API_KEY": "placeholder", "GEMINI_API_KEY": "placeholder"},
+            "gemini needs its model id under ai.available_models.gemini; the app would not start",
+            id="no-model-id",
+        ),
+    ],
+)
+def test_a_model_offered_to_users_without_its_key_or_model_id_is_a_located_refusal(
+    offered: str, gemini_model: str, keys: dict[str, str], message: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = away_from_the_repository_env(tmp_path)
+    monkeypatch.chdir(project)
+    for name in ("OPENAI_API_KEY", "GEMINI_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in {"ANTHROPIC_API_KEY": "placeholder", **keys}.items():
+        monkeypatch.setenv(name, value)
+    shipped = (CONFIG / "appsetting.yaml").read_text(encoding="utf-8")
+    text = shipped.replace("  user_selectable: []", f"  user_selectable: {offered}", 1)
+    text = text.replace("\n    gemini: gemini-2.5-flash", gemini_model, 1)
+
+    with pytest.raises(InvalidSettingsError) as refused:
+        startup_settings(project, {SettingsFile.APPSETTING: text})
+
+    [problem] = refused.value.problems
+    line = at(text, f"user_selectable: {offered}")[0]
+    assert (problem.file, problem.path, problem.line) == (SettingsFile.APPSETTING, "ai.user_selectable.1", line)
+    assert problem.message == message
+
+
 def test_settings_of_another_environment_than_the_process_started_in_are_refused_where_they_set_it(tmp_path: Path) -> None:
     (tmp_path / "config").mkdir()
     for file, text in SHIPPED.items():

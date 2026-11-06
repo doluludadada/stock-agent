@@ -20,7 +20,8 @@ See `../../docs/web-integration.md` for scopes, the feature matrix and the revie
 src/
   app/            routes, layout shell, providers; composes features
   features/
-    auth/              first-time setup, sign-in, registration, the account menu and the administrator's users page
+    auth/              first-time setup, sign-in, registration, the account menu, My settings (the user's AI model)
+                       and the administrator's users page
     market-overview/   the research target's trend (the TAIEX unless `?target=` names a stock or ETF), the most
                        traded stocks, the session's breadth and industry moves, the strategy slot
     strategies/        strategy model, API mapping, library, formula designer
@@ -28,8 +29,8 @@ src/
     valuation/         P/E valuation, undervalued scan, AI explanation on request
     watchlist/         server watchlist and its toggle button
     account/           mock account, positions and equity curve
-    admin-settings/    the settings files as text: the server's check as you type, a save with the password,
-                       edits made on disk, history and restore
+    admin-settings/    appsetting.yaml as a form and every settings file as text, two views of one draft: the
+                       server's check as you edit, a save with the password, edits made on disk, history and restore
     stock-research/    stock page, backend evaluation and readings
   shared/         typed HTTP transport, session and public market data (api/), URL builders (config/), generic UI,
                   formatters, theme, stock id and chart range rules
@@ -86,7 +87,9 @@ the contract by `catalog.test.ts`.
 | Valuation | `valuation/api.ts` | `/v1/valuation` |
 | Account | `account/api.ts` | `/v1/account/history` |
 | Settings files: the overview (polled), a revision's text (read once), checks, saves, backups, reload | `admin-settings/api.ts` | `/v1/admin/settings`, `/v1/admin/audit` |
+| The settings form: a text's settings and their schema, and a change written into the text | `admin-settings/api.ts` | `/v1/admin/settings/appsetting/form` |
 | Who is signed in, setup, sign-in, registration, sign-out | `auth/api.ts` | `/v1/auth` |
+| The AI models the site offers the user, and the user's choice | `auth/api.ts` | `/v1/auth/me/ai-model` |
 | The users directory and changes to a user | `auth/api.ts` | `/v1/admin/users` |
 
 Server state lives in TanStack Query. Query keys start with their scope (`public`, `owner`, `admin`).
@@ -148,7 +151,7 @@ settings files hold no secret: the server refuses one written into them.
   signed-out or failed state is a `StateBlock`; a figure the backend has no source for is one line that says so.
 - A stock's volume reads in lots through `useFormat().lots` ("3.7萬張"); a price from an older session carries its
   date (`useFormat().closeOn`, "11/2 收盤").
-- Navigation: a bottom tab bar under 768 px (market, watchlist, search, account, more), a rail of icons from 768 px
+- Navigation: a bottom tab bar under 768 px (analysis, market, search, watchlist, account, more), a rail of icons from 768 px
   and the full sidebar from 1024 px, all from one list (`app/layouts/navigation.ts`), which also feeds the search
   palette's pages. Every control is at least 44 px tall under 768 px.
 - No decorative motion: no entrance animations, glows, spotlights or textures. Motion is kept where it explains a
@@ -159,6 +162,15 @@ settings files hold no secret: the server refuses one written into them.
   web fonts fail.
 - The settings editor is CodeMirror 6: YAML highlighting, search, undo, and each problem the server locates marked
   at its line and column. Its colors are the tokens, and it loads only with the administrator's route.
+- `appsetting.yaml` opens on its form; the editor is its Advanced (YAML) tab, and `instructions.yaml` is text only. The
+  form's sections and settings are one table, `FORM_SECTIONS` in `admin-settings/form.ts`: each names its dotted path,
+  and its control comes from the server's JSON schema there (a boolean is a switch, a choice a select, a list of
+  choices checkboxes, a number a number field with the schema's bounds, a text a text field). Its label is
+  `admin:form.field.<path>` in both locales, and its help is the setting's description in the schema, the settings
+  class's docstring. The server writes each change into the draft's text in place, so the YAML tab shows it with its
+  comments, and the check, the review and the save are the editor's own. A problem the check places at a setting shows
+  beside it. To offer another setting, add its path to the table and its label to both dictionaries; `i18n.test.ts`
+  fails while a label is missing.
 - Price and volume are two synced charts (`shared/ui/price-volume-chart.tsx`), never one chart
   with two y-axes. The moving averages' colors pass the dataviz validator against both price colors.
 - Motion respects `prefers-reduced-motion` through `MotionConfig reducedMotion="user"` and a CSS fallback.
@@ -175,6 +187,11 @@ each zh-TW file is typed as `DictionaryShape<typeof en>`. Traditional Chinese is
 `i18n/i18n.test.ts` checks that both locales have the same keys, that every literal key in the
 source exists, and that dynamic key families resolve. Dates and numbers use `Intl` with the
 `Asia/Taipei` time zone (`shared/lib/format.ts`).
+
+The built-in strategies' rule names are text, not keys, because they hold `.` and `:`.
+`locales/zh-TW/rule-names.ts` maps each English name to its Chinese name, and `useStrategyLabels().rule` shows it.
+A copy of a built-in saves the names in the reader's language. `i18n.test.ts` fails when a rule in `config/strategies`
+has no Chinese name.
 
 ## Checks
 

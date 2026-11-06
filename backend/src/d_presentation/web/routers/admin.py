@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Path, Query, Request, status
 
-from a_domain.ports.system.settings_files import BackupId, SettingsDocument, SettingsEdit
+from a_domain.ports.system.settings_files import BackupId, SettingsDocument, SettingsEdit, SettingsForm
 from a_domain.types.enums import SettingsFile
 from d_presentation.web.schemas import (
     Confirmed,
@@ -13,6 +13,7 @@ from d_presentation.web.schemas import (
     SettingsDocumentResponse,
     SettingsEditResponse,
     SettingsFileStatusResponse,
+    SettingsFormRequest,
     SettingsOverviewResponse,
     SettingsRestoreConfirmed,
     SettingsRestoreRequest,
@@ -36,7 +37,8 @@ router = APIRouter(prefix="/admin", tags=["Administration"], dependencies=[Priva
 Administrators only (403 otherwise, signed in still). Every YAML settings file of config/, named only by its
 SettingsFile id and edited as a whole text. A save or a restore is checked as the app starts, needs the administrator's
 password again, opens the app on the new text before it writes anything, then writes it atomically with a backup and
-an audit entry and runs on it at once.
+an audit entry and runs on it at once. appsetting.yaml also has a form, whose route writes a setting into a text the page
+then saves like any other, and writes no file.
 """
 
 BackupPath = Annotated[BackupId, Path()]
@@ -135,6 +137,26 @@ async def preview_settings_file(
     problems at their line and column. Nothing is written.
     """
     return edit_response(await pipeline.preview_settings_file(file, body.revision, host_of(request), text=body.text), switch)
+
+
+@router.post(
+    "/settings/appsetting/form",
+    responses={
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            "model": ErrorResponse,
+            "description": "A change the text cannot take (settings_edit_refused): the text does not parse, the path names "
+            "no setting it sets, or the value is of another kind than the one there.",
+        }
+    },
+)
+async def edit_settings_form(body: SettingsFormRequest, pipeline: UserPipeline) -> SettingsForm:
+    """
+    The settings form's view of a text of appsetting.yaml: the text with each change written over its setting's value
+    in place, every other line, comment and key as it was; every setting the text then sets, by dotted path (null while
+    the text does not parse); and the JSON schema of what each setting accepts. Nothing is written: the page checks and
+    saves the text it answers like any text the administrator types.
+    """
+    return pipeline.edit_settings_form(body.text, body.changes)
 
 
 @router.put("/settings/{file}", responses=SAVE_ANSWERS)

@@ -3,7 +3,7 @@ from datetime import datetime
 from pydantic import ConfigDict, computed_field
 from pydantic.dataclasses import dataclass
 
-from a_domain.types.enums import Permission, Role, UserStatus
+from a_domain.types.enums import AiProvider, Permission, Role, UserStatus
 from a_domain.types.ids import SessionToken, UserId
 from a_domain.types.values import EmailAddress, Username
 
@@ -22,6 +22,11 @@ class User:
     role: Role
     status: UserStatus = UserStatus.ACTIVE
     created_at: datetime
+    ai_model: AiProvider | None = None
+    """
+    The AI model the user chose for their own runs on My settings, None for the site's default. A choice the site stopped
+    offering stays saved, and the user's runs use the site's default until it is offered again.
+    """
 
     @computed_field
     @property

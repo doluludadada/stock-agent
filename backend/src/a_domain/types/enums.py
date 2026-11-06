@@ -748,6 +748,7 @@ class ErrorCode(StrEnum):
     """The app would not start with the settings: the answer also lists `problems`, each at its file, line and column."""
 
     TECHNICAL_SETTINGS_CONFLICT = auto()
+    AI_MODEL_NOT_OFFERED = auto()
     RUN_IN_PROGRESS = auto()
     TOO_MANY_RUNS = auto()
     LISTING_UNAVAILABLE = auto()

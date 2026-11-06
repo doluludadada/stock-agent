@@ -36,9 +36,11 @@ interface StockResearchPageProps {
   strategyName: (strategy: StrategyRef) => string
   /** Each rule of the strategy as a sentence in the reader's language, keyed by the rule name a report uses. */
   ruleSentences?: (strategy: StrategyRef) => ReadonlyMap<string, string>
+  /** A rule's name in the reader's language; the report's name stays the key. */
+  ruleName: (name: string) => string
 }
 
-export function StockResearchPage({ code, actions, strategyName, ruleSentences }: StockResearchPageProps) {
+export function StockResearchPage({ code, actions, strategyName, ruleSentences, ruleName }: StockResearchPageProps) {
   const { t } = useTranslation('research')
   const listable = isStockId(code)
   const history = useStockHistory(code, HISTORY_BARS, listable)
@@ -51,7 +53,7 @@ export function StockResearchPage({ code, actions, strategyName, ruleSentences }
         className="rounded-2xl border bg-card py-12"
         action={
           <Button asChild variant="outline">
-            <Link to={paths.overview}>{t('back')}</Link>
+            <Link to={paths.market}>{t('back')}</Link>
           </Button>
         }
       />
@@ -59,10 +61,10 @@ export function StockResearchPage({ code, actions, strategyName, ruleSentences }
   }
   if (history.isPending) return <Skeleton className="h-[32rem] rounded-2xl" />
   if (history.isError) return <ErrorState error={history.error} title={t('loadFailed')} onRetry={() => void history.refetch()} className="rounded-2xl border bg-card py-12" />
-  return <Research history={history.data} actions={actions} strategyName={strategyName} ruleSentences={ruleSentences} />
+  return <Research history={history.data} actions={actions} strategyName={strategyName} ruleSentences={ruleSentences} ruleName={ruleName} />
 }
 
-function Research({ history, actions, strategyName, ruleSentences }: Omit<StockResearchPageProps, 'code'> & { history: StockHistory }) {
+function Research({ history, actions, strategyName, ruleSentences, ruleName }: Omit<StockResearchPageProps, 'code'> & { history: StockHistory }) {
   const { t } = useTranslation('research')
   const format = useFormat()
   const signedIn = useIsSignedIn()
@@ -83,7 +85,7 @@ function Research({ history, actions, strategyName, ruleSentences }: Omit<StockR
   return (
     <div className="space-y-5 lg:space-y-6">
       <header className="space-y-3">
-        <Link to={paths.overview} className="-ml-1 inline-flex min-h-11 items-center gap-1.5 rounded-md px-1 text-sm text-muted-foreground hover:text-foreground md:min-h-8">
+        <Link to={paths.market} className="-ml-1 inline-flex min-h-11 items-center gap-1.5 rounded-md px-1 text-sm text-muted-foreground hover:text-foreground md:min-h-8">
           <ArrowLeft aria-hidden className="size-4" />
           {t('back')}
         </Link>
@@ -124,7 +126,7 @@ function Research({ history, actions, strategyName, ruleSentences }: Omit<StockR
         </div>
       </div>
 
-      {signedIn && technical.data && <EvaluationDetails technical={technical.data} ruleSentences={ruleSentences} />}
+      {signedIn && technical.data && <EvaluationDetails technical={technical.data} ruleSentences={ruleSentences} ruleName={ruleName} />}
     </div>
   )
 }
@@ -235,7 +237,7 @@ function VerdictCount({ label, count, tone }: { label: string; count: number; to
 }
 
 /** Every check the strategy made, in the reader's words, and each indicator it read at the last bar. */
-function EvaluationDetails({ technical, ruleSentences }: { technical: StockTechnical; ruleSentences: StockResearchPageProps['ruleSentences'] }) {
+function EvaluationDetails({ technical, ruleSentences, ruleName }: { technical: StockTechnical } & Pick<StockResearchPageProps, 'ruleSentences' | 'ruleName'>) {
   const { t } = useTranslation('research')
   const sentences = useMemo(() => ruleSentences?.(technical.strategy) ?? new Map<string, string>(), [ruleSentences, technical.strategy])
   if (!technical.report) return null
@@ -244,9 +246,9 @@ function EvaluationDetails({ technical, ruleSentences }: { technical: StockTechn
     <div id="evaluation-details" className="scroll-mt-20 space-y-4 lg:space-y-5">
       <Panel title={t('evaluation.detailsTitle')} description={t('evaluation.detailsQuestion')}>
         <div className="grid gap-x-8 gap-y-6 @2xl:grid-cols-2 @5xl:grid-cols-3">
-          <CheckList icon={CircleX} tone="text-destructive" title={t('evaluation.hard')} checks={checks.hard} sentences={sentences} />
-          <CheckList icon={CircleMinus} tone="text-gold" title={t('evaluation.soft')} checks={checks.soft} sentences={sentences} />
-          <CheckList icon={CirclePlus} tone="text-brand" title={t('evaluation.observations')} checks={checks.observations} sentences={sentences} />
+          <CheckList icon={CircleX} tone="text-destructive" title={t('evaluation.hard')} checks={checks.hard} sentences={sentences} ruleName={ruleName} />
+          <CheckList icon={CircleMinus} tone="text-gold" title={t('evaluation.soft')} checks={checks.soft} sentences={sentences} ruleName={ruleName} />
+          <CheckList icon={CirclePlus} tone="text-brand" title={t('evaluation.observations')} checks={checks.observations} sentences={sentences} ruleName={ruleName} />
         </div>
       </Panel>
       <IndicatorPanel technical={technical} />
@@ -258,7 +260,21 @@ function EvaluationDetails({ technical, ruleSentences }: { technical: StockTechn
  * One kind of check: each rule as the sentence the designer writes for it, wrapping in full, with the rule's own name
  * on hover. A rule the strategy no longer holds keeps its name.
  */
-function CheckList({ icon: Icon, tone, title, checks, sentences }: { icon: typeof CircleX; tone: string; title: string; checks: Check[]; sentences: ReadonlyMap<string, string> }) {
+function CheckList({
+  icon: Icon,
+  tone,
+  title,
+  checks,
+  sentences,
+  ruleName,
+}: {
+  icon: typeof CircleX
+  tone: string
+  title: string
+  checks: Check[]
+  sentences: ReadonlyMap<string, string>
+  ruleName: (name: string) => string
+}) {
   const { t } = useTranslation('research')
   return (
     <section className="min-w-0">
@@ -271,8 +287,8 @@ function CheckList({ icon: Icon, tone, title, checks, sentences }: { icon: typeo
       ) : (
         <ul className="space-y-2.5 text-sm">
           {checks.map((check, index) => (
-            <li key={`${check.rule}-${index}`} className="flex items-start justify-between gap-3 border-l-2 pl-3 leading-relaxed" title={check.rule}>
-              <span className="min-w-0 text-pretty first-letter:uppercase">{sentences.get(check.rule) ?? check.rule}</span>
+            <li key={`${check.rule}-${index}`} className="flex items-start justify-between gap-3 border-l-2 pl-3 leading-relaxed" title={ruleName(check.rule)}>
+              <span className="min-w-0 text-pretty first-letter:uppercase">{sentences.get(check.rule) ?? ruleName(check.rule)}</span>
               {check.detected !== undefined && (
                 <span className={cn('mt-0.5 shrink-0 rounded-full px-2 text-xs leading-5', check.detected ? 'bg-brand-soft text-brand' : 'bg-muted text-muted-foreground')}>
                   {t(check.detected ? 'evaluation.detected' : 'evaluation.notDetected')}

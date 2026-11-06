@@ -11,12 +11,15 @@ import { ConfirmDialog } from '@/shared/ui/confirm-dialog'
 import { ErrorState } from '@/shared/ui/error-state'
 import { Panel } from '@/shared/ui/panel'
 import { Skeleton } from '@/shared/ui/skeleton'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/ui/tabs'
 import { settingsKeys, useSaveSettings, useSettingsAudit, useSettingsCheck, useSettingsText, wasWrittenHere } from './api'
 import { ChangeSummary, LineChanges, ProblemList, type Reveal } from './CheckDetails'
 import { drafts, PAGE_LOADED_AT, useDraft } from './drafts'
+import { FORM_FILE } from './form'
 import { History } from './History'
 import { checkOf, diskStateOf, linesAdded, locatedIn, reasonOf, refusalOf, type Check, type FileStatus, type SettingsEdit, type SettingsOverview, type SettingsProblem } from './model'
 import { ReviewDialog, type DialogRefusal } from './ReviewDialog'
+import { SettingsForm } from './SettingsForm'
 import { YamlEditor, type YamlEditorHandle } from './YamlEditor'
 
 /** The pause after the last key before the server checks the text. */
@@ -28,6 +31,9 @@ export interface RevealRequest {
   column: number
   at: number
 }
+
+/** appsetting.yaml opens on its form; its text, and every other file's, is the Advanced (YAML) view. */
+type View = 'form' | 'yaml'
 
 /**
  * What the last save or restore did, until the text changes again. A refusal names the text it is about: the draft's,
@@ -54,8 +60,9 @@ interface FileWorkspaceProps {
 const acknowledged = new Set<string>()
 
 /**
- * One settings file: its text in the editor, the server's check as the administrator types, the save with its review
- * and password, what the save did, a newer file on disk, and the file's history.
+ * One settings file: its form or its text in the editor, the server's check as the administrator edits, the save with
+ * its review and password, what the save did, a newer file on disk, and the file's history. The form and the editor
+ * are two views of one unsaved text, so a change in either shows in the other and saves the same way.
  */
 export function FileWorkspace({ status, overview, owner, reveal, throttledUntil, onThrottled }: FileWorkspaceProps) {
   const { t } = useTranslation('admin')
@@ -74,6 +81,10 @@ export function FileWorkspace({ status, overview, owner, reveal, throttledUntil,
   const [outcome, setOutcome] = useState<Outcome | null>(null)
   const [updatedAt, setUpdatedAt] = useState<string | null>(null)
   const [seenRevision, setSeenRevision] = useState(status.revision)
+  const [view, setView] = useState<View>('form')
+  const showing: View = file === FORM_FILE ? view : 'yaml'
+  const [target, setTarget] = useState<RevealRequest | null>(null)
+  const [seenReveal, setSeenReveal] = useState<RevealRequest | null>(null)
 
   const disk = diskStateOf(overview, status)
   const conflict = draft !== null && draft.base.revision !== status.revision
@@ -101,9 +112,27 @@ export function FileWorkspace({ status, overview, owner, reveal, throttledUntil,
     if (draft === null && !wasWrittenHere(status.revision)) setUpdatedAt(status.modified_at)
   }
 
+  /** Puts the caret on a place in the text, opening the YAML view first when the form is showing. */
+  const revealAt = (line: number, column: number) => {
+    setView('yaml')
+    setTarget({ line, column, at: Date.now() })
+  }
+
+  if (seenReveal !== reveal) {
+    setSeenReveal(reveal)
+    if (reveal) {
+      setView('yaml')
+      setTarget(reveal)
+    }
+  }
+
+  // The caret moves once the YAML view shows, so the editor can scroll it into view.
+  const revealed = useRef(0)
   useEffect(() => {
-    if (reveal) editor.current?.reveal(reveal.line, reveal.column)
-  }, [reveal])
+    if (!target || showing !== 'yaml' || revealed.current === target.at) return
+    revealed.current = target.at
+    editor.current?.reveal(target.line, target.column)
+  }, [target, showing])
 
   // Another administrator's save brings a revision this page did not write: its audit entry and backup are new too.
   const readRevision = useRef(status.revision)
@@ -132,12 +161,11 @@ export function FileWorkspace({ status, overview, owner, reveal, throttledUntil,
   }
 
   const changedLines = useMemo(() => (editing ? linesAdded(check.data?.diff ?? []) : []), [editing, check.data])
-  const revealHere: Reveal = (line, column) => editor.current?.reveal(line, column)
 
   /** The save button and Ctrl+S: the review when the text is ready, the first problem when it has one. */
   const openReview = () => {
     if (state?.kind === 'ready') setReviewing(true)
-    if (state?.kind === 'problems' && problems[0]) editor.current?.reveal(problems[0].line, problems[0].column)
+    if (state?.kind === 'problems' && problems[0]) revealAt(problems[0].line, problems[0].column)
   }
 
   const confirmSave = async (password: string): Promise<DialogRefusal | null> => {
@@ -171,6 +199,35 @@ export function FileWorkspace({ status, overview, owner, reveal, throttledUntil,
   }
 
   const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'
+  const notLoaded = shown.isError ? (
+    <ErrorState error={shown.error} title={t('loadFailed')} onRetry={() => void shown.refetch()} className="h-full" />
+  ) : (
+    <Skeleton className="h-full rounded-none" />
+  )
+  const yamlView = (
+    <>
+      {/* Below the side column's width the check sits under the editor, so the editor leaves room for its title. */}
+      <div className="h-[max(18rem,58dvh)] md:h-[max(24rem,calc(100dvh-24rem))] xl:h-[max(26rem,calc(100dvh-21rem))]">
+        {shown.data ? (
+          <YamlEditor
+            ref={editor}
+            value={draft?.text ?? shown.data.text}
+            onChange={edit}
+            onSave={openReview}
+            problems={problems}
+            changedLines={changedLines}
+            label={t('editor.label', { file: fileName })}
+            describedBy={keysHint}
+          />
+        ) : (
+          notLoaded
+        )}
+      </div>
+      <p id={keysHint} className="hidden border-t px-4 py-2 text-xs text-pretty text-muted-foreground md:block">
+        {t('editor.keys', { mod })}
+      </p>
+    </>
+  )
   const lastSave = audit.data?.find((entry) => entry.file === file && entry.to_revision === status.revision)
 
   return (
@@ -190,7 +247,7 @@ export function FileWorkspace({ status, overview, owner, reveal, throttledUntil,
           </div>
           <div className={cn('flex items-center gap-2', draft ? 'w-full sm:w-auto' : 'ml-auto')}>
             <span aria-live="polite" className="min-w-0">
-              <CheckStatus state={state} onFirstProblem={() => problems[0] && editor.current?.reveal(problems[0].line, problems[0].column)} />
+              <CheckStatus state={state} onFirstProblem={() => problems[0] && revealAt(problems[0].line, problems[0].column)} />
             </span>
             {draft && (
               <Button type="button" variant="ghost" size="sm" onClick={() => setDiscarding(true)} className="ml-auto sm:ml-0">
@@ -250,28 +307,33 @@ export function FileWorkspace({ status, overview, owner, reveal, throttledUntil,
         )}
         {updatedAt && !draft && <Banner tone="info" icon={Info} onDismiss={() => setUpdatedAt(null)} title={t('notice.updated', { time: formatMonthDayTime(locale, updatedAt) })} />}
 
-        {/* Below the side column's width the check sits under the editor, so the editor leaves room for its title. */}
-        <div className="h-[max(18rem,58dvh)] md:h-[max(24rem,calc(100dvh-24rem))] xl:h-[max(26rem,calc(100dvh-21rem))]">
-          {shown.data ? (
-            <YamlEditor
-              ref={editor}
-              value={draft?.text ?? shown.data.text}
-              onChange={edit}
-              onSave={openReview}
-              problems={problems}
-              changedLines={changedLines}
-              label={t('editor.label', { file: fileName })}
-              describedBy={keysHint}
-            />
-          ) : shown.isError ? (
-            <ErrorState error={shown.error} title={t('loadFailed')} onRetry={() => void shown.refetch()} className="h-full" />
-          ) : (
-            <Skeleton className="h-full rounded-none" />
-          )}
-        </div>
-        <p id={keysHint} className="hidden border-t px-4 py-2 text-xs text-pretty text-muted-foreground md:block">
-          {t('editor.keys', { mod })}
-        </p>
+        {file === FORM_FILE ? (
+          <Tabs value={showing} onValueChange={(next) => setView(next === 'form' ? 'form' : 'yaml')} className="gap-0">
+            <div className="border-b px-2 md:px-3">
+              <TabsList variant="line" aria-label={t('view.label', { file: fileName })}>
+                <TabsTrigger value="form" className="px-2.5">
+                  {t('view.form')}
+                </TabsTrigger>
+                <TabsTrigger value="yaml" className="px-2.5">
+                  {t('view.yaml')}
+                </TabsTrigger>
+              </TabsList>
+            </div>
+            <TabsContent value="form">
+              {shown.data ? (
+                <SettingsForm text={draft?.text ?? shown.data.text} onText={edit} problems={problems} onOpenYaml={() => setView('yaml')} />
+              ) : (
+                <div className="h-96">{notLoaded}</div>
+              )}
+            </TabsContent>
+            {/* Kept mounted, so its undo history and scroll survive a visit to the form and a reveal finds the editor. */}
+            <TabsContent value="yaml" forceMount className="data-[state=inactive]:hidden">
+              {yamlView}
+            </TabsContent>
+          </Tabs>
+        ) : (
+          yamlView
+        )}
       </section>
 
       <div className="min-w-0 space-y-4 lg:space-y-5">
@@ -281,7 +343,7 @@ export function FileWorkspace({ status, overview, owner, reveal, throttledUntil,
           refused={refused}
           rebased={draft?.rebased === true}
           stale={draft !== null && check.isPlaceholderData}
-          onReveal={revealHere}
+          onReveal={revealAt}
           onRetry={() => void check.refetch()}
           file={file}
         />

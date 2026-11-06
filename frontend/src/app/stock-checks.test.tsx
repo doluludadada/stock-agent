@@ -24,7 +24,7 @@ describe('the stock page’s checks', () => {
   afterAll(() => vi.unstubAllGlobals())
   afterEach(() => session.signOut())
 
-  it('say each rule the report names in the reader’s words, never the strategy’s English rule name', { timeout: 30_000 }, async () => {
+  it('say each rule the report names in the reader’s words, and name it in Chinese on hover, never in the strategy’s English', { timeout: 30_000 }, async () => {
     const strategy = builtInJson('balanced')
     const [excluding, , bonus] = strategy.rules.filter((rule) => rule.effect !== 'reduce_score_on_fail')
     vi.stubGlobal(
@@ -59,7 +59,8 @@ describe('the stock page’s checks', () => {
     const details = await screen.findByRole('region', { name: '評估明細' }, { timeout: 15_000 })
     const excluded = within(details).getByRole('heading', { name: /排除項目/ }).closest('section')!
     expect(excluded.textContent).not.toContain(excluding!.name)
-    expect(within(excluded).getByTitle(excluding!.name).textContent).toMatch(/[一-鿿]/)
+    expect(within(excluded).getByTitle('股價站上 20 日均線').textContent).toMatch(/[一-鿿]/)
+    expect(within(excluded).queryByTitle(excluding!.name)).not.toBeInTheDocument()
     const bonuses = within(details).getByRole('heading', { name: /加分檢查/ }).closest('section')!
     expect(within(bonuses).getByText('未出現')).toBeVisible()
     expect(bonuses.textContent).not.toContain('not detected')

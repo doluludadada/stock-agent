@@ -46,6 +46,7 @@ const runs: DictionaryShape<typeof en> = {
     cancel: '取消',
     start: '啟動任務',
   },
+  latest: { title: '最新結果', open: '開啟這次任務' },
   historyTitle: '任務紀錄',
   loadFailed: '無法載入任務紀錄。',
   empty: { title: '還沒有任務', description: '從這裡或 CLI 啟動的任務都會列在這裡。' },

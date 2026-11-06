@@ -183,7 +183,7 @@ Main files:
 
 | File | Purpose |
 | --- | --- |
-| `config/appsetting.yaml` | Active AI model (`ai.active_model`, Claude Haiku by default), logging, analysis weights, thresholds, folders, mock account, the technical settings owner and built-in strategy list, and under `sources` every outside endpoint (TWSE, TPEX, MOPS, PTT, news, AI, LINE) with the text formats their pages use, their timeouts and how much of each page is read. The settings classes are in `backend/src/b_application/config/`. |
+| `config/appsetting.yaml` | Active AI model (`ai.active_model`, Claude Haiku by default) and the ones a user may pick instead (`ai.user_selectable`), logging, analysis weights, thresholds, folders, mock account, the technical settings owner and built-in strategy list, and under `sources` every outside endpoint (TWSE, TPEX, MOPS, PTT, news, AI, LINE) with the text formats their pages use, their timeouts and how much of each page is read. The settings classes are in `backend/src/b_application/config/`. |
 | `config/strategies/*.json` | The built-in technical strategies, one file each. An owner's own strategies and selections are saved in the database. |
 | `config/instructions.yaml` | AI report prompts and RAG injection prompts. |
 | `.env` | API keys, optional database credentials and the Shioaji credentials. |
@@ -311,6 +311,7 @@ Access: public (sign-in, registration, the first-time setup, the built-in strate
 | --- | --- | --- |
 | `GET /v1/auth/status`, `POST /v1/auth/setup`, `/register`, `/sign-in`, `/sign-out` | public | Whether the first-time setup or registration is offered; set up the first administrator (with the console's setup code); register; sign in (sets the session cookie); sign out. |
 | `GET /v1/auth/me` | signed in | The signed-in user with their permissions. |
+| `GET`/`PUT /v1/auth/me/ai-model` | signed in | My settings: the AI models the site offers (`ai.active_model` and `ai.user_selectable`), its default and the one the user's runs use; choose one, or `null` for the site's default (422 for a model the site does not offer). |
 | `GET /v1/admin/users`, `PATCH /v1/admin/users/{id}` | administrator | The users; change a role, deactivate or reactivate, set a new password. The last active administrator stays (409). |
 | `POST /v1/runs/full-cycle`, `/v1/runs/specific-stocks` | signed in | Start menu 1 or menu 4's analysis (at most 20 stock ids) in the background: 202 with the run id, 409 while the user's own run runs. They never order. |
 | `POST /v1/runs/buzz-scan`, `/v1/runs/intraday` | signed in | Start menus 2 and 3 only while the execution provider is the mock broker (403 otherwise). Their orders go through the same gates and journal as the CLI's. |
@@ -322,7 +323,7 @@ Access: public (sign-in, registration, the first-time setup, the built-in strate
 | `GET /v1/market/stocks/{id}/technical` | signed in | The active strategy's evaluation of the stock and each indicator at every bar it read. |
 | `GET /v1/valuation/market`, `/stocks`, `/scan`; `POST /v1/valuation/explanation` | signed in | Menus 5 and 6, read-only. Only the explanation calls the AI, once per confirmed request. |
 | `GET /v1/account/history?as_of=` | signed in | Menu 7, with the execution provider and order mode it reads. |
-| `/v1/admin/settings...`, `/v1/admin/audit` | administrator | `appsetting.yaml` and `instructions.yaml` as whole texts: read, preview, save with revision and the password again, backups, restore with the password, reload, audit. A save opens the app on the new text first, then writes it and runs on it at once; an edit on disk is loaded too. See [docs/web-integration.md](docs/web-integration.md#settings-files). |
+| `/v1/admin/settings...`, `/v1/admin/audit` | administrator | `appsetting.yaml` and `instructions.yaml` as whole texts: read, preview, save with revision and the password again, backups, restore with the password, reload, audit; and the form's writing of a setting into a text of `appsetting.yaml`, keeping its comments. A save opens the app on the new text first, then writes it and runs on it at once; an edit on disk is loaded too. See [docs/web-integration.md](docs/web-integration.md#settings-files). |
 
 One workflow runs at a time per server process; a second start answers 409. Run the API with one worker.
 

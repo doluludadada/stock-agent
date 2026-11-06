@@ -16,7 +16,7 @@ function renderRun() {
     <I18nextProvider i18n={initI18n('en')}>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <MemoryRouter>
-          <RunDetailPage runId={RUN} />
+          <RunDetailPage runId={RUN} ruleName={(name) => name} />
         </MemoryRouter>
       </QueryClientProvider>
     </I18nextProvider>,

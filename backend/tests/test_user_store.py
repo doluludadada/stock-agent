@@ -7,6 +7,7 @@ import asyncio
 import base64
 import secrets
 import threading
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -22,7 +23,7 @@ from support.settings import shipped_config
 from trading_stack import SilentLogger
 
 from a_domain.model.system.user import User
-from a_domain.types.enums import DatabaseBackend, Role, UserStatus
+from a_domain.types.enums import AiProvider, DatabaseBackend, Role, UserStatus
 from a_domain.types.errors import AlreadySetUpError, LastAdministratorError, SignInRefused, SignInThrottled, UserExistsError
 from a_domain.types.ids import SessionToken, UserId
 from b_application.use_cases.users.sign_in_attempt import SignInAttempt
@@ -215,6 +216,25 @@ async def test_a_refused_change_keeps_the_old_role_and_password_and_a_saved_one_
     assert (await store.find(UserId("local"))).role == Role.ADMINISTRATOR
     assert await store.verify_password("bob", SecretStr("a new password for bob")) is not None
     assert await store.session_user(session.token, NOW) is None
+
+
+@pytest.mark.asyncio
+async def test_a_users_ai_model_and_an_administrators_change_of_their_role_never_undo_each_other(store: SqlUserStore) -> None:
+    read_before_the_choice = await store.find(UserId("u-2"))
+    assert read_before_the_choice is not None and read_before_the_choice.ai_model is None
+    await store.save_ai_model(UserId("u-2"), AiProvider.OPENAI, NOW)
+    read_before_the_choice.role = Role.ADMINISTRATOR
+    await store.save(read_before_the_choice, NOW)
+    chosen = await store.find(UserId("u-2"))
+
+    read_before_the_demotion = await store.find(UserId("u-2"))
+    assert read_before_the_demotion is not None
+    await store.save(replace(read_before_the_demotion, role=Role.USER), NOW)
+    await store.save_ai_model(UserId("u-2"), None, NOW)
+    cleared = await store.find(UserId("u-2"))
+
+    assert chosen is not None and (chosen.role, chosen.ai_model) == (Role.ADMINISTRATOR, AiProvider.OPENAI)
+    assert cleared is not None and (cleared.role, cleared.ai_model) == (Role.USER, None)
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Callable, Mapping
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 
@@ -41,6 +41,7 @@ from b_application.use_cases.admin.settings_audit import SettingsAudit
 from b_application.use_cases.admin.settings_backups import SettingsBackups
 from b_application.use_cases.admin.settings_confirmation import SettingsConfirmation
 from b_application.use_cases.admin.settings_editor import SettingsEditor
+from b_application.use_cases.admin.settings_form_editor import SettingsFormEditor
 from b_application.use_cases.admin.settings_reader import SettingsReader
 from b_application.use_cases.admin.settings_save import SettingsSave
 from b_application.use_cases.chat.chat_reply import ChatReply
@@ -81,6 +82,8 @@ from b_application.use_cases.trade.order_outcome import OrderOutcome
 from b_application.use_cases.trade.order_preparation import OrderPreparation
 from b_application.use_cases.trade.unwatch_stocks import UnwatchStocks
 from b_application.use_cases.trade.watch_stocks import WatchStocks
+from b_application.use_cases.users.ai_model_choice import AiModelChoice
+from b_application.use_cases.users.ai_model_lookup import AiModelLookup
 from b_application.use_cases.users.first_administrator_setup import FirstAdministratorSetup
 from b_application.use_cases.users.password_reset import PasswordReset
 from b_application.use_cases.users.session_start import SessionStart
@@ -191,8 +194,9 @@ class OwnedPorts:
     mock_broker: IExecutionProvider
     ai_provider: IAiProvider
     """
-    The user's counted provider, capped at accounts.daily_ai_calls unless the user has UNCAPPED_AI. Every paid call of a
-    workflow or an explanation goes through it.
+    The user's counted provider, on the AI model the user chose while the site offers it, else on ai.active_model,
+    capped at accounts.daily_ai_calls unless the user has UNCAPPED_AI. Every paid call of a workflow or an explanation
+    goes through it.
     """
     sentiment_classifier: ISentimentClassifier
 
@@ -207,7 +211,7 @@ class ProviderDependencies:
     news_provider: NewsProvider
     social_media_provider: PttProvider
     ai_provider: IAiProvider
-    """The installation's own provider, uncounted. Only LINE chat uses it; LINE chat stays as it is."""
+    """The installation's own provider, on ai.active_model, uncounted. Only LINE chat uses it; LINE chat stays as it is."""
     conversation_repository: IConversationRepository
     notification_provider: INotificationProvider | None
     platform_provider: IPlatformProvider | None
@@ -220,8 +224,7 @@ class ProviderDependencies:
     """A user, or None signed out -> the adapters that hold that user's data. The order-gate check passes fakes."""
 
 
-def create_ai_provider(config: AppConfig, logger: ILoggingProvider) -> IAiProvider:
-    provider = config.ai.active_model
+def create_ai_provider(config: AppConfig, logger: ILoggingProvider, provider: AiProvider) -> IAiProvider:
     model_name = config.ai.available_models.get(provider)
 
     if model_name is None:
@@ -348,7 +351,7 @@ async def build_provider_dependencies(
     logger.info(f"Opening ChromaDB at: {config.db.chroma_persist_path}")
     chroma_client = chromadb.PersistentClient(path=config.db.chroma_persist_path)
 
-    ai_provider = create_ai_provider(config, logger)
+    ai_providers = {provider: create_ai_provider(config, logger, provider) for provider in config.ai.offered_models}
 
     return ProviderDependencies(
         stock_provider=stock_provider,
@@ -358,7 +361,7 @@ async def build_provider_dependencies(
         ),
         news_provider=NewsProvider(create_news_sources(config, logger), config, logger),
         social_media_provider=PttProvider(config=config, logger=logger, stock_provider=stock_provider),
-        ai_provider=ai_provider,
+        ai_provider=ai_providers[config.ai.active_model],
         conversation_repository=ChromaConversationRepository(chroma_client, logger),
         notification_provider=create_notification_provider(config, logger),
         platform_provider=create_platform_provider(config, logger),
@@ -371,7 +374,7 @@ async def build_provider_dependencies(
         user_store=SqlUserStore(db, accounts_key, logger),
         attempt_log=process.attempt_log,
         real_broker=real_broker,
-        owned_ports=create_owned_ports(config, db, chroma_client, ai_provider, market_clock, logger, process.cache_writes),
+        owned_ports=create_owned_ports(config, db, chroma_client, ai_providers, market_clock, logger, process.cache_writes),
     )
 
 
@@ -379,13 +382,14 @@ def create_owned_ports(
     config: AppConfig,
     db: DatabaseConnector,
     chroma_client: ClientAPI,
-    ai_provider: IAiProvider,
+    ai_providers: Mapping[AiProvider, IAiProvider],
     market_clock: TaiwanMarketClock,
     logger: ILoggingProvider,
     cache_writes: asyncio.Lock,
 ) -> Callable[[User | None], OwnedPorts]:
     """
-    The real factory of one user's adapters: one connector bound to the user, over the one database and Chroma client.
+    The real factory of one user's adapters: one connector bound to the user, over the one database and Chroma client,
+    and the provider of the AI model config.ai.model_for picks for the user from `ai_providers`, one per offered model.
     `cache_writes` is the process's write lock of the shared caches.
     """
     sentiment_repository = SentimentRepository(db, cache_writes)
@@ -394,6 +398,7 @@ def create_owned_ports(
         owner_id = user.user_id if user is not None else None
         daily_ai_calls = None if user is not None and Permission.UNCAPPED_AI in user.permissions else config.accounts.daily_ai_calls
         owners_db = db.for_owner(owner_id)
+        ai_provider = ai_providers[config.ai.model_for(user.ai_model if user is not None else None)]
         counted = DailyCappedAiProvider(ai_provider, owners_db, market_clock, daily_ai_calls, config.accounts.daily_ai_calls_total)
         return OwnedPorts(
             journal=TradingJournal(owners_db),
@@ -445,7 +450,7 @@ def build_pipeline(
     Every use case once, over the shared ports and the user's own ports, or nobody's for None. The trading and the
     valuation operations share the collect and process steps. The order path's wiring is the same for every user, over
     the user's journal and broker; the permissions decide only the broker, the AI limit (in owned_ports) and whether
-    run reports reach the LINE recipients.
+    run reports reach the LINE recipients. The run records name the AI model owned_ports gave the user.
     """
     owned = dependencies.owned_ports(user)
     notifications = (
@@ -458,7 +463,9 @@ def build_pipeline(
     return Pipeline(
         strategy_loader=StrategyLoader(owned.technical_settings_repository, config, logger),
         technical_settings_editor=TechnicalSettingsEditor(owned.technical_settings_repository, config),
-        run_history=RunHistory(journal, market_clock, config, logger),
+        run_history=RunHistory(
+            journal, market_clock, config, logger, config.ai.model_for(user.ai_model if user is not None else None)
+        ),
         account_loader=AccountLoader(broker, stocks, logger),
         market_scanner=MarketScanner(stocks, logger),
         stock_lookup=StockLookup(stocks, logger),
@@ -504,6 +511,7 @@ def build_pipeline(
         settings_backups=SettingsBackups(dependencies.settings_files),
         settings_audit=SettingsAudit(dependencies.settings_files, dependencies.user_store),
         settings_editor=SettingsEditor(dependencies.settings_files, config),
+        settings_form_editor=SettingsFormEditor(dependencies.settings_files),
         settings_confirmation=SettingsConfirmation(dependencies.user_store, dependencies.attempt_log, market_clock, config, logger),
         settings_save=SettingsSave(dependencies.settings_files, market_clock, logger),
         editor_access=EditorAccess(dependencies.user_store),
@@ -518,6 +526,8 @@ def build_pipeline(
         sign_out=SignOut(dependencies.user_store),
         user_directory=UserDirectory(dependencies.user_store),
         user_change=UserChange(dependencies.user_store, market_clock, logger),
+        ai_model_lookup=AiModelLookup(config),
+        ai_model_choice=AiModelChoice(dependencies.user_store, market_clock, config, logger),
     )
 
 

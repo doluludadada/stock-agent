@@ -13,7 +13,9 @@ class AccountsConfig(BaseSettings):
     in the settings editor, and a save applies them at once. The key never comes from the database or a settings file.
     """
 
-    model_config = SettingsConfigDict(env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore", env_prefix="ACCOUNTS_")
+    model_config = SettingsConfigDict(
+        env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore", env_prefix="ACCOUNTS_", use_attribute_docstrings=True
+    )
 
     key: SecretStr | None = Field(default=None, validation_alias="ACCOUNTS_KEY")
     """

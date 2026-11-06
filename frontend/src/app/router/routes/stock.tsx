@@ -14,6 +14,7 @@ export function StockRoute() {
       actions={(stock) => <WatchButton code={stock.code} label={stock.name} />}
       strategyName={(strategy) => labels.name({ id: strategy.strategy_id, name: strategy.name })}
       ruleSentences={ruleSentences}
+      ruleName={labels.rule}
     />
   )
 }

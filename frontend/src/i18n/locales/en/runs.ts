@@ -43,6 +43,7 @@ const runs = {
     cancel: 'Cancel',
     start: 'Start the run',
   },
+  latest: { title: 'Latest result', open: 'Open the run' },
   historyTitle: 'Recorded runs',
   loadFailed: 'The runs could not be loaded.',
   empty: { title: 'No runs yet', description: 'Runs started here or from the CLI appear in this list.' },

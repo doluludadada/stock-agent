@@ -18,6 +18,8 @@ from a_domain.types.values import FormulaId
 class AnalysisConfig(BaseModel):
     """Cross-analysis weighting and trading parameters. Every value comes from the `analysis` section of config/appsetting.yaml."""
 
+    model_config = ConfigDict(use_attribute_docstrings=True)
+
     technical_weight: float = Field(ge=0, le=1)
     ai_weight: float = Field(ge=0, le=1)
 
@@ -150,6 +152,8 @@ class MockTradingConfig(BaseModel):
     Initial cash is only used when the user's mock_cash row does not exist yet.
     """
 
+    model_config = ConfigDict(use_attribute_docstrings=True)
+
     initial_cash: float = Field(default=1_000_000, gt=0)
     max_fill_quantity: int | None = Field(default=None, gt=0)
     """Most shares the simulated market fills per order at the limit price. Unset fills any quantity."""
@@ -229,6 +233,8 @@ class ShioajiConfig(BaseSettings):
 
 
 class WatchlistConfig(BaseModel):
+    model_config = ConfigDict(use_attribute_docstrings=True)
+
     automatic_expiry_sessions: int = Field(default=1, gt=0)
     """
     A TECHNICAL or BUZZ entry stays active through the close of this many trading sessions after its workflow

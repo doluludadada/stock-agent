@@ -10,7 +10,7 @@ import { apiGet, apiWrite, expect, horizontalOverflow, signIn, test } from './fi
 
 const SHOTS = process.env.E2E_SHOTS ?? 'docs/screenshots'
 
-type Strategy = { strategy_id: string; name: string; rules: unknown[]; indicators: unknown; scoring: unknown }
+type Strategy = { strategy_id: string; name: string; rules: { name: string }[]; indicators: unknown; scoring: unknown }
 type Settings = { revision: number; strategies: Strategy[] }
 
 async function copyBalanced(page: Page, name: string): Promise<string> {
@@ -37,7 +37,9 @@ test('a built-in strategy copied in the designer saves on the server with all of
   const official = ((await apiGet(page, '/v1/technical-settings/built-in-strategies')) as Strategy[]).find((item) => item.strategy_id === 'balanced')!
   const copy = saved.strategies.find((item) => item.strategy_id === id)!
   expect(copy.name).toBe('E2E 平衡副本')
-  expect(copy.rules).toEqual(official.rules)
+  const unnamed = (rules: Strategy['rules']) => rules.map((rule) => ({ ...rule, name: null }))
+  expect(unnamed(copy.rules), 'the copy keeps every rule of the built-in').toEqual(unnamed(official.rules))
+  expect(copy.rules[0]?.name, 'a copy made in zh-TW names its rules in Chinese').toBe('股價站上 20 日均線')
   expect(copy.indicators).toEqual(official.indicators)
   await page.screenshot({ path: `${SHOTS}/live-builder-saved.png`, fullPage: true })
 
@@ -80,7 +82,7 @@ test('the overview charts the TAIEX as the default index, lists the most traded 
     market: { advancers: number; decliners: number; unchanged: number }
     industries: Record<string, unknown>
   }
-  await page.goto('/')
+  await page.goto('/market')
   await expect(page.getByRole('heading', { name: '市場總覽', level: 1 })).toBeVisible()
 
   const level = new Intl.NumberFormat('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(history.bars.at(-1)!.close)
@@ -117,7 +119,7 @@ test('the overview charts the TAIEX as the default index, lists the most traded 
 
 test('the research target can be changed through the listing search, kept in the address, and set back', async ({ page, consoleErrors }) => {
   void consoleErrors
-  await page.goto('/')
+  await page.goto('/market')
   await page.getByRole('button', { name: '更換' }).click()
   await page.getByRole('combobox').fill('2330')
   await page.getByRole('option', { name: /2330/ }).first().click({ timeout: 120_000 })
@@ -128,7 +130,7 @@ test('the research target can be changed through the listing search, kept in the
   await page.reload()
   await expect(page.getByRole('region', { name: /2330/ }).getByRole('heading', { level: 2 })).toContainText('台積電', { timeout: 60_000 })
   await page.getByRole('link', { name: '改回加權指數' }).click()
-  await expect(page).toHaveURL(/\/$/)
+  await expect(page).toHaveURL(/\/market$/)
   await expect(page.getByRole('region', { name: /加權指數/ }).getByRole('heading', { level: 2 })).toContainText('指數 · 預設')
 })
 
@@ -161,7 +163,7 @@ test('after switching the strategy in use, the stock page evaluates with the new
 test('a card whose request fails says so and loads on retry, and going offline is announced', async ({ page }) => {
   let failing = true
   await page.route('**/v1/market/most-traded', (route) => (failing ? route.fulfill({ status: 503, json: { detail: 'The exchange listing is unavailable.' } }) : route.continue()))
-  await page.goto('/')
+  await page.goto('/market')
   const most = page.getByRole('region', { name: '成交熱絡' })
   await expect(most.getByText('無法載入成交排行')).toBeVisible({ timeout: 30_000 })
   await expect(most.getByText('行情資料暫時無法取得，請稍後再試。')).toBeVisible()
@@ -204,7 +206,7 @@ test('search finds a listed stock, its page shows real bars and the backend eval
 test('a specific-stock run starts after confirming its AI cost, ends, and keeps its report', async ({ page, consoleErrors }) => {
   void consoleErrors
   await signIn(page)
-  await page.goto('/runs')
+  await page.goto('/')
   await page.getByLabel('要分析的股票代號').fill('2330')
   await page.getByLabel('要分析的股票代號').press('Enter')
   await expect(page.getByRole('alertdialog')).toContainText('每檔一次付費 AI 呼叫')
@@ -235,7 +237,7 @@ const VIEWPORTS = [
   { name: 'desktop', width: 1440, height: 900 },
   { name: 'mobile', width: 390, height: 844 },
 ]
-const PAGES = ['/', '/strategies', '/runs', '/valuation', '/watchlist', '/account', '/admin/settings', '/stocks/2330']
+const PAGES = ['/', '/market', '/strategies', '/valuation', '/watchlist', '/account', '/admin/settings', '/stocks/2330']
 
 for (const viewport of VIEWPORTS) {
   test(`${viewport.name}: every page fits without horizontal overflow, in both themes`, async ({ page, consoleErrors }) => {
@@ -255,7 +257,7 @@ for (const viewport of VIEWPORTS) {
 
 test('English, light theme, keyboard skip link and focus', async ({ page, consoleErrors }) => {
   void consoleErrors
-  await page.goto('/')
+  await page.goto('/market')
   await page.getByRole('button', { name: '語言' }).click()
   await page.getByRole('menuitem', { name: 'English' }).click()
   await expect(page.getByRole('heading', { name: 'Market overview', level: 1 })).toBeVisible()

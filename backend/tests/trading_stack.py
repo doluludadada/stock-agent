@@ -145,7 +145,7 @@ async def open_stack(tmp_path: Path, configure=lambda config: None, journal: Tra
     stocks = StockDirectory()
     watchlist = FakeWatchlistRepository(clock)
     ai, sentiment = FakeAiProvider(), FakeSentimentClassifier()
-    factory = create_owned_ports(config, db, chromadb.EphemeralClient(), ai, clock, logger, asyncio.Lock())
+    factory = create_owned_ports(config, db, chromadb.EphemeralClient(), {config.ai.active_model: ai}, clock, logger, asyncio.Lock())
     real = factory(users.by_id[LEGACY_OWNER_ID])
     owned = replace(
         real,

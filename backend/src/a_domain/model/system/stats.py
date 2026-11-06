@@ -29,7 +29,10 @@ class SystemStats:
     """The technical strategy the run applied. None until TechnicalFilter applies one."""
 
     ai_model: str | None = None
-    """The configured model of the active AI provider. None when the provider has no model configured, and on a read-only step."""
+    """
+    The model id of the AI model the run used: its user's choice while the site offers it, else ai.active_model's. None
+    when the provider has no model configured, and on a read-only step.
+    """
 
     total_scanned: int = 0
 

@@ -66,7 +66,7 @@ function BuilderSource({ mode }: StrategyBuilderPageProps) {
   const [source, setSource] = useState<DraftSource | null>(null)
   if (source === null && settings.data && builtIns.data) {
     const copyName = (original: Strategy) => strategyText('copyName', { name: labels.name(original) })
-    setSource(resolveDraftSource(mode, settings.data.strategies, builtIns.data, copyName))
+    setSource(resolveDraftSource(mode, settings.data.strategies, builtIns.data, { copyName, ruleName: labels.rule }))
   }
   if (source === null && (settings.isError || builtIns.isError)) {
     const retry = () => void Promise.all([settings.refetch(), builtIns.refetch()])
@@ -350,6 +350,7 @@ function QuickFillBar({
   onFill: (kind: QuickFillKind) => void
 }) {
   const { t } = useTranslation('builder')
+  const labels = useStrategyLabels()
   return (
     <Panel
       title={
@@ -371,7 +372,7 @@ function QuickFillBar({
               <SelectContent>
                 {strategy.rules.map((rule, index) => (
                   <SelectItem key={rule.id} value={rule.id}>
-                    {rule.name.trim() || t('rule.label', { index: index + 1 })}
+                    {labels.rule(rule.name.trim()) || t('rule.label', { index: index + 1 })}
                   </SelectItem>
                 ))}
               </SelectContent>

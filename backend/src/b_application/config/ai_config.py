@@ -41,10 +41,16 @@ type ReportPrompt = Annotated[str, placeholders({"stock_id", "articles_text"})]
 class AiConfig(BaseSettings):
     """AI provider and behaviour settings. The API keys come from the environment, every other value from config/appsetting.yaml."""
 
-    model_config = SettingsConfigDict(env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore", use_attribute_docstrings=True
+    )
 
     active_model: AiProvider
+    """The site's default: the AI model of every run whose user chose none, LINE chat's and the signed-out pages'."""
+
     available_models: dict[AiProvider, str]
+    user_selectable: list[AiProvider] = Field(default_factory=list)
+    """The AI models a user may choose for their own runs on My settings, besides active_model. Empty offers only it."""
 
     openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     grok_api_key: str | None = Field(default=None, validation_alias="GROK_API_KEY")
@@ -60,8 +66,27 @@ class AiConfig(BaseSettings):
     max_output_tokens: int = Field(gt=0)
     """The most tokens a Claude reply may use, its thinking included. The other providers use their own default."""
 
-    def missing_key(self) -> str | None:
-        """The environment variable the active provider still needs, or None when its model and key are set."""
+    @property
+    def offered_models(self) -> dict[AiProvider, str]:
+        """
+        Each AI model a user's runs may use, by provider, with its model id: active_model first, then user_selectable.
+        startup_settings refuses a start on which one of them lacks its model id or its key.
+        """
+        return {provider: self.available_models[provider] for provider in (self.active_model, *self.user_selectable)}
+
+    def model_for(self, choice: AiProvider | None) -> AiProvider:
+        """The AI model a user's runs use: their choice while the site offers it, else active_model."""
+        if choice is None or choice not in self.offered_models:
+            return self.active_model
+
+        return choice
+
+    def missing_keys(self) -> dict[str, str]:
+        """
+        What each offered provider still needs before the app may start, by the setting that offers it (ai.active_model,
+        or ai.user_selectable.<index>): its model id under available_models or its API key's environment variable, by
+        name only. Empty when every offered provider has both.
+        """
         keys = {
             AiProvider.OPENAI: ("OPENAI_API_KEY", self.openai_api_key),
             AiProvider.GROK: ("GROK_API_KEY", self.grok_api_key),
@@ -70,12 +95,20 @@ class AiConfig(BaseSettings):
             AiProvider.NVIDIA: ("NVIDIA_API_KEY", self.nvidia_api_key),
             AiProvider.CLAUDE: ("ANTHROPIC_API_KEY", self.anthropic_api_key),
         }
-        name, key = keys[self.active_model]
+        offered = {"ai.active_model": self.active_model} | {
+            f"ai.user_selectable.{index}": provider for index, provider in enumerate(self.user_selectable)
+        }
+        missing = {}
 
-        if self.active_model not in self.available_models:
-            return f"ai.available_models.{self.active_model.value}"
+        for path, provider in offered.items():
+            name, key = keys[provider]
 
-        return name if not (key and key.strip()) else None
+            if provider not in self.available_models:
+                missing[path] = f"{provider.value} needs its model id under ai.available_models.{provider.value}"
+            elif not (key and key.strip()):
+                missing[path] = f"{provider.value} needs {name} in the environment or .env"
+
+        return missing
 
     system_prompt: str | None = None
     rag_injection_prompt: Annotated[str | None, placeholders({"search_results"})] = None

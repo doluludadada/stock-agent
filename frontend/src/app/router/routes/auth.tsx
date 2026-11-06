@@ -15,7 +15,7 @@ export function AuthGate() {
   const location = useLocation()
   const needsSetup = status.data?.needs_first_administrator === true
   if (needsSetup && location.pathname !== paths.setup) return <Navigate to={paths.setup} replace />
-  if (status.data && !needsSetup && location.pathname === paths.setup) return <Navigate to={session.status === 'signedIn' ? paths.overview : paths.signIn} replace />
+  if (status.data && !needsSetup && location.pathname === paths.setup) return <Navigate to={session.status === 'signedIn' ? paths.runs : paths.signIn} replace />
   return (
     <AuthLinksProvider value={{ signIn: paths.signInThen, register: status.data?.registration_open === false ? null : paths.register }}>
       <Outlet />
@@ -25,14 +25,14 @@ export function AuthGate() {
 
 export function SetupRoute() {
   const navigate = useNavigate()
-  return <SetupScreen onDone={() => navigate(paths.overview, { replace: true })} />
+  return <SetupScreen onDone={() => navigate(paths.runs, { replace: true })} />
 }
 
 export function SignInRoute() {
   const [params] = useSearchParams()
   const navigate = useNavigate()
   const session = useSession()
-  const next = safeNext(params.get('next'), paths.overview)
+  const next = safeNext(params.get('next'), paths.runs)
   if (session.status === 'signedIn') return <Navigate to={next} replace />
   return <SignInScreen registerHref={paths.register} onDone={() => navigate(next, { replace: true })} />
 }
@@ -40,6 +40,6 @@ export function SignInRoute() {
 export function RegisterRoute() {
   const navigate = useNavigate()
   const session = useSession()
-  if (session.status === 'signedIn') return <Navigate to={paths.overview} replace />
-  return <RegisterScreen signInHref={paths.signIn} onDone={() => navigate(paths.overview, { replace: true })} />
+  if (session.status === 'signedIn') return <Navigate to={paths.runs} replace />
+  return <RegisterScreen signInHref={paths.signIn} onDone={() => navigate(paths.runs, { replace: true })} />
 }

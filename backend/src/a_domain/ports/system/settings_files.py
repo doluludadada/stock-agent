@@ -105,6 +105,30 @@ class SettingsEdit:
         return self.revision == self.base_revision
 
 
+type SettingValue = bool | int | float | str | list[str]
+"""What the settings form writes into one setting: a switch, a number, a text or a choice, or a list of choices."""
+
+
+@dataclass(frozen=True)
+class SettingChange:
+    """One setting the settings form writes: its keys from the top of the file, and its new value."""
+
+    path: Annotated[tuple[Annotated[str, Field(min_length=1)], ...], Field(min_length=1)]
+    value: SettingValue
+
+
+@dataclass(frozen=True)
+class SettingsForm:
+    """
+    A text of appsetting.yaml as the settings form shows it: the text; every setting it sets, by dotted path, a list
+    counting as one value (None for a text that does not parse); and the JSON schema of what each setting accepts.
+    """
+
+    text: str
+    values: dict[str, Any] | None
+    schema: dict[str, Any]
+
+
 class ISettingsFiles(Protocol):
     """
     The YAML files of config/ the administrator edits as whole texts: read, checked as the app starts, and replaced

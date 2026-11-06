@@ -125,6 +125,7 @@ All bodies are JSON. `revision` is the SHA-256 the page read (64 hex characters)
 | `GET /v1/admin/settings` | `SettingsOverviewResponse` |
 | `GET /v1/admin/settings/{file}` | `SettingsDocumentResponse` |
 | `POST /v1/admin/settings/{file}/preview` `{revision, text}` | `SettingsEditResponse`, nothing written |
+| `POST /v1/admin/settings/appsetting/form` `{text, changes: [{path, value}]}` | `SettingsForm` `{text, values, schema}`, nothing written |
 | `PUT /v1/admin/settings/{file}` `{confirm: true, revision, text, password}` | `SettingsEditResponse` with `saved` |
 | `GET /v1/admin/settings/{file}/backups` | `[{backup_id, revision, created_at}]`, newest first |
 | `POST /v1/admin/settings/{file}/backups/{backup_id}/preview` `{revision}` | `SettingsEditResponse` of the backup's text |
@@ -143,6 +144,16 @@ All bodies are JSON. `revision` is the SHA-256 the page read (64 hex characters)
   `revision` when the reload applied; otherwise `refused` holds the new refusal. The watcher and the CLI never retry
   unchanged refused files on their own.
 - `SettingsDocumentResponse`: `{status: <a files entry>, text}`, the whole text.
+- `SettingsForm` is the page's form over `appsetting.yaml`, a second editor of the same unsaved text. `text` is the
+  request's text with each change written over its setting's value in place: every other character stays, comments,
+  key order and layout included, and the value is written as the loader reads it back (a text such as `yes` is
+  quoted). A change's `path` is the setting's keys from the top of the file, such as `["ai", "temperature"]`, and its
+  `value` is JSON: a boolean, a number, a string or a list of strings. `values` is every setting the text then sets,
+  by dotted path (`null` while the text does not parse), and `schema` is the settings classes' JSON schema, with no
+  field the environment owns or the loader sets. A change to a path the text does not set, of another kind than the
+  value there, or into a text that does not parse answers 422 `settings_edit_refused`. Validation stays with the
+  preview: a value the app would refuse is written, and the preview places its problem. The page makes the answer's
+  text the draft, so the check, the review, the password and the save are a typed edit's.
 - `SettingsEditResponse`: `file`, `base_revision` (the revision on disk it was compared with), `revision` (the
   proposed text's; after a save, the file's), `running_revision`, `changed` (every setting path whose value differs,
   removed or added ones included; an empty list when the text does not parse, and `problems` then holds the parse
@@ -210,7 +221,7 @@ An independent review of the change found, and this round fixed:
 | # | Severity | Finding | Fix and regression test |
 | --- | --- | --- | --- |
 | R1 | P1 | A backup restore wrote the backup's whole text, so it could put back locked settings (order mode, sizing, stop-loss) changed by hand since, and the audit named only the allowlisted ones. | A restore sets only the allowlisted values the backup holds on the current text. `test_a_restore_brings_back_only_allowlisted_values_and_keeps_locked_settings_changed_since`. |
-| R2 | P2 | A save could pass validation and still stop the next start: an AI provider without its key, or a log level loguru does not know. | `AiConfig.missing_key()` in the save check; `log_level` is a loguru level. Two cases in `test_a_file_the_app_would_refuse_is_never_saved`. |
+| R2 | P2 | A save could pass validation and still stop the next start: an AI provider without its key, or a log level loguru does not know. | `AiConfig.missing_keys()` in the save check, for every offered provider since; `log_level` is a loguru level. Two cases in `test_a_file_the_app_would_refuse_is_never_saved`. |
 | R3 | P2 | `Transfer-Encoding: gzip, chunked` slipped past the body limit. | Any `Transfer-Encoding` answers 413. `test_a_body_without_a_plain_length_is_refused`. |
 | R4 | P2 | A history backfill recorded its window for stocks the source skipped, so they were not asked again. | Windows only for stocks that came back. `test_a_window_is_recorded_only_for_stocks_the_source_answered`. |
 | R5 | P2 | Two requests caching the same new stock at once could hit a unique-key error (`merge` selects, then inserts at commit). | The cache's writes run one at a time per process. Not reproduced in a test; across processes (CLI and server) the race remains. |

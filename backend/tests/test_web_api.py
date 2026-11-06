@@ -521,7 +521,9 @@ async def test_the_api_writes_only_runs_watchlist_settings_and_settings_files_an
     writes = {(method, path) for method, path in every_write if not path.startswith("/v1/auth")}
 
     assert writes == {(method, path) for method, path, _ in WRITES + ORDERING_WRITES + VALUATION_WRITES}
-    assert every_write - writes == {("POST", f"/v1/auth/{step}") for step in ("setup", "register", "sign-in", "sign-out")}
+    assert every_write - writes == {("POST", f"/v1/auth/{step}") for step in ("setup", "register", "sign-in", "sign-out")} | {
+        ("PUT", "/v1/auth/me/ai-model")
+    }
     description = app.openapi()["info"]["description"]
     assert "No endpoint places, cancels or modifies an order by itself" in description
     assert "only while the execution provider is" in description

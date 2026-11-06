@@ -17,13 +17,14 @@ export const draftIds: IdFactory = newIds()
 
 /**
  * What the editor starts from: an owner strategy to edit, a copy of an owner or built-in strategy, or a blank one.
- * Copies get a new id, so saving never replaces their source.
+ * Copies get a new id, so saving never replaces their source. A copy of a built-in becomes the owner's own text, so its
+ * rules take their names in the owner's language; the names of an owner strategy are already the owner's.
  */
 export function resolveDraftSource(
   mode: BuilderMode,
   owned: readonly Strategy[],
   builtIns: readonly Strategy[],
-  copyName: (source: Strategy) => string,
+  labels: { copyName: (source: Strategy) => string; ruleName: (name: string) => string },
 ): DraftSource {
   if (mode.type === 'blank') return { status: 'ready', strategy: createBlankStrategy(draftIds), isNew: true }
   if (mode.type === 'edit') {
@@ -32,7 +33,10 @@ export function resolveDraftSource(
   }
   const original = (mode.source === 'builtIn' ? builtIns : owned).find((strategy) => strategy.id === mode.id)
   if (!original) return { status: 'missing' }
-  return { status: 'ready', strategy: copyStrategy(original, { ids: draftIds, name: copyName(original) }), isNew: true }
+  const copy = copyStrategy(original, { ids: draftIds, name: labels.copyName(original) })
+  if (mode.source === 'owned') return { status: 'ready', strategy: copy, isNew: true }
+  const rules = copy.rules.map((rule) => ({ ...rule, name: labels.ruleName(rule.name) }))
+  return { status: 'ready', strategy: { ...copy, rules }, isNew: true }
 }
 
 type DraftState = { draft: Strategy; baseline: string }

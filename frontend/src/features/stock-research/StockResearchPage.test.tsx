@@ -15,7 +15,7 @@ describe('the stock page', () => {
       <I18nextProvider i18n={initI18n('en')}>
         <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
           <MemoryRouter>
-            <StockResearchPage code="23-30" strategyName={(strategy) => strategy.name} />
+            <StockResearchPage code="23-30" strategyName={(strategy) => strategy.name} ruleName={(name) => name} />
           </MemoryRouter>
         </QueryClientProvider>
       </I18nextProvider>,

@@ -14,6 +14,42 @@ type Problem = { message: string; file: FileId | null; path: string | null; line
 
 const PASSWORD = 'correct horse battery'
 const APPSETTING = 'environment: dev\nai:\n  temperature: 0.7\ntrading:\n  order_mode: mock_only\n'
+/** A text with a setting of each kind the form shows, and a comment the form must keep. */
+const FORM_TEXT = [
+  'environment: dev',
+  'ai:',
+  '  # How freely the model words its reply.',
+  '  temperature: 0.7',
+  '  user_selectable: []',
+  'trading:',
+  '  order_mode: mock_only',
+  'accounts:',
+  '  registration_open: true',
+  '',
+].join('\n')
+
+/** The settings classes' schema as the server answers it, cut down to the settings FORM_TEXT sets. */
+const SCHEMA = {
+  properties: {
+    environment: { $ref: '#/$defs/SystemEnvironment', default: 'dev' },
+    ai: { $ref: '#/$defs/AiConfig' },
+    trading: { $ref: '#/$defs/TradingConfig' },
+    accounts: { $ref: '#/$defs/AccountsConfig' },
+  },
+  $defs: {
+    SystemEnvironment: { enum: ['dev', 'test', 'prod'], type: 'string', description: 'Which machine the app runs on.' },
+    AiProvider: { enum: ['openai', 'gemini', 'claude'], type: 'string' },
+    OrderMode: { enum: ['mock_only', 'live', 'disabled'], type: 'string' },
+    AiConfig: {
+      properties: {
+        temperature: { type: 'number', minimum: 0, maximum: 2, description: 'How freely the model words its reply: 0 always picks the likeliest words.' },
+        user_selectable: { type: 'array', items: { $ref: '#/$defs/AiProvider' } },
+      },
+    },
+    TradingConfig: { properties: { order_mode: { $ref: '#/$defs/OrderMode', default: 'mock_only' } } },
+    AccountsConfig: { properties: { registration_open: { type: 'boolean', description: 'Anyone may register as a user.' } } },
+  },
+}
 const INSTRUCTIONS = 'system_prompt: You are careful.\n'
 
 /** A revision as the server makes one, from the text alone. */
@@ -38,6 +74,30 @@ function leaves(text: string): Map<string, string> {
   return found
 }
 
+/** A value of the small texts as the server's YAML loader reads it. */
+function typed(raw: string): unknown {
+  if (raw === 'true' || raw === 'false') return raw === 'true'
+  if (/^-?\d+(\.\d+)?$/.test(raw)) return Number(raw)
+  if (raw.startsWith('[')) return raw.slice(1, -1).split(',').map((item) => item.trim()).filter(Boolean)
+  return raw
+}
+
+/** The text with one setting's value written in place, every other line as it was, as the server's form does. */
+function writeSetting(text: string, path: string, value: unknown): string {
+  const parents: string[] = []
+  return text
+    .split('\n')
+    .map((line) => {
+      const match = /^( *)(\w+):\s*(.*)$/.exec(line)
+      if (!match) return line
+      parents.length = match[1]!.length / 2
+      const at = [...parents, match[2]!].join('.')
+      if (!match[3]) parents.push(match[2]!)
+      return at === path ? `${match[1]}${match[2]}: ${Array.isArray(value) ? `[${value.join(', ')}]` : String(value)}` : line
+    })
+    .join('\n')
+}
+
 /**
  * The settings API as the backend answers it, kept in memory: whole texts by revision, a check that finds an unclosed
  * list and an order mode the app refuses, saves and restores that need the password, backups, an audit, and a reload
@@ -55,6 +115,8 @@ function fakeServer() {
     nextSave: null as Response | null,
     /** Holds the audit's answers back until it settles, as a slow network would. */
     auditHeld: null as Promise<void> | null,
+    /** Holds the form's answers back the same way. */
+    formHeld: null as Promise<void> | null,
     /** Changes appsetting.yaml on disk right before the next read of its text, once. */
     editBeforeRead: null as string | null,
     /** Problems from outside the files, such as a database that is down: every start fails with them while set. */
@@ -67,6 +129,7 @@ function fakeServer() {
     text.split('\n').flatMap((line, index): Problem[] => {
       if (/:\s*\[[^\]]*$/.test(line)) return [{ message: "YAML: expected ',' or ']', but got '<stream end>'", file, path: null, line: index + 1, column: line.indexOf('[') + 1 }]
       if (line.includes('order_mode: sometimes')) return [{ message: "Input should be 'mock_only', 'live' or 'disabled'", file, path: 'trading.order_mode', line: index + 1, column: 3 }]
+      if (line.includes('temperature: 5')) return [{ message: 'Input should be less than or equal to 2', file, path: 'ai.temperature', line: index + 1, column: 3 }]
       return []
     })
   const edit = (file: FileId, text: string) => {
@@ -127,6 +190,16 @@ function fakeServer() {
       await state.auditHeld
       return json(state.audit)
     }
+    if (url === '/v1/admin/settings/appsetting/form') {
+      await state.formHeld
+      const text = String(body?.text)
+      const changes = (body?.changes ?? []) as { path: string[]; value: unknown }[]
+      const parsed = !problemsOf('appsetting', text).some((problem) => problem.message.startsWith('YAML:'))
+      if (!parsed && changes.length > 0) return json({ detail: 'appsetting.yaml does not parse', code: 'settings_edit_refused' }, 422)
+      const written = changes.reduce((current, change) => writeSetting(current, change.path.join('.'), change.value), text)
+      const values = parsed ? Object.fromEntries([...leaves(written)].map(([path, raw]) => [path, typed(raw)])) : null
+      return json({ text: written, values, schema: SCHEMA })
+    }
     const [, id, rest] = /^\/v1\/admin\/settings\/(appsetting|instructions)(.*)$/.exec(url) ?? []
     if (id !== 'appsetting' && id !== 'instructions') return json({ detail: 'Not found', code: 'not_found' }, 404)
     if (rest === '' && method === 'GET') {
@@ -172,7 +245,22 @@ function renderPage(server: ReturnType<typeof fakeServer>, user = TEST_ADMIN) {
   return router
 }
 
-const editor = (file = 'appsetting.yaml') => screen.findByRole('textbox', { name: `The text of ${file}` })
+/** A file's text in the editor. appsetting.yaml opens on its form, so its Advanced (YAML) tab is chosen first. */
+async function editor(file = 'appsetting.yaml') {
+  if (file === 'appsetting.yaml') {
+    const tab = await screen.findByRole('tab', { name: 'Advanced (YAML)' })
+    if (tab.getAttribute('aria-selected') !== 'true') await userEvent.click(tab)
+  }
+  return screen.findByRole('textbox', { name: `The text of ${file}` })
+}
+
+const formPanel = () => screen.findByRole('tabpanel', { name: 'Form' })
+
+/** A request of the form that writes a change into the text, not one that only reads a text. */
+function writesAChange(request: { url: string; body: Record<string, unknown> | null }): boolean {
+  const changes = request.body?.changes
+  return request.url === '/v1/admin/settings/appsetting/form' && Array.isArray(changes) && changes.length > 0
+}
 
 /** Replaces the whole text the way an administrator pasting a corrected file would. */
 async function paste(user: ReturnType<typeof userEvent.setup>, text: string) {
@@ -201,10 +289,11 @@ describe('the settings editor', { timeout: 90_000 }, () => {
     vi.unstubAllGlobals()
   })
 
-  it('offers every settings file the server lists, each whole in an editor with line numbers', async () => {
+  it('opens appsetting.yaml on its form, offers every file whole in an editor with line numbers, and the prompts only as text', async () => {
     renderPage(fakeServer())
     const user = userEvent.setup()
 
+    expect(await screen.findByRole('tab', { name: 'Form' })).toHaveAttribute('aria-selected', 'true')
     expect(await editor()).toHaveTextContent('order_mode: mock_only')
     expect(screen.getByRole('tab', { name: /appsetting\.yaml/ })).toHaveAttribute('aria-selected', 'true')
     expect(document.querySelector('.cm-lineNumbers')).toHaveTextContent('12345')
@@ -212,6 +301,93 @@ describe('the settings editor', { timeout: 90_000 }, () => {
     await user.click(screen.getByRole('tab', { name: /instructions\.yaml/ }))
 
     expect(await editor('instructions.yaml')).toHaveTextContent('system_prompt: You are careful.')
+    expect(screen.queryByRole('tab', { name: 'Form' })).not.toBeInTheDocument()
+  })
+
+  it('shows each setting with the control its schema gives it, the read-only ones as text, and one the file lacks as left to its default', async () => {
+    const server = fakeServer()
+    server.state.files.appsetting = FORM_TEXT
+    renderPage(server)
+
+    const form = await formPanel()
+    expect(await within(form).findByRole('switch', { name: 'Open registration' })).toBeChecked()
+    expect(within(form).getByRole('combobox', { name: 'Order mode' })).toHaveTextContent('Mock orders only')
+    const temperature = within(form).getByRole('spinbutton', { name: 'Temperature' })
+    expect(temperature).toHaveValue(0.7)
+    expect(temperature).toHaveAttribute('min', '0')
+    expect(temperature).toHaveAttribute('max', '2')
+    expect(temperature).toHaveAccessibleDescription(/ai\.temperature.*0 always picks the likeliest words/)
+    const offered = within(form).getByRole('group', { name: 'Models users may pick' })
+    expect(within(offered).getAllByRole('checkbox').map((box) => box.getAttribute('aria-checked'))).toEqual(['false', 'false', 'false'])
+    expect(within(form).getByText('Development (dev)')).toBeInTheDocument()
+    expect(within(form).queryByRole('combobox', { name: 'Environment' })).not.toBeInTheDocument()
+    expect(within(form).getAllByText(/^Not in the file, so the app uses its default\./).length).toBeGreaterThan(0)
+  })
+
+  it('makes each change the unsaved text, keeps the comments, checks it, shows it in the YAML, and saves it through the review', async () => {
+    const server = fakeServer()
+    server.state.files.appsetting = FORM_TEXT
+    renderPage(server)
+    const user = userEvent.setup()
+    const form = await formPanel()
+    const registration = await within(form).findByRole('switch', { name: 'Open registration' })
+
+    let answer = () => {}
+    server.state.formHeld = new Promise<void>((resolve) => (answer = resolve))
+    await user.click(registration)
+    await user.click(within(form).getByRole('checkbox', { name: 'Gemini' }))
+    answer()
+    await waitFor(() => expect(saveButton()).toBeEnabled())
+
+    const written = server.sent.filter(writesAChange)
+    expect(written.map((request) => request.body?.changes)).toEqual([[{ path: ['accounts', 'registration_open'], value: false }], [{ path: ['ai', 'user_selectable'], value: ['gemini'] }]])
+    expect(written[1]!.body?.text, 'the second change goes into the text the first one made').toContain('registration_open: false')
+    const expected = FORM_TEXT.replace('registration_open: true', 'registration_open: false').replace('user_selectable: []', 'user_selectable: [gemini]')
+    expect(screen.getByRole('region', { name: 'Check' })).toHaveTextContent('accounts.registration_open')
+    expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
+
+    const text = await editor()
+    expect(text).toHaveTextContent('registration_open: false')
+    expect(text).toHaveTextContent('# How freely the model words its reply.')
+    await saveWithPassword(user)
+
+    expect(await screen.findByText(/^Saved at .*The server runs on it now\.$/)).toBeInTheDocument()
+    expect(server.state.files.appsetting).toBe(expected)
+  })
+
+  it('writes a number once the field is left, and shows the problem the check finds next to the setting', async () => {
+    const server = fakeServer()
+    server.state.files.appsetting = FORM_TEXT
+    renderPage(server)
+    const user = userEvent.setup()
+    const form = await formPanel()
+
+    const temperature = await within(form).findByRole('spinbutton', { name: 'Temperature' })
+    await user.clear(temperature)
+    await user.type(temperature, '5')
+    expect(server.sent.some(writesAChange), 'nothing is written while typing').toBe(false)
+    await user.tab()
+
+    expect(await within(form).findByText('Input should be less than or equal to 2')).toBeInTheDocument()
+    expect(within(form).getByRole('spinbutton', { name: 'Temperature' })).toHaveAttribute('aria-invalid', 'true')
+    expect(saveButton()).toBeDisabled()
+
+    await user.click(within(screen.getByRole('region', { name: 'Check' })).getByRole('button', { name: /^Line 4, column 3/ }))
+    expect(screen.getByRole('tab', { name: 'Advanced (YAML)' }), 'a problem’s place opens the text').toHaveAttribute('aria-selected', 'true')
+    await waitFor(() => expect(document.querySelector('.cm-activeLine')).toHaveTextContent('temperature: 5'))
+  })
+
+  it('says the form cannot read a text that does not parse, and points to the YAML', async () => {
+    renderPage(fakeServer())
+    const user = userEvent.setup()
+
+    await paste(user, APPSETTING.replace('order_mode: mock_only', 'order_mode: [mock_only'))
+    await user.click(screen.getByRole('tab', { name: 'Form' }))
+    expect(await screen.findByText('The form cannot read this text')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Open the text' }))
+
+    expect(screen.getByRole('tab', { name: 'Advanced (YAML)' })).toHaveAttribute('aria-selected', 'true')
+    expect(await editor()).toHaveTextContent('order_mode: [mock_only')
   })
 
   it('shows each problem at its line and column, puts the caret there, and saves nothing while one is left', async () => {

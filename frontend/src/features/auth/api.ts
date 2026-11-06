@@ -1,12 +1,15 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
-import { apiRequest, isApiError, session, useHasPermission, type Schemas, type User } from '@/shared/api'
+import { apiRequest, isApiError, session, useHasPermission, useIsSignedIn, type Schemas, type User } from '@/shared/api'
 
 export type AuthStatus = Schemas['AuthStatusResponse']
+export type AiModels = Schemas['AiModelResponse']
+export type AiProvider = Schemas['AiProvider']
 
 export const authKeys = {
   status: ['public', 'auth', 'status'] as const,
   me: ['public', 'auth', 'me'] as const,
   users: ['admin', 'users'] as const,
+  aiModel: ['owner', 'settings', 'ai-model'] as const,
 }
 
 /** Whether the site still needs its first administrator, and whether it takes registrations. */
@@ -109,5 +112,26 @@ export function useChangeUser() {
     mutationFn: ({ userId, body }: { userId: string; body: Schemas['UserChangeRequest'] }) =>
       apiRequest('patch', '/v1/admin/users/{user_id}', { params: { user_id: userId }, body }),
     onSuccess: (changed) => client.setQueryData<User[]>(authKeys.users, (users) => users?.map((user) => (user.user_id === changed.user_id ? changed : user))),
+  })
+}
+
+/** My settings: the AI models the site offers, its default, and the one the signed-in user's runs use. */
+export function useAiModels() {
+  const signedIn = useIsSignedIn()
+  return useQuery({ queryKey: authKeys.aiModel, queryFn: ({ signal }) => apiRequest('get', '/v1/auth/me/ai-model', { signal }), enabled: signedIn })
+}
+
+/**
+ * Saves the model of the user's next runs, null for the site's default. A model the site stopped offering since the
+ * page loaded is refused, and the offer is read again.
+ */
+export function useChooseAiModel() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (aiModel: AiProvider | null) => apiRequest('put', '/v1/auth/me/ai-model', { body: { confirm: true, ai_model: aiModel } }),
+    onSuccess: (saved) => client.setQueryData(authKeys.aiModel, saved),
+    onError: (error) => {
+      if (isApiError(error) && error.code === 'ai_model_not_offered') void client.invalidateQueries({ queryKey: authKeys.aiModel })
+    },
   })
 }

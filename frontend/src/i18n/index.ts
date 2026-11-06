@@ -1,6 +1,7 @@
 import i18next from 'i18next'
 import { initReactI18next, useTranslation } from 'react-i18next'
 import { DEFAULT_LOCALE, initialLocale, isLocale, persistLocale, type Locale } from './language'
+import zhRuleNames from './locales/zh-TW/rule-names'
 import { NAMESPACES, resources } from './resources'
 
 export { useTranslation }
@@ -35,4 +36,11 @@ export async function changeLocale(locale: Locale): Promise<void> {
 export function useLocale(): Locale {
   const { i18n } = useTranslation()
   return isLocale(i18n.language) ? i18n.language : DEFAULT_LOCALE
+}
+
+const BUILT_IN_RULE_NAMES: Record<Locale, ReadonlyMap<string, string>> = { en: new Map(), 'zh-TW': zhRuleNames }
+
+/** A built-in strategy's rule name in the locale. English is the name itself, and any other name stays as typed. */
+export function builtInRuleName(locale: Locale, name: string): string {
+  return BUILT_IN_RULE_NAMES[locale].get(name) ?? name
 }

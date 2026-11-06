@@ -105,6 +105,71 @@
         "title": "AccountValueResponse",
         "type": "object"
       },
+      "AiModelRequest": {
+        "properties": {
+          "ai_model": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AiProvider"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "confirm": {
+            "const": true,
+            "title": "Confirm",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "confirm",
+          "ai_model"
+        ],
+        "title": "AiModelRequest",
+        "type": "object"
+      },
+      "AiModelResponse": {
+        "description": "My settings' AI model: the models the site offers its users, its default among them, and the one the user's runs use.",
+        "properties": {
+          "in_use": {
+            "$ref": "#/components/schemas/AiProvider"
+          },
+          "models": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "$ref": "#/components/schemas/AiProvider"
+            },
+            "title": "Models",
+            "type": "object"
+          },
+          "site_default": {
+            "$ref": "#/components/schemas/AiProvider"
+          }
+        },
+        "required": [
+          "models",
+          "site_default",
+          "in_use"
+        ],
+        "title": "AiModelResponse",
+        "type": "object"
+      },
+      "AiProvider": {
+        "enum": [
+          "openai",
+          "grok",
+          "gemini",
+          "groq",
+          "nvidia",
+          "claude"
+        ],
+        "title": "AiProvider",
+        "type": "string"
+      },
       "AiReportResponse": {
         "properties": {
           "bearish_factors": {
@@ -679,6 +744,7 @@
           "settings_edit_refused",
           "settings_refused",
           "technical_settings_conflict",
+          "ai_model_not_offered",
           "run_in_progress",
           "too_many_runs",
           "listing_unavailable",
@@ -1951,6 +2017,51 @@
         "minimum": 0.0,
         "type": "integer"
       },
+      "SettingChange": {
+        "description": "One setting the settings form writes: its keys from the top of the file, and its new value.",
+        "properties": {
+          "path": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Path",
+            "type": "array"
+          },
+          "value": {
+            "$ref": "#/components/schemas/SettingValue"
+          }
+        },
+        "required": [
+          "path",
+          "value"
+        ],
+        "title": "SettingChange",
+        "type": "object"
+      },
+      "SettingValue": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        ]
+      },
       "SettingsAction": {
         "enum": [
           "save",
@@ -2172,6 +2283,62 @@
           "modified_at"
         ],
         "title": "SettingsFileStatusResponse",
+        "type": "object"
+      },
+      "SettingsForm": {
+        "description": "A text of appsetting.yaml as the settings form shows it: the text; every setting it sets, by dotted path, a list\ncounting as one value (None for a text that does not parse); and the JSON schema of what each setting accepts.",
+        "properties": {
+          "schema": {
+            "additionalProperties": true,
+            "title": "Schema",
+            "type": "object"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "values": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Values"
+          }
+        },
+        "required": [
+          "text",
+          "values",
+          "schema"
+        ],
+        "title": "SettingsForm",
+        "type": "object"
+      },
+      "SettingsFormRequest": {
+        "properties": {
+          "changes": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SettingChange"
+            },
+            "maxItems": 100,
+            "title": "Changes",
+            "type": "array"
+          },
+          "text": {
+            "maxLength": 1048576,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "SettingsFormRequest",
         "type": "object"
       },
       "SettingsOverviewResponse": {
@@ -3169,6 +3336,16 @@
       "User": {
         "description": "A person who signs in, and the owner of their own mock account, watchlist, records and strategies. It holds no\ncredential: the user store keeps the password hash and the encrypted username and email, and hands back this model\nwith both decrypted, so the Web answers with it.",
         "properties": {
+          "ai_model": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AiProvider"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -3784,6 +3961,53 @@
         ]
       }
     },
+    "/v1/admin/settings/appsetting/form": {
+      "post": {
+        "description": "The settings form's view of a text of appsetting.yaml: the text with each change written over its setting's value\nin place, every other line, comment and key as it was; every setting the text then sets, by dotted path (null while\nthe text does not parse); and the JSON schema of what each setting accepts. Nothing is written: the page checks and\nsaves the text it answers like any text the administrator types.",
+        "operationId": "edit_settings_form_v1_admin_settings_appsetting_form_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsFormRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsForm"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "A change the text cannot take (settings_edit_refused): the text does not parse, the path names no setting it sets, or the value is of another kind than the one there."
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Edit Settings Form",
+        "tags": [
+          "Administration"
+        ]
+      }
+    },
     "/v1/admin/settings/reload": {
       "post": {
         "description": "The administrator's try again: loads the settings files as they are on disk now, an edit the server refused\nbefore included, since a refusal can come from outside the files (a database that was down, a broker login that\nfailed). The server runs on them when they start, and the answer's `refused` is null; or it keeps its settings,\nand `refused` says why.",
@@ -4347,6 +4571,71 @@
           }
         ],
         "summary": "Get Me",
+        "tags": [
+          "Sign-in"
+        ]
+      }
+    },
+    "/v1/auth/me/ai-model": {
+      "get": {
+        "description": "My settings: the AI models the site offers, its default, and the one the user's runs use. 401 when signed out.",
+        "operationId": "get_ai_model_v1_auth_me_ai_model_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiModelResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Get Ai Model",
+        "tags": [
+          "Sign-in"
+        ]
+      },
+      "put": {
+        "description": "Chooses the AI model of the user's next runs, or null for the site's default. A run already running keeps its model.\nA model the site stopped offering later leaves the choice saved, and the runs use the site's default meanwhile.",
+        "operationId": "choose_ai_model_v1_auth_me_ai_model_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiModelRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiModelResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "The site does not offer that model; nothing saved."
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Choose Ai Model",
         "tags": [
           "Sign-in"
         ]

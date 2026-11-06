@@ -4,6 +4,7 @@ from typing import Protocol
 from pydantic import SecretStr
 
 from a_domain.model.system.user import User, UserSession
+from a_domain.types.enums import AiProvider
 from a_domain.types.ids import SessionToken, UserId
 
 
@@ -63,5 +64,13 @@ class IUserStore(Protocol):
         A user who is no longer active, or who gets a new password, loses every session in the same transaction.
         Raises LastAdministratorError, writing nothing, when the save would leave no active administrator: the active
         administrators are locked first, so two administrators demoting each other at once cannot both succeed.
+        """
+        ...
+
+    async def save_ai_model(self, user_id: UserId, ai_model: AiProvider | None, now: datetime) -> None:
+        """
+        Writes only the user's choice of AI model, None for the site's default, changed at `now`. It and save() write
+        different columns, so neither undoes the other: a user's choice made while an administrator changes their role
+        keeps both.
         """
         ...

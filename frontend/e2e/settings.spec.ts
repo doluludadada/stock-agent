@@ -4,7 +4,8 @@ import type { Browser, Page } from '@playwright/test'
 import { ADMIN, APP_HEADER, apiGet, expect, signIn, test } from './fixtures'
 
 /**
- * The administrator's settings editor against a real backend: edits in the browser's editor, saves with the password,
+ * The administrator's settings editor against a real backend: a change in the form, edits in the browser's editor,
+ * saves with the password,
  * problems at their line and column, text that survives a reload and a visit elsewhere, a member kept out, and edits
  * made on disk that the running server loads, or refuses with its reasons.
  *
@@ -26,12 +27,19 @@ function onDisk(): string {
 
 const editor = (page: Page) => page.getByRole('textbox', { name: 'appsetting.yaml 的內容' })
 
+/** appsetting.yaml opens on its form; its text is the Advanced (YAML) view. */
+async function openText(page: Page) {
+  await page.getByRole('tab', { name: '進階（YAML）' }).click()
+  await expect(editor(page)).toBeVisible({ timeout: 60_000 })
+}
+
 /**
  * Replaces the first `find` through the editor's own search, the way an administrator would. The search field keeps
  * the last query, so it is emptied first, and the replacement is typed only once the match is selected: typed
  * anywhere else, it would edit a comment.
  */
 async function replaceInEditor(page: Page, find: string, put: string) {
+  await openText(page)
   await editor(page).click()
   await page.keyboard.press('ControlOrMeta+f')
   const query = page.locator('.cm-search input[name=search]')
@@ -60,7 +68,7 @@ async function discardChanges(page: Page) {
   await page.getByRole('alertdialog').getByRole('button', { name: '放棄修改' }).click()
 }
 
-test('an administrator changes the AI temperature, saves it with the password, and the server runs on it at once', async ({ page, consoleErrors }) => {
+test('an administrator changes the AI temperature in the form, saves it with the password, and the server runs on it at once', async ({ page, consoleErrors }) => {
   void consoleErrors
   await signIn(page)
   await page.goto('/admin/settings')
@@ -68,9 +76,16 @@ test('an administrator changes the AI temperature, saves it with the password, a
   const current = /temperature: ([\d.]+)/.exec(before.text)![1]!
   const next = current === '0.4' ? '0.5' : '0.4'
 
-  await expect(editor(page)).toContainText('environment: dev')
-  await replaceInEditor(page, `temperature: ${current}`, `temperature: ${next}`)
+  const form = page.getByRole('tabpanel', { name: '表單' })
+  await expect(form.getByRole('switch', { name: '開放註冊' })).toBeVisible({ timeout: 60_000 })
+  await expect(form.getByText(/^檔案中沒有這項設定/), 'every setting the form lists is in the shipped file').toHaveCount(0)
+  await expect(form.getByText(/^檔案中的值無法用表單顯示/), 'and has a control for its value').toHaveCount(0)
+  const temperature = form.getByRole('spinbutton', { name: '溫度' })
+  await temperature.fill(next)
+  await temperature.press('Enter')
   await expect(page.getByRole('region', { name: '檢查結果' })).toContainText('ai.temperature', { timeout: 60_000 })
+  await openText(page)
+  await expect(editor(page), 'the YAML shows the change the form made').toContainText(`temperature: ${next}`)
   await saveWithPassword(page)
 
   await expect(page.getByText(/^已於 .* 儲存，伺服器現在以它運作。$/)).toBeVisible({ timeout: 60_000 })
@@ -145,7 +160,7 @@ test('invalid YAML is shown at the line and column the server gives, and the tex
   const ask = page.getByRole('alertdialog', { name: '離開這個頁面？' })
   await expect(ask).toContainText('appsetting.yaml 未儲存的修改會保留在這個分頁')
   await ask.getByRole('button', { name: '離開' }).click()
-  await page.waitForURL((url) => url.pathname === '/')
+  await page.waitForURL((url) => url.pathname === '/market')
   await page.getByRole('navigation', { name: '主要導覽' }).getByRole('link', { name: '系統設定' }).click()
   await expect(page.getByRole('tab', { name: /appsetting\.yaml.*有未儲存的修改/ })).toBeVisible({ timeout: 60_000 })
   await expect(located).toBeVisible({ timeout: 60_000 })
@@ -177,6 +192,7 @@ test('an edit made on disk is loaded by the running server, and one it would not
   await signIn(page)
   await page.goto('/admin/settings')
   await expect(page.getByText('伺服器正以此檔運作')).toBeVisible({ timeout: 60_000 })
+  await openText(page)
 
   try {
     writeFileSync(file, original.replace('# config/appsetting.yaml', '# config/appsetting.yaml, edited on the server'))

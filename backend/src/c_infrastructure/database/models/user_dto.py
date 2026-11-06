@@ -16,7 +16,7 @@ from sqlmodel import Field, SQLModel, col
 
 from a_domain.model.system.user import User
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from a_domain.types.enums import Role, UserStatus
+from a_domain.types.enums import AiProvider, Role, UserStatus
 from a_domain.types.ids import SessionToken, UserId
 from a_domain.types.values import comparable_name
 from b_application.config.app_config import AppConfig
@@ -121,6 +121,7 @@ class UserDTO(SQLModel, table=True):
     status: UserStatus
     created_at: datetime = Field(sa_type=UtcDateTime)
     updated_at: datetime = Field(sa_type=UtcDateTime)
+    ai_model: AiProvider | None = None
 
     @classmethod
     def from_domain(cls, user: User, password_hash: str, keys: UserKeys) -> Self:
@@ -135,6 +136,7 @@ class UserDTO(SQLModel, table=True):
             status=user.status,
             created_at=user.created_at,
             updated_at=user.created_at,
+            ai_model=user.ai_model,
         )
 
     @classmethod
@@ -150,6 +152,7 @@ class UserDTO(SQLModel, table=True):
             role=self.role,
             status=self.status,
             created_at=self.created_at,
+            ai_model=self.ai_model,
         )
 
 

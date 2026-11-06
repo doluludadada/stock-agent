@@ -1,28 +1,31 @@
 """
-The upgrade from schema version 2 (one owner, no owner columns) to 3 (rows have owners) on a real database of each
-backend: every row is kept and becomes the legacy owner's, which is what the first administrator takes at setup; a
-second start changes nothing; and a failure inside the step leaves the database exactly as version 2 left it.
+The upgrades on a real database of each backend. From schema version 2 (one owner, no owner columns) to 3 (rows have
+owners): every row is kept and becomes the legacy owner's, which is what the first administrator takes at setup; a
+second start changes nothing; and a failure inside the step leaves the database exactly as version 2 left it. From 3
+to 4 (a user's AI model): every user keeps their row and signs in as before on the site's default model.
 """
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import UUID
 
 import pytest
+from pydantic import SecretStr
 from sqlalchemy import Connection, inspect, text
-from support.databases import BACKENDS, create_version_2_tables, database_config, empty_database, raw_engine
+from support.databases import BACKENDS, create_version_2_tables, create_version_3_tables, database_config, empty_database, raw_engine
 from support.harness import MARKET_OPEN
 from trading_stack import MovableClock, SilentLogger
 
 import c_infrastructure.database.models.schema_version_dto as schema_version
-from a_domain.types.enums import DatabaseBackend
+from a_domain.types.enums import AiProvider, DatabaseBackend, Role
 from a_domain.types.ids import RunId, UserId
 from c_infrastructure.database.db_connector import DatabaseCommandError, DatabaseConnector
 from c_infrastructure.database.models.schema_version_dto import SCHEMA_VERSION
-from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
+from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID, UserKeys
 from c_infrastructure.database.repositories.trading_journal import TradingJournal
+from c_infrastructure.database.repositories.user_store import SqlUserStore
 from c_infrastructure.database.repositories.watchlist_repository import WatchlistRepository
 from c_infrastructure.trading.mock.mock_execution_provider import MockExecutionProvider
 
@@ -300,3 +303,98 @@ async def test_a_failure_inside_the_owner_step_leaves_the_version_2_database_as_
     after = await database_snapshot(backend, tmp_path)
     assert after == before
     assert after["schema_version"][1] == [("2",)]
+
+
+ACCOUNTS_KEY = SecretStr("A" * 43)
+"""32 zero-ish bytes in base64url: the key the version-3 users below were sealed with."""
+
+
+async def version_3_database(backend: DatabaseBackend, folder: Path) -> DatabaseConnector:
+    """A database as version 3 left it: its tables, the stamp 3, the administrator and a user, and the administrator's run."""
+    connector = await empty_database(backend, folder)
+    await create_version_3_tables(backend, folder)
+    keys, engine = UserKeys(ACCOUNTS_KEY), raw_engine(backend, folder)
+    users = [(LEGACY_OWNER_ID, "owner", "ADMINISTRATOR"), ("u-member", "member", "USER")]
+    run = {"owner_id": LEGACY_OWNER_ID, **dict(LEGACY_ROWS)["workflow_runs"]}
+
+    async with engine.begin() as connection:
+        for user_id, name, role in users:
+            await connection.execute(
+                text(
+                    "INSERT INTO users (user_id, username_sealed, username_index, email_sealed, email_index, password_hash, "
+                    "role, status, created_at, updated_at) VALUES (:user_id, :username_sealed, :username_index, "
+                    ":email_sealed, :email_index, 'not a hash', :role, 'ACTIVE', :at, :at)"
+                ),
+                {
+                    "user_id": user_id,
+                    "username_sealed": keys.seal("username", user_id, name),
+                    "username_index": keys.username_index(name),
+                    "email_sealed": keys.seal("email", user_id, f"{name}@example.com"),
+                    "email_index": keys.email_index(f"{name}@example.com"),
+                    "role": role,
+                    "at": stored(backend, AT),
+                },
+            )
+
+        await connection.execute(
+            text(f"INSERT INTO workflow_runs ({', '.join(run)}) VALUES ({', '.join(f':{column}' for column in run)})"),
+            {column: stored(backend, value) for column, value in run.items()},
+        )
+
+    await engine.dispose()
+    return connector
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+async def test_a_version_3_database_gains_the_ai_model_and_keeps_every_user_on_the_site_default(
+    backend: DatabaseBackend, tmp_path: Path
+) -> None:
+    connector = await version_3_database(backend, tmp_path)
+    before = await database_snapshot(backend, tmp_path)
+
+    try:
+        migration = await connector.migrate()
+        await connector.init_db()
+        store = SqlUserStore(connector, ACCOUNTS_KEY, SilentLogger())
+        upgraded = await store.users()
+        await store.save_ai_model(UserId("u-member"), AiProvider.OPENAI, AT.replace(tzinfo=UTC))
+        chosen = await store.find(UserId("u-member"))
+        run = await TradingJournal(connector.for_owner(LEGACY_OWNER_ID)).find_run(RunId(RUN))
+    finally:
+        await connector.close()
+
+    after = await database_snapshot(backend, tmp_path)
+    assert list(migration.before.pending) == ["3 -> 4 add_user_ai_model"]
+    assert after["schema_version"][1] == [(str(SCHEMA_VERSION),)]
+    assert {table: len(rows) for table, (_, rows) in after.items()} == {table: len(rows) for table, (_, rows) in before.items()}
+    assert set(after["users"][0]) - set(before["users"][0]) == {"ai_model"}
+    assert [(user.username, user.role, user.ai_model) for user in upgraded] == [
+        ("owner", Role.ADMINISTRATOR, None),
+        ("member", Role.USER, None),
+    ]
+    assert chosen is not None and chosen.ai_model == AiProvider.OPENAI
+    assert run is not None and run.orders_filled == 1
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+async def test_a_failure_after_the_ai_model_step_leaves_the_version_3_database_as_it_was(
+    backend: DatabaseBackend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connector = await version_3_database(backend, tmp_path)
+    before = await database_snapshot(backend, tmp_path)
+
+    async def fails_after_the_column(connection: Any) -> None:
+        await schema_version.add_user_ai_model(connection)
+        raise RuntimeError("the upgrade stopped after adding the column")
+
+    monkeypatch.setattr(schema_version, "UPGRADES", (*schema_version.UPGRADES[:2], fails_after_the_column))
+
+    try:
+        with pytest.raises(DatabaseCommandError, match="after adding the column"):
+            await connector.migrate()
+    finally:
+        await connector.close()
+
+    after = await database_snapshot(backend, tmp_path)
+    assert after == before
+    assert after["schema_version"][1] == [("3",)]

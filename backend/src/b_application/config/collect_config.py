@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from a_domain.rules.collect.freshness import DataFreshnessRule, MissingSessionRule, RealtimeQuoteRule
 
@@ -42,6 +42,8 @@ class FreshnessConfig(BaseModel):
     The official closes that price a P/E valuation follow DailyCloseFreshnessRule instead: it tolerates
     only the exchanges' publication lag, daily_close_max_missed_sessions weekday sessions.
     """
+
+    model_config = ConfigDict(use_attribute_docstrings=True)
 
     realtime_max_lag_minutes: int = Field(default=15, gt=0)
     history_max_lag_days: int = Field(default=10, gt=0)

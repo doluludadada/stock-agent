@@ -6,6 +6,7 @@ from trading_stack import SilentLogger, run_stats
 
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
+from a_domain.types.enums import MarketType
 from b_application.config.app_config import AppConfig
 from b_application.config.market_data_config import MarketHoursConfig
 from b_application.use_cases.collect.market_data_collector import MarketDataCollector
@@ -16,8 +17,8 @@ pytestmark = pytest.mark.asyncio
 
 NOW = datetime(2026, 10, 19, 10, 0, tzinfo=TAIWAN_TIMEZONE)
 MISSING_FRIDAY = (
-    "Daily history lacks the 2026-10-16 session for 2/2 stocks (2317, 2330): the price source has not published it, "
-    "so their analysis ends at an earlier close. An exchange holiday also reads as missing."
+    "Daily history lacks the 2026-10-16 session for 2/2 stocks (2317, 2330): no TWSE stock has it, so TWSE has not "
+    "published it yet, it was an exchange holiday, or none of these stocks traded. Their analysis ends at an earlier close."
 )
 
 
@@ -98,6 +99,49 @@ async def test_history_without_the_last_settled_session_is_a_run_error(tmp_path,
     stocks = [Stock(stock_id="2330"), Stock(stock_id="2317")]
 
     await collector(feed, tmp_path).execute(stocks, 1, stats)
+
+    assert stats.errors == errors
+    assert all(stock.ohlcv for stock in stocks)
+
+
+class SessionFeed:
+    def __init__(self, sessions: dict[str, date]) -> None:
+        self._sessions = sessions
+
+    async def fetch_history(self, stocks: list[Stock], start_date: datetime, end_date: datetime) -> dict[str, list[Ohlcv]]:
+        return {
+            stock_id: [Ohlcv(ts=datetime.combine(session, time(13, 30), TAIWAN_TIMEZONE), open=1, high=1, low=1, close=1, volume=1)]
+            for stock_id, session in self._sessions.items()
+        }
+
+
+FRIDAY, THURSDAY = date(2026, 10, 16), date(2026, 10, 15)
+TWSE_UNPUBLISHED = (
+    "Daily history lacks the 2026-10-16 session for 2/3 stocks (1538, 2330): no TWSE stock has it, so TWSE has not "
+    "published it yet, it was an exchange holiday, or none of these stocks traded. Their analysis ends at an earlier close."
+)
+
+
+@pytest.mark.parametrize(
+    ("sessions", "errors"),
+    [
+        ({"2330": FRIDAY, "1538": THURSDAY, "6488": FRIDAY}, []),
+        ({"2330": THURSDAY, "1538": THURSDAY, "6488": FRIDAY}, [TWSE_UNPUBLISHED]),
+    ],
+    ids=["a stock without a trade that session", "TPEX published and TWSE not yet"],
+)
+async def test_a_session_is_missing_only_when_none_of_an_exchanges_stocks_has_it(
+    tmp_path, sessions: dict[str, date], errors: list[str]
+) -> None:
+    stats = run_stats()
+    stocks = [Stock(stock_id="2330"), Stock(stock_id="1538"), Stock(stock_id="6488", market=MarketType.TPEX)]
+
+    await MarketDataCollector(
+        ohlcv_provider=SessionFeed(sessions),
+        market_clock=ClockAt(MarketHoursConfig()),
+        config=freshness_config(tmp_path),
+        logger=SilentLogger(),
+    ).execute(stocks, 1, stats)
 
     assert stats.errors == errors
     assert all(stock.ohlcv for stock in stocks)

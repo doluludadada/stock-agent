@@ -11,7 +11,7 @@ version is a command you run on purpose, `just db-migrate`, and it backs the dat
 When the code needs a newer version than the database holds, the CLI and the Web API stop at startup with this message:
 
 ```text
-The database is at schema version 1, and this version of stock-agent needs 3. Startup never upgrades a database.
+The database is at schema version 1, and this version of stock-agent needs 4. Startup never upgrades a database.
 Remedy: run `just db-migrate`. It backs the database up into backups/ first, then upgrades it in one transaction. `just db-status` shows the steps it runs.
 ```
 
@@ -23,7 +23,7 @@ Remedy: run `just db-migrate`. It backs the database up into backups/ first, the
 4. Start the app again.
 
 If a step fails, the transaction rolls back. The database keeps its version and every row, and the message names the
-step that failed and the backup. A second `just db-migrate` prints `Already at version 3. Nothing to migrate, and no
+step that failed and the backup. A second `just db-migrate` prints `Already at version 4. Nothing to migrate, and no
 backup was made.` and changes nothing.
 
 ## Restore a backup
@@ -55,7 +55,7 @@ unique constraint, or a change to how a column stores its value. A new table nee
    the new version.
 4. Test the step on both backends. Build a database of the previous version from the tables that version created, fill
    it with rows, run `DatabaseConnector.migrate()`, and check every row. Also check that a failure inside the step
-   leaves the database as it was. `tests/test_schema_upgrade.py` does both for the step from version 2 to 3.
+   leaves the database as it was. `tests/test_schema_upgrade.py` does both for the steps from version 2 to 3 and from 3 to 4.
 
 Each step follows these rules:
 

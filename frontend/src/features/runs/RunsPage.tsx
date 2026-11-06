@@ -1,10 +1,10 @@
-import { Activity, Megaphone, Play, Radar, ScanSearch, ShieldAlert } from 'lucide-react'
+import { Activity, ArrowRight, ClipboardList, Megaphone, Play, Radar, ScanSearch, ShieldAlert, UserRound } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { useLocale, useTranslation } from '@/i18n'
 import { paths } from '@/shared/config/paths'
-import { isApiError } from '@/shared/api'
+import { isApiError, useSession } from '@/shared/api'
 import { formatDateTime } from '@/shared/lib/format'
 import { isAcceptedList, parseStockIds } from '@/shared/lib/stock-ids'
 import { Badge } from '@/shared/ui/badge'
@@ -18,8 +18,8 @@ import { Panel } from '@/shared/ui/panel'
 import { Skeleton } from '@/shared/ui/skeleton'
 import { StateBlock } from '@/shared/ui/state-block'
 import { StockIdsProblem } from '@/shared/ui/stock-ids-problem'
-import { RequireSignIn } from '@/shared/ui/require-sign-in'
-import { PAGE_SIZE, useRunsPage, useStartRun, type Run, type RunKind } from './api'
+import { SignInActions } from '@/shared/ui/require-sign-in'
+import { PAGE_SIZE, useRunSignals, useRunsPage, useStartRun, type Run, type RunKind, type Signal } from './api'
 import { RunStateBadge } from './RunStateBadge'
 
 const KINDS: { kind: RunKind; icon: typeof Play; orders: boolean }[] = [
@@ -29,18 +29,64 @@ const KINDS: { kind: RunKind; icon: typeof Play; orders: boolean }[] = [
   { kind: 'intraday', icon: Activity, orders: true },
 ]
 
+/** The home page: start a run, read the latest result and the history; a visitor reads what the analyses do. */
 export function RunsPage() {
   const { t } = useTranslation('runs')
+  const current = useSession()
   return (
     <div className="space-y-5 lg:space-y-6">
-      <PageHeader eyebrow={t('common:nav.section.mine')} title={t('title')} description={t('description')} />
-      <RequireSignIn layout="page" reason={t('signIn')}>
+      <PageHeader eyebrow={t('common:nav.section.analysis')} title={t('title')} description={t('description')} />
+      {current.status === 'checking' && <Skeleton className="h-40 rounded-2xl" />}
+      {current.status === 'signedOut' && <Intro ended={current.ended} />}
+      {current.status === 'signedIn' && (
         <div className="space-y-4 lg:space-y-5">
           <StartPanel />
+          <LatestResult />
           <History />
         </div>
-      </RequireSignIn>
+      )}
     </div>
+  )
+}
+
+function Intro({ ended }: { ended: boolean }) {
+  const { t } = useTranslation('runs')
+  return (
+    <section className="grid overflow-hidden rounded-2xl border bg-card shadow-card md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <StateBlock
+        icon={UserRound}
+        title={ended ? t('common:auth.ended.title') : t('signIn')}
+        description={ended ? t('common:auth.ended.description') : t('common:auth.prompt.description')}
+        className="py-10 md:items-start md:px-10 md:text-left [&>div]:md:justify-start"
+        action={
+          <>
+            <SignInActions />
+            <Button asChild variant="ghost">
+              <Link to={paths.market}>
+                {t('common:nav.overview')}
+                <ArrowRight aria-hidden />
+              </Link>
+            </Button>
+          </>
+        }
+      />
+      <div className="border-t bg-muted/40 px-6 py-8 md:border-t-0 md:border-l md:px-10">
+        <p className="eyebrow mb-4">{t('startQuestion')}</p>
+        <ul className="grid gap-4">
+          {KINDS.map(({ kind, icon: Icon }) => (
+            <li key={kind} className="flex items-start gap-3">
+              <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-brand-soft text-brand">
+                <Icon aria-hidden className="size-4.5" />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm font-medium">{t(`kind.${kind}.title`)}</span>
+                <span className="block text-xs text-pretty text-muted-foreground">{t(`kind.${kind}.description`)}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
   )
 }
 
@@ -142,6 +188,65 @@ function StartPanel() {
         confirm={t('confirm.start')}
         onConfirm={launch}
       />
+    </Panel>
+  )
+}
+
+/** The newest run that ended, if any; a running run has no decisions yet. */
+function LatestResult() {
+  const latest = useRunsPage(0).data?.runs.find((run) => run.state !== 'running')
+  return latest ? <LatestRun run={latest} /> : null
+}
+
+const LATEST_SHOWN = 5
+const buyFirstThenScore = (a: Signal, b: Signal) => Number(b.action === 'buy') - Number(a.action === 'buy') || b.score - a.score
+
+function LatestRun({ run }: { run: Run }) {
+  const { t } = useTranslation('runs')
+  const locale = useLocale()
+  const signals = useRunSignals(run.run_id, true)
+  const summary = run.summary
+  const strongest = signals.data ? [...signals.data].sort(buyFirstThenScore).slice(0, LATEST_SHOWN) : []
+  const timing = summary && t('timing', { start: formatDateTime(locale, summary.start_time), end: summary.end_time ? formatDateTime(locale, summary.end_time) : '—' })
+  const columns: Column<Signal>[] = [
+    {
+      key: 'stock',
+      header: t('column.stock'),
+      cell: (signal) => (
+        <Link to={paths.stock(signal.stock_id)} className="stretched-link font-mono hover:text-brand focus-visible:text-brand">
+          {signal.stock_id}
+        </Link>
+      ),
+    },
+    {
+      key: 'action',
+      header: t('column.action'),
+      cell: (signal) => <Badge variant={signal.action === 'buy' ? 'default' : 'outline'}>{t(`action.${signal.action}`)}</Badge>,
+    },
+    { key: 'score', header: t('column.score'), numeric: true, cell: (signal) => signal.score },
+    { key: 'reason', header: t('column.reason'), from: 'md', className: 'w-full min-w-48 whitespace-normal text-xs text-muted-foreground', cell: (signal) => signal.reason },
+  ]
+  return (
+    <Panel
+      title={t('latest.title')}
+      description={summary ? `${t(`workflow.${summary.workflow}`)} · ${timing}` : t('unrecorded')}
+      aside={
+        <>
+          <RunStateBadge state={run.state} />
+          <Button asChild variant="ghost" size="sm" className="-my-1">
+            <Link to={paths.run(run.run_id)}>
+              {t('latest.open')}
+              <ArrowRight aria-hidden />
+            </Link>
+          </Button>
+        </>
+      }
+      flush={strongest.length > 0}
+    >
+      {signals.isPending && <Skeleton className="h-24 rounded-lg" />}
+      {signals.isError && <ErrorState error={signals.error} title={t('signalsFailed')} onRetry={() => void signals.refetch()} />}
+      {signals.data && strongest.length === 0 && <StateBlock icon={ClipboardList} title={t('noSignals')} className="py-4" />}
+      {strongest.length > 0 && <DataTable rows={strongest} columns={columns} rowKey={(signal) => signal.decision_id} label={t('latest.title')} />}
     </Panel>
   )
 }

@@ -14,7 +14,7 @@ from sqlmodel import col, select
 from a_domain.model.system.user import User, UserSession
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.user_store import IUserStore
-from a_domain.types.enums import Role, UserStatus
+from a_domain.types.enums import AiProvider, Role, UserStatus
 from a_domain.types.errors import AlreadySetUpError, LastAdministratorError, UserExistsError
 from a_domain.types.ids import SessionToken, UserId
 from c_infrastructure.database.db_connector import DatabaseConnector
@@ -198,4 +198,10 @@ class SqlUserStore(IUserStore):
             if not (await session.execute(administrators)).first():
                 raise LastAdministratorError("At least one active administrator must remain. Nothing was saved.")
 
+            await session.commit()
+
+    @override
+    async def save_ai_model(self, user_id: UserId, ai_model: AiProvider | None, now: datetime) -> None:
+        async with self._db.get_session() as session:
+            await session.execute(update(UserDTO).where(col(UserDTO.user_id) == user_id).values(ai_model=ai_model, updated_at=now))
             await session.commit()

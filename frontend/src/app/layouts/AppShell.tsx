@@ -1,6 +1,6 @@
 import { Ellipsis, Search, WifiOff } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router'
+import { Link, Outlet, useLocation, useNavigate } from 'react-router'
 import { UserMenu } from '@/features/auth'
 import { useTranslation } from '@/i18n'
 import { useSession } from '@/shared/api'
@@ -9,7 +9,7 @@ import { useOnline } from '@/shared/lib/use-online'
 import { cn } from '@/shared/lib/utils'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/shared/ui/sheet'
 import { BrandMark } from './BrandMark'
-import { isInTab, navSections, TAB_PAGES, type NavItem, type NavSection } from './navigation'
+import { isCurrent, navSections, TAB_PAGES, type NavItem, type NavSection } from './navigation'
 import { PreferenceControls, PreferenceMenu } from './PreferenceMenu'
 import { SearchField, SearchPalette } from './StockSearch'
 
@@ -59,7 +59,7 @@ export function AppShell() {
           <SearchField onOpen={() => setSearching(true)} className="hidden md:flex" />
           <div className="ml-auto flex items-center gap-1">
             <PreferenceMenu />
-            <UserMenu adminLinks={{ users: paths.users, settings: paths.adminSettings }} onSignedOut={() => navigate(paths.overview)} />
+            <UserMenu adminLinks={{ users: paths.users, settings: paths.adminSettings }} onSignedOut={() => navigate(paths.runs)} />
           </div>
         </header>
 
@@ -73,7 +73,7 @@ export function AppShell() {
         </main>
       </div>
 
-      <TabBar onSearch={() => setSearching(true)} onMore={() => setMoreOpen(true)} moreActive={!Object.values(TAB_PAGES).some((item) => isInTab(item, location.pathname))} />
+      <TabBar onSearch={() => setSearching(true)} onMore={() => setMoreOpen(true)} moreActive={!Object.values(TAB_PAGES).some((item) => isCurrent(item, location.pathname))} />
       <MoreSheet open={moreOpen} onOpenChange={setMoreOpen} sections={sections} />
       <SearchPalette open={searching} onOpenChange={setSearching} sections={sections} />
     </div>
@@ -82,6 +82,7 @@ export function AppShell() {
 
 function SideNav({ sections }: { sections: NavSection[] }) {
   const { t } = useTranslation()
+  const location = useLocation()
   return (
     <div className="space-y-5">
       {sections.map((section) => (
@@ -91,20 +92,18 @@ function SideNav({ sections }: { sections: NavSection[] }) {
           <ul className="space-y-0.5">
             {section.items.map((item) => (
               <li key={item.key}>
-                <NavLink
+                <Link
                   to={item.to}
-                  end={item.end}
-                  className={({ isActive }) =>
-                    cn(
-                      'group flex min-h-14 flex-col items-center justify-center gap-1 rounded-lg px-1 text-center text-[0.6875rem] leading-tight text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
-                      'lg:min-h-9 lg:flex-row lg:justify-start lg:gap-2.5 lg:px-2.5 lg:text-left lg:text-sm',
-                      isActive && 'bg-brand-soft font-medium text-brand hover:bg-brand-soft hover:text-brand',
-                    )
-                  }
+                  aria-current={isCurrent(item, location.pathname) ? 'page' : undefined}
+                  className={cn(
+                    'group flex min-h-14 flex-col items-center justify-center gap-1 rounded-lg px-1 text-center text-[0.6875rem] leading-tight text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
+                    'lg:min-h-9 lg:flex-row lg:justify-start lg:gap-2.5 lg:px-2.5 lg:text-left lg:text-sm',
+                    isCurrent(item, location.pathname) && 'bg-brand-soft font-medium text-brand hover:bg-brand-soft hover:text-brand',
+                  )}
                 >
                   <item.icon aria-hidden className="size-5 shrink-0 lg:size-4" />
                   {t(`nav.${item.key}`)}
-                </NavLink>
+                </Link>
               </li>
             ))}
           </ul>
@@ -116,12 +115,12 @@ function SideNav({ sections }: { sections: NavSection[] }) {
 
 const tabClass = 'flex min-h-11 flex-1 flex-col items-center justify-center gap-0.5 text-[0.6875rem] font-medium transition-colors'
 
-/** The phone's bottom bar: the market, the watchlist, search, the account and everything else. */
+/** The phone's bottom bar: the analysis runs, the market, search, the watchlist, the account and everything else. */
 function TabBar({ onSearch, onMore, moreActive }: { onSearch: () => void; onMore: () => void; moreActive: boolean }) {
   const { t } = useTranslation()
   const location = useLocation()
   const tab = (name: keyof typeof TAB_PAGES, item: NavItem) => {
-    const active = isInTab(item, location.pathname)
+    const active = isCurrent(item, location.pathname)
     return (
       <Link to={item.to} aria-current={active ? 'page' : undefined} className={cn(tabClass, active ? 'text-brand' : 'text-muted-foreground')}>
         <item.icon aria-hidden className={cn('size-5', active && name === 'watchlist' && 'fill-current')} />
@@ -135,14 +134,15 @@ function TabBar({ onSearch, onMore, moreActive }: { onSearch: () => void; onMore
       className="fixed inset-x-0 bottom-0 z-30 flex border-t bg-background/92 px-1 pb-[env(safe-area-inset-bottom)] shadow-bar backdrop-blur-md md:hidden"
     >
       <div className="flex h-(--tabbar-height) w-full items-stretch">
+        {tab('analysis', TAB_PAGES.analysis)}
         {tab('market', TAB_PAGES.market)}
-        {tab('watchlist', TAB_PAGES.watchlist)}
         <button type="button" onClick={onSearch} className={cn(tabClass, 'text-muted-foreground')}>
           <span className="grid size-9 place-items-center rounded-full bg-brand text-primary-foreground shadow-card">
             <Search aria-hidden className="size-4.5" />
           </span>
           <span className="sr-only">{t('nav.tab.search')}</span>
         </button>
+        {tab('watchlist', TAB_PAGES.watchlist)}
         {tab('account', TAB_PAGES.account)}
         <button type="button" onClick={onMore} aria-haspopup="dialog" className={cn(tabClass, moreActive ? 'text-brand' : 'text-muted-foreground')}>
           <Ellipsis aria-hidden className="size-5" />
@@ -156,6 +156,7 @@ function TabBar({ onSearch, onMore, moreActive }: { onSearch: () => void; onMore
 /** Every page, the language and the theme, in a sheet that rises from the tab bar. */
 function MoreSheet({ open, onOpenChange, sections }: { open: boolean; onOpenChange: (open: boolean) => void; sections: NavSection[] }) {
   const { t } = useTranslation()
+  const location = useLocation()
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="bottom" className="max-h-[85dvh] gap-0 overflow-y-auto rounded-t-2xl bg-card pb-[calc(env(safe-area-inset-bottom)+1rem)]">
@@ -170,17 +171,18 @@ function MoreSheet({ open, onOpenChange, sections }: { open: boolean; onOpenChan
               <ul className="grid grid-cols-2 gap-2">
                 {section.items.map((item) => (
                   <li key={item.key}>
-                    <NavLink
+                    <Link
                       to={item.to}
-                      end={item.end}
+                      aria-current={isCurrent(item, location.pathname) ? 'page' : undefined}
                       onClick={() => onOpenChange(false)}
-                      className={({ isActive }) =>
-                        cn('flex min-h-12 items-center gap-2.5 rounded-xl border px-3 text-sm', isActive ? 'border-brand/30 bg-brand-soft font-medium text-brand' : 'bg-background')
-                      }
+                      className={cn(
+                        'flex min-h-12 items-center gap-2.5 rounded-xl border px-3 text-sm',
+                        isCurrent(item, location.pathname) ? 'border-brand/30 bg-brand-soft font-medium text-brand' : 'bg-background',
+                      )}
                     >
                       <item.icon aria-hidden className="size-4.5 shrink-0" />
                       {t(`nav.${item.key}`)}
-                    </NavLink>
+                    </Link>
                   </li>
                 ))}
               </ul>

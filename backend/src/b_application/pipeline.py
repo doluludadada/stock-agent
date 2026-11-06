@@ -10,12 +10,19 @@ from a_domain.model.system.stats import SystemStats
 from a_domain.model.system.user import User, UserSession
 from a_domain.model.valuation.scan import MarketValuation, ScanCriteria, ValuationScan
 from a_domain.model.valuation.valuation import ReportSection, StockValuation, ValuationReport
-from a_domain.ports.system.settings_files import SettingsAuditEntry, SettingsBackup, SettingsDocument, SettingsEdit
+from a_domain.ports.system.settings_files import (
+    SettingChange,
+    SettingsAuditEntry,
+    SettingsBackup,
+    SettingsDocument,
+    SettingsEdit,
+    SettingsForm,
+)
 from a_domain.rules.market.breadth import MarketBreadth
 from a_domain.rules.system.registration import SignInOffer
 from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
 from a_domain.rules.watchlist.membership import WatchlistAddition
-from a_domain.types.enums import AiAnalysisFocus, MarketIndex, Role, SettingsFile, UserStatus, WatchlistType, Workflow
+from a_domain.types.enums import AiAnalysisFocus, AiProvider, MarketIndex, Role, SettingsFile, UserStatus, WatchlistType, Workflow
 from a_domain.types.ids import RunId, SessionToken, UserId
 from a_domain.types.values import EmailAddress, NewPassword, PositiveFiniteFloat, Username
 from b_application.schemas.pipeline_status import PipelineStatus
@@ -24,6 +31,7 @@ from b_application.use_cases.admin.settings_audit import SettingsAudit
 from b_application.use_cases.admin.settings_backups import SettingsBackups
 from b_application.use_cases.admin.settings_confirmation import SettingsConfirmation
 from b_application.use_cases.admin.settings_editor import SettingsEditor
+from b_application.use_cases.admin.settings_form_editor import SettingsFormEditor
 from b_application.use_cases.admin.settings_reader import SettingsReader
 from b_application.use_cases.admin.settings_save import SettingsSave
 from b_application.use_cases.chat.chat_reply import ChatReply
@@ -64,6 +72,8 @@ from b_application.use_cases.trade.order_outcome import OrderOutcome
 from b_application.use_cases.trade.order_preparation import OrderPreparation
 from b_application.use_cases.trade.unwatch_stocks import UnwatchStocks
 from b_application.use_cases.trade.watch_stocks import WatchStocks
+from b_application.use_cases.users.ai_model_choice import AiModelChoice
+from b_application.use_cases.users.ai_model_lookup import AiModelLookup
 from b_application.use_cases.users.first_administrator_setup import FirstAdministratorSetup
 from b_application.use_cases.users.password_reset import PasswordReset
 from b_application.use_cases.users.session_start import SessionStart
@@ -152,6 +162,7 @@ class Pipeline:
     settings_backups: SettingsBackups
     settings_audit: SettingsAudit
     settings_editor: SettingsEditor
+    settings_form_editor: SettingsFormEditor
     settings_confirmation: SettingsConfirmation
     settings_save: SettingsSave
     editor_access: EditorAccess
@@ -166,6 +177,8 @@ class Pipeline:
     sign_out: SignOut
     user_directory: UserDirectory
     user_change: UserChange
+    ai_model_lookup: AiModelLookup
+    ai_model_choice: AiModelChoice
 
     async def run_full_cycle(self, run_id: RunId | None = None, built_in_strategy_id: str | None = None) -> PipelineStatus:
         """After-market analysis of the whole market. It records decisions priced from daily closes and never orders."""
@@ -509,6 +522,13 @@ class Pipeline:
         """
         return await self.settings_editor.execute(file, expected_revision, host, text, backup_id)
 
+    def edit_settings_form(self, text: str, changes: Sequence[SettingChange]) -> SettingsForm:
+        """
+        A text of appsetting.yaml as the settings form shows it, with the form's changes written into it in place.
+        Nothing is written: the page checks and saves the text it answers like any text the administrator types.
+        """
+        return self.settings_form_editor.execute(text, changes)
+
     async def review_settings_save(
         self,
         administrator: User,
@@ -589,3 +609,19 @@ class Pipeline:
     ) -> User | None:
         """The administrator's change of a user's role, status or password. None when no such user exists."""
         return await self.user_change.execute(user_id, role, status, password)
+
+    def load_ai_models(self, user: User) -> tuple[dict[AiProvider, str], AiProvider, AiProvider]:
+        """
+        My settings: each AI model the site offers with its model id, the site's default, and the model the user's runs
+        use, their choice while the site offers it, else the default.
+        """
+        return self.ai_model_lookup.execute(user)
+
+    async def choose_ai_model(self, user: User, ai_model: AiProvider | None) -> tuple[dict[AiProvider, str], AiProvider, AiProvider]:
+        """
+        My settings' save of the AI model for the user's next runs, one the site offers or None for the site's default,
+        then what load_ai_models answers. It raises AiModelNotOffered, saving nothing, for a model the site does not offer.
+        """
+        saved = await self.ai_model_choice.execute(user, ai_model)
+
+        return self.ai_model_lookup.execute(saved)

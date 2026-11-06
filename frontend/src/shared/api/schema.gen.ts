@@ -65,6 +65,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/settings/appsetting/form": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Edit Settings Form
+         * @description The settings form's view of a text of appsetting.yaml: the text with each change written over its setting's value
+         *     in place, every other line, comment and key as it was; every setting the text then sets, by dotted path (null while
+         *     the text does not parse); and the JSON schema of what each setting accepts. Nothing is written: the page checks and
+         *     saves the text it answers like any text the administrator types.
+         */
+        post: operations["edit_settings_form_v1_admin_settings_appsetting_form_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/settings/reload": {
         parameters: {
             query?: never;
@@ -246,6 +269,31 @@ export interface paths {
          */
         get: operations["get_me_v1_auth_me_get"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/me/ai-model": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Ai Model
+         * @description My settings: the AI models the site offers, its default, and the one the user's runs use. 401 when signed out.
+         */
+        get: operations["get_ai_model_v1_auth_me_ai_model_get"];
+        /**
+         * Choose Ai Model
+         * @description Chooses the AI model of the user's next runs, or null for the site's default. A run already running keeps its model.
+         *     A model the site stopped offering later leaves the choice saved, and the runs use the site's default meanwhile.
+         */
+        put: operations["choose_ai_model_v1_auth_me_ai_model_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -887,6 +935,32 @@ export interface components {
             /** Unrealized Pnl */
             unrealized_pnl: number;
         };
+        /** AiModelRequest */
+        AiModelRequest: {
+            ai_model: components["schemas"]["AiProvider"] | null;
+            /**
+             * Confirm
+             * @constant
+             */
+            confirm: true;
+        };
+        /**
+         * AiModelResponse
+         * @description My settings' AI model: the models the site offers its users, its default among them, and the one the user's runs use.
+         */
+        AiModelResponse: {
+            in_use: components["schemas"]["AiProvider"];
+            /** Models */
+            models: {
+                [key: string]: string;
+            };
+            site_default: components["schemas"]["AiProvider"];
+        };
+        /**
+         * AiProvider
+         * @enum {string}
+         */
+        AiProvider: "openai" | "grok" | "gemini" | "groq" | "nvidia" | "claude";
         /** AiReportResponse */
         AiReportResponse: {
             /** Bearish Factors */
@@ -1126,7 +1200,7 @@ export interface components {
          *     refused file, a user who is not an administrator and an installation on a real broker.
          * @enum {string}
          */
-        ErrorCode: "sign_in_required" | "sign_in_refused" | "sign_in_throttled" | "registration_closed" | "setup_code_refused" | "already_set_up" | "user_exists" | "last_administrator" | "unknown_host" | "app_request_required" | "administrators_only" | "real_broker_refused" | "mock_broker_only" | "password_required" | "password_refused" | "settings_file_refused" | "settings_file_missing" | "settings_conflict" | "settings_edit_refused" | "settings_refused" | "technical_settings_conflict" | "run_in_progress" | "too_many_runs" | "listing_unavailable" | "not_found" | "invalid_request" | "body_too_large" | "request_refused";
+        ErrorCode: "sign_in_required" | "sign_in_refused" | "sign_in_throttled" | "registration_closed" | "setup_code_refused" | "already_set_up" | "user_exists" | "last_administrator" | "unknown_host" | "app_request_required" | "administrators_only" | "real_broker_refused" | "mock_broker_only" | "password_required" | "password_refused" | "settings_file_refused" | "settings_file_missing" | "settings_conflict" | "settings_edit_refused" | "settings_refused" | "technical_settings_conflict" | "ai_model_not_offered" | "run_in_progress" | "too_many_runs" | "listing_unavailable" | "not_found" | "invalid_request" | "body_too_large" | "request_refused";
         /**
          * ErrorResponse
          * @description Every refusal: `detail` in words for a person, `code` for the client to switch on.
@@ -1622,6 +1696,16 @@ export interface components {
         };
         Score_int_: number;
         /**
+         * SettingChange
+         * @description One setting the settings form writes: its keys from the top of the file, and its new value.
+         */
+        SettingChange: {
+            /** Path */
+            path: string[];
+            value: components["schemas"]["SettingValue"];
+        };
+        SettingValue: boolean | number | string | string[];
+        /**
          * SettingsAction
          * @enum {string}
          */
@@ -1704,6 +1788,33 @@ export interface components {
             revision: string;
             /** Running Revision */
             running_revision: string | null;
+        };
+        /**
+         * SettingsForm
+         * @description A text of appsetting.yaml as the settings form shows it: the text; every setting it sets, by dotted path, a list
+         *     counting as one value (None for a text that does not parse); and the JSON schema of what each setting accepts.
+         */
+        SettingsForm: {
+            /** Schema */
+            schema: {
+                [key: string]: unknown;
+            };
+            /** Text */
+            text: string;
+            /** Values */
+            values: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** SettingsFormRequest */
+        SettingsFormRequest: {
+            /**
+             * Changes
+             * @default []
+             */
+            changes: components["schemas"]["SettingChange"][];
+            /** Text */
+            text: string;
         };
         /** SettingsOverviewResponse */
         SettingsOverviewResponse: {
@@ -2079,6 +2190,7 @@ export interface components {
          *     with both decrypted, so the Web answers with it.
          */
         User: {
+            ai_model?: components["schemas"]["AiProvider"] | null;
             /**
              * Created At
              * Format: date-time
@@ -2318,6 +2430,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SettingsOverviewResponse"];
+                };
+            };
+        };
+    };
+    edit_settings_form_v1_admin_settings_appsetting_form_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SettingsFormRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsForm"];
+                };
+            };
+            /** @description A change the text cannot take (settings_edit_refused): the text does not parse, the path names no setting it sets, or the value is of another kind than the one there. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2699,6 +2844,57 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["User"];
                 };
+            };
+        };
+    };
+    get_ai_model_v1_auth_me_ai_model_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiModelResponse"];
+                };
+            };
+        };
+    };
+    choose_ai_model_v1_auth_me_ai_model_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiModelRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiModelResponse"];
+                };
+            };
+            /** @description The site does not offer that model; nothing saved. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

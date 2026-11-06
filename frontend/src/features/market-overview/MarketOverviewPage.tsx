@@ -114,7 +114,7 @@ function TrendPanel({ target, history, onTarget }: { target: TrendTarget; histor
         <>
           {target.kind === 'stock' && (
             <Button asChild variant="ghost" size="sm">
-              <Link to={paths.overview}>{t('target.reset', { name: t('index.taiex') })}</Link>
+              <Link to={paths.market}>{t('target.reset', { name: t('index.taiex') })}</Link>
             </Button>
           )}
           <StockPicker label={t('target.change')} onSelect={onTarget} />
