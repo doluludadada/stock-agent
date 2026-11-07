@@ -1,12 +1,17 @@
 const account = {
   signIn: 'Sign in to see your mock account',
-  title: 'Mock account',
-  description: 'Your paper account: cash, positions, trades, and the equity at every close.',
+  page: {
+    mock: { title: 'Mock account', description: 'Your paper account: cash, positions, trades, and the equity at every close.' },
+    shioaji: { title: 'SinoPac account', description: 'Your SinoPac account: cash, positions and the trades of your runs.' },
+  },
+  view: { label: 'Account', server: { simulation: 'simulation', live: 'live' } },
   loadFailed: 'The account could not be loaded.',
-  provider: { mock: 'Mock broker', shioaji: 'Shioaji' },
-  orderMode: { mock_only: 'Mock orders', live: 'Live orders', disabled: 'No orders' },
-  mockNotice: 'A paper account kept by the mock broker, not money at a real broker.',
-  brokerNotice: 'Reads the Shioaji account in the settings; the Web never orders on it.',
+  provider: { mock: 'Mock broker', shioaji: 'SinoPac' },
+  notice: {
+    mock: 'A paper account kept by the mock broker, not money at a real broker.',
+    simulation: 'SinoPac’s simulation server. Social Buzz, Intraday and a manual BUY order here when you choose SinoPac; no real money moves.',
+    live: 'Your real SinoPac account. Social Buzz, Intraday and a manual BUY order here with real money when you choose SinoPac.',
+  },
   value: { equity: 'Equity', cash: 'Cash', marketValue: 'Market value', unrealized: 'Unrealized P&L' },
   summary: { today: 'Today', since: 'since {{date}}', positions: 'Positions', count: '{{count}} stocks', total: 'Total P&L', startingCapital: 'Starting capital' },
   curveTitle: 'Equity at each close',
@@ -45,7 +50,7 @@ const account = {
   asOfShow: 'Show',
   asOfNone: 'No fill happened on or before {{date}}.',
   asOfTitle: 'As of {{time}}, the last fill that day',
-  about: { title: 'About this account', broker: 'Broker', orderMode: 'Order mode' },
+  about: { title: 'About this account', broker: 'Broker' },
   start: {
     title: 'Nothing in your mock account yet',
     description:

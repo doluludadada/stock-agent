@@ -14,14 +14,14 @@ from trading_stack import SilentLogger
 
 from a_domain.model.trading.order import Order
 from a_domain.ports.trading.execution_provider import IExecutionProvider
-from a_domain.types.enums import ExecutionProvider, OrderMode, OrderStatus, OrderType, SystemEnvironment, TimeInForce, TradeAction
+from a_domain.types.enums import OrderStatus, OrderType, SystemEnvironment, TimeInForce, TradeAction
 from a_domain.types.ids import new_decision_id, new_run_id
 from b_application.config.trading_config import ShioajiConfig, ShioajiLogin
 from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection, ShioajiQuoteProvider
 from c_infrastructure.system.attempt_log import MemoryAttemptLog
 from c_infrastructure.system.market_clock import TaiwanMarketClock
 from c_infrastructure.trading.shioaji.execution_provider import ORDER_STATUS, ShioajiExecutionProvider
-from d_presentation.dependencies import ProcessState, TradingSetupError, connect_shioaji
+from d_presentation.dependencies import ProcessState, connect_shioaji
 
 NOW = datetime(2026, 10, 19, 10, 0, tzinfo=UTC)
 
@@ -35,8 +35,10 @@ def provider(client: FakeShioaji) -> ShioajiExecutionProvider:
     if client.stock_account is None:
         client.stock_account = client.account_at_login
 
-    login = login_of(simulation=True)
-    return ShioajiExecutionProvider(client=client, quotes=quotes_of(client, login), login=login, config=CONFIG, logger=SilentLogger())
+    login, connection = login_of(simulation=True), ShioajiConnection(client=client, up=True)
+    return ShioajiExecutionProvider(
+        connection=connection, quotes=quotes_of(connection, login), login=login, config=CONFIG, logger=SilentLogger()
+    )
 
 
 def login_of(simulation: bool) -> ShioajiLogin:
@@ -50,22 +52,21 @@ async def connected(client: FakeShioaji, simulation: bool) -> ShioajiExecutionPr
     The broker on a client the quote provider logged in, to simulation as test does or production as prod does, once
     its connect() checked the login: the startup's order.
     """
-    login = login_of(simulation)
-    quotes = quotes_of(client, login)
-    broker = ShioajiExecutionProvider(client=client, quotes=quotes, login=login, config=CONFIG, logger=SilentLogger())
+    login, connection = login_of(simulation), ShioajiConnection(client=client)
+    quotes = quotes_of(connection, login)
+    broker = ShioajiExecutionProvider(connection=connection, quotes=quotes, login=login, config=CONFIG, logger=SilentLogger())
     await quotes.connect()
     await broker.connect()
     return broker
 
 
-def quotes_of(client: FakeShioaji, login: ShioajiLogin) -> ShioajiQuoteProvider:
+def quotes_of(connection: ShioajiConnection, login: ShioajiLogin) -> ShioajiQuoteProvider:
     return ShioajiQuoteProvider(
-        connection=ShioajiConnection(client=client),
+        connection=connection,
         new_client=FakeShioaji,
         login=login,
         market_clock=TaiwanMarketClock(CONFIG.market_hours),
         market_data=CONFIG.market_data,
-        sources=CONFIG.sources.shioaji,
         board_lot_shares=1000,
         logger=SilentLogger(),
     )
@@ -496,16 +497,13 @@ def said(logger: RecordingLogger) -> list[str]:
 
 async def broker_of(
     client: FakeShioaji, monkeypatch: pytest.MonkeyPatch, logger: RecordingLogger, environment: SystemEnvironment
-) -> IExecutionProvider:
-    """The broker that connect_shioaji builds on `client` at the start of a site in `environment` with Shioaji as the broker."""
+) -> IExecutionProvider | None:
+    """The SinoPac broker connect_shioaji builds on `client` at the start of a personal site in `environment`, or None."""
     monkeypatch.setattr(shioaji, "Shioaji", lambda simulation: client)
     polling = CONFIG.shioaji.model_copy(update={"poll_interval_seconds": 0, "max_polls": 3})
-    site = environment_setup(
-        CONFIG.model_copy(update={"shioaji": polling}), environment, ExecutionProvider.SHIOAJI, OrderMode.DISABLED
-    )
+    site = environment_setup(CONFIG.model_copy(update={"shioaji": polling}), environment)
     process = ProcessState(logger=logger, attempt_log=MemoryAttemptLog(), cache_writes=asyncio.Lock())
     _, broker = await connect_shioaji(site, process, TaiwanMarketClock(CONFIG.market_hours))
-    assert broker is not None
     return broker
 
 
@@ -520,16 +518,14 @@ async def broker_of(
     ],
     ids=["refused CA activation", "unsigned account"],
 )
-async def test_a_refused_production_start_says_what_failed_without_the_servers_words_or_the_account_number(
+async def test_a_refused_production_account_check_offers_no_sinopac_and_says_why_without_the_servers_words_or_the_account_number(
     client: FakeShioaji, says: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     logger = RecordingLogger()
 
-    with pytest.raises(TradingSetupError) as refused:
-        await broker_of(client, monkeypatch, logger, SystemEnvironment.PROD)
-
-    assert says in str(refused.value)
-    assert private_parts(raised(refused.value), *said(logger)) == []
+    assert await broker_of(client, monkeypatch, logger, SystemEnvironment.PROD) is None
+    assert any(says in line and "SinoPac production orders unavailable" in line for line in said(logger))
+    assert private_parts(*said(logger)) == []
 
 
 ACCOUNT_READS = ("account_balance", "settlements", "update_status", "list_trades", "list_positions")
@@ -548,6 +544,7 @@ async def test_a_refused_account_read_raises_and_fails_the_order_saying_only_the
 ) -> None:
     logger = RecordingLogger()
     broker = await broker_of(client, monkeypatch, logger, SystemEnvironment.TEST)
+    assert broker is not None
 
     with pytest.raises(Exception) as refused:
         await broker.get_account()

@@ -41,9 +41,11 @@ from a_domain.ports.market.daily_close_archive import (
 from a_domain.rules.fundamentals.trailing_eps import EpsFilings, QuarterEps
 from a_domain.rules.technical.strategy import TechnicalSettings
 from a_domain.rules.trading.cost import TradingCostRule
+from a_domain.rules.trading.order_rule import BrokerLink
 from a_domain.types.enums import (
     AiAnalysisFocus,
     AiProvider,
+    ExecutionProvider,
     FinancialStatement,
     MarketIndex,
     MarketType,
@@ -479,8 +481,17 @@ class FakeTradingJournal:
     async def save_snapshot(self, snapshot: AccountSnapshot) -> None:
         self.account_snapshots.append(snapshot)
 
-    async def snapshots(self, since: datetime | None = None) -> list[AccountSnapshot]:
-        kept = [snapshot for snapshot in self.account_snapshots if since is None or snapshot.taken_at >= since]
+    def on(self, broker: ExecutionProvider, run_id: RunId) -> bool:
+        """Whether the run of `run_id` chose `broker`, as the SQL journal reads a row's broker through its run."""
+        run = self.runs.get(run_id)
+        return run is not None and run.execution_provider == broker
+
+    async def snapshots(self, broker: ExecutionProvider, since: datetime | None = None) -> list[AccountSnapshot]:
+        kept = [
+            snapshot
+            for snapshot in self.account_snapshots
+            if self.on(broker, snapshot.run_id) and (since is None or snapshot.taken_at >= since)
+        ]
         return sorted(kept, key=lambda snapshot: snapshot.taken_at)
 
     async def save_stock_reports(self, run_id: RunId, stocks: list[Stock]) -> None:
@@ -510,14 +521,26 @@ class FakeTradingJournal:
         follows = [(signal, orders[signal.decision_id]) for signal in self.signals if signal.followed_decision_id in followed]
         return sorted((follow for follow in follows if follow[0].decision_id in orders), key=lambda follow: follow[1].created_at)
 
-    async def trades(self, since: datetime | None, limit: int, offset: int) -> list[tuple[Order, SystemStats]]:
+    async def trades(
+        self, broker: ExecutionProvider, since: datetime | None, limit: int, offset: int
+    ) -> list[tuple[Order, SystemStats]]:
         filled = [
-            order for order in self.orders.values() if order.filled_quantity > 0 and (since is None or order.created_at >= since)
+            order
+            for order in self.orders.values()
+            if order.filled_quantity > 0 and self.on(broker, order.run_id) and (since is None or order.created_at >= since)
         ]
         newest = sorted(filled, key=lambda order: order.created_at, reverse=True)[offset : offset + limit]
         runs = {order.run_id: self.runs[order.run_id] for order in newest}
         sources = {run_id: self.runs.get(run.followed_run_id, run) if run.followed_run_id else run for run_id, run in runs.items()}
         return [(order, sources[order.run_id]) for order in newest]
+
+    async def buy_orders(self, broker: ExecutionProvider, since: datetime) -> list[Order]:
+        orders = [
+            order
+            for order in self.orders.values()
+            if order.action == TradeAction.BUY and self.on(broker, order.run_id) and order.created_at >= since
+        ]
+        return sorted(orders, key=lambda order: order.created_at)
 
 
 class FakeWatchlistRepository:
@@ -558,9 +581,13 @@ class FakeSentimentClassifier:
 
 
 class RecordingExecutionProvider:
-    """Broker that records each place_order call and fills it in full at its limit, charging fees like the mock."""
+    """
+    Broker that records each place_order call and fills it in full at its limit, charging fees like the mock. Its
+    `link` says which broker it stands for: the mock account unless a test makes it SinoPac.
+    """
 
-    def __init__(self, cash: float = 1_000_000.0, cost_rule: TradingCostRule | None = None) -> None:
+    def __init__(self, cash: float = 1_000_000.0, cost_rule: TradingCostRule | None = None, link: BrokerLink | None = None) -> None:
+        self.current_link = link or BrokerLink(broker=ExecutionProvider.MOCK)
         self.cash = cash
         self.opening: AccountOpening | None = None
         self.positions: list[Position] = []
@@ -568,6 +595,9 @@ class RecordingExecutionProvider:
         self._cost_rule = cost_rule or TradingCostRule(
             fee_rate=0.001425, tax_rate=0.003, etf_tax_rate=0.001, min_fee=20, bond_etf_tax_exempt_until=date(2026, 12, 31)
         )
+
+    def link(self) -> BrokerLink:
+        return self.current_link
 
     async def place_order(self, order: Order) -> Order:
         self.placed.append(replace(order))

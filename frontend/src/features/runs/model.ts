@@ -18,3 +18,11 @@ export function openDecisions(follow: Follow, decisions: readonly Signal[]): Sig
   const byId = new Map(decisions.map((decision) => [decision.decision_id, decision]))
   return follow.open_decision_ids.flatMap((id) => byId.get(id) ?? [])
 }
+
+/** Shares typed for a BUY: a whole number above 0, or null. */
+export function parseShares(text: string): number | null {
+  const typed = text.trim()
+  if (!/^\d+$/.test(typed)) return null
+  const shares = Number(typed)
+  return shares > 0 && Number.isSafeInteger(shares) ? shares : null
+}

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { describeComparison, describeCondition } from './describe'
 import { applyEdit, copyStrategy, createBlankStrategy, findComparison, indicatorUsage, pruneEditorIndicators } from './edit'
 import { quickFill } from './quick-fill'
-import { withStrategy, withoutStrategy } from './settings'
+import { builtInInUse, customStrategies, withBuiltInActive, withStrategy, withoutStrategy } from './settings'
 import { builtIn, fakeText, sequentialIds } from './built-ins.test-support'
 import type { IndicatorId, NodeId, Strategy, StrategyId, StrategySettings } from './types'
 import { errorsOf, exprPath, requiredBars, validateStrategy } from './validate'
@@ -175,10 +175,11 @@ describe('invalid drafts', () => {
 describe('saved settings', () => {
   const settings: StrategySettings = {
     activeStrategyId: 'balanced' as StrategyId,
-    buzzStrategyId: 'aggressive' as StrategyId,
     strategies: [builtIn('balanced'), builtIn('aggressive')],
     revision: 4,
   }
+  const builtIns = [builtIn('conservative'), builtIn('balanced'), builtIn('aggressive')]
+  const edited = (strategy: Strategy): Strategy => ({ ...strategy, scoring: { ...strategy.scoring, baseScore: 60 } })
 
   it('adds or replaces one strategy and keeps the revision the save must carry', () => {
     const copy = copyOfBalanced()
@@ -186,11 +187,35 @@ describe('saved settings', () => {
     expect(added).toMatchObject({ revision: 4, strategies: [{ id: 'balanced' }, { id: 'aggressive' }, { id: copy.id }] })
   })
 
-  it('never deletes a selected strategy', () => {
+  it('never deletes the strategy in use', () => {
     expect(withoutStrategy(settings, 'balanced' as StrategyId)).toBe('selected')
-    expect(withoutStrategy({ ...settings, buzzStrategyId: 'balanced' as StrategyId }, 'aggressive' as StrategyId)).toMatchObject({
-      strategies: [{ id: 'balanced' }],
+    expect(withoutStrategy(settings, 'aggressive' as StrategyId)).toMatchObject({ strategies: [{ id: 'balanced' }] })
+  })
+
+  it('counts a copy of a built-in as the built-in, and as the owner’s own once it changed', () => {
+    const mine = copyOfBalanced()
+    expect(customStrategies({ ...settings, strategies: [...settings.strategies, mine] }, builtIns).map((item) => item.id)).toEqual([mine.id])
+    expect(builtInInUse(settings, builtIns)?.id).toBe('balanced')
+
+    const changed = { ...settings, strategies: [edited(builtIn('balanced')), builtIn('aggressive')] }
+    expect(customStrategies(changed, builtIns).map((item) => item.id)).toEqual(['balanced'])
+    expect(builtInInUse(changed, builtIns)).toBeNull()
+  })
+
+  it('puts a built-in in use as it ships, bringing back a deleted copy and keeping a changed one under a new id', () => {
+    const conservative = builtIn('conservative')
+    expect(withBuiltInActive(settings, conservative, 'stg_new' as StrategyId)).toMatchObject({
+      activeStrategyId: 'conservative',
+      strategies: [{ id: 'balanced' }, { id: 'aggressive' }, { id: 'conservative' }],
+      revision: 4,
     })
+
+    const changed = { ...settings, activeStrategyId: 'aggressive' as StrategyId, strategies: [edited(builtIn('balanced')), builtIn('aggressive')] }
+    const next = withBuiltInActive(changed, builtIn('balanced'), 'stg_new' as StrategyId)
+    expect(next).toMatchObject({ activeStrategyId: 'balanced', strategies: [{ id: 'balanced' }, { id: 'aggressive' }, { id: 'stg_new' }] })
+    if (typeof next === 'string') throw new Error(next)
+    expect(next.strategies[0]!.scoring.baseScore).toBe(builtIn('balanced').scoring.baseScore)
+    expect(next.strategies[2]!.scoring.baseScore).toBe(60)
   })
 
   it('prunes only the indicator settings the editor itself left unused', () => {

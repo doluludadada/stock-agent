@@ -6,10 +6,8 @@ import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from rich.panel import Panel
-
 from a_domain.model.system.user import User
-from a_domain.types.enums import ErrorCode, ExecutionProvider, OrderMode, Permission
+from a_domain.types.enums import ErrorCode, ExecutionProvider, Permission
 from a_domain.types.errors import ListingUnavailableError
 from b_application.config.app_config import AppConfig
 from b_application.schemas.pipeline_status import PipelineStatus
@@ -30,7 +28,7 @@ class MenuOption:
     may_submit_orders: bool = False
     """
     The option can send an order to the broker (menu 4 only for a BUY the user confirms). The menu adds a line saying
-    what the current order mode does with its orders, and a real broker's warning names it.
+    where its orders go, and the option asks for the broker when the user may choose a real one.
     """
 
     needs_realtime_quotes: bool = False
@@ -67,7 +65,7 @@ MENU = {
     "3": MenuOption(
         title="Run Intraday Trading",
         description=("Revalidate positions and active watchlist stocks.", "Generate signals."),
-        run=lambda runtime, session: session.pipeline.run_intraday(built_in_strategy_id=session.built_in_strategy_id),
+        run=trading_views.run_intraday,
         may_submit_orders=True,
         needs_realtime_quotes=True,
     ),
@@ -137,7 +135,7 @@ async def run_menu(switch: RuntimeSwitch, user: User) -> None:
     """
     One round per menu option. Before the menu prints, the settings files on disk are loaded when they changed, with a
     line saying so. The round then holds one runtime from the menu it prints to the option's summary, so the trading
-    setup the menu shows (broker, order mode, the real-broker warning) is the one the chosen option runs on, and an
+    setup the menu shows (the brokers, a real broker's server and limits) is the one the chosen option runs on, and an
     edit made during an option waits for the next round. An option that may send an order looks at the files once
     more after the choice: settings that changed while the menu waited, a Web save included, print the menu again on
     them instead. The user is read again before each option; menu 8's strategy carries over to the next round while
@@ -152,7 +150,7 @@ async def run_menu(switch: RuntimeSwitch, user: User) -> None:
             runtime = opened.runtime
             built_in_strategy_id = still_built_in(runtime, built_in_strategy_id)
             session = session_for(runtime, user, built_in_strategy_id)
-            choice = ask_menu_choice(runtime.config, session)
+            choice = ask_menu_choice(runtime, session)
 
             if choice in (None, EXIT) or not await still_signed_in(runtime, session):
                 return
@@ -205,14 +203,18 @@ def still_built_in(runtime: Runtime, built_in_strategy_id: str | None) -> str | 
 
 
 def session_for(runtime: Runtime, user: User, built_in_strategy_id: str | None = None) -> terminal.CliSession:
-    """The one way a CLI session is made, from the signed-in administrator: every menu option runs on their Pipeline."""
-    return terminal.CliSession(user=user, pipeline=runtime.pipeline_for(user), built_in_strategy_id=built_in_strategy_id)
+    """
+    The one way a CLI session is made, from the signed-in administrator: every menu option runs on their Pipeline on
+    their mock account, and an option that orders on a real broker the user chose for it on theirs on that broker.
+    """
+    pipeline = runtime.pipeline_for(user, ExecutionProvider.MOCK)
+    return terminal.CliSession(user=user, pipeline=pipeline, built_in_strategy_id=built_in_strategy_id)
 
 
 async def still_signed_in(runtime: Runtime, session: terminal.CliSession) -> bool:
     """
     Reads the user again before each menu option: a user deactivated, or no longer an administrator, since the CLI
-    started loses it, and with it manual BUY and the real broker, at the next option.
+    started loses it at the next option. An order on a real broker reads the user again itself, at the order.
     """
     user = await runtime.signed_out.load_user(session.user.user_id)
 
@@ -223,8 +225,8 @@ async def still_signed_in(runtime: Runtime, session: terminal.CliSession) -> boo
     return False
 
 
-def ask_menu_choice(config: AppConfig, session: terminal.CliSession) -> str | None:
-    print_menu(config, session)
+def ask_menu_choice(runtime: Runtime, session: terminal.CliSession) -> str | None:
+    print_menu(runtime, session)
     choice = terminal.ask_user("Select an option", choices=[EXIT, *MENU])
 
     if choice is None:
@@ -259,9 +261,10 @@ async def run_menu_option(choice: str, runtime: Runtime, session: terminal.CliSe
     return status
 
 
-def print_menu(config: AppConfig, session: terminal.CliSession) -> None:
+def print_menu(runtime: Runtime, session: terminal.CliSession) -> None:
+    config = runtime.config
     terminal.console.print(f"Signed in:          {session.user.username} ({session.user.role.value})")
-    print_trading_setup(config)
+    print_trading_setup(runtime, session)
     strategy = session.built_in_strategy_id
     terminal.console.print(f"Technical strategy: {f'built-in {strategy}, this session only' if strategy else 'saved settings'}")
     terminal.console.print("")
@@ -275,7 +278,7 @@ def print_menu(config: AppConfig, session: terminal.CliSession) -> None:
         if refusal := audience_refusal(config, option):
             terminal.console.print(f"    {refusal}")
         elif option.may_submit_orders:
-            terminal.console.print(f"    {order_mode_effect(config)}")
+            terminal.console.print(f"    {order_effect(config)}")
 
         terminal.console.print("")
 
@@ -304,27 +307,17 @@ async def load_built_in_strategy(runtime: Runtime, session: terminal.CliSession)
     return None
 
 
-def print_trading_setup(config: AppConfig) -> None:
-    real_broker = config.trading.execution_provider != ExecutionProvider.MOCK
-    broker = terminal.format_label(config.trading.execution_provider.value)
-    mode = terminal.format_label(config.trading.order_mode.value)
+def print_trading_setup(runtime: Runtime, session: terminal.CliSession) -> None:
+    config = runtime.config
+    real = ", ".join(broker.label for broker in runtime.brokers_for(session.user) if broker.real)
+    server = "simulation" if config.environment.shioaji_simulation else "PRODUCTION, REAL MONEY"
+    order_limit, daily_limit = config.trading.max_order_value, config.trading.max_daily_buy_value
+    limits = f"each BUY at most {order_limit:,.0f} NT$, at most {daily_limit:,.0f} NT$ of BUYs a day"
 
     terminal.console.print(f"Environment:        {terminal.format_label(config.environment.value)}")
-    terminal.console.print(f"Execution Provider: {broker}")
-    terminal.console.print(f"Account:            {'the broker default stock account' if real_broker else 'your mock account'}")
-    terminal.console.print(f"Orders:             {mode}")
-
-    if not real_broker:
-        return
-
-    server = "SIMULATION (paper trading)" if config.environment.shioaji_simulation else "PRODUCTION: REAL ACCOUNT, REAL MONEY"
-    order_menus = ", ".join(key for key, option in MENU.items() if option.may_submit_orders)
-    orders = (
-        f"menus {order_menus} send orders to the broker"
-        if config.trading.order_mode == OrderMode.LIVE
-        else "no order is sent; cash and positions are read from the broker"
+    terminal.console.print(
+        f"Orders:             your mock account{f', or {real} ({server}) when you choose it for a run: {limits}' if real else ''}"
     )
-    terminal.console.print(Panel(f"{broker} {server}\nOrders {mode}: {orders}", title="REAL BROKER", style="bold red"))
 
 
 def audience_refusal(config: AppConfig, option: MenuOption) -> str | None:
@@ -347,18 +340,11 @@ def audience_refusal(config: AppConfig, option: MenuOption) -> str | None:
     return None
 
 
-def order_mode_effect(config: AppConfig) -> str:
+def order_effect(config: AppConfig) -> str:
     if not config.audience.realtime_quotes:
         return f"Sends no order: audience {config.audience.value} has no realtime quote to price one, so no manual BUY."
 
-    mode = terminal.format_label(config.trading.order_mode.value)
-    broker = terminal.format_label(config.trading.execution_provider.value)
-
-    return {
-        OrderMode.MOCK_ONLY: f"May submit orders to the mock broker (order mode {mode}).",
-        OrderMode.LIVE: f"May submit orders to the {broker} broker (order mode {mode}).",
-        OrderMode.DISABLED: f"Would submit orders, but order mode {mode} records each one REJECTED and sends none.",
-    }[config.trading.order_mode]
+    return "May submit orders to the account the run starts on: your mock account unless you choose another."
 
 
 if __name__ == "__main__":

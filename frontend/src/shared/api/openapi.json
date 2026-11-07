@@ -64,9 +64,6 @@
               }
             ]
           },
-          "order_mode": {
-            "$ref": "#/components/schemas/OrderMode"
-          },
           "profit": {
             "anyOf": [
               {
@@ -86,8 +83,7 @@
           "as_of",
           "execution_provider",
           "opening",
-          "profit",
-          "order_mode"
+          "profit"
         ],
         "title": "AccountHistoryResponse",
         "type": "object"
@@ -418,10 +414,6 @@
         "title": "AuthStatusResponse",
         "type": "object"
       },
-      "BackupId": {
-        "pattern": "^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}$",
-        "type": "string"
-      },
       "BarsAgo": {
         "maximum": 250.0,
         "minimum": 0.0,
@@ -483,6 +475,55 @@
           "average_change_percent"
         ],
         "title": "Breadth",
+        "type": "object"
+      },
+      "BrokerResponse": {
+        "description": "A broker the signed-in user may choose for a run now, as a run's confirmation names it: the mock account always,\nSinoPac for an administrator while the site's login is up.",
+        "properties": {
+          "broker": {
+            "$ref": "#/components/schemas/ExecutionProvider"
+          },
+          "max_daily_buy_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Daily Buy Value"
+          },
+          "max_order_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Order Value"
+          },
+          "simulation": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Simulation"
+          }
+        },
+        "required": [
+          "broker",
+          "simulation",
+          "max_order_value",
+          "max_daily_buy_value"
+        ],
+        "title": "BrokerResponse",
         "type": "object"
       },
       "Comparison-Input": {
@@ -812,7 +853,7 @@
           "app_request_required",
           "administrators_only",
           "real_broker_refused",
-          "mock_broker_only",
+          "broker_unavailable",
           "realtime_quotes_unavailable",
           "mops_unavailable",
           "password_required",
@@ -856,6 +897,7 @@
         "type": "object"
       },
       "ExecutionProvider": {
+        "description": "A broker a run may order on, chosen when the run starts. Its properties are the one table of what each broker\nneeds; the order gates, the wiring and the pages read them, and nothing else decides by broker.",
         "enum": [
           "mock",
           "shioaji"
@@ -1177,6 +1219,7 @@
         "title": "InformationSource",
         "type": "string"
       },
+      "JsonValue": {},
       "LatestPrice": {
         "additionalProperties": false,
         "description": "The latest price: the run's realtime quote when it has one, else the latest daily close. It has no earlier\nsample, so a crossing cannot read it; a crossing of daily closes reads `{\"type\": \"market\", \"field\": \"close\"}`.",
@@ -1257,6 +1300,35 @@
           "signal"
         ],
         "title": "MacdIndicator",
+        "type": "object"
+      },
+      "ManualBuyRequest": {
+        "description": "A manual BUY of one stock the specific-stock run reported, on the broker the request's `broker` query names.",
+        "properties": {
+          "confirm": {
+            "const": true,
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "quantity": {
+            "exclusiveMinimum": 0.0,
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "stock_id": {
+            "maxLength": 10,
+            "minLength": 1,
+            "pattern": "^[0-9A-Za-z]+$",
+            "title": "Stock Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "confirm",
+          "stock_id",
+          "quantity"
+        ],
+        "title": "ManualBuyRequest",
         "type": "object"
       },
       "MarketBreadth": {
@@ -1627,7 +1699,7 @@
                 "type": "null"
               }
             ],
-            "description": "The exchange's official change from the session's reference price: the previous close, adjusted on an ex-rights or\nex-dividend day. The TWSE and TPEX listings and the broker's snapshots report it; a bar without one has None.",
+            "description": "The exchange's official change from the session's reference price: the previous close, adjusted on an ex-rights or\nex-dividend day. The exchanges' daily reports and listings and the broker's snapshots report it; a bar without one,\nor whose exchange compared its close to no reference, has None.",
             "title": "Change"
           },
           "close": {
@@ -1844,15 +1916,6 @@
         "title": "Order",
         "type": "object"
       },
-      "OrderMode": {
-        "enum": [
-          "mock_only",
-          "live",
-          "disabled"
-        ],
-        "title": "OrderMode",
-        "type": "string"
-      },
       "OrderPricing": {
         "description": "What prices an order of this deployment, in which phase of the trading day it may be placed and on which brokers.\nAudience.order_pricing picks one; OrderGateRule and the follow's window read it, and nothing else decides by it.",
         "enum": [
@@ -2029,7 +2092,7 @@
         "type": "number"
       },
       "ProblemsResponse": {
-        "description": "A save or a reload the app would not start with (`settings_refused`): nothing was saved; the problems say where and why.",
+        "description": "Settings the app would not start with (`settings_refused`): nothing was saved; the problems say where and why.",
         "properties": {
           "code": {
             "$ref": "#/components/schemas/ErrorCode"
@@ -2189,50 +2252,6 @@
         "title": "RegistrationRequest",
         "type": "object"
       },
-      "ReloadRefused": {
-        "properties": {
-          "at": {
-            "format": "date-time",
-            "title": "At",
-            "type": "string"
-          },
-          "previous": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "propertyNames": {
-              "$ref": "#/components/schemas/SettingsFile"
-            },
-            "title": "Previous",
-            "type": "object"
-          },
-          "problems": {
-            "items": {
-              "$ref": "#/components/schemas/SettingsProblem"
-            },
-            "title": "Problems",
-            "type": "array"
-          },
-          "revisions": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "propertyNames": {
-              "$ref": "#/components/schemas/SettingsFile"
-            },
-            "title": "Revisions",
-            "type": "object"
-          }
-        },
-        "required": [
-          "revisions",
-          "previous",
-          "problems",
-          "at"
-        ],
-        "title": "ReloadRefused",
-        "type": "object"
-      },
       "ReportSection": {
         "properties": {
           "lines": {
@@ -2271,10 +2290,6 @@
         ],
         "title": "ResetRequest",
         "type": "object"
-      },
-      "Revision": {
-        "pattern": "^[0-9a-f]{64}$",
-        "type": "string"
       },
       "Role": {
         "enum": [
@@ -2444,9 +2459,6 @@
             ],
             "title": "Followed Run Id"
           },
-          "order_mode": {
-            "$ref": "#/components/schemas/OrderMode"
-          },
           "orders_refused": {
             "title": "Orders Refused",
             "type": "integer"
@@ -2494,7 +2506,6 @@
         "required": [
           "workflow",
           "execution_provider",
-          "order_mode",
           "start_time",
           "end_time",
           "total_scanned",
@@ -2589,19 +2600,15 @@
         "type": "integer"
       },
       "SettingChange": {
-        "description": "One setting the settings form writes: its keys from the top of the file, and its new value.",
+        "description": "One setting the settings form changes: the path of its field, and its new value as JSON.",
         "properties": {
           "path": {
-            "items": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "minItems": 1,
+            "minLength": 1,
             "title": "Path",
-            "type": "array"
+            "type": "string"
           },
           "value": {
-            "$ref": "#/components/schemas/SettingValue"
+            "$ref": "#/components/schemas/JsonValue"
           }
         },
         "required": [
@@ -2611,201 +2618,100 @@
         "title": "SettingChange",
         "type": "object"
       },
-      "SettingValue": {
-        "anyOf": [
-          {
-            "type": "boolean"
+      "SettingField": {
+        "description": "One setting as the administrator's settings form shows it: its dotted settings path, such as ai.temperature, or an\nAI prompt's, such as ai.system_prompt; how the form shows it; the value the file sets, as JSON, else its default,\nelse null; its options and bounds from the settings classes; and whether it applies only at a restart.",
+        "properties": {
+          "exclusive_maximum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exclusive Maximum"
           },
-          {
-            "type": "integer"
+          "exclusive_minimum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exclusive Minimum"
           },
-          {
-            "type": "number"
+          "kind": {
+            "$ref": "#/components/schemas/SettingKind"
           },
-          {
-            "type": "string"
+          "maximum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maximum"
           },
-          {
+          "minimum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum"
+          },
+          "options": {
+            "default": [],
             "items": {
               "type": "string"
             },
+            "title": "Options",
             "type": "array"
+          },
+          "path": {
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          },
+          "restart_only": {
+            "default": false,
+            "title": "Restart Only",
+            "type": "boolean"
+          },
+          "value": {
+            "$ref": "#/components/schemas/JsonValue"
           }
-        ]
+        },
+        "required": [
+          "path",
+          "kind",
+          "value"
+        ],
+        "title": "SettingField",
+        "type": "object"
       },
-      "SettingsAction": {
+      "SettingKind": {
+        "description": "How the administrator's settings form shows a setting and takes its new value.",
         "enum": [
-          "save",
-          "restore"
+          "switch",
+          "choice",
+          "choices",
+          "integer",
+          "number",
+          "text",
+          "lines",
+          "structure"
         ],
-        "title": "SettingsAction",
+        "title": "SettingKind",
         "type": "string"
-      },
-      "SettingsAuditEntryResponse": {
-        "properties": {
-          "action": {
-            "$ref": "#/components/schemas/SettingsAction"
-          },
-          "actor": {
-            "title": "Actor",
-            "type": "string"
-          },
-          "actor_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Actor Name"
-          },
-          "file": {
-            "$ref": "#/components/schemas/SettingsFile"
-          },
-          "from_revision": {
-            "title": "From Revision",
-            "type": "string"
-          },
-          "recorded_at": {
-            "format": "date-time",
-            "title": "Recorded At",
-            "type": "string"
-          },
-          "settings": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Settings",
-            "type": "array"
-          },
-          "to_revision": {
-            "title": "To Revision",
-            "type": "string"
-          }
-        },
-        "required": [
-          "recorded_at",
-          "file",
-          "action",
-          "actor",
-          "actor_name",
-          "from_revision",
-          "to_revision",
-          "settings"
-        ],
-        "title": "SettingsAuditEntryResponse",
-        "type": "object"
-      },
-      "SettingsBackupResponse": {
-        "properties": {
-          "backup_id": {
-            "title": "Backup Id",
-            "type": "string"
-          },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "revision": {
-            "title": "Revision",
-            "type": "string"
-          }
-        },
-        "required": [
-          "backup_id",
-          "revision",
-          "created_at"
-        ],
-        "title": "SettingsBackupResponse",
-        "type": "object"
-      },
-      "SettingsDocumentResponse": {
-        "properties": {
-          "status": {
-            "$ref": "#/components/schemas/SettingsFileStatusResponse"
-          },
-          "text": {
-            "title": "Text",
-            "type": "string"
-          }
-        },
-        "required": [
-          "status",
-          "text"
-        ],
-        "title": "SettingsDocumentResponse",
-        "type": "object"
-      },
-      "SettingsEditResponse": {
-        "properties": {
-          "applied": {
-            "title": "Applied",
-            "type": "boolean"
-          },
-          "base_revision": {
-            "title": "Base Revision",
-            "type": "string"
-          },
-          "changed": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Changed",
-            "type": "array"
-          },
-          "diff": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Diff",
-            "type": "array"
-          },
-          "file": {
-            "$ref": "#/components/schemas/SettingsFile"
-          },
-          "problems": {
-            "items": {
-              "$ref": "#/components/schemas/SettingsProblem"
-            },
-            "title": "Problems",
-            "type": "array"
-          },
-          "revision": {
-            "title": "Revision",
-            "type": "string"
-          },
-          "running_revision": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Running Revision"
-          },
-          "saved": {
-            "title": "Saved",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "file",
-          "base_revision",
-          "revision",
-          "running_revision",
-          "changed",
-          "diff",
-          "problems",
-          "saved",
-          "applied"
-        ],
-        "title": "SettingsEditResponse",
-        "type": "object"
       },
       "SettingsFile": {
         "description": "A settings file in config/ the administrator may edit from the Web. Nothing else on disk can be named.",
@@ -2815,138 +2721,6 @@
         ],
         "title": "SettingsFile",
         "type": "string"
-      },
-      "SettingsFileStatusResponse": {
-        "properties": {
-          "file": {
-            "$ref": "#/components/schemas/SettingsFile"
-          },
-          "file_name": {
-            "title": "File Name",
-            "type": "string"
-          },
-          "modified_at": {
-            "format": "date-time",
-            "title": "Modified At",
-            "type": "string"
-          },
-          "revision": {
-            "title": "Revision",
-            "type": "string"
-          },
-          "running_revision": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Running Revision"
-          }
-        },
-        "required": [
-          "file",
-          "file_name",
-          "revision",
-          "running_revision",
-          "modified_at"
-        ],
-        "title": "SettingsFileStatusResponse",
-        "type": "object"
-      },
-      "SettingsForm": {
-        "description": "A text of appsetting.yaml as the settings form shows it: the text; every setting it sets, by dotted path, a list\ncounting as one value (None for a text that does not parse); and the JSON schema of what each setting accepts.",
-        "properties": {
-          "schema": {
-            "additionalProperties": true,
-            "title": "Schema",
-            "type": "object"
-          },
-          "text": {
-            "title": "Text",
-            "type": "string"
-          },
-          "values": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Values"
-          }
-        },
-        "required": [
-          "text",
-          "values",
-          "schema"
-        ],
-        "title": "SettingsForm",
-        "type": "object"
-      },
-      "SettingsFormRequest": {
-        "properties": {
-          "changes": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/SettingChange"
-            },
-            "maxItems": 100,
-            "title": "Changes",
-            "type": "array"
-          },
-          "text": {
-            "maxLength": 1048576,
-            "title": "Text",
-            "type": "string"
-          }
-        },
-        "required": [
-          "text"
-        ],
-        "title": "SettingsFormRequest",
-        "type": "object"
-      },
-      "SettingsOverviewResponse": {
-        "properties": {
-          "draining": {
-            "title": "Draining",
-            "type": "integer"
-          },
-          "environment": {
-            "$ref": "#/components/schemas/SystemEnvironment"
-          },
-          "files": {
-            "items": {
-              "$ref": "#/components/schemas/SettingsFileStatusResponse"
-            },
-            "title": "Files",
-            "type": "array"
-          },
-          "refused": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ReloadRefused"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "environment",
-          "files",
-          "refused",
-          "draining"
-        ],
-        "title": "SettingsOverviewResponse",
-        "type": "object"
       },
       "SettingsProblem": {
         "description": "One reason the app would not start with the settings: what, and where when a settings file names a place. The\nline and column are 1-based and point at the key the problem is about, or the YAML parser's mark. Never a value:\npydantic's own text can quote the input, which can be a secret from .env.",
@@ -3036,52 +2810,16 @@
         "title": "SettingsProblem",
         "type": "object"
       },
-      "SettingsRestoreConfirmed": {
-        "properties": {
-          "confirm": {
-            "const": true,
-            "title": "Confirm",
-            "type": "boolean"
-          },
-          "password": {
-            "anyOf": [
-              {
-                "format": "password",
-                "maxLength": 256,
-                "type": "string",
-                "writeOnly": true
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Password"
-          },
-          "revision": {
-            "$ref": "#/components/schemas/Revision"
-          }
-        },
-        "required": [
-          "revision",
-          "confirm"
-        ],
-        "title": "SettingsRestoreConfirmed",
-        "type": "object"
-      },
-      "SettingsRestoreRequest": {
-        "properties": {
-          "revision": {
-            "$ref": "#/components/schemas/Revision"
-          }
-        },
-        "required": [
-          "revision"
-        ],
-        "title": "SettingsRestoreRequest",
-        "type": "object"
-      },
       "SettingsSaveRequest": {
         "properties": {
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/SettingChange"
+            },
+            "maxItems": 300,
+            "title": "Changes",
+            "type": "array"
+          },
           "confirm": {
             "const": true,
             "title": "Confirm",
@@ -3100,40 +2838,13 @@
               }
             ],
             "title": "Password"
-          },
-          "revision": {
-            "$ref": "#/components/schemas/Revision"
-          },
-          "text": {
-            "maxLength": 1048576,
-            "title": "Text",
-            "type": "string"
           }
         },
         "required": [
-          "revision",
-          "text",
-          "confirm"
+          "confirm",
+          "changes"
         ],
         "title": "SettingsSaveRequest",
-        "type": "object"
-      },
-      "SettingsTextRequest": {
-        "properties": {
-          "revision": {
-            "$ref": "#/components/schemas/Revision"
-          },
-          "text": {
-            "maxLength": 1048576,
-            "title": "Text",
-            "type": "string"
-          }
-        },
-        "required": [
-          "revision",
-          "text"
-        ],
-        "title": "SettingsTextRequest",
         "type": "object"
       },
       "SetupRequest": {
@@ -3663,16 +3374,6 @@
         "title": "StockValuationResponse",
         "type": "object"
       },
-      "SystemEnvironment": {
-        "description": "Which machine the app runs on, and with it what it may trade on. Its properties are the one table of what each\nenvironment allows; the trading setup check and the broker login read them, and nothing else decides by\nenvironment. A process takes its environment at start: neither the Web editor nor a reload changes it.",
-        "enum": [
-          "dev",
-          "test",
-          "prod"
-        ],
-        "title": "SystemEnvironment",
-        "type": "string"
-      },
       "TechnicalReport": {
         "description": "Result produced by a TechnicalStrategy.\n\nHard failures reject the stock.\nSoft failures reduce technical quality without rejecting the stock.\nObservations describe optional technical signals.",
         "properties": {
@@ -3786,12 +3487,9 @@
       },
       "TechnicalSettings-Input": {
         "additionalProperties": false,
-        "description": "One owner's strategies and which one each workflow uses: the Buzz strategy for Buzz, the active one for every\nother workflow. revision counts the owner's saves, so a save from an older read is refused instead of overwriting.",
+        "description": "One owner's strategies and the active one, which every workflow uses. revision counts the owner's saves, so a save\nfrom an older read is refused instead of overwriting.",
         "properties": {
           "active_strategy_id": {
-            "$ref": "#/components/schemas/FormulaId"
-          },
-          "buzz_strategy_id": {
             "$ref": "#/components/schemas/FormulaId"
           },
           "revision": {
@@ -3812,7 +3510,6 @@
         },
         "required": [
           "active_strategy_id",
-          "buzz_strategy_id",
           "strategies"
         ],
         "title": "TechnicalSettings",
@@ -3820,12 +3517,9 @@
       },
       "TechnicalSettings-Output": {
         "additionalProperties": false,
-        "description": "One owner's strategies and which one each workflow uses: the Buzz strategy for Buzz, the active one for every\nother workflow. revision counts the owner's saves, so a save from an older read is refused instead of overwriting.",
+        "description": "One owner's strategies and the active one, which every workflow uses. revision counts the owner's saves, so a save\nfrom an older read is refused instead of overwriting.",
         "properties": {
           "active_strategy_id": {
-            "$ref": "#/components/schemas/FormulaId"
-          },
-          "buzz_strategy_id": {
             "$ref": "#/components/schemas/FormulaId"
           },
           "revision": {
@@ -3846,7 +3540,6 @@
         },
         "required": [
           "active_strategy_id",
-          "buzz_strategy_id",
           "strategies"
         ],
         "title": "TechnicalSettings",
@@ -4477,17 +4170,57 @@
     }
   },
   "info": {
-    "description": "\nRuns the stock-agent workflows and reads what they recorded, on the same runtime as the CLI.\n\nUsers. Anyone may register (`POST /v1/auth/register`) while registration is open, and signs in with a username or an\nemail (`POST /v1/auth/sign-in`), which sets the HttpOnly session cookie `stock_agent_session`. Public: sign-in,\nregistration, the first-time setup, the built-in strategies and market data (`/v1/market`). Signed in: every other\nread and write, each on the user's own runs, decisions, orders, watchlist, mock account and saved technical settings.\nAdministrator: the users (`/v1/admin/users`) and the settings files (`/v1/admin/settings*`). 401 means sign in: the\nsession is missing, expired or ended. 403 means signed in but not allowed, and never ends the session. Every write\nsends the header `X-Requested-With: stock-agent`, and every write but sign-in, sign-out, registration and setup\nrepeats `\"confirm\": true` in its body.\n\nOrders. Full Cycle, specific-stock analysis, valuation and market data never order. Buzz and Intraday send orders\nthrough the same gates and trading journal as the CLI, and so does a follow (`POST /v1/runs/{run_id}/follow`), which\nplaces a finished Full Cycle's open decisions in the user's mock account, priced again: at a fresh realtime quote in\ncontinuous trading, or on a site without realtime quotes at the last session's official close while no session\ntrades. The API starts them only while the execution provider is the mock broker (403 otherwise).\nNo endpoint places, cancels or modifies an order by itself, and the API offers no manual BUY.\n\nOpen data. A public site (`audience: public`) uses only the TWSE and TPEX OpenAPI data the server archives: daily\nhistory and the index trend come from that archive, it has no realtime quote, so Buzz and Intraday answer 403\n`realtime_quotes_unavailable`, and it trades on the mock broker only. A personal site without a Shioaji login reads its\ndaily history and index trend from the same archive and has no realtime quote either, so it answers Buzz and Intraday\nthe same way. It reads no news site and no MOPS: the AI step\nreads the archived material information, the TWSE news naming the stock and its archived financials, a stock with none\nof them is decided on its technical score alone, and every valuation endpoint answers 403 `mops_unavailable`. `GET\n/v1/market/audience` answers the site's audience and what it allows, so the web app offers only that. `GET\n/v1/market/archive-status` says how many sessions the archive holds and how many the built-in strategies need, `GET\n/v1/market/stocks/{stock_id}/financials` answers a stock's archived quarters and monthly revenue, and `GET\n/v1/market/attribution` names the open data's providers, datasets and license, which a page showing it must credit.\n\nWorkflows run in the background, one at a time per user and a few at a time per server: a start answers 202 with the\nrun id, and GET /v1/runs/{run_id} reports the run's state and its record; another user's run id answers 404. Run the\nserver with one worker process.\n",
+    "description": "\nRuns the stock-agent workflows and reads what they recorded, on the same runtime as the CLI.\n\nUsers. Anyone may register (`POST /v1/auth/register`) while registration is open, and signs in with a username or an\nemail (`POST /v1/auth/sign-in`), which sets the HttpOnly session cookie `stock_agent_session`. Public: sign-in,\nregistration, the first-time setup, the built-in strategies and market data (`/v1/market`). Signed in: every other\nread and write, each on the user's own runs, decisions, orders, watchlist, mock account and saved technical settings.\nAdministrator: the users (`/v1/admin/users`) and the settings form (`/v1/admin/settings`). 401 means sign in: the\nsession is missing, expired or ended. 403 means signed in but not allowed, and never ends the session. Every write\nsends the header `X-Requested-With: stock-agent`, and every write but sign-in, sign-out, registration and setup\nrepeats `\"confirm\": true` in its body.\n\nOrders. Full Cycle, specific-stock analysis, valuation and market data never order. Buzz, Intraday and a manual BUY\nof a stock a specific-stock run reported (`POST /v1/runs/{run_id}/manual-buy`) send orders through the same gates and\ntrading journal as the CLI, on the broker their `broker` query names for the whole run: the user's mock account by\ndefault, or SinoPac (`shioaji`) for an administrator while the site's Shioaji login is up, on its simulation server\nin dev and test and on the real account in prod, each BUY within trading.max_order_value and the day's within\ntrading.max_daily_buy_value (`GET /v1/account/brokers` names them). A follow (`POST /v1/runs/{run_id}/follow`) places a\nfinished Full Cycle's open decisions in the user's mock account only, priced again: at a fresh realtime quote in\ncontinuous trading, or on a site without realtime quotes at the last session's official close while no session\ntrades. No endpoint cancels or modifies an order.\n\nOpen data. A public site (`audience: public`) uses only the TWSE and TPEX OpenAPI data the server archives: daily\nhistory and the index trend come from that archive, it has no realtime quote, so Buzz and Intraday answer 403\n`realtime_quotes_unavailable`, and it trades on the mock broker only. A personal site reads its daily history and\nindex trend from the exchanges' own daily reports; without a Shioaji login it has no realtime quote either, so it\nanswers Buzz and Intraday the same way. A public site reads no news site and no MOPS: the AI step\nreads the archived material information, the TWSE news naming the stock and its archived financials, a stock with none\nof them is decided on its technical score alone, and every valuation endpoint answers 403 `mops_unavailable`. `GET\n/v1/market/audience` answers the site's audience and what it allows, so the web app offers only that. `GET\n/v1/market/archive-status` says how many sessions the archive holds and how many the built-in strategies need, `GET\n/v1/market/stocks/{stock_id}/financials` answers a stock's archived quarters and monthly revenue, and `GET\n/v1/market/attribution` names the open data's providers, datasets and license, which a page showing it must credit.\n\nWorkflows run in the background, one at a time per user and a few at a time per server: a start answers 202 with the\nrun id, and GET /v1/runs/{run_id} reports the run's state and its record; another user's run id answers 404. Run the\nserver with one worker process.\n",
     "title": "TW-Stock-Alpha-Agent",
     "version": "0.2.0"
   },
   "openapi": "3.1.0",
   "paths": {
+    "/v1/account/brokers": {
+      "get": {
+        "description": "The brokers the user may choose for Buzz, Intraday or a manual BUY now, the mock account first, each with what a\nrun's confirmation names: a real broker's server and its BUY limits.",
+        "operationId": "get_brokers_v1_account_brokers_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BrokerResponse"
+                  },
+                  "title": "Response Get Brokers V1 Account Brokers Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Get Brokers",
+        "tags": [
+          "Account"
+        ]
+      }
+    },
     "/v1/account/history": {
       "get": {
-        "description": "Menu 7: the account now, its equity curve, and the account at the end of `as_of`. It never orders and records no run.",
+        "description": "Menu 7 on the `broker` account, the mock account by default: the account now, its equity curve, and the account at\nthe end of `as_of`. It never orders and records no run.",
         "operationId": "get_account_history_v1_account_history_get",
         "parameters": [
+          {
+            "in": "query",
+            "name": "broker",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ExecutionProvider",
+              "default": "mock"
+            }
+          },
           {
             "in": "query",
             "name": "as_of",
@@ -4516,6 +4249,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "real_broker_refused: a real broker's account, asked by a user who is not an administrator. broker_unavailable: the real broker has no login up on this site now."
           },
           "422": {
             "content": {
@@ -4564,16 +4307,6 @@
             },
             "description": "Successful Response"
           },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "mock_broker_only: the execution provider is not the mock broker."
-          },
           "409": {
             "content": {
               "application/json": {
@@ -4608,7 +4341,7 @@
     },
     "/v1/account/trades": {
       "get": {
-        "description": "Every order that filled at least one share since the mock account opened, newest first, each with the run whose\ndecision it carried out: a follow's with the run it followed. Ask for limit + 1 to know of a next page.",
+        "description": "Every order of a run on the `broker` account (the mock account by default) that filled at least one share, since\nthe mock account opened or every one at a real broker, newest first, each with the run whose decision it carried\nout: a follow's with the run it followed. Ask for limit + 1 to know of a next page.",
         "operationId": "get_trades_v1_account_trades_get",
         "parameters": [
           {
@@ -4634,6 +4367,15 @@
               "title": "Offset",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "broker",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ExecutionProvider",
+              "default": "mock"
+            }
           }
         ],
         "responses": {
@@ -4650,6 +4392,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "real_broker_refused: a real broker's account, asked by a user who is not an administrator. broker_unavailable: the real broker has no login up on this site now."
           },
           "422": {
             "content": {
@@ -4673,33 +4425,19 @@
         ]
       }
     },
-    "/v1/admin/audit": {
+    "/v1/admin/settings": {
       "get": {
-        "description": "The latest saves and restores, newest first: when, which file, by whom, which revisions and which settings. No value.",
-        "operationId": "get_settings_audit_v1_admin_audit_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "maximum": 200,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          }
-        ],
+        "description": "The settings form: each setting by its dotted settings path, in the order of the settings classes, with how the form\nshows it, the value the file on disk sets (else its default, else null), its options and bounds, and whether it\napplies only at a restart. The AI prompts of instructions.yaml are fields at their settings paths, such as\nai.system_prompt.",
+        "operationId": "get_settings_v1_admin_settings_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/SettingsAuditEntryResponse"
+                    "$ref": "#/components/schemas/SettingField"
                   },
-                  "title": "Response Get Settings Audit V1 Admin Audit Get",
+                  "title": "Response Get Settings V1 Admin Settings Get",
                   "type": "array"
                 }
               }
@@ -4710,11 +4448,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ProblemsResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "A settings file does not parse (settings_refused); the problem says where."
           }
         },
         "security": [
@@ -4722,192 +4460,14 @@
             "APIKeyCookie": []
           }
         ],
-        "summary": "Get Settings Audit",
-        "tags": [
-          "Administration"
-        ]
-      }
-    },
-    "/v1/admin/settings": {
-      "get": {
-        "description": "Every settings file with its revision on disk and the one the server runs on, an edit on disk the server refused and\nwhy, how many earlier settings still finish runs, and what applies only at a restart.",
-        "operationId": "get_settings_overview_v1_admin_settings_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SettingsOverviewResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "APIKeyCookie": []
-          }
-        ],
-        "summary": "Get Settings Overview",
-        "tags": [
-          "Administration"
-        ]
-      }
-    },
-    "/v1/admin/settings/appsetting/form": {
-      "post": {
-        "description": "The settings form's view of a text of appsetting.yaml: the text with each change written over its setting's value\nin place, every other line, comment and key as it was; every setting the text then sets, by dotted path (null while\nthe text does not parse); and the JSON schema of what each setting accepts. Nothing is written: the page checks and\nsaves the text it answers like any text the administrator types.",
-        "operationId": "edit_settings_form_v1_admin_settings_appsetting_form_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SettingsFormRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SettingsForm"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "A change the text cannot take (settings_edit_refused): the text does not parse, the path names no setting it sets, or the value is of another kind than the one there."
-          }
-        },
-        "security": [
-          {
-            "APIKeyCookie": []
-          }
-        ],
-        "summary": "Edit Settings Form",
-        "tags": [
-          "Administration"
-        ]
-      }
-    },
-    "/v1/admin/settings/reload": {
-      "post": {
-        "description": "The administrator's try again: loads the settings files as they are on disk now, an edit the server refused\nbefore included, since a refusal can come from outside the files (a database that was down, a broker login that\nfailed). The server runs on them when they start, and the answer's `refused` is null; or it keeps its settings,\nand `refused` says why.",
-        "operationId": "reload_settings_v1_admin_settings_reload_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Confirmed"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SettingsOverviewResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "APIKeyCookie": []
-          }
-        ],
-        "summary": "Reload Settings",
-        "tags": [
-          "Administration"
-        ]
-      }
-    },
-    "/v1/admin/settings/{file}": {
-      "get": {
-        "description": "The whole file as it is on disk, with its revision and the one the server runs on.",
-        "operationId": "get_settings_file_v1_admin_settings__file__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "file",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SettingsFile"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SettingsDocumentResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "APIKeyCookie": []
-          }
-        ],
-        "summary": "Get Settings File",
+        "summary": "Get Settings",
         "tags": [
           "Administration"
         ]
       },
       "put": {
-        "description": "Opens the app on the whole new text, writes it and runs on it at once, when the app starts with it, the file is\nstill at `revision` and the password is the administrator's own; or refuses with nothing written and the app as it\nwas. Runs that started earlier finish on the settings they started with.",
-        "operationId": "save_settings_file_v1_admin_settings__file__put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "file",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SettingsFile"
-            }
-          }
-        ],
+        "description": "Writes every change into its settings file in place, every other line, comment and key as it was, opens the app on\nthe new files, writes them and runs on them at once, when the app starts with them and the password is the\nadministrator's own; or refuses with nothing written and the app as it was. A change to the value its field shows\nis skipped, and changes that change nothing write nothing. Runs that started earlier finish on the settings they\nstarted with. The answer is the form after the save.",
+        "operationId": "save_settings_v1_admin_settings_put",
         "requestBody": {
           "content": {
             "application/json": {
@@ -4923,222 +4483,16 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SettingsEditResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "A save or a restore without the password (password_required), or with a wrong one (password_refused)."
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "The file changed after the revision the request carries; nothing saved."
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemsResponse"
-                }
-              }
-            },
-            "description": "The app would not start with it."
-          },
-          "429": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Too many wrong passwords from this address; Retry-After says when."
-          }
-        },
-        "security": [
-          {
-            "APIKeyCookie": []
-          }
-        ],
-        "summary": "Save Settings File",
-        "tags": [
-          "Administration"
-        ]
-      }
-    },
-    "/v1/admin/settings/{file}/backups": {
-      "get": {
-        "operationId": "list_settings_backups_v1_admin_settings__file__backups_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "file",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SettingsFile"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/SettingsBackupResponse"
+                    "$ref": "#/components/schemas/SettingField"
                   },
-                  "title": "Response List Settings Backups V1 Admin Settings  File  Backups Get",
+                  "title": "Response Save Settings V1 Admin Settings Put",
                   "type": "array"
                 }
               }
             },
             "description": "Successful Response"
           },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "APIKeyCookie": []
-          }
-        ],
-        "summary": "List Settings Backups",
-        "tags": [
-          "Administration"
-        ]
-      }
-    },
-    "/v1/admin/settings/{file}/backups/{backup_id}/preview": {
-      "post": {
-        "description": "The backup's whole text against the file on disk, reviewed as a save would be. Nothing is written.",
-        "operationId": "preview_settings_restore_v1_admin_settings__file__backups__backup_id__preview_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "file",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SettingsFile"
-            }
-          },
-          {
-            "in": "path",
-            "name": "backup_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/BackupId"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SettingsRestoreRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SettingsEditResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "APIKeyCookie": []
-          }
-        ],
-        "summary": "Preview Settings Restore",
-        "tags": [
-          "Administration"
-        ]
-      }
-    },
-    "/v1/admin/settings/{file}/backups/{backup_id}/restore": {
-      "post": {
-        "description": "Puts the backup's whole text back through the same checks, password, startup, backup, audit and swap as a save.",
-        "operationId": "restore_settings_backup_v1_admin_settings__file__backups__backup_id__restore_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "file",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SettingsFile"
-            }
-          },
-          {
-            "in": "path",
-            "name": "backup_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/BackupId"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SettingsRestoreConfirmed"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SettingsEditResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
           "403": {
             "content": {
               "application/json": {
@@ -5147,7 +4501,7 @@
                 }
               }
             },
-            "description": "A save or a restore without the password (password_required), or with a wrong one (password_refused)."
+            "description": "A save without the password (password_required), or with a wrong one (password_refused)."
           },
           "409": {
             "content": {
@@ -5157,17 +4511,25 @@
                 }
               }
             },
-            "description": "The file changed after the revision the request carries; nothing saved."
+            "description": "The server reloaded its settings after the request started, or another save wrote a file first (settings_conflict); nothing saved."
           },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProblemsResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ProblemsResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    }
+                  ],
+                  "title": "Response 422 Save Settings V1 Admin Settings Put"
                 }
               }
             },
-            "description": "The app would not start with it."
+            "description": "The app would not start with the new settings (settings_refused, with the problems at their settings paths), or a change names no field of the form or cannot be written in place (settings_edit_refused)."
           },
           "429": {
             "content": {
@@ -5177,7 +4539,7 @@
                 }
               }
             },
-            "description": "Too many wrong passwords from this address; Retry-After says when."
+            "description": "Too many wrong passwords from this address (sign_in_throttled); Retry-After says when."
           }
         },
         "security": [
@@ -5185,64 +4547,7 @@
             "APIKeyCookie": []
           }
         ],
-        "summary": "Restore Settings Backup",
-        "tags": [
-          "Administration"
-        ]
-      }
-    },
-    "/v1/admin/settings/{file}/preview": {
-      "post": {
-        "description": "The text against the file on disk: its diff, the settings it changes, those applying only at a restart, and its\nproblems at their line and column. Nothing is written.",
-        "operationId": "preview_settings_file_v1_admin_settings__file__preview_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "file",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SettingsFile"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SettingsTextRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SettingsEditResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "APIKeyCookie": []
-          }
-        ],
-        "summary": "Preview Settings File",
+        "summary": "Save Settings",
         "tags": [
           "Administration"
         ]
@@ -5696,7 +5001,7 @@
     },
     "/v1/market/indexes/{index}": {
       "get": {
-        "description": "One market index's completed daily bars, oldest first, from the daily history the stock pages share: the broker's\nhistory cache on a site with a Shioaji login, else the open-data archive. Public. Like a stock's history, it\nfetches no realtime quote.",
+        "description": "One market index's completed daily bars, oldest first, from the daily history the stock pages share: the history\ncache of the exchanges' own reports on a personal site, else the open-data archive. Public. Like a stock's history, it\nfetches no realtime quote.",
         "operationId": "get_index_history_v1_market_indexes__index__get",
         "parameters": [
           {
@@ -6053,8 +5358,19 @@
     },
     "/v1/runs/buzz-scan": {
       "post": {
-        "description": "Starts menu 2, Social Buzz, on the mock broker only. Its decisions go through the same order gates and trading\njournal as the CLI's: a stop-loss SELL or a qualified BUY becomes a mock order. One AI call per qualified stock.",
+        "description": "Starts menu 2, Social Buzz, on the `broker` the query names for the whole run, the mock account by default. Its\ndecisions go through the same order gates and trading journal as the CLI's: a stop-loss SELL or a qualified BUY\nbecomes an order on that broker. One AI call per qualified stock.",
         "operationId": "start_buzz_scan_v1_runs_buzz_scan_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "broker",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ExecutionProvider",
+              "default": "mock"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -6084,7 +5400,7 @@
                 }
               }
             },
-            "description": "mock_broker_only: the execution provider is not the mock broker; use the CLI. realtime_quotes_unavailable: the site has no realtime quotes: it uses open data only (audience public), or it has no Shioaji login."
+            "description": "realtime_quotes_unavailable: the site has no realtime quotes: it uses open data only (audience public), or it has no Shioaji login. real_broker_refused: a real `broker` asked by a user who is not an administrator. broker_unavailable: the real broker has no login up on this site now."
           },
           "409": {
             "content": {
@@ -6197,8 +5513,19 @@
     },
     "/v1/runs/intraday": {
       "post": {
-        "description": "Starts menu 3, Intraday, on the mock broker only, through the same order gates and journal as the CLI's.",
+        "description": "Starts menu 3, Intraday, on the `broker` the query names for the whole run, the mock account by default.",
         "operationId": "start_intraday_v1_runs_intraday_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "broker",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ExecutionProvider",
+              "default": "mock"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -6228,7 +5555,7 @@
                 }
               }
             },
-            "description": "mock_broker_only: the execution provider is not the mock broker; use the CLI. realtime_quotes_unavailable: the site has no realtime quotes: it uses open data only (audience public), or it has no Shioaji login."
+            "description": "realtime_quotes_unavailable: the site has no realtime quotes: it uses open data only (audience public), or it has no Shioaji login. real_broker_refused: a real `broker` asked by a user who is not an administrator. broker_unavailable: the real broker has no login up on this site now."
           },
           "409": {
             "content": {
@@ -6274,7 +5601,7 @@
     },
     "/v1/runs/specific-stocks": {
       "post": {
-        "description": "Starts menu 4's analysis of the given stocks. Each stock is one AI call. It never orders; the API offers no manual BUY.",
+        "description": "Starts menu 4's analysis of the given stocks, one AI call each. It never orders: a manual BUY of a reported stock does.",
         "operationId": "start_specific_stock_analysis_v1_runs_specific_stocks_post",
         "requestBody": {
           "content": {
@@ -6414,16 +5741,6 @@
             },
             "description": "Successful Response"
           },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "mock_broker_only: the execution provider is not the mock broker."
-          },
           "404": {
             "content": {
               "application/json": {
@@ -6499,7 +5816,7 @@
                 }
               }
             },
-            "description": "mock_broker_only: the execution provider is not the mock broker. realtime_quotes_unavailable: the site prices orders on realtime quotes and has no Shioaji login now."
+            "description": "realtime_quotes_unavailable: the site prices orders on realtime quotes and has no Shioaji login now."
           },
           "404": {
             "content": {
@@ -6548,6 +5865,114 @@
           }
         ],
         "summary": "Follow Run",
+        "tags": [
+          "Workflow runs"
+        ]
+      }
+    },
+    "/v1/runs/{run_id}/manual-buy": {
+      "post": {
+        "description": "Menu 4's manual BUY of one stock a specific-stock run of the user reported: `quantity` shares on the `broker` the\nquery names, the mock account by default, as a run of its own. It is priced on a fresh realtime quote when it is\nplaced, and every order gate holds it: market open, the quote's age, the broker's limits and its own checks.",
+        "operationId": "buy_manually_v1_runs__run_id__manual_buy_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "broker",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ExecutionProvider",
+              "default": "mock"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualBuyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunAccepted"
+                }
+              }
+            },
+            "description": "The run started; poll GET /v1/runs/{run_id}."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "realtime_quotes_unavailable: the site has no realtime quotes: it uses open data only (audience public), or it has no Shioaji login. real_broker_refused: a real `broker` asked by a user who is not an administrator. broker_unavailable: the real broker has no login up on this site now."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The user has no run that reported this stock."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Another run of this user is still running."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The server runs its most workflows at once; start yours later."
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Buy Manually",
         "tags": [
           "Workflow runs"
         ]
@@ -6661,7 +6086,7 @@
     },
     "/v1/technical-settings": {
       "get": {
-        "description": "The owner's strategies and which one each workflow uses, with the revision a save must carry. The first read\ncopies every built-in strategy for the owner. A workflow already running keeps the strategy it started with. A\nsave that lands during the read answers 409: read again.",
+        "description": "The owner's strategies and the active one, which every workflow uses, with the revision a save must carry. The\nfirst read copies every built-in strategy for the owner. A workflow already running keeps the strategy it started\nwith. A save that lands during the read answers 409: read again.",
         "operationId": "get_technical_settings_v1_technical_settings_get",
         "responses": {
           "200": {

@@ -88,7 +88,7 @@ async def test_a_first_load_saves_the_initial_settings_at_revision_0_and_a_later
 
 async def test_a_save_from_the_revision_read_replaces_the_settings_and_counts_up(db: DatabaseConnector) -> None:
     read = await of(db, "alice").load(INITIAL)
-    edited = replace(read, active_strategy_id="aggressive", buzz_strategy_id="conservative")
+    edited = replace(read, active_strategy_id="aggressive")
 
     saved = await of(db, "alice").save(edited)
 
@@ -103,7 +103,7 @@ async def test_a_save_from_an_older_revision_is_refused_and_changes_nothing(db: 
     first = await of(db, "alice").save(replace(read, active_strategy_id="aggressive"))
 
     with pytest.raises(TechnicalSettingsConflictError):
-        await of(db, "alice").save(replace(read, active_strategy_id="conservative", buzz_strategy_id="conservative"))
+        await of(db, "alice").save(replace(read, active_strategy_id="conservative"))
 
     assert await of(db, "alice").load(INITIAL) == first
 
@@ -291,7 +291,7 @@ def settings_json() -> Json:
     built_ins = [
         json.loads((STRATEGY_FILES / f"{strategy_id}.json").read_text()) for strategy_id in ("conservative", "balanced", "aggressive")
     ]
-    return {"active_strategy_id": "custom", "buzz_strategy_id": "aggressive", "strategies": [*built_ins, CUSTOM], "revision": 0}
+    return {"active_strategy_id": "custom", "strategies": [*built_ins, CUSTOM], "revision": 0}
 
 
 def unused_formula_words() -> list[str]:
@@ -320,11 +320,7 @@ async def test_settings_keep_every_formula_through_json_and_sql(tmp_path: Path, 
 
     returned = json.loads(SETTINGS.dump_json(loaded))
     assert returned["strategies"][3] == CUSTOM
-    assert {key: value for key, value in returned.items() if key != "strategies"} == {
-        "active_strategy_id": "custom",
-        "buzz_strategy_id": "aggressive",
-        "revision": 0,
-    }
+    assert {key: value for key, value in returned.items() if key != "strategies"} == {"active_strategy_id": "custom", "revision": 0}
     assert SETTINGS.validate_python(returned) == SETTINGS.validate_python(document) == loaded
 
 

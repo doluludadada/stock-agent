@@ -1,19 +1,12 @@
 const builder = {
   signIn: 'Sign in to design and save a formula',
   backToLibrary: 'Strategy library',
-  eyebrowNew: 'New strategy',
-  eyebrowEdit: 'Edit strategy',
   untitled: 'Untitled strategy',
   loadFailed: 'The strategy could not be loaded.',
   status: { new: 'Not saved yet', pending: 'Unsaved changes', saved: 'Saved', revision: 'revision {{revision}}' },
   quickFill: {
     title: 'Quick fill',
-    description: 'Inserts an ordinary condition you can change freely afterwards.',
-    target: 'Add to',
-    added: '{{name}} added',
-    editable: 'Every part of it stays editable.',
     kind: {
-      maCross: 'MA crossover',
       macdCross: 'MACD crossover',
       rsiThreshold: 'RSI threshold',
       volumeAboveAverage: 'Volume above average',
@@ -23,10 +16,8 @@ const builder = {
   rule: {
     label: 'Rule {{index}}',
     name: 'Rule name',
-    namePlaceholder: 'Name it after the conditions work',
     effect: 'Effect',
     remove: 'Remove rule {{index}}',
-    preview: 'Reads as:',
     add: 'Add rule',
   },
   group: {
@@ -40,17 +31,11 @@ const builder = {
   },
   condition: {
     observe: 'What to watch',
-    observeHint: 'data or indicator',
     judge: 'How to judge',
-    judgeHint: 'comparison',
     compare: 'Compare with',
-    compareHint: 'data, indicator or number',
     comparator: 'Comparison',
     crosses_aboveHint: 'Crosses above: on the previous trading day the left side was at or below the right side, and today it is above.',
     crosses_belowHint: 'Crosses below: on the previous trading day the left side was at or above the right side, and today it is below.',
-    done: 'Done',
-    edit: 'Edit condition',
-    collapse: 'Collapse condition',
     remove: 'Remove condition',
     needsFix: 'Needs a fix',
   },
@@ -95,10 +80,7 @@ const builder = {
     empty: 'Add a rule to see the formula.',
   },
   scoring: {
-    title: 'Scoring',
-    summary: 'Base score {{base}}; each rule applies its effect once.',
-    show: 'Adjust',
-    hide: 'Hide',
+    summary: 'Scoring: base {{base}}',
     baseScore: 'Base score',
     blockFailurePenalty: 'Exclusion penalty',
     failureScoreReduction: 'Deduction',
@@ -106,9 +88,7 @@ const builder = {
     note: 'Passing an “exclude if failed” rule does not add points by itself.',
   },
   name: {
-    title: 'Name and save',
     label: 'Strategy name',
-    placeholder: 'For example: Swing trend with volume',
     id: 'Strategy id {{id}}',
   },
   save: {
@@ -123,7 +103,6 @@ const builder = {
     full: 'The settings hold the most strategies they can. Delete one first.',
     notLoaded: 'The settings have not loaded yet. Save again in a moment; your draft is kept.',
     failed: 'The save did not go through. Your draft is kept; try again.',
-    hintDirty: 'You have unsaved changes.',
   },
   conflict: {
     title: 'The settings changed since you opened this strategy',

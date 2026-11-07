@@ -8,7 +8,7 @@ use-case constructors.
 import tempfile
 from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager, nullcontext
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, fields
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -25,13 +25,13 @@ from a_domain.model.trading.watchlist import WatchlistEntry
 from a_domain.rules.technical.calculation.calculator import MovingAverageIndicator
 from a_domain.rules.technical.formula import Comparison, IndicatorValue, LatestPrice
 from a_domain.rules.technical.strategy import TechnicalRule, TechnicalScoring, TechnicalSettings, TechnicalStrategy
+from a_domain.rules.trading.order_rule import BrokerLink
 from a_domain.types.enums import (
     AiAnalysisFocus,
     ComparisonOperator,
     ExecutionProvider,
     IndicatorKind,
     InformationSource,
-    OrderMode,
     Role,
     RuleEffect,
     SystemEnvironment,
@@ -44,7 +44,6 @@ from b_application.config.app_config import AppConfig
 from b_application.config.chat_config import NotificationConfig
 from b_application.config.market_data_config import MarketHoursConfig
 from b_application.config.settings_loader import settings_revision, settings_texts, validate_trading_environment
-from b_application.config.trading_config import TradingConfig
 from b_application.pipeline import Pipeline
 from b_application.schemas.pipeline_status import PipelineStatus
 from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
@@ -79,7 +78,7 @@ from support.fakes import (
     RecordingLogger,
     SignedOut,
 )
-from support.settings import environment_setup, shipped_config
+from support.settings import shipped_config
 
 MARKET_OPEN = datetime(2026, 10, 19, 10, 0, tzinfo=TAIWAN_TIMEZONE)
 MARKET_CLOSED = datetime(2026, 10, 19, 14, 0, tzinfo=TAIWAN_TIMEZONE)
@@ -116,8 +115,8 @@ BUZZ_STRATEGY = TechnicalStrategy(
 
 
 def harness_settings() -> TechnicalSettings:
-    """Full Cycle, Intraday and Manual use the trend strategy; Buzz uses only a minimum-price check."""
-    return TechnicalSettings(active_strategy_id="trend", buzz_strategy_id="buzz", strategies=(TREND_STRATEGY, BUZZ_STRATEGY))
+    """Every workflow uses the active trend strategy; the saved Buzz strategy, only a minimum-price check, waits unused."""
+    return TechnicalSettings(active_strategy_id="trend", strategies=(TREND_STRATEGY, BUZZ_STRATEGY))
 
 
 def harness_config() -> AppConfig:
@@ -129,7 +128,6 @@ def harness_config() -> AppConfig:
                 analysis_report_momentum=PROMPT_TEMPLATES[AiAnalysisFocus.MOMENTUM],
                 valuation_explanation=VALUATION_PROMPT_TEMPLATE,
             ),
-            "trading": TradingConfig(execution_provider=ExecutionProvider.MOCK, order_mode=OrderMode.MOCK_ONLY),
             "notifications": NotificationConfig(enabled=False),
         }
     )
@@ -175,6 +173,11 @@ class CliHarness:
     journal: FakeTradingJournal
     watchlist: FakeWatchlistRepository
     broker: RecordingExecutionProvider
+    """The administrator's mock account."""
+
+    real_broker: RecordingExecutionProvider
+    """SinoPac on the site's login, offered to the runtime only with build_harness(sinopac=True)."""
+
     technical_settings: FakeTechnicalSettingsRepository
     logger: RecordingLogger
     users: FakeUserStore
@@ -193,7 +196,11 @@ class CliHarness:
 
     @property
     def pipeline(self) -> Pipeline:
-        return self.runtime.pipeline_for(self.administrator)
+        return self.runtime.pipeline_for(self.administrator, ExecutionProvider.MOCK)
+
+    def pipeline_on(self, broker: ExecutionProvider) -> Pipeline:
+        """The administrator's Pipeline on `broker`, as a run that chose it gets it."""
+        return self.runtime.pipeline_for(self.administrator, broker)
 
     def session(self) -> terminal.CliSession:
         """A CLI session of the administrator, made by the CLI's own session_for."""
@@ -254,10 +261,19 @@ class CliHarness:
         )
 
     async def run_menu(
-        self, choice: str, *, stock_ids: str | None = None, add_to_watchlist: bool = False, buy: Iterable[str] = ()
+        self,
+        choice: str,
+        *,
+        stock_ids: str | None = None,
+        add_to_watchlist: bool = False,
+        buy: Iterable[str] = (),
+        order_on: ExecutionProvider | None = None,
     ) -> PipelineStatus:
-        """Runs one CLI menu choice. Answers the stock-ID prompt, the watchlist confirmation and each per-stock BUY confirmation."""
-        status = await self.answer_menu(choice, stock_ids=stock_ids, add_to_watchlist=add_to_watchlist, buy=buy)
+        """
+        Runs one CLI menu choice. Answers the stock-ID prompt, the watchlist confirmation, each per-stock BUY confirmation
+        and, where SinoPac is offered, the broker prompt with `order_on`.
+        """
+        status = await self.answer_menu(choice, stock_ids=stock_ids, add_to_watchlist=add_to_watchlist, buy=buy, order_on=order_on)
         assert status is not None, f"menu {choice} returned no status"
         return status
 
@@ -273,10 +289,16 @@ class CliHarness:
         add_to_watchlist: bool = False,
         buy: Iterable[str] = (),
         as_of: str | None = None,
+        order_on: ExecutionProvider | None = None,
     ) -> PipelineStatus | None:
         buy_stock_ids = set(buy)
 
         def answer_prompt(prompt: str, *args, **kwargs) -> str:
+            if prompt == "Order on":
+                assert order_on is not None, f"menu {choice} asked for a broker the test did not choose"
+                assert order_on.value in kwargs["choices"], f"{order_on} is not offered: {kwargs['choices']}"
+                return order_on.value
+
             answer = as_of if "as of date" in prompt else stock_ids
             assert answer is not None, f"menu {choice} asked an unexpected prompt: {prompt!r}"
             return answer
@@ -331,11 +353,6 @@ UNUSED_PROJECT_ROOT = Path(tempfile.gettempdir()) / "stock-agent-harness-has-no-
 """Where the harness's settings-file adapter points unless a test gives its own copy: never the repository's config/."""
 
 
-def real_broker_config() -> AppConfig:
-    """The harness settings on Shioaji in prod, with orders disabled and placeholder credentials: a real-broker installation."""
-    return environment_setup(harness_config(), SystemEnvironment.PROD, ExecutionProvider.SHIOAJI, OrderMode.DISABLED)
-
-
 def build_harness(
     *,
     now: datetime = MARKET_OPEN,
@@ -343,10 +360,12 @@ def build_harness(
     settings: TechnicalSettings | None = None,
     settings_root: Path = UNUSED_PROJECT_ROOT,
     realtime_quotes: bool | None = None,
+    sinopac: bool = False,
 ) -> CliHarness:
     """
     realtime_quotes is whether the runtime has a broker login, as the audience allows unless the test says otherwise:
-    False on a personal site is one without a Shioaji login.
+    False on a personal site is one without a Shioaji login. sinopac offers the administrator's runs SinoPac on that
+    login, the harness's `real_broker`, on the server the environment trades on.
     """
     config = config or harness_config()
     login = config.audience.realtime_quotes if realtime_quotes is None else realtime_quotes
@@ -373,6 +392,8 @@ def build_harness(
     watchlist = FakeWatchlistRepository(clock)
     technical_settings = FakeTechnicalSettingsRepository(settings or harness_settings())
     broker = RecordingExecutionProvider()
+    sinopac_link = BrokerLink(broker=ExecutionProvider.SHIOAJI, up=True, simulation=config.environment.shioaji_simulation)
+    real_broker = RecordingExecutionProvider(link=sinopac_link)
 
     users = FakeUserStore()
     users.add(ADMINISTRATOR, ADMINISTRATOR_PASSWORD)
@@ -415,7 +436,7 @@ def build_harness(
         settings_files=SettingsFiles(project_root=settings_root, max_bytes=262_144, backups_kept=3, logger=logger),
         user_store=users,
         attempt_log=MemoryAttemptLog(),
-        real_broker=None if config.trading.execution_provider == ExecutionProvider.MOCK else broker,
+        real_broker=real_broker if sinopac else None,
         owned_ports=owned_ports,
     )
     return CliHarness(
@@ -435,6 +456,7 @@ def build_harness(
         journal=journal,
         watchlist=watchlist,
         broker=broker,
+        real_broker=real_broker,
         technical_settings=technical_settings,
         logger=logger,
         users=users,
@@ -458,9 +480,8 @@ def signs_in_then(answer: str):
 
 
 def runtime_for(harness: CliHarness, config: AppConfig) -> Runtime:
-    """A runtime over the harness's fakes built from other settings, as a reload opens it: the real broker for Shioaji."""
-    real_broker = None if config.trading.execution_provider == ExecutionProvider.MOCK else harness.broker
-    return compose_runtime(config, harness.logger, harness.clock, replace(harness.dependencies, real_broker=real_broker))
+    """A runtime over the harness's fakes built from other settings, as a reload opens it, offering what the first offered."""
+    return compose_runtime(config, harness.logger, harness.clock, harness.dependencies)
 
 
 @asynccontextmanager

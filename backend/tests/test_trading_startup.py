@@ -1,6 +1,5 @@
 import asyncio
 import io
-from itertools import product
 from pathlib import Path
 from typing import get_args
 
@@ -10,11 +9,13 @@ from pydantic import BaseModel
 from rich.console import Console
 from shioaji.error import TokenError
 from support.fake_shioaji import FakeShioaji
-from support.harness import build_harness
+from support.fakes import RecordingLogger
+from support.harness import build_harness, harness_config
 from support.settings import environment_setup, shipped_config
 from trading_stack import SilentLogger
 
-from a_domain.types.enums import DatabaseBackend, ExecutionProvider, OrderMode, ShioajiCredential, SystemEnvironment
+from a_domain.rules.trading.order_rule import BrokerLink
+from a_domain.types.enums import DatabaseBackend, ExecutionProvider, ShioajiCredential, SystemEnvironment
 from b_application.config.app_config import AppConfig
 from b_application.config.market_data_config import MarketHoursConfig
 from b_application.config.settings_loader import validate_trading_environment
@@ -33,29 +34,15 @@ def process() -> ProcessState:
 
 
 DEV, TEST, PROD = SystemEnvironment.DEV, SystemEnvironment.TEST, SystemEnvironment.PROD
-MOCK, SHIOAJI = ExecutionProvider.MOCK, ExecutionProvider.SHIOAJI
-
-STARTS = {
-    (DEV, MOCK, OrderMode.MOCK_ONLY),
-    (DEV, MOCK, OrderMode.DISABLED),
-    (TEST, MOCK, OrderMode.MOCK_ONLY),
-    (TEST, MOCK, OrderMode.DISABLED),
-    (TEST, SHIOAJI, OrderMode.DISABLED),
-    (PROD, MOCK, OrderMode.MOCK_ONLY),
-    (PROD, MOCK, OrderMode.DISABLED),
-    (PROD, SHIOAJI, OrderMode.DISABLED),
-    (PROD, SHIOAJI, OrderMode.LIVE),
-}
-"""Dev never touches a real broker, mock_only needs the mock, live needs environment prod and Shioaji."""
 
 PRODUCTION = [credential.value for credential in PROD.shioaji_credentials]
 SECRET = "Kq7x9"
 """A credential's value a refusal must never show."""
 
 
-def trading_config(environment: SystemEnvironment, provider: ExecutionProvider, mode: OrderMode) -> AppConfig:
+def trading_config(environment: SystemEnvironment) -> AppConfig:
     """The shipped settings in the environment, with placeholders for exactly the Shioaji credentials it reads."""
-    return environment_setup(shipped_config(), environment, provider, mode)
+    return environment_setup(shipped_config(), environment)
 
 
 def without(config: AppConfig, *credentials: ShioajiCredential) -> AppConfig:
@@ -64,45 +51,39 @@ def without(config: AppConfig, *credentials: ShioajiCredential) -> AppConfig:
     return config.model_copy(update={"shioaji": ShioajiConfig(_env_file=None, **polling, **kept)})
 
 
-@pytest.mark.parametrize(("environment", "provider", "mode"), list(product(SystemEnvironment, ExecutionProvider, OrderMode)))
-async def test_each_environment_provider_and_order_mode_either_starts_or_is_refused(
-    monkeypatch, environment: SystemEnvironment, provider: ExecutionProvider, mode: OrderMode
+@pytest.mark.parametrize("environment", list(SystemEnvironment))
+async def test_every_environment_starts_and_offers_sinopac_on_the_server_it_trades_on(
+    monkeypatch, environment: SystemEnvironment
 ) -> None:
     monkeypatch.setattr(shioaji, "Shioaji", FakeShioaji)
-    config = trading_config(environment, provider, mode)
-
-    if (environment, provider, mode) not in STARTS:
-        with pytest.raises(TradingSetupError):
-            validate_trading_environment(config)
-        return
-
+    config = trading_config(environment)
     validate_trading_environment(config)
 
-    _, broker = await connect_shioaji(config, process(), TaiwanMarketClock(MarketHoursConfig()))
-    assert (broker is None) if provider == MOCK else type(broker) is ShioajiExecutionProvider
+    quotes, broker = await connect_shioaji(config, process(), TaiwanMarketClock(MarketHoursConfig()))
+
+    assert quotes is not None and type(broker) is ShioajiExecutionProvider
+    assert broker.link() == BrokerLink(broker=ExecutionProvider.SHIOAJI, up=True, simulation=environment.shioaji_simulation)
 
 
-@pytest.mark.parametrize(
-    ("environment", "removed", "missing"),
-    [
-        (TEST, TEST.shioaji_credentials, "SHIOAJI_API_KEY_TEST, SHIOAJI_SECRET_KEY_TEST"),
-        (PROD, (ShioajiCredential.SECRET_KEY,), "SHIOAJI_SECRET_KEY"),
-        (
-            PROD,
-            (ShioajiCredential.CA_PATH, ShioajiCredential.CA_PASSWORD, ShioajiCredential.PERSON_ID),
-            "SHIOAJI_CA_PATH, SHIOAJI_CA_PASSWORD, SHIOAJI_PERSON_ID",
-        ),
-    ],
-)
-async def test_shioaji_without_the_credentials_of_its_environment_refuses_to_start_and_names_them(
-    environment: SystemEnvironment, removed: tuple[ShioajiCredential, ...], missing: str
-) -> None:
-    config = without(trading_config(environment, SHIOAJI, OrderMode.DISABLED), *removed)
+async def test_prod_without_its_certificate_keeps_the_quotes_and_offers_no_sinopac_naming_what_failed(monkeypatch) -> None:
+    monkeypatch.setattr(shioaji, "Shioaji", FakeShioaji)
+    removed = (ShioajiCredential.CA_PATH, ShioajiCredential.CA_PASSWORD, ShioajiCredential.PERSON_ID)
+    logger = RecordingLogger()
+    state = ProcessState(logger=logger, attempt_log=MemoryAttemptLog(), cache_writes=asyncio.Lock())
 
-    with pytest.raises(
-        TradingSetupError, match=f"shioaji in environment {environment.value} needs {missing} in the environment or .env"
-    ):
-        validate_trading_environment(config)
+    quotes, broker = await connect_shioaji(without(trading_config(PROD), *removed), state, TaiwanMarketClock(MarketHoursConfig()))
+
+    assert quotes is not None and broker is None
+    assert any(
+        "SinoPac production orders unavailable: Shioaji production needs the CA certificate" in line for _, line in logger.records
+    )
+
+
+async def test_a_site_without_the_key_pair_has_no_quote_and_offers_no_sinopac() -> None:
+    config = without(trading_config(TEST), *TEST.shioaji_credentials)
+    validate_trading_environment(config)
+
+    assert await connect_shioaji(config, process(), TaiwanMarketClock(MarketHoursConfig())) == (None, None)
 
 
 @pytest.mark.parametrize("environment", [DEV, TEST])
@@ -111,7 +92,7 @@ async def test_dev_and_test_refuse_to_start_while_a_production_credential_is_in_
     environment: SystemEnvironment, credential: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv(credential, SECRET)
-    config = trading_config(environment, MOCK, OrderMode.MOCK_ONLY)
+    config = trading_config(environment)
     config.shioaji = ShioajiConfig(_env_file=None, **config.shioaji.model_dump(include={"poll_interval_seconds", "max_polls"}))
 
     with pytest.raises(TradingSetupError) as refused:
@@ -124,7 +105,7 @@ async def test_dev_and_test_refuse_to_start_while_a_production_credential_is_in_
 async def test_a_production_credential_in_dot_env_stops_a_test_machine_too(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / ".env").write_text(f'SHIOAJI_CA_PASSWORD="{SECRET}"\n', encoding="utf-8")
     monkeypatch.chdir(tmp_path)
-    config = trading_config(TEST, MOCK, OrderMode.MOCK_ONLY)
+    config = trading_config(TEST)
     config.shioaji = ShioajiConfig(**config.shioaji.model_dump(include={"poll_interval_seconds", "max_polls"}))
 
     with pytest.raises(TradingSetupError, match="environment test refuses to start while SHIOAJI_CA_PASSWORD is set") as refused:
@@ -133,19 +114,19 @@ async def test_a_production_credential_in_dot_env_stops_a_test_machine_too(tmp_p
     assert SECRET not in str(refused.value)
 
 
-async def test_dev_and_test_machines_with_only_the_test_pair_start_on_the_mock_broker(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_dev_and_test_machines_with_only_the_test_pair_start(monkeypatch: pytest.MonkeyPatch) -> None:
     for credential in TEST.shioaji_credentials:
         monkeypatch.setenv(credential.value, SECRET)
 
     for environment in (DEV, TEST):
-        validate_trading_environment(trading_config(environment, MOCK, OrderMode.MOCK_ONLY))
+        validate_trading_environment(trading_config(environment))
 
 
 async def test_the_test_environment_logs_in_to_simulation_with_only_the_test_pair(monkeypatch: pytest.MonkeyPatch) -> None:
     clients: list[FakeShioaji] = []
     monkeypatch.setattr(shioaji, "Shioaji", lambda simulation: clients.append(FakeShioaji(simulation)) or clients[-1])
 
-    await connect_shioaji(trading_config(TEST, SHIOAJI, OrderMode.DISABLED), process(), TaiwanMarketClock(MarketHoursConfig()))
+    await connect_shioaji(trading_config(TEST), process(), TaiwanMarketClock(MarketHoursConfig()))
 
     [client] = clients
     assert (client.simulation, client.ca_activations) == (True, [])
@@ -156,7 +137,7 @@ async def test_prod_never_logs_in_to_simulation_and_activates_its_certificate(mo
     clients: list[FakeShioaji] = []
     monkeypatch.setattr(shioaji, "Shioaji", lambda simulation: clients.append(FakeShioaji(simulation)) or clients[-1])
 
-    await connect_shioaji(trading_config(PROD, SHIOAJI, OrderMode.LIVE), process(), TaiwanMarketClock(MarketHoursConfig()))
+    await connect_shioaji(trading_config(PROD), process(), TaiwanMarketClock(MarketHoursConfig()))
 
     [client] = clients
     assert client.simulation is False
@@ -166,17 +147,8 @@ async def test_prod_never_logs_in_to_simulation_and_activates_its_certificate(mo
     ]
 
 
-@pytest.mark.parametrize(("environment", "provider"), [(DEV, MOCK), (TEST, SHIOAJI)])
-async def test_order_mode_live_outside_prod_is_refused_naming_prod(
-    environment: SystemEnvironment, provider: ExecutionProvider
-) -> None:
-    with pytest.raises(TradingSetupError, match=f"order_mode live needs environment prod, not {environment.value}"):
-        validate_trading_environment(trading_config(environment, provider, OrderMode.LIVE))
-
-
-@pytest.mark.parametrize("mode", [OrderMode.MOCK_ONLY, OrderMode.DISABLED])
-async def test_prod_refuses_sqlite(mode: OrderMode) -> None:
-    config = trading_config(PROD, MOCK, mode).model_copy(update={"db": shipped_config().db})
+async def test_prod_refuses_sqlite() -> None:
+    config = trading_config(PROD).model_copy(update={"db": shipped_config().db})
 
     assert config.db.backend == DatabaseBackend.SQLITE
     with pytest.raises(TradingSetupError, match="environment prod needs db.backend postgresql, not sqlite"):
@@ -186,29 +158,27 @@ async def test_prod_refuses_sqlite(mode: OrderMode) -> None:
 async def test_no_setting_or_variable_chooses_simulation_only_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SHIOAJI_SIMULATION", "false")
     monkeypatch.setenv("SIMULATION", "true")
-    credentials = trading_config(PROD, SHIOAJI, OrderMode.LIVE).shioaji.model_copy(
-        update=trading_config(TEST, SHIOAJI, OrderMode.DISABLED).shioaji.model_dump(include={"api_key_test", "secret_key_test"})
+    credentials = trading_config(PROD).shioaji.model_copy(
+        update=trading_config(TEST).shioaji.model_dump(include={"api_key_test", "secret_key_test"})
     )
 
     assert (credentials.login(TEST).simulation, credentials.login(PROD).simulation) == (True, False)
 
 
-async def test_a_failed_shioaji_login_stops_startup_with_the_broker_reason(monkeypatch) -> None:
+async def test_a_failed_shioaji_login_leaves_no_quote_and_no_sinopac_saying_why_without_the_servers_words(monkeypatch) -> None:
     monkeypatch.setattr(shioaji, "Shioaji", lambda simulation: FakeShioaji(simulation, login_error=TokenError(401, "bad api key")))
-    config = trading_config(PROD, SHIOAJI, OrderMode.LIVE)
+    logger = RecordingLogger()
+    state = ProcessState(logger=logger, attempt_log=MemoryAttemptLog(), cache_writes=asyncio.Lock())
 
-    with pytest.raises(TradingSetupError, match="^Shioaji production login failed: TokenError, status 401$"):
-        await connect_shioaji(config, process(), TaiwanMarketClock(MarketHoursConfig()))
+    assert await connect_shioaji(trading_config(PROD), state, TaiwanMarketClock(MarketHoursConfig())) == (None, None)
+    assert any(line.startswith("Shioaji production login failed: TokenError, status 401.") for _, line in logger.records)
+    assert not any("bad api key" in line for _, line in logger.records)
 
 
-async def test_the_mock_broker_in_mock_only_mode_on_dev_is_the_default() -> None:
+async def test_the_shipped_settings_are_dev_with_the_owners_sinopac_limits() -> None:
     shipped = load_settings(get_project_root())
 
-    assert (TradingConfig(), shipped.trading) == (
-        TradingConfig(execution_provider=MOCK, order_mode=OrderMode.MOCK_ONLY),
-        TradingConfig(execution_provider=MOCK, order_mode=OrderMode.MOCK_ONLY),
-    )
-    assert shipped.environment == DEV
+    assert (shipped.environment, shipped.trading) == (DEV, TradingConfig(max_order_value=100_000, max_daily_buy_value=300_000))
 
 
 @pytest.fixture
@@ -219,29 +189,28 @@ def screen(monkeypatch) -> io.StringIO:
 
 
 @pytest.mark.parametrize(
-    ("environment", "mode", "server", "orders"),
+    ("environment", "orders"),
     [
-        (TEST, OrderMode.DISABLED, "SHIOAJI SIMULATION (paper trading)", "Orders DISABLED: no order is sent"),
-        (PROD, OrderMode.LIVE, "SHIOAJI PRODUCTION: REAL ACCOUNT, REAL MONEY", "Orders LIVE: menus 2, 3, 4 send orders to the broker"),
-        (PROD, OrderMode.DISABLED, "SHIOAJI PRODUCTION: REAL ACCOUNT, REAL MONEY", "Orders DISABLED: no order is sent"),
+        (DEV, "your mock account, or SinoPac (simulation) when you choose it for a run"),
+        (PROD, "your mock account, or SinoPac (PRODUCTION, REAL MONEY) when you choose it for a run"),
     ],
 )
-async def test_the_menu_header_warns_about_a_real_broker(
-    screen: io.StringIO, environment: SystemEnvironment, mode: OrderMode, server: str, orders: str
+async def test_the_menu_header_names_sinopac_and_its_server_where_the_administrator_may_choose_it(
+    screen: io.StringIO, environment: SystemEnvironment, orders: str
 ) -> None:
-    interactive.print_menu(trading_config(environment, SHIOAJI, mode), build_harness().session())
+    harness = build_harness(config=environment_setup(harness_config(), environment), sinopac=True)
 
-    output = screen.getvalue()
-    assert "REAL BROKER" in output and server in output and orders in output
-    assert "Execution Provider: SHIOAJI" in output and f"Orders:             {mode.value.upper()}" in output
+    interactive.print_menu(harness.runtime, harness.session())
+
+    assert f"Orders:             {orders}" in screen.getvalue()
 
 
-async def test_the_menu_header_shows_no_broker_warning_for_the_mock(screen: io.StringIO) -> None:
-    interactive.print_menu(trading_config(DEV, MOCK, OrderMode.MOCK_ONLY), build_harness().session())
+async def test_the_menu_header_names_only_the_mock_account_without_sinopac(screen: io.StringIO) -> None:
+    harness = build_harness()
 
-    output = screen.getvalue()
-    assert "REAL BROKER" not in output
-    assert "Execution Provider: MOCK" in output and "Account:            your mock account" in output
+    interactive.print_menu(harness.runtime, harness.session())
+
+    assert "Orders:             your mock account\n" in screen.getvalue()
 
 
 def menu_entry(output: str, title: str) -> list[str]:
@@ -250,20 +219,15 @@ def menu_entry(output: str, title: str) -> list[str]:
     return [line.strip() for line in lines[start + 1 : lines.index("", start)]]
 
 
-@pytest.mark.parametrize(
-    ("environment", "provider", "mode", "orders"),
-    [
-        (DEV, MOCK, OrderMode.MOCK_ONLY, "May submit orders to the mock broker (order mode MOCK ONLY)."),
-        (TEST, MOCK, OrderMode.DISABLED, "Would submit orders, but order mode DISABLED records each one REJECTED and sends none."),
-        (PROD, SHIOAJI, OrderMode.LIVE, "May submit orders to the SHIOAJI broker (order mode LIVE)."),
-    ],
-)
-async def test_menus_2_3_and_4_say_they_may_submit_orders_under_the_current_order_mode(
-    screen: io.StringIO, environment: SystemEnvironment, provider: ExecutionProvider, mode: OrderMode, orders: str
-) -> None:
-    interactive.print_menu(trading_config(environment, provider, mode), build_harness().session())
+async def test_menus_2_3_and_4_say_their_orders_go_to_the_account_the_run_starts_on(screen: io.StringIO) -> None:
+    harness = build_harness(sinopac=True)
 
-    output = screen.getvalue()
+    interactive.print_menu(harness.runtime, harness.session())
+
+    output, orders = (
+        screen.getvalue(),
+        "May submit orders to the account the run starts on: your mock account unless you choose another.",
+    )
     assert orders in menu_entry(output, "[2] Scan Social Buzz")
     assert orders in menu_entry(output, "[3] Run Intraday Trading")
     assert orders in menu_entry(output, "[4] Analyse Specific Stocks"), "a confirmed manual BUY sends an order"
@@ -276,10 +240,11 @@ BOOLEAN_SETTINGS = {
     "behavior.enable_x_search",
     "behavior.enable_inline_citations",
     "notifications.enabled",
+    "sources.exchange.daily_reports.index_volume_lots",
 }
 """
 None of them sends or stops an order: open registration, the AI's web search, X search and inline citations, LINE
-notifications.
+notifications, and whether an exchange's index report counts its volume in lots.
 """
 
 
@@ -296,8 +261,8 @@ def boolean_settings(model: type[BaseModel], prefix: str = "") -> set[str]:
     return found
 
 
-async def test_the_order_mode_is_the_only_setting_that_turns_orders_on_or_off() -> None:
+async def test_no_setting_turns_orders_on_or_off() -> None:
     assert boolean_settings(AppConfig) == BOOLEAN_SETTINGS, (
-        "trading.order_mode alone decides whether a workflow may send an order. A new boolean setting must not "
-        "duplicate it: add an OrderMode value instead, or list the setting here if it switches something else."
+        "A run's own broker choice and the order gates decide where an order goes. A new boolean setting must not "
+        "switch orders on or off: list it here only if it switches something else."
     )

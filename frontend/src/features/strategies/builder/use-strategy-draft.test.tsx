@@ -12,7 +12,7 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 /** The server's settings; `answer` holds back the next save's reply until the test lets it through. */
 function fakeServer() {
   const server = { revision: 1, strategies: [builtInJson('balanced'), builtInJson('aggressive')], answer: Promise.resolve() }
-  const settings = () => ({ active_strategy_id: 'balanced', buzz_strategy_id: 'balanced', strategies: server.strategies, revision: server.revision })
+  const settings = () => ({ active_strategy_id: 'balanced', strategies: server.strategies, revision: server.revision })
   const fetch = vi.fn(async (_url: string, init?: RequestInit) => {
     if (init?.method !== 'PUT') return json(settings())
     const body = JSON.parse(String(init.body)) as { settings: { revision: number; strategies: typeof server.strategies } }

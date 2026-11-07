@@ -30,9 +30,10 @@ src/
     valuation/         P/E valuation, undervalued scan, AI explanation on request
     watchlist/         server watchlist and its toggle button
     account/           mock account: the total P&L since it opened, positions, equity curve, the trades with the run
-                       each came from, and the mock account panel of My settings (starting capital and the reset)
-    admin-settings/    appsetting.yaml as a form and every settings file as text, two views of one draft: the
-                       server's check as you edit, a save with the password, edits made on disk, history and restore
+                       each came from, and the mock account panel of My settings (starting capital and the reset);
+                       a switch to the SinoPac account where the user may order there
+    admin-settings/    every setting of appsetting.yaml and the AI prompts of instructions.yaml as one form, generated
+                       from the server's fields; a save with the password applies at once
     stock-research/    stock page, backend evaluation and readings, the archived financials
     attribution/       the open data's providers, datasets and license, which every page's footer links to
   shared/         typed HTTP transport, session and public market data (api/), URL builders (config/), generic UI,
@@ -85,19 +86,20 @@ the contract by `catalog.test.ts`.
 | --- | --- | --- |
 | Listing search, most traded, breadth, stock and index bars, many stocks' quotes and names | `shared/api/market.ts` | `/v1/market` |
 | The site's audience and what it allows; the open-data archive's warm-up | `shared/api/audience.ts`, `shared/api/market.ts` | `/v1/market/audience`, `/v1/market/archive-status` |
+| The brokers the user may choose now, the mock account first, a real one with its server and BUY limits | `shared/api/brokers.ts` | `/v1/account/brokers` |
 | A stock's evaluation by the active strategy | `stock-research/api.ts` | `/v1/market/stocks/{id}/technical` |
 | A stock's archived quarters and monthly revenue | `stock-research/api.ts` | `/v1/market/stocks/{id}/financials` |
 | The open data's providers, datasets and license | `attribution/api.ts` | `/v1/market/attribution` |
 | Built-in strategies, owner settings, saves with revisions | `strategies/api/queries.ts` | `/v1/technical-settings` |
-| Runs, decisions, orders | `runs/api.ts` | `/v1/runs` |
+| Runs, decisions, orders; a start of Buzz or Intraday on the broker chosen | `runs/api.ts` | `/v1/runs` |
+| A manual BUY of a stock a specific-stock run reported, on the broker chosen | `runs/api.ts` | `/v1/runs/{run_id}/manual-buy` |
 | A run's follow into the mock account: what is open, the refusal, the follows so far; starting one | `runs/api.ts` | `/v1/runs/{run_id}/follow` |
 | Watchlist | `watchlist/api.ts` | `/v1/watchlist` |
 | Valuation | `valuation/api.ts` | `/v1/valuation` |
-| Account: now, the curve, the opening and the total P&L | `account/api.ts` | `/v1/account/history` |
-| The trades since the opening, each with the run whose decision it carried out (the followed run for a follow) | `account/api.ts` | `/v1/account/trades` |
+| Account of a broker: now, the curve, the opening and the total P&L (none at a real broker) | `account/api.ts` | `/v1/account/history` |
+| A broker's trades (the mock account's since the opening), each with the run whose decision it carried out (the followed run for a follow) | `account/api.ts` | `/v1/account/trades` |
 | The reset of the mock account with a new starting capital | `account/api.ts` | `/v1/account/reset` |
-| Settings files: the overview (polled), a revision's text (read once), checks, saves, backups, reload | `admin-settings/api.ts` | `/v1/admin/settings`, `/v1/admin/audit` |
-| The settings form: a text's settings and their schema, and a change written into the text | `admin-settings/api.ts` | `/v1/admin/settings/appsetting/form` |
+| The settings form: every setting with its kind, bounds, choices and value; a save of the changed ones | `admin-settings/api.ts` | `/v1/admin/settings` |
 | Who is signed in, setup, sign-in, registration, sign-out | `auth/api.ts` | `/v1/auth` |
 | The AI models the site offers the user, and the user's choice | `auth/api.ts` | `/v1/auth/me/ai-model` |
 | The users directory and changes to a user | `auth/api.ts` | `/v1/admin/users` |
@@ -131,8 +133,8 @@ One codebase runs as the owner's personal site and as a public site on open data
 answers the server's table of what its audience allows (`open_data_only`, `realtime_quotes`, `news_articles`, `mops`)
 and how it prices an order (`order_pricing`), read once per tab. A follow of a run says its price from it: a realtime
 quote, only in continuous trading, or the official close of the last session, only while no session trades. A navigation item (`NavItem.requires`) or a run kind (`KINDS` in `RunsPage.tsx`) names the capability
-it needs, and shows only once the server said the site has it, so a public visitor never sees Buzz, Intraday, the Buzz
-strategy choice, the watchlist's Social buzz source or the valuation, even for a moment. A link to a page the site does not offer opens a short reason
+it needs, and shows only once the server said the site has it, so a public visitor never sees Buzz, Intraday, the
+watchlist's Social buzz source or the valuation, even for a moment. A link to a page the site does not offer opens a short reason
 (`RequireCapability` in `app/router/RouteFallbacks.tsx`), not a page whose requests the server refuses. Hiding is never
 the protection: the server refuses each of them. On open data only, the market overview and the run results say how far
 the archive has come (`ArchiveWarmUp`) until it holds the sessions the strategies need. Every page's footer says nothing
@@ -151,10 +153,9 @@ stock page say it again beside the result (`NotAdviceNote`).
 
 ## Local persistence
 
-Only the theme and the locale stay in `localStorage` (`stock-agent.theme`, `stock-agent.locale`). The settings editor
-keeps an administrator's unsaved text in `sessionStorage` (`stock-agent.settings-drafts`), for that tab and that user
-only, so a reload, an ended session or a visit to another page loses nothing; a save or a discard removes it. The
-settings files hold no secret: the server refuses one written into them.
+Only the theme and the locale stay in `localStorage` (`stock-agent.theme`, `stock-agent.locale`). The settings form
+keeps its unsaved changes in the page only and asks before the page is left with one. The settings files hold no
+secret: the server refuses one written into them, and its form shows none.
 
 ## Design system
 
@@ -176,7 +177,7 @@ settings files hold no secret: the server refuses one written into them.
   signed-out or failed state is a `StateBlock`; a figure the backend has no source for is one line that says so.
 - A stock's volume reads in lots through `useFormat().lots` ("3.7萬張"); a price from an older session carries its
   date (`useFormat().closeOn`, "11/2 收盤").
-- Navigation: a bottom tab bar under 768 px (analysis, market, search, watchlist, account, more), a rail of icons from 768 px
+- Navigation: a bottom tab bar under 768 px (market, analysis, search, watchlist, account, more), a rail of icons from 768 px
   and the full sidebar from 1024 px, all from one list (`app/layouts/navigation.ts`), which also feeds the search
   palette's pages. Every control is at least 44 px tall under 768 px.
 - No decorative motion: no entrance animations, glows, spotlights or textures. Motion is kept where it explains a
@@ -185,17 +186,16 @@ settings files hold no secret: the server refuses one written into them.
   an arrow or hidden text, so color is never the only signal.
 - Numbers use tabular figures (`.tabular`). Chinese text falls back to system CJK fonts when the
   web fonts fail.
-- The settings editor is CodeMirror 6: YAML highlighting, search, undo, and each problem the server locates marked
-  at its line and column. Its colors are the tokens, and it loads only with the administrator's route.
-- `appsetting.yaml` opens on its form; the editor is its Advanced (YAML) tab, and `instructions.yaml` is text only. The
-  form's sections and settings are one table, `FORM_SECTIONS` in `admin-settings/form.ts`: each names its dotted path,
-  and its control comes from the server's JSON schema there (a boolean is a switch, a choice a select, a list of
-  choices checkboxes, a number a number field with the schema's bounds, a text a text field). Its label is
-  `admin:form.field.<path>` and its help `admin:form.help.<path>`, both in both locales, so a reader never sees
-  Chinese labels over English help. The server writes each change into the draft's text in place, so the YAML tab shows it with its
-  comments, and the check, the review and the save are the editor's own. A problem the check places at a setting shows
-  beside it. To offer another setting, add its path to the table and its label and help to both dictionaries;
-  `i18n.test.ts` fails while either is missing.
+- The settings page is one form, with no YAML. The server answers every setting it reads from `appsetting.yaml` and
+  the prompts of `instructions.yaml` as a field (`GET /v1/admin/settings`): its dotted path, its kind, its value, its
+  choices and the schema's bounds. `admin-settings/form.ts` groups the fields by their YAML section (`sources` by its
+  second key too) and gives each kind its control: a switch, a select, checkboxes, a number field with the bounds, a
+  text field or box, a list one item per line, and JSON for a map or a nested list. A setting that changes only at a
+  restart (`environment`, `audience`) shows as text with one line why. A number out of its bounds or JSON that does not
+  parse is held at its field in the words of the server's refusal codes (`admin:refusal.<code>`), and a save the server
+  refuses shows each problem at its setting. A setting the server adds later shows with no frontend change: its label
+  `admin:form.field.<path>` and help `admin:form.help.<path>` are all it needs, and `i18n.test.ts` fails while either is
+  missing in a locale for a path of `shared/api/settings-fields.json`, which `export_openapi.py` writes.
 - Price and volume are two synced charts (`shared/ui/price-volume-chart.tsx`), never one chart
   with two y-axes. The moving averages' colors pass the dataviz validator against both price colors.
 - Motion respects `prefers-reduced-motion` through `MotionConfig reducedMotion="user"` and a CSS fallback.

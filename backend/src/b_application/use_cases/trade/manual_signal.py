@@ -14,9 +14,10 @@ from b_application.config.app_config import AppConfig
 class ManualSignal:
     """
     Use Case: Decides and records the user's confirmed BUY of one analysed stock with ManualEntryRule, which skips the
-    buy threshold but never the sizing on the run's equity: the account's cash plus each position at the run's latest
-    price for it (AccountValueRule). It returns the recorded decision and, when no order may follow, why: the analysis has no
-    composite score, there is no price, the decision cannot be recorded, or it sizes to no share.
+    buy threshold: the shares the user asked for, or with None as many as sizing on the run's equity allows (the
+    account's cash plus each position at the run's latest price for it, AccountValueRule). It returns the recorded
+    decision and, when no order may follow, why: the analysis has no composite score, there is no price, the decision
+    cannot be recorded, or it sizes to no share.
     """
 
     def __init__(self, journal: ITradingJournal, market_clock: IMarketClock, config: AppConfig, logger: ILoggingProvider) -> None:
@@ -27,7 +28,7 @@ class ManualSignal:
         self._logger = logger
 
     async def execute(
-        self, stock: Stock, account: Account, stocks: Mapping[str, Stock], stats: SystemStats
+        self, stock: Stock, quantity: int | None, account: Account, stocks: Mapping[str, Stock], stats: SystemStats
     ) -> tuple[list[TradeSignal], str | None]:
         refusal = None
 
@@ -41,7 +42,7 @@ class ManualSignal:
             return [], refusal
 
         equity = self._value_rule.apply(account, stocks.values()).equity
-        signal = self._entry_rule.apply(stock, account, equity=equity, now=self._market_clock.now())
+        signal = self._entry_rule.apply(stock, account, quantity, equity=equity, now=self._market_clock.now())
 
         try:
             await self._journal.save_signals(stats.run_id, [signal])

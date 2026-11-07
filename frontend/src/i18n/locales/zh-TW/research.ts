@@ -4,6 +4,7 @@ import type { DictionaryShape } from '../../types'
 const research: DictionaryShape<typeof en> = {
   signIn: '登入後用你的策略評估這檔股票',
   back: '返回',
+  noBars: '這檔股票還沒有日線資料。',
   insufficient: '資料不足',
   loadFailed: '無法載入這檔股票。',
   technicalFailed: '無法載入技術評估。',

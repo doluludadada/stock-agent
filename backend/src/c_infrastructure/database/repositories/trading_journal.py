@@ -12,6 +12,7 @@ from a_domain.model.trading.account import AccountSnapshot
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.ports.trading.trading_journal import ITradingJournal
+from a_domain.types.enums import ExecutionProvider, TradeAction
 from a_domain.types.ids import RunId
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.trading_journal_dto import (
@@ -64,8 +65,13 @@ class TradingJournal(ITradingJournal):
             await session.commit()
 
     @override
-    async def snapshots(self, since: datetime | None = None) -> list[AccountSnapshot]:
-        statement = select(AccountSnapshotDTO).order_by(col(AccountSnapshotDTO.taken_at))
+    async def snapshots(self, broker: ExecutionProvider, since: datetime | None = None) -> list[AccountSnapshot]:
+        statement = (
+            select(AccountSnapshotDTO)
+            .join(WorkflowRunDTO, col(WorkflowRunDTO.run_id) == col(AccountSnapshotDTO.run_id))
+            .where(col(WorkflowRunDTO.execution_provider) == broker)
+            .order_by(col(AccountSnapshotDTO.taken_at))
+        )
 
         if since is not None:
             statement = statement.where(col(AccountSnapshotDTO.taken_at) >= since)
@@ -142,11 +148,13 @@ class TradingJournal(ITradingJournal):
         return [(TradeSignal(**signal.model_dump(exclude={"run_id"})), Order(**order.model_dump())) for signal, order in rows]
 
     @override
-    async def trades(self, since: datetime | None, limit: int, offset: int) -> list[tuple[Order, SystemStats]]:
+    async def trades(
+        self, broker: ExecutionProvider, since: datetime | None, limit: int, offset: int
+    ) -> list[tuple[Order, SystemStats]]:
         statement = (
             select(OrderDTO, WorkflowRunDTO)
             .join(WorkflowRunDTO, col(WorkflowRunDTO.run_id) == col(OrderDTO.run_id))
-            .where(col(OrderDTO.filled_quantity) > 0)
+            .where(col(OrderDTO.filled_quantity) > 0, col(WorkflowRunDTO.execution_provider) == broker)
             .order_by(col(OrderDTO.created_at).desc())
         )
 
@@ -161,3 +169,21 @@ class TradingJournal(ITradingJournal):
             followed = {row.run_id: SystemStats(**row.model_dump()) for row in followed_rows.scalars()}
 
         return [(order, followed.get(run.followed_run_id, run) if run.followed_run_id else run) for order, run in pairs]
+
+    @override
+    async def buy_orders(self, broker: ExecutionProvider, since: datetime) -> list[Order]:
+        statement = (
+            select(OrderDTO)
+            .join(WorkflowRunDTO, col(WorkflowRunDTO.run_id) == col(OrderDTO.run_id))
+            .where(
+                col(WorkflowRunDTO.execution_provider) == broker,
+                col(OrderDTO.action) == TradeAction.BUY,
+                col(OrderDTO.created_at) >= since,
+            )
+            .order_by(col(OrderDTO.created_at))
+        )
+
+        async with self._db.owner_session() as session:
+            rows = (await session.execute(statement)).scalars().all()
+
+        return [Order(**row.model_dump()) for row in rows]

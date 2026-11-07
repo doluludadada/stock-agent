@@ -3,7 +3,7 @@ from datetime import datetime
 from pydantic import ConfigDict, Field
 from pydantic.dataclasses import dataclass
 
-from a_domain.types.enums import ExecutionProvider, OrderMode, Workflow
+from a_domain.types.enums import ExecutionProvider, Workflow
 from a_domain.types.ids import RunId, new_run_id
 from a_domain.types.values import FormulaId
 
@@ -11,7 +11,7 @@ from a_domain.types.values import FormulaId
 @dataclass(config=ConfigDict(validate_assignment=True), kw_only=True)
 class SystemStats:
     """
-    One workflow run: its identity, the trading settings, technical strategy and AI model it ran with, timing,
+    One workflow run: its identity, the broker it chose, the technical strategy and AI model it ran with, timing,
     counters and errors. Saved as the run record when the run starts and again when it finishes; an empty end_time
     means the run never finished.
 
@@ -20,8 +20,12 @@ class SystemStats:
 
     run_id: RunId = Field(default_factory=new_run_id)
     workflow: Workflow
-    execution_provider: ExecutionProvider
-    order_mode: OrderMode
+    execution_provider: ExecutionProvider = Field(frozen=True)
+    """
+    The broker the run chose when it started, the mock account unless an administrator chose a real one. Every order of
+    the run goes to it or is refused (BrokerAccessRule), and it never changes during the run.
+    """
+
     start_time: datetime
     end_time: datetime | None = None
 

@@ -59,10 +59,9 @@ describe('the formula JSON boundary', () => {
     expect(JSON.stringify(strategyToApi(edited))).not.toMatch(/"id"|node_|rule_/)
   })
 
-  it('keeps the selections and the revision a save must carry', () => {
+  it('keeps the strategy in use and the revision a save must carry', () => {
     const api = {
       active_strategy_id: 'balanced',
-      buzz_strategy_id: 'aggressive',
       strategies: BUILT_INS.map(builtIn),
       revision: 7,
     }

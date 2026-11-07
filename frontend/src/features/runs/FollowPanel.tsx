@@ -29,12 +29,11 @@ interface FollowPanelProps {
 
 /**
  * Follows a finished analysis into the user's mock account: what a follow takes now and at which price, or why it
- * cannot, and every follow so far with its outcome. An installation on a real broker answers 403 and shows none.
+ * cannot, and every follow so far with its outcome.
  */
 export function FollowPanel({ runId, follow, decisions, names }: FollowPanelProps) {
   const { t } = useTranslation('runs')
   const audience = useAudience()
-  if (isApiError(follow.error) && follow.error.code === 'mock_broker_only') return null
   if (follow.isError) return <ErrorState error={follow.error} title={t('follow.loadFailed')} onRetry={() => void follow.refetch()} className="rounded-2xl border bg-card" />
   if (audience.isError) return <ErrorState error={audience.error} title={t('common:audience.failed')} onRetry={() => void audience.refetch()} className="rounded-2xl border bg-card" />
   if (follow.isPending || audience.isPending) return <Skeleton className="h-32 rounded-2xl" />
@@ -90,7 +89,6 @@ function FollowAction({ runId, follow, pricing, quoted, decisions, names }: Foll
     if (code === 'outside_follow_window') return t('follow.refused.window')
     if (code === 'realtime_quotes_unavailable') return t('follow.refused.quotes')
     if (code === 'run_in_progress') return t('busy')
-    if (code === 'mock_broker_only') return t('mockOnly')
     return t('follow.failed', { reason: error.message })
   }
   const confirm = () => {

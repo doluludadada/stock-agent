@@ -33,7 +33,9 @@ Each rule makes one decision in `apply`:
 |                 | `AffordableQuantityRule`  | The largest lot-aligned BUY quantity the cash pays for, fee included                       |
 | `tick.py`       | `TickSizeRule`            | The exchange tick of a price                                                               |
 |                 | `LimitPriceRule`          | An order's limit price: the decided price as a tick, up for a BUY and down for a SELL      |
-| `order_rule.py` | `OrderGateRule`           | Why an order may not be sent now: order mode, continuous trading, quote age                |
+| `order_rule.py` | `OrderGateRule`           | Why an order may not be sent now: continuous trading, quote age                            |
+|                 | `BrokerAccessRule`        | Why an order may not reach its broker now: the run's choice, a real broker's user, login, server |
+|                 | `BuyLimitRule`            | Why a real broker's BUY may not be sent: its value and the day's BUYs above the limits     |
 |                 | `OrderRule`               | The order for a decision: LIMIT IOC at its limit price, or REJECTED with the gate's reason |
 | `execution.py`  | `OrderAcceptanceRule`     | Why any broker refuses an order unsent: not LIMIT, ROD, or more than the account covers    |
 |                 | `LotSplitRule`            | An order's shares as the exchange trades them: one board-lot part and one odd-lot part     |

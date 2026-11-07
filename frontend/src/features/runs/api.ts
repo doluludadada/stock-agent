@@ -1,5 +1,5 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiRequest, runResultsKey, useIsSignedIn, type Schemas } from '@/shared/api'
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { apiRequest, brokersKey, isApiError, runResultsKey, useIsSignedIn, type Broker, type Schemas } from '@/shared/api'
 
 export type Run = Schemas['RunResponse']
 export type Signal = Schemas['SignalResponse']
@@ -82,14 +82,45 @@ export function useRunOrders(runId: string, enabled: boolean) {
   })
 }
 
+/** A 403 can mean the broker's login went down or the user's role changed, so the brokers offered are asked again. */
+function askBrokersAgainOnRefusal(client: QueryClient) {
+  return (error: Error) => {
+    if (isApiError(error, 'forbidden')) void client.invalidateQueries({ queryKey: brokersKey })
+  }
+}
+
+/** Starts a run; a specific-stock analysis takes its stocks, Buzz and Intraday order on `broker` for the whole run. */
 export function useStartRun() {
   const client = useQueryClient()
   return useMutation({
-    mutationFn: ({ kind, stockIds = [] }: { kind: RunKind; stockIds?: string[] }) =>
-      kind === 'specific-stocks'
-        ? apiRequest('post', START_PATHS[kind], { body: { confirm: true, stock_ids: stockIds } })
-        : apiRequest('post', START_PATHS[kind], { body: { confirm: true } }),
+    mutationFn: ({ kind, stockIds, broker }: { kind: RunKind; stockIds: string[]; broker: Broker }) => {
+      switch (kind) {
+        case 'full-cycle':
+          return apiRequest('post', START_PATHS[kind], { body: { confirm: true } })
+        case 'specific-stocks':
+          return apiRequest('post', START_PATHS[kind], { body: { confirm: true, stock_ids: stockIds } })
+        case 'buzz-scan':
+        case 'intraday':
+          return apiRequest('post', START_PATHS[kind], { query: { broker }, body: { confirm: true } })
+      }
+    },
+    onError: askBrokersAgainOnRefusal(client),
     onSettled: () => client.invalidateQueries({ queryKey: runKeys.all }),
+  })
+}
+
+/** Buys `quantity` shares of a stock the specific-stock run reported, on `broker`, as a run of its own whose id the answer carries. */
+export function useManualBuy(runId: string) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ stockId, quantity, broker }: { stockId: string; quantity: number; broker: Broker }) =>
+      apiRequest('post', '/v1/runs/{run_id}/manual-buy', { params: { run_id: runId }, query: { broker }, body: { confirm: true, stock_id: stockId, quantity } }),
+    onError: askBrokersAgainOnRefusal(client),
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: runKeys.all })
+      // One stock's BUY can end before its page first asks, so that page never sees it running and reloads nothing.
+      void client.invalidateQueries({ queryKey: runResultsKey })
+    },
   })
 }
 

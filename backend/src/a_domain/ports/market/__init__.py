@@ -10,6 +10,7 @@ from a_domain.ports.market.daily_close_archive import (
     OpenDataDownload,
     ValuationRatios,
 )
+from a_domain.ports.market.daily_history_source import IDailyHistorySource
 from a_domain.ports.market.fundamentals_provider import IFundamentalsProvider
 from a_domain.ports.market.news_provider import INewsProvider
 from a_domain.ports.market.news_source import INewsSource
@@ -27,6 +28,7 @@ __all__ = [
     "ExchangeNews",
     "FinancialReport",
     "IDailyCloseArchive",
+    "IDailyHistorySource",
     "IFundamentalsProvider",
     "INewsProvider",
     "INewsSource",

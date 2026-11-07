@@ -8,12 +8,23 @@ from uuid import uuid4
 
 import pytest
 from pydantic import TypeAdapter
-from support.harness import build_harness, falling_history, harness_config, harness_settings, open_harness_switch, rising_history
-from support.settings import environment_setup, shipped_config
+from support.harness import (
+    MEMBER,
+    MEMBER_PASSWORD,
+    build_harness,
+    falling_history,
+    harness_settings,
+    open_harness_switch,
+    rising_history,
+)
+from support.settings import shipped_config
 from support.web import ended, hold_stock_list, run_to_end, serve, write
 
+from a_domain.model.market.ohlcv import Ohlcv
+from a_domain.model.market.stock import Stock
+from a_domain.model.trading.account import Position
 from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
-from a_domain.types.enums import ExecutionProvider, OrderMode, SystemEnvironment, TradeAction, WatchlistType
+from a_domain.types.enums import Role, SystemEnvironment, TradeAction, WatchlistType
 from b_application.config import settings_loader
 from b_application.config.settings_loader import InvalidSettingsError
 from d_presentation.live_runtime import open_runtime_switch
@@ -31,11 +42,15 @@ FOLLOWED_RUN = "00000000-0000-0000-0000-000000000001"
 ORDERING_WRITES = [
     ("POST", "/v1/runs/buzz-scan", {}),
     ("POST", "/v1/runs/intraday", {}),
+    ("POST", f"/v1/runs/{FOLLOWED_RUN}/manual-buy", {"stock_id": "2330", "quantity": 100}),
     ("POST", f"/v1/runs/{FOLLOWED_RUN}/follow", {}),
 ]
+"""
+The only writes that can lead to an order: Buzz, Intraday and a manual BUY, on the broker their `broker` query names,
+and a follow, on the mock account only.
+"""
 VALUATION_WRITES = [("POST", "/v1/valuation/explanation", {"stock_id": "2330", "target_pe": 15})]
 """Read-only, but each request is one paid AI call, so it is confirmed like a write."""
-"""The only writes that can lead to an order: Buzz, Intraday and a follow, which the API starts on the mock broker only."""
 
 WRITES = [
     ("POST", "/v1/runs/full-cycle", {}),
@@ -322,7 +337,7 @@ async def test_a_save_replaces_the_settings_raises_the_revision_and_drives_the_n
 async def test_a_save_from_a_stale_revision_answers_409_and_saves_nothing() -> None:
     harness = build_harness()
     first = settings_document() | {"active_strategy_id": "buzz"}
-    stale = settings_document() | {"buzz_strategy_id": "trend"}
+    stale = settings_document()
 
     async with serve(harness) as client:
         accepted = await write(client, "PUT", SETTINGS_PATH, {"settings": first})
@@ -421,15 +436,23 @@ async def test_account_history_values_positions_at_their_latest_quote() -> None:
     assert harness.broker.placed == []
 
 
-async def test_account_history_names_the_broker_and_order_mode_the_settings_choose() -> None:
-    harness = build_harness(config=shioaji_config(OrderMode.DISABLED, SystemEnvironment.TEST))
+async def test_the_account_page_reads_the_mock_account_by_default_and_sinopac_when_asked() -> None:
+    harness = build_harness(sinopac=True)
     harness.list_stock("2330", rising_history(110.0))
-    harness.hold("2330", quantity=1000, average_cost=100.0)
+    harness.real_broker.cash = 42_000.0
+    harness.real_broker.positions = [Position(stock_id="2330", quantity=1000, average_cost=100.0)]
 
     async with serve(harness) as client:
-        history = (await client.get("/v1/account/history")).json()
+        mock = (await client.get("/v1/account/history")).json()
+        sinopac = (await client.get("/v1/account/history", params={"broker": "shioaji"})).json()
+        brokers = (await client.get("/v1/account/brokers")).json()
 
-    assert (history["execution_provider"], history["order_mode"]) == ("shioaji", "disabled")
+    assert (mock["execution_provider"], mock["current"]["cash"], mock["current"]["positions"]) == ("mock", harness.broker.cash, [])
+    assert (sinopac["execution_provider"], sinopac["current"]["cash"], len(sinopac["current"]["positions"])) == ("shioaji", 42_000, 1)
+    assert brokers == [
+        {"broker": "mock", "simulation": None, "max_order_value": None, "max_daily_buy_value": None},
+        {"broker": "shioaji", "simulation": True, "max_order_value": 100_000.0, "max_daily_buy_value": 300_000.0},
+    ]
 
 
 # ---------------------------- Permission and scope -------------------------- #
@@ -535,8 +558,8 @@ async def test_the_api_writes_only_runs_watchlist_settings_and_settings_files_an
         ("PUT", "/v1/auth/me/ai-model")
     }
     description = app.openapi()["info"]["description"]
-    assert "No endpoint places, cancels or modifies an order by itself" in description
-    assert "only while the execution provider is" in description
+    assert "No endpoint cancels or modifies an order" in description
+    assert "on the broker their `broker` query names for the whole run" in description
 
 
 async def test_no_request_but_buzz_and_intraday_reaches_the_broker() -> None:
@@ -566,33 +589,123 @@ async def test_no_request_but_buzz_and_intraday_reaches_the_broker() -> None:
     }
 
 
-def shioaji_config(order_mode: OrderMode, environment: SystemEnvironment):
-    """A setup the CLI accepts with the Shioaji broker: order mode disabled reads a real account without ordering."""
-    return environment_setup(harness_config(), environment, ExecutionProvider.SHIOAJI, order_mode)
+SINOPAC_STARTS = [(path, body) for method, path, body in ORDERING_WRITES if not path.endswith("/follow")]
 
 
-REAL_BROKER_SETUPS = [
-    (OrderMode.DISABLED, SystemEnvironment.TEST),
-    (OrderMode.DISABLED, SystemEnvironment.PROD),
-    (OrderMode.LIVE, SystemEnvironment.PROD),
-]
-
-
-@pytest.mark.parametrize(("order_mode", "environment"), REAL_BROKER_SETUPS)
-@pytest.mark.parametrize(("method", "path", "body"), ORDERING_WRITES)
-async def test_buzz_and_intraday_are_refused_unless_the_broker_is_the_mock(
-    order_mode: OrderMode, environment: SystemEnvironment, method: str, path: str, body: dict[str, Any]
+@pytest.mark.parametrize(("path", "body"), SINOPAC_STARTS)
+async def test_a_sinopac_start_is_refused_to_a_user_and_while_no_login_is_up_and_records_nothing(
+    path: str, body: dict[str, Any]
 ) -> None:
-    harness = build_harness(config=shioaji_config(order_mode, environment))
+    offered = build_harness(sinopac=True)
+    offered.users.add(MEMBER, MEMBER_PASSWORD)
+    unavailable = build_harness()
+
+    async with serve(offered, user=(MEMBER.username, MEMBER_PASSWORD)) as client:
+        member = await client.post(path, params={"broker": "shioaji"}, json={"confirm": True, **body})
+
+    async with serve(unavailable) as client:
+        administrator = await client.post(path, params={"broker": "shioaji"}, json={"confirm": True, **body})
+
+    assert (member.status_code, member.json()["code"]) == (403, "real_broker_refused")
+    assert (administrator.status_code, administrator.json()["code"]) == (403, "broker_unavailable")
+    assert (offered.real_broker.placed, offered.journal.runs, unavailable.journal.runs) == ([], {}, {})
+
+
+async def test_web_intraday_on_sinopac_orders_on_sinopac_only_and_records_the_choice_on_the_run() -> None:
+    harness = build_harness(sinopac=True)
     harness.list_stock("2317", rising_history(100.0), realtime_price=80.0)
+    harness.real_broker.positions = [Position(stock_id="2317", quantity=1000, average_cost=100.0)]
     harness.hold("2317", quantity=1000, average_cost=100.0)
 
     async with serve(harness) as client:
-        response = await write(client, method, path, body)
+        response = await client.post("/v1/runs/intraday", params={"broker": "shioaji"}, json={"confirm": True})
+        run = await ended(client, response.json()["run_id"])
 
-    assert response.status_code == 403
-    assert "mock broker" in response.json()["detail"]
-    assert (harness.broker.placed, harness.journal.runs, harness.journal.orders) == ([], {}, {})
+    assert (run["state"], run["summary"]["execution_provider"]) == ("finished", "shioaji")
+    assert [(order.stock_id, order.action, order.quantity) for order in harness.real_broker.placed] == [
+        ("2317", TradeAction.SELL, 1000)
+    ]
+    assert harness.broker.placed == []
+
+
+async def reported_run(client: Any, stock_id: str = "2330") -> str:
+    """A finished specific-stock analysis of `stock_id`, as the run page offers its manual BUY."""
+    return (await run_to_end(client, "/v1/runs/specific-stocks", {"stock_ids": [stock_id]}))["run_id"]
+
+
+async def manual_buy(client: Any, run_id: str, quantity: int, broker: str = "mock", stock_id: str = "2330") -> dict[str, Any]:
+    response = await client.post(
+        f"/v1/runs/{run_id}/manual-buy", params={"broker": broker}, json={"confirm": True, "stock_id": stock_id, "quantity": quantity}
+    )
+    assert response.status_code == 202, response.text
+    bought = await ended(client, response.json()["run_id"])
+    [order] = (await client.get(f"/v1/runs/{bought['run_id']}/orders")).json()
+    return {**bought, "order": order}
+
+
+async def test_a_manual_buy_of_a_reported_stock_buys_the_shares_asked_at_a_fresh_quote_on_the_account_chosen() -> None:
+    harness = build_harness(sinopac=True)
+    harness.list_stock("2330", rising_history(100.0), realtime_price=101.0)
+
+    async with serve(harness) as client:
+        run_id = await reported_run(client)
+        mock = await manual_buy(client, run_id, 300)
+        sinopac = await manual_buy(client, run_id, 500, broker="shioaji")
+        unreported = await client.post(f"/v1/runs/{run_id}/manual-buy", json={"confirm": True, "stock_id": "2317", "quantity": 100})
+
+    assert (mock["summary"]["workflow"], mock["summary"]["execution_provider"], sinopac["summary"]["execution_provider"]) == (
+        "manual_buy",
+        "mock",
+        "shioaji",
+    )
+    assert [(order.stock_id, order.quantity, order.limit_price) for order in harness.broker.placed] == [("2330", 300, 101)]
+    assert [(order.stock_id, order.quantity, order.limit_price) for order in harness.real_broker.placed] == [("2330", 500, 101)]
+    assert (mock["order"]["status"], sinopac["order"]["status"], unreported.status_code) == ("filled", "filled", 404)
+
+
+async def test_sinopac_buys_stop_at_the_order_limit_and_at_the_days_limit_while_the_mock_account_has_neither() -> None:
+    harness = build_harness(sinopac=True)
+    harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
+
+    async with serve(harness) as client:
+        run_id = await reported_run(client)
+        too_big = await manual_buy(client, run_id, 1001, broker="shioaji")
+        filled = [await manual_buy(client, run_id, 1000, broker="shioaji") for _ in range(3)]
+        past_the_day = await manual_buy(client, run_id, 1, broker="shioaji")
+        on_mock = await manual_buy(client, run_id, 5000)
+
+    assert too_big["order"]["status"] == "rejected" and too_big["order"]["reason"].startswith("ORDER_VALUE_LIMIT: costs 100,100")
+    assert [bought["order"]["status"] for bought in filled] == ["filled"] * 3
+    assert past_the_day["order"]["status"] == "rejected" and past_the_day["order"]["reason"].startswith(
+        "DAILY_BUY_LIMIT: costs 100 after 300,000"
+    )
+    assert [order.quantity for order in harness.real_broker.placed] == [1000, 1000, 1000]
+    assert on_mock["order"]["status"] == "filled" and [order.quantity for order in harness.broker.placed] == [5000]
+
+
+async def test_an_administrator_demoted_during_a_sinopac_run_has_its_next_order_refused() -> None:
+    harness = build_harness(sinopac=True)
+    harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
+    release, fetch = asyncio.Event(), harness.prices.fetch_realtime_bars
+
+    async def held_quotes(stocks: list[Stock]) -> dict[str, Ohlcv]:
+        await release.wait()
+        return await fetch(stocks)
+
+    async with serve(harness) as client:
+        run_id = await reported_run(client)
+        harness.prices.fetch_realtime_bars = held_quotes
+        started = await client.post(
+            f"/v1/runs/{run_id}/manual-buy", params={"broker": "shioaji"}, json={"confirm": True, "stock_id": "2330", "quantity": 100}
+        )
+        harness.administrator.role = Role.USER
+        release.set()
+        bought = await ended(client, started.json()["run_id"])
+        harness.administrator.role = Role.ADMINISTRATOR
+        [order] = (await client.get(f"/v1/runs/{bought['run_id']}/orders")).json()
+
+    assert order["status"] == "rejected" and order["reason"].startswith("REAL_BROKER_REFUSED")
+    assert harness.real_broker.placed == []
 
 
 async def test_web_intraday_on_the_mock_broker_orders_as_the_cli_does_and_records_first() -> None:
@@ -629,12 +742,11 @@ async def test_a_settings_read_that_a_save_interrupts_answers_409_and_the_next_r
 
 async def test_the_api_refuses_to_start_on_the_trading_setups_the_cli_refuses(monkeypatch) -> None:
     unsafe = shipped_config()
-    unsafe.environment = SystemEnvironment.DEV
-    unsafe.trading.execution_provider = ExecutionProvider.SHIOAJI
+    unsafe.environment = SystemEnvironment.PROD
     monkeypatch.setattr(settings_loader, "load_settings", lambda project_root, texts: unsafe)
     app = create_app(open_runtime_switch)
 
-    with pytest.raises(InvalidSettingsError, match="trading.execution_provider: environment dev trades only on mock, not shioaji"):
+    with pytest.raises(InvalidSettingsError, match="db.backend: environment prod needs db.backend postgresql, not sqlite"):
         async with app.router.lifespan_context(app):
             pass
 

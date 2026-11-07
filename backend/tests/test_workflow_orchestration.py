@@ -20,7 +20,6 @@ from a_domain.types.enums import (
     AiAnalysisFocus,
     ExecutionProvider,
     InformationSource,
-    OrderMode,
     OrderStatus,
     SignalSource,
     SystemEnvironment,
@@ -74,9 +73,9 @@ async def test_buzz_scan_persists_only_technical_survivors() -> None:
 
     assert stock_ids(status.buzz_stocks) == ["2603", "1101"]
     assert set(harness.prices.history_requests) == {"2603", "1101"}
-    assert stock_ids(status.survivors) == ["2603"], "the Buzz strategy, not the trend strategy, decides survivors"
-    assert harness.watchlist.rows == [("2603", WatchlistType.BUZZ)]
-    assert [(call.stock_id, call.focus) for call in harness.ai.calls] == [("2603", AiAnalysisFocus.MOMENTUM)]
+    assert stock_ids(status.survivors) == ["1101"], "the active trend strategy decides survivors, as in every workflow"
+    assert harness.watchlist.rows == [("1101", WatchlistType.BUZZ)]
+    assert [(call.stock_id, call.focus) for call in harness.ai.calls] == [("1101", AiAnalysisFocus.MOMENTUM)]
 
 
 @pytest.mark.asyncio
@@ -456,9 +455,9 @@ async def test_a_workflow_started_under_a_named_run_id_records_under_it(workflow
 # --------------------------- Every workflow that decides -------------------------- #
 
 
-def wanted_by_every_workflow(config: AppConfig | None = None) -> CliHarness:
+def wanted_by_every_workflow(config: AppConfig | None = None, sinopac: bool = False) -> CliHarness:
     """2330 is listed, rising, on the TECHNICAL watchlist and trending, so menus 1, 2 and 3 each decide to BUY it."""
-    harness = build_harness(config=config)
+    harness = build_harness(config=config, sinopac=sinopac)
     harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
     harness.watch("2330", WatchlistType.TECHNICAL)
     harness.discuss("2330", mentions=1, engagement=harness.config.collect_rules.buzz_min_engagement)
@@ -466,31 +465,32 @@ def wanted_by_every_workflow(config: AppConfig | None = None) -> CliHarness:
 
 
 @pytest.mark.parametrize(
-    ("environment", "provider", "mode", "placed", "outcome"),
+    ("environment", "sinopac", "order_on"),
     [
-        (SystemEnvironment.DEV, ExecutionProvider.MOCK, OrderMode.DISABLED, [], (OrderStatus.REJECTED, "ORDER_MODE_DISABLED")),
-        (SystemEnvironment.DEV, ExecutionProvider.MOCK, OrderMode.MOCK_ONLY, ["2330"], (OrderStatus.FILLED, "")),
-        (SystemEnvironment.PROD, ExecutionProvider.SHIOAJI, OrderMode.LIVE, ["2330"], (OrderStatus.FILLED, "")),
+        (SystemEnvironment.DEV, False, None),
+        (SystemEnvironment.DEV, True, ExecutionProvider.MOCK),
+        (SystemEnvironment.DEV, True, ExecutionProvider.SHIOAJI),
+        (SystemEnvironment.PROD, True, ExecutionProvider.SHIOAJI),
     ],
-    ids=["disabled", "mock-only", "live"],
+    ids=["mock-only-site", "mock-chosen", "sinopac-simulation", "sinopac-production"],
 )
 @pytest.mark.parametrize("menu", ["2", "3"], ids=["buzz", "intraday"])
 @pytest.mark.asyncio
-async def test_buzz_and_intraday_send_an_order_only_when_the_order_mode_allows_it(
-    menu: str,
-    environment: SystemEnvironment,
-    provider: ExecutionProvider,
-    mode: OrderMode,
-    placed: list[str],
-    outcome: tuple[OrderStatus, str],
+async def test_buzz_and_intraday_order_on_the_account_the_run_chose_and_only_there(
+    menu: str, environment: SystemEnvironment, sinopac: bool, order_on: ExecutionProvider | None
 ) -> None:
-    harness = wanted_by_every_workflow(environment_setup(harness_config(), environment, provider, mode))
+    harness = wanted_by_every_workflow(environment_setup(harness_config(), environment), sinopac=sinopac)
+    harness.real_broker.cash = 150_000
 
-    await harness.run_menu(menu)
+    status = await harness.run_menu(menu, order_on=order_on)
 
     [order] = harness.journal.orders.values()
-    assert [order.stock_id for order in harness.broker.placed] == placed
-    assert (order.stock_id, order.status, (order.reason or "").split(":")[0]) == ("2330", *outcome)
+    chosen, other = (
+        (harness.real_broker, harness.broker) if order_on == ExecutionProvider.SHIOAJI else (harness.broker, harness.real_broker)
+    )
+    assert status.stats.execution_provider == (order_on or ExecutionProvider.MOCK)
+    assert [placed.stock_id for placed in chosen.placed] == ["2330"] and other.placed == []
+    assert (order.stock_id, order.status) == ("2330", OrderStatus.FILLED)
 
 
 @pytest.mark.parametrize(

@@ -15,7 +15,7 @@ from pydantic import SecretStr
 
 from a_domain.model.system.user import User, UserSession
 from a_domain.types.enums import ExecutionProvider, Permission
-from a_domain.types.errors import MopsUnavailable, RealBrokerRefused, RealtimeQuotesUnavailable, SignInRequired
+from a_domain.types.errors import MopsUnavailable, RealtimeQuotesUnavailable, SignInRequired
 from a_domain.types.ids import RunId, SessionToken
 from b_application.pipeline import Pipeline
 from b_application.schemas.pipeline_status import PipelineStatus
@@ -47,10 +47,6 @@ class AppRequestRequired(PermissionError):
 
 class AdministratorsOnly(PermissionError):
     """A signed-in user without the permission the route needs. 403: the session stays."""
-
-
-class MockBrokerOnly(PermissionError):
-    """Buzz, Intraday, a follow or a reset of the mock account on an installation whose broker is not the mock. 403."""
 
 
 class NothingToFollow(Exception):
@@ -150,19 +146,6 @@ def require_app_request(request: Request) -> None:
         raise AppRequestRequired(f"A write needs the header {APP_REQUEST_HEADER}: {APP_REQUEST_VALUE}.")
 
 
-def require_mock_broker(runtime: RuntimeDependency) -> None:
-    """
-    Buzz, Intraday and a follow send orders, and a reset reopens the mock account. The Web API runs them only on the
-    mock broker, so a browser never reaches a real account: 403 for any other execution provider, whatever the order
-    mode.
-    """
-    if runtime.config.trading.execution_provider != ExecutionProvider.MOCK:
-        raise MockBrokerOnly(
-            "The Web API runs Buzz, Intraday, follows and the mock account's reset only on the mock broker. Use the CLI for "
-            "another execution provider."
-        )
-
-
 def require_realtime_quotes(runtime: RuntimeDependency) -> None:
     """
     Buzz and Intraday order on realtime quotes. A deployment on open data only (audience public) has none, so it
@@ -215,16 +198,6 @@ async def current_user(runtime: RuntimeDependency, token: SessionCookie) -> User
 CurrentUser = Annotated[User, Depends(current_user)]
 
 
-def require_private_access(runtime: RuntimeDependency, user: CurrentUser) -> None:
-    """
-    Every private route: a signed-in user, and on an installation whose broker is real, one with USE_REAL_BROKER. A
-    user without it gets 403, signed in still, before any Pipeline of theirs is built: every private page shows or
-    trades the one real account.
-    """
-    if runtime.config.trading.execution_provider != ExecutionProvider.MOCK and Permission.USE_REAL_BROKER not in user.permissions:
-        raise RealBrokerRefused("This installation trades on a real broker. Only an administrator may use its private pages.")
-
-
 def requires(permission: Permission) -> Callable[[User], None]:
     """A route that needs a permission beyond signing in: 403 without it. 403 never signs anyone out."""
 
@@ -236,8 +209,18 @@ def requires(permission: Permission) -> Callable[[User], None]:
 
 
 def user_pipeline(runtime: RuntimeDependency, user: CurrentUser) -> Pipeline:
-    """The signed-in user's own Pipeline. Its routes also carry PrivateAccess, which runs first."""
-    return runtime.pipeline_for(user)
+    """The signed-in user's own Pipeline, on their mock account: every private route but a run's or an account's broker choice."""
+    return runtime.pipeline_for(user, ExecutionProvider.MOCK)
+
+
+def broker_pipeline(runtime: RuntimeDependency, user: CurrentUser, broker: ExecutionProvider = ExecutionProvider.MOCK) -> Pipeline:
+    """
+    The signed-in user's own Pipeline on the broker the request's `broker` query names, the mock account by default:
+    Buzz, Intraday and a manual BUY order on it, and the account page reads it. 403 real_broker_refused for a real
+    broker without USE_REAL_BROKER, 403 broker_unavailable while its login is down or the site offers none, before any
+    run starts; the order gates check both again at each order.
+    """
+    return runtime.pipeline_for(user, broker)
 
 
 def signed_out_pipeline(runtime: RuntimeDependency) -> Pipeline:
@@ -246,6 +229,7 @@ def signed_out_pipeline(runtime: RuntimeDependency) -> Pipeline:
 
 
 UserPipeline = Annotated[Pipeline, Depends(user_pipeline)]
+BrokerPipeline = Annotated[Pipeline, Depends(broker_pipeline)]
 SignedOutPipeline = Annotated[Pipeline, Depends(signed_out_pipeline)]
 
 
@@ -295,10 +279,10 @@ def check_setup_code(request: Request, code: SecretStr) -> None:
 
 KnownHost = Depends(require_known_host)
 AppRequest = Depends(require_app_request)
-MockBroker = Depends(require_mock_broker)
 RealtimeQuotes = Depends(require_realtime_quotes)
 QuoteLogin = Depends(require_quote_login)
 Mops = Depends(require_mops)
-PrivateAccess = Depends(require_private_access)
+PrivateAccess = Depends(current_user)
+"""Every private route: a signed-in user. Whose data it reaches is the Pipeline's, built for that user."""
 ManageUsers = Depends(requires(Permission.MANAGE_USERS))
 EditSystemSettings = Depends(requires(Permission.EDIT_SYSTEM_SETTINGS))

@@ -64,7 +64,7 @@ class SqlTechnicalSettingsRepository(ITechnicalSettingsRepository):
         claim = (
             update(TechnicalSettingsDTO)
             .where(col(TechnicalSettingsDTO.revision) == settings.revision)
-            .values(active_strategy_id=saved.active_strategy_id, buzz_strategy_id=saved.buzz_strategy_id, revision=saved.revision)
+            .values(active_strategy_id=saved.active_strategy_id, revision=saved.revision)
             .returning(col(TechnicalSettingsDTO.revision))
         )
 

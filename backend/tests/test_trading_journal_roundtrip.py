@@ -15,8 +15,9 @@ from a_domain.model.analysis.technical_report import TechnicalReport
 from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
+from a_domain.model.system.stats import SystemStats
 from a_domain.model.trading.account import Account, AccountSnapshot, Mark, Position
-from a_domain.types.enums import InformationSource
+from a_domain.types.enums import ExecutionProvider, InformationSource, Workflow
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
 from c_infrastructure.database.repositories.trading_journal import TradingJournal
@@ -38,12 +39,14 @@ async def journal(tmp_path: Path) -> AsyncIterator[TradingJournal]:
 async def test_a_snapshot_reads_back_each_position_at_its_mark_and_an_unpriced_one_at_its_cost(journal: TradingJournal) -> None:
     marked = Position(stock_id="2330", quantity=1000, average_cost=100.1425, mark=Mark(price=105.0, at=FILLED_AT))
     unpriced = Position(stock_id="2317", quantity=2000, average_cost=40.0)
+    run = SystemStats(workflow=Workflow.INTRADAY, execution_provider=ExecutionProvider.MOCK, start_time=FILLED_AT)
     snapshot = AccountSnapshot(
-        taken_at=FILLED_AT, run_id=uuid4(), order_id=uuid4(), account=Account(cash=500_000.0, positions=[marked, unpriced])
+        taken_at=FILLED_AT, run_id=run.run_id, order_id=uuid4(), account=Account(cash=500_000.0, positions=[marked, unpriced])
     )
 
+    await journal.save_run(run)
     await journal.save_snapshot(snapshot)
-    [read] = await journal.snapshots()
+    [read] = await journal.snapshots(ExecutionProvider.MOCK)
 
     assert (read.snapshot_id, read.taken_at, read.account.cash) == (snapshot.snapshot_id, FILLED_AT, 500_000.0)
     assert [(p.stock_id, p.quantity, p.average_cost, p.mark_price, p.marked_at) for p in read.account.positions] == [

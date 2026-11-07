@@ -9,7 +9,8 @@ import { Panel } from '@/shared/ui/panel'
 import { RequireSignIn } from '@/shared/ui/require-sign-in'
 import { ShowMore } from '@/shared/ui/show-more'
 import { Skeleton } from '@/shared/ui/skeleton'
-import { useStrategySettings } from '../api/queries'
+import { useBuiltInStrategies, useStrategySettings } from '../api/queries'
+import { builtInInUse, customStrategies } from '../model/settings'
 import { requiredBars } from '../model/validate'
 import { useStrategyLabels } from '../use-formula-text'
 import { RuleSummaryList } from './RuleSummaryList'
@@ -17,7 +18,7 @@ import { RuleSummaryList } from './RuleSummaryList'
 const RULES_SHOWN = 3
 const OTHERS_SHOWN = 5
 
-/** The user's strategy in use and the other saved ones, for the market overview; it lays out by its own width. */
+/** The one strategy every workflow uses and the user's own others, for the market overview; it lays out by its own width. */
 export function StrategySummaryPanel() {
   const { t } = useTranslation('strategies')
   return (
@@ -42,22 +43,27 @@ export function StrategySummaryPanel() {
 function StrategySummary() {
   const { t } = useTranslation('strategies')
   const settings = useStrategySettings()
+  const builtIns = useBuiltInStrategies()
   const labels = useStrategyLabels()
   const [allRules, setAllRules] = useState(false)
-  if (settings.isPending) return <Skeleton className="h-24 rounded-lg" />
-  if (settings.isError) return <ErrorState error={settings.error} title={t('library.loadFailed')} onRetry={() => void settings.refetch()} />
+  if (settings.isPending || builtIns.isPending) return <Skeleton className="h-24 rounded-lg" />
+  if (settings.isError || builtIns.isError) {
+    const retry = () => void Promise.all([settings.refetch(), builtIns.refetch()])
+    return <ErrorState error={settings.error ?? builtIns.error} title={t('library.loadFailed')} onRetry={retry} />
+  }
   const active = settings.data.strategies.find((strategy) => strategy.id === settings.data.activeStrategyId)
-  const others = settings.data.strategies.filter((strategy) => strategy.id !== active?.id)
+  const builtIn = builtInInUse(settings.data, builtIns.data) !== null
+  const others = customStrategies(settings.data, builtIns.data).filter((strategy) => strategy.id !== active?.id)
 
   return (
     <div className="grid gap-x-8 gap-y-5 @2xl:grid-cols-[minmax(0,1fr)_17rem]">
       {active ? (
         <div className="min-w-0 space-y-2.5">
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <Link to={paths.editStrategy(active.id)} className="inline-flex min-h-11 items-center font-semibold hover:text-brand md:min-h-0">
+            <Link to={builtIn ? paths.strategies : paths.editStrategy(active.id)} className="inline-flex min-h-11 items-center font-semibold hover:text-brand md:min-h-0">
               {labels.name(active)}
             </Link>
-            <span className="tabular text-xs text-muted-foreground">{t('panel.meta', { rules: active.rules.length, bars: requiredBars(active) })}</span>
+            <span className="tabular text-xs text-muted-foreground">{t('meta', { rules: active.rules.length, bars: requiredBars(active) })}</span>
           </div>
           {labels.purpose(active) && <p className="text-sm text-pretty text-muted-foreground">{labels.purpose(active)}</p>}
           <RuleSummaryList id="active-strategy-rules" strategy={active} limit={allRules ? undefined : RULES_SHOWN} />

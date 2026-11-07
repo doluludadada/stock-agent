@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { I18nextProvider } from 'react-i18next'
 import { MemoryRouter } from 'react-router'
@@ -51,13 +51,105 @@ describe('a run the server refuses to start', { timeout: 20_000 }, () => {
 
     expect(await screen.findByText('Another run is still going. Wait for it to end.')).toBeInTheDocument()
   })
+})
 
-  it('names the mock broker only for its own refusal, not for every 403', async () => {
-    const detail = 'This installation trades on a real broker. Only an administrator may use its private pages.'
-    await startRefused(403, { detail, code: 'real_broker_refused' })
+const MOCK = { broker: 'mock', simulation: null, max_order_value: null, max_daily_buy_value: null }
+const SINOPAC = { broker: 'shioaji', simulation: true, max_order_value: 100_000, max_daily_buy_value: 300_000 }
 
-    expect(await screen.findByText(`The run did not start: ${detail}`)).toBeInTheDocument()
-    expect(screen.queryByText('This workflow runs from the web only on the mock broker.')).not.toBeInTheDocument()
+/** The runs page against a server that offers these brokers and answers a start of Buzz with `answer`. */
+function serveBuzz(brokers: unknown[], answer: { status: number; body: unknown } = { status: 202, body: { run_id: '44444444-4444-4444-8444-444444444444' } }) {
+  const starts: string[] = []
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/v1/market/audience') return json(PERSONAL_SITE)
+      if (url === '/v1/account/brokers') return json(brokers)
+      if (url.startsWith('/v1/runs?')) return json([])
+      if (url.startsWith('/v1/runs/buzz-scan') && init?.method === 'POST') {
+        starts.push(url)
+        return json(answer.body, answer.status)
+      }
+      return json({ detail: 'Not Found', code: 'not_found' }, 404)
+    }),
+  )
+  render(
+    <I18nextProvider i18n={initI18n('en')}>
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter>
+          <RunsPage />
+          <Toaster />
+        </MemoryRouter>
+      </QueryClientProvider>
+    </I18nextProvider>,
+  )
+  return starts
+}
+
+const buzzCard = async () => (await screen.findByRole('heading', { name: /Social Buzz/ })).closest('li')!
+const openBuzz = async (user: ReturnType<typeof userEvent.setup>) => {
+  await user.click(within(await buzzCard()).getByRole('button', { name: 'Start' }))
+  return screen.findByRole('alertdialog', { name: 'Start Social Buzz?' })
+}
+
+describe('the account a Buzz run orders on', { timeout: 20_000 }, () => {
+  beforeEach(() => session.signIn(TEST_USER))
+  afterEach(() => {
+    session.signOut()
+    vi.unstubAllGlobals()
+  })
+
+  it('offers no choice while only the mock account is offered, and starts there', async () => {
+    const starts = serveBuzz([MOCK])
+    const user = userEvent.setup()
+
+    expect(within(await buzzCard()).getByText('Mock orders')).toBeVisible()
+    const dialog = await openBuzz(user)
+    expect(within(dialog).getByText(/Orders go to your mock account\./)).toBeVisible()
+    expect(within(dialog).queryByRole('radiogroup')).not.toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole('button', { name: 'Start the run' }))
+    await waitFor(() => expect(starts).toEqual(['/v1/runs/buzz-scan?broker=mock']))
+  })
+
+  it('opens on the mock account every time, and orders on SinoPac only once chosen, naming its server and limits', async () => {
+    const starts = serveBuzz([MOCK, SINOPAC])
+    const user = userEvent.setup()
+
+    expect(await within(await buzzCard()).findByText('Places orders')).toBeVisible()
+    let dialog = await openBuzz(user)
+    const accounts = within(dialog).getByRole('radiogroup', { name: 'Account for the orders' })
+    expect(within(accounts).getByRole('radio', { name: 'Mock account' })).toHaveAttribute('aria-checked', 'true')
+    expect(within(dialog).queryByText(/NT\$/)).not.toBeInTheDocument()
+
+    await user.click(within(accounts).getByRole('radio', { name: 'SinoPac' }))
+    expect(within(dialog).getByText('SinoPac: simulation, no real money')).toBeVisible()
+    expect(within(dialog).getByText('Each BUY up to NT$100,000, and BUYs up to NT$300,000 per Taiwan day. The server refuses a BUY past them.')).toBeVisible()
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+
+    dialog = await openBuzz(user)
+    expect(within(dialog).getByRole('radio', { name: 'Mock account' })).toHaveAttribute('aria-checked', 'true')
+    await user.click(within(dialog).getByRole('radio', { name: 'SinoPac' }))
+    await user.click(within(dialog).getByRole('button', { name: 'Start the run' }))
+    await waitFor(() => expect(starts).toEqual(['/v1/runs/buzz-scan?broker=shioaji']))
+  })
+
+  it('says plainly when SinoPac is the live account with real money', async () => {
+    serveBuzz([MOCK, { ...SINOPAC, simulation: false }])
+    const user = userEvent.setup()
+
+    const dialog = await openBuzz(user)
+    await user.click(await within(dialog).findByRole('radio', { name: 'SinoPac' }))
+    expect(within(dialog).getByText('SinoPac: live account, real money')).toBeVisible()
+  })
+
+  it('says to use the mock account when the broker has no login now', async () => {
+    serveBuzz([MOCK, SINOPAC], { status: 403, body: { detail: 'Shioaji is not logged in.', code: 'broker_unavailable' } })
+    const user = userEvent.setup()
+
+    const dialog = await openBuzz(user)
+    await user.click(await within(dialog).findByRole('radio', { name: 'SinoPac' }))
+    await user.click(within(dialog).getByRole('button', { name: 'Start the run' }))
+    expect(await screen.findByText('The broker has no login on this site now. Start on the mock account, or try again later.')).toBeVisible()
   })
 })
 

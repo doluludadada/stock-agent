@@ -1,11 +1,12 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { FORM_SECTIONS } from '@/features/admin-settings/form'
+import { groupOf, sectionOf } from '@/features/admin-settings/form'
 import { BUILT_IN_IDS, builtInJson } from '@/features/strategies/model/built-ins.test-support'
 import { QUARTER_FIGURES } from '@/features/stock-research/model'
 import { COMPARATORS, INDICATOR_CATALOG, INDICATOR_KINDS, RULE_EFFECTS } from '@/features/strategies/model/catalog'
 import openapi from '@/shared/api/openapi.json'
+import settingsFields from '@/shared/api/settings-fields.json'
 import zhRuleNames from './locales/zh-TW/rule-names'
 import { resources } from './resources'
 
@@ -29,6 +30,9 @@ function sourceFiles(dir: string): string[] {
     return /\.tsx?$/.test(name) && !/\.test\./.test(name) ? [full] : []
   })
 }
+
+/** Every setting the server's settings form shows: each needs a label and a help in every locale. */
+const SETTING_PATHS = settingsFields.map((field) => field.path)
 
 describe('translations', () => {
   it('zh-TW and en have exactly the same keys in every namespace', () => {
@@ -82,27 +86,14 @@ describe('translations', () => {
       ['valuation', 'elimination', ['eps_unavailable', 'eps_not_positive', 'price_missing', 'price_stale', 'below_min_undervaluation', 'no_price_history', 'technical_hard_failure']],
       ['valuation', 'epsUnavailable', ['not_loaded', 'not_reported', 'incomplete_history', 'source_failed']],
       ['valuation', 'peNotApplicable', ['eps_unavailable', 'eps_zero', 'eps_negative', 'invalid_price']],
-      ['admin', 'file', openapi.components.schemas.SettingsFile.enum as string[]],
-      ['admin', 'fileRole', openapi.components.schemas.SettingsFile.enum as string[]],
-      ['admin', 'state', ['running', 'loading', 'refused', 'unsaved', 'conflict']],
-      ['admin', 'status', ['checking', 'problems', 'ready', 'failed']],
-      ['admin', 'view', ['form', 'yaml']],
-      ['admin', 'form.section', FORM_SECTIONS.map((section) => section.id)],
-      ['admin', 'form.field', FORM_SECTIONS.flatMap((section) => section.fields)],
-      ['admin', 'form.help', FORM_SECTIONS.flatMap((section) => section.fields)],
-      ['admin', 'form.readOnly', FORM_SECTIONS.flatMap((section) => (section.readOnly ? section.fields : []))],
-      [
-        'admin',
-        'form.option',
-        [
-          ...(openapi.components.schemas.AiProvider.enum as string[]),
-          ...(openapi.components.schemas.ExecutionProvider.enum as string[]),
-          ...(openapi.components.schemas.OrderMode.enum as string[]),
-          ...(openapi.components.schemas.SystemEnvironment.enum as string[]),
-          'sqlite',
-          'postgresql',
-        ],
-      ],
+      ['admin', 'form.section', [...new Set(SETTING_PATHS.map(sectionOf))]],
+      ['admin', 'form.group', [...new Set(SETTING_PATHS.flatMap((path) => groupOf(path) ?? []))]],
+      ['admin', 'form.field', SETTING_PATHS],
+      ['admin', 'form.help', SETTING_PATHS],
+      ['admin', 'form.option', [...new Set(settingsFields.flatMap((field) => field.options))]],
+      ['common', 'broker.name', openapi.components.schemas.ExecutionProvider.enum as string[]],
+      ['account', 'provider', openapi.components.schemas.ExecutionProvider.enum as string[]],
+      ['account', 'page', (openapi.components.schemas.ExecutionProvider.enum as string[]).flatMap((broker) => [`${broker}.title`, `${broker}.description`])],
       ['common', 'errors', ['unauthorized', 'forbidden', 'notFound', 'conflict', 'invalid', 'rateLimited', 'unavailable', 'network', 'server']],
       ['auth', 'role', openapi.components.schemas.Role.enum as string[]],
       ['auth', 'settings.provider', openapi.components.schemas.AiProvider.enum as string[]],

@@ -145,7 +145,6 @@ export function strategyToApi(strategy: Strategy): ApiStrategyInput {
 export function settingsFromApi(settings: ApiSettings): StrategySettings {
   return {
     activeStrategyId: settings.active_strategy_id as StrategyId,
-    buzzStrategyId: settings.buzz_strategy_id as StrategyId,
     strategies: settings.strategies.map(strategyFromApi),
     revision: settings.revision ?? 0,
   }
@@ -154,7 +153,6 @@ export function settingsFromApi(settings: ApiSettings): StrategySettings {
 export function settingsToApi(settings: StrategySettings): ApiSettingsInput {
   return {
     active_strategy_id: settings.activeStrategyId,
-    buzz_strategy_id: settings.buzzStrategyId,
     strategies: settings.strategies.map(strategyToApi),
     revision: settings.revision,
   }

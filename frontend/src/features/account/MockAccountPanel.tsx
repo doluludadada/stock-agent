@@ -12,10 +12,10 @@ import { Stat } from '@/shared/ui/stat'
 import { useAccountHistory, useResetAccount, type AccountOpening } from './api'
 import { parseStartingCapital } from './model'
 
-/** My settings' mock account: its starting capital and a reset that opens it again. A real broker reports no opening and shows none. */
+/** My settings' mock account: its starting capital and a reset that opens it again. */
 export function MockAccountPanel() {
   const { t } = useTranslation('account')
-  const history = useAccountHistory(null)
+  const history = useAccountHistory('mock', null)
   if (history.isError) {
     return (
       <Panel title={t('reset.title')}>

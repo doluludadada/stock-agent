@@ -287,7 +287,8 @@ async def test_a_version_1_database_is_upgraded_in_place_and_keeps_every_row(tmp
         {"owner_id": "local", **{column: value for column, value in row.items() if column != "account_id"}}
         for row in before["mock_cash"]
     ]
-    assert [{**row, "failure": None, "owner_id": "local", "followed_run_id": None} for row in before["workflow_runs"]] == [
+    kept_runs = [{column: value for column, value in row.items() if column != "order_mode"} for row in before["workflow_runs"]]
+    assert [{**row, "failure": None, "owner_id": "local", "followed_run_id": None} for row in kept_runs] == [
         {**row, "failure": None} for row in after["workflow_runs"]
     ]
     assert [row["failure"] for row in after["workflow_runs"]] == ["RuntimeError: Yahoo hung", None, "CancelledError: "]

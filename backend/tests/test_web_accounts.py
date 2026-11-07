@@ -15,15 +15,12 @@ from support.harness import (
     CliHarness,
     build_harness,
     harness_config,
-    open_harness_switch,
-    real_broker_config,
     rising_history,
 )
 from support.web import app_of, client_at, ended, hold_stock_list, run_to_end, serve, sign_in, write
 
 from a_domain.types.ids import UserId
-from d_presentation.web.app import create_app
-from d_presentation.web.session import current_user, require_private_access
+from d_presentation.web.session import current_user
 
 pytestmark = pytest.mark.asyncio
 
@@ -78,25 +75,28 @@ async def test_a_taken_username_or_email_is_refused_whatever_its_case() -> None:
     assert (username.json()["detail"], email.json()["detail"]) == ("That username is taken.", "That email is taken.")
 
 
-async def test_registration_is_closed_when_switched_off_and_on_a_real_broker() -> None:
+async def test_registration_is_closed_only_when_switched_off_and_stays_open_where_sinopac_is_offered() -> None:
     config = harness_config()
     switched_off = build_harness(
         config=config.model_copy(update={"accounts": config.accounts.model_copy(update={"registration_open": False})})
     )
-    real_broker = shioaji_harness()
 
-    for harness in (switched_off, real_broker):
-        async with serve(harness, authorized=False) as client:
-            status = (await client.get("/v1/auth/status")).json()
-            refused = await client.post("/v1/auth/register", json=NEW_USER)
+    async with serve(switched_off, authorized=False) as client:
+        closed = (await client.get("/v1/auth/status")).json()
+        refused = await client.post("/v1/auth/register", json=NEW_USER)
 
-        assert (status["registration_open"], refused.status_code) == (False, 403)
+    async with serve(sinopac_harness(), authorized=False) as client:
+        offered = (await client.get("/v1/auth/status")).json()
+        registered = await client.post("/v1/auth/register", json=NEW_USER)
+
+    assert (closed["registration_open"], refused.status_code) == (False, 403)
+    assert (offered["registration_open"], registered.status_code) == (True, 201)
 
 
-def shioaji_harness() -> CliHarness:
-    config = real_broker_config()
-    harness = build_harness(config=config)
+def sinopac_harness() -> CliHarness:
+    harness = build_harness(sinopac=True)
     harness.users.add(MEMBER, MEMBER_PASSWORD)
+    harness.list_stock("2330", rising_history(100.0))
     return harness
 
 
@@ -110,21 +110,16 @@ PRIVATE_PAGES = (
 )
 
 
-async def test_on_a_real_broker_a_user_is_signed_in_but_refused_every_private_page() -> None:
-    async with serve(shioaji_harness(), user=(MEMBER.username, MEMBER_PASSWORD)) as client:
-        me = await client.get("/v1/auth/me")
-        refused = {path: (await client.get(path)).status_code for path in PRIVATE_PAGES}
+async def test_where_sinopac_is_offered_a_user_reads_every_private_page_and_is_refused_only_sinopac() -> None:
+    async with serve(sinopac_harness(), user=(MEMBER.username, MEMBER_PASSWORD)) as client:
+        pages = {path: (await client.get(path)).status_code for path in PRIVATE_PAGES}
+        brokers = (await client.get("/v1/account/brokers")).json()
+        sinopac = await client.get("/v1/account/history", params={"broker": "shioaji"})
         again = await client.get("/v1/auth/me")
 
-    assert (me.status_code, again.status_code) == (200, 200)
-    assert refused == dict.fromkeys(PRIVATE_PAGES, 403)
-
-
-def test_every_route_of_a_signed_in_user_passes_the_private_gate_but_the_users_own_record() -> None:
-    """The gate is a dependency of the route or its router, so a route that forgets it is found here by name."""
-    app = create_app(lambda: open_harness_switch(build_harness()))
-
-    assert routes_asking(app, current_user) - routes_asking(app, require_private_access) == {("GET", "/v1/auth/me")}
+    assert pages == dict.fromkeys(PRIVATE_PAGES, 200)
+    assert [broker["broker"] for broker in brokers] == ["mock"]
+    assert (sinopac.status_code, sinopac.json()["code"], again.status_code) == (403, "real_broker_refused", 200)
 
 
 async def test_wrong_passwords_are_one_answer_and_the_limit_is_per_name_and_client() -> None:

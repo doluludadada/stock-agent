@@ -61,7 +61,7 @@ export function AppShell() {
           <SearchField onOpen={() => setSearching(true)} className="hidden md:flex" />
           <div className="ml-auto flex items-center gap-1">
             <PreferenceMenu />
-            <UserMenu onSignedOut={() => navigate(paths.runs)} />
+            <UserMenu onSignedOut={() => navigate(paths.market)} />
           </div>
         </header>
 
@@ -114,7 +114,7 @@ function SideNav({ sections }: { sections: NavSection[] }) {
 
 const tabClass = 'flex min-h-11 flex-1 flex-col items-center justify-center gap-0.5 text-[0.6875rem] font-medium transition-colors'
 
-/** The phone's bottom bar: the analysis runs, the market, search, the watchlist, the account and everything else. */
+/** The phone's bottom bar: the market, the analysis runs, search, the watchlist, the account and everything else. */
 function TabBar({ onSearch, onMore, moreActive }: { onSearch: () => void; onMore: () => void; moreActive: boolean }) {
   const { t } = useTranslation()
   const location = useLocation()
@@ -133,8 +133,8 @@ function TabBar({ onSearch, onMore, moreActive }: { onSearch: () => void; onMore
       className="fixed inset-x-0 bottom-0 z-30 flex border-t bg-background/92 px-1 pb-[env(safe-area-inset-bottom)] shadow-bar backdrop-blur-md md:hidden"
     >
       <div className="flex h-(--tabbar-height) w-full items-stretch">
-        {tab('analysis', TAB_PAGES.analysis)}
         {tab('market', TAB_PAGES.market)}
+        {tab('analysis', TAB_PAGES.analysis)}
         <button type="button" onClick={onSearch} className={cn(tabClass, 'text-muted-foreground')}>
           <span className="grid size-9 place-items-center rounded-full bg-brand text-primary-foreground shadow-card">
             <Search aria-hidden className="size-4.5" />

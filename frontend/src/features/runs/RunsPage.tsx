@@ -4,7 +4,7 @@ import { Link, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { useLocale, useTranslation } from '@/i18n'
 import { paths } from '@/shared/config/paths'
-import { allows, isApiError, useAudience, useSession, type Audience, type Capability } from '@/shared/api'
+import { allows, chosenOffer, MOCK_ONLY, useAudience, useBrokers, useSession, type Audience, type Broker, type Capability } from '@/shared/api'
 import { formatDateTime } from '@/shared/lib/format'
 import { isAcceptedList, parseStockIds } from '@/shared/lib/stock-ids'
 import { ArchiveWarmUp } from '@/shared/ui/archive-warm-up'
@@ -22,7 +22,9 @@ import { StateBlock } from '@/shared/ui/state-block'
 import { StockIdsProblem } from '@/shared/ui/stock-ids-problem'
 import { SignInActions } from '@/shared/ui/require-sign-in'
 import { PAGE_SIZE, useRunSignals, useRunsPage, useStartRun, type Run, type RunKind, type Signal } from './api'
+import { BrokerChoice } from './BrokerChoice'
 import { RunStateBadge } from './RunStateBadge'
+import { useStartRefusal } from './refusal'
 
 /** Every analysis a run can be; one that needs a capability is offered only where the site's audience allows it. */
 const KINDS: { kind: RunKind; icon: typeof Play; orders: boolean; requires?: Capability }[] = [
@@ -115,34 +117,38 @@ function StartPanel({ kinds }: { kinds: readonly Kind[] }) {
   const question = useStartQuestion(kinds)
   const navigate = useNavigate()
   const start = useStartRun()
+  const refusal = useStartRefusal()
+  const offers = useBrokers().data ?? MOCK_ONLY
   const [confirming, setConfirming] = useState<RunKind | null>(null)
+  const [chosen, setChosen] = useState<Broker>('mock')
+  const broker = chosenOffer(offers, chosen).broker
   const [stockText, setStockText] = useState('')
   const stocks = parseStockIds(stockText)
+  const confirmingOrders = KINDS.some((item) => item.kind === confirming && item.orders)
 
+  const ask = (kind: RunKind) => {
+    setChosen('mock')
+    setConfirming(kind)
+  }
   const launch = () => {
     if (!confirming) return
     const kind = confirming
     setConfirming(null)
     start.mutate(
-      { kind, stockIds: stocks.ids },
+      { kind, stockIds: stocks.ids, broker },
       {
         onSuccess: (accepted) => {
           toast.success(t('started', { kind: t(`kind.${kind}.title`) }))
           navigate(paths.run(accepted.run_id))
         },
-        onError: (error) => {
-          const code = isApiError(error) ? error.code : null
-          if (code === 'run_in_progress') toast.error(t('busy'))
-          else if (code === 'mock_broker_only') toast.error(t('mockOnly'), { description: error.message })
-          else toast.error(t('startFailed', { reason: error.message }))
-        },
+        onError: (error) => toast.error(refusal(error)),
       },
     )
   }
 
   const onSpecific = (event: FormEvent) => {
     event.preventDefault()
-    if (isAcceptedList(stocks)) setConfirming('specific-stocks')
+    if (isAcceptedList(stocks)) ask('specific-stocks')
   }
 
   return (
@@ -159,7 +165,7 @@ function StartPanel({ kinds }: { kinds: readonly Kind[] }) {
                 {orders ? (
                   <Badge variant="outline" className="gap-1 border-gold/40 font-normal text-gold">
                     <ShieldAlert aria-hidden className="size-3" />
-                    {t('mockOrders')}
+                    {offers.length > 1 ? t('placesOrders') : t('mockOrders')}
                   </Badge>
                 ) : (
                   <Badge variant="outline" className="font-normal">
@@ -187,7 +193,7 @@ function StartPanel({ kinds }: { kinds: readonly Kind[] }) {
                 <StockIdsProblem id="specific-stocks-problem" list={stocks} />
               </form>
             ) : (
-              <Button type="button" size="sm" variant="outline" className="self-start" onClick={() => setConfirming(kind)} disabled={start.isPending}>
+              <Button type="button" size="sm" variant="outline" className="self-start" onClick={() => ask(kind)} disabled={start.isPending}>
                 <Play aria-hidden />
                 {t('start')}
               </Button>
@@ -202,13 +208,15 @@ function StartPanel({ kinds }: { kinds: readonly Kind[] }) {
         description={
           <>
             {confirming && t(`kind.${confirming}.cost`)} {confirming === 'specific-stocks' && t('confirm.stocks', { ids: stocks.ids.join(', ') })}{' '}
-            {confirming && KINDS.find((item) => item.kind === confirming)?.orders && t('confirm.mock')}
+            {confirmingOrders && offers.length < 2 && t('confirm.mock')}
           </>
         }
         cancel={t('confirm.cancel')}
         confirm={t('confirm.start')}
         onConfirm={launch}
-      />
+      >
+        {confirmingOrders && <BrokerChoice offers={offers} value={broker} onChange={setChosen} />}
+      </ConfirmDialog>
     </Panel>
   )
 }

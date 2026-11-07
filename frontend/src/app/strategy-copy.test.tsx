@@ -28,7 +28,7 @@ describe('copying an official strategy', () => {
     const edited = { ...official, name: 'My balanced', rules: official.rules.slice(0, 1) }
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url === '/v1/technical-settings/built-in-strategies') return json([official])
-      if (url === '/v1/technical-settings') return json({ active_strategy_id: 'balanced', buzz_strategy_id: 'balanced', strategies: [edited], revision: 1 })
+      if (url === '/v1/technical-settings') return json({ active_strategy_id: 'balanced', strategies: [edited], revision: 1 })
       return json([])
     }))
     session.signIn(TEST_USER)
@@ -48,7 +48,9 @@ describe('copying an official strategy', () => {
     )
 
     await screen.findByRole('link', { name: 'Copy My balanced' })
-    await userEvent.setup().click(screen.getByRole('link', { name: 'Copy Balanced' }))
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'New strategy' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Copy Balanced' }))
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Balanced copy' })).toBeInTheDocument()
   }, 20_000)

@@ -1,10 +1,8 @@
 import asyncio
 import time
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
-from itertools import groupby
-from math import isfinite
+from datetime import datetime, timedelta
 from typing import override
 
 import c_infrastructure.trading.shioaji.sdk_reporting  # noqa: F401
@@ -18,9 +16,7 @@ from a_domain.model.market.stock import Stock
 from a_domain.ports.market.broker_quote_provider import IBrokerQuoteProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
-from a_domain.types.enums import MarketType
 from b_application.config.market_data_config import MarketDataConfig
-from b_application.config.sources_config import ShioajiSources
 from b_application.config.trading_config import ShioajiLogin
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 
@@ -48,10 +44,9 @@ class ShioajiConnection:
 class ShioajiQuoteProvider(IBrokerQuoteProvider[Snapshot]):
     """
     Sinopac's market data over the Shioaji client, on the simulation or the production server as the login says: each
-    stock's snapshot for realtime quotes, one daily-quotes request per session for every listed stock's daily bar, and
-    the one-minute bars of each exchange's own index (sources.shioaji.index_codes) for its daily history. The simulation
-    server serves the same exchange data as production. Shioaji stamps market data with the Taipei wall-clock time as
-    nanoseconds since the epoch read as if Taipei were UTC.
+    stock's snapshot for realtime quotes. The simulation server serves the same exchange data as production. Shioaji
+    stamps market data with the Taipei wall-clock time as nanoseconds since the epoch read as if Taipei were UTC. The
+    daily history comes from the exchanges' own reports instead (IDailyHistorySource).
 
     Every runtime's provider of one login reads the process's ShioajiConnection of that login, which the first logs in
     and a later one logs in again only once the login failed or went down. When Shioaji is the broker,
@@ -60,7 +55,7 @@ class ShioajiQuoteProvider(IBrokerQuoteProvider[Snapshot]):
     Shioaji allows 50 market-data queries per 10 seconds, snapshots, ticks and kbars together, and stops answering
     for a minute after one more. So requests on one login go one at a time, from every runtime: a snapshots request, of
     at most market_data.quote_batch_size stocks, at least market_data.quote_request_interval_seconds after the request
-    before it, and a daily-history request at least market_data.history_request_interval_seconds after it.
+    before it.
     """
 
     def __init__(
@@ -70,7 +65,6 @@ class ShioajiQuoteProvider(IBrokerQuoteProvider[Snapshot]):
         login: ShioajiLogin,
         market_clock: IMarketClock,
         market_data: MarketDataConfig,
-        sources: ShioajiSources,
         board_lot_shares: int,
         logger: ILoggingProvider,
     ) -> None:
@@ -82,9 +76,6 @@ class ShioajiQuoteProvider(IBrokerQuoteProvider[Snapshot]):
         self._batch_size = market_data.quote_batch_size
         self._timeout_milliseconds = round(market_data.quote_timeout_seconds * 1000)
         self._quote_interval_seconds = market_data.quote_request_interval_seconds
-        self._history_interval_seconds = market_data.history_request_interval_seconds
-        self._index_window = timedelta(days=market_data.index_minutes_window_days - 1)
-        self._index_codes = sources.index_codes
         self._board_lot_shares = board_lot_shares
         self._logger = logger
 
@@ -169,84 +160,6 @@ class ShioajiQuoteProvider(IBrokerQuoteProvider[Snapshot]):
             volume=snapshot.total_volume * self._board_lot_shares,
             change=snapshot.change_price,
         )
-
-    @override
-    async def fetch_session_bars(self, session: date) -> dict[str, Ohlcv]:
-        """
-        Shioaji's daily quotes, measured on the simulation server on 2026-11-06: one answer holds every listed stock of
-        both exchanges with a four-digit code (1991), with the exchanges' official prices and shares traded, and a stock
-        without a trade has no prices (NaN) and volume 0. A weekend, a holiday or a date to come answers no rows.
-        """
-        daily_quotes = self._connection.client.daily_quotes
-        answer = await self.request(self._history_interval_seconds, daily_quotes, date=session, timeout=self._timeout_milliseconds)
-        rows = zip(answer.Date, answer.Code, answer.Open, answer.High, answer.Low, answer.Close, answer.Volume, strict=True)
-        stamp = self._clock.session_close(session)
-        bars = {
-            code: Ohlcv(ts=stamp, open=open_price, high=high, low=low, close=close, volume=volume)
-            for day, code, open_price, high, low, close, volume in rows
-            if day == session and volume > 0 and isfinite(close)
-        }
-
-        self._logger.info(f"Shioaji daily quotes of {session}: {len(bars)} stocks with a trade")
-        return bars
-
-    @override
-    async def fetch_session_changes(self, session: date, stock_ids: Collection[str]) -> dict[str, float]:
-        return {
-            snapshot.code: quote.change
-            for snapshot in await self.snapshots(stock_ids)
-            if (quote := self.quote_of(snapshot)) is not None and quote.change is not None and quote.ts.date() == session
-        }
-
-    @override
-    async def fetch_index_bars(self, market: MarketType, first: date, last: date) -> list[Ohlcv]:
-        """The server refuses one-minute bars over more than market_data.index_minutes_window_days, so they come in windows."""
-        contract = await asyncio.to_thread(lambda: self._connection.client.Contracts.Indexs[self._index_codes[market]])
-        minutes: list[Ohlcv] = []
-        start = first
-
-        while start <= last:
-            end = min(start + self._index_window, last)
-            window = {"start": start.isoformat(), "end": end.isoformat(), "timeout": self._timeout_milliseconds}
-            kbars = await self.request(self._history_interval_seconds, self._connection.client.kbars, contract, **window)
-            columns = zip(kbars.ts, kbars.Open, kbars.High, kbars.Low, kbars.Close, kbars.Volume, strict=True)
-            minutes += [
-                Ohlcv(
-                    ts=self._epoch + timedelta(microseconds=ts // 1000),
-                    open=open_price,
-                    high=high,
-                    low=low,
-                    close=close,
-                    volume=volume,
-                )
-                for ts, open_price, high, low, close, volume in columns
-            ]
-            start = end + timedelta(days=1)
-
-        bars = self.daily_bars(minutes)
-        self._logger.info(f"Shioaji index bars of {market.value} from {first} to {last}: {len(bars)} sessions")
-        return bars
-
-    @override
-    def daily_bars(self, minutes: Sequence[Ohlcv]) -> list[Ohlcv]:
-        """An index's volume counts board lots, like a snapshot's."""
-        bars: list[Ohlcv] = []
-
-        for session, run in groupby(minutes, key=lambda minute: minute.ts.date()):
-            day = list(run)
-            bars.append(
-                Ohlcv(
-                    ts=self._clock.session_close(session),
-                    open=day[0].open,
-                    high=max(minute.high for minute in day),
-                    low=min(minute.low for minute in day),
-                    close=day[-1].close,
-                    volume=sum(minute.volume for minute in day) * self._board_lot_shares,
-                    change=day[-1].close - bars[-1].close if bars else None,
-                )
-            )
-
-        return bars
 
     @override
     async def request[**Arguments, Answer](

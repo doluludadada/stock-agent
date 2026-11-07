@@ -5,15 +5,9 @@ import type { Comparison, IdFactory } from './types'
  * Quick fills only populate an ordinary, fully editable comparison. They are starting points;
  * nothing downstream knows which quick fill produced a condition.
  */
-export type QuickFillKind = 'maCross' | 'macdCross' | 'rsiThreshold' | 'volumeAboveAverage' | 'volumeAboveYesterday'
+export type QuickFillKind = 'macdCross' | 'rsiThreshold' | 'volumeAboveAverage' | 'volumeAboveYesterday'
 
-export const QUICK_FILLS: readonly QuickFillKind[] = [
-  'maCross',
-  'macdCross',
-  'rsiThreshold',
-  'volumeAboveAverage',
-  'volumeAboveYesterday',
-]
+export const QUICK_FILLS: readonly QuickFillKind[] = ['macdCross', 'rsiThreshold', 'volumeAboveAverage', 'volumeAboveYesterday']
 
 export interface QuickFillResult {
   condition: Comparison
@@ -23,20 +17,6 @@ export interface QuickFillResult {
 export function quickFill(kind: QuickFillKind, ids: IdFactory): QuickFillResult {
   const id = newNodeId(ids)
   switch (kind) {
-    case 'maCross': {
-      const fast = newIndicatorId(ids)
-      const slow = newIndicatorId(ids)
-      return {
-        condition: {
-          type: 'comparison',
-          id,
-          operator: 'crosses_above',
-          left: { type: 'indicator', indicatorId: fast, output: 'value', barsAgo: 0 },
-          right: { type: 'indicator', indicatorId: slow, output: 'value', barsAgo: 0 },
-        },
-        indicators: { [fast]: { kind: 'sma', period: 20 }, [slow]: { kind: 'sma', period: 60 } } as IndicatorTable,
-      }
-    }
     case 'macdCross': {
       // Both outputs read the same setting, so the line and its signal can never drift apart.
       const macd = newIndicatorId(ids)

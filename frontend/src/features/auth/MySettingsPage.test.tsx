@@ -101,8 +101,7 @@ const history = (opening: History['opening']): History => ({
   live_stock_ids: [],
   equity_curve: {},
   as_of: null,
-  execution_provider: opening ? 'mock' : 'shioaji',
-  order_mode: opening ? 'mock_only' : 'disabled',
+  execution_provider: 'mock',
   opening,
   profit: opening ? 0 : null,
 })
@@ -115,7 +114,7 @@ function serveAccount(opening: History['opening'], refusal?: { status: number; d
     'fetch',
     vi.fn(async (url: string, init?: RequestInit) => {
       if (url === '/v1/auth/me/ai-model') return json(OFFER)
-      if (url === '/v1/account/history') return json(history(current))
+      if (url === '/v1/account/history?broker=mock') return json(history(current))
       if (url === '/v1/account/reset' && init?.method === 'POST') {
         const body = JSON.parse(String(init.body)) as Schemas['ResetRequest']
         resets.push(body)
@@ -199,13 +198,5 @@ describe('My settings’ mock account', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Reset' }))
 
     expect(await screen.findByText('A run of yours is still going and could order meanwhile. Reset once it ends.')).toBeVisible()
-  })
-
-  it('shows no mock account at a real broker, which reports no opening', async () => {
-    serveAccount(null)
-    openWithMockAccount()
-
-    expect(await screen.findByRole('combobox', { name: 'Model for your runs' })).toBeVisible()
-    expect(screen.queryByRole('region', { name: 'Mock account' })).not.toBeInTheDocument()
   })
 })

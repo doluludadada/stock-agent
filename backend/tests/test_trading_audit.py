@@ -11,7 +11,7 @@ from a_domain.model.analysis.technical_report import TechnicalReport
 from a_domain.model.trading.account import Account, Position
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.watchlist import WatchlistEntry
-from a_domain.types.enums import OrderMode, OrderStatus, RejectReason, SignalSource, TradeAction, WatchlistType, Workflow
+from a_domain.types.enums import OrderStatus, RejectReason, SignalSource, TradeAction, WatchlistType, Workflow
 from b_application.use_cases.trade.order_execution import OrderExecution
 from c_infrastructure.database.models.trading_journal_dto import AccountSnapshotDTO, OrderDTO, TradeSignalDTO, WorkflowRunDTO
 from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
@@ -77,13 +77,9 @@ async def test_a_filled_manual_buy_returns_the_filled_order(tmp_path) -> None:
     assert (result.status, result.filled_quantity, result.fee) == (OrderStatus.FILLED, 2000, 285)
 
 
-@pytest.mark.parametrize(
-    ("setup", "reason"),
-    [("market_closed", "MARKET_CLOSED"), ("order_mode_disabled", "ORDER_MODE_DISABLED"), ("stale_price", "STALE_PRICE")],
-)
+@pytest.mark.parametrize(("setup", "reason"), [("market_closed", "MARKET_CLOSED"), ("stale_price", "STALE_PRICE")])
 async def test_a_refused_manual_buy_is_a_recorded_rejected_order_with_its_reason(tmp_path, setup: str, reason: str) -> None:
-    configure = (lambda config: setattr(config.trading, "order_mode", OrderMode.DISABLED)) if setup == "order_mode_disabled" else None
-    stack = await open_stack(tmp_path, configure=configure or (lambda config: None))
+    stack = await open_stack(tmp_path)
 
     if setup == "market_closed":
         stack.clock.current = MONDAY_10_00.replace(hour=14)
@@ -282,7 +278,7 @@ async def test_order_execution_sends_only_a_pending_order(tmp_path, ending: str 
     order = stack.config.order_rule().apply(signal, stats.run_id, stack.clock.now(), stack.clock.trading_phase(), last_close)
 
     if ending == "rejected":
-        order.reject(RejectReason.ORDER_MODE_DISABLED, "order mode disabled", now=stack.clock.now())
+        order.reject(RejectReason.MARKET_CLOSED, "the market closed", now=stack.clock.now())
 
     if ending == "failed":
         order.fail("the order record could not be saved, so the order was not sent: disk full", now=stack.clock.now())

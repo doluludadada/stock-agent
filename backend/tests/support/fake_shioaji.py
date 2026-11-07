@@ -16,8 +16,8 @@ import c_infrastructure.trading.shioaji.sdk_reporting  # noqa: F401
 # isort: split
 from shioaji.account import Account, StockAccount
 from shioaji.constant import Action, ChangeType, Exchange, Status, StockOrderCond, StockOrderLot, TickType, Unit
-from shioaji.contracts import Contract, Index, Stock
-from shioaji.data import DailyQuotes, Kbars, Snapshot
+from shioaji.contracts import Contract, Stock
+from shioaji.data import Snapshot
 from shioaji.order import Deal, Order, OrderStatus, Trade
 from shioaji.position import AccountBalance, SettlementV1, StockPosition
 
@@ -110,30 +110,9 @@ class FakeStocks:
         return self._contracts.get(code)
 
 
-def index(code: str, exchange: Exchange = Exchange.TSE) -> Index:
-    return Index(exchange=exchange, code=code, symbol=f"{exchange.value}{code}", name=code)
-
-
-def daily_quotes(day: datetime.date, rows: dict[str, tuple[float, float, float, float, int]]) -> DailyQuotes:
-    """Shioaji's daily quotes of one date: per code its open, high, low, close and shares, NaN prices for no trade."""
-    columns = list(zip(*rows.values(), strict=True)) or [[], [], [], [], []]
-    return DailyQuotes(
-        Date=[day] * len(rows),
-        Code=list(rows),
-        Open=list(columns[0]),
-        High=list(columns[1]),
-        Low=list(columns[2]),
-        Close=list(columns[3]),
-        Volume=list(columns[4]),
-        Transaction=[1] * len(rows),
-        Amount=[0] * len(rows),
-    )
-
-
 @dataclass
 class FakeContracts:
     Stocks: FakeStocks
-    Indexs: FakeStocks = field(default_factory=lambda: FakeStocks({"001": index("001"), "101": index("101", Exchange.OTC)}))
 
 
 @dataclass
@@ -170,17 +149,12 @@ class FakeShioaji:
     """False: place_order returns a copy, and update_status refreshes only the trade that list_trades holds."""
 
     market_data_error: Exception | None = None
-    """What snapshots, daily_quotes and kbars raise instead of answering, as the SDK does for a server's refusal."""
+    """What snapshots raises instead of answering, as the SDK does for a server's refusal."""
     session_down_callback: Callable[[], None] | None = None
     """The one callback the SDK keeps: a second registration replaces the first."""
     snapshot_answers: dict[str, Snapshot] = field(default_factory=dict)
     """What snapshots answers for each code; a code without one gets no snapshot."""
     snapshot_requests: list[list[str]] = field(default_factory=list)
-    daily_answers: dict[datetime.date, DailyQuotes] = field(default_factory=dict)
-    """What daily_quotes answers for each date; another date gets no rows, as a weekend or a holiday does."""
-    minute_bars: dict[str, list[tuple[datetime.datetime, float, float, float, float, int]]] = field(default_factory=dict)
-    """Each index code's one-minute bars in Taipei wall-clock time: open, high, low, close and lots."""
-    history_requests: list[tuple[str, ...]] = field(default_factory=list)
 
     stock_account: StockAccount | None = None
     logins: list[dict] = field(default_factory=list)
@@ -229,38 +203,6 @@ class FakeShioaji:
             raise self.market_data_error
         self.snapshot_requests.append([contract.code for contract in contracts])
         return [self.snapshot_answers[contract.code] for contract in contracts if contract.code in self.snapshot_answers]
-
-    def daily_quotes(self, date: datetime.date, exclude: bool = True, timeout: int = 5000, cb=None) -> DailyQuotes:
-        assert len(self.logins) > self.logouts, "daily quotes outside a login"
-        self.history_requests.append(("daily_quotes", date.isoformat()))
-
-        if self.market_data_error is not None:
-            raise self.market_data_error
-
-        return self.daily_answers.get(date, daily_quotes(date, {}))
-
-    def kbars(self, contract: Contract, start: str, end: str, timeout: int = 30000, cb=None) -> Kbars:
-        """Refuses a range over 30 days, as the server answers 400 'Kbars date range must not exceed 30 days.'"""
-        first, last = datetime.date.fromisoformat(start), datetime.date.fromisoformat(end)
-        self.history_requests.append(("kbars", contract.code, start, end))
-
-        if self.market_data_error is not None:
-            raise self.market_data_error
-
-        if (last - first).days >= 30:
-            raise Exception({"status": {"status_code": 400}, "response": {"detail": "Kbars date range must not exceed 30 days."}})
-
-        rows = [row for row in self.minute_bars.get(contract.code, []) if first <= row[0].date() <= last]
-        stamps = [int(row[0].replace(tzinfo=datetime.UTC).timestamp()) * 1_000_000_000 for row in rows]
-        return Kbars(
-            ts=stamps,
-            Open=[row[1] for row in rows],
-            High=[row[2] for row in rows],
-            Low=[row[3] for row in rows],
-            Close=[row[4] for row in rows],
-            Volume=[row[5] for row in rows],
-            Amount=[0.0] * len(rows),
-        )
 
     def logout(self) -> bool:
         self.logouts += 1

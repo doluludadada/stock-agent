@@ -20,5 +20,6 @@ class Ohlcv:
     change: float | None = None
     """
     The exchange's official change from the session's reference price: the previous close, adjusted on an ex-rights or
-    ex-dividend day. The TWSE and TPEX listings and the broker's snapshots report it; a bar without one has None.
+    ex-dividend day. The exchanges' daily reports and listings and the broker's snapshots report it; a bar without one,
+    or whose exchange compared its close to no reference, has None.
     """

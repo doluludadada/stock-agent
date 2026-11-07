@@ -297,7 +297,7 @@ free-form expression submitted by the client. Adding a new formula still require
 
 | Proposed table | Columns |
 | --- | --- |
-| `technical_settings` | `owner_id` primary key, `active_strategy_id`, `buzz_strategy_id`, `revision`. |
+| `technical_settings` | `owner_id` primary key, `active_strategy_id`, `revision`. |
 | `technical_strategies` | Composite primary key (`owner_id`, `strategy_id`), `name`, `definition_json` containing indicators, scoring and rules. |
 
 Selections reference (`owner_id`, `strategy_id`) so an owner cannot select another owner's

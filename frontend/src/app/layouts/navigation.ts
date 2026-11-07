@@ -23,12 +23,13 @@ export interface NavSection {
   items: readonly NavItem[]
 }
 
-const RUNS: NavItem = { key: 'runs', to: paths.runs, icon: Activity, end: true, alsoUnder: '/runs/' }
+const RUNS: NavItem = { key: 'runs', to: paths.runs, icon: Activity, end: false }
 const OVERVIEW: NavItem = { key: 'overview', to: paths.market, icon: LayoutDashboard, end: true, alsoUnder: '/stocks/' }
 const WATCHLIST: NavItem = { key: 'watchlist', to: paths.watchlist, icon: Star, end: false }
 const ACCOUNT: NavItem = { key: 'account', to: paths.account, icon: Wallet, end: false }
 
 const SECTIONS: readonly NavSection[] = [
+  { key: 'research', items: [OVERVIEW, { key: 'valuation', to: paths.valuation, icon: Calculator, end: false, requires: 'mops' }] },
   {
     key: 'analysis',
     items: [
@@ -37,7 +38,6 @@ const SECTIONS: readonly NavSection[] = [
       { key: 'builder', to: paths.newStrategy, icon: Sparkles, end: false },
     ],
   },
-  { key: 'research', items: [OVERVIEW, { key: 'valuation', to: paths.valuation, icon: Calculator, end: false, requires: 'mops' }] },
   { key: 'mine', items: [WATCHLIST, ACCOUNT, { key: 'settings', to: paths.mySettings, icon: SlidersHorizontal, end: true }] },
   {
     key: 'admin',
@@ -59,7 +59,7 @@ export function navSections(permissions: readonly Permission[], audience: Audien
 }
 
 /** The phone's tab bar: the four places used during a session; search and the other pages sit between and after them. */
-export const TAB_PAGES = { analysis: RUNS, market: OVERVIEW, watchlist: WATCHLIST, account: ACCOUNT } as const
+export const TAB_PAGES = { market: OVERVIEW, analysis: RUNS, watchlist: WATCHLIST, account: ACCOUNT } as const
 
 /** Whether a path is the item's page: the sidebar, the more sheet and the tab bar all mark the same item. */
 export function isCurrent(item: NavItem, pathname: string): boolean {

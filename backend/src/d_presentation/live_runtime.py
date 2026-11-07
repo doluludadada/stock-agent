@@ -6,10 +6,9 @@ settings a runtime was built from never change under the work that holds it.
 """
 
 import asyncio
-from collections.abc import AsyncGenerator, Callable, Generator, Mapping
+from collections.abc import AsyncGenerator, Callable, Generator, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager, contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Self
 
@@ -17,8 +16,8 @@ from pydantic import SecretStr
 
 from a_domain.model.system.user import User
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from a_domain.ports.system.settings_files import SettingsEdit, SettingsProblem
-from a_domain.types.enums import SettingsFile
+from a_domain.ports.system.settings_files import SettingChange, SettingsEdit, SettingsProblem
+from a_domain.types.enums import ExecutionProvider, SettingsFile
 from a_domain.types.errors import SettingsConflictError
 from a_domain.types.ids import UserId
 from b_application.config.app_config import AppConfig
@@ -74,36 +73,21 @@ class OpenedRuntime:
 
 @dataclass(frozen=True, slots=True)
 class SettingsReloaded:
-    """A reload of the settings files on disk that the process runs on now: the revisions it read and those it replaced."""
+    """Settings files the process runs on now: the revisions it read and those it replaced."""
 
     revisions: dict[SettingsFile, str]
     previous: dict[SettingsFile, str]
-    at: datetime
 
 
 @dataclass(frozen=True, slots=True)
 class ReloadRefused:
-    """Settings files on disk the app would not start with: the revisions it read, those it kept running on, and why."""
+    """Settings files on disk the app would not start with: the revisions it read, and why."""
 
     revisions: dict[SettingsFile, str]
-    previous: dict[SettingsFile, str]
     problems: tuple[SettingsProblem, ...]
-    at: datetime
 
 
 type SettingsReload = SettingsReloaded | ReloadRefused
-
-
-@dataclass(frozen=True, slots=True)
-class ReloadStatus:
-    running: dict[SettingsFile, str]
-    """The revision of each file the current runtime was built from: what new requests run on."""
-
-    refused: ReloadRefused | None
-    """The last edit on disk the app would not start with, kept until the files change again or a retry starts."""
-
-    draining: int
-    """Earlier runtimes still open because a request or a run that started on them has not ended."""
 
 
 def startup_problems(error: Exception, logger: ILoggingProvider) -> list[SettingsProblem]:
@@ -152,21 +136,20 @@ class RuntimeSwitch:
             yield opened
 
     @property
-    def status(self) -> ReloadStatus:
-        draining = sum(1 for opened in self.opened[:-1] if opened.closing is None or not opened.closing.done())
-        return ReloadStatus(running=dict(self.opened[-1].runtime.config.settings_revisions), refused=self.refused, draining=draining)
+    def running(self) -> dict[SettingsFile, str]:
+        """The revision of each file the current runtime was built from: what new requests run on."""
+        return dict(self.opened[-1].runtime.config.settings_revisions)
 
     async def reload(self) -> SettingsReload | None:
         """
-        The one reload rule of the watcher, the reload request and the CLI: when the settings files on disk differ
-        from both the revisions the current runtime runs on and the last refused ones, opens a runtime from the files
-        as they are and makes it current. None when there is nothing new to load. A refusal leaves the current runtime
-        serving and is kept in `status`; the same files are not tried again until they change. Running it twice
-        changes nothing the second time.
+        The watcher's reload rule: when the settings files on disk differ from both the revisions the current runtime
+        runs on and the last refused ones, opens a runtime from the files as they are and makes it current. None when
+        there is nothing new to load. A refusal leaves the current runtime serving and is kept, so the same files are
+        not tried again until they change. Running it twice changes nothing the second time.
         """
         async with self.lock:
             revisions = {file: settings_revision(text) for file, text in settings_texts(self.project_root).items()}
-            running = self.status.running
+            running = self.running
 
             if revisions == running:
                 self.refused = None
@@ -178,12 +161,12 @@ class RuntimeSwitch:
             try:
                 opened = await self.open_candidate({}, None)
             except InvalidSettingsError as error:
-                self.refused = ReloadRefused(revisions, running, tuple(error.problems), datetime.now(UTC))
+                self.refused = ReloadRefused(revisions, tuple(error.problems))
                 self.logger.warning(f"The settings on disk were not loaded:\n{error}")
                 return self.refused
 
             self.publish(opened)
-            return SettingsReloaded(dict(opened.runtime.config.settings_revisions), running, datetime.now(UTC))
+            return SettingsReloaded(self.running, running)
 
     async def log_in_again(self) -> None:
         """
@@ -204,62 +187,52 @@ class RuntimeSwitch:
 
             self.publish(opened)
 
-    async def retry(self) -> SettingsReload | None:
-        """
-        The administrator's try again: the files on disk now, by the same rule, the refused ones included, since a
-        refusal can come from outside them, such as a database that was down or a broker login that failed.
-        """
-        async with self.lock:
-            self.refused = None
-
-        return await self.reload()
-
     async def save(
         self,
         opened: OpenedRuntime,
         administrator: User,
-        file: SettingsFile,
-        revision: str,
+        changes: Sequence[SettingChange],
         *,
-        text: str | None = None,
-        backup_id: str | None = None,
-        password: SecretStr | None = None,
+        password: SecretStr | None,
         client: str,
         host: str,
-    ) -> SettingsEdit:
+    ) -> list[SettingsEdit]:
         """
-        The administrator's save or restore, running at once or refused with nothing written and the app as it was.
-        The request's runtime must still be current: a page that read settings the server no longer runs is a conflict.
-        The administrator's Pipeline reviews the text and confirms the password; then a runtime on the new text opens,
-        the file is written, and the new runtime becomes current. Work that started earlier finishes on the one it holds.
+        The settings form's save, running at once or refused with nothing written and the app as it was. The request's
+        runtime must still be current: a page that read settings the server no longer runs is a conflict. The
+        administrator's Pipeline reviews the changes and confirms the password; changes that change no file end there.
+        Work that started earlier finishes on the runtime it holds.
         """
         async with self.lock:
             if opened is not self.opened[-1]:
-                raise SettingsConflictError("The server reloaded its settings after this page read them; read the file again")
+                raise SettingsConflictError("The server reloaded its settings after this page read them; read them again")
 
-            pipeline = opened.runtime.pipeline_for(administrator)
-            edit = await pipeline.review_settings_save(administrator, file, revision, host, password, client, text, backup_id)
+            pipeline = opened.runtime.pipeline_for(administrator, ExecutionProvider.MOCK)
+            edits = await pipeline.review_settings_form(administrator, changes, host, password, client)
 
-            if edit.unchanged:
-                return edit
+            if not edits:
+                return []
 
-            return await self.write_and_publish(pipeline, edit, administrator.user_id)
+            return await self.write_and_publish(pipeline, edits, administrator.user_id)
 
-    async def write_and_publish(self, pipeline: Pipeline, edit: SettingsEdit, actor: UserId) -> SettingsEdit:
+    async def write_and_publish(self, pipeline: Pipeline, edits: Sequence[SettingsEdit], actor: UserId) -> list[SettingsEdit]:
         """
-        Opens the runtime the edit's text starts, which `actor` can still sign in to, writes the file with its backup
-        and audit entry, and makes the runtime current. A write that fails, another editor's save in between included,
-        closes the new runtime again and swaps nothing. The caller holds the lock.
+        Opens one runtime on every edited text, which `actor` can still sign in to, writes each file with its backup and
+        audit entry, and makes the runtime current. A write that fails, another editor's save in between included,
+        closes the new runtime and swaps nothing; a file written before it stays written, and the watcher loads it like
+        an edit on disk. The caller holds the lock.
         """
-        candidate = await self.open_candidate({edit.file: edit.text}, actor)
+        previous = self.running
+        candidate = await self.open_candidate({edit.file: edit.text for edit in edits}, actor)
 
         try:
-            saved = await pipeline.save_settings_file(edit, actor)
+            saved = [await pipeline.save_settings_file(edit, actor) for edit in edits]
         except BaseException:
             await candidate.exit_stack.aclose()
             raise
 
         self.publish(candidate)
+        self.logger.info(f"Settings saved from the Web and reloaded: {describe(SettingsReloaded(self.running, previous))}.")
         return saved
 
     async def open_candidate(self, candidates: Mapping[SettingsFile, str], administrator: UserId | None) -> OpenedRuntime:
@@ -331,9 +304,9 @@ async def open_runtime_switch(project_root: Path | None = None) -> AsyncGenerato
 async def watch_settings(switch: RuntimeSwitch) -> None:
     """
     The Web API's look at config/ for edits made outside the app: every api.settings_poll_seconds of the current
-    settings, a reload when a file changed. A reload or a refusal is logged once; a refusal stays in the status for the
-    administrator, and the same files are not tried again until they change. It never stops on an error of its own: it
-    logs it and looks again at the next interval. The lifespan cancels it at shutdown.
+    settings, a reload when a file changed. A reload or a refusal is logged once, and the same refused files are not
+    tried again until they change. It never stops on an error of its own: it logs it and looks again at the next
+    interval. The lifespan cancels it at shutdown.
     """
     while True:
         with switch.hold() as opened:
@@ -356,8 +329,8 @@ async def collect_daily_data(switch: RuntimeSwitch) -> None:
     The Web API's collection of the daily data, at the start, then every api.archive_interval_hours of the current
     settings, on the current runtime: first the TWSE and TPEX open data the OpenAPI serves only for its latest session,
     day, month or quarter (closes, material information, EPS statistics, valuation ratios, balance sheets, income
-    statements, monthly revenue and TWSE news) into the archive, then, on a site with a broker login, the broker's daily
-    quotes of the sessions its history cache lacks. Before them, a Shioaji login that is down is made again
+    statements, monthly revenue and TWSE news) into the archive, then, on a personal site, the exchanges' daily reports
+    of the sessions its history cache lacks. Before them, a Shioaji login that is down is made again
     (RuntimeSwitch.log_in_again). A step never stops it on an error of its own: it logs it, goes on to the next and
     tries again at the next interval. The lifespan cancels it at shutdown and waits until the step it stopped has ended.
     """
@@ -370,7 +343,7 @@ async def collect_daily_data(switch: RuntimeSwitch) -> None:
 
             for step, failure in (
                 (pipeline.archive_daily_closes, "The open data could not be archived"),
-                (pipeline.refresh_daily_history, "The broker's daily history could not be refreshed"),
+                (pipeline.refresh_daily_history, "The exchanges' daily history could not be refreshed"),
             ):
                 try:
                     await step()
@@ -380,7 +353,7 @@ async def collect_daily_data(switch: RuntimeSwitch) -> None:
         await asyncio.sleep(interval * 3600)
 
 
-def describe(reload: SettingsReload) -> str:
+def describe(reload: SettingsReloaded) -> str:
     """`appsetting.yaml 1a2b3c4d5e6f -> 6f5e4d3c2b1a`, for each file whose revision changed."""
     changed = [file for file in SettingsFile if reload.revisions.get(file) != reload.previous.get(file)]
     return ", ".join(

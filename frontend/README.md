@@ -1,7 +1,7 @@
 # Stock Agent web
 
 The web UI for Stock Agent: a market overview with a selectable research target, the strategy library and formula
-designer, analysis runs, valuation, the watchlist, the mock account and the administrator's settings editor. It reads
+designer, analysis runs, valuation, the watchlist, the mock account and the administrator's settings form. It reads
 and writes through the backend Web API on same-origin `/v1` paths. People sign in with their own account; the first
 visit to a new site sets up the administrator with the code the backend prints on its console.
 
@@ -49,8 +49,8 @@ machine before you merge a change to a page:
      E2E_SETTINGS_DIR=~/.cache/stock-agent-verify/runs/<run-id>/app/config bun run e2e
    ```
 
-   Playwright starts the dev server on port 5199 and reuses one that is already there. Without `E2E_SETTINGS_DIR`
-   it skips the two tests that edit a settings file on disk.
+   Playwright starts the dev server on port 5199, or on `E2E_PORT`, and reuses one that is already there. Without
+   `E2E_SETTINGS_DIR` it skips the test that edits a settings file on disk.
 
 The suite is not in CI. Its specs read real market data from the backend (daily bars, the TAIEX, the TWSE and TPEX
 OpenAPI archive) and start an analysis run that calls the AI provider. A CI runner would depend on those

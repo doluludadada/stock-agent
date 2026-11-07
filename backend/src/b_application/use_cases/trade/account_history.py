@@ -18,10 +18,10 @@ class AccountHistory:
     Use Case: Read-only account history for menu 7 and GET /v1/account/history. It never places orders and records no
     run.
 
-    Snapshots come from the trading journal (one after every fill, since the mock account opened); prices come from
-    the market data provider and are loaded into the Stock objects it returns. A price fetch that fails leaves
-    positions valued at their snapshot or cost price. It returns the account valued now, the held stocks, the equity
-    curve and the account as of `as_of`.
+    Snapshots come from the trading journal: one after every fill of a run on this broker, since the mock account
+    opened, every one at a real broker. Prices come from the market data provider and are loaded into the Stock objects
+    it returns. A price fetch that fails leaves positions valued at their snapshot or cost price. It returns the account
+    valued now, the held stocks, the equity curve and the account as of `as_of`.
     """
 
     def __init__(
@@ -49,7 +49,7 @@ class AccountHistory:
 
     async def execute(self, as_of: date | None) -> tuple[Account, list[Stock], dict[date, Account], AccountSnapshot | None]:
         account = await self._execution_provider.get_account()
-        snapshots = await self._journal.snapshots(account.opened_at)
+        snapshots = await self._journal.snapshots(self._execution_provider.link().broker, account.opened_at)
         stock_ids = sorted(account.stock_ids.union(*(snapshot.account.stock_ids for snapshot in snapshots)))
         stocks = [stock for stock_id in stock_ids if (stock := await self._stock_provider.get_by_id(stock_id)) is not None]
 

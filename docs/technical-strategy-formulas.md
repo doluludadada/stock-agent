@@ -74,8 +74,9 @@ Behavior that did change, by requirement:
 
 - A stock with fewer than 61 daily bars now fails the built-in strategies with score 0. The criteria scored the rules
   they could.
-- Buzz uses the owner's `buzz_strategy_id`, which starts as `balanced`. HEAD's `buzz_safety_only` and other extra
-  strategies are not built in.
+- Buzz uses the owner's active strategy, like every other workflow (the owner's ruling of 2026-11-07: one strategy for
+  the whole site). Schema version 6 dropped `buzz_strategy_id`. HEAD's `buzz_safety_only` and other extra strategies
+  are not built in.
 
 ## Storage
 
@@ -83,7 +84,7 @@ Settings are rows in five tables, all keyed by owner (`backend/src/c_infrastruct
 
 | Table | Rows |
 | --- | --- |
-| `technical_settings` | One per owner: `active_strategy_id`, `buzz_strategy_id`, `revision`. |
+| `technical_settings` | One per owner: `active_strategy_id`, `revision`. |
 | `technical_strategies` | The owner's strategies: name, position, scoring numbers. |
 | `technical_indicators` | Each strategy's indicators: id, kind and the parameter columns of that kind. |
 | `technical_rules` | Each strategy's rules: position, name, effect. |

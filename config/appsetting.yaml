@@ -1,15 +1,15 @@
 # config/appsetting.yaml
 
-# dev: a developer's machine, the mock broker only. test: staging before launch, Shioaji only in simulation with the
-# *_TEST key pair. prod: the live service, PostgreSQL only, the only environment for order_mode live. A personal site's
-# realtime quotes come from Shioaji: in dev and test from its simulation server with the *_TEST key pair, in prod from
-# production. dev and test refuse to start while a production Shioaji credential is set. Neither the Web editor nor a
-# reload changes it: restart.
+# dev: a developer's machine. test: staging before launch. prod: the live service, PostgreSQL only. A personal site's
+# Shioaji login, which its realtime quotes and its SinoPac orders share, is on SinoPac's simulation server with the
+# *_TEST key pair in dev and test, and on the real account with the production credentials in prod: only prod places a
+# real-money order. dev and test refuse to start while a production Shioaji credential is set. Neither the Web editor
+# nor a reload changes it: restart.
 environment: dev
 
-# personal: the owner's own machine, with Shioaji's daily history and realtime quotes and any broker the environment
-# allows. Without the environment's Shioaji key pair its daily history and index trend come from the open-data archive,
-# and it has no realtime quote, so Buzz and Intraday are refused and it orders nothing. public: a
+# personal: the owner's own machine, with the daily history and index trend of the exchanges' own daily reports,
+# Shioaji's realtime quotes, and SinoPac for the runs an administrator starts on it. Without the environment's Shioaji
+# key pair it has no realtime quote, so Buzz and Intraday are refused and it orders nothing. public: a
 # free public website on open-licensed data only. Its daily history and index trend come from the open-data archive of
 # the TWSE and TPEX OpenAPI closes, it has no realtime quote, so Buzz, Intraday and manual BUY are refused, and it trades
 # on the mock broker only.
@@ -210,24 +210,32 @@ market_data:
   quote_batch_size: 500
   quote_request_interval_seconds: 0.2
   quote_timeout_seconds: 10.0
-  # Daily history on a site with a Shioaji login: one daily-quotes request per session holds every listed stock, and an
-  # index's history is its one-minute bars, at most 30 days per request. Shioaji documents no limit of the daily
-  # quotes' own, so each request waits a second after the one before.
-  history_request_interval_seconds: 1.0
+  # Daily history on a personal site, from the exchanges' own reports of each date (sources.exchange.daily_reports):
+  # one request per exchange and session for every listed stock, and two per exchange and month for its index. TWSE
+  # refuses an address for minutes after more than about 3 requests in 5 seconds, so each site is asked at most once
+  # this often, from every runtime together.
+  history_request_interval_seconds: 3.0
+  history_timeout_seconds: 30.0
   # Sessions the Web API's timer keeps for every stock: the stock page's one-year chart (250 sessions and the one
   # before them). A strategy that needs older sessions fetches them when it runs.
   history_backfill_bars: 251
-  index_minutes_window_days: 30
-  # A question Shioaji answered with nothing new, such as a session it does not serve yet, or one that failed, as every
-  # request does while the login is down, is asked again at most this often.
+  # A question the exchanges answered with nothing new, such as a session they do not serve yet, or one that failed,
+  # as every request does while a site refuses the address, is asked again at most this often.
   history_retry_hours: 2
   # The TWSE and TPEX listings, with each stock's latest official close.
   listing_cache_hours: 6
   listing_timeout_seconds: 30.0
 
 trading:
-  execution_provider: mock
-  order_mode: mock_only
+  # Buzz, Intraday and a manual BUY order on the account their run chose when it started: the user's mock account, the
+  # default, or for an administrator on a personal site with a Shioaji login SinoPac, on its simulation server in dev
+  # and test and on the real account in prod. A follow orders on the mock account only. These two limits hold every
+  # SinoPac BUY, checked as it is sent; a SELL is never held to them and sells only shares the account holds.
+  # Most NT$ one SinoPac BUY may cost at its limit price, fees aside.
+  max_order_value: 100000
+  # Most NT$ the SinoPac BUYs of one Taiwan calendar day may cost together at their limit prices, counted from the
+  # trading journal, where each order is saved before it is sent.
+  max_daily_buy_value: 300000
 
 mock_trading:
   # Each user's mock account starts with this cash the first time it is read.
@@ -240,7 +248,7 @@ accounts:
   # Paid AI calls of every user together per Taiwan calendar day. Past it, users' calls are refused until midnight.
   # An administrator's calls count toward it and are never refused.
   daily_ai_calls_total: 600
-  # Anyone may register as a user once the first administrator exists. Never on an installation with a real broker.
+  # Anyone may register as a user once the first administrator exists. A user trades on their own mock account only.
   registration_open: true
   # Failed sign-ins before the next is refused for the window: per sign-in name and client address, and per address.
   sign_in_failures_per_name: 5
@@ -256,7 +264,7 @@ accounts:
   # Web workflow runs at once, every user's together; each user runs one at a time.
   max_concurrent_runs: 2
 
-# The Shioaji login of a personal site: its realtime quotes, and its orders with trading.execution_provider: shioaji.
+# The Shioaji login of a personal site: its realtime quotes, and the SinoPac orders of the runs that choose SinoPac.
 # The environment above decides the server and the credentials, which come from the environment or .env only: dev and
 # test log in to Shioaji's simulation server with SHIOAJI_API_KEY_TEST and SHIOAJI_SECRET_KEY_TEST; prod logs in to the
 # real account with SHIOAJI_API_KEY and SHIOAJI_SECRET_KEY, and orders also need SHIOAJI_CA_PATH, SHIOAJI_CA_PASSWORD
@@ -517,6 +525,30 @@ sources:
       link: "Url"
       date: "Date"
       stock_code_pattern: "[（(：:]\\s*([0-9]{4,6}[A-Z]?)\\s*[)）]"
+    # Each exchange's own reports of any date on its site, which only a personal site reads: they are not the open
+    # data above, and TWSE's terms forbid a public site their automated download. quotes_url serves the closing quotes
+    # of every security of one date: TWSE's MI_INDEX without warrants (ALLBUT0999), TPEX's without warrants (EW).
+    # index_prices_url serves the index's open, high, low and close of each session of a month, index_volume_url the
+    # market's volume and the index's change of each session of a month. {date} is the date asked, written as the site
+    # reads it. A field is read under its name with the spaces around it removed.
+    daily_reports:
+      twse:
+        quotes_url: "https://www.twse.com.tw/rwd/zh/afterTrading/MI_INDEX?date={date:%Y%m%d}&type=ALLBUT0999&response=json"
+        quote_fields:
+          { stock_id: "證券代號", open: "開盤價", high: "最高價", low: "最低價", close: "收盤價", volume: "成交股數", change: "漲跌價差", sign: "漲跌(+/-)" }
+        index_prices_url: "https://www.twse.com.tw/rwd/zh/TAIEX/MI_5MINS_HIST?date={date:%Y%m01}&response=json"
+        index_price_fields: { date: "日期", open: "開盤指數", high: "最高指數", low: "最低指數", close: "收盤指數" }
+        index_volume_url: "https://www.twse.com.tw/rwd/zh/afterTrading/FMTQIK?date={date:%Y%m01}&response=json"
+        index_volume_fields: { date: "日期", volume: "成交股數", change: "漲跌點數" }
+        index_volume_lots: false
+      tpex:
+        quotes_url: "https://www.tpex.org.tw/www/zh-tw/afterTrading/otc?date={date:%Y/%m/%d}&type=EW&response=json"
+        quote_fields: { stock_id: "代號", open: "開盤", high: "最高", low: "最低", close: "收盤", volume: "成交股數", change: "漲跌" }
+        index_prices_url: "https://www.tpex.org.tw/www/zh-tw/indexInfo/inx?date={date:%Y/%m/01}&response=json"
+        index_price_fields: { date: "日期", open: "開市", high: "最高", low: "最低", close: "收市" }
+        index_volume_url: "https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingIndex?date={date:%Y/%m/01}&response=json"
+        index_volume_fields: { date: "日期", volume: "成交張數", change: "漲/跌" }
+        index_volume_lots: true
   # The credit the Open Government Data License v1 asks for, in the form of its annex (https://data.gov.tw/license):
   # each providing agency and the datasets the app reads from it, the license's notice, and its name and address.
   # A use that does not show it holds no license (Article 3, paragraph 2). List every dataset read above.
@@ -568,10 +600,6 @@ sources:
     notice: "此開放資料依政府資料開放授權條款 (Open Government Data License) 進行公眾釋出，使用者於遵守本條款各項規定之前提下，得利用之。"
     license: "政府資料開放授權條款－第1版"
     license_url: "https://data.gov.tw/license"
-  shioaji:
-    # Shioaji's contract code of each exchange's own index, whose one-minute bars make its daily history on a site with
-    # a Shioaji login: TSE001, the TAIEX, and OTC101, the TPEx Index.
-    index_codes: { twse: "001", tpex: "101" }
   mops:
     eps_url: "https://mopsov.twse.com.tw/mops/web/ajax_t163sb04"
     eps_form_fields:

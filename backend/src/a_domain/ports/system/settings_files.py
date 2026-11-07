@@ -1,10 +1,11 @@
+from collections.abc import Mapping
 from datetime import datetime
-from typing import Annotated, Any, Protocol, override
+from typing import Annotated, Protocol, override
 
-from pydantic import Field
+from pydantic import Field, JsonValue
 from pydantic.dataclasses import dataclass
 
-from a_domain.types.enums import Audience, SettingsAction, SettingsFile, SystemEnvironment
+from a_domain.types.enums import Audience, SettingKind, SettingsAction, SettingsFile, SystemEnvironment
 from a_domain.types.ids import UserId
 
 type Revision = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
@@ -24,7 +25,7 @@ class SettingsProblem:
     """None for a problem no settings file sets: a value from .env, a built-in strategy's JSON, the database or broker."""
 
     path: str | None = None
-    """The setting's dotted path, such as trading.order_mode."""
+    """The setting's dotted path, such as trading.max_order_value."""
 
     line: Annotated[int, Field(ge=1)] | None = None
     column: Annotated[int, Field(ge=1)] | None = None
@@ -39,7 +40,7 @@ class SettingsProblem:
 
     @override
     def __str__(self) -> str:
-        """`appsetting.yaml line 207, column 15, trading.order_mode: Input should be ...`: how startup and the CLI print it."""
+        """`appsetting.yaml line 207, column 15, trading.max_order_value: Input should be ...`: how startup and the CLI print it."""
         place = f"{self.file.file_name} line {self.line}, column {self.column}" if self.file and self.line else None
         where = ", ".join(part for part in (place, self.path) if part)
         return f"{where}: {self.message}" if where else self.message
@@ -72,8 +73,8 @@ class SettingsBackup:
 @dataclass(frozen=True)
 class SettingsAuditEntry:
     """
-    One save or restore: when, by which administrator (their user id: the audit file is plain text, and the username
-    is stored only encrypted), from which revision to which, and the setting paths it changed. No value.
+    One save: when, by which administrator (their user id: the audit file is plain text, and the username is stored only
+    encrypted), from which revision to which, and the setting paths it changed. No value.
     """
 
     recorded_at: datetime
@@ -88,59 +89,51 @@ class SettingsAuditEntry:
 @dataclass(frozen=True)
 class SettingsEdit:
     """
-    A proposed whole text for one settings file, written by the administrator or taken from a kept backup, against the
-    file as it is on disk: the lines and settings it changes, and why the app would refuse to start with it. An edit
-    with problems is never saved; `saved` is the file once it was.
+    A new text of one settings file, the settings form's changes written into the file as it is on disk, and the
+    settings it changes, by dotted path. `saved` is the file once it was saved.
     """
 
     file: SettingsFile
     base_revision: Revision
-    """The revision on disk the edit was compared with: the one the administrator read."""
+    """The revision on disk the changes were written into."""
 
     text: str
     revision: Revision
     changed: tuple[str, ...]
-    diff: tuple[str, ...]
-    problems: tuple[SettingsProblem, ...]
-    restored_backup_id: BackupId | None = None
-    """The backup a restore puts back; None for an edited text."""
-
     saved: SettingsDocument | None = None
 
-    @property
-    def unchanged(self) -> bool:
-        """The text is the file as it is: a save of it writes nothing."""
-        return self.revision == self.base_revision
 
+@dataclass(frozen=True)
+class SettingField:
+    """
+    One setting as the administrator's settings form shows it: its dotted settings path, such as ai.temperature, or an
+    AI prompt's, such as ai.system_prompt; how the form shows it; the value the file sets, as JSON, else its default,
+    else null; its options and bounds from the settings classes; and whether it applies only at a restart.
+    """
 
-type SettingValue = bool | int | float | str | list[str]
-"""What the settings form writes into one setting: a switch, a number, a text or a choice, or a list of choices."""
+    path: Annotated[str, Field(min_length=1)]
+    kind: SettingKind
+    value: JsonValue
+    options: tuple[str, ...] = ()
+    minimum: float | None = None
+    maximum: float | None = None
+    exclusive_minimum: float | None = None
+    exclusive_maximum: float | None = None
+    restart_only: bool = False
 
 
 @dataclass(frozen=True)
 class SettingChange:
-    """One setting the settings form writes: its keys from the top of the file, and its new value."""
+    """One setting the settings form changes: the path of its field, and its new value as JSON."""
 
-    path: Annotated[tuple[Annotated[str, Field(min_length=1)], ...], Field(min_length=1)]
-    value: SettingValue
-
-
-@dataclass(frozen=True)
-class SettingsForm:
-    """
-    A text of appsetting.yaml as the settings form shows it: the text; every setting it sets, by dotted path, a list
-    counting as one value (None for a text that does not parse); and the JSON schema of what each setting accepts.
-    """
-
-    text: str
-    values: dict[str, Any] | None
-    schema: dict[str, Any]
+    path: Annotated[str, Field(min_length=1)]
+    value: JsonValue
 
 
 class ISettingsFiles(Protocol):
     """
-    The YAML files of config/ the administrator edits as whole texts: read, checked as the app starts, and replaced
-    atomically with a backup and an audit entry. Only a SettingsFile can be named, so no request reaches another path.
+    The YAML files of config/ the settings form writes into: read, checked as the app starts, and replaced atomically
+    with a backup and an audit entry. Only a SettingsFile can be named, so no request reaches another path.
     """
 
     async def read(self, file: SettingsFile) -> SettingsDocument:
@@ -167,35 +160,14 @@ class ISettingsFiles(Protocol):
         """Appends the audit entry, owner-only. It holds setting paths and revisions, never a value."""
         ...
 
-    async def backups(self, file: SettingsFile) -> list[SettingsBackup]:
-        """The kept backups, newest first."""
-        ...
-
-    async def backup_text(self, file: SettingsFile, backup_id: str) -> str | None: ...
-
-    async def audit_entries(self, limit: int) -> list[SettingsAuditEntry]:
-        """The latest entries, newest first."""
-        ...
-
-    def revision_of(self, text: str) -> str: ...
-
-    def leaves(self, file: SettingsFile, text: str) -> dict[str, Any] | None:
-        """
-        Every setting the YAML text of `file` sets, by dotted path, a list counting as one value; None for a text that does
-        not parse, holds an anchor or an alias, or is not a mapping.
-        """
-        ...
-
     def check(
-        self, file: SettingsFile, text: str, environment: SystemEnvironment, audience: Audience, host: str
+        self, candidates: Mapping[SettingsFile, str], environment: SystemEnvironment, audience: Audience, host: str
     ) -> tuple[SettingsProblem, ...]:
         """
-        `text` as `file`, with every other settings file as it is on disk, through the checks startup runs before it
-        opens anything: the settings load, the trading setup, the accounts key and the active AI provider's key, and
-        the environment and the audience the running process started in, which a save cannot change. The new settings
-        must also keep the editor open to the administrator saving them, who reached it at `host`. Why the app would
-        refuse it, or no problem.
+        The candidate texts, every other settings file as it is on disk, through the checks startup runs before it opens
+        anything: the settings load, the trading setup, the accounts key and the active AI provider's key, and the
+        environment and the audience the running process started in, which a save cannot change. The new settings must
+        also keep the editor open to the administrator saving them, who reached it at `host`. Why the app would refuse
+        them, or no problem.
         """
         ...
-
-    def diff(self, file: SettingsFile, before: str, after: str) -> list[str]: ...

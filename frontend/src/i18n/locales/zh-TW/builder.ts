@@ -4,19 +4,12 @@ import type { DictionaryShape } from '../../types'
 const builder: DictionaryShape<typeof en> = {
   signIn: '登入後設計並儲存你的公式',
   backToLibrary: '策略庫',
-  eyebrowNew: '新策略',
-  eyebrowEdit: '編輯策略',
   untitled: '未命名策略',
   loadFailed: '無法載入策略。',
   status: { new: '尚未儲存', pending: '有未儲存的變更', saved: '已儲存', revision: '版本 {{revision}}' },
   quickFill: {
     title: '快速填入',
-    description: '填入一般條件，之後每個部分都能自由修改。',
-    target: '加入到',
-    added: '已加入「{{name}}」',
-    editable: '條件內容都可以再修改。',
     kind: {
-      maCross: '均線交叉',
       macdCross: 'MACD 交叉',
       rsiThreshold: 'RSI 門檻',
       volumeAboveAverage: '今日量大於平均量',
@@ -26,10 +19,8 @@ const builder: DictionaryShape<typeof en> = {
   rule: {
     label: '規則 {{index}}',
     name: '規則名稱',
-    namePlaceholder: '條件完成後再命名',
     effect: '效果',
     remove: '刪除規則 {{index}}',
-    preview: '讀作：',
     add: '新增規則',
   },
   group: {
@@ -43,17 +34,11 @@ const builder: DictionaryShape<typeof en> = {
   },
   condition: {
     observe: '觀察什麼',
-    observeHint: '資料或指標',
     judge: '怎麼判斷',
-    judgeHint: '比較方式',
     compare: '與什麼比較',
-    compareHint: '資料、指標或數值',
     comparator: '比較方式',
     crosses_aboveHint: '向上穿越：前一交易日左邊小於或等於右邊，今日左邊大於右邊。',
     crosses_belowHint: '向下穿越：前一交易日左邊大於或等於右邊，今日左邊小於右邊。',
-    done: '完成',
-    edit: '編輯條件',
-    collapse: '收合條件',
     remove: '刪除條件',
     needsFix: '需要修正',
   },
@@ -98,10 +83,7 @@ const builder: DictionaryShape<typeof en> = {
     empty: '新增規則後即可看到公式。',
   },
   scoring: {
-    title: '評分設定',
-    summary: '基準分 {{base}}；每條規則只套用一次效果。',
-    show: '調整',
-    hide: '收合',
+    summary: '評分：基準分 {{base}}',
     baseScore: '基準分',
     blockFailurePenalty: '淘汰扣分',
     failureScoreReduction: '未通過扣分',
@@ -109,9 +91,7 @@ const builder: DictionaryShape<typeof en> = {
     note: '通過「未通過淘汰」規則本身不會加分。',
   },
   name: {
-    title: '命名與儲存',
     label: '策略名稱',
-    placeholder: '例如：波段趨勢加量能',
     id: '策略代號 {{id}}',
   },
   save: {
@@ -126,7 +106,6 @@ const builder: DictionaryShape<typeof en> = {
     full: '策略數量已達上限，請先刪除一套。',
     notLoaded: '設定還沒載入完成，草稿仍保留，請稍候再儲存。',
     failed: '儲存沒有完成，草稿仍保留，請再試一次。',
-    hintDirty: '有尚未儲存的變更。',
   },
   conflict: {
     title: '你開啟這個策略後，設定已被變更',

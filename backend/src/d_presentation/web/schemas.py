@@ -12,7 +12,7 @@ from enum import StrEnum
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, SecretStr, StringConstraints
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, PositiveInt, SecretStr, StringConstraints
 
 from a_domain.model.analysis.technical_report import TechnicalReport
 from a_domain.model.fundamentals.eps import EpsUnavailable
@@ -23,7 +23,7 @@ from a_domain.model.trading.account import AccountOpening
 from a_domain.model.trading.order import Order
 from a_domain.model.valuation.scan import ScanCriteria
 from a_domain.model.valuation.valuation import PeMedian, ReportSection
-from a_domain.ports.system.settings_files import Revision, SettingChange, SettingsProblem
+from a_domain.ports.system.settings_files import SettingChange, SettingsProblem
 from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
 from a_domain.types.enums import (
     AiProvider,
@@ -38,23 +38,18 @@ from a_domain.types.enums import (
     InformationSource,
     MarketIndex,
     MarketType,
-    OrderMode,
     OrderPricing,
     PeNotApplicableReason,
     Role,
     ScanStep,
     ScenarioName,
-    SettingsAction,
-    SettingsFile,
     SignalSource,
-    SystemEnvironment,
     TradeAction,
     UserStatus,
     WatchlistType,
     Workflow,
 )
 from a_domain.types.values import EmailAddress, NewPassword, PositiveFiniteFloat, Username
-from d_presentation.live_runtime import ReloadRefused
 
 StockId = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=10, pattern=r"^[0-9A-Za-z]+$")]
 
@@ -157,7 +152,8 @@ class RunSummary(Response):
 
     workflow: Workflow
     execution_provider: ExecutionProvider
-    order_mode: OrderMode
+    """The broker the run chose when it started: every order of the run went to it, or was refused."""
+
     start_time: datetime
     end_time: datetime | None
     followed_run_id: UUID | None = None
@@ -322,6 +318,14 @@ class TradeResponse(BaseModel):
     run: RunReference
 
 
+class ManualBuyRequest(Confirmed):
+    """A manual BUY of one stock the specific-stock run reported, on the broker the request's `broker` query names."""
+
+    stock_id: StockId
+    quantity: PositiveInt
+    """The shares to buy, at the realtime quote's price when the order is placed."""
+
+
 class ResetRequest(Confirmed):
     initial_cash: PositiveFiniteFloat
     """The cash the mock account opens with again."""
@@ -344,7 +348,7 @@ class AccountHistoryResponse(BaseModel):
     """None when as_of was not asked for, or no fill happened on or before it."""
 
     execution_provider: ExecutionProvider
-    """mock: the paper account of the mock broker, not a real brokerage account."""
+    """Whose account this is: mock, the user's paper account in the app; shioaji, the SinoPac account of the site's login."""
 
     opening: AccountOpening | None
     """When the mock account opened, at its first read or its last reset, and the cash it opened with. None at a real broker."""
@@ -352,7 +356,22 @@ class AccountHistoryResponse(BaseModel):
     profit: float | None
     """The account's equity now minus the cash it opened with. None at a real broker."""
 
-    order_mode: OrderMode
+
+class BrokerResponse(BaseModel):
+    """
+    A broker the signed-in user may choose for a run now, as a run's confirmation names it: the mock account always,
+    SinoPac for an administrator while the site's login is up.
+    """
+
+    broker: ExecutionProvider
+    simulation: bool | None
+    """A real broker's server: true for SinoPac's simulation server (dev and test), false for the real account (prod)."""
+
+    max_order_value: float | None
+    """A real broker's most NT$ per BUY at its limit price (trading.max_order_value). None on the mock account."""
+
+    max_daily_buy_value: float | None
+    """A real broker's most NT$ of BUYs per Taiwan calendar day (trading.max_daily_buy_value). None on the mock account."""
 
 
 # ---------------------------------------------------------------------------- #
@@ -383,9 +402,9 @@ class IndexHistoryResponse(BaseModel):
     index: MarketIndex
     bars: list[Ohlcv]
     """
-    Completed daily bars, oldest first, as the index's one-minute bars on Shioaji make them on a site with a Shioaji
-    login, else as the open-data archive keeps its close: such a bar's open, high and low are its close and its volume
-    0. Empty when none is in the window.
+    Completed daily bars, oldest first, as the exchange's own monthly index reports give them on a personal site, with
+    its market's volume in shares, else as the open-data archive keeps its close: such a bar's open, high and low are
+    its close and its volume 0. Empty when none is in the window.
     """
 
 
@@ -567,113 +586,19 @@ class ValuationExplanationResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------- #
-#                                Settings files                                #
+#                                Settings form                                 #
 # ---------------------------------------------------------------------------- #
 
 
-class SettingsTextRequest(BaseModel):
-    revision: Revision
-    """The file revision the administrator read; a file that moved past it answers 409."""
+class SettingsSaveRequest(Confirmed):
+    changes: Annotated[list[SettingChange], Field(max_length=300)]
+    """
+    The settings the form changes, each by its field's path, in order. A change to the value its field shows changes
+    nothing.
+    """
 
-    text: Annotated[str, Field(max_length=1_048_576)]
-    """The whole file. The editor refuses one larger than api.settings_file_max_bytes."""
-
-
-class SettingsFormRequest(BaseModel):
-    text: Annotated[str, Field(max_length=1_048_576)]
-    """The administrator's whole text of appsetting.yaml: their unsaved text, or the file as it is on disk."""
-
-    changes: Annotated[list[SettingChange], Field(max_length=100)] = []
-    """The settings the form writes into the text, in order; none to read the text as it is."""
-
-
-class SettingsSaveRequest(Confirmed, SettingsTextRequest):
     password: Annotated[SecretStr, Field(max_length=256)] | None = None
     """The administrator's own password, which every save needs: without it, 403. Never logged or echoed."""
-
-
-class SettingsRestoreRequest(BaseModel):
-    revision: Revision
-
-
-class SettingsRestoreConfirmed(Confirmed, SettingsRestoreRequest):
-    password: Annotated[SecretStr, Field(max_length=256)] | None = None
-    """The administrator's own password, which every restore needs, as a save does."""
-
-
-class SettingsFileStatusResponse(BaseModel):
-    file: SettingsFile
-    file_name: str
-    revision: str
-    """The revision on disk now."""
-
-    running_revision: str | None
-    """The revision of the settings the server runs on now."""
-
-    modified_at: datetime
-
-
-class SettingsOverviewResponse(BaseModel):
-    environment: SystemEnvironment
-    """The environment this server started in. Read-only here: it changes only when the app restarts."""
-
-    files: list[SettingsFileStatusResponse]
-
-    refused: ReloadRefused | None
-    """
-    The edit on disk the server refused, its revisions, the ones it kept running on (`previous`) and its problems, until
-    the files change again or a reload succeeds; None otherwise.
-    """
-
-    draining: int
-    """Earlier settings still open because a request or a run that started on them has not ended."""
-
-
-class SettingsDocumentResponse(BaseModel):
-    status: SettingsFileStatusResponse
-    text: str
-
-
-class SettingsEditResponse(BaseModel):
-    file: SettingsFile
-    base_revision: str
-    """The revision on disk the text was compared with."""
-
-    revision: str
-    """The proposed text's revision; after a save, the file's new revision."""
-
-    running_revision: str | None
-    changed: list[str]
-    """Every setting path whose value the text changes, a removed or an added one included."""
-
-    diff: list[str]
-    problems: list[SettingsProblem]
-    """Why the app would refuse to start with the text, each at its file, line and column when one names a place."""
-
-    saved: bool
-    applied: bool
-    """The server runs on this revision now: a saved file applies at once, every setting in it."""
-
-
-class SettingsBackupResponse(Response):
-    backup_id: str
-    revision: str
-    created_at: datetime
-
-
-class SettingsAuditEntryResponse(BaseModel):
-    recorded_at: datetime
-    file: SettingsFile
-    action: SettingsAction
-    actor: str
-    """The administrator's user id, which is all the audit file keeps."""
-
-    actor_name: str | None
-    """The administrator's username, read now; None for a user who no longer exists."""
-
-    from_revision: str
-    to_revision: str
-    settings: list[str]
 
 
 class ErrorResponse(BaseModel):
@@ -684,7 +609,7 @@ class ErrorResponse(BaseModel):
 
 
 class ProblemsResponse(ErrorResponse):
-    """A save or a reload the app would not start with (`settings_refused`): nothing was saved; the problems say where and why."""
+    """Settings the app would not start with (`settings_refused`): nothing was saved; the problems say where and why."""
 
     problems: list[SettingsProblem]
 

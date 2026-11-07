@@ -1,20 +1,18 @@
 """
-A personal site's realtime quotes come from Shioaji's snapshots, stamped with the exchange's trade time, and its daily
-history from Shioaji's daily quotes and the exchanges' index one-minute bars, over the one Shioaji login the process
-holds, which a Shioaji broker shares. A public site builds no Shioaji adapter, and a personal site without a login has
-no quote, so it orders nothing.
+A personal site's realtime quotes come from Shioaji's snapshots, stamped with the exchange's trade time, over the one
+Shioaji login the process holds, which a Shioaji broker shares. A public site builds no Shioaji adapter, and a personal
+site without a login has no quote, so it orders nothing.
 """
 
 import asyncio
 import threading
-from datetime import date, datetime, timedelta
-from math import nan
+from datetime import datetime, timedelta
 
 import pytest
 import shioaji
 from pydantic import SecretStr
 from shioaji.error import TokenError
-from support.fake_shioaji import FakeContracts, FakeShioaji, FakeStocks, daily_quotes, snapshot, stock
+from support.fake_shioaji import FakeContracts, FakeShioaji, FakeStocks, snapshot, stock
 from support.fakes import RecordingLogger
 from support.settings import environment_setup, shipped_config
 from trading_stack import MONDAY_10_00, SilentLogger, analysed_stock, open_stack
@@ -22,13 +20,12 @@ from trading_stack import MONDAY_10_00, SilentLogger, analysed_stock, open_stack
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.order import Order
-from a_domain.types.enums import Audience, ExecutionProvider, MarketType, OrderMode, OrderStatus, SystemEnvironment
+from a_domain.types.enums import Audience, OrderStatus, SystemEnvironment
 from a_domain.types.errors import RealtimeQuotesUnavailable
 from b_application.config.app_config import AppConfig
 from b_application.config.market_data_config import MarketDataConfig, MarketHoursConfig
 from b_application.config.trading_config import ShioajiConfig, ShioajiLogin
 from c_infrastructure.database.repositories.daily_close_archive import SqlDailyCloseArchive
-from c_infrastructure.market.cached_price_provider import CachedPriceProvider
 from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection, ShioajiQuoteProvider
 from c_infrastructure.system.attempt_log import MemoryAttemptLog
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
@@ -65,16 +62,14 @@ def quote_provider(client: FakeShioaji, market_data: MarketDataConfig | None = N
         new_client=FakeShioaji,
         login=ShioajiLogin(simulation=True, api_key=SecretStr("key"), secret_key=SecretStr("secret")),
         market_clock=CLOCK,
-        market_data=market_data or MarketDataConfig(quote_request_interval_seconds=0, history_request_interval_seconds=0),
-        sources=shipped_config().sources.shioaji,
+        market_data=market_data or MarketDataConfig(quote_request_interval_seconds=0),
         board_lot_shares=1000,
         logger=SilentLogger(),
     )
 
 
-def shioaji_site(environment: SystemEnvironment, provider: ExecutionProvider, audience: Audience = Audience.PERSONAL) -> AppConfig:
-    mode = OrderMode.DISABLED if provider == ExecutionProvider.SHIOAJI else OrderMode.MOCK_ONLY
-    return environment_setup(shipped_config(), environment, provider, mode).model_copy(update={"audience": audience})
+def shioaji_site(environment: SystemEnvironment, audience: Audience = Audience.PERSONAL) -> AppConfig:
+    return environment_setup(shipped_config(), environment).model_copy(update={"audience": audience})
 
 
 async def test_a_quote_is_the_session_so_far_stamped_with_the_exchanges_trade_time_in_lots_of_shares() -> None:
@@ -145,7 +140,7 @@ async def test_quotes_and_a_shioaji_broker_share_one_login_that_every_runtime_of
 ) -> None:
     made: list[FakeShioaji] = []
     monkeypatch.setattr(shioaji, "Shioaji", lambda simulation: made.append(FakeShioaji(simulation)) or made[-1])
-    shared, site = process(), shioaji_site(SystemEnvironment.TEST, ExecutionProvider.SHIOAJI)
+    shared, site = process(), shioaji_site(SystemEnvironment.TEST)
 
     for _ in ("startup", "reload"):
         quotes, broker = await connect_shioaji(site, shared, CLOCK)
@@ -159,30 +154,27 @@ async def test_quotes_and_a_shioaji_broker_share_one_login_that_every_runtime_of
 
 
 @pytest.mark.parametrize("environment", [SystemEnvironment.DEV, SystemEnvironment.TEST])
-async def test_dev_and_test_read_their_quotes_on_the_simulation_server_without_a_broker(
+async def test_dev_and_test_read_their_quotes_and_offer_sinopac_on_the_simulation_server(
     environment: SystemEnvironment, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     made: list[FakeShioaji] = []
     monkeypatch.setattr(shioaji, "Shioaji", lambda simulation: made.append(FakeShioaji(simulation)) or made[-1])
 
-    quotes, broker = await connect_shioaji(shioaji_site(environment, ExecutionProvider.MOCK), process(), CLOCK)
+    quotes, broker = await connect_shioaji(shioaji_site(environment), process(), CLOCK)
 
     [client] = made
-    assert (quotes is not None, broker) == (True, None)
+    assert quotes is not None and broker is not None and broker.link().simulation is True
     assert client.simulation and [login["api_key"] for login in client.logins] == ["SHIOAJI_API_KEY_TEST"]
 
 
 async def test_a_public_site_builds_no_shioaji_client_and_has_no_quote() -> None:
-    assert await connect_shioaji(shioaji_site(SystemEnvironment.TEST, ExecutionProvider.MOCK, Audience.PUBLIC), process(), CLOCK) == (
-        None,
-        None,
-    )
+    assert await connect_shioaji(shioaji_site(SystemEnvironment.TEST, Audience.PUBLIC), process(), CLOCK) == (None, None)
 
 
-async def test_a_personal_site_without_a_key_pair_or_whose_login_fails_on_the_mock_broker_has_no_quote(
+async def test_a_personal_site_without_a_key_pair_or_whose_login_fails_has_no_quote_and_no_sinopac(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    without_keys = shioaji_site(SystemEnvironment.DEV, ExecutionProvider.MOCK)
+    without_keys = shioaji_site(SystemEnvironment.DEV)
     without_keys.shioaji = ShioajiConfig(
         _env_file=None, **without_keys.shioaji.model_dump(include={"poll_interval_seconds", "max_polls"})
     )
@@ -195,69 +187,9 @@ async def test_a_personal_site_without_a_key_pair_or_whose_login_fails_on_the_mo
     shared = process()
 
     for _ in ("startup", "reload"):
-        assert await connect_shioaji(shioaji_site(SystemEnvironment.DEV, ExecutionProvider.MOCK), shared, CLOCK) == (None, None)
+        assert await connect_shioaji(shioaji_site(SystemEnvironment.DEV), shared, CLOCK) == (None, None)
 
     assert [(len(client.logins), client.logouts) for client in made] == [(1, 0), (1, 0)]
-
-
-FRIDAY = date(2026, 11, 6)
-
-
-async def test_a_sessions_daily_quotes_are_every_traded_stocks_official_bar_stamped_at_the_close_in_one_request() -> None:
-    client = logged_in_client()
-    client.daily_answers[FRIDAY] = daily_quotes(
-        FRIDAY, {"2330": (2020.0, 2195.0, 2020.0, 2135.0, 110_714_587), "5906": (nan, nan, nan, nan, 0)}
-    )
-
-    bars = await quote_provider(client).fetch_session_bars(FRIDAY)
-    holiday = await quote_provider(client).fetch_session_bars(date(2026, 10, 23))
-
-    close = CLOCK.session_close(FRIDAY)
-    assert bars == {"2330": Ohlcv(ts=close, open=2020.0, high=2195.0, low=2020.0, close=2135.0, volume=110_714_587)}
-    assert holiday == {}
-    assert client.history_requests == [("daily_quotes", "2026-11-06"), ("daily_quotes", "2026-10-23")]
-
-
-async def test_a_sessions_changes_come_from_the_snapshots_only_while_they_still_show_that_session() -> None:
-    client = logged_in_client()
-    client.Contracts = FakeContracts(FakeStocks({code: stock(code) for code in ("2330", "6488", "2317")}))
-    friday_close = datetime(2026, 11, 6, 13, 30, tzinfo=TAIWAN_TIMEZONE)
-    client.snapshot_answers = {
-        "2330": snapshot("2330", friday_close, 2135.0, 97_065, change=-105.0),
-        "6488": snapshot("6488", friday_close + timedelta(days=3), 512.0, 100, change=-52.0),
-        "2317": snapshot("2317", friday_close.replace(hour=8, minute=30), 224.5, 0, change=0.0),
-    }
-
-    assert await quote_provider(client).fetch_session_changes(FRIDAY, ["2330", "6488", "2317"]) == {"2330": -105.0}
-
-
-async def test_an_index_history_is_its_one_minute_bars_per_session_asked_in_windows_the_server_accepts() -> None:
-    client = logged_in_client()
-    minutes = {
-        date(2026, 10, 30): [(9, 1, 46139.79, 46139.79, 45900.0, 46000.0, 50), (13, 30, 45300.0, 45400.0, 44726.26, 45211.83, 70)],
-        date(2026, 11, 2): [(9, 1, 45034.53, 45156.17, 44900.0, 45000.0, 40), (13, 30, 44950.0, 45000.0, 44399.1, 44920.14, 60)],
-    }
-    client.minute_bars["001"] = [
-        (datetime.combine(day, datetime.min.time()).replace(hour=hour, minute=minute), *prices)
-        for day, rows in minutes.items()
-        for hour, minute, *prices in rows
-    ]
-
-    bars = await quote_provider(client).fetch_index_bars(MarketType.TWSE, date(2026, 10, 1), date(2026, 11, 6))
-
-    assert client.history_requests == [("kbars", "001", "2026-10-01", "2026-10-30"), ("kbars", "001", "2026-10-31", "2026-11-06")]
-    assert bars == [
-        Ohlcv(ts=CLOCK.session_close(date(2026, 10, 30)), open=46139.79, high=46139.79, low=44726.26, close=45211.83, volume=120_000),
-        Ohlcv(
-            ts=CLOCK.session_close(date(2026, 11, 2)),
-            open=45034.53,
-            high=45156.17,
-            low=44399.1,
-            close=44920.14,
-            volume=100_000,
-            change=44920.14 - 45211.83,
-        ),
-    ]
 
 
 def made_clients(monkeypatch: pytest.MonkeyPatch, **fields: object) -> list[FakeShioaji]:
@@ -273,7 +205,7 @@ def made_clients(monkeypatch: pytest.MonkeyPatch, **fields: object) -> list[Fake
 async def test_the_runtimes_of_one_login_pace_their_requests_together(monkeypatch: pytest.MonkeyPatch) -> None:
     """Shioaji counts its 50 market-data queries per 10 seconds per login, whichever runtime asks."""
     made = made_clients(monkeypatch)
-    site, shared = shioaji_site(SystemEnvironment.TEST, ExecutionProvider.MOCK), process()
+    site, shared = shioaji_site(SystemEnvironment.TEST), process()
     site.market_data = site.market_data.model_copy(update={"quote_request_interval_seconds": 0.2})
     (startup, _), (reload, _) = [await connect_shioaji(site, shared, CLOCK) for _ in ("startup", "reload")]
     [client] = made
@@ -290,7 +222,7 @@ async def test_the_runtimes_of_one_login_pace_their_requests_together(monkeypatc
 async def test_a_login_a_timed_out_reload_left_running_is_the_one_the_next_reload_uses(monkeypatch: pytest.MonkeyPatch) -> None:
     gate = threading.Event()
     made = made_clients(monkeypatch, login_gate=gate)
-    site, shared = shioaji_site(SystemEnvironment.TEST, ExecutionProvider.MOCK), process()
+    site, shared = shioaji_site(SystemEnvironment.TEST), process()
 
     with pytest.raises(TimeoutError):
         async with asyncio.timeout(0.1):
@@ -312,7 +244,7 @@ async def test_an_sdk_error_reaches_the_logs_and_the_run_record_as_its_type_and_
 ) -> None:
     logger = RecordingLogger()
     made_clients(monkeypatch, login_error=SDK_REFUSAL)
-    site = shioaji_site(SystemEnvironment.DEV, ExecutionProvider.MOCK)
+    site = shioaji_site(SystemEnvironment.DEV)
     shared = ProcessState(logger=logger, attempt_log=MemoryAttemptLog(), cache_writes=asyncio.Lock())
     assert await connect_shioaji(site, shared, CLOCK) == (None, None)
 
@@ -322,15 +254,10 @@ async def test_an_sdk_error_reaches_the_logs_and_the_run_record_as_its_type_and_
     stack = await open_stack(tmp_path)
     stack.quotes.fetch_realtime_bars = quotes.fetch_realtime_bars
     status = await stack.pipeline.buy_manually(analysed_stock())
-    archive = SqlDailyCloseArchive(stack.db, stack.clock, shipped_config().sources.exchange, 7, SilentLogger())
-    cache = CachedPriceProvider(quotes, archive, stack.db, stack.clock, site.market_data, logger, asyncio.Lock())
-    await cache.fetch_history([Stock(stock_id="2330")], *stack.clock.history_window(30))
 
     said = [message for _, message in logger.records] + status.stats.errors
     assert [message for message in said if "TokenError, status 401" in message] == [
-        "Shioaji simulation login failed: TokenError, status 401. Daily history from the open-data archive, and no realtime "
-        "quote, so no order",
-        "The broker's daily history failed (RuntimeError: Shioaji answered TokenError, status 401); reading what the cache holds",
+        "Shioaji simulation login failed: TokenError, status 401. No realtime quote, so no order",
         "Failed to fetch realtime market data: Shioaji answered TokenError, status 401",
     ]
     assert not [message for message in said if "A123456789" in message or "203.0.113.7" in message]

@@ -1,20 +1,26 @@
+import math
+from collections.abc import Sequence
 from datetime import datetime
+from typing import Annotated
 
+from pydantic import Field
 from pydantic.dataclasses import dataclass
 
+from a_domain.model.system.user import User
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.rules.collect.freshness import DataFreshnessRule
 from a_domain.rules.trading.tick import LimitPriceRule
 from a_domain.types.enums import (
     ExecutionProvider,
-    OrderMode,
     OrderPricing,
     OrderType,
+    Permission,
     RejectReason,
     TimeInForce,
     TradeAction,
     TradingPhase,
+    UserStatus,
 )
 from a_domain.types.ids import RunId
 
@@ -55,31 +61,17 @@ class OrderPriceRule:
 @dataclass(frozen=True)
 class OrderGateRule:
     """
-    Why the app may not send an order for this decision now, or None. The gates run per decision right before
-    submission, against one reading of the clock: the order mode and execution provider, the brokers and the trading
-    phase the order pricing allows (a realtime quote prices an order in continuous trading only, since the opening and
-    closing call auctions take ROD only and the app sends IOC; an official close prices a mock order only while no
-    session trades), and the price's age (OrderPriceRule).
+    Why the app may not send an order for this decision now, or None, whichever broker takes it. The gates run per
+    decision right before submission, against one reading of the clock: the trading phase the order pricing allows (a
+    realtime quote prices an order in continuous trading only, since the opening and closing call auctions take ROD
+    only and the app sends IOC; an official close prices a mock order only while no session trades), and the price's
+    age (OrderPriceRule). Which broker may take the order is BrokerAccessRule's, checked at the send itself.
     """
 
-    order_mode: OrderMode
-    execution_provider: ExecutionProvider
     price_rule: OrderPriceRule
 
     def apply(self, signal: TradeSignal, now: datetime, phase: TradingPhase, last_close: datetime) -> tuple[RejectReason, str] | None:
         pricing = self.price_rule.pricing
-
-        if self.order_mode == OrderMode.DISABLED:
-            return RejectReason.ORDER_MODE_DISABLED, "trading.order_mode is disabled"
-
-        if self.order_mode == OrderMode.MOCK_ONLY and self.execution_provider != ExecutionProvider.MOCK:
-            return RejectReason.ORDER_MODE_MISMATCH, f"mock_only order mode cannot use {self.execution_provider.value}"
-
-        if self.order_mode == OrderMode.LIVE and self.execution_provider == ExecutionProvider.MOCK:
-            return RejectReason.ORDER_MODE_MISMATCH, "live order mode cannot use the mock execution provider"
-
-        if self.execution_provider not in pricing.brokers:
-            return RejectReason.ORDER_MODE_MISMATCH, f"{pricing} orders go to the mock broker only"
 
         if phase != pricing.trading_phase:
             detail = (
@@ -88,6 +80,106 @@ class OrderGateRule:
             return pricing.outside_phase, detail
 
         return self.price_rule.apply(signal, now, last_close)
+
+
+@dataclass(frozen=True, kw_only=True)
+class BrokerLink:
+    """
+    What an order sent now would reach, as the broker reports it right before the send: which broker, whether its
+    login is up, and whether that login is on the broker's simulation server. The mock account has no login: it is
+    always up, on no server.
+    """
+
+    broker: ExecutionProvider
+    up: bool = True
+    simulation: bool | None = None
+
+
+@dataclass(frozen=True)
+class BuyLimitRule:
+    """
+    Why a BUY on a real broker may not be sent, or None: its value, the limit price times the shares, above
+    max_order_value, or with the day's earlier BUYs on that broker above max_daily_buy_value. An earlier BUY counts at
+    what it may have bought: all of it while its outcome is open or unknown (PENDING, SUBMITTED, FAILED), what filled
+    once it ended, and nothing when refused. The journal holds each order before it is sent, so the earlier BUYs are
+    every one that may have reached the broker. A BUY with no limit price, a MARKET order, has no value to hold to them,
+    so it is refused. A SELL is never held to them: it sells only shares the account holds.
+    """
+
+    max_order_value: Annotated[float, Field(gt=0, allow_inf_nan=False)]
+    max_daily_buy_value: Annotated[float, Field(gt=0, allow_inf_nan=False)]
+
+    def apply(self, order: Order, earlier_buys: Sequence[Order]) -> tuple[RejectReason, str] | None:
+        if order.action != TradeAction.BUY:
+            return None
+
+        if order.limit_price is None:
+            limits = "trading.max_order_value and trading.max_daily_buy_value"
+            return RejectReason.ORDER_VALUE_LIMIT, f"has no limit price to value against {limits}"
+
+        value = order.limit_price * order.quantity
+
+        if value > self.max_order_value:
+            return (
+                RejectReason.ORDER_VALUE_LIMIT,
+                f"costs {value:,.0f} at its limit, above trading.max_order_value {self.max_order_value:,.0f}",
+            )
+
+        bought = math.fsum(
+            (earlier.limit_price or 0) * (earlier.filled_quantity if earlier.status.fill_final else earlier.quantity)
+            for earlier in earlier_buys
+            if earlier.id != order.id
+        )
+
+        if bought + value > self.max_daily_buy_value:
+            limit = f"trading.max_daily_buy_value {self.max_daily_buy_value:,.0f}"
+            return RejectReason.DAILY_BUY_LIMIT, f"costs {value:,.0f} after {bought:,.0f} of BUYs today, above {limit}"
+
+        return None
+
+
+@dataclass(frozen=True)
+class BrokerAccessRule:
+    """
+    Why an order may not go to the broker it would reach now, or None, checked right before the send: it must be the
+    broker its run chose when it started, one the site's audience and order pricing offer (`brokers`), and for a real
+    broker (ExecutionProvider.real) the user, as saved now, must be active with USE_REAL_BROKER, the broker's login must
+    be up, and on the server the environment trades on (`simulation`: Shioaji's simulation server in dev and test, the
+    real account in prod). A real broker's BUY is then held to its limits (BuyLimitRule).
+    """
+
+    brokers: frozenset[ExecutionProvider]
+    simulation: bool
+    limit_rule: BuyLimitRule
+
+    def apply(
+        self, order: Order, run_broker: ExecutionProvider, link: BrokerLink, user: User | None, earlier_buys: Sequence[Order]
+    ) -> tuple[RejectReason, str] | None:
+        broker = link.broker
+
+        if broker != run_broker:
+            return RejectReason.BROKER_NOT_CHOSEN, f"the run chose {run_broker.value}, and this order would reach {broker.value}"
+
+        if broker not in self.brokers:
+            return RejectReason.BROKER_NOT_OFFERED, f"this site orders on {', '.join(sorted(self.brokers))} only, not {broker.value}"
+
+        if not broker.real:
+            return None
+
+        if user is None or user.status != UserStatus.ACTIVE or Permission.USE_REAL_BROKER not in user.permissions:
+            return RejectReason.REAL_BROKER_REFUSED, f"only an active administrator orders on {broker.value}"
+
+        if not link.up:
+            return RejectReason.BROKER_LOGIN_DOWN, f"the {broker.value} login is down"
+
+        if link.simulation != self.simulation:
+            server = "simulation" if self.simulation else "production"
+            return (
+                RejectReason.BROKER_SERVER_MISMATCH,
+                f"the {broker.value} login is not on the {server} server this environment trades on",
+            )
+
+        return self.limit_rule.apply(order, earlier_buys)
 
 
 @dataclass(frozen=True)

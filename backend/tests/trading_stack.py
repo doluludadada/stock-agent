@@ -29,7 +29,7 @@ from a_domain.model.system.stats import SystemStats
 from a_domain.model.system.user import User
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.ports.trading.execution_provider import IExecutionProvider
-from a_domain.types.enums import ExecutionProvider, OrderMode, Workflow
+from a_domain.types.enums import ExecutionProvider, Workflow
 from b_application.config.app_config import AppConfig
 from b_application.config.market_data_config import MarketHoursConfig
 from b_application.pipeline import Pipeline
@@ -57,9 +57,7 @@ class SilentLogger:
 
 
 def run_stats(workflow: Workflow = Workflow.INTRADAY) -> SystemStats:
-    return SystemStats(
-        workflow=workflow, execution_provider=ExecutionProvider.MOCK, order_mode=OrderMode.MOCK_ONLY, start_time=MONDAY_10_00
-    )
+    return SystemStats(workflow=workflow, execution_provider=ExecutionProvider.MOCK, start_time=MONDAY_10_00)
 
 
 class MovableClock(TaiwanMarketClock):
@@ -136,9 +134,16 @@ class TradingStack:
 
 
 async def open_stack(
-    tmp_path: Path, configure=lambda config: None, journal: TradingJournal | None = None, real_broker: IExecutionProvider | None = None
+    tmp_path: Path,
+    configure=lambda config: None,
+    journal: TradingJournal | None = None,
+    real_broker: IExecutionProvider | None = None,
+    broker: ExecutionProvider = ExecutionProvider.MOCK,
 ) -> TradingStack:
-    """The stack's owner gets the journal and the mock broker the production factory builds, and fakes for the rest."""
+    """
+    The stack's owner gets the journal and the mock broker the production factory builds, and fakes for the rest; its
+    Pipeline is on `broker`, as a run that chose it gets it.
+    """
     prompts = harness_config().prompts.model_copy(update={"social_sentiment": "Stock {stock_id}\n{posts_text}"})
     config = shipped_config(tmp_path).model_copy(update={"prompts": prompts})
     configure(config)
@@ -193,7 +198,7 @@ async def open_stack(
         real_broker=real_broker,
         owned_ports=owned_ports,
     )
-    pipeline = compose_runtime(config, logger, clock, dependencies).pipeline_for(users.by_id[LEGACY_OWNER_ID])
+    pipeline = compose_runtime(config, logger, clock, dependencies).pipeline_for(users.by_id[LEGACY_OWNER_ID], broker)
 
     return TradingStack(
         config,

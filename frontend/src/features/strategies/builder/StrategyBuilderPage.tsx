@@ -1,18 +1,4 @@
-import {
-  ArrowLeft,
-  BarChart3,
-  CandlestickChart,
-  CheckCircle2,
-  CircleAlert,
-  Eye,
-  Gauge,
-  ListPlus,
-  Save,
-  SlidersHorizontal,
-  Sparkles,
-  Volume2,
-  Waves,
-} from 'lucide-react'
+import { ArrowLeft, CheckCircle2, ChevronDown, CircleAlert, Eye, ListPlus, Save, SlidersHorizontal } from 'lucide-react'
 import { AnimatePresence } from 'motion/react'
 import { useCallback, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
@@ -20,21 +6,18 @@ import { toast } from 'sonner'
 import { useTranslation } from '@/i18n'
 import { paths } from '@/shared/config/paths'
 import { cn } from '@/shared/lib/utils'
-import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { ConfirmDialog } from '@/shared/ui/confirm-dialog'
 import { ErrorState } from '@/shared/ui/error-state'
 import { Input } from '@/shared/ui/input'
 import { Label } from '@/shared/ui/label'
 import { Panel } from '@/shared/ui/panel'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '@/shared/ui/sheet'
 import { Skeleton } from '@/shared/ui/skeleton'
 import { StateBlock } from '@/shared/ui/state-block'
 import { RequireSignIn } from '@/shared/ui/require-sign-in'
 import { useBuiltInStrategies, useStrategySettings } from '../api/queries'
 import { blankRule } from '../model/edit'
-import { QUICK_FILLS, quickFill, type QuickFillKind } from '../model/quick-fill'
 import type { NodeId, Scoring, Strategy } from '../model/types'
 import { errorsOf, issuesByOwner, issuesByPath, requiredBars } from '../model/validate'
 import { RuleSummaryList } from '../library/RuleSummaryList'
@@ -91,14 +74,6 @@ function BuilderSource({ mode }: StrategyBuilderPageProps) {
   return <Builder initial={source.strategy} isNew={source.isNew} />
 }
 
-const QUICK_FILL_ICON: Record<QuickFillKind, typeof Waves> = {
-  maCross: Waves,
-  macdCross: CandlestickChart,
-  rsiThreshold: Gauge,
-  volumeAboveAverage: BarChart3,
-  volumeAboveYesterday: Volume2,
-}
-
 function Builder({ initial, isNew }: { initial: Strategy; isNew: boolean }) {
   const { t } = useTranslation('builder')
   const navigate = useNavigate()
@@ -108,7 +83,6 @@ function Builder({ initial, isNew }: { initial: Strategy; isNew: boolean }) {
     const first = initial.rules[0]?.condition.conditions[0]
     return new Set(isNew && initial.rules.length === 1 && first ? [first.id] : [])
   })
-  const [targetRuleId, setTargetRuleId] = useState<NodeId | null>(initial.rules[0]?.id ?? null)
   const [savedOnce, setSavedOnce] = useState(!isNew)
 
   const visibleIssues = useMemo(
@@ -131,26 +105,11 @@ function Builder({ initial, isNew }: { initial: Strategy; isNew: boolean }) {
   }, [])
 
   const context: EditorContext = { strategy: draft, edit, issue, issueOf, ids: draftIds, expanded, toggle }
-  const target = draft.rules.find((rule) => rule.id === targetRuleId) ?? draft.rules.at(-1) ?? null
 
   const addRule = () => {
     const { rule, indicators } = blankRule(draftIds)
     edit({ type: 'addRule', rule, indicators })
-    setTargetRuleId(rule.id)
     toggle(rule.condition.conditions[0]!.id, true)
-  }
-
-  const applyQuickFill = (kind: QuickFillKind) => {
-    const { condition, indicators } = quickFill(kind, draftIds)
-    if (target) {
-      edit({ type: 'addCondition', groupId: target.condition.id, condition, indicators })
-    } else {
-      const { rule } = blankRule(draftIds)
-      edit({ type: 'addRule', rule: { ...rule, condition: { ...rule.condition, conditions: [condition] } }, indicators })
-      setTargetRuleId(rule.id)
-    }
-    toggle(condition.id, true)
-    toast.success(t('quickFill.added', { name: t(`quickFill.kind.${kind}`) }), { description: t('quickFill.editable') })
   }
 
   const handleSave = async () => {
@@ -190,9 +149,15 @@ function Builder({ initial, isNew }: { initial: Strategy; isNew: boolean }) {
   }
 
   const statusTone = dirty ? 'pending' : savedOnce ? 'saved' : 'new'
+  const saveButton = (className?: string) => (
+    <Button type="button" className={className} onClick={() => void handleSave()} disabled={saving}>
+      <Save aria-hidden className="size-4" />
+      {t(saving ? 'save.saving' : 'save.action')}
+    </Button>
+  )
 
   return (
-    <div className="space-y-4 pb-24 xl:pb-0">
+    <div className="space-y-5 pb-24 xl:pb-0">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Button asChild variant="ghost" size="sm" className="-ml-2 text-muted-foreground">
           <Link to={paths.strategies}>
@@ -200,7 +165,10 @@ function Builder({ initial, isNew }: { initial: Strategy; isNew: boolean }) {
             {t('backToLibrary')}
           </Link>
         </Button>
-        <SaveStatus tone={statusTone} revision={revision} />
+        <div className="flex items-center gap-3">
+          <SaveStatus tone={statusTone} revision={revision} />
+          {saveButton('max-xl:hidden')}
+        </div>
       </div>
 
       {conflict && (
@@ -230,49 +198,30 @@ function Builder({ initial, isNew }: { initial: Strategy; isNew: boolean }) {
         </div>
       )}
 
-      <header className="space-y-1">
-        <div className="eyebrow">{t(isNew ? 'eyebrowNew' : 'eyebrowEdit')}</div>
-        <h1 className="display">{draft.name.trim() || t('untitled')}</h1>
-      </header>
+      <StrategyHeading strategy={draft} edit={edit} issue={issue} />
+      {attempted && errorCount > 0 && (
+        <p className="flex items-center gap-1.5 text-xs text-destructive" role="alert">
+          <CircleAlert aria-hidden className="size-3.5" />
+          {t('save.invalid', { count: errorCount })}
+        </p>
+      )}
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
-        <div className="min-w-0 space-y-4">
-          <QuickFillBar target={target} strategy={draft} onTarget={setTargetRuleId} onFill={applyQuickFill} />
-
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_22rem]">
+        <div className="min-w-0 space-y-3">
           <FieldError id="rules-error" issue={issue('rules')} />
-          <div className="space-y-4">
-            <AnimatePresence initial={false}>
-              {draft.rules.map((rule, index) => (
-                <RuleCard
-                  key={rule.id}
-                  context={context}
-                  rule={rule}
-                  index={index}
-                  targeted={target?.id === rule.id}
-                  onTarget={() => setTargetRuleId(rule.id)}
-                />
-              ))}
-            </AnimatePresence>
-          </div>
+          <AnimatePresence initial={false}>
+            {draft.rules.map((rule, index) => (
+              <RuleCard key={rule.id} context={context} rule={rule} index={index} />
+            ))}
+          </AnimatePresence>
           <Button type="button" variant="outline" className="w-full border-dashed" onClick={addRule}>
             <ListPlus aria-hidden className="size-4" />
             {t('rule.add')}
           </Button>
         </div>
 
-        <aside className="space-y-4 xl:sticky xl:top-[calc(var(--topbar-height)+1rem)] xl:self-start">
+        <aside className="max-xl:hidden xl:sticky xl:top-[calc(var(--topbar-height)+1rem)] xl:self-start">
           <PreviewCard strategy={draft} />
-          <ScoringCard scoring={draft.scoring} onChange={(key, value) => edit({ type: 'setScoring', key, value })} issue={issue} />
-          <NameCard
-            strategy={draft}
-            issue={issue}
-            onName={(name) => edit({ type: 'setName', name })}
-            onSave={() => void handleSave()}
-            saving={saving}
-            dirty={dirty}
-            errorCount={errorCount}
-            attempted={attempted}
-          />
         </aside>
       </div>
 
@@ -297,10 +246,7 @@ function Builder({ initial, isNew }: { initial: Strategy; isNew: boolean }) {
                 </div>
               </SheetContent>
             </Sheet>
-            <Button type="button" onClick={() => void handleSave()} disabled={saving}>
-              <Save aria-hidden className="size-4" />
-              {t('save.action')}
-            </Button>
+            {saveButton()}
           </div>
         </div>
       </div>
@@ -316,6 +262,65 @@ function Builder({ initial, isNew }: { initial: Strategy; isNew: boolean }) {
         destructive
       />
     </div>
+  )
+}
+
+/** The strategy's name, edited in place as the page's title, then its id, the bars it needs and its scoring. */
+function StrategyHeading({ strategy, edit, issue }: { strategy: Strategy; edit: EditorContext['edit']; issue: EditorContext['issue'] }) {
+  const { t } = useTranslation('builder')
+  const [scoringOpen, setScoringOpen] = useState(false)
+  const nameIssue = issue('name')
+  const keys: (keyof Scoring)[] = ['baseScore', 'blockFailurePenalty', 'failureScoreReduction', 'passScoreIncrease']
+  return (
+    <header className="space-y-2">
+      <h1 className="sr-only">{strategy.name.trim() || t('untitled')}</h1>
+      <Label htmlFor="strategy-name" className="sr-only">
+        {t('name.label')}
+      </Label>
+      <Input
+        id="strategy-name"
+        value={strategy.name}
+        onChange={(event) => edit({ type: 'setName', name: event.target.value })}
+        placeholder={t('untitled')}
+        aria-invalid={nameIssue ? true : undefined}
+        aria-describedby={nameIssue ? 'strategy-name-error' : undefined}
+        className="display h-auto border-transparent bg-transparent px-2 py-1 -ml-2 shadow-none hover:border-input focus-visible:border-ring md:h-auto md:text-[length:inherit]"
+      />
+      <FieldError id="strategy-name-error" issue={nameIssue} />
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <span className="font-mono">{t('name.id', { id: strategy.id })}</span>
+        <span className="tabular">{t('preview.bars', { count: requiredBars(strategy) })}</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          className="-ml-2 text-muted-foreground"
+          onClick={() => setScoringOpen((open) => !open)}
+          aria-expanded={scoringOpen}
+          aria-controls="strategy-scoring"
+        >
+          <SlidersHorizontal aria-hidden />
+          {t('scoring.summary', { base: strategy.scoring.baseScore })}
+          <ChevronDown aria-hidden className={cn('transition-transform', scoringOpen && 'rotate-180')} />
+        </Button>
+      </div>
+      {scoringOpen && (
+        <div id="strategy-scoring" className="max-w-xl space-y-2 rounded-xl border bg-card p-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {keys.map((key) => (
+              <NumberField
+                key={key}
+                label={t(`scoring.${key}`)}
+                value={strategy.scoring[key]}
+                onChange={(value) => edit({ type: 'setScoring', key, value })}
+                issue={issue(`scoring:${key}`)}
+              />
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">{t('scoring.note')}</p>
+        </div>
+      )}
+    </header>
   )
 }
 
@@ -338,75 +343,10 @@ function SaveStatus({ tone, revision }: { tone: 'pending' | 'saved' | 'new'; rev
   )
 }
 
-function QuickFillBar({
-  target,
-  strategy,
-  onTarget,
-  onFill,
-}: {
-  target: Strategy['rules'][number] | null
-  strategy: Strategy
-  onTarget: (id: NodeId) => void
-  onFill: (kind: QuickFillKind) => void
-}) {
-  const { t } = useTranslation('builder')
-  return (
-    <Panel
-      title={
-        <>
-          <Sparkles aria-hidden className="size-4 text-muted-foreground" />
-          {t('quickFill.title')}
-        </>
-      }
-      aside={
-        strategy.rules.length > 0 && (
-          <div className="flex items-center gap-2">
-            <Label htmlFor="quick-fill-target" className="text-xs text-muted-foreground">
-              {t('quickFill.target')}
-            </Label>
-            <Select value={target?.id ?? ''} onValueChange={(value) => onTarget(value as NodeId)}>
-              <SelectTrigger id="quick-fill-target" className="w-44 md:h-8">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {strategy.rules.map((rule, index) => (
-                  <SelectItem key={rule.id} value={rule.id}>
-                    {rule.name.trim() || t('rule.label', { index: index + 1 })}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )
-      }
-    >
-      <p className="text-xs text-muted-foreground">{t('quickFill.description')}</p>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {QUICK_FILLS.map((kind) => {
-          const Icon = QUICK_FILL_ICON[kind]
-          return (
-            <Button key={kind} type="button" variant="outline" size="sm" onClick={() => onFill(kind)} className="hover:border-primary/40">
-              <Icon aria-hidden className="size-4 text-primary" />
-              {t(`quickFill.kind.${kind}`)}
-            </Button>
-          )
-        })}
-      </div>
-    </Panel>
-  )
-}
-
 function PreviewCard({ strategy }: { strategy: Strategy }) {
   const { t } = useTranslation('builder')
-    return (
-    <Panel
-      title={t('preview.title')}
-      aside={
-        <Badge variant="outline" className="tabular font-normal">
-          {t('preview.bars', { count: requiredBars(strategy) })}
-        </Badge>
-      }
-    >
+  return (
+    <Panel title={t('preview.title')}>
       {strategy.rules.length === 0 ? (
         <p className="text-sm text-muted-foreground">{t('preview.empty')}</p>
       ) : (
@@ -414,100 +354,6 @@ function PreviewCard({ strategy }: { strategy: Strategy }) {
           <RuleSummaryList strategy={strategy} ruleName={(name) => name} />
         </div>
       )}
-    </Panel>
-  )
-}
-
-function ScoringCard({
-  scoring,
-  onChange,
-  issue,
-}: {
-  scoring: Scoring
-  onChange: (key: keyof Scoring, value: number) => void
-  issue: (path: string) => ReturnType<EditorContext['issue']>
-}) {
-  const { t } = useTranslation('builder')
-  const [open, setOpen] = useState(false)
-  const keys: (keyof Scoring)[] = ['baseScore', 'blockFailurePenalty', 'failureScoreReduction', 'passScoreIncrease']
-  return (
-    <Panel
-      title={
-        <>
-          <SlidersHorizontal aria-hidden className="size-4 text-muted-foreground" />
-          {t('scoring.title')}
-        </>
-      }
-      aside={
-        <Button type="button" variant="ghost" size="sm" onClick={() => setOpen((value) => !value)} aria-expanded={open} className="-my-1 text-brand">
-          {t(open ? 'scoring.hide' : 'scoring.show')}
-        </Button>
-      }
-    >
-      <p className="text-xs text-muted-foreground">{t('scoring.summary', { base: scoring.baseScore })}</p>
-      {open && (
-        <div className="mt-3 grid grid-cols-2 gap-3">
-          {keys.map((key) => (
-            <NumberField key={key} label={t(`scoring.${key}`)} value={scoring[key]} onChange={(value) => onChange(key, value)} issue={issue(`scoring:${key}`)} />
-          ))}
-          <p className="col-span-2 text-[0.6875rem] leading-relaxed text-muted-foreground">{t('scoring.note')}</p>
-        </div>
-      )}
-    </Panel>
-  )
-}
-
-function NameCard({
-  strategy,
-  issue,
-  onName,
-  onSave,
-  saving,
-  dirty,
-  errorCount,
-  attempted,
-}: {
-  strategy: Strategy
-  issue: (path: string) => ReturnType<EditorContext['issue']>
-  onName: (name: string) => void
-  onSave: () => void
-  saving: boolean
-  dirty: boolean
-  errorCount: number
-  attempted: boolean
-}) {
-  const { t } = useTranslation('builder')
-  const nameIssue = issue('name')
-  return (
-    <Panel title={t('name.title')}>
-      <div className="space-y-3">
-        <div className="space-y-1.5">
-          <Label htmlFor="strategy-name" className="text-xs text-muted-foreground">
-            {t('name.label')}
-          </Label>
-          <Input
-            id="strategy-name"
-            value={strategy.name}
-            onChange={(event) => onName(event.target.value)}
-            placeholder={t('name.placeholder')}
-            aria-invalid={nameIssue ? true : undefined}
-            aria-describedby={nameIssue ? 'strategy-name-error' : undefined}
-          />
-          <FieldError id="strategy-name-error" issue={nameIssue} />
-          <p className="font-mono text-[0.6875rem] text-muted-foreground">{t('name.id', { id: strategy.id })}</p>
-        </div>
-        {attempted && errorCount > 0 && (
-          <p className="flex items-center gap-1.5 text-xs text-destructive" role="alert">
-            <CircleAlert aria-hidden className="size-3.5" />
-            {t('save.invalid', { count: errorCount })}
-          </p>
-        )}
-        <Button type="button" className="w-full max-xl:hidden" onClick={onSave} disabled={saving}>
-          <Save aria-hidden className="size-4" />
-          {t(saving ? 'save.saving' : 'save.action')}
-        </Button>
-        {dirty && <p className="text-center text-xs text-muted-foreground max-xl:hidden">{t('save.hintDirty')}</p>}
-      </div>
     </Panel>
   )
 }

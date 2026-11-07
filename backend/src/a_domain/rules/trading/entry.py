@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from pydantic import PositiveInt
 from pydantic.dataclasses import dataclass
 
 from a_domain.model.market.stock import Stock
@@ -51,19 +52,24 @@ class EntryRule:
 
 @dataclass(frozen=True)
 class ManualEntryRule:
-    """The user's confirmed BUY: it skips the buy threshold, never the sizing, and says why when no share fits."""
+    """
+    The user's confirmed BUY: it skips the buy threshold. The shares are the user's (`asked`), or with None the sizing's,
+    and it says why when no share fits. The order gates and the broker's own checks hold it either way.
+    """
 
     sizing_rule: SizingRule
 
-    def apply(self, stock: Stock, account: Account, *, equity: float, now: datetime) -> TradeSignal:
+    def apply(self, stock: Stock, account: Account, asked: PositiveInt | None = None, *, equity: float, now: datetime) -> TradeSignal:
         current_price = stock.current_price
         composite_score = stock.composite_score
 
         if current_price is None or composite_score is None:
             raise ValueError("Manual BUY requires a current price and a composite score")
 
-        quantity = self.sizing_rule.apply(account=account, equity=equity, stock_id=stock.stock_id, price=current_price, now=now)
-        reason = "Manual BUY override confirmed by user."
+        quantity = asked or self.sizing_rule.apply(
+            account=account, equity=equity, stock_id=stock.stock_id, price=current_price, now=now
+        )
+        reason = f"Manual BUY of {asked} shares confirmed by user." if asked else "Manual BUY override confirmed by user."
 
         if quantity == 0:
             reason = (

@@ -1,185 +1,231 @@
-import { FileWarning } from 'lucide-react'
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { Search, TriangleAlert } from 'lucide-react'
+import { memo, useCallback, useEffect, useId, useMemo, useState, type ReactNode } from 'react'
+import { useBlocker } from 'react-router'
+import { toast } from 'sonner'
 import { useTranslation } from '@/i18n'
-import { isApiError } from '@/shared/api'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Checkbox } from '@/shared/ui/checkbox'
+import { ConfirmDialog } from '@/shared/ui/confirm-dialog'
 import { ErrorState } from '@/shared/ui/error-state'
 import { Input } from '@/shared/ui/input'
 import { Label } from '@/shared/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
 import { Skeleton } from '@/shared/ui/skeleton'
-import { StateBlock } from '@/shared/ui/state-block'
 import { Switch } from '@/shared/ui/switch'
-import { useSettingsForm, useWriteSettingsForm } from './api'
-import { changeOf, FORM_SECTIONS, problemsAt, rowsOf, type Control, type FormRow, type FormSection, type SettingChange } from './form'
-import type { LocatedProblem } from './model'
+import { Textarea } from '@/shared/ui/textarea'
+import { useSaveSettings, useSettingsForm } from './api'
+import { changesOf, inputOf, isLongText, problemsAt, problemsElsewhere, sectionsOf, type Input as FieldInput, type SettingField } from './form'
+import { problemMessage, refusalOf, type SettingsProblem } from './model'
+import { PasswordDialog, type DialogRefusal } from './PasswordDialog'
 
-interface SettingsFormProps {
-  /** The text the form edits: the administrator's unsaved text, or the file as it is on disk. */
-  text: string
-  /** Makes a text with the form's change the unsaved text, which the page checks and saves as if it were typed. */
-  onText: (text: string) => void
-  /** The check's problems in this file, each shown at the setting it is about. */
-  problems: readonly LocatedProblem[]
-  onOpenYaml: () => void
+/** Every setting of the settings files as a form; a save runs on the new settings at once. */
+export function SettingsForm() {
+  const { t } = useTranslation('admin')
+  const form = useSettingsForm()
+  if (form.isPending) return <Skeleton className="h-[32rem] rounded-2xl" />
+  if (form.isError) return <ErrorState error={form.error} title={t('loadFailed')} onRetry={() => void form.refetch()} className="rounded-2xl border bg-card" />
+  return <FormBody fields={form.data} onStale={() => void form.refetch()} />
 }
 
-/** A change the server would not write, under the setting it was for, until the next change. */
-type Refused = { path: string; reason: string }
+const rowId = (path: string) => `setting-${path}`
 
-/**
- * appsetting.yaml as switches, choices and numbers: a second editor of the same text. Each change is written into the
- * text by the server, keeping every comment and every other line, and becomes the unsaved text; the check, the review
- * and the save are the editor's own.
- */
-export function SettingsForm({ text, onText, problems, onOpenYaml }: SettingsFormProps) {
+function FormBody({ fields, onStale }: { fields: SettingField[]; onStale: () => void }) {
   const { t } = useTranslation('admin')
-  const form = useSettingsForm(text)
-  const write = useWriteSettingsForm()
-  const [refused, setRefused] = useState<Refused | null>(null)
-  const latest = useRef(text)
-  const queue = useRef(Promise.resolve())
+  const save = useSaveSettings()
+  const [inputs, setInputs] = useState<Record<string, FieldInput>>({})
+  const [refused, setRefused] = useState<SettingsProblem[]>([])
+  const [confirming, setConfirming] = useState(false)
+  const [query, setQuery] = useState('')
+  const { changes, problems } = useMemo(() => changesOf(fields, inputs), [fields, inputs])
+  const shown = [...problems, ...refused]
+  const changed = useMemo(() => new Set(changes.map((change) => change.path)), [changes])
+  const dirty = changes.length > 0 || problems.length > 0
+  const blocker = useLeaveGuard(dirty)
+
   useEffect(() => {
-    latest.current = text
-  }, [text])
+    const first = fields.find((field) => problemsAt(refused, field.path).length > 0)
+    if (first) document.getElementById(rowId(first.path))?.scrollIntoView({ block: 'center' })
+  }, [refused, fields])
 
-  /** One change at a time, each into the text the one before it made, so a quick second change never undoes the first. */
-  const change = (next: SettingChange) => {
-    const path = next.path.join('.')
-    queue.current = queue.current.then(async () => {
-      try {
-        const answer = await write(latest.current, [next])
-        latest.current = answer.text
-        setRefused(null)
-        onText(answer.text)
-      } catch (error) {
-        setRefused({ path, reason: isApiError(error) ? error.message : t('common:errors.server') })
-      }
-    })
+  const edit = useCallback((path: string, input: FieldInput) => {
+    setInputs((current) => ({ ...current, [path]: input }))
+    setRefused((current) => current.filter((problem) => problemsAt([problem], path).length === 0))
+  }, [])
+
+  const confirm = async (password: string): Promise<DialogRefusal | null> => {
+    try {
+      await save.mutateAsync({ changes, password })
+      setConfirming(false)
+      setInputs({})
+      setRefused([])
+      toast.success(t('saved'))
+      return null
+    } catch (error) {
+      const refusal = refusalOf(error)
+      if (refusal.kind !== 'refused' && refusal.kind !== 'conflict') return refusal
+      setConfirming(false)
+      if (refusal.kind === 'conflict') onStale()
+      const general = refusal.kind === 'conflict' ? t('conflict') : refusal.detail
+      setRefused(refusal.kind === 'refused' && refusal.problems.length > 0 ? refusal.problems : [{ message: general, path: null }])
+      return null
+    }
   }
 
-  if (form.isPending) return <Skeleton className="m-4 h-96 rounded-xl" />
-  if (form.isError) return <ErrorState error={form.error} title={t('form.failed')} onRetry={() => void form.refetch()} className="py-12" />
-
-  const { values, schema } = form.data
-  if (values === null) {
-    return (
-      <StateBlock
-        icon={FileWarning}
-        title={t('form.unreadable.title')}
-        description={t('form.unreadable.description')}
-        action={
-          <Button type="button" variant="outline" size="sm" onClick={onOpenYaml}>
-            {t('form.unreadable.open')}
-          </Button>
-        }
-        className="py-12"
-      />
-    )
-  }
+  const needle = query.trim().toLowerCase()
+  const matches = (field: SettingField) =>
+    !needle || [t(`form.field.${field.path}`), t(`form.help.${field.path}`), field.path].some((text) => text.toLowerCase().includes(needle))
+  const sections = sectionsOf(fields.filter(matches))
+  const elsewhere = problemsElsewhere(refused, fields)
 
   return (
-    <div className={cn('divide-y', form.isPlaceholderData && 'opacity-70')}>
-      <p className="px-3 py-2.5 text-xs text-pretty text-muted-foreground md:px-4">{t('form.hint')}</p>
-      {FORM_SECTIONS.map((section) => (
-        <SectionView key={section.id} section={section} rows={rowsOf(section, schema, values)} problems={problems} refused={refused} onChange={change} />
-      ))}
+    <div className="space-y-4">
+      <div className="sticky top-(--topbar-height) z-10 -mx-1 flex flex-wrap items-center gap-2 bg-background/95 px-1 py-2 backdrop-blur">
+        <div className="relative min-w-48 flex-1">
+          <Search aria-hidden className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input type="search" value={query} onChange={(event) => setQuery(event.target.value)} aria-label={t('search.label')} placeholder={t('search.placeholder')} className="pl-9" />
+        </div>
+        {dirty && (
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => {
+              setInputs({})
+              setRefused([])
+            }}
+          >
+            {t('discard')}
+          </Button>
+        )}
+        <Button type="button" onClick={() => setConfirming(true)} disabled={changes.length === 0 || problems.length > 0}>
+          {t('save')}
+        </Button>
+      </div>
+
+      {elsewhere.length > 0 && (
+        <div role="alert" className="flex items-start gap-2.5 rounded-xl border border-destructive/30 bg-danger-soft px-4 py-3 text-sm">
+          <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-destructive" />
+          <ul className="space-y-1 text-pretty">
+            {elsewhere.map((problem) => (
+              <li key={problem.message}>{problemMessage(problem, t)}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {sections.length === 0 ? (
+        <p className="py-12 text-center text-sm text-muted-foreground">{t('search.none', { query: query.trim() })}</p>
+      ) : (
+        <div className="divide-y rounded-2xl border bg-card shadow-card">
+          {sections.map((section) => (
+            <section key={section.id} aria-labelledby={`section-${section.id}`} className="px-4 py-5 md:px-6">
+              <h2 id={`section-${section.id}`} className="text-title font-semibold">
+                {t(`form.section.${section.id}`)}
+              </h2>
+              {section.groups.map((group) => (
+                <div key={group.id ?? ''} className={cn(group.id && 'mt-4')}>
+                  {group.id && <h3 className="eyebrow mt-2">{t(`form.group.${group.id}`)}</h3>}
+                  <div className="divide-y divide-dashed">
+                    {group.fields.map((field) => (
+                      <SettingRow
+                        key={field.path}
+                        field={field}
+                        input={inputs[field.path] ?? inputOf(field)}
+                        changed={changed.has(field.path)}
+                        problems={problemsAt(shown, field.path)}
+                        onChange={edit}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </section>
+          ))}
+        </div>
+      )}
+
+      <PasswordDialog open={confirming} onOpenChange={setConfirming} onConfirm={confirm} />
+      <ConfirmDialog
+        open={blocker.state === 'blocked'}
+        title={t('leave.title')}
+        description={t('leave.description')}
+        cancel={t('leave.stay')}
+        confirm={t('leave.leave')}
+        onCancel={() => blocker.reset?.()}
+        onConfirm={() => blocker.proceed?.()}
+      />
     </div>
   )
 }
 
-interface SectionViewProps {
-  section: FormSection
-  rows: FormRow[]
-  problems: readonly LocatedProblem[]
-  refused: Refused | null
-  onChange: (change: SettingChange) => void
+interface SettingRowProps {
+  field: SettingField
+  input: FieldInput
+  changed: boolean
+  problems: SettingsProblem[]
+  onChange: (path: string, input: FieldInput) => void
 }
 
-function SectionView({ section, rows, problems, refused, onChange }: SectionViewProps) {
-  const { t } = useTranslation('admin')
-  const own = problems.filter((problem) => problem.path === section.id)
-  return (
-    <section className="px-3 py-4 md:px-4">
-      <h2 className="text-title font-semibold">{t(`form.section.${section.id}`)}</h2>
-      <Problems problems={own} />
-      <div className="mt-1 divide-y divide-dashed">
-        {rows.map((row) => (
-          <RowView key={row.path} row={row} problems={problemsAt(problems, row.path)} refused={refused?.path === row.path ? refused.reason : null} onChange={onChange} />
-        ))}
-      </div>
-    </section>
-  )
-}
-
-interface RowViewProps {
-  row: FormRow
-  problems: LocatedProblem[]
-  refused: string | null
-  onChange: (change: SettingChange) => void
-}
-
-/** One setting: its label, the path in the YAML, its help, the control, and what the check says about it. */
-function RowView({ row, problems, refused, onChange }: RowViewProps) {
+/** One setting: its label and help, its control, and what is wrong with the value. */
+function SettingRowView({ field, input, changed, problems, onChange }: SettingRowProps) {
   const { t } = useTranslation('admin')
   const id = useId()
-  const [noteId, problemsId, refusedId] = [`${id}-note`, `${id}-problems`, `${id}-refused`]
-  const label = t(`form.field.${row.path}`)
-  const described = {
+  const [helpId, problemsId] = [`${id}-help`, `${id}-problems`]
+  const wide = field.kind === 'lines' || field.kind === 'structure' || isLongText(field)
+  const described: Described = {
     id,
-    'aria-describedby': [noteId, problems.length > 0 && problemsId, refused !== null && refusedId].filter(Boolean).join(' '),
-    'aria-invalid': problems.length > 0 || refused !== null || undefined,
+    'aria-describedby': problems.length > 0 ? `${helpId} ${problemsId}` : helpId,
+    'aria-invalid': problems.length > 0 || undefined,
   }
-  const control = (() => {
-    switch (row.view.kind) {
-      case 'control':
-        return <ControlView control={row.view.control} label={label} described={described} onChange={(value) => onChange(changeOf(row.path, value))} />
-      case 'readOnly':
-        return <p className="text-sm font-medium">{t(`form.option.${row.view.value}`)}</p>
-      case 'missing':
-        return <p className="text-xs text-pretty text-muted-foreground">{t('form.missing')}</p>
-      case 'yamlOnly':
-        return <p className="text-xs text-pretty text-muted-foreground">{t('form.yamlOnly')}</p>
-    }
-  })()
-  const labelled = row.view.kind === 'control' && row.view.control.kind !== 'choices'
+  const label = t(`form.field.${field.path}`)
+  const labelled = !field.restart_only && field.kind !== 'choices'
   return (
-    <div className="grid gap-x-6 gap-y-2 py-3 md:grid-cols-[minmax(0,1fr)_minmax(12rem,18rem)] md:items-start">
+    <div id={rowId(field.path)} className={cn('grid gap-x-6 gap-y-2 py-3.5', !wide && 'md:grid-cols-[minmax(0,1fr)_minmax(12rem,18rem)] md:items-start')}>
       <div className="min-w-0 space-y-1">
-        {labelled ? <Label htmlFor={id}>{label}</Label> : <p className="text-sm leading-none font-medium">{label}</p>}
-        <div id={noteId} className="space-y-1 text-xs text-pretty text-muted-foreground">
-          <p className="font-mono break-all">{row.path}</p>
-          <p>{t(`form.help.${row.path}`)}</p>
-          {row.view.kind === 'readOnly' && <p>{t(`form.readOnly.${row.path}`)}</p>}
+        <div className="flex items-center gap-2">
+          {changed && (
+            <>
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-gold" />
+              <span className="sr-only">{t('form.changed')}</span>
+            </>
+          )}
+          {labelled ? <Label htmlFor={id}>{label}</Label> : <p className="text-sm leading-none font-medium">{label}</p>}
+        </div>
+        <div id={helpId} className="space-y-1 text-xs text-pretty text-muted-foreground">
+          <p>{t(`form.help.${field.path}`)}</p>
+          {field.restart_only && <p>{t('form.restartOnly')}</p>}
         </div>
       </div>
       <div className="min-w-0 space-y-1.5">
-        {control}
-        <Problems id={problemsId} problems={problems} />
-        {refused && (
-          <p id={refusedId} className="text-xs text-pretty text-destructive">
-            {t('form.notWritten', { reason: refused })}
-          </p>
+        {field.restart_only ? (
+          <p className="text-sm font-medium">{field.kind === 'choice' ? t(`form.option.${String(field.value)}`) : String(field.value)}</p>
+        ) : (
+          <Control field={field} input={input} label={label} described={described} onChange={(next) => onChange(field.path, next)} />
+        )}
+        {problems.length > 0 && (
+          <ul id={problemsId} className="space-y-1">
+            {problems.map((problem) => (
+              <li key={`${problem.path}:${problem.message}`} className="text-xs text-pretty text-destructive">
+                {problemMessage(problem, t)}
+              </li>
+            ))}
+          </ul>
         )}
       </div>
     </div>
   )
 }
 
-function Problems({ id, problems }: { id?: string; problems: readonly LocatedProblem[] }) {
-  if (problems.length === 0) return null
-  return (
-    <ul id={id} className="space-y-1">
-      {problems.map((problem) => (
-        <li key={`${problem.line}:${problem.column}:${problem.message}`} className="text-xs text-pretty text-destructive">
-          {problem.message}
-        </li>
-      ))}
-    </ul>
-  )
-}
+/** A keystroke in one setting renders that row only, not the two hundred others. */
+const SettingRow = memo(
+  SettingRowView,
+  (before, after) =>
+    before.field === after.field &&
+    before.input === after.input &&
+    before.changed === after.changed &&
+    before.onChange === after.onChange &&
+    JSON.stringify(before.problems) === JSON.stringify(after.problems),
+)
 
 interface Described {
   id: string
@@ -187,26 +233,29 @@ interface Described {
   'aria-invalid': true | undefined
 }
 
-interface ControlViewProps {
-  control: Control
+interface ControlProps {
+  field: SettingField
+  input: FieldInput
   label: string
   described: Described
-  onChange: (value: SettingChange['value']) => void
+  onChange: (input: FieldInput) => void
 }
 
-function ControlView({ control, label, described, onChange }: ControlViewProps) {
+/** The control the setting's kind gets: a switch, a select, checkboxes, a number, a text, a list or JSON. */
+function Control({ field, input, label, described, onChange }: ControlProps) {
   const { t } = useTranslation('admin')
-  switch (control.kind) {
+  const text = typeof input === 'string' ? input : ''
+  switch (field.kind) {
     case 'switch':
-      return <Switch {...described} checked={control.value} onCheckedChange={onChange} />
-    case 'select':
+      return <Switch {...described} checked={input === true} onCheckedChange={onChange} />
+    case 'choice':
       return (
-        <Select value={control.value} onValueChange={onChange}>
+        <Select value={text} onValueChange={onChange}>
           <SelectTrigger {...described} className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {control.options.map((option) => (
+            {field.options.map((option) => (
               <SelectItem key={option} value={option}>
                 {t(`form.option.${option}`)}
               </SelectItem>
@@ -215,32 +264,71 @@ function ControlView({ control, label, described, onChange }: ControlViewProps) 
         </Select>
       )
     case 'choices':
-      return <Choices control={control} label={label} described={described} onChange={onChange} />
-    case 'number':
+      return <Choices options={field.options} chosen={Array.isArray(input) ? input : []} label={label} described={described} onChange={onChange} />
+    case 'integer':
+    case 'number': {
+      const min = field.minimum ?? field.exclusive_minimum ?? undefined
+      const max = field.maximum ?? field.exclusive_maximum ?? undefined
+      const step = field.kind === 'integer' ? 1 : 'any'
+      return <Input {...described} type="number" inputMode={field.kind === 'integer' ? 'numeric' : 'decimal'} min={min} max={max} step={step} value={text} onChange={(event) => onChange(event.target.value)} className="tabular" />
+    }
     case 'text':
-      return <TypedInput control={control} described={described} onChange={onChange} />
+      return isLongText(field) ? (
+        <Textarea {...described} value={text} onChange={(event) => onChange(event.target.value)} className="max-h-96" />
+      ) : (
+        <Input {...described} value={text} onChange={(event) => onChange(event.target.value)} />
+      )
+    case 'lines':
+      return (
+        <Caption note={t('form.lines')}>
+          <Textarea {...described} value={text} onChange={(event) => onChange(event.target.value)} spellCheck={false} className="max-h-80" />
+        </Caption>
+      )
+    case 'structure':
+      return (
+        <Caption note={t('form.json')}>
+          <Textarea {...described} value={text} onChange={(event) => onChange(event.target.value)} spellCheck={false} className="max-h-96 font-mono text-xs md:text-xs" />
+        </Caption>
+      )
   }
 }
 
+function Caption({ note, children }: { note: string; children: ReactNode }) {
+  return (
+    <div className="space-y-1">
+      {children}
+      <p className="text-xs text-muted-foreground">{note}</p>
+    </div>
+  )
+}
+
+interface ChoicesProps {
+  options: readonly string[]
+  chosen: string[]
+  label: string
+  described: Described
+  onChange: (chosen: string[]) => void
+}
+
 /** A list of choices as checkboxes; a choice added goes last, so the order the file gives the others is kept. */
-function Choices({ control, label, described, onChange }: { control: Extract<Control, { kind: 'choices' }>; label: string; described: Described; onChange: (value: string[]) => void }) {
+function Choices({ options, chosen, label, described, onChange }: ChoicesProps) {
   const { t } = useTranslation('admin')
   return (
     <fieldset id={described.id} aria-describedby={described['aria-describedby']} className="grid grid-cols-2 gap-2.5">
       <legend className="sr-only">{label}</legend>
-      {control.options.map((option) => (
+      {options.map((option) => (
         <ChoiceItem
           key={option}
           label={t(`form.option.${option}`)}
-          checked={control.value.includes(option)}
-          onCheckedChange={(checked) => onChange(checked ? [...control.value, option] : control.value.filter((chosen) => chosen !== option))}
+          checked={chosen.includes(option)}
+          onCheckedChange={(checked) => onChange(checked ? [...chosen, option] : chosen.filter((item) => item !== option))}
         />
       ))}
     </fieldset>
   )
 }
 
-function ChoiceItem({ label, checked, onCheckedChange }: { label: ReactNode; checked: boolean; onCheckedChange: (checked: boolean) => void }) {
+function ChoiceItem({ label, checked, onCheckedChange }: { label: string; checked: boolean; onCheckedChange: (checked: boolean) => void }) {
   const id = useId()
   return (
     <div className="flex min-h-11 items-center gap-2.5 md:min-h-0">
@@ -252,49 +340,16 @@ function ChoiceItem({ label, checked, onCheckedChange }: { label: ReactNode; che
   )
 }
 
-type Typed = Extract<Control, { kind: 'number' | 'text' }>
-
 /**
- * A number or a text, written when the administrator leaves the field or presses Enter, never at each key: "0." is on
- * its way to a number. A new value in the text, from this field's change or from the YAML tab, replaces what was typed.
+ * Asks before leaving the page while a change is not saved. Closing or reloading the tab asks the browser's own
+ * question.
  */
-function TypedInput({ control, described, onChange }: { control: Typed; described: Described; onChange: (value: number | string) => void }) {
-  const { t } = useTranslation('admin')
-  const [typed, setTyped] = useState(String(control.value))
-  const [invalid, setInvalid] = useState<string | null>(null)
-  const [shown, setShown] = useState(control.value)
-  if (shown !== control.value) {
-    setShown(control.value)
-    setTyped(String(control.value))
-    setInvalid(null)
-  }
-  const commit = () => {
-    const value = control.kind === 'number' ? Number(typed) : typed
-    if (control.kind === 'number' && (typed.trim() === '' || !Number.isFinite(value))) return setInvalid(t('form.notNumber'))
-    if (control.kind === 'number' && control.integer && !Number.isInteger(value)) return setInvalid(t('form.notInteger'))
-    setInvalid(null)
-    if (value !== control.value) onChange(value)
-  }
-  const number = control.kind === 'number' ? { type: 'number', inputMode: control.integer ? 'numeric' : 'decimal', min: control.min, max: control.max, step: control.integer ? 1 : 'any' } as const : {}
-  const invalidId = `${described.id}-invalid`
-  return (
-    <>
-      <Input
-        {...described}
-        {...number}
-        aria-describedby={invalid ? `${described['aria-describedby']} ${invalidId}` : described['aria-describedby']}
-        aria-invalid={described['aria-invalid'] ?? (invalid !== null || undefined)}
-        value={typed}
-        onChange={(event) => setTyped(event.target.value)}
-        onBlur={commit}
-        onKeyDown={(event) => event.key === 'Enter' && commit()}
-        className="tabular"
-      />
-      {invalid && (
-        <p id={invalidId} className="text-xs text-destructive">
-          {invalid}
-        </p>
-      )}
-    </>
-  )
+function useLeaveGuard(unsaved: boolean) {
+  useEffect(() => {
+    if (!unsaved) return
+    const onBeforeUnload = (event: BeforeUnloadEvent) => event.preventDefault()
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [unsaved])
+  return useBlocker(({ currentLocation, nextLocation }) => unsaved && currentLocation.pathname !== nextLocation.pathname)
 }

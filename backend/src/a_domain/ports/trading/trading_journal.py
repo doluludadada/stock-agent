@@ -6,12 +6,15 @@ from a_domain.model.system.stats import SystemStats
 from a_domain.model.trading.account import AccountSnapshot
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.signal import TradeSignal
+from a_domain.types.enums import ExecutionProvider
 from a_domain.types.ids import RunId
 
 
 class ITradingJournal(Protocol):
     """
-    The record of what the trading workflows did: runs, decisions, orders and account snapshots.
+    The record of what the trading workflows did: runs, decisions, orders and account snapshots. An order and a
+    snapshot belong to the broker their run chose (SystemStats.execution_provider), so each broker's account reads
+    only its own.
 
     The application is the only writer, whichever execution provider ran the orders. Every write is
     an upsert by primary key, so writing the same row again (a run at start and at finish, an order
@@ -27,8 +30,8 @@ class ITradingJournal(Protocol):
 
     async def save_snapshot(self, snapshot: AccountSnapshot) -> None: ...
 
-    async def snapshots(self, since: datetime | None = None) -> list[AccountSnapshot]:
-        """Every account snapshot taken at or after `since` (every one for None), oldest first."""
+    async def snapshots(self, broker: ExecutionProvider, since: datetime | None = None) -> list[AccountSnapshot]:
+        """Every snapshot of the account at `broker`, taken at or after `since` (every one for None), oldest first."""
         ...
 
     async def save_stock_reports(self, run_id: RunId, stocks: list[Stock]) -> None:
@@ -41,7 +44,8 @@ class ITradingJournal(Protocol):
     async def stock_reports_of(self, run_id: RunId) -> list[Stock]:
         """
         The stocks saved under the run, in their saved order; none for any other workflow. Each comes back with what
-        was saved, its price as a one-bar daily history at its time; never route one into an order.
+        was saved, its price as a one-bar daily history at its time, a daily close the order gates refuse: an order on
+        one is priced only by the realtime quote buy_manually fetches for it.
         """
         ...
 
@@ -63,10 +67,16 @@ class ITradingJournal(Protocol):
         """Every decision, of any run, that follows a decision of this run and got an order, with that order, oldest first."""
         ...
 
-    async def trades(self, since: datetime | None, limit: int, offset: int) -> list[tuple[Order, SystemStats]]:
+    async def trades(
+        self, broker: ExecutionProvider, since: datetime | None, limit: int, offset: int
+    ) -> list[tuple[Order, SystemStats]]:
         """
-        `limit` orders that filled at least one share, created at or after `since`, newest first, after the `offset`
-        newest. Each comes with the run whose decision it carried out: a follow's order with the run it followed,
-        every other order with its own run.
+        `limit` orders of runs on `broker` that filled at least one share, created at or after `since`, newest first,
+        after the `offset` newest. Each comes with the run whose decision it carried out: a follow's order with the run
+        it followed, every other order with its own run.
         """
+        ...
+
+    async def buy_orders(self, broker: ExecutionProvider, since: datetime) -> list[Order]:
+        """Every BUY order of the runs on `broker` created at or after `since`, whatever its status, oldest first."""
         ...

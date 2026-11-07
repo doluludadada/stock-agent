@@ -92,10 +92,9 @@ export interface Strategy {
   scoring: Scoring
 }
 
-/** The owner's saved settings: their strategies, the one each workflow uses, and the revision a save must carry. */
+/** The owner's saved settings: their strategies, the one every workflow uses, and the revision a save must carry. */
 export interface StrategySettings {
   activeStrategyId: StrategyId
-  buzzStrategyId: StrategyId
   strategies: Strategy[]
   revision: number
 }

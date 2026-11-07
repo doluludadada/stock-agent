@@ -142,19 +142,15 @@ PRESENTATION_SETTINGS = {
     ),
     # The settings editor shows the environment the server started in, read-only: a save cannot change it.
     "d_presentation/web/routers/admin.py": frozenset({"environment"}),
-    # The account endpoint says whose account it shows, so the page never labels a Shioaji account as the mock one.
-    "d_presentation/web/routers/account.py": frozenset({"trading.execution_provider", "trading.order_mode"}),
-    # The Web's request gates: the host names it answers, and the broker and the audience's realtime quotes and MOPS,
-    # which decide who may reach the private pages and which runs and valuations a browser may start. A run starts
-    # under the cap of background runs of the runtime it starts on.
+    # The brokers endpoint names, for a run's confirmation, the server a real broker trades on and its BUY limits, so
+    # the user confirms SinoPac's simulation or real account and the limits the order gates will hold the run to.
+    "d_presentation/web/routers/account.py": frozenset(
+        {"environment.shioaji_simulation", "trading.max_order_value", "trading.max_daily_buy_value"}
+    ),
+    # The Web's request gates: the host names it answers, and the audience's realtime quotes and MOPS, which decide which
+    # runs and valuations a browser may start. A run starts under the cap of background runs of the runtime it starts on.
     "d_presentation/web/session.py": frozenset(
-        {
-            "api.allowed_hosts",
-            "trading.execution_provider",
-            "audience.realtime_quotes",
-            "audience.mops",
-            "accounts.max_concurrent_runs",
-        }
+        {"api.allowed_hosts", "audience.realtime_quotes", "audience.mops", "accounts.max_concurrent_runs"}
     ),
     # The open data's attribution, which the license requires next to whatever a page shows from it, and the audience,
     # whose capabilities tell the web app what to offer.
@@ -167,15 +163,16 @@ PRESENTATION_SETTINGS = {
             "technical.built_in_strategies",
         }
     ),
-    # The menu prints the trading setup, so the user sees whether an order would reach a real account, and refuses
-    # what orders on realtime quotes where the audience has none. Menus 5 and 6 print how undervaluation is computed,
-    # its caveat and when a close turns stale.
+    # The menu prints the environment, and before a run on a real broker the server it trades on and the BUY limits the
+    # order gates hold it to, so the user sees whether an order would reach a real account; it refuses what orders on
+    # realtime quotes where the audience has none. Menus 5 and 6 print how undervaluation is computed, its caveat and
+    # when a close turns stale.
     "d_presentation/cli": frozenset(
         {
             "environment",
             "audience",
-            "trading.execution_provider",
-            "trading.order_mode",
+            "trading.max_order_value",
+            "trading.max_daily_buy_value",
             "valuation.undervaluation_formula",
             "valuation.low_pe_caveat",
             "freshness.daily_close_max_missed_sessions",

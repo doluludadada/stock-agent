@@ -47,26 +47,24 @@ class MarketDataConfig(BaseModel):
 
     quote_timeout_seconds: float = Field(default=10.0, gt=0)
 
-    history_request_interval_seconds: float = Field(default=1.0, ge=0)
+    history_request_interval_seconds: float = Field(default=3.0, ge=0)
     """
-    Least time between a daily-history request to Shioaji (a session's daily quotes, an index's one-minute bars) and
-    the market-data request before it. Shioaji documents no limit of the daily quotes' own, so they are paced well
-    inside the 50 market-data queries per 10 seconds.
+    Least time between two requests to one exchange's site for its daily reports, from any runtime. TWSE refuses an
+    address for minutes after more than about 3 requests in 5 seconds.
     """
+
+    history_timeout_seconds: float = Field(default=30.0, gt=0)
 
     history_backfill_bars: int = Field(default=251, gt=0)
     """
-    Sessions of daily history the Web API's timer keeps for every listed stock on a site with a Shioaji login: the
-    stock page's one-year chart. A strategy that needs older sessions fetches them when it runs.
+    Sessions of daily history the Web API's timer keeps for every listed stock on a personal site: the stock page's
+    one-year chart. A strategy that needs older sessions fetches them when it runs.
     """
-
-    index_minutes_window_days: int = Field(default=30, gt=0, le=30)
-    """Calendar days per request of an index's one-minute bars. Shioaji refuses a range of more than 30 days."""
 
     history_retry_hours: float = Field(default=2, gt=0)
     """
-    A question Shioaji answered with nothing new, such as the daily quotes of a session it does not serve yet, or one
-    that failed, as every request does while the login is down, is asked again at most this often.
+    A question the exchanges answered with nothing new, such as the reports of a session they do not serve yet, or one
+    that failed, as every request does while a site refuses the address, is asked again at most this often.
     """
 
     history_start_slack_days: int = Field(default=14, ge=0)

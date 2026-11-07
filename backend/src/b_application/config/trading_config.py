@@ -11,7 +11,7 @@ from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrate
 from a_domain.rules.trading.account_value import AccountValueRule, PositionValueRule
 from a_domain.rules.trading.cost import TradingCostRule
 from a_domain.rules.trading.tick import LimitPriceRule, TickSizeRule
-from a_domain.types.enums import ExecutionProvider, OrderMode, ShioajiCredential, SystemEnvironment
+from a_domain.types.enums import ShioajiCredential, SystemEnvironment
 from a_domain.types.values import FormulaId
 
 
@@ -77,7 +77,7 @@ class TechnicalConfig(BaseModel):
     """The developer's strategies, in menu order. Saving settings never changes them."""
 
     initial_strategy_id: FormulaId
-    """What an owner's first settings select for every workflow."""
+    """The active strategy of an owner's first settings."""
 
     @model_validator(mode="after")
     def validate_initial_strategy(self) -> Self:
@@ -88,9 +88,7 @@ class TechnicalConfig(BaseModel):
     @cached_property
     def initial_settings(self) -> TechnicalSettings:
         """An owner's first settings: an independent copy of every built-in strategy, the initial one selected."""
-        return TechnicalSettings(
-            active_strategy_id=self.initial_strategy_id, buzz_strategy_id=self.initial_strategy_id, strategies=self.built_in_strategies
-        )
+        return TechnicalSettings(active_strategy_id=self.initial_strategy_id, strategies=self.built_in_strategies)
 
     @cached_property
     def required_bars(self) -> int:
@@ -150,10 +148,19 @@ class MarketConfig(BaseModel):
 
 
 class TradingConfig(BaseModel):
-    """Execution-provider selection and order-mode settings."""
+    """
+    The limits of every BUY on a real broker (ExecutionProvider.real). Which broker a run orders on is the run's own
+    choice when it starts, the mock account by default. Every value comes from the `trading` section of
+    config/appsetting.yaml.
+    """
 
-    execution_provider: ExecutionProvider = ExecutionProvider.MOCK
-    order_mode: OrderMode = OrderMode.MOCK_ONLY
+    model_config = ConfigDict(use_attribute_docstrings=True)
+
+    max_order_value: float = Field(gt=0, allow_inf_nan=False)
+    """Most NT$ one BUY on a real broker may cost at its limit price, fees aside."""
+
+    max_daily_buy_value: float = Field(gt=0, allow_inf_nan=False)
+    """Most NT$ the BUYs on a real broker of one Taiwan calendar day may cost together at their limit prices."""
 
 
 class MockTradingConfig(BaseModel):
@@ -185,8 +192,8 @@ class ShioajiLogin(BaseModel):
 
 class ShioajiConfig(BaseSettings):
     """
-    The Shioaji (Sinopac) login of a personal site: its realtime quotes, and its broker when
-    trading.execution_provider is shioaji.
+    The Shioaji (Sinopac) login of a personal site: its realtime quotes, and the SinoPac broker of the runs an
+    administrator starts on SinoPac.
 
     Credentials come from the environment or .env only, each field from its ShioajiCredential variable. Which ones a
     login reads, and whether it is simulation, is SystemEnvironment's table: dev and test log in to Shioaji's
@@ -226,8 +233,8 @@ class ShioajiConfig(BaseSettings):
     def login(self, environment: SystemEnvironment) -> ShioajiLogin | None:
         """
         The login with the environment's own credentials, each by name, or None while its key pair is not set. The
-        realtime quotes need only the key pair; validate_trading_environment refuses Shioaji as the broker without every
-        credential the environment reads.
+        realtime quotes need only the key pair; the SinoPac broker exists only with every credential the environment
+        reads (connect_shioaji).
         """
         match environment:
             case SystemEnvironment.DEV | SystemEnvironment.TEST:

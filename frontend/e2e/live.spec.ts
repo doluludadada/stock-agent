@@ -15,7 +15,8 @@ type Settings = { revision: number; strategies: Strategy[] }
 
 async function copyBalanced(page: Page, name: string): Promise<string> {
   await page.getByRole('link', { name: '策略庫' }).first().click()
-  await page.getByRole('article', { name: '平衡型' }).first().getByRole('link', { name: '複製 平衡型' }).click()
+  await page.getByRole('button', { name: '新增策略' }).click()
+  await page.getByRole('menuitem', { name: '複製 平衡型' }).click()
   await expect(page.getByLabel('策略名稱')).toHaveValue('平衡型 副本')
   await page.getByLabel('策略名稱').fill(name)
   await page.getByRole('button', { name: '儲存', exact: true }).first().click()
@@ -26,11 +27,10 @@ async function copyBalanced(page: Page, name: string): Promise<string> {
 test('a built-in strategy copied in the designer saves on the server with all of its rules and reloads', async ({ page, consoleErrors }) => {
   void consoleErrors
   await page.goto('/strategies')
-  await expect(page.getByRole('article', { name: '保守型' })).toBeVisible()
   await expect(page.getByText('登入後保存並使用你自己的策略')).toBeVisible()
   await signIn(page)
   await page.reload()
-  await expect(page.getByRole('main').getByRole('article', { name: '平衡型' }), 'the built-in and the owner copy').toHaveCount(2)
+  await expect(page.getByRole('radiogroup', { name: '使用中的策略' }).getByRole('radio'), 'one choice per built-in').toHaveText(['保守型', '平衡型', '積極型'])
 
   const id = await copyBalanced(page, 'E2E 平衡副本')
   const saved = (await apiGet(page, '/v1/technical-settings')) as Settings
@@ -82,7 +82,7 @@ test('the overview charts the TAIEX as the default index, lists the most traded 
     market: { advancers: number; decliners: number; unchanged: number }
     industries: Record<string, unknown>
   }
-  await page.goto('/market')
+  await page.goto('/')
   await expect(page.getByRole('heading', { name: '市場總覽', level: 1 })).toBeVisible()
 
   const level = new Intl.NumberFormat('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(history.bars.at(-1)!.close)
@@ -119,7 +119,7 @@ test('the overview charts the TAIEX as the default index, lists the most traded 
 
 test('the research target can be changed through the listing search, kept in the address, and set back', async ({ page, consoleErrors }) => {
   void consoleErrors
-  await page.goto('/market')
+  await page.goto('/')
   await page.getByRole('button', { name: '更換' }).click()
   await page.getByRole('combobox').fill('2330')
   await page.getByRole('option', { name: /2330/ }).first().click({ timeout: 120_000 })
@@ -130,7 +130,7 @@ test('the research target can be changed through the listing search, kept in the
   await page.reload()
   await expect(page.getByRole('region', { name: /2330/ }).getByRole('heading', { level: 2 })).toContainText('台積電', { timeout: 60_000 })
   await page.getByRole('link', { name: '改回加權指數' }).click()
-  await expect(page).toHaveURL(/\/market$/)
+  await expect(page).toHaveURL(/\/$/)
   await expect(page.getByRole('region', { name: /加權指數/ }).getByRole('heading', { level: 2 })).toContainText('指數 · 預設')
 })
 
@@ -139,11 +139,9 @@ test('after switching the strategy in use, the stock page evaluates with the new
   await signIn(page)
   await page.goto('/strategies')
   const activate = async (name: string) => {
-    const card = page.getByRole('region', { name: '我的策略' }).getByRole('article', { name })
-    await expect(card).toBeVisible()
-    const use = card.getByRole('button', { name: '使用這套策略' })
-    if (await use.count()) await use.click()
-    await expect(card.getByText('使用中').first()).toBeVisible()
+    const choice = page.getByRole('radiogroup', { name: '使用中的策略' }).getByRole('radio', { name })
+    if ((await choice.getAttribute('aria-checked')) !== 'true') await choice.click()
+    await expect(choice).toHaveAttribute('aria-checked', 'true')
   }
   const evaluatedWith = async (name: string) => {
     await page.getByRole('button', { name: '搜尋股票' }).click()
@@ -163,7 +161,7 @@ test('after switching the strategy in use, the stock page evaluates with the new
 test('a card whose request fails says so and loads on retry, and going offline is announced', async ({ page }) => {
   let failing = true
   await page.route('**/v1/market/most-traded', (route) => (failing ? route.fulfill({ status: 503, json: { detail: 'The exchange listing is unavailable.' } }) : route.continue()))
-  await page.goto('/market')
+  await page.goto('/')
   const most = page.getByRole('region', { name: '成交熱絡' })
   await expect(most.getByText('無法載入成交排行')).toBeVisible({ timeout: 30_000 })
   await expect(most.getByText('行情資料暫時無法取得，請稍後再試。')).toBeVisible()
@@ -206,7 +204,7 @@ test('search finds a listed stock, its page shows real bars and the backend eval
 test('a specific-stock run starts after confirming its AI cost, ends, and keeps its report', async ({ page, consoleErrors }) => {
   void consoleErrors
   await signIn(page)
-  await page.goto('/')
+  await page.goto('/runs')
   await page.getByLabel('要分析的股票代號').fill('2330')
   await page.getByLabel('要分析的股票代號').press('Enter')
   await expect(page.getByRole('alertdialog')).toContainText('每檔一次付費 AI 呼叫')
@@ -237,7 +235,7 @@ const VIEWPORTS = [
   { name: 'desktop', width: 1440, height: 900 },
   { name: 'mobile', width: 390, height: 844 },
 ]
-const PAGES = ['/', '/market', '/strategies', '/valuation', '/watchlist', '/account', '/admin/settings', '/stocks/2330']
+const PAGES = ['/', '/runs', '/strategies', '/strategies/new', '/valuation', '/watchlist', '/account', '/admin/settings', '/stocks/2330']
 
 for (const viewport of VIEWPORTS) {
   test(`${viewport.name}: every page fits without horizontal overflow, in both themes`, async ({ page, consoleErrors }) => {
@@ -257,7 +255,7 @@ for (const viewport of VIEWPORTS) {
 
 test('English, light theme, keyboard skip link and focus', async ({ page, consoleErrors }) => {
   void consoleErrors
-  await page.goto('/market')
+  await page.goto('/')
   await page.getByRole('button', { name: '語言' }).click()
   await page.getByRole('menuitem', { name: 'English' }).click()
   await expect(page.getByRole('heading', { name: 'Market overview', level: 1 })).toBeVisible()

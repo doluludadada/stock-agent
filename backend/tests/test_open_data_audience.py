@@ -1,13 +1,14 @@
 """
 A public deployment (audience public) runs on open-licensed data only. Through the real wiring it never builds the
-broker history cache, news site, PTT, MOPS, web search or Shioaji adapter and reads its daily history and index trend
-from the open-data archive alone, with the broker's cache beside it untouched; a specific-stock run completes without an
-article and without an AI call. Startup refuses it on a real broker. Its Web API and its CLI refuse Buzz and Intraday,
-which order on realtime quotes, and the valuation, which reads MOPS; menu 4 offers no manual BUY. Its AI step reads a
-stock's archived material information and financials, and decides a stock with neither on its technical score alone.
-Its runs say how far the archive's warm-up has come, and the market overview can read it, a stock's archived financials
-and the open data's attribution. A personal deployment keeps every source; without a Shioaji login it reads its daily
-history from the archive too, and its Web API refuses Buzz and Intraday as a public one does.
+history cache of the exchanges' own reports, news site, PTT, MOPS, web search or Shioaji adapter and reads its daily
+history and index trend from the open-data archive alone, with the history cache beside it untouched; a specific-stock
+run completes without an article and without an AI call. Startup refuses it on a real broker. Its Web API and its CLI
+refuse Buzz and Intraday, which order on realtime quotes, and the valuation, which reads MOPS; menu 4 offers no manual
+BUY. Its AI step reads a stock's archived material information and financials, and decides a stock with neither on its
+technical score alone. Its runs say how far the archive's warm-up has come, and the market overview can read it, a
+stock's archived financials and the open data's attribution. A personal deployment keeps every source; without a Shioaji
+login it still reads its daily history from the exchanges' reports, and its Web API refuses Buzz and Intraday as a
+public one does.
 """
 
 import asyncio
@@ -41,20 +42,11 @@ from a_domain.types.enums import (
     InformationSource,
     MarketIndex,
     MarketType,
-    OrderMode,
-    SettingsFile,
     SystemEnvironment,
 )
 from a_domain.types.values import FiscalQuarter
 from b_application.config.app_config import AppConfig, DbConfig
-from b_application.config.settings_loader import (
-    InvalidSettingsError,
-    TradingSetupError,
-    get_project_root,
-    load_settings,
-    startup_settings,
-    validate_trading_environment,
-)
+from b_application.config.settings_loader import get_project_root, load_settings, validate_trading_environment
 from b_application.config.trading_config import ShioajiConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.ohlcv_dto import OhlcvDTO
@@ -63,13 +55,14 @@ from c_infrastructure.feed.news.yahoo_tw_news_provider import YahooTwNewsProvide
 from c_infrastructure.feed.ptt_provider import PttProvider
 from c_infrastructure.feed.tavily_provider import TavilySearchAdapter
 from c_infrastructure.market.cached_price_provider import CachedPriceProvider
+from c_infrastructure.market.exchange_daily_reports import ExchangeDailyReports
 from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider
 from c_infrastructure.market.shioaji_quote_provider import ShioajiQuoteProvider
 from c_infrastructure.system.attempt_log import MemoryAttemptLog
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
 from d_presentation import dependencies
 from d_presentation.cli import archive_closes as archive_command, terminal
-from d_presentation.dependencies import ProcessState, open_runtime
+from d_presentation.dependencies import ProcessState, connect_shioaji, open_runtime
 from d_presentation.web.schemas import AudienceResponse
 
 pytestmark = pytest.mark.asyncio
@@ -121,6 +114,7 @@ def asked(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
 CLOSED_SOURCES = (
     CachedPriceProvider,
+    ExchangeDailyReports,
     ShioajiQuoteProvider,
     CnyesNewsProvider,
     YahooTwNewsProvider,
@@ -129,8 +123,8 @@ CLOSED_SOURCES = (
     TavilySearchAdapter,
 )
 """
-Every adapter of a source whose terms a public site breaks: Shioaji's history and quotes, cnyes, Yahoo news, PTT, MOPS,
-Tavily.
+Every adapter of a source whose terms a public site breaks: the exchanges' own reports and their history cache,
+Shioaji's quotes, cnyes, Yahoo news, PTT, MOPS, Tavily.
 """
 
 
@@ -167,7 +161,7 @@ def deployment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, audience: Audien
     shipped = load_settings(get_project_root()).model_copy(update={"project_root": tmp_path, "audience": audience})
     shipped.behavior.enable_web_search = audience == Audience.PERSONAL
     shipped.ai.user_selectable = [*shipped.ai.user_selectable, AiProvider.GROQ]
-    config = environment_setup(shipped, SystemEnvironment.DEV, ExecutionProvider.MOCK, OrderMode.MOCK_ONLY)
+    config = environment_setup(shipped, SystemEnvironment.DEV)
     config.accounts.key = KEY
     config.db = DbConfig(_env_file=None, backend=DatabaseBackend.SQLITE, chroma_persist_path=str(tmp_path / "chroma"))
     validate_trading_environment(config)
@@ -179,7 +173,7 @@ def process() -> ProcessState:
 
 
 async def cache_broker_bars(config: AppConfig, bars: dict[str, list[Ohlcv]]) -> None:
-    """Bars in the broker's history cache (ohlcv_data), as a personal deployment with a Shioaji login left them."""
+    """Bars in the history cache (ohlcv_data), as a personal deployment left them."""
     database = DatabaseConnector(config=config, logger=SilentLogger())
     await database.init_db()
 
@@ -206,8 +200,8 @@ async def test_a_public_deployment_builds_no_closed_source_adapter_and_completes
         history = await runtime.signed_out.load_stock_history("2330", 20)
         taiex = await runtime.signed_out.load_index_history(MarketIndex.TAIEX, 20)
         owner = await runtime.signed_out.set_up_first_administrator("owner", "owner@example.com", SecretStr("a long password"))
-        full_cycle = await runtime.pipeline_for(owner).run_full_cycle()
-        specific = await runtime.pipeline_for(owner).analyse_specific_stocks(["2330"])
+        full_cycle = await runtime.pipeline_for(owner, ExecutionProvider.MOCK).run_full_cycle()
+        specific = await runtime.pipeline_for(owner, ExecutionProvider.MOCK).analyse_specific_stocks(["2330"])
 
     [stock] = history.manual_stocks
     [report] = specific.manual_stocks
@@ -224,25 +218,27 @@ async def test_a_public_deployment_builds_no_closed_source_adapter_and_completes
     assert refused_adapters == []
 
 
-async def test_a_personal_deployment_without_a_shioaji_login_reads_its_history_from_the_archive(
+async def test_a_personal_deployment_without_a_shioaji_login_reads_its_history_from_the_exchanges_reports(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, asked: list[str]
 ) -> None:
     config = deployment(tmp_path, monkeypatch, Audience.PERSONAL)
     config.shioaji = ShioajiConfig(_env_file=None, **config.shioaji.model_dump(include={"poll_interval_seconds", "max_polls"}))
-    cached = [Ohlcv(ts=close_of(date(2026, 10, day)), open=1.0, high=1.0, low=1.0, close=1.0, volume=1) for day in (28, 29)]
+    cached = [
+        Ohlcv(ts=close_of(date(2026, 10, day)), open=1.0, high=1.0, low=1.0, close=1.0, volume=1, change=0.0) for day in (28, 29)
+    ]
     await cache_broker_bars(config, {"2330": cached, "^twse": cached})
 
     async with open_runtime(config, process()) as runtime:
         await runtime.signed_out.archive_daily_closes()
         refreshed = await runtime.signed_out.refresh_daily_history()
         history = await runtime.signed_out.load_stock_history("2330", 20)
-        taiex = await runtime.signed_out.load_index_history(MarketIndex.TAIEX, 20)
 
     [stock] = history.manual_stocks
-    assert (runtime.realtime_quotes, refreshed) == (False, None)
-    assert [(bar.ts, bar.open, bar.close) for bar in stock.ohlcv] == [(close_of(date(2026, 10, 29)), 2420.0, 2415.0)]
-    assert [(bar.ts, bar.close) for bar in taiex] == [(close_of(date(2026, 11, 5)), 41574.72)]
-    assert "The open-data archive holds 2 of the 20 sessions needed" in " ".join(history.stats.errors)
+    reports = [urlsplit(url) for url in asked if urlsplit(url).hostname == "www.twse.com.tw"]
+    assert (runtime.realtime_quotes, refreshed is not None) == (False, True)
+    assert [(bar.ts, bar.close) for bar in stock.ohlcv] == [(close_of(date(2026, 10, 28)), 1.0), (close_of(date(2026, 10, 29)), 1.0)]
+    assert reports and all(report.path.startswith("/rwd/") for report in reports)
+    assert "open-data archive" not in " ".join(history.stats.errors)
 
 
 async def test_a_personal_deployment_builds_the_closed_source_adapters(
@@ -259,7 +255,7 @@ async def test_just_archive_closes_opens_no_broker_no_accounts_key_and_no_ai_on_
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, asked: list[str], refused_adapters: list[str], screen: io.StringIO
 ) -> None:
     personal = deployment(tmp_path, monkeypatch, Audience.PERSONAL)
-    config = environment_setup(personal, SystemEnvironment.DEV, ExecutionProvider.SHIOAJI, OrderMode.MOCK_ONLY)
+    config = environment_setup(personal, SystemEnvironment.DEV)
     config.ai = config.ai.model_copy(
         update={"anthropic_api_key": None, "groq_api_key": None, "openai_api_key": None, "nvidia_api_key": None}
     )
@@ -277,37 +273,17 @@ async def test_just_archive_closes_opens_no_broker_no_accounts_key_and_no_ai_on_
     assert "The archive holds 7 dates" in screen.getvalue()
 
 
-@pytest.mark.parametrize("environment", [SystemEnvironment.TEST, SystemEnvironment.PROD])
-async def test_startup_refuses_a_public_deployment_on_a_real_broker_and_allows_a_personal_one(environment: SystemEnvironment) -> None:
-    real_broker = environment_setup(harness_config(), environment, ExecutionProvider.SHIOAJI, OrderMode.DISABLED)
-    validate_trading_environment(real_broker)
+@pytest.mark.parametrize("environment", list(SystemEnvironment))
+async def test_a_public_site_logs_in_to_no_broker_and_offers_only_the_mock_account_whatever_key_pair_it_holds(
+    environment: SystemEnvironment, refused_adapters: list[str]
+) -> None:
+    public = environment_setup(harness_config(), environment).model_copy(update={"audience": Audience.PUBLIC})
+    validate_trading_environment(public)
+    state = ProcessState(logger=SilentLogger(), attempt_log=MemoryAttemptLog(), cache_writes=asyncio.Lock())
 
-    with pytest.raises(TradingSetupError) as refused:
-        validate_trading_environment(real_broker.model_copy(update={"audience": Audience.PUBLIC}))
-
-    assert refused.value.path == "trading.execution_provider"
-    assert str(refused.value).startswith("audience public trades only on mock, not shioaji")
-
-
-async def test_the_start_names_the_line_of_a_public_audience_on_a_real_broker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    (tmp_path / "config").symlink_to(CONFIG)
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "placeholder")
-    text = (CONFIG / "appsetting.yaml").read_text(encoding="utf-8")
-    text = text.replace("environment: dev", "environment: test", 1).replace("audience: personal", "audience: public", 1)
-    text = text.replace(
-        "  execution_provider: mock\n  order_mode: mock_only", "  execution_provider: shioaji\n  order_mode: disabled", 1
-    )
-
-    with pytest.raises(InvalidSettingsError) as refused:
-        startup_settings(tmp_path, {SettingsFile.APPSETTING: text})
-
-    [problem] = refused.value.problems
-    assert (problem.path, problem.line) == (
-        "trading.execution_provider",
-        text[: text.index("execution_provider: shioaji")].count("\n") + 1,
-    )
-    assert "audience public trades only on mock" in problem.message
+    assert await connect_shioaji(public, state, TaiwanMarketClock(public.market_hours)) == (None, None)
+    assert public.broker_access_rule().brokers == frozenset({ExecutionProvider.MOCK})
+    assert refused_adapters == []
 
 
 def public_harness(sessions: int) -> CliHarness:

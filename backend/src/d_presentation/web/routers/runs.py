@@ -12,14 +12,15 @@ from d_presentation.web.schemas import (
     ErrorResponse,
     FollowItem,
     FollowResponse,
+    ManualBuyRequest,
     RunAccepted,
     RunResponse,
     SignalResponse,
     StockIdsRequest,
 )
 from d_presentation.web.session import (
+    BrokerPipeline,
     CurrentUser,
-    MockBroker,
     NotFound,
     NothingToFollow,
     OutsideFollowWindow,
@@ -47,8 +48,9 @@ ORDERING: dict[int | str, dict[str, Any]] = {
     status.HTTP_403_FORBIDDEN: {
         "model": ErrorResponse,
         "description": (
-            "mock_broker_only: the execution provider is not the mock broker; use the CLI. realtime_quotes_unavailable: "
-            "the site has no realtime quotes: it uses open data only (audience public), or it has no Shioaji login."
+            "realtime_quotes_unavailable: the site has no realtime quotes: it uses open data only (audience public), or it "
+            "has no Shioaji login. real_broker_refused: a real `broker` asked by a user who is not an administrator. "
+            "broker_unavailable: the real broker has no login up on this site now."
         ),
     },
 }
@@ -64,32 +66,54 @@ async def start_full_cycle(body: Confirmed, pipeline: UserPipeline, user: Curren
 async def start_specific_stock_analysis(
     body: StockIdsRequest, pipeline: UserPipeline, user: CurrentUser, start: RunStarter
 ) -> RunAccepted:
-    """Starts menu 4's analysis of the given stocks. Each stock is one AI call. It never orders; the API offers no manual BUY."""
+    """Starts menu 4's analysis of the given stocks, one AI call each. It never orders: a manual BUY of a reported stock does."""
     stock_ids = body.stock_ids
     return RunAccepted(run_id=start(user, lambda run_id: pipeline.analyse_specific_stocks(stock_ids, run_id=run_id)))
 
 
-@router.post("/buzz-scan", status_code=status.HTTP_202_ACCEPTED, dependencies=[MockBroker, RealtimeQuotes], responses=ORDERING)
-async def start_buzz_scan(body: Confirmed, pipeline: UserPipeline, user: CurrentUser, start: RunStarter) -> RunAccepted:
+@router.post("/buzz-scan", status_code=status.HTTP_202_ACCEPTED, dependencies=[RealtimeQuotes], responses=ORDERING)
+async def start_buzz_scan(body: Confirmed, pipeline: BrokerPipeline, user: CurrentUser, start: RunStarter) -> RunAccepted:
     """
-    Starts menu 2, Social Buzz, on the mock broker only. Its decisions go through the same order gates and trading
-    journal as the CLI's: a stop-loss SELL or a qualified BUY becomes a mock order. One AI call per qualified stock.
+    Starts menu 2, Social Buzz, on the `broker` the query names for the whole run, the mock account by default. Its
+    decisions go through the same order gates and trading journal as the CLI's: a stop-loss SELL or a qualified BUY
+    becomes an order on that broker. One AI call per qualified stock.
     """
     return RunAccepted(run_id=start(user, lambda run_id: pipeline.run_buzz_scan(run_id=run_id)))
 
 
-@router.post("/intraday", status_code=status.HTTP_202_ACCEPTED, dependencies=[MockBroker, RealtimeQuotes], responses=ORDERING)
-async def start_intraday(body: Confirmed, pipeline: UserPipeline, user: CurrentUser, start: RunStarter) -> RunAccepted:
-    """Starts menu 3, Intraday, on the mock broker only, through the same order gates and journal as the CLI's."""
+@router.post("/intraday", status_code=status.HTTP_202_ACCEPTED, dependencies=[RealtimeQuotes], responses=ORDERING)
+async def start_intraday(body: Confirmed, pipeline: BrokerPipeline, user: CurrentUser, start: RunStarter) -> RunAccepted:
+    """Starts menu 3, Intraday, on the `broker` the query names for the whole run, the mock account by default."""
     return RunAccepted(run_id=start(user, lambda run_id: pipeline.run_intraday(run_id=run_id)))
 
 
+MANUAL_BUY: dict[int | str, dict[str, Any]] = {
+    **ORDERING,
+    status.HTTP_404_NOT_FOUND: {"model": ErrorResponse, "description": "The user has no run that reported this stock."},
+}
+
+
+@router.post("/{run_id}/manual-buy", status_code=status.HTTP_202_ACCEPTED, dependencies=[RealtimeQuotes], responses=MANUAL_BUY)
+async def buy_manually(
+    run_id: UUID, body: ManualBuyRequest, pipeline: BrokerPipeline, user: CurrentUser, runs: WorkflowRunsDependency, start: RunStarter
+) -> RunAccepted:
+    """
+    Menu 4's manual BUY of one stock a specific-stock run of the user reported: `quantity` shares on the `broker` the
+    query names, the mock account by default, as a run of its own. It is priced on a fresh realtime quote when it is
+    placed, and every order gate holds it: market open, the quote's age, the broker's limits and its own checks.
+    """
+    _, recorded = await find_run(run_id, pipeline, user, runs)
+    stock = next((stock for stock in recorded.manual_stocks if stock.stock_id == body.stock_id), None) if recorded else None
+
+    if stock is None:
+        raise NotFound(f"Run {run_id} reported no stock {body.stock_id}.")
+
+    quantity = body.quantity
+    return RunAccepted(run_id=start(user, lambda buy_id: pipeline.buy_manually(stock, quantity, run_id=buy_id)))
+
+
 FOLLOW_READ: dict[int | str, dict[str, Any]] = {
-    status.HTTP_403_FORBIDDEN: {
-        "model": ErrorResponse,
-        "description": "mock_broker_only: the execution provider is not the mock broker.",
-    },
-    status.HTTP_404_NOT_FOUND: {"model": ErrorResponse, "description": "The user has no such run."},
+    status.HTTP_404_NOT_FOUND: {"model": ErrorResponse, "description": "The user has no such run."}
 }
 
 FOLLOWING: dict[int | str, dict[str, Any]] = {
@@ -97,10 +121,7 @@ FOLLOWING: dict[int | str, dict[str, Any]] = {
     **FOLLOW_READ,
     status.HTTP_403_FORBIDDEN: {
         "model": ErrorResponse,
-        "description": (
-            "mock_broker_only: the execution provider is not the mock broker. realtime_quotes_unavailable: the site prices "
-            "orders on realtime quotes and has no Shioaji login now."
-        ),
+        "description": "realtime_quotes_unavailable: the site prices orders on realtime quotes and has no Shioaji login now.",
     },
     status.HTTP_409_CONFLICT: {
         "model": ErrorResponse,
@@ -126,7 +147,7 @@ def refuse_follow(status: PipelineStatus) -> None:
             return
 
 
-@router.get("/{run_id}/follow", dependencies=[MockBroker], responses=FOLLOW_READ)
+@router.get("/{run_id}/follow", responses=FOLLOW_READ)
 async def get_run_follow(run_id: UUID, pipeline: UserPipeline) -> FollowResponse:
     """What a follow of the run into the user's mock account may take now, and every follow of it so far. Records nothing."""
     status = await pipeline.load_follow(RunId(run_id))
@@ -141,7 +162,7 @@ async def get_run_follow(run_id: UUID, pipeline: UserPipeline) -> FollowResponse
     )
 
 
-@router.post("/{run_id}/follow", status_code=status.HTTP_202_ACCEPTED, dependencies=[MockBroker, QuoteLogin], responses=FOLLOWING)
+@router.post("/{run_id}/follow", status_code=status.HTTP_202_ACCEPTED, dependencies=[QuoteLogin], responses=FOLLOWING)
 async def follow_run(run_id: UUID, body: Confirmed, pipeline: UserPipeline, user: CurrentUser, start: RunStarter) -> RunAccepted:
     """
     Follows the run's open decisions into the user's mock account, as a run of its own: each BUY with its shares, each

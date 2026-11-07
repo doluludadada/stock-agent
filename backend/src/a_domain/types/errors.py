@@ -19,11 +19,11 @@ class ListingUnavailableError(RuntimeError):
 
 
 class SettingsConflictError(RuntimeError):
-    """The settings file changed after the caller read it: another tab or an editor saved first. Read it again."""
+    """The settings changed after the caller read them: a reload, or another save that wrote a file first. Read them again."""
 
 
 class SettingsEditError(ValueError):
-    """The edit cannot be written as it is, such as a file larger than the editor takes. Nothing was written. 422."""
+    """A change the settings form cannot write in place, or a file larger than the editor takes. Nothing was written. 422."""
 
 
 class SettingsFileRefused(PermissionError):
@@ -31,11 +31,11 @@ class SettingsFileRefused(PermissionError):
 
 
 class SettingsFileMissing(FileNotFoundError):
-    """The settings file, or the backup named, is not there. 404, said in words: the error never names a server path."""
+    """The settings file is not there. 404, said in words: the error never names a server path."""
 
 
 class PasswordRequired(PermissionError):
-    """A save or a restore of a settings file came without the administrator's password. Nothing was written. 403."""
+    """A save of the settings came without the administrator's password. Nothing was written. 403."""
 
 
 class PasswordRefused(PermissionError):
@@ -61,14 +61,18 @@ class SignInThrottled(PermissionError):
 
 
 class RealBrokerRefused(PermissionError):
-    """A user without USE_REAL_BROKER on an installation whose broker is real. The Web answers 403; the CLI never meets it."""
+    """A user without USE_REAL_BROKER asked for a Pipeline on a real broker. The Web answers 403; the CLI never offers one."""
+
+
+class BrokerUnavailable(LookupError):
+    """A real broker that has no login up on this site now, or that the site's audience does not offer. The Web answers 403."""
 
 
 class RealtimeQuotesUnavailable(PermissionError):
     """
     The deployment uses open data only (audience public), which has no realtime quote, or it has no Shioaji login, and
-    every order is priced on one. The open-data archive, and the price source of a personal site without a Shioaji
-    login, raise it when asked for a quote. On a public site the Web answers it with 403 before Buzz or Intraday
+    every order is priced on one. The open-data archive, which also answers the quotes of a personal site without a
+    Shioaji login, raises it when asked for a quote. On a public site the Web answers it with 403 before Buzz or Intraday
     starts, and the CLI refuses those menus with the same code.
     """
 
@@ -82,7 +86,7 @@ class MopsUnavailable(PermissionError):
 
 
 class RegistrationClosed(PermissionError):
-    """Registration is switched off, the installation trades on a real broker, or no administrator is set up yet. 403."""
+    """Registration is switched off, or no administrator is set up yet. 403."""
 
 
 class AlreadySetUpError(RuntimeError):

@@ -16,11 +16,11 @@ from a_domain.model.trading.account import Account, Position
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.rules.trading.follow import FollowRule, FollowWindowRule, OpenDecisionsRule
+from a_domain.rules.trading.order_rule import BrokerLink
 from a_domain.types.enums import (
     Audience,
     ExecutionProvider,
     FollowRefusal,
-    OrderMode,
     OrderPricing,
     OrderStatus,
     SignalSource,
@@ -41,7 +41,6 @@ def full_cycle(workflow: Workflow = Workflow.FULL_CYCLE, finished: bool = True) 
     return SystemStats(
         workflow=workflow,
         execution_provider=ExecutionProvider.MOCK,
-        order_mode=OrderMode.MOCK_ONLY,
         start_time=FRIDAY_CLOSE + timedelta(hours=7),
         end_time=FRIDAY_CLOSE + timedelta(hours=7, minutes=20) if finished else None,
     )
@@ -132,7 +131,7 @@ async def test_a_follow_buys_the_runs_decision_at_a_fresh_quote_and_names_the_ru
     [order] = status.orders
     [follow] = await stack.journal.signals_of(status.stats.run_id)
     account = await stack.broker.get_account()
-    [(trade, source)] = await stack.journal.trades(account.opened_at, 10, 0)
+    [(trade, source)] = await stack.journal.trades(ExecutionProvider.MOCK, account.opened_at, 10, 0)
     assert (order.status, order.limit_price, order.filled_quantity) == (OrderStatus.FILLED, 100, 1000)
     assert (follow.source, follow.price_at_signal, follow.followed_decision_id) == (
         SignalSource.FOLLOW,
@@ -252,7 +251,7 @@ async def test_a_reset_reopens_the_account_with_the_new_capital_and_every_decisi
 
     assert (account.cash, account.positions, account.profit) == (500_000, [], 0)
     assert account.opening is not None and account.opening.opened_at == stack.clock.current
-    assert await stack.journal.trades(account.opened_at, 10, 0) == []
+    assert await stack.journal.trades(ExecutionProvider.MOCK, account.opened_at, 10, 0) == []
     assert len(await stack.journal.orders_of((await stack.journal.recent_runs(1))[0].run_id)) == 1
     assert (await stack.pipeline.load_follow(run_id)).follow_refusal is None
 
@@ -288,6 +287,9 @@ class RealBroker:
     async def connect(self) -> None:
         self.calls.append("connect")
 
+    def link(self) -> BrokerLink:
+        return BrokerLink(broker=ExecutionProvider.SHIOAJI, up=True, simulation=True)
+
     async def place_order(self, order: Order) -> Order:
         self.calls.append("place_order")
         raise AssertionError("a follow sent an order to the real broker")
@@ -300,15 +302,16 @@ class RealBroker:
         self.calls.append("refusal_for")
 
 
-async def test_a_follow_orders_in_the_users_mock_account_even_where_the_users_pipeline_holds_a_real_broker(tmp_path) -> None:
+async def test_a_follow_on_a_pipeline_built_for_sinopac_never_reaches_it_and_orders_nothing(tmp_path) -> None:
     real = RealBroker()
-    stack = await open_stack(tmp_path, real_broker=real)
+    stack = await open_stack(tmp_path, real_broker=real, broker=ExecutionProvider.SHIOAJI)
     run_id = await recorded(stack, decision())
 
     candidates = await stack.pipeline.load_follow(run_id)
     status = await followed(stack, run_id)
 
     [order] = status.orders
-    assert (len(candidates.followable_signals), order.status, order.filled_quantity) == (1, OrderStatus.FILLED, 1000)
-    assert (await stack.broker.get_account()).position_for("2330") is not None
+    assert (len(candidates.followable_signals), order.status, order.filled_quantity) == (1, OrderStatus.REJECTED, 0)
+    assert order.reason is not None and order.reason.startswith("BROKER_NOT_CHOSEN: the run chose shioaji")
+    assert (await stack.broker.get_account()).position_for("2330") is None
     assert real.calls == []

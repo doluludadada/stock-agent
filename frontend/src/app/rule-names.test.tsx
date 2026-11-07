@@ -31,7 +31,6 @@ const report = {
 const summary = (strategyId: string) => ({
   workflow: 'specific_stocks',
   execution_provider: 'mock',
-  order_mode: 'mock_only',
   start_time: '2026-11-05T01:00:00Z',
   end_time: '2026-11-05T01:01:00Z',
   total_scanned: 0,
@@ -51,7 +50,7 @@ const summary = (strategyId: string) => ({
 function serve() {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (url === '/v1/technical-settings/built-in-strategies') return json([balanced])
-    if (url === '/v1/technical-settings') return json({ active_strategy_id: 'mine', buzz_strategy_id: 'mine', strategies: [mine], revision: 1 })
+    if (url === '/v1/technical-settings') return json({ active_strategy_id: 'balanced', strategies: [balanced, mine], revision: 1 })
     if (url === `/v1/runs/${RUN}`) return json({ run_id: RUN, state: 'finished', error: null, summary: summary('balanced'), reports: [report] })
     if (url === `/v1/runs/${MY_RUN}`) return json({ run_id: MY_RUN, state: 'finished', error: null, summary: summary('mine'), reports: [report] })
     return json([])
@@ -88,7 +87,7 @@ describe('the built-in strategies’ rule names', () => {
   it('read in Chinese in the rules sheet of the zh-TW library', async () => {
     const user = userEvent.setup()
     await open('zh-TW', [{ path: '/strategies', element: <StrategyLibraryRoute /> }], '/strategies')
-    await user.click(within(await screen.findByRole('article', { name: '平衡型' })).getByRole('button', { name: '查看規則' }))
+    await user.click(await screen.findByRole('button', { name: '查看規則' }))
     const sheet = await screen.findByRole('dialog')
     expect(within(sheet).getByText('股價站上 20 日均線')).toBeVisible()
     expect(sheet.textContent).not.toContain('Price Above MA_20')
@@ -97,7 +96,7 @@ describe('the built-in strategies’ rule names', () => {
   it('stay in English in the English rules sheet', async () => {
     const user = userEvent.setup()
     await open('en', [{ path: '/strategies', element: <StrategyLibraryRoute /> }], '/strategies')
-    await user.click(within(await screen.findByRole('article', { name: 'Balanced' })).getByRole('button', { name: 'View rules' }))
+    await user.click(await screen.findByRole('button', { name: 'View rules' }))
     expect(within(await screen.findByRole('dialog')).getByText('Price Above MA_20')).toBeVisible()
   })
 

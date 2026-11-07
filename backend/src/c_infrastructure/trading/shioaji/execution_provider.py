@@ -21,9 +21,11 @@ from a_domain.ports.market.broker_quote_provider import IBrokerQuoteProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.trading.execution_provider import IBrokerExecutionProvider
 from a_domain.rules.trading.execution import BrokerOutcomeRule, FillRule, LotSplitRule, OrderAcceptanceRule
-from a_domain.types.enums import LotKind, OrderStatus, RejectReason, TimeInForce, TradeAction
+from a_domain.rules.trading.order_rule import BrokerLink
+from a_domain.types.enums import ExecutionProvider, LotKind, OrderStatus, RejectReason, TimeInForce, TradeAction
 from b_application.config.app_config import AppConfig
 from b_application.config.trading_config import ShioajiLogin
+from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection
 
 BROKER = "Shioaji"
 
@@ -100,9 +102,15 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
     """
 
     def __init__(
-        self, client: Shioaji, quotes: IBrokerQuoteProvider[Snapshot], login: ShioajiLogin, config: AppConfig, logger: ILoggingProvider
+        self,
+        connection: ShioajiConnection,
+        quotes: IBrokerQuoteProvider[Snapshot],
+        login: ShioajiLogin,
+        config: AppConfig,
+        logger: ILoggingProvider,
     ) -> None:
-        self._client = client
+        self._connection = connection
+        self._client: Shioaji = connection.client
         self._quotes = quotes
         self._login = login
         self._logger = logger
@@ -141,6 +149,20 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
 
         if not account.signed:
             raise RuntimeError("the stock account has not signed Shioaji's API trading agreement")
+
+    @override
+    def link(self) -> BrokerLink:
+        """
+        Up while the connection's login is the one this adapter's client made and Shioaji has not reported it down: a
+        later runtime that logs in again does so on a new client, and this one's is then gone. The server is the
+        client's own, as the SDK was made.
+        """
+        connection = self._connection
+        return BrokerLink(
+            broker=ExecutionProvider.SHIOAJI,
+            up=connection.up and connection.client is self._client,
+            simulation=self._client.simulation,
+        )
 
     @override
     async def get_account(self) -> Account:

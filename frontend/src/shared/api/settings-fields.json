@@ -1,0 +1,866 @@
+[
+  {
+    "path": "environment",
+    "options": [
+      "dev",
+      "test",
+      "prod"
+    ]
+  },
+  {
+    "path": "audience",
+    "options": [
+      "personal",
+      "public"
+    ]
+  },
+  {
+    "path": "ai.active_model",
+    "options": [
+      "openai",
+      "grok",
+      "gemini",
+      "groq",
+      "nvidia",
+      "claude"
+    ]
+  },
+  {
+    "path": "ai.available_models",
+    "options": []
+  },
+  {
+    "path": "ai.user_selectable",
+    "options": [
+      "openai",
+      "grok",
+      "gemini",
+      "groq",
+      "nvidia",
+      "claude"
+    ]
+  },
+  {
+    "path": "ai.connection_timeout",
+    "options": []
+  },
+  {
+    "path": "ai.temperature",
+    "options": []
+  },
+  {
+    "path": "ai.max_output_tokens",
+    "options": []
+  },
+  {
+    "path": "ai.system_prompt",
+    "options": []
+  },
+  {
+    "path": "ai.rag_injection_prompt",
+    "options": []
+  },
+  {
+    "path": "ai.article_content_length",
+    "options": []
+  },
+  {
+    "path": "api.allowed_hosts",
+    "options": []
+  },
+  {
+    "path": "api.settings_file_max_bytes",
+    "options": []
+  },
+  {
+    "path": "api.settings_backups_kept",
+    "options": []
+  },
+  {
+    "path": "api.settings_build_timeout_seconds",
+    "options": []
+  },
+  {
+    "path": "api.settings_poll_seconds",
+    "options": []
+  },
+  {
+    "path": "api.valuation_cache_minutes",
+    "options": []
+  },
+  {
+    "path": "api.archive_interval_hours",
+    "options": []
+  },
+  {
+    "path": "behavior.log_level",
+    "options": [
+      "TRACE",
+      "DEBUG",
+      "INFO",
+      "SUCCESS",
+      "WARNING",
+      "ERROR",
+      "CRITICAL"
+    ]
+  },
+  {
+    "path": "behavior.enable_web_search",
+    "options": []
+  },
+  {
+    "path": "behavior.enable_x_search",
+    "options": []
+  },
+  {
+    "path": "behavior.enable_inline_citations",
+    "options": []
+  },
+  {
+    "path": "behavior.web_search_max_results",
+    "options": []
+  },
+  {
+    "path": "behavior.web_search_triggers",
+    "options": []
+  },
+  {
+    "path": "behavior.web_search_allowed_domains",
+    "options": []
+  },
+  {
+    "path": "behavior.web_search_excluded_domains",
+    "options": []
+  },
+  {
+    "path": "behavior.x_search_allowed_handles",
+    "options": []
+  },
+  {
+    "path": "behavior.x_search_excluded_handles",
+    "options": []
+  },
+  {
+    "path": "db.backend",
+    "options": [
+      "sqlite",
+      "postgresql"
+    ]
+  },
+  {
+    "path": "db.chroma_persist_path",
+    "options": []
+  },
+  {
+    "path": "chat.reset_commands",
+    "options": []
+  },
+  {
+    "path": "chat.reset_reply",
+    "options": []
+  },
+  {
+    "path": "folder.news_archive_dir",
+    "options": []
+  },
+  {
+    "path": "folder.buzz_archive_dir",
+    "options": []
+  },
+  {
+    "path": "folder.ai_response_dir",
+    "options": []
+  },
+  {
+    "path": "tavily.search_depth",
+    "options": []
+  },
+  {
+    "path": "tavily.connection_timeout",
+    "options": []
+  },
+  {
+    "path": "analysis.technical_weight",
+    "options": []
+  },
+  {
+    "path": "analysis.ai_weight",
+    "options": []
+  },
+  {
+    "path": "analysis.min_combined_score_buy",
+    "options": []
+  },
+  {
+    "path": "analysis.max_combined_score_sell",
+    "options": []
+  },
+  {
+    "path": "analysis.risk_per_trade_pct",
+    "options": []
+  },
+  {
+    "path": "analysis.stop_loss_pct",
+    "options": []
+  },
+  {
+    "path": "analysis.lot_size",
+    "options": []
+  },
+  {
+    "path": "analysis.reason_item_limit",
+    "options": []
+  },
+  {
+    "path": "analysis.article_fetch_limit",
+    "options": []
+  },
+  {
+    "path": "analysis.material_information_days",
+    "options": []
+  },
+  {
+    "path": "analysis.lookback_days",
+    "options": []
+  },
+  {
+    "path": "analysis.history_calendar_days_per_bar",
+    "options": []
+  },
+  {
+    "path": "technical.built_in_strategies",
+    "options": []
+  },
+  {
+    "path": "technical.initial_strategy_id",
+    "options": []
+  },
+  {
+    "path": "notifications.enabled",
+    "options": []
+  },
+  {
+    "path": "notifications.recipients",
+    "options": []
+  },
+  {
+    "path": "prompts.analysis_report_fundamental",
+    "options": []
+  },
+  {
+    "path": "prompts.analysis_report_momentum",
+    "options": []
+  },
+  {
+    "path": "prompts.valuation_explanation",
+    "options": []
+  },
+  {
+    "path": "prompts.social_sentiment",
+    "options": []
+  },
+  {
+    "path": "sentiment.min_confidence",
+    "options": []
+  },
+  {
+    "path": "sentiment.min_opinions",
+    "options": []
+  },
+  {
+    "path": "sentiment.consensus_share",
+    "options": []
+  },
+  {
+    "path": "collect_rules.spam_keywords",
+    "options": []
+  },
+  {
+    "path": "collect_rules.financial_keywords",
+    "options": []
+  },
+  {
+    "path": "collect_rules.buzz_min_mentions",
+    "options": []
+  },
+  {
+    "path": "collect_rules.buzz_min_engagement",
+    "options": []
+  },
+  {
+    "path": "collect_rules.social_article_limit",
+    "options": []
+  },
+  {
+    "path": "collect_rules.ptt_lookback_days",
+    "options": []
+  },
+  {
+    "path": "collect_rules.ptt_tags",
+    "options": []
+  },
+  {
+    "path": "quality.min_chars_stock",
+    "options": []
+  },
+  {
+    "path": "quality.min_chars_news",
+    "options": []
+  },
+  {
+    "path": "quality.min_chars_gossip",
+    "options": []
+  },
+  {
+    "path": "market.fee_rate",
+    "options": []
+  },
+  {
+    "path": "market.tax_rate",
+    "options": []
+  },
+  {
+    "path": "market.etf_tax_rate",
+    "options": []
+  },
+  {
+    "path": "market.bond_etf_tax_exempt_until",
+    "options": []
+  },
+  {
+    "path": "market.min_fee",
+    "options": []
+  },
+  {
+    "path": "market.board_lot_shares",
+    "options": []
+  },
+  {
+    "path": "market.stock_ticks",
+    "options": []
+  },
+  {
+    "path": "market.etf_ticks",
+    "options": []
+  },
+  {
+    "path": "market.tick_float_tolerance",
+    "options": []
+  },
+  {
+    "path": "freshness.realtime_max_lag_minutes",
+    "options": []
+  },
+  {
+    "path": "freshness.history_max_lag_days",
+    "options": []
+  },
+  {
+    "path": "freshness.missing_session_listed_stocks",
+    "options": []
+  },
+  {
+    "path": "freshness.daily_close_max_missed_sessions",
+    "options": []
+  },
+  {
+    "path": "market_hours.opening_auction_start",
+    "options": []
+  },
+  {
+    "path": "market_hours.continuous_start",
+    "options": []
+  },
+  {
+    "path": "market_hours.closing_auction_start",
+    "options": []
+  },
+  {
+    "path": "market_hours.close",
+    "options": []
+  },
+  {
+    "path": "market_hours.settled",
+    "options": []
+  },
+  {
+    "path": "market_data.quote_batch_size",
+    "options": []
+  },
+  {
+    "path": "market_data.quote_request_interval_seconds",
+    "options": []
+  },
+  {
+    "path": "market_data.quote_timeout_seconds",
+    "options": []
+  },
+  {
+    "path": "market_data.history_request_interval_seconds",
+    "options": []
+  },
+  {
+    "path": "market_data.history_timeout_seconds",
+    "options": []
+  },
+  {
+    "path": "market_data.history_backfill_bars",
+    "options": []
+  },
+  {
+    "path": "market_data.history_retry_hours",
+    "options": []
+  },
+  {
+    "path": "market_data.history_start_slack_days",
+    "options": []
+  },
+  {
+    "path": "market_data.listing_cache_hours",
+    "options": []
+  },
+  {
+    "path": "market_data.listing_timeout_seconds",
+    "options": []
+  },
+  {
+    "path": "market_data.search_result_limit",
+    "options": []
+  },
+  {
+    "path": "market_data.most_traded_count",
+    "options": []
+  },
+  {
+    "path": "trading.max_order_value",
+    "options": []
+  },
+  {
+    "path": "trading.max_daily_buy_value",
+    "options": []
+  },
+  {
+    "path": "mock_trading.initial_cash",
+    "options": []
+  },
+  {
+    "path": "mock_trading.max_fill_quantity",
+    "options": []
+  },
+  {
+    "path": "shioaji.poll_interval_seconds",
+    "options": []
+  },
+  {
+    "path": "shioaji.max_polls",
+    "options": []
+  },
+  {
+    "path": "watchlist.automatic_expiry_sessions",
+    "options": []
+  },
+  {
+    "path": "valuation.scenario_spread",
+    "options": []
+  },
+  {
+    "path": "valuation.max_scan_explanations",
+    "options": []
+  },
+  {
+    "path": "valuation.not_investment_advice",
+    "options": []
+  },
+  {
+    "path": "valuation.low_pe_caveat",
+    "options": []
+  },
+  {
+    "path": "valuation.ai_not_provided",
+    "options": []
+  },
+  {
+    "path": "valuation.undervaluation_formula",
+    "options": []
+  },
+  {
+    "path": "valuation.no_fair_price_prompt_rule",
+    "options": []
+  },
+  {
+    "path": "valuation.keep_scenarios_prompt_rule",
+    "options": []
+  },
+  {
+    "path": "valuation.low_pe_prompt_rule",
+    "options": []
+  },
+  {
+    "path": "accounts.daily_ai_calls",
+    "options": []
+  },
+  {
+    "path": "accounts.daily_ai_calls_total",
+    "options": []
+  },
+  {
+    "path": "accounts.registration_open",
+    "options": []
+  },
+  {
+    "path": "accounts.sign_in_failures_per_name",
+    "options": []
+  },
+  {
+    "path": "accounts.sign_in_failures_per_client",
+    "options": []
+  },
+  {
+    "path": "accounts.sign_in_window_minutes",
+    "options": []
+  },
+  {
+    "path": "accounts.registrations_per_client",
+    "options": []
+  },
+  {
+    "path": "accounts.registration_window_minutes",
+    "options": []
+  },
+  {
+    "path": "accounts.settings_password_failures",
+    "options": []
+  },
+  {
+    "path": "accounts.session_days",
+    "options": []
+  },
+  {
+    "path": "accounts.max_concurrent_runs",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.twse_daily_quotes_url",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.tpex_daily_quotes_url",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.twse_index_url",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.twse_index_fields.index",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.twse_index_fields.date",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.twse_index_fields.close",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.twse_index_fields.sign",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.twse_index_fields.change",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.twse_index_fields.taiex",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.tpex_index_url",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.company_profiles",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.industry_names",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.industry_max_age_hours",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.material_information",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.quarter_eps",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.valuation_ratios",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.financial_reports.urls",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.financial_reports.served_date",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.financial_reports.year",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.financial_reports.quarter",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.financial_reports.stock_id",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.financial_reports.company_name",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.financial_reports.summary",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.monthly_revenue",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.exchange_news.url",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.exchange_news.title",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.exchange_news.link",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.exchange_news.date",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.exchange_news.stock_code_pattern",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.daily_reports",
+    "options": []
+  },
+  {
+    "path": "sources.attribution.providers",
+    "options": []
+  },
+  {
+    "path": "sources.attribution.notice",
+    "options": []
+  },
+  {
+    "path": "sources.attribution.license",
+    "options": []
+  },
+  {
+    "path": "sources.attribution.license_url",
+    "options": []
+  },
+  {
+    "path": "sources.mops.eps_url",
+    "options": []
+  },
+  {
+    "path": "sources.mops.eps_form_fields",
+    "options": []
+  },
+  {
+    "path": "sources.mops.twse_market_code",
+    "options": []
+  },
+  {
+    "path": "sources.mops.tpex_market_code",
+    "options": []
+  },
+  {
+    "path": "sources.mops.company_id_header",
+    "options": []
+  },
+  {
+    "path": "sources.mops.eps_header_prefix",
+    "options": []
+  },
+  {
+    "path": "sources.mops.no_data_marker",
+    "options": []
+  },
+  {
+    "path": "sources.mops.request_interval_seconds",
+    "options": []
+  },
+  {
+    "path": "sources.mops.timeout_seconds",
+    "options": []
+  },
+  {
+    "path": "sources.mops.provisional_page_max_age_hours",
+    "options": []
+  },
+  {
+    "path": "sources.mops.filing_deadlines",
+    "options": []
+  },
+  {
+    "path": "sources.mops.filing_grace_days",
+    "options": []
+  },
+  {
+    "path": "sources.ptt.base_url",
+    "options": []
+  },
+  {
+    "path": "sources.ptt.search_path",
+    "options": []
+  },
+  {
+    "path": "sources.ptt.push_tag",
+    "options": []
+  },
+  {
+    "path": "sources.ptt.boo_tag",
+    "options": []
+  },
+  {
+    "path": "sources.ptt.arrow_tag",
+    "options": []
+  },
+  {
+    "path": "sources.ptt.ticker_label_pattern",
+    "options": []
+  },
+  {
+    "path": "sources.ptt.ticker_parenthesized_pattern",
+    "options": []
+  },
+  {
+    "path": "sources.ptt.title_ticker_pattern",
+    "options": []
+  },
+  {
+    "path": "sources.ptt.posting_reminder_marker",
+    "options": []
+  },
+  {
+    "path": "sources.ptt.previous_page_label",
+    "options": []
+  },
+  {
+    "path": "sources.ptt.timeout_seconds",
+    "options": []
+  },
+  {
+    "path": "sources.ptt.max_pages",
+    "options": []
+  },
+  {
+    "path": "sources.ptt.max_body_length",
+    "options": []
+  },
+  {
+    "path": "sources.ptt.archive_excerpt_length",
+    "options": []
+  },
+  {
+    "path": "sources.ptt.user_agent",
+    "options": []
+  },
+  {
+    "path": "sources.ptt.cookie",
+    "options": []
+  },
+  {
+    "path": "sources.news.cnyes_api_url",
+    "options": []
+  },
+  {
+    "path": "sources.news.cnyes_article_url",
+    "options": []
+  },
+  {
+    "path": "sources.news.yahoo_base_url",
+    "options": []
+  },
+  {
+    "path": "sources.news.yahoo_quote_url",
+    "options": []
+  },
+  {
+    "path": "sources.news.cnyes_timeout_seconds",
+    "options": []
+  },
+  {
+    "path": "sources.news.yahoo_timeout_seconds",
+    "options": []
+  },
+  {
+    "path": "sources.news.yahoo_min_headline_length",
+    "options": []
+  },
+  {
+    "path": "sources.news.yahoo_short_paragraph_length",
+    "options": []
+  },
+  {
+    "path": "sources.news.cnyes_user_agent",
+    "options": []
+  },
+  {
+    "path": "sources.news.yahoo_user_agent",
+    "options": []
+  },
+  {
+    "path": "sources.ai.grok_base_url",
+    "options": []
+  },
+  {
+    "path": "sources.ai.groq_base_url",
+    "options": []
+  },
+  {
+    "path": "sources.ai.nvidia_base_url",
+    "options": []
+  },
+  {
+    "path": "sources.ai.tavily_search_url",
+    "options": []
+  },
+  {
+    "path": "sources.line.push_url",
+    "options": []
+  },
+  {
+    "path": "sources.line.multicast_url",
+    "options": []
+  },
+  {
+    "path": "sources.line.multicast_timeout_seconds",
+    "options": []
+  },
+  {
+    "path": "sources.line.sentence_endings",
+    "options": []
+  },
+  {
+    "path": "sources.line.max_message_length",
+    "options": []
+  }
+]

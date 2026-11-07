@@ -15,7 +15,7 @@ from support.web import serve, write
 from trading_stack import MovableClock, SilentLogger
 
 from a_domain.model.chat.message import Message, MessageRole
-from a_domain.types.enums import AiProvider
+from a_domain.types.enums import AiProvider, ExecutionProvider
 from a_domain.types.ids import UserId
 from b_application.config.app_config import AppConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
@@ -60,7 +60,9 @@ async def test_a_run_record_names_the_model_its_user_chose_or_the_default_it_fel
     recorded = {}
 
     for choice in (AiProvider.OPENAI, AiProvider.GEMINI, None):
-        status = await harness.runtime.pipeline_for(replace(MEMBER, ai_model=choice)).analyse_specific_stocks(["2330"])
+        status = await harness.runtime.pipeline_for(replace(MEMBER, ai_model=choice), ExecutionProvider.MOCK).analyse_specific_stocks(
+            ["2330"]
+        )
         recorded[choice] = harness.owners[MEMBER.user_id].journal.runs[status.stats.run_id].ai_model
 
     assert recorded == {

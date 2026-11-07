@@ -2,6 +2,7 @@ export { ApiError, apiRequest, isApiError, type ApiErrorKind, type ErrorCode, ty
 export { hasPermission, session, useHasPermission, useIsSignedIn, useSession, type Permission, type Session, type User } from './session'
 export { runResultsKey, strategyResultsKey } from './query-keys'
 export { allows, useAllows, useAudience, type Audience, type Capability } from './audience'
+export { brokersKey, chosenOffer, MOCK_ONLY, useBrokers, type Broker, type BrokerOffer } from './brokers'
 export {
   marketKeys,
   useArchiveStatus,

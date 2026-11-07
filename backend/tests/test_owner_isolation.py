@@ -29,8 +29,10 @@ from a_domain.model.trading.account import AccountSnapshot, Position
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.model.trading.watchlist import WatchlistEntry
+from a_domain.rules.trading.order_rule import BrokerLink
 from a_domain.types.enums import (
     DatabaseBackend,
+    ExecutionProvider,
     InformationSource,
     OrderType,
     Role,
@@ -184,14 +186,14 @@ async def save_snapshot(owners: Owners) -> None:
     with pytest.raises(IntegrityError):
         await owners.bob.journal.save_snapshot(emptied)
 
-    assert [snapshot.account.cash for snapshot in await owners.alice.journal.snapshots()] == [1_000_000]
+    assert [snapshot.account.cash for snapshot in await owners.alice.journal.snapshots(ExecutionProvider.MOCK)] == [1_000_000]
 
 
 async def snapshots(owners: Owners) -> None:
     await alice_records_a_run(owners)
 
-    assert await owners.bob.journal.snapshots() == []
-    [alices] = await owners.alice.journal.snapshots()
+    assert await owners.bob.journal.snapshots(ExecutionProvider.MOCK) == []
+    [alices] = await owners.alice.journal.snapshots(ExecutionProvider.MOCK)
     assert alices.account.account_id == "alice"
 
 
@@ -332,6 +334,11 @@ async def connect(owners: Owners) -> None:
     assert (await owners.alice.mock_broker.get_account()).cash < 1_000_000
 
 
+async def link(owners: Owners) -> None:
+    """The mock account names no owner in its link: each owner's orders go to that owner's own book."""
+    assert owners.alice.mock_broker.link() == owners.bob.mock_broker.link() == BrokerLink(broker=ExecutionProvider.MOCK)
+
+
 async def get_account(owners: Owners) -> None:
     await alice_buys(owners)
     bobs = await owners.bob.mock_broker.get_account()
@@ -460,8 +467,17 @@ async def trades(owners: Owners) -> None:
     filled.fill(filled.quantity, 100.0, 142, 0, now=AT)
     await owners.alice.journal.save_order(filled)
 
-    assert await owners.bob.journal.trades(None, 10, 0) == []
-    assert [(order.id, run.run_id) for order, run in await owners.alice.journal.trades(None, 10, 0)] == [(filled.id, recorded.run_id)]
+    assert await owners.bob.journal.trades(ExecutionProvider.MOCK, None, 10, 0) == []
+    assert [(order.id, run.run_id) for order, run in await owners.alice.journal.trades(ExecutionProvider.MOCK, None, 10, 0)] == [
+        (filled.id, recorded.run_id)
+    ]
+
+
+async def buy_orders(owners: Owners) -> None:
+    recorded = await alice_records_a_run(owners)
+
+    assert await owners.bob.journal.buy_orders(ExecutionProvider.MOCK, AT) == []
+    assert [order.id for order in await owners.alice.journal.buy_orders(ExecutionProvider.MOCK, AT)] == [recorded.order.id]
 
 
 type Case = Callable[[Owners], Awaitable[None]]
@@ -481,6 +497,7 @@ CASES: dict[str, dict[str, Case]] = {
         "orders_of": orders_of,
         "follows_of": follows_of,
         "trades": trades,
+        "buy_orders": buy_orders,
     },
     "watchlist_repository": {"get_active": get_active, "save": save, "remove": remove},
     "technical_settings_repository": {"load": load, "save": save_settings},
@@ -491,6 +508,7 @@ CASES: dict[str, dict[str, Case]] = {
     },
     "mock_broker": {
         "connect": connect,
+        "link": link,
         "get_account": get_account,
         "place_order": place_order,
         "refusal_for": refusal_for,

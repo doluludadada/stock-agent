@@ -4,6 +4,7 @@ from typing import Protocol
 
 from a_domain.model.trading.account import Account, Position
 from a_domain.model.trading.order import ExchangeOrder, Order
+from a_domain.rules.trading.order_rule import BrokerLink
 from a_domain.types.enums import LotKind, RejectReason
 
 
@@ -21,6 +22,10 @@ class IExecutionProvider(Protocol):
         Readies the broker before the first order or account read: the mock seeds its book, Shioaji checks the account
         on the login the realtime quotes hold and activates its certificate. Raises saying what failed.
         """
+        ...
+
+    def link(self) -> BrokerLink:
+        """Which broker this is and, for a real one, whether its login is up now and on which server. Read right before each send."""
         ...
 
     async def place_order(self, order: Order) -> Order: ...

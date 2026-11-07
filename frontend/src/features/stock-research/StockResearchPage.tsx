@@ -63,12 +63,60 @@ export function StockResearchPage({ code, actions, strategyName, ruleSentences, 
   }
   if (history.isPending) return <Skeleton className="h-[32rem] rounded-2xl" />
   if (history.isError) return <ErrorState error={history.error} title={t('loadFailed')} onRetry={() => void history.refetch()} className="rounded-2xl border bg-card py-12" />
+  if (history.data.bars.length === 0) return <WithoutBars history={history.data} actions={actions} />
   return <Research history={history.data} actions={actions} strategyName={strategyName} ruleSentences={ruleSentences} ruleName={ruleName} />
+}
+
+/** A listed stock whose daily history holds no session yet, as while the history cache fills: one line says so. */
+function WithoutBars({ history, actions }: { history: StockHistory; actions: StockResearchPageProps['actions'] }) {
+  const { t } = useTranslation('research')
+  return (
+    <div className="space-y-5 lg:space-y-6">
+      <StockHeader history={history} actions={actions} />
+      <p className="text-sm text-muted-foreground">{t('noBars')}</p>
+      <FinancialsPanel stockId={history.stock.stock_id} />
+    </div>
+  )
+}
+
+function StockHeader({ history, actions }: { history: StockHistory; actions: StockResearchPageProps['actions'] }) {
+  const { t } = useTranslation('research')
+  const format = useFormat()
+  const summary = useMemo(() => summarize(history.bars, '1M'), [history.bars])
+  const name = history.stock.name ?? history.stock.stock_id
+  return (
+    <header className="space-y-3">
+      <Link to={paths.market} className="-ml-1 inline-flex min-h-11 items-center gap-1.5 rounded-md px-1 text-sm text-muted-foreground hover:text-foreground md:min-h-8">
+        <ArrowLeft aria-hidden className="size-4" />
+        {t('back')}
+      </Link>
+      <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
+        <div className="min-w-0 space-y-2">
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+            <h1 className="display">{name}</h1>
+            <span className="font-mono text-sm text-muted-foreground">{history.stock.stock_id}</span>
+            <Badge variant="outline" className="font-normal text-muted-foreground">
+              {t(`market.${history.stock.market}`)}
+            </Badge>
+          </div>
+          {summary && (
+            <QuoteHeadline
+              value={format.price(summary.close)}
+              change={summary.dayChange?.value ?? null}
+              changeRatio={summary.dayChange?.ratio ?? null}
+              asOf={format.closeOn(summary.date)}
+            />
+          )}
+        </div>
+        {actions && <div className="flex flex-wrap gap-2">{actions({ code: history.stock.stock_id, name })}</div>}
+      </div>
+      <NotAdviceNote />
+    </header>
+  )
 }
 
 function Research({ history, actions, strategyName, ruleSentences, ruleName }: Omit<StockResearchPageProps, 'code'> & { history: StockHistory }) {
   const { t } = useTranslation('research')
-  const format = useFormat()
   const signedIn = useIsSignedIn()
   const technical = useStockTechnical(history.stock.stock_id)
   const overlays = useMemo(
@@ -81,38 +129,11 @@ function Research({ history, actions, strategyName, ruleSentences, ruleName }: O
       })),
     [technical.data, t],
   )
-  const summary = useMemo(() => summarize(history.bars, '1M'), [history.bars])
   const name = history.stock.name ?? history.stock.stock_id
 
   return (
     <div className="space-y-5 lg:space-y-6">
-      <header className="space-y-3">
-        <Link to={paths.market} className="-ml-1 inline-flex min-h-11 items-center gap-1.5 rounded-md px-1 text-sm text-muted-foreground hover:text-foreground md:min-h-8">
-          <ArrowLeft aria-hidden className="size-4" />
-          {t('back')}
-        </Link>
-        <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
-          <div className="min-w-0 space-y-2">
-            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-              <h1 className="display">{name}</h1>
-              <span className="font-mono text-sm text-muted-foreground">{history.stock.stock_id}</span>
-              <Badge variant="outline" className="font-normal text-muted-foreground">
-                {t(`market.${history.stock.market}`)}
-              </Badge>
-            </div>
-            {summary && (
-              <QuoteHeadline
-                value={format.price(summary.close)}
-                change={summary.dayChange?.value ?? null}
-                changeRatio={summary.dayChange?.ratio ?? null}
-                asOf={format.closeOn(summary.date)}
-              />
-            )}
-          </div>
-          {actions && <div className="flex flex-wrap gap-2">{actions({ code: history.stock.stock_id, name })}</div>}
-        </div>
-        <NotAdviceNote />
-      </header>
+      <StockHeader history={history} actions={actions} />
 
       <div className="grid items-start gap-4 lg:gap-5 xl:grid-cols-12">
         <Panel className="xl:col-span-8" title={t('chart.title')} description={t('chart.question')}>

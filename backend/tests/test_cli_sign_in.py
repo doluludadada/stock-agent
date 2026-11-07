@@ -24,7 +24,7 @@ from support.harness import (
     rising_history,
 )
 
-from a_domain.types.enums import Role, UserStatus, WatchlistType
+from a_domain.types.enums import ExecutionProvider, Role, UserStatus, WatchlistType
 from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
 from d_presentation.cli import interactive, terminal
 
@@ -72,7 +72,10 @@ async def test_the_first_start_sets_up_the_administrator_who_takes_over_the_sing
     assert (administrator.user_id, administrator.username, administrator.role) == (LEGACY_OWNER_ID, "hsiu", Role.ADMINISTRATOR)
     assert "Back up secrets/accounts.key with the database now" in screen.getvalue()
     assert "Signed in:          hsiu (administrator)" in screen.getvalue()
-    assert [entry.stock_id for entry in (await harness.runtime.pipeline_for(administrator).load_watchlist()).watchlist] == ["2330"]
+    assert [
+        entry.stock_id
+        for entry in (await harness.runtime.pipeline_for(administrator, ExecutionProvider.MOCK).load_watchlist()).watchlist
+    ] == ["2330"]
 
 
 async def test_the_setup_asks_again_for_a_short_password_or_a_mistyped_second_one(

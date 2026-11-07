@@ -1,12 +1,10 @@
 import asyncio
-import difflib
 import json
 import os
-import re
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, override
+from typing import override
 from uuid import uuid4
 
 from pydantic import TypeAdapter
@@ -17,7 +15,6 @@ from a_domain.types.enums import Audience, SettingsFile, SystemEnvironment
 from a_domain.types.errors import SettingsConflictError, SettingsEditError, SettingsFileMissing, SettingsFileRefused
 from b_application.config.settings_loader import (
     InvalidSettingsError,
-    parsed_document,
     settings_revision,
     settings_texts,
     startup_settings,
@@ -27,15 +24,15 @@ from b_application.config.settings_loader import (
 
 class SettingsFiles(ISettingsFiles):
     """
-    config/appsetting.yaml and config/instructions.yaml, edited in place. A save checks the revision under a lock,
+    config/appsetting.yaml and config/instructions.yaml, written in place. A save checks the revision under a lock,
     copies the old text to <project>/.settings-admin/backups/<file>/, writes the new text to a temporary file next to
     the original with the original's permissions, flushes it to disk and renames it over the original, so a crash
     leaves the old or the new file whole. Each save appends one line to .settings-admin/audit.jsonl before it writes,
     so an audit that cannot be written stops the save with the file and the running app as they were. The admin folder
     is outside config/ and the frontend, created owner-only (0700), and keeps the latest `backups_kept` backups.
 
-    A file that is a symlink, or that resolves outside config/, is refused. The administrator's text is written byte
-    for byte; nothing in a file is ever executed (YAML is read with the safe loader only).
+    A file that is a symlink, or that resolves outside config/, is refused. The new text is written byte for byte;
+    nothing in a file is ever executed (YAML is read with the safe loader only).
     """
 
     def __init__(self, project_root: Path, max_bytes: int, backups_kept: int, logger: ILoggingProvider) -> None:
@@ -132,70 +129,10 @@ class SettingsFiles(ISettingsFiles):
         path.chmod(0o600)
 
     @override
-    async def backups(self, file: SettingsFile) -> list[SettingsBackup]:
-        folder = self._admin_folder / "backups" / file.value
-
-        return [
-            SettingsBackup(
-                backup_id=path.stem,
-                file=file,
-                revision=settings_revision(path.read_text(encoding="utf-8")),
-                created_at=datetime.strptime(path.stem.split("-")[0], "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC),
-            )
-            for path in sorted(folder.glob("*.yaml"), reverse=True)
-        ]
-
-    @override
-    async def backup_text(self, file: SettingsFile, backup_id: str) -> str | None:
-        if not re.fullmatch(r"[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}", backup_id):
-            return None
-
-        path = self._admin_folder / "backups" / file.value / f"{backup_id}.yaml"
-
-        return path.read_text(encoding="utf-8") if path.is_file() and not path.is_symlink() else None
-
-    @override
-    async def audit_entries(self, limit: int) -> list[SettingsAuditEntry]:
-        path = self._admin_folder / "audit.jsonl"
-
-        if not path.exists():
-            return []
-
-        lines = path.read_text(encoding="utf-8").splitlines()[-limit:]
-
-        return [self._audit.validate_python(json.loads(line)) for line in reversed(lines)]
-
-    @override
-    def revision_of(self, text: str) -> str:
-        return settings_revision(text)
-
-    @override
-    def leaves(self, file: SettingsFile, text: str) -> dict[str, Any] | None:
-        try:
-            document = parsed_document(file, text)
-        except InvalidSettingsError:
-            return None
-
-        found: dict[str, Any] = {}
-        pending: list[tuple[str, Any]] = [("", document)]
-
-        while pending:
-            prefix, node = pending.pop()
-
-            if not isinstance(node, Mapping) or not node:
-                found[prefix] = node
-                continue
-
-            pending.extend((f"{prefix}.{key}" if prefix else str(key), value) for key, value in node.items())
-
-        found.pop("", None)
-        return found
-
-    @override
     def check(
-        self, file: SettingsFile, text: str, environment: SystemEnvironment, audience: Audience, host: str
+        self, candidates: Mapping[SettingsFile, str], environment: SystemEnvironment, audience: Audience, host: str
     ) -> tuple[SettingsProblem, ...]:
-        texts = settings_texts(self._project_root, {file: text})
+        texts = settings_texts(self._project_root, candidates)
 
         try:
             validate_editor_reachable(startup_settings(self._project_root, texts, environment, audience), texts, host)
@@ -203,8 +140,3 @@ class SettingsFiles(ISettingsFiles):
             return tuple(error.problems)
 
         return ()
-
-    @override
-    def diff(self, file: SettingsFile, before: str, after: str) -> list[str]:
-        saved, proposed = f"{file.file_name} (saved)", f"{file.file_name} (proposed)"
-        return list(difflib.unified_diff(before.splitlines(), after.splitlines(), saved, proposed, lineterm=""))

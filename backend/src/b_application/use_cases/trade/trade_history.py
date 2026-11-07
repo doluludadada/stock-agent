@@ -6,8 +6,9 @@ from a_domain.ports.trading.trading_journal import ITradingJournal
 
 class TradeHistory:
     """
-    Use Case: The account's trades, newest first: every order that filled at least one share since the mock account
-    opened (every one at a real broker), each with the run whose decision it carried out. It records no run.
+    Use Case: The account's trades, newest first: every order of a run on this broker that filled at least one share
+    since the mock account opened (every one at a real broker), each with the run whose decision it carried out. It
+    records no run.
     """
 
     def __init__(self, execution_provider: IExecutionProvider, journal: ITradingJournal) -> None:
@@ -17,4 +18,4 @@ class TradeHistory:
     async def execute(self, limit: int, offset: int) -> list[tuple[Order, SystemStats]]:
         account = await self._execution_provider.get_account()
 
-        return await self._journal.trades(account.opened_at, limit, offset)
+        return await self._journal.trades(self._execution_provider.link().broker, account.opened_at, limit, offset)

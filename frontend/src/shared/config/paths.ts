@@ -1,9 +1,9 @@
 /** The app's addresses. Features link with these; app/router maps the same paths to their pages. */
 export const paths = {
-  /** The home page. */
-  runs: '/',
+  /** The home page: the market overview. */
+  market: '/',
+  runs: '/runs',
   run: (id: string) => `/runs/${encodeURIComponent(id)}`,
-  market: '/market',
   strategies: '/strategies',
   newStrategy: '/strategies/new',
   copyStrategy: (id: string) => `/strategies/new?from=${encodeURIComponent(id)}`,

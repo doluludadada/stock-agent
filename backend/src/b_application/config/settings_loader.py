@@ -1,7 +1,7 @@
 """
 How the CLI and the Web API load their settings at startup, and refuse an unsafe trading setup. The administrator's
-settings editor validates a candidate file through the same functions, so a saved file is one the app starts with, and
-its form writes a setting into the text through them too.
+settings form takes its fields from the same settings classes, writes each change into the files' text in place here,
+and checks the new texts through the same functions, so a saved file is one the app starts with.
 """
 
 import hashlib
@@ -10,18 +10,19 @@ import sys
 from base64 import urlsafe_b64decode
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import replace
+from datetime import date
 from functools import cache
 from pathlib import Path
 from types import UnionType
 from typing import Any, Union, get_args, get_origin, override
 
 import yaml
-from pydantic import BaseModel, SecretStr, TypeAdapter, ValidationError
+from pydantic import BaseModel, JsonValue, SecretStr, TypeAdapter, ValidationError
 from pydantic.json_schema import GenerateJsonSchema
-from pydantic_core import ErrorDetails, core_schema
+from pydantic_core import ErrorDetails, core_schema, to_jsonable_python
 
-from a_domain.ports.system.settings_files import SettingChange, SettingsProblem, SettingValue
-from a_domain.types.enums import Audience, ExecutionProvider, InstructionKey, OrderMode, SettingsFile, SystemEnvironment
+from a_domain.ports.system.settings_files import SettingChange, SettingField, SettingsEdit, SettingsProblem
+from a_domain.types.enums import Audience, InstructionKey, SettingKind, SettingsFile, SystemEnvironment
 from a_domain.types.errors import SettingsEditError
 from a_domain.types.values import FormulaId
 from b_application.config.app_config import AppConfig
@@ -251,35 +252,53 @@ def locate(texts: Mapping[SettingsFile, str], path: str | None, message: str) ->
     if path is None:
         return SettingsProblem(message=message)
 
+    file, keys = setting_place(path)
+    return locate_in(texts, file, keys, path, message)
+
+
+def setting_place(path: str) -> tuple[SettingsFile, list[str]]:
+    """
+    The file that sets a setting and its keys there: a prompt, or a path below one, in instructions.yaml at its key;
+    anything else in appsetting.yaml along its dotted path.
+    """
     prompt = next((key for key in InstructionKey if path == key.settings_path or path.startswith(f"{key.settings_path}.")), None)
 
     if prompt is not None:
-        return locate_in(texts, SettingsFile.INSTRUCTIONS, [prompt.value], path, message)
+        return SettingsFile.INSTRUCTIONS, [prompt.value]
 
-    return locate_in(texts, SettingsFile.APPSETTING, path.split("."), path, message)
+    return SettingsFile.APPSETTING, path.split(".")
 
 
-def locate_in(texts: Mapping[SettingsFile, str], file: SettingsFile, keys: list[str], path: str, message: str) -> SettingsProblem:
-    """The problem at the start of the deepest of `keys` the file's YAML has, found with yaml.compose, which runs nothing."""
+def locate_in(texts: Mapping[SettingsFile, str], file: SettingsFile, keys: Sequence[str], path: str, message: str) -> SettingsProblem:
+    """The problem at the start of the deepest of `keys` the file's YAML has."""
     try:
-        node = yaml.compose(texts[file])
+        found = key_value_nodes(yaml.compose(texts[file]), keys)
     except yaml.YAMLError:
-        node = None
+        found = []
 
-    mark = None
-
-    for key in keys:
-        child = child_node(node, key)
-
-        if child is None:
-            break
-
-        mark, node = child[0].start_mark, child[1]
-
-    if mark is None:
+    if not found:
         return SettingsProblem(message=message, path=path)
 
+    mark = found[-1][0].start_mark
     return SettingsProblem(message=message, file=file, path=path, line=mark.line + 1, column=mark.column + 1)
+
+
+def key_value_nodes(root: yaml.Node | None, keys: Sequence[str]) -> list[tuple[yaml.Node, yaml.Node]]:
+    """
+    The (key, value) nodes of each of `keys` under `root`, a node yaml.compose read, which runs nothing: from the top,
+    up to the first key it lacks.
+    """
+    found: list[tuple[yaml.Node, yaml.Node]] = []
+    node = root
+
+    for key in keys:
+        if (child := child_node(node, key)) is None:
+            break
+
+        found.append(child)
+        node = child[1]
+
+    return found
 
 
 def child_node(node: yaml.Node | None, key: str) -> tuple[yaml.Node, yaml.Node] | None:
@@ -312,41 +331,178 @@ def settings_schema() -> dict[str, Any]:
     return AppConfig.model_json_schema(schema_generator=SettingsFileSchema)
 
 
-def with_changes(file: SettingsFile, text: str, changes: Sequence[SettingChange]) -> str:
+def settings_fields(documents: Mapping[SettingsFile, Mapping[str, Any]]) -> list[SettingField]:
     """
-    `text` with each change written over its setting's value in place, as YAML the loader reads back as that value:
-    every other character stays, comments and layout included. SettingsEditError, naming the setting but never a value,
-    for a text that does not parse, a path that names no setting the text sets (a missing key or a section), a value of
-    another kind than the one there, or a value that would not read back as written.
+    The administrator's settings form: every setting of appsetting.yaml and every AI prompt of instructions.yaml, in
+    the order of the settings classes, depth first, each with the value `documents` (the files as parsed_document reads
+    them) set, else its default. The fields come from settings_schema(), so a setting a class adds appears without a
+    list kept by hand, and no setting the environment owns or the loader sets is one. A section is followed into its
+    settings; a section with none (line) gives no field.
     """
+    schema = settings_schema()
+    return list(section_fields(schema, schema, "", documents))
+
+
+def section_fields(
+    schema: Mapping[str, Any], section: Mapping[str, Any], prefix: str, documents: Mapping[SettingsFile, Mapping[str, Any]]
+) -> Iterator[SettingField]:
+    for name, node in section.get("properties", {}).items():
+        path = f"{prefix}{name}"
+        value = setting_value(documents, path, node)
+        resolved = schema_node(schema, node, value)
+
+        if "properties" in resolved:
+            yield from section_fields(schema, resolved, f"{path}.", documents)
+            continue
+
+        options = resolved.get("enum") or schema_node(schema, resolved.get("items", {}), None).get("enum", ())
+        yield SettingField(
+            path=path,
+            kind=setting_kind(schema, resolved, value),
+            value=value,
+            options=tuple(str(option) for option in options),
+            minimum=resolved.get("minimum"),
+            maximum=resolved.get("maximum"),
+            exclusive_minimum=resolved.get("exclusiveMinimum"),
+            exclusive_maximum=resolved.get("exclusiveMaximum"),
+            restart_only=resolved.get("restart_only", False),
+        )
+
+
+def setting_value(documents: Mapping[SettingsFile, Mapping[str, Any]], path: str, node: Mapping[str, Any]) -> JsonValue:
+    """
+    The value the file sets at `path` as JSON, so a YAML date is its ISO text and a number key a text; else the
+    schema's default, else None.
+    """
+    file, keys = setting_place(path)
+    value: Any = documents.get(file, {})
+
+    for key in keys:
+        if not isinstance(value, Mapping) or key not in value:
+            return node.get("default")
+
+        value = value[key]
+
+    return to_jsonable_python(value)
+
+
+def schema_node(schema: Mapping[str, Any], node: Mapping[str, Any], value: object) -> dict[str, Any]:
+    """
+    The schema a setting's value is read by: its $ref followed, the setting's own keys over the definition's, and of
+    several kinds (anyOf) the one that is not null, else the first whose JSON type the value has, else the first.
+    """
+    resolved = dict(node)
+
+    while "$ref" in resolved:
+        reference = resolved.pop("$ref")
+        resolved = {**schema["$defs"][reference.rsplit("/", 1)[1]], **resolved}
+
+    if "anyOf" not in resolved:
+        return resolved
+
+    branches = [schema_node(schema, branch, value) for branch in resolved.pop("anyOf") if branch.get("type") != "null"]
+    chosen = branches[0] if len(branches) == 1 else next((branch for branch in branches if has_json_type(value, branch)), branches[0])
+    return {**chosen, **resolved}
+
+
+def has_json_type(value: object, node: Mapping[str, Any]) -> bool:
+    """The value is of the node's JSON type; a whole number is a number, and an integer too."""
+    kind = kind_of(value)
+    return node.get("type") == kind or (node.get("type") == "integer" and kind == "number" and isinstance(value, int))
+
+
+def setting_kind(schema: Mapping[str, Any], node: Mapping[str, Any], value: JsonValue) -> SettingKind:
+    """How the form shows a setting `node` reads: an enum is a CHOICE, and a map a STRUCTURE."""
+    if "enum" in node:
+        return SettingKind.CHOICE
+
+    match node.get("type"):
+        case "array":
+            return list_kind(schema_node(schema, node.get("items", {}), None), value)
+        case "boolean":
+            return SettingKind.SWITCH
+        case "integer":
+            return SettingKind.INTEGER
+        case "number":
+            return SettingKind.NUMBER
+        case "string":
+            return SettingKind.TEXT
+        case _:
+            return SettingKind.STRUCTURE
+
+
+def list_kind(items: Mapping[str, Any], value: JsonValue) -> SettingKind:
+    """
+    A list's: CHOICES of an enum's members; LINES of scalars, or of the texts or numbers the file writes where the
+    settings read objects (technical.built_in_strategies names strategy ids the loader reads into strategies); any
+    other list is a STRUCTURE.
+    """
+    if "enum" in items:
+        return SettingKind.CHOICES
+
+    if items.get("type") in ("string", "integer", "number", "boolean"):
+        return SettingKind.LINES
+
+    written_as_scalars = isinstance(value, list) and bool(value) and all(isinstance(item, str | int | float) for item in value)
+    return SettingKind.LINES if written_as_scalars else SettingKind.STRUCTURE
+
+
+def with_changes(texts: Mapping[SettingsFile, str], changes: Sequence[SettingChange]) -> list[SettingsEdit]:
+    """
+    The settings form's changes written into `texts`, the text of every settings file: the edit of each file they
+    change, with the settings it changes. A change to the value its field shows changes nothing. SettingsEditError,
+    naming the setting but never a value, for a path that is no field of the form, or a change with_change cannot write.
+    """
+    documents = {file: editable_document(file, text) for file, text in texts.items()}
+    shown = {field.path: field.value for field in settings_fields(documents)}
+    edited, changed = dict(texts), {file: dict[str, None]() for file in texts}
+
     for change in changes:
-        text = with_change(file, text, change)
+        if change.path not in shown:
+            raise SettingsEditError(f"{change.path} is no setting of the settings form")
 
-    return text
+        if shown[change.path] == change.value:
+            continue
+
+        file, keys = setting_place(change.path)
+        edited[file] = with_change(file, edited[file], keys, change.value)
+        shown[change.path], changed[file][change.path] = change.value, None
+
+    return [
+        SettingsEdit(
+            file=file,
+            base_revision=settings_revision(texts[file]),
+            text=edited[file],
+            revision=settings_revision(edited[file]),
+            changed=tuple(changed[file]),
+        )
+        for file in texts
+        if edited[file] != texts[file]
+    ]
 
 
-def with_change(file: SettingsFile, text: str, change: SettingChange) -> str:
-    path, document = ".".join(change.path), editable_document(file, text)
-    section, key, node = section_of(document, change.path), change.path[-1], value_node(text, change.path)
+def with_change(file: SettingsFile, text: str, keys: Sequence[str], value: JsonValue) -> str:
+    """
+    `text` with `value` written at `keys` as YAML the loader reads back as that value: over the value there in place,
+    or inserted where edited_texts says; every other character stays, comments and layout included. SettingsEditError
+    for a text that does not parse, a value of another kind than the one the file sets, a setting below a flow mapping
+    or a value that is no mapping, or a value no way of writing reads back as.
+    """
+    path, document = ".".join(keys), editable_document(file, text)
+    section = section_of(document, keys)
+    current = section.get(keys[-1]) if section is not None else None
+    known = to_jsonable_python(current)
 
-    if section is None or key not in section or node is None or isinstance(node, yaml.MappingNode):
-        raise SettingsEditError(f"{path} is not a setting {file.file_name} sets")
+    if None not in (known, value) and kind_of(known) != kind_of(value):
+        raise SettingsEditError(f"{path} holds a value of kind {kind_of(known)} in {file.file_name}, not {kind_of(value)}")
 
-    if section[key] is not None and kind_of(section[key]) != kind_of(change.value):
-        raise SettingsEditError(f"{path} holds a {kind_of(section[key])} in {file.file_name}, not a {kind_of(change.value)}")
+    written = in_file_kinds(value, current)
+    candidates = edited_texts(text, keys, written)
+    expected = with_value(document, keys, written) if candidates else None
+    edited = next((candidate for candidate in candidates if reads_back(file, candidate, expected)), None)
 
-    start, end = value_span(text, node)
-    written = yaml_value(change.value)
-    edited = text[:start] + (written if start < end else f" {written}") + text[end:]
-    section[key] = change.value
-
-    try:
-        read_back = parsed_document(file, edited)
-    except InvalidSettingsError:
-        read_back = None
-
-    if read_back != document:
-        raise SettingsEditError(f"{path} cannot be written in place in {file.file_name}; change it in the text")
+    if edited is None:
+        raise SettingsEditError(f"{path} cannot be written in place in {file.file_name}; change it in the file")
 
     return edited
 
@@ -355,7 +511,7 @@ def editable_document(file: SettingsFile, text: str) -> dict[str, Any]:
     try:
         return parsed_document(file, text)
     except InvalidSettingsError:
-        raise SettingsEditError(f"{file.file_name} does not parse: fix the text before the form writes into it") from None
+        raise SettingsEditError(f"{file.file_name} does not parse: fix it in the file before the form writes into it") from None
 
 
 def section_of(document: dict[str, Any], path: Sequence[str]) -> dict[Any, Any] | None:
@@ -368,15 +524,102 @@ def section_of(document: dict[str, Any], path: Sequence[str]) -> dict[Any, Any] 
     return node if isinstance(node, dict) else None
 
 
-def value_node(text: str, path: Sequence[str]) -> yaml.Node | None:
-    """The YAML node of the value at `path`, found with yaml.compose, which runs nothing; None when a key is missing."""
-    node: yaml.Node | None = yaml.compose(text)
+def with_value(document: dict[str, Any], keys: Sequence[str], value: Any) -> dict[str, Any]:
+    """`document`, changed in place, with `value` at `keys`, and any section it lacks on the way added."""
+    node = document
 
-    for key in path:
-        child = child_node(node, key)
-        node = child[1] if child else None
+    for key in keys[:-1]:
+        node = node.setdefault(key, {})
 
-    return node
+    node[keys[-1]] = value
+    return document
+
+
+def reads_back(file: SettingsFile, text: str, expected: dict[str, Any] | None) -> bool:
+    try:
+        return parsed_document(file, text) == expected
+    except InvalidSettingsError:
+        return False
+
+
+def in_file_kinds(value: JsonValue, current: Any) -> Any:
+    """
+    `value` in the YAML kinds the file writes `current` in, so a change keeps the file's way of writing it: a text for a
+    date as that date, and the keys of a map whose keys are all whole numbers, such as market.stock_ticks, as numbers.
+    """
+    match current, value:
+        case date(), str():
+            try:
+                return date.fromisoformat(value)
+            except ValueError:
+                return value
+        case dict(), dict() if current and all(isinstance(key, int) for key in current):
+            return {int(key) if key.isdecimal() else key: item for key, item in value.items()}
+        case _:
+            return value
+
+
+def edited_texts(text: str, keys: Sequence[str], value: Any) -> list[str]:
+    """
+    `text` with `value` written at `keys`, once for each way writings() offers: in place of the value the text has
+    there, right after its key's colon, or at the value's own place when a comment comes between them; or, for a setting
+    the text does not set, inserted after the last setting of the deepest block mapping on the way, at the column of
+    that mapping's keys, with any section it lacks as a nested block mapping. None for a setting below a flow mapping or
+    below a key whose value is no mapping.
+    """
+    root = yaml.compose(text)
+    found = key_value_nodes(root, keys)
+
+    if len(found) == len(keys):
+        key, node = found[-1]
+        start, end = value_span(text, node)
+        colon = text.index(":", key.end_mark.index) + 1
+        begin = colon if not text[colon:start].strip() else start
+        written = writings(value, node, key.start_mark.column)
+        return [f"{text[:begin]}{writing if begin == colon else writing.lstrip()}{text[end:]}" for writing in written]
+
+    if (place := insertion_place(text, found[-1][1] if found else root)) is None:
+        return []
+
+    position, column = place
+    missing = keys[len(found) :]
+    head = text[:position] + ("\n" if text[:position] and not text[:position].endswith("\n") else "")
+    keys_text = "\n".join(f"{' ' * (column + 2 * depth)}{key}:" for depth, key in enumerate(missing))
+    return [f"{head}{keys_text}{writing}{text[position:]}" for writing in writings(value, None, column + 2 * (len(missing) - 1))]
+
+
+def insertion_place(text: str, parent: yaml.Node | None) -> tuple[int, int] | None:
+    """
+    Where a setting the file lacks goes under `parent`: the end of the line of its last setting, at the column of its
+    keys; the end of a document that holds no setting yet, at column 0; None under a flow mapping or no mapping.
+    """
+    if parent is None:
+        return len(text), 0
+
+    if not isinstance(parent, yaml.MappingNode) or parent.flow_style or not parent.value:
+        return None
+
+    end = value_span(text, parent)[1]
+    newline = text.find("\n", end)
+    return (newline if newline >= 0 else len(text)), parent.value[0][0].start_mark.column
+
+
+def writings(value: Any, node: yaml.Node | None, column: int) -> list[str]:
+    """
+    Each way to write `value` after the colon of a key at `column`, over `node`, the value there (None for a new key),
+    the preferred first: a text of several lines as a literal block; a map or a list in block style on the lines below,
+    at the column of the block collection with items it replaces; anything else, an empty list or map included, in
+    flow style on the key's line; and a text double-quoted, which reads back as whatever it holds, wherever it stands.
+    """
+    if isinstance(value, str):
+        quoted = f" {yaml_value(value, '"')}"
+        return [f" {block_value(value, column)}", quoted] if "\n" in value else [f" {yaml_value(value)}", quoted]
+
+    if isinstance(value, list | dict) and value and isinstance(node, yaml.CollectionNode) and not node.flow_style and node.value:
+        indent = node.start_mark.column
+        return [f"\n{' ' * indent}{block_value(value, indent)}", f" {yaml_value(value)}"]
+
+    return [f" {yaml_value(value)}"]
 
 
 def value_span(text: str, node: yaml.Node) -> tuple[int, int]:
@@ -394,17 +637,40 @@ def value_span(text: str, node: yaml.Node) -> tuple[int, int]:
     return start, max(start, len(text[: last.end_mark.index].rstrip()))
 
 
-def yaml_value(value: SettingValue) -> str:
+def yaml_value(value: Any, style: str | None = None) -> str:
     """
-    One value as flow YAML, never folded, written by the library that reads it back, so a text it would read as another
-    kind, such as `yes` or `12`, is quoted.
+    One value in flow style, never folded, written by the library that reads it back, so a text it would read as
+    another kind, such as `yes` or `12`, is quoted; style '"' double-quotes a text, its line breaks escaped.
     """
-    written = yaml.safe_dump(value, default_flow_style=True, allow_unicode=True, width=sys.maxsize)
-    return written.removesuffix("\n...\n").removesuffix("\n")
+    return dumped(
+        yaml.safe_dump(value, default_flow_style=True, default_style=style, allow_unicode=True, width=sys.maxsize, sort_keys=False)
+    )
+
+
+def block_value(value: Any, column: int) -> str:
+    """
+    `value` in block style: a text as a literal block, its lines two columns past its key's `column`; a map or a list
+    with each line after the first at `column`, the column of the value it replaces.
+    """
+    written = yaml.safe_dump(
+        value,
+        default_flow_style=False,
+        default_style="|" if isinstance(value, str) else None,
+        allow_unicode=True,
+        width=sys.maxsize,
+        sort_keys=False,
+    )
+    first, *rest = dumped(written).split("\n")
+    return "\n".join([first, *(f"{' ' * column}{line}" if line else line for line in rest)])
+
+
+def dumped(written: str) -> str:
+    """What yaml.safe_dump wrote, without the line end it closes the value with, and without its document end marker."""
+    return (written[: -len("...\n")] if written.endswith("\n...\n") else written).removesuffix("\n")
 
 
 def kind_of(value: object) -> str:
-    """A value's kind as JSON names it, so a whole number and a decimal are both a number and the form may write either."""
+    """A value's JSON type, except that a whole number and a decimal are both a number, so the form may write either."""
     match value:
         case bool():
             return "boolean"
@@ -413,7 +679,11 @@ def kind_of(value: object) -> str:
         case str():
             return "string"
         case list():
-            return "list"
+            return "array"
+        case dict():
+            return "object"
+        case None:
+            return "null"
         case _:
             return type(value).__name__
 
@@ -499,34 +769,15 @@ def validate_ai_setup(config: AppConfig, texts: Mapping[SettingsFile, str]) -> N
 
 def validate_trading_environment(config: AppConfig) -> None:
     """
-    Refuses a setup that could send an order nobody meant to send, or use a credential the environment must not see,
-    before any broker or database is contacted. What each environment allows is SystemEnvironment's table, and what
-    each audience allows is Audience's:
+    Refuses a setup that could reach data or a credential the environment must not see, before any broker or database
+    is contacted. What each environment allows is SystemEnvironment's table:
 
-    - the brokers the environment and the audience allow (dev: the mock only; public: the mock only);
-    - the order modes the environment allows (only prod: order mode live);
-    - mock_only order mode needs the mock broker, live needs Shioaji;
     - dev and test refuse to start while a production Shioaji credential is set;
-    - prod refuses SQLite;
-    - Shioaji needs the credentials its environment reads.
-    Order mode disabled never orders, so in test and prod it may read a Shioaji account.
+    - prod refuses SQLite.
+    Which broker a run orders on is the run's own choice, and the order gates check at each order that a real broker's
+    login is on the server the environment trades on.
     """
-    environment, provider, mode = config.environment, config.trading.execution_provider, config.trading.order_mode
-    validate_brokers(config)
-
-    if mode not in environment.order_modes:
-        allowed = " or ".join(other.value for other in SystemEnvironment if mode in other.order_modes)
-        raise TradingSetupError(f"order_mode {mode.value} needs environment {allowed}, not {environment.value}", "trading.order_mode")
-
-    if mode == OrderMode.MOCK_ONLY and provider != ExecutionProvider.MOCK:
-        raise TradingSetupError(
-            f"order_mode mock_only needs execution_provider mock, not {provider.value}. "
-            f"Use order_mode disabled to read the {provider.value} account without ordering",
-            "trading.order_mode",
-        )
-
-    if mode == OrderMode.LIVE and provider != ExecutionProvider.SHIOAJI:
-        raise TradingSetupError(f"order_mode live needs execution_provider shioaji, not {provider.value}", "trading.order_mode")
+    environment = config.environment
 
     if config.db.backend not in environment.databases:
         allowed = " or ".join(sorted(backend.value for backend in environment.databases))
@@ -534,43 +785,11 @@ def validate_trading_environment(config: AppConfig) -> None:
             f"environment {environment.value} needs db.backend {allowed}, not {config.db.backend.value}", "db.backend"
         )
 
-    validate_environment_credentials(config)
-
-
-def validate_brokers(config: AppConfig) -> None:
-    """The broker must be one the environment allows and one the audience allows: a public site never reaches a real account."""
-    environment, audience, provider = config.environment, config.audience, config.trading.execution_provider
-
-    if provider not in environment.brokers:
-        allowed = ", ".join(sorted(broker.value for broker in environment.brokers))
-        raise TradingSetupError(
-            f"environment {environment.value} trades only on {allowed}, not {provider.value}", "trading.execution_provider"
-        )
-
-    if provider not in audience.brokers:
-        allowed = ", ".join(sorted(broker.value for broker in audience.brokers))
-        raise TradingSetupError(
-            f"audience {audience.value} trades only on {allowed}, not {provider.value}: nobody trades in a visitor's account",
-            "trading.execution_provider",
-        )
-
-
-def validate_environment_credentials(config: AppConfig) -> None:
-    """The Shioaji variables the environment must not see, and those its broker needs. Names only, never a value."""
-    environment, given = config.environment, config.shioaji.given()
-
-    if refused := [credential.value for credential in environment.refused_credentials if credential in given]:
+    if refused := [credential.value for credential in environment.refused_credentials if credential in config.shioaji.given()]:
         raise TradingSetupError(
             f"environment {environment.value} refuses to start while {', '.join(refused)} is set: the production Shioaji "
             "credentials belong only in the production machine's environment or .env",
             "environment",
-        )
-
-    needed = environment.shioaji_credentials if config.trading.execution_provider == ExecutionProvider.SHIOAJI else ()
-
-    if missing := [credential.value for credential in needed if credential not in given]:
-        raise TradingSetupError(
-            f"execution_provider shioaji in environment {environment.value} needs {', '.join(missing)} in the environment or .env"
         )
 
 

@@ -4,6 +4,27 @@
  */
 
 export interface paths {
+    "/v1/account/brokers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Brokers
+         * @description The brokers the user may choose for Buzz, Intraday or a manual BUY now, the mock account first, each with what a
+         *     run's confirmation names: a real broker's server and its BUY limits.
+         */
+        get: operations["get_brokers_v1_account_brokers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/account/history": {
         parameters: {
             query?: never;
@@ -13,7 +34,8 @@ export interface paths {
         };
         /**
          * Get Account History
-         * @description Menu 7: the account now, its equity curve, and the account at the end of `as_of`. It never orders and records no run.
+         * @description Menu 7 on the `broker` account, the mock account by default: the account now, its equity curve, and the account at
+         *     the end of `as_of`. It never orders and records no run.
          */
         get: operations["get_account_history_v1_account_history_get"];
         put?: never;
@@ -55,30 +77,11 @@ export interface paths {
         };
         /**
          * Get Trades
-         * @description Every order that filled at least one share since the mock account opened, newest first, each with the run whose
-         *     decision it carried out: a follow's with the run it followed. Ask for limit + 1 to know of a next page.
+         * @description Every order of a run on the `broker` account (the mock account by default) that filled at least one share, since
+         *     the mock account opened or every one at a real broker, newest first, each with the run whose decision it carried
+         *     out: a follow's with the run it followed. Ask for limit + 1 to know of a next page.
          */
         get: operations["get_trades_v1_account_trades_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/admin/audit": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Settings Audit
-         * @description The latest saves and restores, newest first: when, which file, by whom, which revisions and which settings. No value.
-         */
-        get: operations["get_settings_audit_v1_admin_audit_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -95,163 +98,23 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get Settings Overview
-         * @description Every settings file with its revision on disk and the one the server runs on, an edit on disk the server refused and
-         *     why, how many earlier settings still finish runs, and what applies only at a restart.
+         * Get Settings
+         * @description The settings form: each setting by its dotted settings path, in the order of the settings classes, with how the form
+         *     shows it, the value the file on disk sets (else its default, else null), its options and bounds, and whether it
+         *     applies only at a restart. The AI prompts of instructions.yaml are fields at their settings paths, such as
+         *     ai.system_prompt.
          */
-        get: operations["get_settings_overview_v1_admin_settings_get"];
-        put?: never;
+        get: operations["get_settings_v1_admin_settings_get"];
+        /**
+         * Save Settings
+         * @description Writes every change into its settings file in place, every other line, comment and key as it was, opens the app on
+         *     the new files, writes them and runs on them at once, when the app starts with them and the password is the
+         *     administrator's own; or refuses with nothing written and the app as it was. A change to the value its field shows
+         *     is skipped, and changes that change nothing write nothing. Runs that started earlier finish on the settings they
+         *     started with. The answer is the form after the save.
+         */
+        put: operations["save_settings_v1_admin_settings_put"];
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/admin/settings/appsetting/form": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Edit Settings Form
-         * @description The settings form's view of a text of appsetting.yaml: the text with each change written over its setting's value
-         *     in place, every other line, comment and key as it was; every setting the text then sets, by dotted path (null while
-         *     the text does not parse); and the JSON schema of what each setting accepts. Nothing is written: the page checks and
-         *     saves the text it answers like any text the administrator types.
-         */
-        post: operations["edit_settings_form_v1_admin_settings_appsetting_form_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/admin/settings/reload": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Reload Settings
-         * @description The administrator's try again: loads the settings files as they are on disk now, an edit the server refused
-         *     before included, since a refusal can come from outside the files (a database that was down, a broker login that
-         *     failed). The server runs on them when they start, and the answer's `refused` is null; or it keeps its settings,
-         *     and `refused` says why.
-         */
-        post: operations["reload_settings_v1_admin_settings_reload_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/admin/settings/{file}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Settings File
-         * @description The whole file as it is on disk, with its revision and the one the server runs on.
-         */
-        get: operations["get_settings_file_v1_admin_settings__file__get"];
-        /**
-         * Save Settings File
-         * @description Opens the app on the whole new text, writes it and runs on it at once, when the app starts with it, the file is
-         *     still at `revision` and the password is the administrator's own; or refuses with nothing written and the app as it
-         *     was. Runs that started earlier finish on the settings they started with.
-         */
-        put: operations["save_settings_file_v1_admin_settings__file__put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/admin/settings/{file}/backups": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Settings Backups */
-        get: operations["list_settings_backups_v1_admin_settings__file__backups_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/admin/settings/{file}/backups/{backup_id}/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Preview Settings Restore
-         * @description The backup's whole text against the file on disk, reviewed as a save would be. Nothing is written.
-         */
-        post: operations["preview_settings_restore_v1_admin_settings__file__backups__backup_id__preview_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/admin/settings/{file}/backups/{backup_id}/restore": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Restore Settings Backup
-         * @description Puts the backup's whole text back through the same checks, password, startup, backup, audit and swap as a save.
-         */
-        post: operations["restore_settings_backup_v1_admin_settings__file__backups__backup_id__restore_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/admin/settings/{file}/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Preview Settings File
-         * @description The text against the file on disk: its diff, the settings it changes, those applying only at a restart, and its
-         *     problems at their line and column. Nothing is written.
-         */
-        post: operations["preview_settings_file_v1_admin_settings__file__preview_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -541,8 +404,8 @@ export interface paths {
         };
         /**
          * Get Index History
-         * @description One market index's completed daily bars, oldest first, from the daily history the stock pages share: the broker's
-         *     history cache on a site with a Shioaji login, else the open-data archive. Public. Like a stock's history, it
+         * @description One market index's completed daily bars, oldest first, from the daily history the stock pages share: the history
+         *     cache of the exchanges' own reports on a personal site, else the open-data archive. Public. Like a stock's history, it
          *     fetches no realtime quote.
          */
         get: operations["get_index_history_v1_market_indexes__index__get"];
@@ -691,8 +554,9 @@ export interface paths {
         put?: never;
         /**
          * Start Buzz Scan
-         * @description Starts menu 2, Social Buzz, on the mock broker only. Its decisions go through the same order gates and trading
-         *     journal as the CLI's: a stop-loss SELL or a qualified BUY becomes a mock order. One AI call per qualified stock.
+         * @description Starts menu 2, Social Buzz, on the `broker` the query names for the whole run, the mock account by default. Its
+         *     decisions go through the same order gates and trading journal as the CLI's: a stop-loss SELL or a qualified BUY
+         *     becomes an order on that broker. One AI call per qualified stock.
          */
         post: operations["start_buzz_scan_v1_runs_buzz_scan_post"];
         delete?: never;
@@ -732,7 +596,7 @@ export interface paths {
         put?: never;
         /**
          * Start Intraday
-         * @description Starts menu 3, Intraday, on the mock broker only, through the same order gates and journal as the CLI's.
+         * @description Starts menu 3, Intraday, on the `broker` the query names for the whole run, the mock account by default.
          */
         post: operations["start_intraday_v1_runs_intraday_post"];
         delete?: never;
@@ -752,7 +616,7 @@ export interface paths {
         put?: never;
         /**
          * Start Specific Stock Analysis
-         * @description Starts menu 4's analysis of the given stocks. Each stock is one AI call. It never orders; the API offers no manual BUY.
+         * @description Starts menu 4's analysis of the given stocks, one AI call each. It never orders: a manual BUY of a reported stock does.
          */
         post: operations["start_specific_stock_analysis_v1_runs_specific_stocks_post"];
         delete?: never;
@@ -799,6 +663,28 @@ export interface paths {
          *     orders on realtime quotes refuses it while it has no Shioaji login, as it does Buzz and Intraday.
          */
         post: operations["follow_run_v1_runs__run_id__follow_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/runs/{run_id}/manual-buy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Buy Manually
+         * @description Menu 4's manual BUY of one stock a specific-stock run of the user reported: `quantity` shares on the `broker` the
+         *     query names, the mock account by default, as a run of its own. It is priced on a fresh realtime quote when it is
+         *     placed, and every order gate holds it: market open, the quote's age, the broker's limits and its own checks.
+         */
+        post: operations["buy_manually_v1_runs__run_id__manual_buy_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -854,9 +740,9 @@ export interface paths {
         };
         /**
          * Get Technical Settings
-         * @description The owner's strategies and which one each workflow uses, with the revision a save must carry. The first read
-         *     copies every built-in strategy for the owner. A workflow already running keeps the strategy it started with. A
-         *     save that lands during the read answers 409: read again.
+         * @description The owner's strategies and the active one, which every workflow uses, with the revision a save must carry. The
+         *     first read copies every built-in strategy for the owner. A workflow already running keeps the strategy it started
+         *     with. A save that lands during the read answers 409: read again.
          */
         get: operations["get_technical_settings_v1_technical_settings_get"];
         /**
@@ -1081,7 +967,6 @@ export interface components {
             /** Live Stock Ids */
             live_stock_ids: string[];
             opening: components["schemas"]["AccountOpening"] | null;
-            order_mode: components["schemas"]["OrderMode"];
             /** Profit */
             profit: number | null;
         };
@@ -1239,7 +1124,6 @@ export interface components {
             /** Registration Open */
             registration_open: boolean;
         };
-        BackupId: string;
         BarsAgo: number;
         /** BollingerIndicator */
         BollingerIndicator: {
@@ -1266,6 +1150,20 @@ export interface components {
             decliners: number;
             /** Unchanged */
             unchanged: number;
+        };
+        /**
+         * BrokerResponse
+         * @description A broker the signed-in user may choose for a run now, as a run's confirmation names it: the mock account always,
+         *     SinoPac for an administrator while the site's login is up.
+         */
+        BrokerResponse: {
+            broker: components["schemas"]["ExecutionProvider"];
+            /** Max Daily Buy Value */
+            max_daily_buy_value: number | null;
+            /** Max Order Value */
+            max_order_value: number | null;
+            /** Simulation */
+            simulation: boolean | null;
         };
         /**
          * Comparison
@@ -1399,7 +1297,7 @@ export interface components {
          *     refused file, a user who is not an administrator and an installation on a real broker.
          * @enum {string}
          */
-        ErrorCode: "sign_in_required" | "sign_in_refused" | "sign_in_throttled" | "registration_closed" | "setup_code_refused" | "already_set_up" | "user_exists" | "last_administrator" | "unknown_host" | "app_request_required" | "administrators_only" | "real_broker_refused" | "mock_broker_only" | "realtime_quotes_unavailable" | "mops_unavailable" | "password_required" | "password_refused" | "settings_file_refused" | "settings_file_missing" | "settings_conflict" | "settings_edit_refused" | "settings_refused" | "technical_settings_conflict" | "ai_model_not_offered" | "run_in_progress" | "too_many_runs" | "nothing_to_follow" | "outside_follow_window" | "listing_unavailable" | "not_found" | "invalid_request" | "body_too_large" | "request_refused";
+        ErrorCode: "sign_in_required" | "sign_in_refused" | "sign_in_throttled" | "registration_closed" | "setup_code_refused" | "already_set_up" | "user_exists" | "last_administrator" | "unknown_host" | "app_request_required" | "administrators_only" | "real_broker_refused" | "broker_unavailable" | "realtime_quotes_unavailable" | "mops_unavailable" | "password_required" | "password_refused" | "settings_file_refused" | "settings_file_missing" | "settings_conflict" | "settings_edit_refused" | "settings_refused" | "technical_settings_conflict" | "ai_model_not_offered" | "run_in_progress" | "too_many_runs" | "nothing_to_follow" | "outside_follow_window" | "listing_unavailable" | "not_found" | "invalid_request" | "body_too_large" | "request_refused";
         /**
          * ErrorResponse
          * @description Every refusal: `detail` in words for a person, `code` for the client to switch on.
@@ -1411,6 +1309,8 @@ export interface components {
         };
         /**
          * ExecutionProvider
+         * @description A broker a run may order on, chosen when the run starts. Its properties are the one table of what each broker
+         *     needs; the order gates, the wiring and the pages read them, and nothing else decides by broker.
          * @enum {string}
          */
         ExecutionProvider: "mock" | "shioaji";
@@ -1519,6 +1419,7 @@ export interface components {
          * @enum {string}
          */
         InformationSource: "twse_mops" | "twse_news" | "news_media" | "ptt_stock" | "ptt_gossiping" | "reunion";
+        JsonValue: unknown;
         /**
          * LatestPrice
          * @description The latest price: the run's realtime quote when it has one, else the latest daily close. It has no earlier
@@ -1554,6 +1455,21 @@ export interface components {
             kind: "macd";
             signal: components["schemas"]["IndicatorPeriod"];
             slow: components["schemas"]["IndicatorPeriod"];
+        };
+        /**
+         * ManualBuyRequest
+         * @description A manual BUY of one stock the specific-stock run reported, on the broker the request's `broker` query names.
+         */
+        ManualBuyRequest: {
+            /**
+             * Confirm
+             * @constant
+             */
+            confirm: true;
+            /** Quantity */
+            quantity: number;
+            /** Stock Id */
+            stock_id: string;
         };
         /** MarketBreadth */
         MarketBreadth: {
@@ -1684,7 +1600,8 @@ export interface components {
             /**
              * Change
              * @description The exchange's official change from the session's reference price: the previous close, adjusted on an ex-rights or
-             *     ex-dividend day. The TWSE and TPEX listings and the broker's snapshots report it; a bar without one has None.
+             *     ex-dividend day. The exchanges' daily reports and listings and the broker's snapshots report it; a bar without one,
+             *     or whose exchange compared its close to no reference, has None.
              */
             change: number | null;
             /**
@@ -1802,11 +1719,6 @@ export interface components {
             updated_at: string;
         };
         /**
-         * OrderMode
-         * @enum {string}
-         */
-        OrderMode: "mock_only" | "live" | "disabled";
-        /**
          * OrderPricing
          * @description What prices an order of this deployment, in which phase of the trading day it may be placed and on which brokers.
          *     Audience.order_pricing picks one; OrderGateRule and the follow's window read it, and nothing else decides by it.
@@ -1882,7 +1794,7 @@ export interface components {
         PositiveFiniteFloat: number;
         /**
          * ProblemsResponse
-         * @description A save or a reload the app would not start with (`settings_refused`): nothing was saved; the problems say where and why.
+         * @description Settings the app would not start with (`settings_refused`): nothing was saved; the problems say where and why.
          */
         ProblemsResponse: {
             code: components["schemas"]["ErrorCode"];
@@ -1926,24 +1838,6 @@ export interface components {
             password: components["schemas"]["NewPassword"];
             username: components["schemas"]["Username"];
         };
-        /** ReloadRefused */
-        ReloadRefused: {
-            /**
-             * At
-             * Format: date-time
-             */
-            at: string;
-            /** Previous */
-            previous: {
-                [key: string]: string;
-            };
-            /** Problems */
-            problems: components["schemas"]["SettingsProblem"][];
-            /** Revisions */
-            revisions: {
-                [key: string]: string;
-            };
-        };
         /** ReportSection */
         ReportSection: {
             /** Lines */
@@ -1960,7 +1854,6 @@ export interface components {
             confirm: true;
             initial_cash: components["schemas"]["PositiveFiniteFloat"];
         };
-        Revision: string;
         /**
          * Role
          * @enum {string}
@@ -2034,7 +1927,6 @@ export interface components {
             execution_provider: components["schemas"]["ExecutionProvider"];
             /** Followed Run Id */
             followed_run_id?: string | null;
-            order_mode: components["schemas"]["OrderMode"];
             /** Orders Refused */
             orders_refused: number;
             /** Orders Submitted */
@@ -2088,134 +1980,55 @@ export interface components {
         Score_int_: number;
         /**
          * SettingChange
-         * @description One setting the settings form writes: its keys from the top of the file, and its new value.
+         * @description One setting the settings form changes: the path of its field, and its new value as JSON.
          */
         SettingChange: {
             /** Path */
-            path: string[];
-            value: components["schemas"]["SettingValue"];
+            path: string;
+            value: components["schemas"]["JsonValue"];
         };
-        SettingValue: boolean | number | string | string[];
         /**
-         * SettingsAction
+         * SettingField
+         * @description One setting as the administrator's settings form shows it: its dotted settings path, such as ai.temperature, or an
+         *     AI prompt's, such as ai.system_prompt; how the form shows it; the value the file sets, as JSON, else its default,
+         *     else null; its options and bounds from the settings classes; and whether it applies only at a restart.
+         */
+        SettingField: {
+            /** Exclusive Maximum */
+            exclusive_maximum?: number | null;
+            /** Exclusive Minimum */
+            exclusive_minimum?: number | null;
+            kind: components["schemas"]["SettingKind"];
+            /** Maximum */
+            maximum?: number | null;
+            /** Minimum */
+            minimum?: number | null;
+            /**
+             * Options
+             * @default []
+             */
+            options: string[];
+            /** Path */
+            path: string;
+            /**
+             * Restart Only
+             * @default false
+             */
+            restart_only: boolean;
+            value: components["schemas"]["JsonValue"];
+        };
+        /**
+         * SettingKind
+         * @description How the administrator's settings form shows a setting and takes its new value.
          * @enum {string}
          */
-        SettingsAction: "save" | "restore";
-        /** SettingsAuditEntryResponse */
-        SettingsAuditEntryResponse: {
-            action: components["schemas"]["SettingsAction"];
-            /** Actor */
-            actor: string;
-            /** Actor Name */
-            actor_name: string | null;
-            file: components["schemas"]["SettingsFile"];
-            /** From Revision */
-            from_revision: string;
-            /**
-             * Recorded At
-             * Format: date-time
-             */
-            recorded_at: string;
-            /** Settings */
-            settings: string[];
-            /** To Revision */
-            to_revision: string;
-        };
-        /** SettingsBackupResponse */
-        SettingsBackupResponse: {
-            /** Backup Id */
-            backup_id: string;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Revision */
-            revision: string;
-        };
-        /** SettingsDocumentResponse */
-        SettingsDocumentResponse: {
-            status: components["schemas"]["SettingsFileStatusResponse"];
-            /** Text */
-            text: string;
-        };
-        /** SettingsEditResponse */
-        SettingsEditResponse: {
-            /** Applied */
-            applied: boolean;
-            /** Base Revision */
-            base_revision: string;
-            /** Changed */
-            changed: string[];
-            /** Diff */
-            diff: string[];
-            file: components["schemas"]["SettingsFile"];
-            /** Problems */
-            problems: components["schemas"]["SettingsProblem"][];
-            /** Revision */
-            revision: string;
-            /** Running Revision */
-            running_revision: string | null;
-            /** Saved */
-            saved: boolean;
-        };
+        SettingKind: "switch" | "choice" | "choices" | "integer" | "number" | "text" | "lines" | "structure";
         /**
          * SettingsFile
          * @description A settings file in config/ the administrator may edit from the Web. Nothing else on disk can be named.
          * @enum {string}
          */
         SettingsFile: "appsetting" | "instructions";
-        /** SettingsFileStatusResponse */
-        SettingsFileStatusResponse: {
-            file: components["schemas"]["SettingsFile"];
-            /** File Name */
-            file_name: string;
-            /**
-             * Modified At
-             * Format: date-time
-             */
-            modified_at: string;
-            /** Revision */
-            revision: string;
-            /** Running Revision */
-            running_revision: string | null;
-        };
-        /**
-         * SettingsForm
-         * @description A text of appsetting.yaml as the settings form shows it: the text; every setting it sets, by dotted path, a list
-         *     counting as one value (None for a text that does not parse); and the JSON schema of what each setting accepts.
-         */
-        SettingsForm: {
-            /** Schema */
-            schema: {
-                [key: string]: unknown;
-            };
-            /** Text */
-            text: string;
-            /** Values */
-            values: {
-                [key: string]: unknown;
-            } | null;
-        };
-        /** SettingsFormRequest */
-        SettingsFormRequest: {
-            /**
-             * Changes
-             * @default []
-             */
-            changes: components["schemas"]["SettingChange"][];
-            /** Text */
-            text: string;
-        };
-        /** SettingsOverviewResponse */
-        SettingsOverviewResponse: {
-            /** Draining */
-            draining: number;
-            environment: components["schemas"]["SystemEnvironment"];
-            /** Files */
-            files: components["schemas"]["SettingsFileStatusResponse"][];
-            refused: components["schemas"]["ReloadRefused"] | null;
-        };
         /**
          * SettingsProblem
          * @description One reason the app would not start with the settings: what, and where when a settings file names a place. The
@@ -2239,23 +2052,10 @@ export interface components {
             /** Path */
             path?: string | null;
         };
-        /** SettingsRestoreConfirmed */
-        SettingsRestoreConfirmed: {
-            /**
-             * Confirm
-             * @constant
-             */
-            confirm: true;
-            /** Password */
-            password?: string | null;
-            revision: components["schemas"]["Revision"];
-        };
-        /** SettingsRestoreRequest */
-        SettingsRestoreRequest: {
-            revision: components["schemas"]["Revision"];
-        };
         /** SettingsSaveRequest */
         SettingsSaveRequest: {
+            /** Changes */
+            changes: components["schemas"]["SettingChange"][];
             /**
              * Confirm
              * @constant
@@ -2263,15 +2063,6 @@ export interface components {
             confirm: true;
             /** Password */
             password?: string | null;
-            revision: components["schemas"]["Revision"];
-            /** Text */
-            text: string;
-        };
-        /** SettingsTextRequest */
-        SettingsTextRequest: {
-            revision: components["schemas"]["Revision"];
-            /** Text */
-            text: string;
         };
         /**
          * SetupRequest
@@ -2442,14 +2233,6 @@ export interface components {
             warnings: string[];
         };
         /**
-         * SystemEnvironment
-         * @description Which machine the app runs on, and with it what it may trade on. Its properties are the one table of what each
-         *     environment allows; the trading setup check and the broker login read them, and nothing else decides by
-         *     environment. A process takes its environment at start: neither the Web editor nor a reload changes it.
-         * @enum {string}
-         */
-        SystemEnvironment: "dev" | "test" | "prod";
-        /**
          * TechnicalReport
          * @description Result produced by a TechnicalStrategy.
          *
@@ -2511,12 +2294,11 @@ export interface components {
         };
         /**
          * TechnicalSettings
-         * @description One owner's strategies and which one each workflow uses: the Buzz strategy for Buzz, the active one for every
-         *     other workflow. revision counts the owner's saves, so a save from an older read is refused instead of overwriting.
+         * @description One owner's strategies and the active one, which every workflow uses. revision counts the owner's saves, so a save
+         *     from an older read is refused instead of overwriting.
          */
         "TechnicalSettings-Input": {
             active_strategy_id: components["schemas"]["FormulaId"];
-            buzz_strategy_id: components["schemas"]["FormulaId"];
             /**
              * Revision
              * @default 0
@@ -2527,12 +2309,11 @@ export interface components {
         };
         /**
          * TechnicalSettings
-         * @description One owner's strategies and which one each workflow uses: the Buzz strategy for Buzz, the active one for every
-         *     other workflow. revision counts the owner's saves, so a save from an older read is refused instead of overwriting.
+         * @description One owner's strategies and the active one, which every workflow uses. revision counts the owner's saves, so a save
+         *     from an older read is refused instead of overwriting.
          */
         "TechnicalSettings-Output": {
             active_strategy_id: components["schemas"]["FormulaId"];
-            buzz_strategy_id: components["schemas"]["FormulaId"];
             /**
              * Revision
              * @default 0
@@ -2772,9 +2553,30 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    get_brokers_v1_account_brokers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrokerResponse"][];
+                };
+            };
+        };
+    };
     get_account_history_v1_account_history_get: {
         parameters: {
             query?: {
+                broker?: components["schemas"]["ExecutionProvider"];
                 as_of?: string | null;
             };
             header?: never;
@@ -2790,6 +2592,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AccountHistoryResponse"];
+                };
+            };
+            /** @description real_broker_refused: a real broker's account, asked by a user who is not an administrator. broker_unavailable: the real broker has no login up on this site now. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2825,15 +2636,6 @@ export interface operations {
                     "application/json": components["schemas"]["AccountOpening"];
                 };
             };
-            /** @description mock_broker_only: the execution provider is not the mock broker. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
             /** @description run_in_progress: a run of the user is still running. */
             409: {
                 headers: {
@@ -2859,6 +2661,7 @@ export interface operations {
             query?: {
                 limit?: number;
                 offset?: number;
+                broker?: components["schemas"]["ExecutionProvider"];
             };
             header?: never;
             path?: never;
@@ -2875,92 +2678,8 @@ export interface operations {
                     "application/json": components["schemas"]["TradeResponse"][];
                 };
             };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_settings_audit_v1_admin_audit_get: {
-        parameters: {
-            query?: {
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SettingsAuditEntryResponse"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_settings_overview_v1_admin_settings_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SettingsOverviewResponse"];
-                };
-            };
-        };
-    };
-    edit_settings_form_v1_admin_settings_appsetting_form_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SettingsFormRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SettingsForm"];
-                };
-            };
-            /** @description A change the text cannot take (settings_edit_refused): the text does not parse, the path names no setting it sets, or the value is of another kind than the one there. */
-            422: {
+            /** @description real_broker_refused: a real broker's account, asked by a user who is not an administrator. broker_unavailable: the real broker has no login up on this site now. */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2968,30 +2687,6 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-        };
-    };
-    reload_settings_v1_admin_settings_reload_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["Confirmed"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SettingsOverviewResponse"];
-                };
-            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -3003,13 +2698,11 @@ export interface operations {
             };
         };
     };
-    get_settings_file_v1_admin_settings__file__get: {
+    get_settings_v1_admin_settings_get: {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                file: components["schemas"]["SettingsFile"];
-            };
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -3020,27 +2713,25 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SettingsDocumentResponse"];
+                    "application/json": components["schemas"]["SettingField"][];
                 };
             };
-            /** @description Validation Error */
+            /** @description A settings file does not parse (settings_refused); the problem says where. */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["ProblemsResponse"];
                 };
             };
         };
     };
-    save_settings_file_v1_admin_settings__file__put: {
+    save_settings_v1_admin_settings_put: {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                file: components["schemas"]["SettingsFile"];
-            };
+            path?: never;
             cookie?: never;
         };
         requestBody: {
@@ -3055,10 +2746,10 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SettingsEditResponse"];
+                    "application/json": components["schemas"]["SettingField"][];
                 };
             };
-            /** @description A save or a restore without the password (password_required), or with a wrong one (password_refused). */
+            /** @description A save without the password (password_required), or with a wrong one (password_refused). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -3067,7 +2758,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The file changed after the revision the request carries; nothing saved. */
+            /** @description The server reloaded its settings after the request started, or another save wrote a file first (settings_conflict); nothing saved. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -3076,187 +2767,22 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The app would not start with it. */
+            /** @description The app would not start with the new settings (settings_refused, with the problems at their settings paths), or a change names no field of the form or cannot be written in place (settings_edit_refused). */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProblemsResponse"];
+                    "application/json": components["schemas"]["ProblemsResponse"] | components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Too many wrong passwords from this address; Retry-After says when. */
+            /** @description Too many wrong passwords from this address (sign_in_throttled); Retry-After says when. */
             429: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    list_settings_backups_v1_admin_settings__file__backups_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                file: components["schemas"]["SettingsFile"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SettingsBackupResponse"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    preview_settings_restore_v1_admin_settings__file__backups__backup_id__preview_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                file: components["schemas"]["SettingsFile"];
-                backup_id: components["schemas"]["BackupId"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SettingsRestoreRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SettingsEditResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    restore_settings_backup_v1_admin_settings__file__backups__backup_id__restore_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                file: components["schemas"]["SettingsFile"];
-                backup_id: components["schemas"]["BackupId"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SettingsRestoreConfirmed"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SettingsEditResponse"];
-                };
-            };
-            /** @description A save or a restore without the password (password_required), or with a wrong one (password_refused). */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The file changed after the revision the request carries; nothing saved. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The app would not start with it. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemsResponse"];
-                };
-            };
-            /** @description Too many wrong passwords from this address; Retry-After says when. */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    preview_settings_file_v1_admin_settings__file__preview_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                file: components["schemas"]["SettingsFile"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SettingsTextRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SettingsEditResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -3866,7 +3392,9 @@ export interface operations {
     };
     start_buzz_scan_v1_runs_buzz_scan_post: {
         parameters: {
-            query?: never;
+            query?: {
+                broker?: components["schemas"]["ExecutionProvider"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3886,7 +3414,7 @@ export interface operations {
                     "application/json": components["schemas"]["RunAccepted"];
                 };
             };
-            /** @description mock_broker_only: the execution provider is not the mock broker; use the CLI. realtime_quotes_unavailable: the site has no realtime quotes: it uses open data only (audience public), or it has no Shioaji login. */
+            /** @description realtime_quotes_unavailable: the site has no realtime quotes: it uses open data only (audience public), or it has no Shioaji login. real_broker_refused: a real `broker` asked by a user who is not an administrator. broker_unavailable: the real broker has no login up on this site now. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -3977,7 +3505,9 @@ export interface operations {
     };
     start_intraday_v1_runs_intraday_post: {
         parameters: {
-            query?: never;
+            query?: {
+                broker?: components["schemas"]["ExecutionProvider"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3997,7 +3527,7 @@ export interface operations {
                     "application/json": components["schemas"]["RunAccepted"];
                 };
             };
-            /** @description mock_broker_only: the execution provider is not the mock broker; use the CLI. realtime_quotes_unavailable: the site has no realtime quotes: it uses open data only (audience public), or it has no Shioaji login. */
+            /** @description realtime_quotes_unavailable: the site has no realtime quotes: it uses open data only (audience public), or it has no Shioaji login. real_broker_refused: a real `broker` asked by a user who is not an administrator. broker_unavailable: the real broker has no login up on this site now. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4137,15 +3667,6 @@ export interface operations {
                     "application/json": components["schemas"]["FollowResponse"];
                 };
             };
-            /** @description mock_broker_only: the execution provider is not the mock broker. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
             /** @description The user has no such run. */
             404: {
                 headers: {
@@ -4190,7 +3711,7 @@ export interface operations {
                     "application/json": components["schemas"]["RunAccepted"];
                 };
             };
-            /** @description mock_broker_only: the execution provider is not the mock broker. realtime_quotes_unavailable: the site prices orders on realtime quotes and has no Shioaji login now. */
+            /** @description realtime_quotes_unavailable: the site prices orders on realtime quotes and has no Shioaji login now. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4209,6 +3730,79 @@ export interface operations {
                 };
             };
             /** @description nothing_to_follow: no decision of the run is left to follow. outside_follow_window: the market is in a phase in which this site places no order. run_in_progress: another run of this user is still running. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The server runs its most workflows at once; start yours later. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    buy_manually_v1_runs__run_id__manual_buy_post: {
+        parameters: {
+            query?: {
+                broker?: components["schemas"]["ExecutionProvider"];
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManualBuyRequest"];
+            };
+        };
+        responses: {
+            /** @description The run started; poll GET /v1/runs/{run_id}. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunAccepted"];
+                };
+            };
+            /** @description realtime_quotes_unavailable: the site has no realtime quotes: it uses open data only (audience public), or it has no Shioaji login. real_broker_refused: a real `broker` asked by a user who is not an administrator. broker_unavailable: the real broker has no login up on this site now. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The user has no run that reported this stock. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Another run of this user is still running. */
             409: {
                 headers: {
                     [name: string]: unknown;

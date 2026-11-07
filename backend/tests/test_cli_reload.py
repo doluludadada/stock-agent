@@ -42,7 +42,10 @@ def edit(project: Path, old: str, new: str) -> None:
 
 
 def answers(project: Path, during_the_option: tuple[str, str], *, choices: list[str]):
-    """Signs in, picks `choices` in turn at the menu, and edits the file on disk while menu 4 asks for its stocks."""
+    """
+    Signs in, picks `choices` in turn at the menu, orders on the mock account, and edits the file on disk while menu 4
+    asks for its stocks.
+    """
     remaining = list(choices)
 
     def ask(question: str, *args, **kwargs) -> str:
@@ -54,6 +57,9 @@ def answers(project: Path, during_the_option: tuple[str, str], *, choices: list[
 
         if question.startswith("Select an option"):
             return remaining.pop(0)
+
+        if question == "Order on":
+            return "mock"
 
         edit(project, *during_the_option)
         return "2317"
@@ -68,10 +74,10 @@ def confirm(question: str, *args, **kwargs) -> bool:
 async def test_an_edit_during_an_option_waits_for_the_next_round_which_reloads_and_says_so(
     project: Path, screen: io.StringIO, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    harness = build_harness(settings_root=project)
+    harness = build_harness(settings_root=project, sinopac=True)
     harness.list_stock("2317", falling_history(100.0), realtime_price=98.0)
     monkeypatch.setattr(interactive, "open_runtime_switch", lambda: open_harness_switch(harness))
-    ask = answers(project, ("order_mode: mock_only", "order_mode: disabled"), choices=["4", "0"])
+    ask = answers(project, ("max_order_value: 100000", "max_order_value: 90000"), choices=["4", "0"])
 
     with patch.object(Prompt, "ask", ask), patch.object(Confirm, "ask", confirm):
         await interactive.interactive_menu()
@@ -81,31 +87,31 @@ async def test_an_edit_during_an_option_waits_for_the_next_round_which_reloads_a
     assert (order.status, [placed.stock_id for placed in harness.broker.placed]) == (OrderStatus.FILLED, ["2317"])
     assert output.count("Settings reloaded: appsetting.yaml") == 1
     reloaded = output.index("Settings reloaded: appsetting.yaml")
-    assert "Orders:             MOCK ONLY" in output[:reloaded] and "Orders:             DISABLED" in output[reloaded:]
+    assert "each BUY at most 100,000 NT$" in output[:reloaded] and "each BUY at most 90,000 NT$" in output[reloaded:]
 
 
 async def test_an_edit_on_disk_the_app_would_refuse_keeps_the_cli_on_its_settings_and_says_where(
     project: Path, screen: io.StringIO, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    harness = build_harness(settings_root=project)
+    harness = build_harness(settings_root=project, sinopac=True)
     harness.list_stock("2317", falling_history(100.0), realtime_price=98.0)
     monkeypatch.setattr(interactive, "open_runtime_switch", lambda: open_harness_switch(harness))
-    ask = answers(project, ("order_mode: mock_only", "order_mode: sometimes"), choices=["4", "4", "0"])
+    ask = answers(project, ("max_order_value: 100000", "max_order_value: plenty"), choices=["4", "4", "0"])
 
     with patch.object(Prompt, "ask", ask), patch.object(Confirm, "ask", confirm):
         await interactive.interactive_menu()
 
     output = screen.getvalue()
     refused = output.index("The settings files on disk would not start, so the CLI keeps its settings:")
-    assert "trading.order_mode: Input should be" in output[refused:] and "appsetting.yaml line " in output[refused:]
-    assert "Orders:             MOCK ONLY" in output[refused:] and "Settings reloaded" not in output
+    assert "trading.max_order_value: Input should be" in output[refused:] and "appsetting.yaml line " in output[refused:]
+    assert "each BUY at most 100,000 NT$" in output[refused:] and "Settings reloaded" not in output
     assert output.count("would not start") == 1, "the same refused files are not opened and reported again each round"
 
 
 async def test_a_save_made_while_the_menu_waits_reaches_the_ordering_option_chosen_after_it(
     project: Path, screen: io.StringIO, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    harness = build_harness(settings_root=project)
+    harness = build_harness(settings_root=project, sinopac=True)
     harness.list_stock("2317", falling_history(100.0), realtime_price=98.0)
     monkeypatch.setattr(interactive, "open_runtime_switch", lambda: open_harness_switch(harness))
     remaining = ["4", "4", "0"]
@@ -117,11 +123,14 @@ async def test_a_save_made_while_the_menu_waits_reaches_the_ordering_option_chos
         if question == "Username or email":
             return ADMINISTRATOR.username
 
+        if question == "Order on":
+            return "shioaji"
+
         if not question.startswith("Select an option"):
             return "2317"
 
         if len(remaining) == 3:
-            edit(project, "order_mode: mock_only", "order_mode: disabled")
+            edit(project, "max_order_value: 100000", "max_order_value: 1")
 
         return remaining.pop(0)
 
@@ -129,8 +138,7 @@ async def test_a_save_made_while_the_menu_waits_reaches_the_ordering_option_chos
         await interactive.interactive_menu()
 
     output = screen.getvalue()
-    filled = [order for order in harness.journal.orders.values() if order.status == OrderStatus.FILLED]
-    assert (filled, harness.broker.placed) == ([], [])
+    assert (harness.real_broker.placed, harness.broker.placed) == ([], [])
     again = output.index("The settings changed while the menu waited. Choose again on them.")
-    assert "Orders:             MOCK ONLY" in output[:again] and "Orders:             DISABLED" in output[again:]
-    assert output.index("Orders:             DISABLED", again) < output.index("Stock Reports")
+    assert "each BUY at most 100,000 NT$" in output[:again] and "each BUY at most 1 NT$" in output[again:]
+    assert output.index("each BUY at most 1 NT$", again) < output.index("Stock Reports") < output.index("Each BUY at most 1 NT$")

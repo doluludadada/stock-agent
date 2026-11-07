@@ -95,9 +95,9 @@ async def ended(runs: WorkflowRuns, run_id: RunId) -> None:
 
 
 async def drained(switch: RuntimeSwitch) -> None:
-    """Waits until no earlier runtime is still open, as the editor's status reports it."""
+    """Waits until every runtime but the current one has closed."""
     for _ in range(1000):
-        if switch.status.draining == 0:
+        if all(opened.closing is not None and opened.closing.done() for opened in switch.opened[:-1]):
             return
 
         await asyncio.sleep(0)
@@ -116,13 +116,12 @@ async def test_a_reload_while_a_run_holds_the_old_runtime_closes_it_only_after_t
         with switch.hold() as current:
             assert (run.runtime.config.ai.temperature, current.runtime.config.ai.temperature) == (0.7, 0.2)
 
-        assert [opened.closed for opened in opener.opened] == [False, False] and switch.status.draining == 1
+        assert [opened.closed for opened in opener.opened] == [False, False]
 
     await drained(switch)
 
     assert isinstance(reload, SettingsReloaded)
-    assert [opened.closed for opened in opener.opened] == [True, False]
-    assert switch.status.running == reload.revisions and switch.status.draining == 0
+    assert [opened.closed for opened in opener.opened] == [True, False] and switch.running == reload.revisions
 
 
 async def test_a_run_its_request_started_keeps_a_retired_runtime_open_until_the_run_ends(project: Path) -> None:
@@ -140,7 +139,7 @@ async def test_a_run_its_request_started_keeps_a_retired_runtime_open_until_the_
     edit(project, "temperature: 0.7", "temperature: 0.2")
     await switch.reload()
 
-    assert opener.opened[0].closed is False and switch.status.draining == 1
+    assert opener.opened[0].closed is False
 
     finish.set()
     await ended(runs, run_id)
@@ -176,7 +175,7 @@ async def test_a_refused_run_takes_no_hold_and_a_run_cancelled_before_its_first_
 async def test_a_reload_cancelled_after_its_runtime_opened_closes_that_runtime_and_keeps_the_current_one(project: Path) -> None:
     opener = RecordingOpener()
     switch = await started(project, opener)
-    running, asked, never = switch.status.running, asyncio.Event(), asyncio.Event()
+    running, asked, never = switch.running, asyncio.Event(), asyncio.Event()
 
     async def user_count() -> int:
         asked.set()
@@ -195,7 +194,7 @@ async def test_a_reload_cancelled_after_its_runtime_opened_closes_that_runtime_a
     with pytest.raises(asyncio.CancelledError):
         await reload
 
-    assert [opened.closed for opened in opener.opened] == [False, True] and switch.status.running == running
+    assert [opened.closed for opened in opener.opened] == [False, True] and switch.running == running
 
 
 async def test_refresh_twice_changes_nothing_the_second_time(project: Path) -> None:
@@ -213,24 +212,21 @@ async def test_refresh_twice_changes_nothing_the_second_time(project: Path) -> N
 async def test_a_refused_edit_on_disk_keeps_the_runtime_and_is_tried_again_only_when_the_files_change(project: Path) -> None:
     opener = RecordingOpener()
     switch = await started(project, opener)
-    running = switch.status.running
+    running = switch.running
 
-    edit(project, "  order_mode: mock_only", "  order_mode: sometimes")
+    edit(project, "  max_order_value: 100000", "  max_order_value: plenty")
     refused = await switch.reload()
     again = await switch.reload()
 
-    assert isinstance(refused, ReloadRefused) and [problem.path for problem in refused.problems] == ["trading.order_mode"]
+    assert isinstance(refused, ReloadRefused) and [problem.path for problem in refused.problems] == ["trading.max_order_value"]
     assert refused.problems[0].line is not None and again is None
-    assert switch.status.running == running and switch.status.refused == refused
-    assert len(opener.opened) == 1
+    assert switch.running == running and len(opener.opened) == 1
 
-    edit(project, "  order_mode: sometimes", "  order_mode: disabled")
+    edit(project, "  max_order_value: plenty", "  max_order_value: 90000")
     reload = await switch.reload()
 
     with switch.hold() as current:
-        assert reload is not None and current.runtime.config.trading.order_mode.value == "disabled"
-
-    assert switch.status.refused is None
+        assert reload is not None and current.runtime.config.trading.max_order_value == 90_000
 
 
 async def test_a_reload_that_changes_the_audience_is_refused_and_the_runtime_keeps_the_audience_it_started_on(project: Path) -> None:
@@ -262,23 +258,6 @@ async def test_a_runtime_that_fails_to_open_closes_what_it_opened_and_the_curren
 
     with switch.hold() as current:
         assert current.runtime.config.ai.temperature == 0.7
-
-
-async def test_a_retry_loads_refused_files_that_did_not_change_once_the_cause_outside_them_is_gone(project: Path) -> None:
-    opener = RecordingOpener(failure=None)
-    switch = await started(project, opener)
-    opener.failure = ConnectionRefusedError("the database is down")
-
-    edit(project, "temperature: 0.7", "temperature: 0.2")
-    refused, unchanged = await switch.reload(), await switch.reload()
-    opener.failure = None
-    retried = await switch.retry()
-
-    with switch.hold() as current:
-        temperature = current.runtime.config.ai.temperature
-
-    assert isinstance(refused, ReloadRefused) and unchanged is None and isinstance(retried, SettingsReloaded)
-    assert temperature == 0.2 and switch.status.refused is None
 
 
 @pytest.fixture
@@ -317,6 +296,6 @@ async def test_a_reload_onto_a_database_of_an_older_schema_is_refused_and_the_ru
         with switch.hold() as current:
             temperature = current.runtime.config.ai.temperature
 
-    assert refused is not None and temperature == 0.7 and switch.status.draining == 0
+    assert refused is not None and temperature == 0.7
     [problem] = refused.problems
     assert f"The database is at schema version {SCHEMA_VERSION - 1}" in problem.message and "just db-migrate" in problem.message

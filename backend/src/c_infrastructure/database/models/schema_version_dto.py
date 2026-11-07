@@ -244,9 +244,42 @@ async def add_follows_and_drop_yahoo_history(connection: AsyncConnection) -> Non
     await drop_yahoo_history(connection)
 
 
+async def drop_buzz_strategy(connection: AsyncConnection) -> None:
+    """
+    Version 5 to 6: one strategy for the whole site. Buzz runs on the active strategy like every other workflow, so
+    technical_settings loses buzz_strategy_id. Each owner keeps every strategy, the active one and the revision; only
+    the separate Buzz choice goes. SQLite drops a column in place since 3.35, as PostgreSQL does.
+    """
+    await connection.execute(text("ALTER TABLE technical_settings DROP COLUMN buzz_strategy_id"))
+
+
+ORDER_MODE_STEP = {
+    "sqlite": ("ALTER TABLE workflow_runs DROP COLUMN order_mode",),
+    "postgresql": ("ALTER TABLE workflow_runs DROP COLUMN order_mode", "DROP TYPE ordermode"),
+}
+"""drop_order_mode's statements per database backend: the column, and on PostgreSQL the ENUM type only it used."""
+
+
+async def drop_order_mode(connection: AsyncConnection) -> None:
+    """
+    Version 6 to 7: each run chooses its broker when it starts, which workflow_runs.execution_provider records, so the
+    installation's order mode, which every run copied from trading.order_mode, is gone, and workflow_runs.order_mode
+    with it. No other table or column changes, so the step needs no data.
+    """
+    for statement in ORDER_MODE_STEP[connection.dialect.name]:
+        await connection.execute(text(statement))
+
+
 type UpgradeStep = Callable[[AsyncConnection], Awaitable[None]]
 
-UPGRADES: tuple[UpgradeStep, ...] = (record_run_failures, give_rows_their_owner, add_user_ai_model, add_follows_and_drop_yahoo_history)
+UPGRADES: tuple[UpgradeStep, ...] = (
+    record_run_failures,
+    give_rows_their_owner,
+    add_user_ai_model,
+    add_follows_and_drop_yahoo_history,
+    drop_buzz_strategy,
+    drop_order_mode,
+)
 """
 The steps that upgrade an older database in place, oldest first: UPGRADES[n - 1] turns version n into version n + 1. A
 step names the tables and columns it reads as they were at its version, never through today's SQLModel classes.

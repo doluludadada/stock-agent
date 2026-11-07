@@ -16,7 +16,7 @@ test('the navigation and the runs page offer what the site’s audience allows, 
   void consoleErrors
   await signIn(page)
   const site = (await apiGet(page, '/v1/market/audience')) as Audience
-  await page.goto('/')
+  await page.goto('/runs')
   const main = page.getByRole('main')
   await expect(main.getByRole('button', { name: '啟動', exact: true }), 'Full Cycle, specific stocks, and Buzz and Intraday only with realtime quotes').toHaveCount(
     site.realtime_quotes ? 4 : 2,
@@ -41,7 +41,7 @@ test('every page links to the open data’s credit, which names each provider, i
   void consoleErrors
   const attribution = (await apiGet(page, '/v1/market/attribution')) as Attribution
   const site = (await apiGet(page, '/v1/market/audience')) as Audience
-  await page.goto('/market')
+  await page.goto('/')
   const footer = page.getByRole('contentinfo')
   await expect(footer.getByText(/不構成投資建議/)).toBeVisible()
   await footer.getByRole('link', { name: '資料來源與授權' }).click()
@@ -60,7 +60,7 @@ test('on open data the market overview says how far the archive has come until i
   void consoleErrors
   const site = (await apiGet(page, '/v1/market/audience')) as Audience
   const archive = (await apiGet(page, '/v1/market/archive-status')) as { sessions: number; needed: number }
-  await page.goto('/market')
+  await page.goto('/')
   await expect(page.getByRole('heading', { level: 1, name: '市場總覽' })).toBeVisible()
   const warmUp = page.getByRole('region', { name: '開放資料存檔' })
   if (site.open_data_only && archive.sessions < archive.needed) await expect(warmUp).toContainText(`資料累積中 ${archive.sessions}/${archive.needed}`)

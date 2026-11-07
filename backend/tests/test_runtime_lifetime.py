@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 import shioaji
 from pydantic import SecretStr
-from support.fake_broker import FakeBrokerQuotes, session_bar
+from support.fake_daily_history import FakeDailyHistory, session_bar
 from support.fake_shioaji import FakeShioaji
 from support.fakes import RecordingLogger
 from support.settings import environment_setup
@@ -23,7 +23,7 @@ from trading_stack import SilentLogger
 from a_domain.model.market.article import Article
 from a_domain.model.market.stock import Stock
 from a_domain.rules.fundamentals.trailing_eps import QuarterEps
-from a_domain.types.enums import ExecutionProvider, InformationSource, MarketType, OrderMode, SentimentLabel, SystemEnvironment
+from a_domain.types.enums import InformationSource, MarketType, SentimentLabel, SystemEnvironment
 from a_domain.types.values import FiscalQuarter
 from b_application.config.app_config import AppConfig, DbConfig
 from b_application.pipeline import Pipeline
@@ -32,14 +32,8 @@ from c_infrastructure.database.repositories.sentiment_repository import Sentimen
 from c_infrastructure.database.repositories.user_store import AccountsKeyError, SqlUserStore
 from c_infrastructure.system.attempt_log import MemoryAttemptLog
 from c_infrastructure.system.market_clock import TaiwanMarketClock
-from d_presentation.dependencies import (
-    ProcessState,
-    TradingSetupError,
-    build_provider_dependencies,
-    get_project_root,
-    load_settings,
-    open_runtime,
-)
+from d_presentation import dependencies
+from d_presentation.dependencies import ProcessState, build_provider_dependencies, get_project_root, load_settings, open_runtime
 from d_presentation.live_runtime import RuntimeSwitch, collect_daily_data
 
 pytestmark = pytest.mark.asyncio
@@ -59,17 +53,12 @@ def shioaji_test_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, environment: SystemEnvironment = SystemEnvironment.TEST
 ) -> AppConfig:
     """
-    The shipped settings with the environment's Shioaji key pair, over a SQLite file and a Chroma folder in tmp_path: on
-    Shioaji as the broker in test, on the mock broker in dev, the environment the shipped files name.
+    The shipped settings with the environment's Shioaji key pair, over a SQLite file and a Chroma folder in tmp_path: a
+    personal site whose login offers SinoPac on the simulation server.
     """
     monkeypatch.setenv("ANTHROPIC_API_KEY", "placeholder")
     shipped = load_settings(get_project_root()).model_copy(update={"project_root": tmp_path})
-    broker, mode = (
-        (ExecutionProvider.SHIOAJI, OrderMode.DISABLED)
-        if environment == SystemEnvironment.TEST
-        else (ExecutionProvider.MOCK, OrderMode.MOCK_ONLY)
-    )
-    config = environment_setup(shipped, environment, broker, mode)
+    config = environment_setup(shipped, environment)
     config.accounts.key = KEY
     config.db = DbConfig(_env_file=None, backend=config.db.backend, chroma_persist_path=str(tmp_path / "chroma"))
     return config
@@ -113,7 +102,9 @@ async def test_a_startup_step_that_fails_after_the_login_leaves_it_for_the_next_
     assert [(len(client.logins), client.logouts) for client in clients] == [(1, 0)]
 
 
-async def test_a_broker_whose_check_after_the_login_fails_refuses_each_start(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_broker_whose_check_after_the_login_fails_offers_no_sinopac_and_keeps_the_one_login(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     made: list[FakeShioaji] = []
 
     def client(simulation: bool) -> FakeShioaji:
@@ -124,33 +115,31 @@ async def test_a_broker_whose_check_after_the_login_fails_refuses_each_start(tmp
     shared = process()
 
     for _ in range(3):
-        with pytest.raises(TradingSetupError, match="the login returned no stock account"):
-            async with open_runtime(shioaji_test_config(tmp_path, monkeypatch), shared):
-                pass
+        async with open_runtime(shioaji_test_config(tmp_path, monkeypatch), shared) as runtime:
+            assert (runtime.realtime_quotes, runtime.real_broker) == (True, None)
 
     assert [(len(fake.logins), fake.logouts) for fake in made] == [(1, 0)]
 
 
 async def test_two_runtimes_of_one_process_save_the_same_cached_rows_at_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A retired runtime still finishing a run and the current one, over one database: one shared row is saved once."""
-    config = environment_setup(
-        shioaji_test_config(tmp_path, monkeypatch), SystemEnvironment.DEV, ExecutionProvider.MOCK, OrderMode.MOCK_ONLY
-    )
+    config = environment_setup(shioaji_test_config(tmp_path, monkeypatch), SystemEnvironment.DEV)
     shared, clock = process(), TaiwanMarketClock(config.market_hours)
     start, end = clock.history_window(30)
     settled = datetime.combine(clock.last_settled_session(), config.market_hours.close, clock.now().tzinfo)
     sessions = [day for day in (settled.date() - timedelta(days=offset) for offset in range(20)) if day.weekday() < 5]
     stocks = [f"23{attempt:02d}" for attempt in range(10)]
-    broker = FakeBrokerQuotes(
-        sessions={day: {stock: session_bar(day, 100.0) for stock in stocks} for day in sessions},
+    reports = FakeDailyHistory(
+        sessions={day: {stock: session_bar(day, 100.0, change=0.0) for stock in stocks} for day in sessions},
         index={market: sorted(sessions) for market in MarketType},
     )
+    monkeypatch.setattr(dependencies, "ExchangeDailyReports", lambda **_: reports)
     databases = [DatabaseConnector(config=config, logger=SilentLogger()) for _ in range(2)]
     runtimes = []
 
     for database in databases:
         await database.init_db()
-        runtimes.append(await build_provider_dependencies(config, database, shared, clock, KEY, broker, None))
+        runtimes.append(await build_provider_dependencies(config, database, shared, clock, KEY, None, None))
 
     failures = []
 

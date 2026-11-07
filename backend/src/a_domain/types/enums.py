@@ -63,7 +63,7 @@ class MarketIndex(StrEnum):
 
     @property
     def market(self) -> MarketType:
-        """The exchange that publishes it, under which the open-data archive and the broker's history cache keep its closes."""
+        """The exchange that publishes it, under which the open-data archive and the exchanges' history cache keep its closes."""
         match self:
             case MarketIndex.TAIEX:
                 return MarketType.TWSE
@@ -154,12 +154,39 @@ class OrderStatus(StrEnum):
     def is_open(self) -> bool:
         return bool(self.next_statuses)
 
+    @property
+    def fill_final(self) -> bool:
+        """
+        Its filled quantity is all it will ever fill. An open order may still fill, and a FAILED one may have filled
+        at the broker whatever it recorded.
+        """
+        return not self.is_open and self != OrderStatus.FAILED
+
 
 class RejectReason(StrEnum):
     """Why an order was REJECTED before acceptance: by the app's order gate or by the broker's pre-trade checks."""
 
-    ORDER_MODE_DISABLED = auto()
-    ORDER_MODE_MISMATCH = auto()
+    BROKER_NOT_CHOSEN = auto()
+    """The order would reach another broker than the one its run chose when it started."""
+
+    BROKER_NOT_OFFERED = auto()
+    """The site's audience or its order pricing offers no such broker: a public site orders on the mock account only."""
+
+    REAL_BROKER_REFUSED = auto()
+    """A real broker's order of a user who is not, as saved at the send, an active administrator (USE_REAL_BROKER)."""
+
+    BROKER_LOGIN_DOWN = auto()
+    """The real broker's login failed or went down before the send."""
+
+    BROKER_SERVER_MISMATCH = auto()
+    """The real broker's login is on another server than the environment trades on (SystemEnvironment.shioaji_simulation)."""
+
+    ORDER_VALUE_LIMIT = auto()
+    """A real broker's BUY costs more than trading.max_order_value at its limit price, or has no limit price to value."""
+
+    DAILY_BUY_LIMIT = auto()
+    """A real broker's BUY would take the day's BUYs on it past trading.max_daily_buy_value."""
+
     MARKET_CLOSED = auto()
     SESSION_IN_PROGRESS = auto()
     """An official close prices an order only while no session trades: during one, that close is no longer the price."""
@@ -362,42 +389,54 @@ class ShioajiCredential(StrEnum):
 
 
 class ExecutionProvider(StrEnum):
+    """
+    A broker a run may order on, chosen when the run starts. Its properties are the one table of what each broker
+    needs; the order gates, the wiring and the pages read them, and nothing else decides by broker.
+    """
+
     MOCK = auto()
+    """The user's own mock account, kept in the app's database: the default everywhere, and a follow's only broker."""
+
     SHIOAJI = auto()
+    """SinoPac through the Shioaji API, on the site's own login: its simulation server in dev and test, the real account in prod."""
+
+    @property
+    def label(self) -> str:
+        match self:
+            case ExecutionProvider.MOCK:
+                return "the mock account"
+            case ExecutionProvider.SHIOAJI:
+                return "SinoPac"
+
+    @property
+    def real(self) -> bool:
+        """
+        A broker outside the app, reached on a login: only a user with USE_REAL_BROKER may order on it, only while its
+        login is up on the server the environment trades on, and every BUY is held to the trading limits.
+        """
+        match self:
+            case ExecutionProvider.MOCK:
+                return False
+            case ExecutionProvider.SHIOAJI:
+                return True
 
 
 class SystemEnvironment(StrEnum):
     """
-    Which machine the app runs on, and with it what it may trade on. Its properties are the one table of what each
-    environment allows; the trading setup check and the broker login read them, and nothing else decides by
-    environment. A process takes its environment at start: neither the Web editor nor a reload changes it.
+    Which machine the app runs on, and with it which Shioaji server it trades on. Its properties are the one table of
+    what each environment allows; the trading setup check, the broker login and the order gates read them, and
+    nothing else decides by environment. A process takes its environment at start: neither the Web editor nor a
+    reload changes it.
     """
 
     DEV = auto()
-    """A developer's machine: the mock broker only. Realtime quotes come from Shioaji's simulation server, with the *_TEST key pair."""
+    """A developer's machine: Shioaji's simulation server, with the *_TEST key pair."""
 
     TEST = auto()
-    """Staging before launch: Shioaji only in simulation, with the *_TEST key pair only, or the mock broker."""
+    """Staging before launch: Shioaji's simulation server, with the *_TEST key pair."""
 
     PROD = auto()
-    """The live service: Shioaji only in production, with the production credentials, or the mock broker; PostgreSQL only."""
-
-    @property
-    def brokers(self) -> frozenset[ExecutionProvider]:
-        match self:
-            case SystemEnvironment.DEV:
-                return frozenset({ExecutionProvider.MOCK})
-            case SystemEnvironment.TEST | SystemEnvironment.PROD:
-                return frozenset(ExecutionProvider)
-
-    @property
-    def order_modes(self) -> frozenset[OrderMode]:
-        """Only prod may send a real-money order."""
-        match self:
-            case SystemEnvironment.DEV | SystemEnvironment.TEST:
-                return frozenset({OrderMode.MOCK_ONLY, OrderMode.DISABLED})
-            case SystemEnvironment.PROD:
-                return frozenset(OrderMode)
+    """The live service: Shioaji's real account, with the production credentials; PostgreSQL only. The only real money."""
 
     @property
     def databases(self) -> frozenset[DatabaseBackend]:
@@ -429,7 +468,10 @@ class SystemEnvironment(StrEnum):
 
     @property
     def shioaji_simulation(self) -> bool:
-        """Shioaji's paper-trading server, or the real account. Never configured: test is always simulation, prod never."""
+        """
+        Shioaji's paper-trading server, or the real account: the login is made on it, and the order gates refuse a
+        SinoPac order on a login on any other. Never configured: dev and test are always simulation, prod never.
+        """
         return self != SystemEnvironment.PROD
 
     @property
@@ -465,9 +507,9 @@ class Audience(StrEnum):
 
     PERSONAL = auto()
     """
-    The owner on their own machine: Shioaji's daily history and realtime quotes on the owner's own login, the news
-    sites, the AI's web search, MOPS, PTT and any broker the environment allows. Without that login its daily history
-    is the open-data archive's, and it has no realtime quote.
+    The owner on their own machine: the daily history of the exchanges' own reports of each date, Shioaji's realtime
+    quotes on the owner's own login, the news sites, the AI's web search, MOPS, PTT and any broker the environment
+    allows. Without that login it has no realtime quote.
     """
 
     PUBLIC = auto()
@@ -475,12 +517,15 @@ class Audience(StrEnum):
     A free public website: only open-licensed data, the TWSE and TPEX OpenAPI as the open-data archive keeps them (Open
     Government Data License v1), and the mock broker. Shioaji's market data comes with the owner's own broker login,
     Yahoo's terms forbid automated collection, cnyes forbids reproduction without consent, MOPS disallows every robot
-    and TWSE's terms forbid its automated download, and nobody may trade in a visitor's account.
+    and TWSE's terms forbid the automated download of its site's reports, and nobody may trade in a visitor's account.
     """
 
     @property
     def open_data_only(self) -> bool:
-        """Daily history and the index trend come from the open-data archive alone, never from Shioaji."""
+        """
+        Daily history and the index trend come from the open-data archive alone, never from the exchanges' own reports
+        of each date on their sites, which give a personal site every session without a login.
+        """
         match self:
             case Audience.PERSONAL:
                 return False
@@ -553,12 +598,6 @@ class Workflow(StrEnum):
         the manual BUY and a follow already ordered theirs: following one would order the same decisions twice.
         """
         return self == Workflow.FULL_CYCLE
-
-
-class OrderMode(StrEnum):
-    MOCK_ONLY = auto()
-    LIVE = auto()
-    DISABLED = auto()
 
 
 class RuleEffect(StrEnum):
@@ -913,7 +952,34 @@ class InstructionKey(StrEnum):
 
 class SettingsAction(StrEnum):
     SAVE = auto()
-    RESTORE = auto()
+
+
+class SettingKind(StrEnum):
+    """How the administrator's settings form shows a setting and takes its new value."""
+
+    SWITCH = auto()
+    """On or off."""
+
+    CHOICE = auto()
+    """One of the setting's options."""
+
+    CHOICES = auto()
+    """Any of the setting's options, in order."""
+
+    INTEGER = auto()
+    """A whole number."""
+
+    NUMBER = auto()
+    """A number, whole or decimal."""
+
+    TEXT = auto()
+    """A text of one line or several, such as an AI prompt."""
+
+    LINES = auto()
+    """A list of texts or numbers, one per line."""
+
+    STRUCTURE = auto()
+    """A map, or a list of maps or lists, taken whole."""
 
 
 class ErrorCode(StrEnum):
@@ -935,7 +1001,11 @@ class ErrorCode(StrEnum):
     APP_REQUEST_REQUIRED = auto()
     ADMINISTRATORS_ONLY = auto()
     REAL_BROKER_REFUSED = auto()
-    MOCK_BROKER_ONLY = auto()
+    """A user without USE_REAL_BROKER asked for a run or an account on a real broker."""
+
+    BROKER_UNAVAILABLE = auto()
+    """The real broker asked for has no login up on this site now, or the site's audience offers none (public)."""
+
     REALTIME_QUOTES_UNAVAILABLE = auto()
     """The deployment uses open data only (audience public), which has no realtime quote to order on: Buzz and Intraday."""
 
@@ -982,16 +1052,16 @@ class Permission(StrEnum):
     """List users, change a role or a password, deactivate or reactivate one: /v1/admin/users. Checked by requires()."""
 
     EDIT_SYSTEM_SETTINGS = auto()
-    """The settings files config/appsetting.yaml and config/instructions.yaml: /v1/admin/settings*. Checked by requires()."""
+    """The settings form of config/appsetting.yaml and config/instructions.yaml: /v1/admin/settings. Checked by requires()."""
 
     USE_CLI = auto()
-    """Sign in to the CLI, the only path to manual BUY and to orders on a real broker. Checked by the CLI's sign-in."""
+    """Sign in to the CLI. Checked by the CLI's sign-in."""
 
     USE_REAL_BROKER = auto()
     """
-    Use the private pages, and own a pipeline, over the installation's real broker (Shioaji). Checked by the Web's
-    private-page gate before any Pipeline is built, and again where dependencies.py picks the broker, so no Pipeline
-    of another user ever holds it.
+    Choose a real broker (ExecutionProvider.real) for a run, and read its account. Checked where dependencies.py builds
+    a Pipeline on it, so no other user's Pipeline ever holds it, and again at each order by BrokerAccessRule against the
+    user as saved then.
     """
 
     NOTIFY_RECIPIENTS = auto()

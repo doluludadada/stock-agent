@@ -31,8 +31,8 @@ from a_domain.ports.system.user_store import IUserStore
 from a_domain.ports.trading.execution_provider import IExecutionProvider, ISimulatedExecutionProvider
 from a_domain.ports.trading.trading_journal import ITradingJournal
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
-from a_domain.types.enums import AiProvider, ExecutionProvider, Permission
-from a_domain.types.errors import RealBrokerRefused
+from a_domain.types.enums import AiProvider, ExecutionProvider, MarketType, Permission
+from a_domain.types.errors import BrokerUnavailable, RealBrokerRefused
 from a_domain.types.ids import UserId
 from b_application.config.app_config import AppConfig
 from b_application.config.settings_loader import (
@@ -45,11 +45,8 @@ from b_application.config.settings_loader import (
 from b_application.config.trading_config import ShioajiLogin
 from b_application.pipeline import Pipeline
 from b_application.use_cases.admin.editor_access import EditorAccess
-from b_application.use_cases.admin.settings_audit import SettingsAudit
-from b_application.use_cases.admin.settings_backups import SettingsBackups
 from b_application.use_cases.admin.settings_confirmation import SettingsConfirmation
 from b_application.use_cases.admin.settings_editor import SettingsEditor
-from b_application.use_cases.admin.settings_form_editor import SettingsFormEditor
 from b_application.use_cases.admin.settings_reader import SettingsReader
 from b_application.use_cases.admin.settings_save import SettingsSave
 from b_application.use_cases.chat.chat_reply import ChatReply
@@ -138,6 +135,7 @@ from c_infrastructure.feed.news_provider import NewsProvider
 from c_infrastructure.feed.ptt_provider import PttProvider
 from c_infrastructure.feed.tavily_provider import TavilySearchAdapter
 from c_infrastructure.market.cached_price_provider import CachedPriceProvider
+from c_infrastructure.market.exchange_daily_reports import ExchangeDailyReports
 from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider
 from c_infrastructure.market.twse_provider import TaiwanStockProvider
 from c_infrastructure.platforms.line.line_adapter import LinePlatformAdapter
@@ -160,14 +158,16 @@ if TYPE_CHECKING:
 @dataclass(frozen=True, slots=True)
 class Runtime:
     """
-    What the CLI and the Web API run on. pipeline_for(user) is that user's object graph, over the ports that hold that
-    user's data, built per call, so nothing caches one and no role or status change waits on a cache. signed_out is the
-    graph of nobody, built once, for sign-in, setup, the public market pages and LINE chat: its ports that hold users'
-    data refuse their first call with SignInRequired. open_runtime() builds it from the real adapters;
-    compose_runtime() wires the same graph over any ports, so tests and the order-gate check run it over fakes.
+    What the CLI and the Web API run on. pipeline_for(user, broker) is that user's object graph on that broker, the run's
+    choice, over the ports that hold that user's data, built per call, so nothing caches one and no role or status
+    change waits on a cache: the mock account unless the run chose a real broker, which only a user with
+    USE_REAL_BROKER gets (RealBrokerRefused) while its login is up (BrokerUnavailable). signed_out is the graph of
+    nobody, built once, for sign-in, setup, the public market pages and LINE chat: its ports that hold users' data refuse
+    their first call with SignInRequired. open_runtime() builds it from the real adapters; compose_runtime() wires the
+    same graph over any ports, so tests and the order-gate check run it over fakes.
     """
 
-    pipeline_for: Callable[[User], Pipeline]
+    pipeline_for: Callable[[User, ExecutionProvider], Pipeline]
     signed_out: Pipeline
     market_valuation_cache: MarketValuationCache
     """
@@ -178,9 +178,15 @@ class Runtime:
     config: AppConfig
     logger: ILoggingProvider
     broker_market_data: bool
-    """Whether the runtime's daily history and realtime quotes are the broker's: its Shioaji login was up when it opened."""
+    """Whether the runtime's realtime quotes are the broker's: its Shioaji login was up when it opened."""
     shioaji: ShioajiConnection | None
     """The process's Shioaji login of the site's key pair, up or not; None where the site makes none (ProviderDependencies)."""
+    real_broker: IExecutionProvider | None
+    """SinoPac on the site's login, where the audience offers it and its account check passed (connect_shioaji); else None."""
+
+    def brokers_for(self, user: User) -> list[ExecutionProvider]:
+        """What the CLI and the Web offer `user` for a run now (offered_brokers); pipeline_for refuses any other."""
+        return offered_brokers(self.real_broker, user)
 
     @property
     def realtime_quotes(self) -> bool:
@@ -216,6 +222,8 @@ class ProcessState:
     One save at a time of the price history, the MOPS EPS pages and the classified posts, across every runtime: a
     retired runtime still finishing a run and the current one would otherwise insert the same row at once.
     """
+    exchange_request_slots: dict[MarketType, float] = field(default_factory=dict)
+    """When the process last asked each exchange's site for a daily report, which every runtime's requests wait after."""
     shioaji_connections: dict[ShioajiLogin, ShioajiConnection] = field(default_factory=dict)
     """
     The Shioaji connection of each login the process made: its client, logged in once and again only after the login
@@ -251,14 +259,11 @@ class ProviderDependencies:
 
     stock_provider: TaiwanStockProvider
     price_provider: IOhlcvProvider
-    """The daily history and realtime quotes the site may use: the broker's history cache, else the open-data archive."""
+    """The daily history and realtime quotes the site may use: the exchanges' history cache, else the open-data archive."""
     history_cache: ICachedPriceProvider | None
-    """The broker's history cache when price_provider is one, which the Web API's timer refreshes; None for the archive."""
+    """The exchanges' history cache when price_provider is one, which the Web API's timer refreshes; None for the archive."""
     broker_market_data: bool
-    """
-    Whether the site's daily history and realtime quotes are its broker login's market data. Without it, price_provider
-    is the open-data archive, which serves no quote.
-    """
+    """Whether the site's realtime quotes are its broker login's market data. Without it, no quote is served."""
     shioaji: ShioajiConnection | None
     """
     The process's Shioaji login of the environment's key pair on an audience with realtime quotes, whether it is up or
@@ -282,7 +287,10 @@ class ProviderDependencies:
     user_store: IUserStore
     attempt_log: IAttemptLog
     real_broker: IExecutionProvider | None
-    """Shioaji, on the login connect_shioaji made at startup, when trading.execution_provider is shioaji; None on the mock broker."""
+    """
+    SinoPac, on the login connect_shioaji made, where the audience offers it and its account check passed; None
+    elsewhere. Only the Pipeline of a run an administrator started on it holds it.
+    """
     owned_ports: Callable[[User | None], OwnedPorts]
     """A user, or None signed out -> the adapters that hold that user's data. The order-gate check passes fakes."""
 
@@ -351,32 +359,29 @@ async def connect_shioaji(
     config: AppConfig, process: ProcessState, market_clock: TaiwanMarketClock
 ) -> tuple[IBrokerQuoteProvider[Any] | None, IExecutionProvider | None]:
     """
-    The market data and the broker of a runtime on the process's Shioaji login: the broker when
-    trading.execution_provider is shioaji, which only administrators' pipelines hold, else None for the mock broker.
-    Both read the client of the environment's key pair, simulation in dev and test, production in prod, which the
-    process logs in once and every later runtime of it reuses, until the login fails or Shioaji reports it down: then
-    the next runtime logs in again on a new client (ShioajiQuoteProvider.connect).
+    The market data and the SinoPac broker of a runtime on the process's Shioaji login. Both read the client of the
+    environment's key pair, simulation in dev and test, production in prod, which the process logs in once and every
+    later runtime of it reuses, until the login fails or Shioaji reports it down: then the next runtime logs in again on
+    a new client (ShioajiQuoteProvider.connect). The broker exists where the audience offers it and its account check
+    passes (in prod with the CA certificate the production credentials name); a run uses it only when an administrator
+    chooses it.
 
     An audience without realtime quotes (public) builds no Shioaji adapter. A personal site without the key pair, or
-    whose login fails on the mock broker, gets no market data: its daily history is the open-data archive's, and it has
-    no quote, so nothing is ordered. A login or an account check that fails with Shioaji as the broker refuses the start.
+    whose login fails, has no realtime quote and no SinoPac, so nothing is ordered; its daily history still comes from
+    the exchanges' reports. An account check that fails leaves the market data and offers no SinoPac.
     """
     logger = process.logger
     login = site_login(config)
 
     if login is None:
         if config.audience.realtime_quotes:
-            logger.warning(
-                f"No Shioaji key pair for environment {config.environment.value}: daily history from the open-data archive, "
-                "and no realtime quote, so no order"
-            )
+            logger.warning(f"No Shioaji key pair for environment {config.environment.value}: no realtime quote, so no order")
 
         return None, None
 
     client_class = import_shioaji()
 
     from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection, ShioajiQuoteProvider
-    from c_infrastructure.trading.shioaji.execution_provider import ShioajiExecutionProvider
 
     if login not in process.shioaji_connections:
         process.shioaji_connections[login] = ShioajiConnection(client=client_class(simulation=login.simulation))
@@ -388,32 +393,42 @@ async def connect_shioaji(
         login=login,
         market_clock=market_clock,
         market_data=config.market_data,
-        sources=config.sources.shioaji,
         board_lot_shares=config.market.board_lot_shares,
         logger=logger,
     )
     server, reused = "simulation" if login.simulation else "production", connection.up
-    broker = None
 
     try:
         await quotes.connect()
-
-        if config.trading.execution_provider == ExecutionProvider.SHIOAJI:
-            broker = ShioajiExecutionProvider(client=connection.client, quotes=quotes, login=login, config=config, logger=logger)
-            await broker.connect()
-
     except Exception as error:
-        failure = f"Shioaji {server} login failed: {error}"
-
-        if config.trading.execution_provider == ExecutionProvider.SHIOAJI:
-            raise TradingSetupError(failure) from error
-
-        logger.warning(f"{failure}. Daily history from the open-data archive, and no realtime quote, so no order")
+        logger.warning(f"Shioaji {server} login failed: {error}. No realtime quote, so no order")
         return None, None
 
     login_line = f"Reused the process's Shioaji {server} login" if reused else f"Logged in to Shioaji {server}"
-    logger.info(f"{login_line} for daily history and realtime quotes. Broker: {config.trading.execution_provider.value}")
-    return quotes, broker
+    logger.info(f"{login_line} for realtime quotes")
+    return quotes, await connect_sinopac(config, connection, quotes, login, logger)
+
+
+async def connect_sinopac(
+    config: AppConfig, connection: ShioajiConnection, quotes: IBrokerQuoteProvider[Any], login: ShioajiLogin, logger: ILoggingProvider
+) -> IExecutionProvider | None:
+    """SinoPac's broker on the login the quotes hold, where the audience offers it and its account check passes, else None."""
+    from c_infrastructure.trading.shioaji.execution_provider import ShioajiExecutionProvider
+
+    if ExecutionProvider.SHIOAJI not in config.audience.brokers:
+        return None
+
+    broker = ShioajiExecutionProvider(connection=connection, quotes=quotes, login=login, config=config, logger=logger)
+    server = "simulation" if login.simulation else "production"
+
+    try:
+        await broker.connect()
+    except Exception as error:
+        logger.warning(f"SinoPac {server} orders unavailable: {error}. Runs order on the mock account only")
+        return None
+
+    logger.info(f"SinoPac {server} offered for the runs an administrator starts on it")
+    return broker
 
 
 def create_news_provider(config: AppConfig, logger: ILoggingProvider, archive: IDailyCloseArchive) -> INewsProvider:
@@ -466,17 +481,27 @@ def create_history_cache(
     market_clock: TaiwanMarketClock,
     quotes: IBrokerQuoteProvider[Any] | None,
     archive: IDailyCloseArchive,
+    stock_provider: TaiwanStockProvider,
 ) -> CachedPriceProvider | None:
     """
-    The broker's daily history, kept in the database, and its realtime quotes over the Shioaji login connect_shioaji
-    made, or None without one: an open-data audience, which builds no Shioaji adapter, and a personal site without the
-    key pair read the open-data archive instead.
+    The exchanges' daily reports, kept in the database, with the broker's realtime quotes over the Shioaji login
+    connect_shioaji made, or the archive's refusal of every quote without one; None for an open-data audience (public),
+    which reads the open-data archive instead.
     """
-    if quotes is None:
+    if config.audience.open_data_only:
         return None
 
     return CachedPriceProvider(
-        broker=quotes,
+        quotes=quotes if quotes is not None else archive,
+        source=ExchangeDailyReports(
+            feeds=config.sources.exchange.daily_reports,
+            listing=stock_provider,
+            request_slots=process.exchange_request_slots,
+            market_clock=market_clock,
+            market_data=config.market_data,
+            board_lot_shares=config.market.board_lot_shares,
+            logger=process.logger,
+        ),
         archive=archive,
         db=db,
         market_clock=market_clock,
@@ -505,14 +530,14 @@ async def build_provider_dependencies(
 
     ai_providers = {provider: create_ai_provider(config, logger, provider) for provider in config.ai.offered_models}
     archive = SqlDailyCloseArchive(db, market_clock, config.sources.exchange, config.analysis.material_information_days, logger)
-    history_cache = create_history_cache(config, db, process, market_clock, quotes, archive)
+    history_cache = create_history_cache(config, db, process, market_clock, quotes, archive, stock_provider)
     login = site_login(config)
 
     return ProviderDependencies(
         stock_provider=stock_provider,
         price_provider=archive if history_cache is None else history_cache,
         history_cache=history_cache,
-        broker_market_data=history_cache is not None,
+        broker_market_data=quotes is not None,
         shioaji=process.shioaji_connections.get(login) if login is not None else None,
         daily_close_archive=archive,
         fundamentals_provider=create_fundamentals_provider(config, db, process, market_clock),
@@ -586,45 +611,70 @@ def knowledge_collection(owner_id: UserId | None) -> str | None:
     return f"{ChromaCollection.MARKET_KNOWLEDGE}-{owner_id}"
 
 
-def broker_for(dependencies: ProviderDependencies, owned: OwnedPorts, user: User | None) -> IExecutionProvider:
+def offered_brokers(real_broker: IExecutionProvider | None, user: User | None) -> list[ExecutionProvider]:
     """
-    The user's own mock broker, or the installation's real broker for a user with USE_REAL_BROKER. The Web refuses
-    every other user on a real-broker installation before any Pipeline is built (session.py), and this refuses them
-    again, so no Pipeline of theirs ever exists. A signed-out pipeline never holds the real broker: its mock broker
-    refuses every call, so a public route cannot read the real account.
+    The brokers `user` may choose for a run now, the mock account first: the site's real broker too for a user with
+    USE_REAL_BROKER while its login is up. The order gates check both again at each order.
     """
-    if dependencies.real_broker is None or user is None:
+    link = real_broker.link() if real_broker is not None else None
+
+    if link is None or not link.up or user is None or Permission.USE_REAL_BROKER not in user.permissions:
+        return [ExecutionProvider.MOCK]
+
+    return [ExecutionProvider.MOCK, link.broker]
+
+
+def broker_for(
+    dependencies: ProviderDependencies, owned: OwnedPorts, user: User | None, broker: ExecutionProvider
+) -> IExecutionProvider:
+    """
+    The broker the run chose: the user's own mock account, or the real broker while offered_brokers offers it, so no
+    other user's Pipeline ever holds it. A signed-out pipeline holds the mock account of nobody, which refuses every
+    call.
+    """
+    if not broker.real:
         return owned.mock_broker
 
-    if Permission.USE_REAL_BROKER not in user.permissions:
-        raise RealBrokerRefused("This installation trades on a real broker. Only an administrator may use its private pages.")
+    if user is None or Permission.USE_REAL_BROKER not in user.permissions:
+        raise RealBrokerRefused(f"Only an administrator orders on {broker.label} or reads its account.")
+
+    if dependencies.real_broker is None or broker not in offered_brokers(dependencies.real_broker, user):
+        raise BrokerUnavailable(f"{broker.label} has no login up on this site now. Runs order on the mock account.")
 
     return dependencies.real_broker
 
 
 def build_pipeline(
-    config: AppConfig, logger: ILoggingProvider, market_clock: TaiwanMarketClock, dependencies: ProviderDependencies, user: User | None
+    config: AppConfig,
+    logger: ILoggingProvider,
+    market_clock: TaiwanMarketClock,
+    dependencies: ProviderDependencies,
+    user: User | None,
+    chosen: ExecutionProvider,
 ) -> Pipeline:
     """
-    Every use case once, over the shared ports and the user's own ports, or nobody's for None. The trading and the
-    valuation operations share the collect and process steps. The order path's wiring is the same for every user, over
-    the user's journal and broker; the permissions decide only the broker, the AI limit (in owned_ports) and whether
-    run reports reach the LINE recipients. The run records name the AI model owned_ports gave the user.
+    Every use case once, over the shared ports and the user's own ports, or nobody's for None, on the broker the run
+    chose (`chosen`). The trading and the valuation operations share the collect and process steps. The order path's
+    wiring is the same for every user and broker: the ordering steps hold `chosen`'s broker and the mock_* steps the
+    user's mock account. The permissions decide whether the user may hold a real broker, the AI limit (in owned_ports)
+    and whether run reports reach the LINE recipients. The run records name the AI model owned_ports gave the user and
+    the broker chosen.
     """
     owned = dependencies.owned_ports(user)
     notifications = (
         dependencies.notification_provider if user is not None and Permission.NOTIFY_RECIPIENTS in user.permissions else None
     )
     stocks, prices = dependencies.stock_provider, dependencies.price_provider
-    history_archive = None if dependencies.broker_market_data else dependencies.daily_close_archive
-    journal, broker = owned.journal, broker_for(dependencies, owned, user)
+    history_archive = dependencies.daily_close_archive if config.audience.open_data_only else None
+    journal, broker, users = owned.journal, broker_for(dependencies, owned, user, chosen), dependencies.user_store
+    user_id = user.user_id if user is not None else None
     chat_styler = ChatStylerService(config.sources.line.sentence_endings, config.sources.line.max_message_length)
 
     return Pipeline(
         strategy_loader=StrategyLoader(owned.technical_settings_repository, config, logger),
         technical_settings_editor=TechnicalSettingsEditor(owned.technical_settings_repository, config),
         run_history=RunHistory(
-            journal, market_clock, config, logger, config.ai.model_for(user.ai_model if user is not None else None)
+            journal, market_clock, config, logger, config.ai.model_for(user.ai_model if user is not None else None), chosen
         ),
         account_loader=AccountLoader(broker, stocks, logger),
         market_scanner=MarketScanner(stocks, logger),
@@ -655,10 +705,11 @@ def build_pipeline(
         signals=Signals(journal, market_clock, config, logger),
         manual_signal=ManualSignal(journal, market_clock, config, logger),
         decision_memory=DecisionMemory(owned.knowledge_repository, logger),
-        order_preparation=OrderPreparation(journal, market_clock, config, logger),
+        order_preparation=OrderPreparation(journal, broker, users, user_id, market_clock, config, logger),
         order_execution=OrderExecution(broker, journal, market_clock, logger),
         order_outcome=OrderOutcome(broker, journal, market_clock, logger),
         mock_account_loader=AccountLoader(owned.mock_broker, stocks, logger),
+        mock_order_preparation=OrderPreparation(journal, owned.mock_broker, users, user_id, market_clock, config, logger),
         mock_order_execution=OrderExecution(owned.mock_broker, journal, market_clock, logger),
         mock_order_outcome=OrderOutcome(owned.mock_broker, journal, market_clock, logger),
         follow_candidates=FollowCandidates(journal, owned.mock_broker, market_clock, config),
@@ -681,10 +732,7 @@ def build_pipeline(
         ),
         dispatcher=Dispatcher(dependencies.platform_provider, logger),
         settings_reader=SettingsReader(dependencies.settings_files),
-        settings_backups=SettingsBackups(dependencies.settings_files),
-        settings_audit=SettingsAudit(dependencies.settings_files, dependencies.user_store),
         settings_editor=SettingsEditor(dependencies.settings_files, config),
-        settings_form_editor=SettingsFormEditor(dependencies.settings_files),
         settings_confirmation=SettingsConfirmation(dependencies.user_store, dependencies.attempt_log, market_clock, config, logger),
         settings_save=SettingsSave(dependencies.settings_files, market_clock, logger),
         editor_access=EditorAccess(dependencies.user_store),
@@ -707,15 +755,16 @@ def build_pipeline(
 def compose_runtime(
     config: AppConfig, logger: ILoggingProvider, market_clock: TaiwanMarketClock, dependencies: ProviderDependencies
 ) -> Runtime:
-    signed_out = build_pipeline(config, logger, market_clock, dependencies, None)
+    signed_out = build_pipeline(config, logger, market_clock, dependencies, None, ExecutionProvider.MOCK)
     return Runtime(
-        pipeline_for=lambda user: build_pipeline(config, logger, market_clock, dependencies, user),
+        pipeline_for=lambda user, broker: build_pipeline(config, logger, market_clock, dependencies, user, broker),
         signed_out=signed_out,
         market_valuation_cache=MarketValuationCache(signed_out.load_market_valuation, config.api.valuation_cache_minutes * 60),
         config=config,
         logger=logger,
         broker_market_data=dependencies.broker_market_data,
         shioaji=dependencies.shioaji,
+        real_broker=dependencies.real_broker,
     )
 
 

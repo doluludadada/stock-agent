@@ -1,10 +1,12 @@
 """Menus 1 to 4: the trading workflows, the manual watchlist and manual BUY prompts, and the run summary the menu prints."""
 
 from rich.console import JustifyMethod
+from rich.panel import Panel
 from rich.table import Table
 
 from a_domain.model.market.stock import Stock
 from a_domain.rules.watchlist.membership import WatchlistAddition
+from a_domain.types.enums import ExecutionProvider
 from b_application.pipeline import Pipeline
 from b_application.schemas.pipeline_status import PipelineStatus
 from d_presentation.cli import terminal
@@ -26,11 +28,45 @@ STOCK_REPORT_COLUMNS: tuple[tuple[str, JustifyMethod], ...] = (
 
 
 async def scan_social_buzz(runtime: Runtime, session: terminal.CliSession) -> PipelineStatus:
-    status = await session.pipeline.run_buzz_scan(built_in_strategy_id=session.built_in_strategy_id)
+    status = await ordering_pipeline(runtime, session).run_buzz_scan(built_in_strategy_id=session.built_in_strategy_id)
 
     print_buzz_report(status)
 
     return status
+
+
+async def run_intraday(runtime: Runtime, session: terminal.CliSession) -> PipelineStatus:
+    return await ordering_pipeline(runtime, session).run_intraday(built_in_strategy_id=session.built_in_strategy_id)
+
+
+def ordering_pipeline(runtime: Runtime, session: terminal.CliSession) -> Pipeline:
+    """
+    The Pipeline a run that orders holds from its start to its end: the session's, on the mock account, unless the user
+    may choose a real broker now and chooses it here, after a panel names its server and its BUY limits. Ctrl-D cancels.
+    """
+    brokers = runtime.brokers_for(session.user)
+
+    if len(brokers) == 1:
+        return session.pipeline
+
+    simulation = runtime.config.environment.shioaji_simulation
+    server = "SIMULATION server (no real money)" if simulation else "PRODUCTION: REAL ACCOUNT, REAL MONEY"
+    order_limit, daily_limit = runtime.config.trading.max_order_value, runtime.config.trading.max_daily_buy_value
+    terminal.console.print(
+        Panel(
+            f"{' or '.join(broker.label for broker in brokers[1:])}: {server}\n"
+            f"Each BUY at most {order_limit:,.0f} NT$, at most {daily_limit:,.0f} NT$ of BUYs a day.",
+            title="ORDER ON",
+            style="bold yellow" if simulation else "bold red",
+        )
+    )
+    choice = terminal.ask_user("Order on", choices=[broker.value for broker in brokers])
+
+    if choice is None:
+        raise EOFError
+
+    broker = ExecutionProvider(choice)
+    return session.pipeline if not broker.real else runtime.pipeline_for(session.user, broker)
 
 
 async def analyse_specific_stocks(runtime: Runtime, session: terminal.CliSession) -> PipelineStatus | None:
@@ -49,7 +85,7 @@ async def analyse_specific_stocks(runtime: Runtime, session: terminal.CliSession
         terminal.console.print(f"No manual BUY: audience {runtime.config.audience.value} has no realtime quote to price one.")
         return status
 
-    await offer_manual_buy(stocks=status.manual_stocks, pipeline=session.pipeline)
+    await offer_manual_buy(status.manual_stocks, runtime, session)
 
     return status
 
@@ -67,10 +103,10 @@ async def offer_manual_watchlist(stocks: list[Stock], pipeline: Pipeline) -> Non
     print_watchlist_result(addition)
 
 
-async def offer_manual_buy(stocks: list[Stock], pipeline: Pipeline) -> None:
+async def offer_manual_buy(stocks: list[Stock], runtime: Runtime, session: terminal.CliSession) -> None:
     for stock in stocks:
         if terminal.confirm(f"BUY {stock.stock_id} now using manual override?"):
-            print_manual_buy_result(stock.stock_id, await pipeline.buy_manually(stock))
+            print_manual_buy_result(stock.stock_id, await ordering_pipeline(runtime, session).buy_manually(stock))
 
 
 def print_watchlist_result(addition: WatchlistAddition) -> None:

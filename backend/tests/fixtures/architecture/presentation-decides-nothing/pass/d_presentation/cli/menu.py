@@ -1,10 +1,9 @@
-from a_domain.types.enums import OrderMode
 from b_application.config.settings import AppSettings
 
 
 def print_trading_setup(config: AppSettings) -> None:
-    print(config.environment.value, config.trading.execution_provider.value, config.environment.shioaji_simulation)
-    print("REAL MONEY" if config.trading.order_mode == OrderMode.LIVE and not config.environment.shioaji_simulation else "no real order")
+    print(config.environment.value, config.environment.shioaji_simulation)
+    print("REAL MONEY" if not config.environment.shioaji_simulation else "no real money", config.trading.max_order_value)
 
 
 def print_built_in_strategies(config: AppSettings) -> None:

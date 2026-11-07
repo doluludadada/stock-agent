@@ -98,7 +98,7 @@ async def current_database(backend: DatabaseBackend, folder: Path) -> DatabaseCo
     """A database startup created, holding one owner's settings row."""
     connector = await empty_database(backend, folder)
     await connector.init_db()
-    await execute(backend, folder, "INSERT INTO technical_settings VALUES ('local', 'trend', 'buzz', 1)")
+    await execute(backend, folder, "INSERT INTO technical_settings VALUES ('local', 'trend', 1)")
     return connector
 
 
@@ -209,7 +209,8 @@ async def test_migrate_backs_up_then_upgrades_version_1_keeping_every_row(
     assert f"Backed up to {backup}" in printed
     assert (
         f"Migrated from version 1 to {SCHEMA_VERSION}:\n  1 -> 2 record_run_failures\n  2 -> 3 give_rows_their_owner\n"
-        "  3 -> 4 add_user_ai_model\n  4 -> 5 add_follows_and_drop_yahoo_history"
+        "  3 -> 4 add_user_ai_model\n  4 -> 5 add_follows_and_drop_yahoo_history\n  5 -> 6 drop_buzz_strategy\n"
+        "  6 -> 7 drop_order_mode"
     ) in printed
     assert after["schema_version"][1] == [(str(SCHEMA_VERSION),)]
     kept = before.keys() - YAHOO_HISTORY
@@ -345,7 +346,7 @@ async def test_restore_puts_a_backup_back_after_backing_up_the_current_database(
         [backup] = backups(tmp_path)
         kept = digest(backup)
         await execute(
-            backend, tmp_path, "UPDATE technical_settings SET revision = 2", "INSERT INTO technical_settings VALUES ('b', 'x', 'y', 7)"
+            backend, tmp_path, "UPDATE technical_settings SET revision = 2", "INSERT INTO technical_settings VALUES ('b', 'x', 7)"
         )
         changed = await database_snapshot(backend, tmp_path)
         assert await commands.restore(connector, backup, confirmed=True) == 0
@@ -357,7 +358,7 @@ async def test_restore_puts_a_backup_back_after_backing_up_the_current_database(
     assert f"Backed the current database up to {current}, then restored {backup}:" in printed
     assert "Current: startup opens it as it is." in printed
     assert printed_rows(printed)["technical_settings"] == ["1"]
-    assert await settings_rows(backend, tmp_path) == [("trend", "buzz", "local", "1")]
+    assert await settings_rows(backend, tmp_path) == [("trend", "local", "1")]
     assert digest(backup) == kept
 
     if backend == DatabaseBackend.SQLITE:
@@ -419,7 +420,7 @@ async def test_restore_brings_back_a_deleted_sqlite_database(tmp_path: Path, out
         await connector.close()
 
     assert f"The database had no table, so no backup was made, then restored {backup}:" in output.getvalue()
-    assert await settings_rows(DatabaseBackend.SQLITE, tmp_path) == [("trend", "buzz", "local", "1")]
+    assert await settings_rows(DatabaseBackend.SQLITE, tmp_path) == [("trend", "local", "1")]
     assert backups(tmp_path) == [backup]
 
 

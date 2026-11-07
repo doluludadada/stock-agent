@@ -9,10 +9,10 @@ from a_domain.rules.trading.cost import AffordableQuantityRule
 from a_domain.rules.trading.decision import DecisionRule, RunDecisionsRule
 from a_domain.rules.trading.entry import EntryRule, ManualEntryRule
 from a_domain.rules.trading.exit import ExitRule, StopLossRule
-from a_domain.rules.trading.order_rule import OrderGateRule, OrderPriceRule, OrderRule
+from a_domain.rules.trading.order_rule import BrokerAccessRule, BuyLimitRule, OrderGateRule, OrderPriceRule, OrderRule
 from a_domain.rules.trading.reason import AnalysisSummaryRule, EntryReasonRule, ExitReasonRule
 from a_domain.rules.trading.sizing import BuyCostRule, SizingRule
-from a_domain.types.enums import Audience, DatabaseBackend, ExecutionProvider, SettingsFile, SystemEnvironment
+from a_domain.types.enums import Audience, DatabaseBackend, SettingsFile, SystemEnvironment
 from b_application.config.accounts_config import AccountsConfig
 from b_application.config.ai_config import AiConfig, BehaviorConfig, PromptsConfig, SentimentConfig, TavilyConfig
 from b_application.config.api_config import ApiConfig
@@ -79,8 +79,10 @@ class AppConfig(BaseSettings):
     project_root: Path = Field(exclude=True)
     """Set by load_settings, never by a settings file: `exclude` marks a field the loader sets, and the key check refuses it."""
 
-    environment: SystemEnvironment = SystemEnvironment.DEV
-    audience: Audience = Audience.PERSONAL
+    environment: SystemEnvironment = Field(SystemEnvironment.DEV, json_schema_extra={"restart_only": True})
+    """`restart_only` marks a setting a reload or a save refuses to change: validate_started_setup_unchanged."""
+
+    audience: Audience = Field(Audience.PERSONAL, json_schema_extra={"restart_only": True})
     """Whom this deployment serves, and with it which data and brokers it may use: Audience's table."""
 
     settings_revisions: dict[SettingsFile, str] = Field(default_factory=dict, exclude=True)
@@ -105,7 +107,7 @@ class AppConfig(BaseSettings):
     freshness: FreshnessConfig = Field(default_factory=FreshnessConfig)
     market_hours: MarketHoursConfig = Field(default_factory=MarketHoursConfig)
     market_data: MarketDataConfig = Field(default_factory=MarketDataConfig)
-    trading: TradingConfig = Field(default_factory=TradingConfig)
+    trading: TradingConfig
     mock_trading: MockTradingConfig = Field(default_factory=MockTradingConfig)
     shioaji: ShioajiConfig
     watchlist: WatchlistConfig = Field(default_factory=WatchlistConfig)
@@ -155,14 +157,19 @@ class AppConfig(BaseSettings):
 
     def order_rule(self) -> OrderRule:
         price_rule = OrderPriceRule(pricing=self.audience.order_pricing, price_freshness=self.freshness.realtime_rule())
-        gate_rule = OrderGateRule(
-            order_mode=self.trading.order_mode, execution_provider=self.trading.execution_provider, price_rule=price_rule
-        )
 
-        return OrderRule(gate_rule=gate_rule, limit_price_rule=self.market.limit_price_rule())
+        return OrderRule(gate_rule=OrderGateRule(price_rule=price_rule), limit_price_rule=self.market.limit_price_rule())
+
+    def broker_access_rule(self) -> BrokerAccessRule:
+        """OrderExecution's check at the send: the brokers both the audience and its order pricing offer, the environment's server."""
+        limit_rule = BuyLimitRule(max_order_value=self.trading.max_order_value, max_daily_buy_value=self.trading.max_daily_buy_value)
+
+        return BrokerAccessRule(
+            brokers=self.audience.brokers & self.audience.order_pricing.brokers,
+            simulation=self.environment.shioaji_simulation,
+            limit_rule=limit_rule,
+        )
 
     def registration_rule(self) -> RegistrationRule:
         """The sign-up screen and the registration both ask it, so they never disagree."""
-        return RegistrationRule(
-            registration_open=self.accounts.registration_open, real_broker=self.trading.execution_provider != ExecutionProvider.MOCK
-        )
+        return RegistrationRule(registration_open=self.accounts.registration_open)

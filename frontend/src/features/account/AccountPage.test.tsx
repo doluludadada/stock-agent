@@ -23,11 +23,14 @@ const HISTORY: History = {
   equity_curve: {},
   as_of: null,
   execution_provider: 'mock',
-  order_mode: 'mock_only',
   opening: { initial_cash: 1_000_000, opened_at: '2026-11-04T01:00:00Z' },
   profit: 12_000,
 }
 const EMPTY: History = { ...HISTORY, current: { cash: 2_000_000, market_value: 0, unrealized_pnl: 0, equity: 2_000_000, positions: [] }, profit: 0 }
+const SINOPAC_HISTORY: History = { ...HISTORY, execution_provider: 'shioaji', current: { ...value, cash: 405_000, equity: 505_000 }, opening: null, profit: null }
+
+const MOCK = { broker: 'mock', simulation: null, max_order_value: null, max_daily_buy_value: null }
+const SINOPAC = { broker: 'shioaji', simulation: true, max_order_value: 100_000, max_daily_buy_value: 300_000 }
 
 const LISTING: Record<string, string> = { '2330': '台積電', '2317': '鴻海' }
 
@@ -62,7 +65,7 @@ const fullCycle = { run_id: FULL_CYCLE, workflow: 'full_cycle', start_time: '202
 const intraday = { run_id: INTRADAY, workflow: 'intraday', start_time: '2026-11-06T02:00:00Z' } as const
 
 /** The account endpoints and the listing, as the backend answers them; trades page by `limit` and `offset`. */
-function serve(history: History, trades: Trade[]) {
+function serve(history: History, trades: Trade[], brokers: unknown[] = [MOCK]) {
   const asked: string[] = []
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
   vi.stubGlobal(
@@ -74,7 +77,8 @@ function serve(history: History, trades: Trade[]) {
         const code = searchParams.get('query') ?? ''
         return json(LISTING[code] ? [{ stock_id: code, name: LISTING[code], market: 'twse', today: null }] : [])
       }
-      if (pathname === '/v1/account/history') return json(history)
+      if (pathname === '/v1/account/brokers') return json(brokers)
+      if (pathname === '/v1/account/history') return json(searchParams.get('broker') === 'shioaji' ? SINOPAC_HISTORY : history)
       if (pathname === '/v1/account/trades') {
         const offset = Number(searchParams.get('offset'))
         return json(trades.slice(offset, offset + Number(searchParams.get('limit'))))
@@ -157,11 +161,11 @@ describe('the mock account', () => {
 
     const table = await screen.findByRole('table', { name: 'Trades' })
     expect(within(table).getAllByRole('row')).toHaveLength(1 + 20)
-    expect(asked.filter((url) => url.startsWith('/v1/account/trades'))).toEqual(['/v1/account/trades?limit=21&offset=0'])
+    expect(asked.filter((url) => url.startsWith('/v1/account/trades'))).toEqual(['/v1/account/trades?limit=21&offset=0&broker=mock'])
 
     await user.click(screen.getByRole('button', { name: 'Show more trades' }))
     expect(await within(table).findAllByRole('row')).toHaveLength(1 + 23)
-    expect(asked.filter((url) => url.startsWith('/v1/account/trades'))).toEqual(['/v1/account/trades?limit=21&offset=0', '/v1/account/trades?limit=21&offset=20'])
+    expect(asked.filter((url) => url.startsWith('/v1/account/trades'))).toEqual(['/v1/account/trades?limit=21&offset=0&broker=mock', '/v1/account/trades?limit=21&offset=20&broker=mock'])
     expect(screen.queryByRole('button', { name: 'Show more trades' })).not.toBeInTheDocument()
   })
 
@@ -171,7 +175,32 @@ describe('the mock account', () => {
 
     expect(await screen.findByText('Nothing in your mock account yet')).toBeVisible()
     expect(screen.getByText(/^Open a finished analysis run and follow its decisions into this account\./)).toBeVisible()
-    expect(screen.getByRole('link', { name: 'Open the analysis runs' })).toHaveAttribute('href', '/')
+    expect(screen.getByRole('link', { name: 'Open the analysis runs' })).toHaveAttribute('href', '/runs')
     expect(screen.queryByRole('table', { name: 'Trades' })).not.toBeInTheDocument()
+  })
+
+  it('offers no other account while only the mock account is offered', async () => {
+    serve(HISTORY, [])
+    open()
+
+    expect(await screen.findByText('1,012,000')).toBeVisible()
+    expect(screen.queryByRole('radiogroup', { name: 'Account' })).not.toBeInTheDocument()
+  })
+
+  it('switches to the SinoPac account, asking its own history and trades, with no starting capital and no total P&L', async () => {
+    const asked = serve(HISTORY, [], [MOCK, SINOPAC])
+    const user = userEvent.setup()
+    open()
+
+    expect(await screen.findByText('1,012,000')).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'Mock account', level: 1 })).toBeVisible()
+    await user.click(await screen.findByRole('radio', { name: 'SinoPac · simulation' }))
+
+    expect(await screen.findByText('505,000')).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'SinoPac account', level: 1 })).toBeVisible()
+    expect(screen.queryByText('Total P&L')).not.toBeInTheDocument()
+    expect(screen.queryByText('Starting capital')).not.toBeInTheDocument()
+    expect(screen.getByText(/^SinoPac’s simulation server\./)).toBeVisible()
+    expect(asked.filter((url) => url.includes('broker=shioaji')).sort()).toEqual(['/v1/account/history?broker=shioaji', '/v1/account/trades?limit=21&offset=0&broker=shioaji'])
   })
 })

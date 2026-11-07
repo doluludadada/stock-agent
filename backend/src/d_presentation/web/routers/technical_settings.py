@@ -14,9 +14,9 @@ CONFLICT: dict[int | str, dict[str, Any]] = {status.HTTP_409_CONFLICT: {"descrip
 @router.get("", responses=CONFLICT, dependencies=[PrivateAccess])
 async def get_technical_settings(pipeline: UserPipeline) -> TechnicalSettings:
     """
-    The owner's strategies and which one each workflow uses, with the revision a save must carry. The first read
-    copies every built-in strategy for the owner. A workflow already running keeps the strategy it started with. A
-    save that lands during the read answers 409: read again.
+    The owner's strategies and the active one, which every workflow uses, with the revision a save must carry. The
+    first read copies every built-in strategy for the owner. A workflow already running keeps the strategy it started
+    with. A save that lands during the read answers 409: read again.
     """
     return await pipeline.load_technical_settings()
 

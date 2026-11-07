@@ -7,12 +7,12 @@ and a second follow of a run with nothing left to follow is refused without reco
 from datetime import timedelta
 
 import pytest
-from support.harness import MARKET_CLOSED, MARKET_OPEN, build_harness, harness_config, real_broker_config, rising_history
+from support.harness import MARKET_CLOSED, MARKET_OPEN, build_harness, harness_config, rising_history
 from support.web import ended, hold_stock_list, serve, write
 
 from a_domain.model.system.stats import SystemStats
 from a_domain.model.trading.signal import TradeSignal
-from a_domain.types.enums import Audience, ExecutionProvider, OrderMode, SignalSource, TradeAction, Workflow
+from a_domain.types.enums import Audience, ExecutionProvider, SignalSource, TradeAction, Workflow
 from a_domain.types.ids import RunId
 
 pytestmark = pytest.mark.asyncio
@@ -25,7 +25,6 @@ async def recorded_full_cycle(harness, quantity: int = 1000) -> RunId:
     run = SystemStats(
         workflow=Workflow.FULL_CYCLE,
         execution_provider=ExecutionProvider.MOCK,
-        order_mode=OrderMode.MOCK_ONLY,
         start_time=YESTERDAY_CLOSE + timedelta(hours=6),
         end_time=YESTERDAY_CLOSE + timedelta(hours=6, minutes=15),
     )
@@ -115,17 +114,19 @@ async def test_an_unknown_run_has_no_follow() -> None:
     assert (read.status_code, started.status_code) == (404, 404)
 
 
-@pytest.mark.parametrize("path", ["/v1/runs/00000000-0000-0000-0000-000000000001/follow", "/v1/account/reset"])
-async def test_a_real_broker_installation_offers_no_follow_and_no_reset(path: str) -> None:
-    harness = build_harness(config=real_broker_config())
+async def test_where_sinopac_is_offered_a_follow_and_a_reset_reach_only_the_mock_account() -> None:
+    harness = build_harness(sinopac=True)
+    harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
+    run_id = await recorded_full_cycle(harness)
 
     async with serve(harness) as client:
-        read = await client.get(path) if path.endswith("follow") else None
-        written = await write(client, "POST", path, {"initial_cash": 500_000})
+        started = await write(client, "POST", f"/v1/runs/{run_id}/follow", {})
+        follow = await ended(client, started.json()["run_id"])
+        reset = await write(client, "POST", "/v1/account/reset", {"initial_cash": 500_000})
 
-    assert (written.status_code, written.json()["code"]) == (403, "mock_broker_only")
-    assert read is None or read.status_code == 403
-    assert harness.broker.opening is None and harness.broker.placed == []
+    assert (follow["state"], follow["summary"]["execution_provider"], reset.status_code) == ("finished", "mock", 200)
+    assert [order.stock_id for order in harness.broker.placed] == ["2330"] and harness.broker.opening is not None
+    assert (harness.real_broker.placed, harness.real_broker.opening) == ([], None)
 
 
 async def test_a_reset_opens_the_account_again_with_the_chosen_capital_and_the_history_says_so() -> None:

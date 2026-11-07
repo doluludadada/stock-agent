@@ -32,7 +32,7 @@ STORED_INDICATOR = TypeAdapter(IndicatorParameters)
 
 class TechnicalSettingsDTO(SQLModel, table=True):
     """
-    One owner's selections and save counter. The owner's strategies, their indicators, rules and formula nodes are
+    One owner's active strategy and save counter. The owner's strategies, their indicators, rules and formula nodes are
     rows of the tables below, always replaced together with a revision increment in one transaction.
     """
 
@@ -40,17 +40,11 @@ class TechnicalSettingsDTO(SQLModel, table=True):
 
     owner_id: str = Field(primary_key=True)
     active_strategy_id: str
-    buzz_strategy_id: str
     revision: int
 
     @classmethod
     def from_domain(cls, owner_id: str, settings: TechnicalSettings) -> Self:
-        return cls(
-            owner_id=owner_id,
-            active_strategy_id=settings.active_strategy_id,
-            buzz_strategy_id=settings.buzz_strategy_id,
-            revision=settings.revision,
-        )
+        return cls(owner_id=owner_id, active_strategy_id=settings.active_strategy_id, revision=settings.revision)
 
     @classmethod
     def child_rows(cls, owner_id: str, settings: TechnicalSettings) -> list[tuple[type[SQLModel], list[dict[str, Any]]]]:
@@ -83,7 +77,6 @@ class TechnicalSettingsDTO(SQLModel, table=True):
 
         return TechnicalSettings(
             active_strategy_id=self.active_strategy_id,
-            buzz_strategy_id=self.buzz_strategy_id,
             strategies=tuple(strategy.to_domain(rows) for strategy in strategies),
             revision=self.revision,
         )

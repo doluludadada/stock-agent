@@ -52,7 +52,7 @@ const ERROR_CODES = {
   app_request_required: true,
   administrators_only: true,
   real_broker_refused: true,
-  mock_broker_only: true,
+  broker_unavailable: true,
   realtime_quotes_unavailable: true,
   mops_unavailable: true,
   password_required: true,

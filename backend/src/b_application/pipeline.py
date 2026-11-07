@@ -2,7 +2,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 
-from pydantic import SecretStr
+from pydantic import PositiveInt, SecretStr
 
 from a_domain.model.fundamentals.monthly_revenue import MonthlyRevenue
 from a_domain.model.fundamentals.quarter_financials import QuarterFinancials
@@ -15,28 +15,18 @@ from a_domain.model.trading.order import Order
 from a_domain.model.valuation.scan import MarketValuation, ScanCriteria, ValuationScan
 from a_domain.model.valuation.valuation import ReportSection, StockValuation, ValuationReport
 from a_domain.ports.market.daily_close_archive import ArchivedMonth, ArchivedQuarter, ArchivedSession
-from a_domain.ports.system.settings_files import (
-    SettingChange,
-    SettingsAuditEntry,
-    SettingsBackup,
-    SettingsDocument,
-    SettingsEdit,
-    SettingsForm,
-)
+from a_domain.ports.system.settings_files import SettingChange, SettingField, SettingsEdit
 from a_domain.rules.market.breadth import MarketBreadth
 from a_domain.rules.system.registration import SignInOffer
 from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
 from a_domain.rules.watchlist.membership import WatchlistAddition
-from a_domain.types.enums import AiAnalysisFocus, AiProvider, MarketIndex, Role, SettingsFile, UserStatus, WatchlistType, Workflow
+from a_domain.types.enums import AiAnalysisFocus, AiProvider, MarketIndex, Role, UserStatus, WatchlistType, Workflow
 from a_domain.types.ids import RunId, SessionToken, UserId
 from a_domain.types.values import EmailAddress, NewPassword, PositiveFiniteFloat, Username
 from b_application.schemas.pipeline_status import PipelineStatus
 from b_application.use_cases.admin.editor_access import EditorAccess
-from b_application.use_cases.admin.settings_audit import SettingsAudit
-from b_application.use_cases.admin.settings_backups import SettingsBackups
 from b_application.use_cases.admin.settings_confirmation import SettingsConfirmation
 from b_application.use_cases.admin.settings_editor import SettingsEditor
-from b_application.use_cases.admin.settings_form_editor import SettingsFormEditor
 from b_application.use_cases.admin.settings_reader import SettingsReader
 from b_application.use_cases.admin.settings_save import SettingsSave
 from b_application.use_cases.chat.chat_reply import ChatReply
@@ -117,11 +107,16 @@ class Pipeline:
 
     Buzz, Intraday, manual BUY and a follow send orders with the same four lines: each decision of the run that has no order yet,
     one at a time in decision order. OrderPreparation gates it and records its order right before the send, so OrderRule
-    measures the quote's age at submission; OrderExecution sends it only when it is PENDING and records the broker's
-    answer; OrderOutcome re-reads the account after a fill; and the order joins status.orders before the next decision
-    is prepared, so a decision never gets a second order. Buzz and Intraday send twice: right after the stop-loss check,
-    while those quotes are fresh, and at the end. Full Cycle, specific-stock analysis and valuation never send; a
-    follow sends a finished Full Cycle's decisions, priced again, into the user's mock account.
+    measures the quote's age at submission and BrokerAccessRule checks the broker the order would reach; OrderExecution
+    sends it only when it is PENDING and records the broker's answer; OrderOutcome re-reads the account after a fill;
+    and the order joins status.orders before the next decision is prepared, so a decision never gets a second order.
+    Buzz and Intraday send twice: right after the stop-loss check, while those quotes are fresh, and at the end. Full
+    Cycle, specific-stock analysis and valuation never send; a follow sends a finished Full Cycle's decisions, priced
+    again, into the user's mock account.
+
+    Which broker the ordering steps hold (account_loader, order_preparation, order_execution, order_outcome) is the
+    run's choice, fixed when dependencies.py builds this Pipeline for the run: the mock account unless an administrator
+    chose a real broker. The mock_* steps always hold the user's mock account, and a follow uses only them.
 
     A built-in strategy id, the CLI session's choice, makes a run use that built-in strategy instead of the saved one.
 
@@ -164,6 +159,7 @@ class Pipeline:
     order_execution: OrderExecution
     order_outcome: OrderOutcome
     mock_account_loader: AccountLoader
+    mock_order_preparation: OrderPreparation
     mock_order_execution: OrderExecution
     mock_order_outcome: OrderOutcome
     follow_candidates: FollowCandidates
@@ -184,10 +180,7 @@ class Pipeline:
     chat_reply: ChatReply
     dispatcher: Dispatcher
     settings_reader: SettingsReader
-    settings_backups: SettingsBackups
-    settings_audit: SettingsAudit
     settings_editor: SettingsEditor
-    settings_form_editor: SettingsFormEditor
     settings_confirmation: SettingsConfirmation
     settings_save: SettingsSave
     editor_access: EditorAccess
@@ -342,20 +335,22 @@ class Pipeline:
 
         return status
 
-    async def buy_manually(self, stock: Stock) -> PipelineStatus:
+    async def buy_manually(self, stock: Stock, quantity: PositiveInt | None = None, run_id: RunId | None = None) -> PipelineStatus:
         """
-        The user's confirmed BUY of one analysed stock, as its own recorded run. It skips only the automatic buy
-        threshold: the account, the realtime quote, sizing on the account's equity, the decision record, the order gates
-        (order mode, market open, price freshness) and the broker's own checks all still apply.
+        The user's confirmed BUY of one analysed stock, as its own recorded run: `quantity` shares, or with None as many
+        as sizing on the account's equity allows. It skips only the automatic buy threshold: the account, a fresh
+        realtime quote, the decision record, the order gates (market open, price freshness, the broker the run chose
+        and its limits) and the broker's own checks all still apply. The Web passes a stock a finished specific-stock
+        run reported, whose saved price is a daily close the gates refuse, so only the realtime quote can price it.
 
         status.manual_buy_refusal says why no order was sent; otherwise status.orders holds the one order.
         """
-        async with self.run_history.execute(Workflow.MANUAL_BUY) as stats:
+        async with self.run_history.execute(Workflow.MANUAL_BUY, run_id) as stats:
             status = PipelineStatus(stats=stats, manual_stocks=[stock])
             status.account, status.held_stocks = await self.account_loader.execute(status.stocks)
             status.stale_stock_ids = await self.realtime_quote_feed.execute(status.manual_stocks, status.stale_stock_ids, status.stats)
             status.signals, status.manual_buy_refusal = await self.manual_signal.execute(
-                stock, status.account, status.stocks, status.stats
+                stock, quantity, status.account, status.stocks, status.stats
             )
             await self.decision_memory.execute(status.signals, status.stocks, status.stats)
             for signal in status.signals:
@@ -373,9 +368,9 @@ class Pipeline:
         fresh realtime quote in continuous trading where the site has them, else the official close of the last closed
         session while no session trades. A decision that gets no follow decision now stays open; one whose follow order
         fills is followed. A follow that may not start (FollowCandidates' refusal) records the refusal and sends nothing.
-        Every step that reads the account or sends an order holds the user's mock book (mock_account_loader,
-        mock_order_execution, mock_order_outcome), never the broker the other operations order on, so no follow reaches a
-        real account whatever the installation's broker.
+        Every step that reads the account, gates or sends an order holds the user's mock book (mock_account_loader,
+        mock_order_preparation, mock_order_execution, mock_order_outcome), never the broker the run chose, so no follow
+        reaches a real account whatever broker its Pipeline was built for.
         """
         async with self.run_history.execute(Workflow.FOLLOW, run_id, followed_run_id) as stats:
             status = PipelineStatus(stats=stats)
@@ -395,7 +390,7 @@ class Pipeline:
             status.stale_stock_ids = await self.realtime_quote_feed.execute(status.manual_stocks, status.stale_stock_ids, status.stats)
             status.signals = await self.follow_signals.execute(status.followable_signals, status.stocks, status.account, status.stats)
             for signal in status.signals:
-                if order := await self.order_preparation.execute(signal, status.orders, status.stats):
+                if order := await self.mock_order_preparation.execute(signal, status.orders, status.stats):
                     order = await self.mock_order_execution.execute(order, status.stats)
                     status.account = await self.mock_order_outcome.execute(order, status.account, status.stocks, status.stats)
                     status.orders.append(order)
@@ -534,9 +529,9 @@ class Pipeline:
 
     async def refresh_daily_history(self) -> tuple[date, date] | None:
         """
-        The Web API's timer on a site with a broker login: the broker's daily quotes of every session the history cache
-        lacks over the stock page's longest chart, and the window's first and last session; None where the daily
-        history is the open-data archive's. No run record.
+        The Web API's timer on a personal site: the exchanges' daily reports of every session the history cache lacks
+        over the stock page's longest chart, and the window's first and last session; None where the daily history is
+        the open-data archive's. No run record.
         """
         return await self.daily_history_refresh.execute()
 
@@ -611,54 +606,25 @@ class Pipeline:
         """
         return await self.technical_settings_editor.execute(settings)
 
-    async def read_settings_file(self, file: SettingsFile) -> SettingsDocument:
-        """One settings file as it is on disk."""
-        return await self.settings_reader.execute(file)
+    async def load_settings_form(self) -> list[SettingField]:
+        """
+        The administrator's settings form: every setting and AI prompt, with the value the files on disk set, else its
+        default. InvalidSettingsError at the parser's mark for a file that does not parse.
+        """
+        return await self.settings_reader.execute()
 
-    async def list_settings_backups(self, file: SettingsFile) -> list[SettingsBackup]:
-        """The kept backups of one settings file, newest first."""
-        return await self.settings_backups.execute(file)
-
-    async def load_settings_audit(self, limit: int) -> list[tuple[SettingsAuditEntry, User | None]]:
-        """The latest saves and restores, newest first, each with the administrator who made it."""
-        return await self.settings_audit.execute(limit)
-
-    async def preview_settings_file(
-        self, file: SettingsFile, expected_revision: str, host: str, text: str | None = None, backup_id: str | None = None
-    ) -> SettingsEdit:
+    async def review_settings_form(
+        self, administrator: User, changes: Sequence[SettingChange], host: str, password: SecretStr | None, client: str
+    ) -> list[SettingsEdit]:
         """
-        The administrator's whole new text, or a kept backup to put back, against the file on disk and the settings this
-        Pipeline's runtime runs on: what it changes, what applies only at a restart, and its problems, a lockout of the
-        editor reached at `host` included. Nothing is written.
+        The settings form's save, reviewed and confirmed: SettingsEditError for a change the form cannot write,
+        InvalidSettingsError with the problems of new texts the app would refuse, a lockout of the editor reached at
+        `host` included, then PasswordRequired, PasswordRefused or SignInThrottled without the administrator's own
+        password inside its attempt limit. The edit of each file the changes change; nothing is written.
         """
-        return await self.settings_editor.execute(file, expected_revision, host, text, backup_id)
-
-    def edit_settings_form(self, text: str, changes: Sequence[SettingChange]) -> SettingsForm:
-        """
-        A text of appsetting.yaml as the settings form shows it, with the form's changes written into it in place.
-        Nothing is written: the page checks and saves the text it answers like any text the administrator types.
-        """
-        return self.settings_form_editor.execute(text, changes)
-
-    async def review_settings_save(
-        self,
-        administrator: User,
-        file: SettingsFile,
-        expected_revision: str,
-        host: str,
-        password: SecretStr | None,
-        client: str,
-        text: str | None = None,
-        backup_id: str | None = None,
-    ) -> SettingsEdit:
-        """
-        A save or a restore, reviewed as its preview is and confirmed: InvalidSettingsError with the problems of a text
-        the app would refuse, then PasswordRequired, PasswordRefused or SignInThrottled without the administrator's own
-        password inside its attempt limit. Nothing is written.
-        """
-        edit = await self.settings_editor.execute(file, expected_revision, host, text, backup_id)
-        await self.settings_confirmation.execute(administrator, edit, password, client)
-        return edit
+        edits = await self.settings_editor.execute(changes, host)
+        await self.settings_confirmation.execute(administrator, password, client)
+        return edits
 
     async def confirm_editor_access(self, running: SignInOffer, saving: UserId | None) -> None:
         """
@@ -670,7 +636,7 @@ class Pipeline:
         await self.editor_access.execute(candidate, running, saving)
 
     async def save_settings_file(self, edit: SettingsEdit, actor: UserId) -> SettingsEdit:
-        """Writes a proposal the app starts with, still at its base revision, with a backup and an audit entry naming `actor`."""
+        """Writes an edit the app starts with, still at its base revision, with a backup and an audit entry naming `actor`."""
         return await self.settings_save.execute(edit, actor)
 
     async def load_sign_in_options(self) -> SignInOffer:

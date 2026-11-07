@@ -2,7 +2,7 @@ import { ArrowRight, CopyCheck, FlaskConical, Landmark, LineChart, ReceiptText, 
 import { lazy, Suspense, useMemo, useState, type FormEvent } from 'react'
 import { Link } from 'react-router'
 import { useLocale, useTranslation } from '@/i18n'
-import { useListedNames } from '@/shared/api'
+import { chosenOffer, MOCK_ONLY, useBrokers, useListedNames, type Broker, type BrokerOffer } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
 import { directionOf } from '@/shared/lib/direction'
 import { formatCompact, formatDateTime, formatMonthDayTime, formatNumber, useFormat } from '@/shared/lib/format'
@@ -15,6 +15,7 @@ import { Input } from '@/shared/ui/input'
 import { PageHeader } from '@/shared/ui/page-header'
 import { Panel } from '@/shared/ui/panel'
 import { RequireSignIn } from '@/shared/ui/require-sign-in'
+import { Segmented } from '@/shared/ui/segmented'
 import { Skeleton } from '@/shared/ui/skeleton'
 import { StackedBar } from '@/shared/ui/stacked-bar'
 import { Stat } from '@/shared/ui/stat'
@@ -26,28 +27,48 @@ const ValueChart = lazy(() => import('@/shared/ui/value-chart').then((module) =>
 
 const percent = (locale: string, ratio: number) => `${formatNumber(locale, ratio * 100, 1)}%`
 
+/**
+ * The mock account, and a switch to a real broker's account where the user may order there. Each account mounts
+ * afresh, so the page never shows one account's figures under the other's title while they load.
+ */
 export function AccountPage() {
   const { t } = useTranslation('account')
+  const offers = useBrokers().data ?? MOCK_ONLY
+  const [chosen, setChosen] = useState<Broker>('mock')
+  const offer = chosenOffer(offers, chosen)
   return (
     <div className="space-y-5 lg:space-y-6">
-      <PageHeader eyebrow={t('common:nav.section.mine')} title={t('title')} description={t('description')} />
+      <PageHeader
+        eyebrow={t('common:nav.section.mine')}
+        title={t(`page.${offer.broker}.title`)}
+        description={t(`page.${offer.broker}.description`)}
+        actions={offers.length > 1 && <AccountSwitch offers={offers} value={offer.broker} onChange={setChosen} />}
+      />
       <RequireSignIn layout="page" reason={t('signIn')}>
-        <Account />
+        <Account key={offer.broker} offer={offer} />
       </RequireSignIn>
     </div>
   )
 }
 
+function AccountSwitch({ offers, value, onChange }: { offers: readonly BrokerOffer[]; value: Broker; onChange: (broker: Broker) => void }) {
+  const { t } = useTranslation('account')
+  const label = (offer: BrokerOffer) =>
+    offer.broker === 'mock' ? t('common:broker.name.mock') : `${t(`common:broker.name.${offer.broker}`)} · ${t(offer.simulation ? 'view.server.simulation' : 'view.server.live')}`
+  return <Segmented label={t('view.label')} value={value} onChange={onChange} options={offers.map((offer) => ({ value: offer.broker, label: label(offer) }))} />
+}
+
 /**
  * The account as one desk: the equity leads; the equity curve beside the allocation from 1280 px; the positions and
  * the trades across; the past-day lookup beside what this account is. Narrower, the same order in one column. A mock
- * account with no position and no trade says how to fill it instead of listing nothing.
+ * account with no position and no trade says how to fill it instead of listing nothing. A real broker's account has
+ * no opening, so it shows no starting capital and no total P&L.
  */
-function Account() {
+function Account({ offer }: { offer: BrokerOffer }) {
   const { t } = useTranslation('account')
   const [asOf, setAsOf] = useState<string | null>(null)
-  const history = useAccountHistory(asOf)
-  const trades = useTrades()
+  const history = useAccountHistory(offer.broker, asOf)
+  const trades = useTrades(offer.broker)
   const positions = history.data?.current.positions
   const tradeRows = useMemo(() => trades.data?.pages.flatMap((page) => page.trades), [trades.data])
   const codes = useMemo(
@@ -68,7 +89,7 @@ function Account() {
       <Positions value={data.current} liveStockIds={data.live_stock_ids} names={names} className="md:col-span-2" />
       {!empty && <TradesPanel trades={trades} rows={tradeRows} names={names} className="md:col-span-2" />}
       <AsOfPanel history={data} asOf={asOf} onAsOf={setAsOf} busy={history.isFetching} />
-      <AboutPanel history={data} />
+      <AboutPanel offer={offer} />
     </div>
   )
 }
@@ -160,7 +181,7 @@ function EquityPanel({ history, className }: { history: AccountHistory; classNam
       aside={first && last && <span className="tabular">{format.monthDay(first.date)} – {format.monthDay(last.date)}</span>}
     >
       {!first || !last ? (
-        <StateBlock icon={LineChart} title={t('noCurve')} description={t('noCurveHint')} />
+        <StateBlock icon={LineChart} title={t('noCurve')} description={history.execution_provider === 'mock' ? t('noCurveHint') : undefined} />
       ) : (
         <div className="space-y-4">
           <Suspense fallback={<Skeleton className="h-(--chart-price-height) rounded-xl" />}>
@@ -460,11 +481,10 @@ function AsOfPanel({ history, asOf, onAsOf, busy }: { history: AccountHistory; a
   )
 }
 
-/** Which broker keeps the account and how orders go, said once instead of above every figure. */
-function AboutPanel({ history }: { history: AccountHistory }) {
+/** Which broker keeps the account and, for a real one, on which server and with what money, said once. */
+function AboutPanel({ offer }: { offer: BrokerOffer }) {
   const { t } = useTranslation('account')
-  const mock = history.execution_provider === 'mock'
-  const Icon = mock ? FlaskConical : Landmark
+  const Icon = offer.broker === 'mock' ? FlaskConical : Landmark
   return (
     <Panel title={t('about.title')}>
       <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-6 gap-y-3 text-sm">
@@ -472,13 +492,13 @@ function AboutPanel({ history }: { history: AccountHistory }) {
         <dd>
           <Badge variant="outline" className="gap-1 border-gold/40 font-normal text-gold">
             <Icon aria-hidden className="size-3" />
-            {t(`provider.${history.execution_provider}`)}
+            {t(`provider.${offer.broker}`)}
           </Badge>
         </dd>
-        <dt className="text-muted-foreground">{t('about.orderMode')}</dt>
-        <dd>{t(`orderMode.${history.order_mode}`)}</dd>
       </dl>
-      <p className="mt-4 border-t pt-4 text-sm text-pretty text-muted-foreground">{t(mock ? 'mockNotice' : 'brokerNotice')}</p>
+      <p className="mt-4 border-t pt-4 text-sm text-pretty text-muted-foreground">
+        {t(offer.broker === 'mock' ? 'notice.mock' : offer.simulation ? 'notice.simulation' : 'notice.live')}
+      </p>
     </Panel>
   )
 }

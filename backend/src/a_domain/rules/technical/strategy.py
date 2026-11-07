@@ -147,12 +147,11 @@ class TechnicalStrategy:
 @dataclass(frozen=True, config=ConfigDict(extra="forbid"))
 class TechnicalSettings:
     """
-    One owner's strategies and which one each workflow uses: the Buzz strategy for Buzz, the active one for every
-    other workflow. revision counts the owner's saves, so a save from an older read is refused instead of overwriting.
+    One owner's strategies and the active one, which every workflow uses. revision counts the owner's saves, so a save
+    from an older read is refused instead of overwriting.
     """
 
     active_strategy_id: FormulaId
-    buzz_strategy_id: FormulaId
     strategies: Annotated[tuple[TechnicalStrategy, ...], Field(min_length=1, max_length=50)]
     revision: NonNegativeInt = 0
 
@@ -163,16 +162,11 @@ class TechnicalSettings:
         if len(strategy_ids) != len(self.strategies):
             raise ValueError("every strategy needs its own strategy_id")
 
-        for selected in (self.active_strategy_id, self.buzz_strategy_id):
-            if selected not in strategy_ids:
-                raise ValueError(f"the selected strategy {selected} is not one of the strategies")
+        if self.active_strategy_id not in strategy_ids:
+            raise ValueError(f"the selected strategy {self.active_strategy_id} is not one of the strategies")
 
         return self
 
     @property
     def active_strategy(self) -> TechnicalStrategy:
         return next(strategy for strategy in self.strategies if strategy.strategy_id == self.active_strategy_id)
-
-    @property
-    def buzz_strategy(self) -> TechnicalStrategy:
-        return next(strategy for strategy in self.strategies if strategy.strategy_id == self.buzz_strategy_id)

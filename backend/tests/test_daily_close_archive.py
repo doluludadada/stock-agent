@@ -582,10 +582,7 @@ async def test_a_database_of_this_schema_version_without_the_archive_gains_it_at
             await connection.execute(text(f"DROP TABLE {table}"))
 
         await connection.execute(
-            text(
-                "INSERT INTO technical_settings (owner_id, active_strategy_id, buzz_strategy_id, revision) "
-                "VALUES ('local', 'trend', 'buzz', 4)"
-            )
+            text("INSERT INTO technical_settings (owner_id, active_strategy_id, revision) VALUES ('local', 'trend', 4)")
         )
 
     await engine.dispose()

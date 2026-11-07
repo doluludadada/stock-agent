@@ -52,31 +52,31 @@ describe('the home page', { timeout: 20_000 }, () => {
     vi.unstubAllGlobals()
   })
 
-  it('is the analysis runs, first in the navigation and in the phone’s tab bar', async () => {
+  it('is the market overview, first in the navigation and in the phone’s tab bar', async () => {
     renderApp('/', 'user')
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Market overview' })).toBeInTheDocument()
+    const nav = screen.getByRole('navigation', { name: 'Main navigation' })
+    expect(texts(within(nav).getAllByText(/^(Analysis|Research|Mine)$/))).toEqual(['Research', 'Analysis', 'Mine'])
+    expect(texts(within(nav).getAllByRole('link'))).toEqual(['Market overview', 'Valuation', 'Analysis runs', 'Strategy library', 'Formula designer', 'Watchlist', 'Mock account', 'My settings'])
+    const tabs = screen.getByRole('navigation', { name: 'Main pages' })
+    expect(texts(within(tabs).getAllByRole('link'))).toEqual(['Market', 'Analysis', 'Watchlist', 'Account'])
+    expect(within(tabs).getByRole('link', { name: 'Market' })).toHaveAttribute('aria-current', 'page')
+  })
+
+  it('takes an old link to the market overview home, with the research target it named', async () => {
+    const { router } = renderApp('/market?target=2330', 'user')
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Market overview' })).toBeInTheDocument()
+    expect([router.state.location.pathname, router.state.location.search]).toEqual(['/', '?target=2330'])
+  })
+
+  it('keeps the analysis runs at their own address, where the analysis tab holds them', async () => {
+    renderApp('/runs', 'user')
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Analysis runs' })).toBeInTheDocument()
     expect(await screen.findAllByRole('button', { name: 'Start' }), 'one per analysis kind').toHaveLength(4)
-    const nav = screen.getByRole('navigation', { name: 'Main navigation' })
-    expect(texts(within(nav).getAllByText(/^(Analysis|Research|Mine)$/))).toEqual(['Analysis', 'Research', 'Mine'])
-    expect(texts(within(nav).getAllByRole('link'))).toEqual(['Analysis runs', 'Strategy library', 'Formula designer', 'Market overview', 'Valuation', 'Watchlist', 'Mock account', 'My settings'])
-    const tabs = screen.getByRole('navigation', { name: 'Main pages' })
-    expect(texts(within(tabs).getAllByRole('link'))).toEqual(['Analysis', 'Market', 'Watchlist', 'Account'])
-    expect(within(tabs).getByRole('link', { name: 'Analysis' })).toHaveAttribute('aria-current', 'page')
-  })
-
-  it('takes an old link to the runs page there', async () => {
-    const { router } = renderApp('/runs', 'user')
-
-    expect(await screen.findByRole('heading', { level: 1, name: 'Analysis runs' })).toBeInTheDocument()
-    expect(router.state.location.pathname).toBe('/')
-  })
-
-  it('moves the market overview to its own address, where the market tab holds it', async () => {
-    renderApp('/market', 'user')
-
-    expect(await screen.findByRole('heading', { level: 1, name: 'Market overview' })).toBeInTheDocument()
-    expect(within(screen.getByRole('navigation', { name: 'Main pages' })).getByRole('link', { name: 'Market' })).toHaveAttribute('aria-current', 'page')
+    expect(within(screen.getByRole('navigation', { name: 'Main pages' })).getByRole('link', { name: 'Analysis' })).toHaveAttribute('aria-current', 'page')
   })
 
   it('marks the analysis runs in the sidebar and the tab bar on a run’s own page', async () => {
@@ -89,15 +89,15 @@ describe('the home page', { timeout: 20_000 }, () => {
   })
 
   it('tells a visitor what the analyses do, with sign-in, registration and the market overview a click away', async () => {
-    renderApp('/', 'visitor')
+    renderApp('/runs', 'visitor')
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Analysis runs' })).toBeInTheDocument()
     const main = screen.getByRole('main')
     expect(await within(main).findByText('Full Cycle'), 'once the server said what the site offers').toBeInTheDocument()
     for (const kind of ['Full Cycle', 'Specific stocks', 'Social Buzz', 'Intraday']) expect(within(main).getByText(kind)).toBeInTheDocument()
-    expect(within(main).getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/sign-in')
+    expect(within(main).getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/sign-in?next=%2Fruns')
     expect(within(main).getByRole('link', { name: 'Create account' })).toHaveAttribute('href', '/register')
-    expect(within(main).getByRole('link', { name: 'Market overview' })).toHaveAttribute('href', '/market')
+    expect(within(main).getByRole('link', { name: 'Market overview' })).toHaveAttribute('href', '/')
     expect(within(main).queryByRole('button', { name: 'Start' })).not.toBeInTheDocument()
   })
 
@@ -110,7 +110,7 @@ describe('the home page', { timeout: 20_000 }, () => {
   })
 
   it('offers on a public site neither the valuation nor a workflow that needs realtime quotes, and says how far its data has come', async () => {
-    renderApp('/', 'user', PUBLIC_SITE)
+    renderApp('/runs', 'user', PUBLIC_SITE)
 
     expect(await screen.findAllByRole('button', { name: 'Start' }), 'Full Cycle and specific stocks').toHaveLength(2)
     const main = screen.getByRole('main')
@@ -118,7 +118,7 @@ describe('the home page', { timeout: 20_000 }, () => {
     expect(within(main).getByText('Two workflows; one of yours runs at a time')).toBeInTheDocument()
     expect((await within(main).findByRole('region', { name: 'Open-data archive' })).textContent).toContain('Data accumulating 3/61')
     const nav = screen.getByRole('navigation', { name: 'Main navigation' })
-    expect(texts(within(nav).getAllByRole('link'))).toEqual(['Analysis runs', 'Strategy library', 'Formula designer', 'Market overview', 'Watchlist', 'Mock account', 'My settings'])
+    expect(texts(within(nav).getAllByRole('link'))).toEqual(['Market overview', 'Analysis runs', 'Strategy library', 'Formula designer', 'Watchlist', 'Mock account', 'My settings'])
   })
 
   it('says why a public site has no valuation when a link opens it, and asks the server for none', async () => {

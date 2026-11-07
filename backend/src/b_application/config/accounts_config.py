@@ -54,8 +54,8 @@ class AccountsConfig(BaseSettings):
 
     settings_password_failures: Annotated[int, Field(gt=0, le=1000)]
     """
-    Wrong passwords an administrator may re-enter to save or restore a settings file from one client address in the
-    sign-in window before the next is refused (429). Counted apart from the sign-ins, so neither locks the other out.
+    Wrong passwords an administrator may re-enter to save the settings from one client address in the sign-in window
+    before the next is refused (429). Counted apart from the sign-ins, so neither locks the other out.
     """
 
     session_days: Annotated[int, Field(gt=0, le=90)]

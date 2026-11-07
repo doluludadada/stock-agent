@@ -16,6 +16,7 @@ from a_domain.types.enums import ErrorCode
 from a_domain.types.errors import (
     AiModelNotOffered,
     AlreadySetUpError,
+    BrokerUnavailable,
     LastAdministratorError,
     ListingUnavailableError,
     MopsUnavailable,
@@ -41,7 +42,6 @@ from d_presentation.web.routers.api_v1 import router as api_v1_router
 from d_presentation.web.session import (
     AdministratorsOnly,
     AppRequestRequired,
-    MockBrokerOnly,
     NotFound,
     NothingToFollow,
     OutsideFollowWindow,
@@ -58,23 +58,26 @@ Users. Anyone may register (`POST /v1/auth/register`) while registration is open
 email (`POST /v1/auth/sign-in`), which sets the HttpOnly session cookie `stock_agent_session`. Public: sign-in,
 registration, the first-time setup, the built-in strategies and market data (`/v1/market`). Signed in: every other
 read and write, each on the user's own runs, decisions, orders, watchlist, mock account and saved technical settings.
-Administrator: the users (`/v1/admin/users`) and the settings files (`/v1/admin/settings*`). 401 means sign in: the
+Administrator: the users (`/v1/admin/users`) and the settings form (`/v1/admin/settings`). 401 means sign in: the
 session is missing, expired or ended. 403 means signed in but not allowed, and never ends the session. Every write
 sends the header `X-Requested-With: stock-agent`, and every write but sign-in, sign-out, registration and setup
 repeats `"confirm": true` in its body.
 
-Orders. Full Cycle, specific-stock analysis, valuation and market data never order. Buzz and Intraday send orders
-through the same gates and trading journal as the CLI, and so does a follow (`POST /v1/runs/{run_id}/follow`), which
-places a finished Full Cycle's open decisions in the user's mock account, priced again: at a fresh realtime quote in
+Orders. Full Cycle, specific-stock analysis, valuation and market data never order. Buzz, Intraday and a manual BUY
+of a stock a specific-stock run reported (`POST /v1/runs/{run_id}/manual-buy`) send orders through the same gates and
+trading journal as the CLI, on the broker their `broker` query names for the whole run: the user's mock account by
+default, or SinoPac (`shioaji`) for an administrator while the site's Shioaji login is up, on its simulation server
+in dev and test and on the real account in prod, each BUY within trading.max_order_value and the day's within
+trading.max_daily_buy_value (`GET /v1/account/brokers` names them). A follow (`POST /v1/runs/{run_id}/follow`) places a
+finished Full Cycle's open decisions in the user's mock account only, priced again: at a fresh realtime quote in
 continuous trading, or on a site without realtime quotes at the last session's official close while no session
-trades. The API starts them only while the execution provider is the mock broker (403 otherwise).
-No endpoint places, cancels or modifies an order by itself, and the API offers no manual BUY.
+trades. No endpoint cancels or modifies an order.
 
 Open data. A public site (`audience: public`) uses only the TWSE and TPEX OpenAPI data the server archives: daily
 history and the index trend come from that archive, it has no realtime quote, so Buzz and Intraday answer 403
-`realtime_quotes_unavailable`, and it trades on the mock broker only. A personal site without a Shioaji login reads its
-daily history and index trend from the same archive and has no realtime quote either, so it answers Buzz and Intraday
-the same way. It reads no news site and no MOPS: the AI step
+`realtime_quotes_unavailable`, and it trades on the mock broker only. A personal site reads its daily history and
+index trend from the exchanges' own daily reports; without a Shioaji login it has no realtime quote either, so it
+answers Buzz and Intraday the same way. A public site reads no news site and no MOPS: the AI step
 reads the archived material information, the TWSE news naming the stock and its archived financials, a stock with none
 of them is decided on its technical score alone, and every valuation endpoint answers 403 `mops_unavailable`. `GET
 /v1/market/audience` answers the site's audience and what it allows, so the web app offers only that. `GET
@@ -132,7 +135,7 @@ ERROR_ANSWERS: dict[type[Exception], tuple[int, ErrorCode]] = {
     SetupCodeRefused: (status.HTTP_403_FORBIDDEN, ErrorCode.SETUP_CODE_REFUSED),
     AdministratorsOnly: (status.HTTP_403_FORBIDDEN, ErrorCode.ADMINISTRATORS_ONLY),
     RealBrokerRefused: (status.HTTP_403_FORBIDDEN, ErrorCode.REAL_BROKER_REFUSED),
-    MockBrokerOnly: (status.HTTP_403_FORBIDDEN, ErrorCode.MOCK_BROKER_ONLY),
+    BrokerUnavailable: (status.HTTP_403_FORBIDDEN, ErrorCode.BROKER_UNAVAILABLE),
     RealtimeQuotesUnavailable: (status.HTTP_403_FORBIDDEN, ErrorCode.REALTIME_QUOTES_UNAVAILABLE),
     MopsUnavailable: (status.HTTP_403_FORBIDDEN, ErrorCode.MOPS_UNAVAILABLE),
     SettingsFileRefused: (status.HTTP_403_FORBIDDEN, ErrorCode.SETTINGS_FILE_REFUSED),
@@ -219,7 +222,7 @@ def create_app(open_switch: Callable[[], AbstractAsyncContextManager[RuntimeSwit
     """
     The FastAPI app. Its lifespan opens the process's runtimes through the startup checks the CLI runs, offers the
     first-time setup while no user exists, watches the settings files and collects the daily data on a timer: the
-    open-data archive, and the broker's daily history on a site with a broker login. At shutdown it stops the watch and
+    open-data archive, and the exchanges' daily history on a personal site. At shutdown it stops the watch and
     the timer and waits until both have ended, so a collection never outlives the runtime it holds, cancels every
     running workflow while its runtime is open, so its record ends as aborted, then closes every runtime.
     """

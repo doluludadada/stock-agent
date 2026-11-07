@@ -163,12 +163,65 @@ class ExchangeNewsFeed(BaseModel):
     """A regex whose first group is a stock code a title names, in parentheses alone or after the label of a code."""
 
 
+class QuoteFields(BaseModel):
+    """
+    The fields of one exchange's closing quotes of a date: a security's code, its prices, the shares traded and its
+    change. TWSE writes the change's sign in a field of its own, as HTML, and X where it compared the close to no
+    reference; TPEX signs the change and writes a word where it compared it to none.
+    """
+
+    stock_id: str
+    open: str
+    high: str
+    low: str
+    close: str
+    volume: str
+    change: str
+    sign: str | None = None
+
+
+class IndexPriceFields(BaseModel):
+    """The fields of an exchange's report of its index's open, high, low and close of each session of a month."""
+
+    date: str
+    open: str
+    high: str
+    low: str
+    close: str
+
+
+class IndexVolumeFields(BaseModel):
+    """The fields of an exchange's report of its market's volume and its index's change of each session of a month."""
+
+    date: str
+    volume: str
+    change: str
+
+
+class DailyReportFeed(BaseModel):
+    """
+    One exchange's own reports of a date on its site, the daily history of a personal site: the closing quotes of every
+    security of one session, and its index's prices and its market's volume of each session of one month. Each URL is a
+    template whose {date} is the date asked, a month's by any day of it, formatted as the site reads it.
+    """
+
+    quotes_url: str
+    quote_fields: QuoteFields
+    index_prices_url: str
+    index_price_fields: IndexPriceFields
+    index_volume_url: str
+    index_volume_fields: IndexVolumeFields
+    index_volume_lots: bool
+    """Whether the volume report counts board lots (market.board_lot_shares shares each) instead of shares."""
+
+
 class ExchangeSources(BaseModel):
     """
     The TWSE and TPEX OpenAPI: the listings with each stock's latest official close, the daily index reports, the
     company profiles with each company's industry, and the reports it serves only for their latest day, month or
     quarter: the material information, the EPS statistics, the valuation ratios, the balance sheets and income
-    statements, the monthly revenue and TWSE's own news.
+    statements, the monthly revenue and TWSE's own news. Apart from them, each exchange's own reports of any date on
+    its site (`daily_reports`), which an open-data site never reads (Audience.open_data_only).
     """
 
     twse_daily_quotes_url: str
@@ -189,6 +242,7 @@ class ExchangeSources(BaseModel):
     financial_reports: FinancialReportFeeds
     monthly_revenue: dict[MarketType, MonthlyRevenueFeed]
     exchange_news: ExchangeNewsFeed
+    daily_reports: dict[MarketType, DailyReportFeed]
 
     @model_validator(mode="after")
     def _every_feed_serves_both_markets(self) -> Self:
@@ -198,24 +252,12 @@ class ExchangeSources(BaseModel):
             "quarter_eps": self.quarter_eps,
             "valuation_ratios": self.valuation_ratios,
             "monthly_revenue": self.monthly_revenue,
+            "daily_reports": self.daily_reports,
         }
 
         for name, feed in feeds.items():
             if missing := set(MarketType) - set(feed):
                 raise ValueError(f"sources.exchange.{name} needs a feed for {', '.join(sorted(missing))}")
-
-        return self
-
-
-class ShioajiSources(BaseModel):
-    """Sinopac's Shioaji market data: the contract code of each exchange's own index, whose one-minute bars make its daily history."""
-
-    index_codes: dict[MarketType, str]
-
-    @model_validator(mode="after")
-    def _every_market_has_an_index(self) -> Self:
-        if missing := set(MarketType) - set(self.index_codes):
-            raise ValueError(f"sources.shioaji.index_codes needs a code for {', '.join(sorted(missing))}")
 
         return self
 
@@ -361,7 +403,6 @@ class SourcesConfig(BaseModel):
 
     exchange: ExchangeSources
     attribution: OpenDataAttribution
-    shioaji: ShioajiSources
     mops: MopsSources
     ptt: PttSources
     news: NewsSources

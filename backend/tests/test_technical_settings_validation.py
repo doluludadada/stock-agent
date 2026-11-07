@@ -27,8 +27,8 @@ def strategy_document(strategy_id: str = "main", indicators: Json | None = None,
     }
 
 
-def settings_document(*strategies: Json, active: str = "main", buzz: str = "main") -> Json:
-    return {"active_strategy_id": active, "buzz_strategy_id": buzz, "strategies": list(strategies or [strategy_document()])}
+def settings_document(*strategies: Json, active: str = "main") -> Json:
+    return {"active_strategy_id": active, "strategies": list(strategies or [strategy_document()])}
 
 
 def test_the_document_the_refusals_start_from_is_valid() -> None:
@@ -128,14 +128,11 @@ def test_values_at_the_edge_of_the_bounds_are_accepted(indicators: Json, conditi
     [
         pytest.param(settings_document(strategy_document(), strategy_document()), id="duplicate-strategy-id"),
         pytest.param(settings_document(active="missing"), id="missing-active-strategy"),
-        pytest.param(settings_document(buzz="missing"), id="missing-buzz-strategy"),
-        pytest.param({"active_strategy_id": "main", "buzz_strategy_id": "main", "strategies": []}, id="no-strategies"),
+        pytest.param(settings_document() | {"buzz_strategy_id": "main"}, id="a-separate-buzz-strategy"),
+        pytest.param({"active_strategy_id": "main", "strategies": []}, id="no-strategies"),
         pytest.param(settings_document(strategy_document() | {"rules": []}), id="strategy-without-rules"),
         pytest.param(settings_document(strategy_document() | {"name": " "}), id="blank-strategy-name"),
-        pytest.param(
-            settings_document(strategy_document("Main Strategy"), active="Main Strategy", buzz="Main Strategy"),
-            id="strategy-id-not-a-formula-id",
-        ),
+        pytest.param(settings_document(strategy_document("Main Strategy"), active="Main Strategy"), id="strategy-id-not-a-formula-id"),
         pytest.param(settings_document() | {"revision": -1}, id="negative-revision"),
         pytest.param(settings_document(strategy_document() | {"scoring": {"base_score": 101}}), id="base-score-over-100"),
     ],
@@ -165,5 +162,5 @@ def test_the_built_in_strategies_are_the_three_files_in_menu_order_and_every_own
 
     assert sorted(path.stem for path in STRATEGY_FILES.glob("*.json")) == ["aggressive", "balanced", "conservative"]
     assert [strategy.strategy_id for strategy in technical.built_in_strategies] == ["conservative", "balanced", "aggressive"]
-    assert (initial.active_strategy_id, initial.buzz_strategy_id, initial.revision) == ("balanced", "balanced", 0)
+    assert (initial.active_strategy_id, initial.revision) == ("balanced", 0)
     assert initial.strategies == technical.built_in_strategies

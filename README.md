@@ -10,9 +10,9 @@ This project is not financial advice. Treat generated signals as decision suppor
 
 - Market: Taiwan stocks.
 - Primary UI: CLI at `backend/src/d_presentation/cli/interactive.py`.
-- API: FastAPI at `backend/main.py` starts Full Cycle and specific-stock analysis (never order), and Buzz and Intraday on the mock broker only; reads runs, signals, orders, the watchlist and the account; serves market data and valuation; reads and saves the owner's technical strategies; and lets an administrator edit the settings files, which the server runs on at once. See [Web API](#web-api).
+- API: FastAPI at `backend/main.py` starts Full Cycle and specific-stock analysis (never order), and Buzz, Intraday and a manual BUY of an analysed stock on the account each run chooses; reads runs, signals, orders, the watchlist and the account; serves market data and valuation; reads and saves the owner's technical strategies; and lets an administrator edit the settings files, which the server runs on at once. See [Web API](#web-api).
 - Web UI: `frontend/` (Bun, React, Vite) on the same API through a same-origin `/v1` proxy. See [`docs/web-integration.md`](docs/web-integration.md).
-- Order execution: `MockExecutionProvider` by default. `ShioajiExecutionProvider` (Sinopac) is wired for `execution_provider: shioaji`, see [Real broker (Shioaji)](#real-broker-shioaji). It has not been run against a real Shioaji account.
+- Order execution: each user's `MockExecutionProvider` by default. `ShioajiExecutionProvider` (Sinopac) takes the runs an administrator starts on it, see [Real broker (Shioaji)](#real-broker-shioaji). It has not been run against a real Shioaji account.
 - Database: local SQLite at `stock_agent.db` with `db.backend: sqlite`. `db.backend: postgresql` uses the PostgreSQL credentials in `.env` and refuses to start without them.
 - Knowledge store: ChromaDB path is configured by `config/appsetting.yaml`.
 
@@ -53,7 +53,7 @@ Menu behavior:
 | 7 | Account History | Shows cash, positions with unrealized PnL at the latest quote, the equity curve since the first fill, and the account as of a date you enter. Warns about each position with no live quote, which is then priced at its last daily close, or at its average cost when no price came back. | Never submits orders. |
 | 8 | Load Built-in Strategy | Lists the built-in technical strategies and Cancel. The chosen one replaces the saved strategy for menus 1, 2, 3, 4 and 6 until the CLI exits; the menu header names it. Saved settings and the Web API are unchanged. | Never. |
 
-Every BUY or SELL decision ends as one row in the `orders` table with its run id and decision id: REJECTED with the reason when a gate refuses it (order mode, market closed, a quote older than `freshness.realtime_max_lag_minutes`). IOC orders trade only in continuous trading, 09:00 to 13:25 on weekdays; the opening call auction (08:30-09:00) and the closing call auction (13:25-13:30) take ROD only, so an order then is REJECTED as `MARKET_CLOSED`, otherwise what the broker did with it, including the fee, the tax and, for a SELL, the realized PnL. Orders are LIMIT at the decision's price and IOC. The limit is a valid exchange tick (`LimitPriceRule`, with the TWSE/TPEx tick table in `market.stock_ticks` and `market.etf_ticks`): a quote off the tick grid rounds up for a BUY and down for a SELL, and sizing prices a BUY at that limit. One run decides best composite score first, a tie going to the lower stock id. Each BUY risks `analysis.risk_per_trade_pct` of the account's equity: its cash plus every held position at the latest price the run has for it (the realtime quote, else the last daily close, else the average cost, as menu 7 marks it), fixed once before the run's first decision. The quantity is capped by the cash the run's earlier BUYs left, their fees included, so a run never commits more than the account's cash; when it runs out, the lower-scored stocks get HOLD. A manual BUY is sized the same way. Fees and tax come from `market` in `config/appsetting.yaml`: a SELL pays the transaction tax `tax_rate` (0.3%) on a stock and `etf_tax_rate` (0.1%) on an ETF, which is a code starting with `00`. A bond ETF, a `00` code ending in `B` such as `00679B`, pays no tax on a SELL traded on or before `bond_etf_tax_exempt_until` (2026-12-31), and `etf_tax_rate` after it.
+Every BUY or SELL decision ends as one row in the `orders` table with its run id and decision id: REJECTED with the reason when a gate refuses it (market closed, a quote older than `freshness.realtime_max_lag_minutes`, a broker the run may not reach, a SinoPac limit). IOC orders trade only in continuous trading, 09:00 to 13:25 on weekdays; the opening call auction (08:30-09:00) and the closing call auction (13:25-13:30) take ROD only, so an order then is REJECTED as `MARKET_CLOSED`, otherwise what the broker did with it, including the fee, the tax and, for a SELL, the realized PnL. Orders are LIMIT at the decision's price and IOC. The limit is a valid exchange tick (`LimitPriceRule`, with the TWSE/TPEx tick table in `market.stock_ticks` and `market.etf_ticks`): a quote off the tick grid rounds up for a BUY and down for a SELL, and sizing prices a BUY at that limit. One run decides best composite score first, a tie going to the lower stock id. Each BUY risks `analysis.risk_per_trade_pct` of the account's equity: its cash plus every held position at the latest price the run has for it (the realtime quote, else the last daily close, else the average cost, as menu 7 marks it), fixed once before the run's first decision. The quantity is capped by the cash the run's earlier BUYs left, their fees included, so a run never commits more than the account's cash; when it runs out, the lower-scored stocks get HOLD. A manual BUY is sized the same way. Fees and tax come from `market` in `config/appsetting.yaml`: a SELL pays the transaction tax `tax_rate` (0.3%) on a stock and `etf_tax_rate` (0.1%) on an ETF, which is a code starting with `00`. A bond ETF, a `00` code ending in `B` such as `00679B`, pays no tax on a SELL traded on or before `bond_etf_tax_exempt_until` (2026-12-31), and `etf_tax_rate` after it.
 
 ### Specific Stock Flow
 
@@ -66,7 +66,7 @@ When you enter a stock such as `2330`, the app should only research that stock:
 5. Show the stock report.
 6. Offer the stock for the `MANUAL` watchlist.
 
-Adding the stock to the watchlist is a separate manual confirmation. A manual BUY override is also separate. It is sized with fees included and still goes through the same order steps, which check the order mode, market-open status and the age of the quote. The CLI prints the order's status and reason, or why no order could be built.
+Adding the stock to the watchlist is a separate manual confirmation. A manual BUY override is also separate. It is sized with fees included and still goes through the same order steps, which check the broker the run chose, market-open status and the age of the quote. The web app's manual BUY takes the shares the user asks for instead of the sizing. The CLI prints the order's status and reason, or why no order could be built.
 
 ## What Counts As "Good"
 
@@ -161,7 +161,7 @@ Important distinction:
 
 - `NewsFeed` and `AiAnalyser` only gather news, ask the AI and combine the technical and AI scores into the composite score.
 - `Pipeline` (`backend/src/b_application/pipeline.py`) holds every workflow as one method. Each method lists the use cases it runs, so it alone decides whether signals, reporting, watchlist writes or order steps happen.
-- The order steps run one decision at a time: `OrderPreparation` checks the order mode, the trading phase and the quote's age and records the order, `OrderExecution` sends it to the broker, and `OrderOutcome` records what the broker did.
+- The order steps run one decision at a time: `OrderPreparation` checks the trading phase, the quote's age and the broker the order would reach, and records the order, `OrderExecution` sends it to the broker, and `OrderOutcome` records what the broker did.
 - `MarketScanner` loads the universe, `StockLookup` the requested stock IDs and `IntradayCandidates` the held and watched stocks. `MarketDataCollector` loads daily OHLCV, `RealtimeQuoteFeed` loads the realtime quotes that price orders, and `TechnicalFilter` calculates the strategy's indicators and applies its rules.
 
 ## Architecture
@@ -195,78 +195,83 @@ table decides what each may use (`Audience` in `backend/src/a_domain/types/enums
 
 | `audience` | Daily history and index trend | Realtime quotes | Buzz, Intraday, manual BUY | Articles for the AI step | Valuation (menus 5, 6) | Brokers |
 | --- | --- | --- | --- | --- | --- | --- |
-| `personal` (the owner's machine) | Shioaji's daily quotes and index one-minute bars, kept in `ohlcv_data`; without the environment's key pair, the open-data archive | Shioaji snapshots, on the environment's key pair | Yes; without the key pair the Web answers 403 `realtime_quotes_unavailable` to Buzz and Intraday | cnyes and Yahoo news, and Tavily web search | MOPS EPS | those the environment allows |
+| `personal` (the owner's machine) | the exchanges' own daily reports of each date (TWSE's MI_INDEX, TPEX's closing quotes, each index per month), kept in `ohlcv_data`, with or without a Shioaji login | Shioaji snapshots, on the environment's key pair | Yes; without the key pair the Web answers 403 `realtime_quotes_unavailable` to Buzz and Intraday | cnyes and Yahoo news, and Tavily web search | MOPS EPS | those the environment allows |
 | `public` (a free public website) | the open-data archive only | none | Refused: the Web answers 403 `realtime_quotes_unavailable`, the CLI refuses menus 2 and 3 and offers no manual BUY | the archived material information and the TWSE news naming the stock, of the last `analysis.material_information_days` (30), only | Refused: the Web answers 403 `mops_unavailable`, the CLI refuses menus 5 and 6 | `mock` only; startup refuses any other |
 
 A public deployment never builds the Shioaji, cnyes, Yahoo news, PTT, MOPS or Tavily adapter: Shioaji's market data
 comes with the owner's own broker login, Yahoo's terms forbid automated collection, cnyes forbids reproduction without
-consent, MOPS's robots.txt disallows every path and TWSE's terms forbid its automated download, and PTT is read only by
-Buzz. Its AI step reads a stock's
+consent, MOPS's robots.txt disallows every path and TWSE's terms forbid the automated download of its site's reports,
+and PTT is read only by Buzz. Its AI step reads a stock's
 archived material information and the TWSE news naming it; a stock with none of them and no archived financials is not
 sent to the AI, its run log says so, and its decision rests on its technical score alone. On every audience the AI
 prompt also carries the stock's archived financials: its latest two archived quarters and its latest month's revenue. Its strategies need 61 sessions of closes, so until the archive holds them every run
 says how many it holds and finds no candidate. LINE is not part of the table and works as on a personal deployment.
 
-A personal deployment with the environment's Shioaji key pair reads its daily history from Shioaji, on the login the
-realtime quotes use. One `daily_quotes` request answers every listed stock's official bar of a session, and each
-exchange's own index (TSE001, OTC101) comes from its one-minute bars, at most 30 days per request; both are paced a
-second apart (`market_data.history_request_interval_seconds`), since Shioaji documents no limit of the daily quotes'
-own. The bars are kept in `ohlcv_data` as served, never in the open-data archive. The Web API's timer brings them to
-the last settled session over the stock page's one-year chart (`market_data.history_backfill_bars`, 251 sessions) at its
-start and then every `api.archive_interval_hours`, asking only for the sessions it lacks; a run fetches the sessions of
-its own window it lacks, older ones included. The daily quotes carry no change from the session's reference price, so a
-backfilled session gives no adjustment: a split, a capital reduction or a dividend inside the backfill shows as the gap
-it traded at. The last settled session takes each stock's change from its Shioaji snapshot, which shows that session
-until the next one opens, so from the first refresh on a read adjusts the bars before every corporate action, whatever
-its kind, as the archive's are (`HistoryAdjustmentRule`). Without the key pair the daily history and the index trend
-come from the open-data archive and there is no realtime quote. The SDK's Sentry reporting (`LOG_SENTRY`) and its
+A personal deployment reads its daily history from the exchanges' own reports of each date on their sites, with no
+login (`sources.exchange.daily_reports`). TWSE's MI_INDEX and TPEX's closing quotes each answer every security of one
+session in one request, with each stock's official change from the session's reference price; the rows kept are the
+stocks with a four-digit code, the listings' own universe. Each exchange's own index (the TAIEX, the TPEx Index) comes
+per month from two reports: its open, high, low and close (MI_5MINS_HIST, TPEX's index report) and its market's volume
+with the index's official change (FMTQIK, TPEX's trading index). TWSE refuses an address for minutes after more than
+about 3 requests in 5 seconds, so each site is asked at most once every `market_data.history_request_interval_seconds`
+(3), from every runtime together; a backfill takes about 3 seconds a session. Shioaji serves only the realtime quotes
+and the broker. The bars are kept in `ohlcv_data` as reported, never in the open-data archive. The Web API's timer
+brings them to the last settled session over the stock page's one-year chart (`market_data.history_backfill_bars`, 251
+sessions) at its start and then every `api.archive_interval_hours`, asking only for the sessions it lacks; a run fetches
+the sessions of its own window it lacks, older ones included. A session the cache holds without any change, as
+Shioaji's daily quotes saved them before, is asked again once and takes the reports' changes. A read adjusts the bars
+before every corporate action whose reference the exchange gives in the change, such as a split (`HistoryAdjustmentRule`).
+On an ex-dividend or ex-rights day TWSE writes `X` and a change of 0.00 and TPEX writes `除息` or `除權息` with no number:
+neither compares the close to a reference, so the bar keeps no change and that day stays as listed. Without the
+environment's Shioaji key pair there is no realtime quote. The SDK's Sentry reporting (`LOG_SENTRY`) and its
 `shioaji.log` (`SJ_LOG_PATH`) are off unless the environment sets them. Schema version 5 (`just db-migrate`) drops the
 Yahoo bars the cache held before.
 
 The audience, like the environment, changes only when the app restarts: a reload or a Web save that changes it is
 refused, and the settings form shows it read-only. `GET /v1/market/audience` answers the audience and the table's
-capabilities, and the web app hides what the site cannot do: Buzz and Intraday on the runs page, the Buzz strategy
-choice and the valuation page, whose address then says why it is not offered. `GET /v1/market/attribution` answers the credit the Open Government
+capabilities, and the web app hides what the site cannot do: Buzz and Intraday on the runs page and the valuation
+page, whose address then says why it is not offered. `GET /v1/market/attribution` answers the credit the Open Government
 Data License v1 requires of every page that shows the open data: each provider, the datasets the site reads from it,
 the license's notice, and its name and address (`sources.attribution`).
 
 ### Real broker (Shioaji)
 
-The shipped settings use the mock broker in `mock_only` order mode on `environment: dev`. The environment decides what
-the app may trade on, with which credentials, from one table (`SystemEnvironment` in
-`backend/src/a_domain/types/enums.py`):
+Every run that may order chooses its account when it starts: Buzz, Intraday and a manual BUY order on the user's mock
+account by default, or, for an administrator on a personal site whose Shioaji login is up, on SinoPac. The choice holds
+for the whole run (`workflow_runs.execution_provider`), and a follow orders on the mock account only. The Web asks it in
+each start's confirmation (`?broker=shioaji`), and the CLI asks `Order on` before menus 2 and 3 and before each manual
+BUY of menu 4, only where SinoPac is offered. The environment decides which SinoPac server, with which credentials,
+from one table (`SystemEnvironment` in `backend/src/a_domain/types/enums.py`):
 
-| `environment` | Brokers | Order modes | Shioaji server and credentials | Database |
-| --- | --- | --- | --- | --- |
-| `dev` (a developer's machine) | `mock` | `mock_only`, `disabled` | simulation, for realtime quotes only, with `SHIOAJI_API_KEY_TEST` and `SHIOAJI_SECRET_KEY_TEST` only | SQLite or PostgreSQL |
-| `test` (staging before launch) | `mock`, `shioaji` | `mock_only`, `disabled` | simulation, with `SHIOAJI_API_KEY_TEST` and `SHIOAJI_SECRET_KEY_TEST` only | SQLite or PostgreSQL |
-| `prod` (the live service) | `mock`, `shioaji` | `mock_only`, `disabled`, `live` | production, with `SHIOAJI_API_KEY`, `SHIOAJI_SECRET_KEY`, `SHIOAJI_CA_PATH`, `SHIOAJI_CA_PASSWORD` and `SHIOAJI_PERSON_ID` only | PostgreSQL only |
+| `environment` | SinoPac server and credentials | Database |
+| --- | --- | --- |
+| `dev` (a developer's machine) | simulation, no real money, with `SHIOAJI_API_KEY_TEST` and `SHIOAJI_SECRET_KEY_TEST` only | SQLite or PostgreSQL |
+| `test` (staging before launch) | simulation, no real money, with `SHIOAJI_API_KEY_TEST` and `SHIOAJI_SECRET_KEY_TEST` only | SQLite or PostgreSQL |
+| `prod` (the live service) | production, real money, with `SHIOAJI_API_KEY`, `SHIOAJI_SECRET_KEY`, `SHIOAJI_CA_PATH`, `SHIOAJI_CA_PASSWORD` and `SHIOAJI_PERSON_ID` only | PostgreSQL only |
 
 A personal site reads its realtime quotes from Shioaji's snapshots, each stamped with the exchange's time of the stock's
-last trade, over one login per process that a Shioaji broker shares. Dev and test log in to the simulation server,
-which serves the same exchange data; prod logs in to production and needs only the key pair for quotes. Without the key
-pair, or when that login fails on the mock broker, the site starts with no realtime quote: every quote is refused and
-nothing is ordered. Shioaji allows 50 market-data queries per 10 seconds and 500 stocks per snapshots request, which
+last trade, over one login per process that the SinoPac broker shares. Dev and test log in to the simulation server,
+which serves the same exchange data; prod logs in to production. Without the key pair, or when that login fails, the
+site starts with no realtime quote and no SinoPac: every quote is refused and nothing is ordered. In prod, SinoPac is
+offered only once its account check passes, the CA certificate included; a failed check is logged and leaves the mock
+account. Shioaji allows 50 market-data queries per 10 seconds and 500 stocks per snapshots request, which
 `market_data.quote_*` keeps to.
+
+Each SinoPac order passes the order gates right before it is sent (`BrokerAccessRule` and `BuyLimitRule` in
+`backend/src/a_domain/rules/trading/order_rule.py`), or is recorded REJECTED with the reason: the run chose SinoPac, the
+user is still an active administrator, the site's audience offers it, its login is up, and on the server the environment
+trades on. Each SinoPac BUY costs at most `trading.max_order_value` (NT$100,000) at its limit price, and the day's SinoPac
+BUYs at most `trading.max_daily_buy_value` (NT$300,000), counted from the trading journal, which holds every order before
+it is sent. A SELL is never held to them and sells only shares the account holds. The account page shows the SinoPac
+account next to the mock account (`GET /v1/account/history?broker=shioaji`).
 
 `dev` and `test` refuse to start while any of the five production variables is set in the environment or `.env`, so the
 production key lives only on the production machine; the refusal names the variables, never their values. Nothing
-else chooses simulation: a test machine cannot log in with the production key, and prod cannot run in simulation. The
-CLI and the Web API also refuse a combination that could send an order nobody meant to send, and say what to change:
-
-| `environment` | `execution_provider` | `order_mode` | Starts? |
-| --- | --- | --- | --- |
-| any | `mock` | `mock_only` or `disabled` | Yes (prod on PostgreSQL). |
-| any | `mock` | `live` | No. Live order mode needs Shioaji. |
-| `dev` | `shioaji` | any | No. Dev never touches a real broker. |
-| `test` or `prod` | `shioaji` | `mock_only` | No. Use `disabled` to read the Shioaji account without ordering. |
-| `test` or `prod` | `shioaji` | `disabled` | Yes. Cash and positions come from Shioaji, no order is sent. |
-| `test` | `shioaji` | `live` | No. Live order mode needs `environment: prod`. |
-| `prod` | `shioaji` | `live` | Yes. Menus 2 and 3 and a confirmed manual BUY send orders to Shioaji. |
+else chooses simulation: a test machine cannot log in with the production key, and prod cannot run in simulation.
 
 On the production machine, keep the SinoPac CA certificate at `secrets/Sinopac.pfx` in the checkout (the `secrets/`
-folder is gitignored) and set `SHIOAJI_CA_PATH` to that file's path. With any non-mock broker the menu header shows a red
-REAL BROKER panel with the broker, simulation (test) or production (prod), and the order mode.
+folder is gitignored) and set `SHIOAJI_CA_PATH` to that file's path. Before a run on SinoPac the CLI shows a panel with
+the server, simulation or PRODUCTION, and the limits.
 
 How the adapter trades: quantities are shares; whole 1000-share lots go as one board-lot order, LIMIT IOC, and the rest as one intraday odd-lot order, LIMIT ROD, because TWSE and TPEx take intraday odd lots as ROD only. Before sending, it refuses a BUY that the cash cannot pay, because the broker checks the trading limit, not the cash. Cash is the bank balance minus settlement payments due and minus the BUYs the broker lists as dealt today. A part still working after `shioaji.max_polls` status reads `shioaji.poll_interval_seconds` apart (about five seconds) is cancelled, the odd-lot ROD part included, so no order is left working. The order then ends with what filled and its fee, and its reason lists each part with its time in force, its status and the shares it dealt. A part the broker still reports as working after the cancel, or a timed-out call it cannot find again, ends the order FAILED with a reason that says to check the broker.
 
@@ -364,8 +369,8 @@ Access: public (sign-in, registration, the first-time setup, the built-in strate
 | `GET /v1/admin/users`, `PATCH /v1/admin/users/{id}` | administrator | The users; change a role, deactivate or reactivate, set a new password. The last active administrator stays (409). |
 | `POST /v1/runs/full-cycle`, `/v1/runs/specific-stocks` | signed in | Start menu 1 or menu 4's analysis (at most 20 stock ids) in the background: 202 with the run id, 409 while the user's own run runs. They never order. |
 | `POST /v1/runs/buzz-scan`, `/v1/runs/intraday` | signed in | Start menus 2 and 3 only while the execution provider is the mock broker (403 otherwise). Their orders go through the same gates and journal as the CLI's. |
-| `GET`/`POST /v1/runs/{id}/follow` | signed in | Follow a finished Full Cycle into the user's mock account, mock broker only (403 otherwise): what is still open to follow and why a follow may not start now; start one in the background (202 with the follow's run id). Each open decision is priced again: at a fresh realtime quote in continuous trading (personal), or at the last session's official close while no session trades (public). A decision is followed once a follow order of it filled since the account opened; 409 `nothing_to_follow` or `outside_follow_window` records nothing. |
-| `GET /v1/account/trades?limit&offset`, `POST /v1/account/reset` | signed in | The trades since the mock account opened, each with the run it came from; reopen the mock account with a new starting capital (mock broker only, 409 while the user's run runs). |
+| `GET`/`POST /v1/runs/{id}/follow` | signed in | Follow a finished Full Cycle into the user's mock account, the only account a follow orders on: what is still open to follow and why a follow may not start now; start one in the background (202 with the follow's run id). Each open decision is priced again: at a fresh realtime quote in continuous trading (personal), or at the last session's official close while no session trades (public). A decision is followed once a follow order of it filled since the account opened; 409 `nothing_to_follow` or `outside_follow_window` records nothing. |
+| `GET /v1/account/trades?limit&offset`, `POST /v1/account/reset` | signed in | The trades since the mock account opened, each with the run it came from; reopen the mock account with a new starting capital (409 while the user's run runs). `?broker=shioaji` lists the SinoPac account's trades instead (an administrator's, while its login is up). |
 | `GET /v1/runs?limit&offset`, `/v1/runs/{id}`, `.../signals`, `.../orders` | signed in | Runs newest first, a run's state, record and saved stock reports, its decisions and orders. |
 | `GET /v1/watchlist`, `POST /v1/watchlist/manual`, `POST /v1/watchlist/manual/remove` | signed in | Active entries with names; add or remove MANUAL entries only. |
 | `GET`/`PUT /v1/technical-settings` | signed in | The user's strategies with the `revision` a save must carry (409 when stale, 422 when invalid). |
@@ -376,8 +381,10 @@ Access: public (sign-in, registration, the first-time setup, the built-in strate
 | `GET /v1/market/stocks/{id}/financials` | public | The stock's archived quarters (revenue, gross profit, operating income, net income and EPS of the year to the quarter's end; total assets, liabilities and equity; book value per share) and monthly revenue, oldest first. |
 | `GET /v1/market/stocks/{id}/technical` | signed in | The active strategy's evaluation of the stock and each indicator at every bar it read. |
 | `GET /v1/valuation/market`, `/stocks`, `/scan`; `POST /v1/valuation/explanation` | signed in | Menus 5 and 6, read-only. Only the explanation calls the AI, once per confirmed request. A public site answers 403 `mops_unavailable`. |
-| `GET /v1/account/history?as_of=` | signed in | Menu 7, with the execution provider and order mode it reads. |
-| `/v1/admin/settings...`, `/v1/admin/audit` | administrator | `appsetting.yaml` and `instructions.yaml` as whole texts: read, preview, save with revision and the password again, backups, restore with the password, reload, audit; and the form's writing of a setting into a text of `appsetting.yaml`, keeping its comments. A save opens the app on the new text first, then writes it and runs on it at once; an edit on disk is loaded too. See [docs/web-integration.md](docs/web-integration.md#settings-files). |
+| `GET /v1/account/history?as_of=&broker=` | signed in | Menu 7 on the mock account, or with `broker=shioaji` on SinoPac (403 `real_broker_refused` for a user, `broker_unavailable` while its login is down). |
+| `GET /v1/account/brokers` | signed in | The accounts the user may choose for a run now, the mock account first, with SinoPac's server and BUY limits for the confirmation. |
+| `POST /v1/runs/{id}/manual-buy?broker=` | signed in | Buy `quantity` shares of a stock the finished specific-stock run reported, as a run of its own on the chosen account, priced on a fresh realtime quote through every order gate. |
+| `GET`, `PUT /v1/admin/settings` | administrator | Every setting of `appsetting.yaml` and the AI prompts of `instructions.yaml` as form fields, and a save of the changed ones with the password again. A save writes each change into its file in place, comments kept, opens the app on the new settings first, then writes them and runs on them at once; an edit on disk is loaded too. See [docs/web-integration.md](docs/web-integration.md#settings-files). |
 
 One workflow runs at a time per server process; a second start answers 409. Run the API with one worker.
 
@@ -387,7 +394,7 @@ One workflow runs at a time per server process; a second start answers 409. Run 
 
 Tables are created with `create_all`, which never changes an existing table. A new database also gets a `schema_version` row, the code's `SCHEMA_VERSION` (`backend/src/c_infrastructure/database/models/schema_version_dto.py`), which says how its rows are stored. Startup never upgrades a database. When the database's schema version is older than the code's, the app stops, changing nothing, and names `just db-migrate`, which backs the database up and then upgrades it in one transaction, keeping every row (see [Database migrations](#database-migrations)). The app also stops when the database is not new and its schema version is missing or one no upgrade reaches, or when an existing table's columns differ from the code. That message names each table to drop. A `stock_agent.db` made before the schema version existed is refused for every table, because several of its tables hold Taiwan wall-clock times that the current code reads as UTC. Delete that file, or drop the tables the message names; the next start recreates them empty. Cached prices and EPS refill themselves, while the mock account, watchlist and trading rows in a dropped table are lost. Such a file's `mock_positions` also hold average costs without the buy fee, and its unused `mock_orders` table can be dropped.
 
-The open-data archive is `daily_close_archive` (each stock's official daily bar per session), `index_close_archive` (the TAIEX and the TPEx Index per session), `material_information_archive` (each company's material information announcement under the time it was announced, its subject, clause and text as served), `quarter_eps_archive` (each company's year-to-date basic EPS per quarter, as served), `valuation_ratio_archive` (each stock's P/E, dividend yield and P/B per session), `financial_report_archive` (each company's balance sheet and income statement per quarter, from the report of its industry format, every field as served in a JSON column), `monthly_revenue_archive` (each company's revenue per month with its changes, as served) and `exchange_news_archive` (TWSE's own news items, under their address). Its source is the TWSE and TPEX OpenAPI, which publish under the Open Government Data License v1 and serve only their latest session, day, month or quarter, so what is not saved while they serve it is lost. Every row is kept under the date or period its own payload row names. The Web API saves them at its start and then every `api.archive_interval_hours` (3); `just archive-closes` saves once and prints every date, quarter and month the archive holds; it opens only the database and the OpenAPI, so it needs no broker login, accounts key or AI key. A report that serves rows none of which can be read, as when an exchange renames a field, is logged as an error naming the report and how many rows it served; one that serves no rows is logged as information. The bars are kept as listed, and a stock's history is read adjusted for the corporate actions whose reference price the exchange gives in the bar's change, such as a split, across no session the archive missed and, on TPEX, across no session the stock did not trade, since TPEX then compares to a reference it moved; TWSE writes `X0.00` on an ex-dividend, ex-rights or capital-reduction day, so those days stay as listed. A quarter's figures are read from its archived statements by the columns `sources.exchange.financial_reports.summary` names for their industry format, so the reading can change while the rows stay as served; `GET /v1/market/stocks/{stock_id}/financials` answers them with the monthly revenue, public. Saving the same data again changes nothing. The broker's bars of `ohlcv_data` never go into it. A public deployment reads its daily history and index trend from it alone (see Personal or public deployment); `GET /v1/market/archive-status` says how many sessions it holds and how many the built-in strategies need.
+The open-data archive is `daily_close_archive` (each stock's official daily bar per session), `index_close_archive` (the TAIEX and the TPEx Index per session), `material_information_archive` (each company's material information announcement under the time it was announced, its subject, clause and text as served), `quarter_eps_archive` (each company's year-to-date basic EPS per quarter, as served), `valuation_ratio_archive` (each stock's P/E, dividend yield and P/B per session), `financial_report_archive` (each company's balance sheet and income statement per quarter, from the report of its industry format, every field as served in a JSON column), `monthly_revenue_archive` (each company's revenue per month with its changes, as served) and `exchange_news_archive` (TWSE's own news items, under their address). Its source is the TWSE and TPEX OpenAPI, which publish under the Open Government Data License v1 and serve only their latest session, day, month or quarter, so what is not saved while they serve it is lost. Every row is kept under the date or period its own payload row names. The Web API saves them at its start and then every `api.archive_interval_hours` (3); `just archive-closes` saves once and prints every date, quarter and month the archive holds; it opens only the database and the OpenAPI, so it needs no broker login, accounts key or AI key. A report that serves rows none of which can be read, as when an exchange renames a field, is logged as an error naming the report and how many rows it served; one that serves no rows is logged as information. The bars are kept as listed, and a stock's history is read adjusted for the corporate actions whose reference price the exchange gives in the bar's change, such as a split, across no session the archive missed and, on TPEX, across no session the stock did not trade, since TPEX then compares to a reference it moved; TWSE writes `X0.00` on an ex-dividend, ex-rights or capital-reduction day, so those days stay as listed. A quarter's figures are read from its archived statements by the columns `sources.exchange.financial_reports.summary` names for their industry format, so the reading can change while the rows stay as served; `GET /v1/market/stocks/{stock_id}/financials` answers them with the monthly revenue, public. Saving the same data again changes nothing. The bars of `ohlcv_data` never go into it. A public deployment reads its daily history and index trend from it alone (see Personal or public deployment); `GET /v1/market/archive-status` says how many sessions it holds and how many the built-in strategies need.
 - `backups/`: the database backups that `just db-backup`, `just db-migrate` and `just db-restore` write, owner-only and ignored by git.
 - `chroma_data/`: Chroma persistence.
 - `news_archive/`: archived news payloads.
@@ -396,11 +403,11 @@ The open-data archive is `daily_close_archive` (each stock's official daily bar 
 
 ## Safety Rules
 
-- Every BUY or SELL decision gets one `orders` row before anything reaches the broker. A closed market, a disabled order mode or a quote older than `freshness.realtime_max_lag_minutes` makes that row `REJECTED` with the reason, and nothing is sent.
+- Every BUY or SELL decision gets one `orders` row before anything reaches the broker. A closed market, a quote older than `freshness.realtime_max_lag_minutes`, a broker the run may not reach now or a SinoPac BUY past its limits makes that row `REJECTED` with the reason, and nothing is sent.
 - `Run Full Cycle` does not call order execution.
-- The Web API starts Buzz and Intraday only while the execution provider is the mock broker, through the same order gates and journal as the CLI; every other endpoint never orders, and the Web has no manual BUY. Every write needs a signed-in user and `confirm: true`; the settings editor needs an administrator, never changes the environment, and needs the administrator's password again to change the broker, order mode, `shioaji`, `db`, the score weights and thresholds, sizing, stop-loss, or the history and quote freshness.
+- The Web API starts Buzz, Intraday and a manual BUY on the account each run chooses, the user's mock account by default and SinoPac only for an administrator, through the same order gates and journal as the CLI; a follow orders on the mock account only, and every other endpoint never orders. Every write needs a signed-in user and `confirm: true`; the settings editor needs an administrator, never changes the environment, and needs the administrator's password again to change the SinoPac limits, `shioaji`, `db`, the score weights and thresholds, sizing, stop-loss, or the history and quote freshness.
 - Manual BUY override is explicit user intent and still uses the same order checks.
-- Real orders need `environment: prod`, `execution_provider: shioaji`, `order_mode: live` and the production Shioaji credentials together. Any other combination with Shioaji either refuses to start or only reads the account, and dev and test never see a production credential.
+- Real-money orders need `environment: prod`, the production Shioaji credentials and an administrator who chooses SinoPac for that run; dev and test order SinoPac on its simulation server only, never see a production credential, and every SinoPac BUY is held to `trading.max_order_value` and `trading.max_daily_buy_value`.
 
 ## Known Cleanup Areas
 

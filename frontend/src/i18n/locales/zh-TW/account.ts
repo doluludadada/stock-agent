@@ -3,13 +3,18 @@ import type { DictionaryShape } from '../../types'
 
 const account: DictionaryShape<typeof en> = {
   signIn: '登入後查看你的模擬帳戶',
-  title: '模擬帳戶',
-  description: '你的紙上帳戶：現金、持股、成交，以及每天收盤時的權益。',
+  page: {
+    mock: { title: '模擬帳戶', description: '你的紙上帳戶：現金、持股、成交，以及每天收盤時的權益。' },
+    shioaji: { title: '永豐金帳戶', description: '你的永豐金帳戶：現金、持股，以及你的分析任務在這裡的成交。' },
+  },
+  view: { label: '帳戶', server: { simulation: '模擬環境', live: '正式' } },
   loadFailed: '無法載入帳戶。',
-  provider: { mock: '模擬券商', shioaji: '永豐 Shioaji' },
-  orderMode: { mock_only: '模擬下單', live: '實際下單', disabled: '不下單' },
-  mockNotice: '模擬券商維護的紙上帳戶，不是真實資產。',
-  brokerNotice: '讀取設定中的永豐帳戶；網頁不會在此下單。',
+  provider: { mock: '模擬券商', shioaji: '永豐金' },
+  notice: {
+    mock: '模擬券商維護的紙上帳戶，不是真實資產。',
+    simulation: '永豐金的模擬環境。社群熱度、盤中檢查與手動買進選擇永豐金時在這裡下單，不涉及真實資金。',
+    live: '你的永豐金正式帳戶。社群熱度、盤中檢查與手動買進選擇永豐金時，會在這裡以真實資金下單。',
+  },
   value: { equity: '總權益', cash: '現金', marketValue: '持股市值', unrealized: '未實現損益' },
   summary: { today: '今日', since: '自 {{date}} 起', positions: '持股', count: '{{count}} 檔', total: '總損益', startingCapital: '起始資金' },
   curveTitle: '每日收盤權益',
@@ -48,7 +53,7 @@ const account: DictionaryShape<typeof en> = {
   asOfShow: '查看',
   asOfNone: '{{date}} 當天或之前沒有任何成交。',
   asOfTitle: '截至 {{time}}（當日最後一筆成交）',
-  about: { title: '關於這個帳戶', broker: '券商', orderMode: '下單模式' },
+  about: { title: '關於這個帳戶', broker: '券商' },
   start: {
     title: '模擬帳戶目前是空的',
     description: '開啟一次已完成的分析任務，把它的決策跟單到這個帳戶。之後這裡會列出成交、持股與權益，讓你看看照分析操作的結果。',

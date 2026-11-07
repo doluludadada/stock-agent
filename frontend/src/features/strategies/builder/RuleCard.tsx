@@ -1,9 +1,10 @@
-import { ChevronDown, CircleAlert, Eye, FolderPlus, Pencil, Plus, Trash2 } from 'lucide-react'
+import { BarChart3, CandlestickChart, ChevronDown, CircleAlert, FolderPlus, Gauge, Plus, Sparkles, Trash2, Volume2 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useId, type ReactNode } from 'react'
 import { useTranslation } from '@/i18n'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/shared/ui/dropdown-menu'
 import { Input } from '@/shared/ui/input'
 import { Label } from '@/shared/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
@@ -11,6 +12,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/shared/ui/toggle-group'
 import { COMPARATORS, RULE_EFFECTS, isCrossing } from '../model/catalog'
 import { describeComparison, describeCondition } from '../model/describe'
 import { blankComparison, blankGroup, indicatorIdsOf, measuresVolume, type StrategyEdit } from '../model/edit'
+import { QUICK_FILLS, quickFill, type QuickFillKind } from '../model/quick-fill'
 import type { Comparison, ConditionGroup, GroupOperator, IdFactory, NodeId, Rule, RuleEffect, Strategy } from '../model/types'
 import { isBlocking, ruleHasIssues, type IssueOwner, type ValidationIssue } from '../model/validate'
 import { useFormulaText } from '../use-formula-text'
@@ -31,15 +33,12 @@ interface RuleCardProps {
   context: EditorContext
   rule: Rule
   index: number
-  targeted: boolean
-  onTarget: () => void
 }
 
-export function RuleCard({ context, rule, index, targeted, onTarget }: RuleCardProps) {
+export function RuleCard({ context, rule, index }: RuleCardProps) {
   const { t } = useTranslation('builder')
-  const text = useFormulaText()
   const nameId = useId()
-  const { strategy, edit, issue } = context
+  const { edit, issue } = context
   const hasIssues = ruleHasIssues(context.issueOf, rule)
 
   return (
@@ -48,29 +47,23 @@ export function RuleCard({ context, rule, index, targeted, onTarget }: RuleCardP
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.98 }}
-      onFocusCapture={onTarget}
-      onPointerDown={onTarget}
       aria-label={t('rule.label', { index: index + 1 })}
-      className={cn(
-        'rounded-xl border bg-card shadow-card transition-colors',
-        targeted && 'border-primary/40 ring-1 ring-primary/20',
-        hasIssues && 'border-destructive/40',
-      )}
+      className={cn('rounded-xl border bg-card shadow-card transition-colors', hasIssues && 'border-destructive/40')}
     >
-      <header className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-end">
-        <div className="flex min-w-0 flex-1 items-end gap-3">
-          <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted font-mono text-sm text-muted-foreground">
-            {String(index + 1).padStart(2, '0')}
+      <header className="flex flex-wrap items-start gap-2 border-b p-3 sm:flex-nowrap md:px-4">
+        <div className="flex min-w-0 flex-1 basis-full items-start gap-2 sm:basis-auto">
+          <span aria-hidden className="tabular grid h-11 w-6 shrink-0 place-items-center text-sm text-muted-foreground md:h-9">
+            {index + 1}
           </span>
-          <div className="min-w-0 flex-1 space-y-1.5">
-            <Label htmlFor={nameId} className="text-xs text-muted-foreground">
+          <div className="min-w-0 flex-1 space-y-1">
+            <Label htmlFor={nameId} className="sr-only">
               {t('rule.name')}
             </Label>
             <Input
               id={nameId}
               value={rule.name}
               onChange={(event) => edit({ type: 'setRuleName', ruleId: rule.id, name: event.target.value })}
-              placeholder={t('rule.namePlaceholder')}
+              placeholder={t('rule.name')}
               className="md:h-9"
               aria-invalid={isBlocking(issue(`rule:${rule.id}`)) ? true : undefined}
               aria-describedby={issue(`rule:${rule.id}`) ? `${nameId}-error` : undefined}
@@ -78,7 +71,7 @@ export function RuleCard({ context, rule, index, targeted, onTarget }: RuleCardP
             <FieldError id={`${nameId}-error`} issue={issue(`rule:${rule.id}`)} />
           </div>
         </div>
-        <div className="flex items-end gap-2">
+        <div className="ml-8 flex items-start gap-1 sm:ml-0">
           <EffectPicker value={rule.effect} onChange={(effect) => edit({ type: 'setRuleEffect', ruleId: rule.id, effect })} />
           <Button
             type="button"
@@ -93,12 +86,8 @@ export function RuleCard({ context, rule, index, targeted, onTarget }: RuleCardP
         </div>
       </header>
 
-      <div className="space-y-3 p-4">
+      <div className="p-3 md:px-4">
         <GroupBody context={context} group={rule.condition} root />
-        <p className="rounded-lg bg-muted/50 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-          <span className="font-medium text-foreground">{t('rule.preview')} </span>
-          <span className="first-letter:uppercase">{describeCondition(rule.condition, strategy, text)}</span>
-        </p>
       </div>
     </motion.section>
   )
@@ -108,8 +97,8 @@ function EffectPicker({ value, onChange }: { value: RuleEffect; onChange: (effec
   const { t } = useTranslation('builder')
   const id = useId()
   return (
-    <div className="space-y-1.5">
-      <Label htmlFor={id} className="text-xs text-muted-foreground">
+    <div>
+      <Label htmlFor={id} className="sr-only">
         {t('rule.effect')}
       </Label>
       <Select value={value} onValueChange={(effect) => onChange(effect as RuleEffect)}>
@@ -168,9 +157,15 @@ function GroupBody({ context, group, root = false }: { context: EditorContext; g
     toggle(condition.conditions[0]!.id, true)
   }
 
+  const addQuickFill = (kind: QuickFillKind) => {
+    const { condition, indicators } = quickFill(kind, ids)
+    edit({ type: 'addCondition', groupId: group.id, condition, indicators })
+    toggle(condition.id, true)
+  }
+
   return (
     <div className="space-y-3">
-      <GroupOperatorToggle group={group} edit={edit} />
+      {group.conditions.length > 1 && <GroupOperatorToggle group={group} edit={edit} />}
       <FieldError id={`${group.id}-error`} issue={issue(`node:${group.id}`)} />
       <ol className="space-y-2">
         <AnimatePresence initial={false}>
@@ -199,19 +194,54 @@ function GroupBody({ context, group, root = false }: { context: EditorContext; g
           ))}
         </AnimatePresence>
       </ol>
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" size="sm" onClick={addComparison}>
+      <div className="flex flex-wrap gap-1">
+        <Button type="button" variant="ghost" size="sm" className="-ml-2 text-brand" onClick={addComparison}>
           <Plus aria-hidden className="size-4" />
           {t('group.addCondition')}
         </Button>
         {root && (
-          <Button type="button" variant="ghost" size="sm" onClick={addGroup}>
+          <Button type="button" variant="ghost" size="sm" className="text-muted-foreground" onClick={addGroup}>
             <FolderPlus aria-hidden className="size-4" />
             {t('group.addGroup')}
           </Button>
         )}
+        {root && <QuickFillMenu onFill={addQuickFill} />}
       </div>
     </div>
+  )
+}
+
+const QUICK_FILL_ICON: Record<QuickFillKind, typeof Gauge> = {
+  macdCross: CandlestickChart,
+  rsiThreshold: Gauge,
+  volumeAboveAverage: BarChart3,
+  volumeAboveYesterday: Volume2,
+}
+
+/** Common conditions, each inserted as an ordinary comparison that stays fully editable. */
+function QuickFillMenu({ onFill }: { onFill: (kind: QuickFillKind) => void }) {
+  const { t } = useTranslation('builder')
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button type="button" variant="ghost" size="sm" className="text-muted-foreground">
+          <Sparkles aria-hidden className="size-4" />
+          {t('quickFill.title')}
+          <ChevronDown aria-hidden className="size-3.5" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start">
+        {QUICK_FILLS.map((kind) => {
+          const Icon = QUICK_FILL_ICON[kind]
+          return (
+            <DropdownMenuItem key={kind} onSelect={() => onFill(kind)}>
+              <Icon aria-hidden />
+              {t(`quickFill.kind.${kind}`)}
+            </DropdownMenuItem>
+          )
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -251,8 +281,8 @@ function ComparisonItem({ context, comparison }: { context: EditorContext; compa
   const sentence = describeComparison(comparison, context.strategy, text)
 
   return (
-    <div className={cn('rounded-xl border bg-background/40 transition-colors', open && 'bg-background shadow-sm', invalid && 'border-destructive/40')}>
-      <div className="flex items-start gap-2 p-3">
+    <div className={cn('rounded-lg border transition-colors', open && 'bg-background', invalid && 'border-destructive/40')}>
+      <div className="flex items-start gap-2 px-3 py-2">
         <button
           type="button"
           onClick={() => context.toggle(comparison.id)}
@@ -269,16 +299,6 @@ function ComparisonItem({ context, comparison }: { context: EditorContext; compa
               <span className="max-sm:sr-only">{t('condition.needsFix')}</span>
             </span>
           )}
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="text-muted-foreground md:size-8"
-            onClick={() => context.toggle(comparison.id)}
-            aria-label={t(open ? 'condition.collapse' : 'condition.edit')}
-          >
-            {open ? <Eye aria-hidden className="size-4" /> : <Pencil aria-hidden className="size-4" />}
-          </Button>
           <Button
             type="button"
             variant="ghost"
@@ -309,12 +329,12 @@ function ComparisonEditor({ context, comparison }: { context: EditorContext; com
   const volumeUnit = measuresVolume(comparison.left, context.strategy.indicators) || measuresVolume(comparison.right, context.strategy.indicators)
 
   return (
-    <div className="@container border-t px-3 pb-3 sm:px-4 sm:pb-4">
+    <div className="@container border-t px-3 pb-3">
       <div className="divide-y">
-        <Step number={1} title={t('condition.observe')} hint={t('condition.observeHint')}>
+        <Step title={t('condition.observe')}>
           <OperandEditor context={operandContext} path={['left']} expression={comparison.left} volumeUnit={volumeUnit} />
         </Step>
-        <Step number={2} title={t('condition.judge')} hint={t('condition.judgeHint')}>
+        <Step title={t('condition.judge')}>
           <Field label={t('condition.comparator')} htmlFor={comparatorId} className="max-w-64">
             <Select
               value={comparison.operator}
@@ -336,31 +356,22 @@ function ComparisonEditor({ context, comparison }: { context: EditorContext; com
             <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">{t(`condition.${comparison.operator}Hint`)}</p>
           )}
         </Step>
-        <Step number={3} title={t('condition.compare')} hint={t('condition.compareHint')}>
+        <Step title={t('condition.compare')}>
           <OperandEditor context={operandContext} path={['right']} expression={comparison.right} volumeUnit={volumeUnit} />
         </Step>
       </div>
       <FieldError id={`${comparison.id}-node-error`} issue={context.issue(`node:${comparison.id}`)} />
-      <div className="mt-3 flex justify-end">
-        <Button type="button" size="sm" variant="secondary" onClick={() => context.toggle(comparison.id, false)}>
-          {t('condition.done')}
-        </Button>
-      </div>
     </div>
   )
 }
 
-function Step({ number, title, hint, children }: { number: number; title: string; hint: string; children: ReactNode }) {
+function Step({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <fieldset className="grid gap-3 py-4 @2xl:grid-cols-[9rem_minmax(0,1fr)] @2xl:gap-5">
+    <fieldset className="grid gap-2 py-3 @2xl:grid-cols-[6.5rem_minmax(0,1fr)] @2xl:gap-4">
       <legend className="sr-only">{title}</legend>
-      <div aria-hidden className="flex items-start gap-2 @2xl:flex-col @2xl:gap-1">
-        <span className="flex items-center gap-2">
-          <span className="grid size-5 place-items-center rounded-full bg-primary/15 text-[0.6875rem] font-semibold text-primary">{number}</span>
-          <span className="text-sm font-medium">{title}</span>
-        </span>
-        <span className="text-xs text-muted-foreground @2xl:pl-7">{hint}</span>
-      </div>
+      <span aria-hidden className="text-xs font-medium text-muted-foreground @2xl:pt-2">
+        {title}
+      </span>
       <div className="min-w-0 space-y-2">{children}</div>
     </fieldset>
   )

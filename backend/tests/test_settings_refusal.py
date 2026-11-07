@@ -125,32 +125,37 @@ def test_every_yaml_file_in_config_is_a_settings_file() -> None:
 
 
 def test_a_file_that_does_not_parse_is_refused_at_the_parsers_mark() -> None:
-    text = SHIPPED[SettingsFile.APPSETTING].replace("  order_mode: mock_only\n", "  order_mode: [mock_only\n", 1)
+    text = SHIPPED[SettingsFile.APPSETTING].replace("  max_order_value: 100000\n", "  max_order_value: [100000\n", 1)
 
     [problem] = refused(SettingsFile.APPSETTING, text)
 
     assert (problem.file, problem.message.startswith("YAML: ")) == (SettingsFile.APPSETTING, True)
-    assert problem.line is not None and problem.line > at(text, "  order_mode: [mock_only")[0]
+    assert problem.line is not None and problem.line > at(text, "  max_order_value: [100000")[0]
 
 
 def test_a_refused_value_is_located_at_its_key() -> None:
-    text = SHIPPED[SettingsFile.APPSETTING].replace("  order_mode: mock_only", "  order_mode: sometimes", 1)
+    text = SHIPPED[SettingsFile.APPSETTING].replace("  max_order_value: 100000", "  max_order_value: plenty", 1)
 
     [problem] = refused(SettingsFile.APPSETTING, text)
 
     assert (problem.file, problem.path, problem.line, problem.column) == (
         SettingsFile.APPSETTING,
-        "trading.order_mode",
-        *at(text, "order_mode: sometimes"),
+        "trading.max_order_value",
+        *at(text, "max_order_value: plenty"),
     )
-    assert "sometimes" not in problem.message
-    assert str(problem).startswith(f"appsetting.yaml line {problem.line}, column 3, trading.order_mode: Input should be")
+    assert "plenty" not in problem.message
+    assert str(problem).startswith(f"appsetting.yaml line {problem.line}, column 3, trading.max_order_value: Input should be")
 
 
 @pytest.mark.parametrize(
     ("line", "edited", "code", "params"),
     [
-        ("  order_mode: mock_only", "  order_mode: sometimes", "enum", {"expected": "'mock_only', 'live' or 'disabled'"}),
+        (
+            "  active_model: claude",
+            "  active_model: sometimes",
+            "enum",
+            {"expected": "'openai', 'grok', 'gemini', 'groq', 'nvidia' or 'claude'"},
+        ),
         ("  temperature: 0.7", "  temperature: 3", "less_than_equal", {"le": 2}),
         ("  temperature: 0.7", "  temperature: warm", "float_parsing", {}),
     ],
@@ -216,14 +221,14 @@ def test_an_unsafe_trading_setup_is_located_at_the_setting_it_names(tmp_path: Pa
     for file, text in SHIPPED.items():
         (tmp_path / "config" / file.file_name).write_text(text, encoding="utf-8")
     (tmp_path / "config" / "strategies").symlink_to(CONFIG / "strategies")
-    text = SHIPPED[SettingsFile.APPSETTING].replace("  execution_provider: mock", "  execution_provider: shioaji", 1)
+    text = SHIPPED[SettingsFile.APPSETTING].replace("environment: dev", "environment: prod", 1)
     files = SettingsFiles(project_root=tmp_path, max_bytes=262_144, backups_kept=3, logger=SilentLogger())
 
-    problems = files.check(SettingsFile.APPSETTING, text, SystemEnvironment.DEV, Audience.PERSONAL, "127.0.0.1")
-    [problem] = [problem for problem in problems if problem.path != "ai.active_model"]
+    problems = files.check({SettingsFile.APPSETTING: text}, SystemEnvironment.PROD, Audience.PERSONAL, "127.0.0.1")
+    [problem] = [problem for problem in problems if problem.path == "db.backend"]
 
-    assert (problem.path, problem.line) == ("trading.execution_provider", at(text, "execution_provider: shioaji")[0])
-    assert problem.message == "environment dev trades only on mock, not shioaji"
+    assert (problem.path, problem.line) == ("db.backend", at(text, "backend: sqlite")[0])
+    assert problem.message == "environment prod needs db.backend postgresql, not sqlite"
 
 
 def test_a_missing_ai_key_is_a_located_refusal_at_the_first_start(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -53,8 +53,8 @@ async def get_market_breadth(pipeline: SignedOutPipeline) -> MarketBreadth:
 @router.get("/indexes/{index}")
 async def get_index_history(index: MarketIndex, pipeline: SignedOutPipeline, bars: BarCount = 250) -> IndexHistoryResponse:
     """
-    One market index's completed daily bars, oldest first, from the daily history the stock pages share: the broker's
-    history cache on a site with a Shioaji login, else the open-data archive. Public. Like a stock's history, it
+    One market index's completed daily bars, oldest first, from the daily history the stock pages share: the history
+    cache of the exchanges' own reports on a personal site, else the open-data archive. Public. Like a stock's history, it
     fetches no realtime quote.
     """
     history = await pipeline.load_index_history(index, bars)

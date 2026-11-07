@@ -11,7 +11,8 @@ from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.execution_provider import ISimulatedExecutionProvider
 from a_domain.rules.trading.execution import FillRule, OrderAcceptanceRule
-from a_domain.types.enums import RejectReason, TimeInForce, TradeAction
+from a_domain.rules.trading.order_rule import BrokerLink
+from a_domain.types.enums import ExecutionProvider, RejectReason, TimeInForce, TradeAction
 from b_application.config.app_config import AppConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.mock_trading_dto import MockCash, MockPosition
@@ -83,6 +84,10 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
                 return
 
             self._logger.info("Mock account seeded.")
+
+    @override
+    def link(self) -> BrokerLink:
+        return BrokerLink(broker=ExecutionProvider.MOCK)
 
     @override
     async def place_order(self, order: Order) -> Order:

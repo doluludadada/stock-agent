@@ -5,14 +5,14 @@ import { useArchiveStatus, useAudience } from '@/shared/api'
 import { cn } from '@/shared/lib/utils'
 
 /**
- * A site without realtime quotes reads its daily history from the archive it keeps from its first day: a site on open
- * data only, and the owner's site without a Shioaji login. Until the archive holds the sessions the strategies need,
- * this says how far it has come; anywhere else, and after that, it shows `fallback`.
+ * A site on open data only reads its daily history from the archive it keeps from its first day. Until the archive
+ * holds the sessions the strategies need, this says how far it has come; anywhere else, and after that, it shows
+ * `fallback`. The owner's site reads every session from the exchanges' own daily reports, login or not.
  */
 export function ArchiveWarmUp({ className, fallback = null }: { className?: string; fallback?: ReactNode }) {
   const { t } = useTranslation()
   const audience = useAudience().data
-  const fromArchive = audience !== undefined && !audience.realtime_quotes
+  const fromArchive = audience?.open_data_only === true
   const status = useArchiveStatus(fromArchive)
   if (!fromArchive || !status.data || status.data.sessions >= status.data.needed) return fallback
   const { sessions, needed } = status.data
@@ -26,7 +26,7 @@ export function ArchiveWarmUp({ className, fallback = null }: { className?: stri
         <div role="progressbar" aria-label={t('warmUp.label')} aria-valuemin={0} aria-valuemax={needed} aria-valuenow={sessions} className="h-1.5 overflow-hidden rounded-full bg-background/70">
           <div className="h-full rounded-full bg-gold" style={{ width: `${(sessions / needed) * 100}%` }} />
         </div>
-        <p className="text-xs text-pretty text-muted-foreground">{t(audience.open_data_only ? 'warmUp.description' : 'warmUp.withoutLogin', { needed })}</p>
+        <p className="text-xs text-pretty text-muted-foreground">{t('warmUp.description', { needed })}</p>
       </div>
     </section>
   )

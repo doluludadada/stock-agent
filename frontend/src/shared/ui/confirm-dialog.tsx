@@ -20,13 +20,15 @@ interface ConfirmDialogProps {
   cancel: string
   confirm: string
   onConfirm: () => void
+  /** While the yes cannot be given yet, such as before a required field holds a valid value. */
+  confirmDisabled?: boolean
   /** For a dialog whose `open` follows outside state, such as a navigation blocker, instead of `onOpenChange`. */
   onCancel?: () => void
   destructive?: boolean
 }
 
 /** A question that needs an explicit yes before something costly or irreversible happens. */
-export function ConfirmDialog({ open, onOpenChange, title, description, children, cancel, confirm, onConfirm, onCancel, destructive = false }: ConfirmDialogProps) {
+export function ConfirmDialog({ open, onOpenChange, title, description, children, cancel, confirm, onConfirm, confirmDisabled = false, onCancel, destructive = false }: ConfirmDialogProps) {
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
@@ -37,7 +39,7 @@ export function ConfirmDialog({ open, onOpenChange, title, description, children
         {children}
         <AlertDialogFooter>
           <AlertDialogCancel onClick={onCancel}>{cancel}</AlertDialogCancel>
-          <AlertDialogAction variant={destructive ? 'destructive' : 'default'} onClick={onConfirm}>
+          <AlertDialogAction variant={destructive ? 'destructive' : 'default'} disabled={confirmDisabled} onClick={onConfirm}>
             {confirm}
           </AlertDialogAction>
         </AlertDialogFooter>

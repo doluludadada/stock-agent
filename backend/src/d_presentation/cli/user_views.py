@@ -31,7 +31,7 @@ async def sign_in(pipeline: Pipeline) -> User | None:
 
     if Permission.USE_CLI not in user.permissions:
         terminal.console.print(
-            "[red]Only an administrator can use the CLI: it reaches manual BUY and the real broker. Use the web app.[/red]"
+            "[red]Only an administrator can use the CLI: it reaches every account and the settings. Use the web app.[/red]"
         )
         return None
 

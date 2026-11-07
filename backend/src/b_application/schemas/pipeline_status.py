@@ -9,7 +9,7 @@ from a_domain.model.trading.account import Account, AccountSnapshot
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.model.trading.watchlist import WatchlistEntry
-from a_domain.types.enums import ExecutionProvider, FollowRefusal, IndicatorOutput, OrderMode, Workflow
+from a_domain.types.enums import ExecutionProvider, FollowRefusal, IndicatorOutput, Workflow
 from a_domain.types.values import FormulaId
 
 
@@ -155,14 +155,9 @@ class PipelineStatus:
         The status of one read-only step (valuation, the stock page, the account history), for the counters and errors
         of the collect and process steps it shares with the trading workflows. It records no run and sends no order, so
         its run identity is fixed to values that cannot order, and its start time is the Unix epoch, which nothing
-        reads. Its execution_provider and order_mode say that this step cannot order, never whose account it read.
+        reads. Its execution_provider is the default, the mock account, never whose account it read.
         """
-        stats = SystemStats(
-            workflow=workflow,
-            execution_provider=ExecutionProvider.MOCK,
-            order_mode=OrderMode.DISABLED,
-            start_time=datetime.fromtimestamp(0, UTC),
-        )
+        stats = SystemStats(workflow=workflow, execution_provider=ExecutionProvider.MOCK, start_time=datetime.fromtimestamp(0, UTC))
 
         return cls(stats=stats)
 

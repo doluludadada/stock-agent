@@ -64,7 +64,6 @@ type Follow = Schemas['FollowResponse']
 const summary = (workflow: Schemas['Workflow'], followed_run_id: string | null = null): Schemas['RunSummary'] => ({
   workflow,
   execution_provider: 'mock',
-  order_mode: 'mock_only',
   start_time: '2026-11-05T13:00:00Z',
   end_time: '2026-11-05T13:20:00Z',
   total_scanned: 1900,
@@ -258,13 +257,86 @@ describe('following a finished Full Cycle into the mock account', () => {
     expect(await screen.findByText('This run made no BUY or SELL, so there is nothing to follow.')).toBeVisible()
   })
 
-  it('shows no follow on an installation whose broker is not the mock', async () => {
-    serve({ follow: { status: 403, body: { detail: 'Only on the mock broker.', code: 'mock_broker_only' } } })
+  it('offers no manual BUY on a Full Cycle', async () => {
+    serve({ follow: { refusal: null, open_decision_ids: [BUY], follows: [] } })
     openRun()
 
-    expect(await screen.findByRole('table', { name: 'Decisions (3)' })).toBeVisible()
-    expect(screen.queryByRole('heading', { name: 'Follow in your mock account' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('columnheader', { name: 'Follow' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Stock reports' })).toBeVisible()
+    expect(screen.queryByRole('button', { name: /^Buy / })).not.toBeInTheDocument()
+  })
+})
+
+const BUY_RUN = '44444444-4444-4444-8444-444444444444'
+const MOCK = { broker: 'mock', simulation: null, max_order_value: null, max_daily_buy_value: null }
+const SINOPAC = { broker: 'shioaji', simulation: true, max_order_value: 100_000, max_daily_buy_value: 300_000 }
+
+/** A finished specific-stock analysis that reported 2330 and 2317, the brokers offered, and the BUY's own run. */
+function serveSpecific({ audience = PERSONAL_SITE, brokers = [MOCK, SINOPAC] }: { audience?: Schemas['AudienceResponse']; brokers?: unknown[] } = {}) {
+  const buys: { url: string; body: unknown }[] = []
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/v1/market/audience') return json(audience)
+      if (url === '/v1/account/brokers') return json(brokers)
+      if (url === `/v1/runs/${RUN}`) {
+        const report = (stock_id: string, name: string) => ({ stock_id, name, technical_report: null, ai_report: null, composite_score: 70, current_price: 500, latest_market_data_at: null })
+        return json({ run_id: RUN, state: 'finished', error: null, summary: summary('specific_stocks'), reports: [report('2330', 'TSMC'), report('2317', 'Hon Hai')] })
+      }
+      if (url.startsWith(`/v1/runs/${RUN}/manual-buy`) && init?.method === 'POST') {
+        buys.push({ url, body: JSON.parse(String(init.body)) })
+        return json({ run_id: BUY_RUN }, 202)
+      }
+      if (url === `/v1/runs/${BUY_RUN}`) return json({ run_id: BUY_RUN, state: 'running', error: null, summary: { ...summary('manual_buy'), execution_provider: 'shioaji' }, reports: [] })
+      if (url.endsWith('/orders') || url.endsWith('/signals')) return json([])
+      return json({ detail: 'Not found.', code: 'not_found' }, 404)
+    }),
+  )
+  return buys
+}
+
+describe('a manual BUY of a stock a specific-stock analysis reported', () => {
+  beforeEach(() => session.signIn(TEST_USER))
+  afterEach(() => {
+    session.signOut()
+    vi.unstubAllGlobals()
+  })
+
+  it('asks for whole shares, names the stock, the shares and the account, and opens the BUY’s run on the account chosen', async () => {
+    const buys = serveSpecific()
+    const user = userEvent.setup()
+    openRun()
+
+    expect(await screen.findByRole('button', { name: 'Buy 2317 Hon Hai' })).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Buy 2330 TSMC' }))
+    const dialog = await screen.findByRole('alertdialog', { name: 'Buy 2330 TSMC?' })
+    const go = within(dialog).getByRole('button', { name: 'Buy' })
+    expect(go).toBeDisabled()
+
+    const shares = within(dialog).getByRole('spinbutton', { name: 'Shares' })
+    await user.type(shares, '1.5')
+    expect(within(dialog).getByText('Enter a whole number of shares above 0.')).toBeVisible()
+    expect(go).toBeDisabled()
+
+    await user.clear(shares)
+    await user.type(shares, '1000')
+    expect(within(dialog).getByText('BUY 1,000 shares of 2330 TSMC · Mock account')).toBeVisible()
+    await user.click(await within(dialog).findByRole('radio', { name: 'SinoPac' }))
+    expect(within(dialog).getByText('SinoPac: simulation, no real money')).toBeVisible()
+    expect(within(dialog).getByText(/^Each BUY up to NT\$100,000, and BUYs up to NT\$300,000 per Taiwan day\./)).toBeVisible()
+    expect(within(dialog).getByText('BUY 1,000 shares of 2330 TSMC · SinoPac')).toBeVisible()
+    expect(buys).toEqual([])
+
+    await user.click(go)
+    expect(await screen.findByRole('heading', { name: 'Manual BUY', level: 1 })).toBeVisible()
+    expect(screen.getByText('SinoPac')).toBeVisible()
+    expect(buys).toEqual([{ url: `/v1/runs/${RUN}/manual-buy?broker=shioaji`, body: { confirm: true, stock_id: '2330', quantity: 1000 } }])
+  })
+
+  it('offers no BUY where the site has no realtime quote to price it', async () => {
+    serveSpecific({ audience: { ...PERSONAL_SITE, realtime_quotes: false } })
+    openRun()
+
+    expect(await screen.findByRole('heading', { name: 'Stock reports' })).toBeVisible()
+    expect(screen.queryByRole('button', { name: /^Buy / })).not.toBeInTheDocument()
   })
 })

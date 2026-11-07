@@ -86,18 +86,9 @@ async def test_a_run_whose_strategy_read_is_interrupted_twice_fails_before_any_o
 TREND_FAILS = (75, ["Price Above MA_5"])
 """The saved active strategy's verdict on a stock below its 5-day average: its one block rule fails, 90 - 15."""
 
-BUZZ_PASSES = (90, [])
-"""The saved Buzz strategy's verdict on the same stock, priced at 50: only a minimum price of 15."""
 
-
-@pytest.mark.parametrize(
-    ("menu", "verdict"),
-    [("1", TREND_FAILS), ("2", BUZZ_PASSES), ("3", TREND_FAILS), ("4", TREND_FAILS)],
-    ids=["full-cycle", "buzz", "intraday", "specific-stocks"],
-)
-async def test_buzz_runs_the_saved_buzz_strategy_and_every_other_workflow_the_saved_active_one(
-    menu: str, verdict: tuple[int, list[str]]
-) -> None:
+@pytest.mark.parametrize("menu", ["1", "2", "3", "4"], ids=["full-cycle", "buzz", "intraday", "specific-stocks"])
+async def test_every_workflow_buzz_included_runs_the_saved_active_strategy(menu: str) -> None:
     harness = build_harness()
     harness.list_stock("2603", falling_history(50.0), realtime_price=50.0)
     harness.discuss("2603", mentions=1, engagement=harness.config.collect_rules.buzz_min_engagement)
@@ -105,7 +96,7 @@ async def test_buzz_runs_the_saved_buzz_strategy_and_every_other_workflow_the_sa
 
     status = await harness.run_menu(menu, stock_ids="2603")
 
-    assert reported(status, "2603") == verdict
+    assert reported(status, "2603") == TREND_FAILS, "the saved Buzz-only strategy, which this stock passes, is not in use"
 
 
 async def test_a_run_given_a_built_in_strategy_uses_it_and_leaves_the_saved_settings_alone() -> None:
@@ -147,7 +138,7 @@ LONG_TREND = STRATEGY.validate_python(
     [
         pytest.param(harness_settings(), None, 30, [], id="5-bar-strategy-gets-the-shortest-window"),
         pytest.param(
-            TechnicalSettings(active_strategy_id="long_trend", buzz_strategy_id="long_trend", strategies=(LONG_TREND,)),
+            TechnicalSettings(active_strategy_id="long_trend", strategies=(LONG_TREND,)),
             None,
             152,
             ["Need 101 daily bars; received 10"],

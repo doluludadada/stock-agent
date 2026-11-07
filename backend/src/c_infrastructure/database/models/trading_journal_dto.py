@@ -11,7 +11,7 @@ from a_domain.model.analysis.technical_report import TechnicalReport
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.account import Account, AccountSnapshot, Mark, Position
-from a_domain.types.enums import ExecutionProvider, OrderMode, OrderStatus, OrderType, SignalSource, TimeInForce, TradeAction, Workflow
+from a_domain.types.enums import ExecutionProvider, OrderStatus, OrderType, SignalSource, TimeInForce, TradeAction, Workflow
 from a_domain.types.ids import OrderId, RunId
 from c_infrastructure.database.utc_datetime import UtcDateTime
 
@@ -25,7 +25,6 @@ class WorkflowRunDTO(SQLModel, table=True):
     run_id: UUID = Field(primary_key=True)
     workflow: Workflow
     execution_provider: ExecutionProvider
-    order_mode: OrderMode
     start_time: datetime = Field(sa_type=UtcDateTime)
     end_time: datetime | None = Field(default=None, sa_type=UtcDateTime)
     technical_strategy_id: str | None = None

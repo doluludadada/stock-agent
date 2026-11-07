@@ -73,9 +73,7 @@ describe('the transport', () => {
     const problems = [{ message: 'names no setting', file: 'appsetting', path: 'trading.order_mod', line: 207, column: 3 }]
     vi.stubGlobal('fetch', vi.fn(async () => json({ detail: 'The app would not start with these settings.', problems }, 422)))
 
-    const error = await apiRequest('put', '/v1/admin/settings/{file}', { params: { file: 'appsetting' }, body: { confirm: true, revision: 'a'.repeat(64), text: '' } }).catch(
-      (reason: unknown) => reason,
-    )
+    const error = await apiRequest('put', '/v1/admin/settings', { body: { confirm: true, changes: [] } }).catch((reason: unknown) => reason)
 
     expect(isApiError(error, 'invalid') && error.message).toBe('The app would not start with these settings.')
     expect(isApiError(error) && error.body).toEqual({ detail: 'The app would not start with these settings.', problems })
@@ -85,9 +83,7 @@ describe('the transport', () => {
     const answers = [json({ detail: 'The password is wrong.', code: 'password_refused' }, 403), json({ detail: 'Refused.', code: 'a_code_from_later' }, 403)]
     vi.stubGlobal('fetch', vi.fn(async () => answers.shift()))
     const save = () =>
-      apiRequest('put', '/v1/admin/settings/{file}', { params: { file: 'appsetting' }, body: { confirm: true, revision: 'a'.repeat(64), text: '', password: 'x' } }).catch(
-        (reason: unknown) => reason,
-      )
+      apiRequest('put', '/v1/admin/settings', { body: { confirm: true, changes: [], password: 'x' } }).catch((reason: unknown) => reason)
 
     const known = await save()
     const unknown = await save()

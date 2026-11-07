@@ -10,9 +10,9 @@ class StrategyLoader:
     """
     Loads the technical strategy one run uses, before the run starts; the run keeps it, so settings saved while it
     runs apply to the next run. Given a built-in strategy id, the CLI session's choice, the run uses that built-in
-    strategy and the saved settings stay as they are. Otherwise the owner's saved settings choose: the Buzz strategy
-    for Buzz, the active strategy for every other workflow. A save that lands while the settings are read fails that
-    read, so the loader reads once more: a run must not fail before its stop-loss SELLs over a settings edit.
+    strategy and the saved settings stay as they are. Otherwise every workflow uses the owner's saved active strategy.
+    A save that lands while the settings are read fails that read, so the loader reads once more: a run must not fail
+    before its stop-loss SELLs over a settings edit.
     """
 
     def __init__(
@@ -36,7 +36,7 @@ class StrategyLoader:
         except TechnicalSettingsConflictError:
             settings = await self._technical_settings_repository.load(self._initial_settings)
 
-        strategy = settings.buzz_strategy if workflow == Workflow.BUZZ_SCAN else settings.active_strategy
+        strategy = settings.active_strategy
         self._logger.info(f"Technical strategy for {workflow.value}: {strategy.strategy_id}, revision {settings.revision}.")
 
         return strategy

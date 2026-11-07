@@ -1,5 +1,4 @@
-import { Navigate, type RouteObject } from 'react-router'
-import { paths } from '@/shared/config/paths'
+import type { RouteObject } from 'react-router'
 import { AppShell } from '../layouts/AppShell'
 import { AuthLayout } from '../layouts/AuthLayout'
 import { NotFoundRoute, RouteErrorBoundary } from './RouteFallbacks'
@@ -27,13 +26,12 @@ export const routes: RouteObject[] = [
           {
             errorElement: <RouteErrorBoundary />,
             children: [
-              { index: true, lazy: () => import('./routes/runs').then((m) => ({ Component: m.RunsRoute })) },
-              { path: 'market', lazy: () => import('./routes/overview').then((m) => ({ Component: m.OverviewRoute })) },
+              { index: true, lazy: () => import('./routes/overview').then((m) => ({ Component: m.OverviewRoute })) },
+              { path: 'market', lazy: () => import('./routes/overview').then((m) => ({ Component: m.MarketRedirect })) },
+              { path: 'runs', lazy: () => import('./routes/runs').then((m) => ({ Component: m.RunsRoute })) },
               { path: 'strategies', lazy: () => import('./routes/strategies').then((m) => ({ Component: m.StrategyLibraryRoute })) },
               { path: 'strategies/new', lazy: () => import('./routes/strategies').then((m) => ({ Component: m.NewStrategyRoute })) },
               { path: 'strategies/:id/edit', lazy: () => import('./routes/strategies').then((m) => ({ Component: m.EditStrategyRoute })) },
-              // The runs page was here before it became the home page, and old links still arrive.
-              { path: 'runs', element: <Navigate to={paths.runs} replace /> },
               { path: 'runs/:runId', lazy: () => import('./routes/runs').then((m) => ({ Component: m.RunRoute })) },
               { path: 'valuation', lazy: () => import('./routes/valuation').then((m) => ({ Component: m.ValuationRoute })) },
               { path: 'watchlist', lazy: () => import('./routes/watchlist').then((m) => ({ Component: m.WatchlistRoute })) },

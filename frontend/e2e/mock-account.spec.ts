@@ -48,7 +48,7 @@ test('a reset through My settings asks first, then the account opens again with 
   await page.goto('/account')
   await expect(page.getByText('起始資金').locator('..')).toContainText('2,345,678')
   await expect(page.getByText('模擬帳戶目前是空的')).toBeVisible()
-  await expect(page.getByRole('link', { name: '前往分析任務' })).toHaveAttribute('href', '/')
+  await expect(page.getByRole('link', { name: '前往分析任務' })).toHaveAttribute('href', '/runs')
 })
 
 test('a followed Full Cycle fills in the mock account, the trade names that run, and the run has nothing left to follow', async ({ page, consoleErrors }) => {

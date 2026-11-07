@@ -9,17 +9,7 @@ from a_domain.model.trading.signal import TradeSignal
 from a_domain.rules.collect.freshness import DataFreshnessRule
 from a_domain.rules.trading.cost import TradingCostRule
 from a_domain.rules.trading.order_rule import OrderGateRule, OrderPriceRule, OrderRule
-from a_domain.types.enums import (
-    ExecutionProvider,
-    OrderMode,
-    OrderPricing,
-    OrderStatus,
-    OrderType,
-    SignalSource,
-    TimeInForce,
-    TradeAction,
-    TradingPhase,
-)
+from a_domain.types.enums import OrderPricing, OrderStatus, OrderType, SignalSource, TimeInForce, TradeAction, TradingPhase
 from a_domain.types.ids import new_run_id
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 
@@ -34,14 +24,9 @@ LAST_CLOSE = datetime(2026, 10, 16, 13, 30, tzinfo=TAIWAN_TIMEZONE)
 """Friday's close: on Monday 10:20 the close of the last closed session."""
 
 
-def order_rule(
-    order_mode: OrderMode = OrderMode.MOCK_ONLY,
-    provider: ExecutionProvider = ExecutionProvider.MOCK,
-    pricing: OrderPricing = OrderPricing.REALTIME_QUOTE,
-) -> OrderRule:
+def order_rule(pricing: OrderPricing = OrderPricing.REALTIME_QUOTE) -> OrderRule:
     price_rule = OrderPriceRule(pricing=pricing, price_freshness=DataFreshnessRule(timedelta(minutes=15)))
-    gate_rule = OrderGateRule(order_mode=order_mode, execution_provider=provider, price_rule=price_rule)
-    return OrderRule(gate_rule=gate_rule, limit_price_rule=LIMIT_PRICE)
+    return OrderRule(gate_rule=OrderGateRule(price_rule=price_rule), limit_price_rule=LIMIT_PRICE)
 
 
 RULE = order_rule()
@@ -71,23 +56,16 @@ def test_a_fresh_decision_becomes_a_pending_ioc_limit_order_at_its_price() -> No
 
 
 @pytest.mark.parametrize(
-    ("order_mode", "provider", "phase", "quote_age", "reason"),
+    ("phase", "quote_age", "reason"),
     [
-        (OrderMode.DISABLED, ExecutionProvider.MOCK, TradingPhase.CONTINUOUS, 1, "ORDER_MODE_DISABLED"),
-        (OrderMode.MOCK_ONLY, ExecutionProvider.SHIOAJI, TradingPhase.CONTINUOUS, 1, "ORDER_MODE_MISMATCH"),
-        (OrderMode.LIVE, ExecutionProvider.MOCK, TradingPhase.CONTINUOUS, 1, "ORDER_MODE_MISMATCH"),
-        (OrderMode.MOCK_ONLY, ExecutionProvider.MOCK, TradingPhase.CLOSED, 1, "MARKET_CLOSED"),
-        (OrderMode.MOCK_ONLY, ExecutionProvider.MOCK, TradingPhase.OPENING_AUCTION, 1, "MARKET_CLOSED"),
-        (OrderMode.MOCK_ONLY, ExecutionProvider.MOCK, TradingPhase.CLOSING_AUCTION, 1, "MARKET_CLOSED"),
-        (OrderMode.MOCK_ONLY, ExecutionProvider.MOCK, TradingPhase.CONTINUOUS, 16, "STALE_PRICE"),
+        (TradingPhase.CLOSED, 1, "MARKET_CLOSED"),
+        (TradingPhase.OPENING_AUCTION, 1, "MARKET_CLOSED"),
+        (TradingPhase.CLOSING_AUCTION, 1, "MARKET_CLOSED"),
+        (TradingPhase.CONTINUOUS, 16, "STALE_PRICE"),
     ],
 )
-def test_each_gate_rejects_with_its_reason(
-    order_mode: OrderMode, provider: ExecutionProvider, phase: TradingPhase, quote_age: int, reason: str
-) -> None:
-    rule = order_rule(order_mode, provider)
-
-    order = rule.apply(
+def test_each_gate_rejects_with_its_reason(phase: TradingPhase, quote_age: int, reason: str) -> None:
+    order = RULE.apply(
         buy_signal(quoted_at=NOW - timedelta(minutes=quote_age)), new_run_id(), now=NOW, phase=phase, last_close=LAST_CLOSE
     )
 
@@ -143,21 +121,19 @@ def test_an_official_close_prices_a_mock_order_while_no_session_trades() -> None
 
 
 @pytest.mark.parametrize(
-    ("order_mode", "provider", "phase", "priced_at", "reason"),
+    ("phase", "priced_at", "reason"),
     [
-        (OrderMode.MOCK_ONLY, ExecutionProvider.MOCK, TradingPhase.CONTINUOUS, LAST_CLOSE, "SESSION_IN_PROGRESS"),
-        (OrderMode.MOCK_ONLY, ExecutionProvider.MOCK, TradingPhase.OPENING_AUCTION, LAST_CLOSE, "SESSION_IN_PROGRESS"),
-        (OrderMode.MOCK_ONLY, ExecutionProvider.MOCK, TradingPhase.CLOSING_AUCTION, LAST_CLOSE, "SESSION_IN_PROGRESS"),
-        (OrderMode.MOCK_ONLY, ExecutionProvider.MOCK, TradingPhase.CLOSED, LAST_CLOSE - timedelta(days=1), "STALE_PRICE"),
-        (OrderMode.LIVE, ExecutionProvider.SHIOAJI, TradingPhase.CLOSED, LAST_CLOSE, "ORDER_MODE_MISMATCH"),
-        (OrderMode.DISABLED, ExecutionProvider.MOCK, TradingPhase.CLOSED, LAST_CLOSE, "ORDER_MODE_DISABLED"),
+        (TradingPhase.CONTINUOUS, LAST_CLOSE, "SESSION_IN_PROGRESS"),
+        (TradingPhase.OPENING_AUCTION, LAST_CLOSE, "SESSION_IN_PROGRESS"),
+        (TradingPhase.CLOSING_AUCTION, LAST_CLOSE, "SESSION_IN_PROGRESS"),
+        (TradingPhase.CLOSED, LAST_CLOSE - timedelta(days=1), "STALE_PRICE"),
     ],
-    ids=["continuous", "opening-auction", "closing-auction", "older-close", "real-broker", "disabled"],
+    ids=["continuous", "opening-auction", "closing-auction", "older-close"],
 )
-def test_an_official_close_is_refused_during_a_session_when_older_than_the_last_close_and_on_any_real_broker(
-    order_mode: OrderMode, provider: ExecutionProvider, phase: TradingPhase, priced_at: datetime, reason: str
+def test_an_official_close_is_refused_during_a_session_and_when_older_than_the_last_close(
+    phase: TradingPhase, priced_at: datetime, reason: str
 ) -> None:
-    rule = order_rule(order_mode, provider, OrderPricing.OFFICIAL_CLOSE)
+    rule = order_rule(OrderPricing.OFFICIAL_CLOSE)
 
     order = rule.apply(close_signal(priced_at), new_run_id(), now=SATURDAY, phase=phase, last_close=LAST_CLOSE)
 

@@ -4,7 +4,7 @@ import { useMemo, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { useLocale, useTranslation } from '@/i18n'
 import { paths } from '@/shared/config/paths'
-import { isApiError } from '@/shared/api'
+import { isApiError, useAllows } from '@/shared/api'
 import { formatDateTime, formatNumber, formatPrice } from '@/shared/lib/format'
 import { ArchiveWarmUp } from '@/shared/ui/archive-warm-up'
 import { Badge } from '@/shared/ui/badge'
@@ -18,6 +18,7 @@ import { StateBlock } from '@/shared/ui/state-block'
 import { RequireSignIn } from '@/shared/ui/require-sign-in'
 import { useRun, useRunFollow, useRunOrders, useRunSignals, type Order, type Run, type Signal } from './api'
 import { FollowPanel } from './FollowPanel'
+import { ManualBuy } from './ManualBuy'
 import { followMarks, type FollowMark } from './model'
 import { RunStateBadge } from './RunStateBadge'
 
@@ -46,6 +47,9 @@ function RunDetail({ runId, renderWatch, ruleName }: RunDetailPageProps) {
   /** Only a finished analysis records decisions it never ordered, which a user may follow into the mock account. */
   const followable = run.data?.state === 'finished' && run.data.summary?.workflow === 'full_cycle'
   const follow = useRunFollow(runId, followable)
+  const quoted = useAllows('realtime_quotes')
+  /** A finished specific-stock analysis offers a BUY of each stock it reported, priced on a realtime quote. */
+  const buyable = quoted && run.data?.state === 'finished' && run.data.summary?.workflow === 'specific_stocks'
   const marks = useMemo(() => follow.data && followMarks(follow.data), [follow.data])
   const reports = run.data?.reports
   const names = useMemo(() => new Map((reports ?? []).flatMap((report) => (report.name ? [[report.stock_id, report.name] as const] : []))), [reports])
@@ -84,7 +88,7 @@ function RunDetail({ runId, renderWatch, ruleName }: RunDetailPageProps) {
       )}
       {run.data.summary && <Summary summary={run.data.summary} />}
       {followable && <FollowPanel runId={runId} follow={follow} decisions={signals.data} names={names} />}
-      {(run.data.reports ?? []).length > 0 && <Reports reports={run.data.reports ?? []} renderWatch={renderWatch} ruleName={ruleName} />}
+      {(run.data.reports ?? []).length > 0 && <Reports reports={run.data.reports ?? []} buyFrom={buyable ? runId : null} renderWatch={renderWatch} ruleName={ruleName} />}
       {ended && (
         <div className="grid items-start gap-4 lg:gap-5 xl:grid-cols-2">
           <Signals query={signals} marks={marks} />
@@ -107,7 +111,7 @@ function Header({ run }: { run: Run }) {
         <RunStateBadge state={run.state} />
         {summary && (
           <Badge variant="outline" className="font-normal">
-            {t('broker', { provider: t(`provider.${summary.execution_provider}`), mode: t(`orderMode.${summary.order_mode}`) })}
+            {t(`common:broker.name.${summary.execution_provider}`)}
           </Badge>
         )}
       </div>
@@ -153,8 +157,14 @@ function Summary({ summary }: { summary: NonNullable<Run['summary']> }) {
   )
 }
 
+interface ReportsProps extends Pick<RunDetailPageProps, 'renderWatch' | 'ruleName'> {
+  reports: NonNullable<Run['reports']>
+  /** The run whose reported stocks each offer a BUY; null where the run offers none. */
+  buyFrom: string | null
+}
+
 /** One card per stock: its scores, the price the run read, the rules that excluded it and the AI's summary. */
-function Reports({ reports, renderWatch, ruleName }: { reports: NonNullable<Run['reports']> } & Pick<RunDetailPageProps, 'renderWatch' | 'ruleName'>) {
+function Reports({ reports, buyFrom, renderWatch, ruleName }: ReportsProps) {
   const { t } = useTranslation('runs')
   const locale = useLocale()
   return (
@@ -167,7 +177,10 @@ function Reports({ reports, renderWatch, ruleName }: { reports: NonNullable<Run[
                 <span className="truncate font-semibold">{report.name ?? report.stock_id}</span>
                 <span className="font-mono text-xs text-muted-foreground">{report.stock_id}</span>
               </Link>
-              {renderWatch?.(report.stock_id, report.name ?? report.stock_id)}
+              <div className="flex shrink-0 items-center gap-1">
+                {buyFrom && <ManualBuy runId={buyFrom} stockId={report.stock_id} name={report.name} />}
+                {renderWatch?.(report.stock_id, report.name ?? report.stock_id)}
+              </div>
             </div>
             <dl className="grid grid-cols-3 gap-3 rounded-lg bg-muted/60 px-3 py-2.5">
               <Stat label={t('score.technical')}>{report.technical_report?.score ?? '—'}</Stat>

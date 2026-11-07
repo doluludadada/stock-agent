@@ -17,9 +17,8 @@ class MarketDataCollector:
     no history: Intraday skips the stocks its run may no longer act on. Realtime quotes, which price orders, are
     RealtimeQuoteFeed's job.
 
-    `archive` is the open-data archive when the daily history comes from it (a public site, or a personal one without a
-    Shioaji login), else None: while it holds fewer sessions than required_bars, the run says so instead of only failing
-    every stock for too few bars.
+    `archive` is the open-data archive when the daily history comes from it (a public site), else None: while it holds
+    fewer sessions than required_bars, the run says so instead of only failing every stock for too few bars.
     """
 
     def __init__(

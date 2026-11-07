@@ -13,7 +13,7 @@ import { TEST_USER } from '@/test/users'
 function fakeBackend() {
   let active = 'balanced'
   let revision = 0
-  const settings = () => ({ active_strategy_id: active, buzz_strategy_id: 'balanced', strategies: [builtInJson('balanced'), builtInJson('aggressive')], revision })
+  const settings = () => ({ active_strategy_id: active, strategies: [builtInJson('balanced'), builtInJson('aggressive')], revision })
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
   const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input)

@@ -2,16 +2,17 @@ import asyncio
 from collections.abc import Mapping
 from dataclasses import asdict, replace
 from datetime import date, datetime, timedelta
-from typing import Any, override
+from typing import override
 
 from sqlalchemy import func
 from sqlmodel import col, select
 
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
-from a_domain.ports.market.broker_quote_provider import IBrokerQuoteProvider
 from a_domain.ports.market.cached_price_provider import ICachedPriceProvider
 from a_domain.ports.market.daily_close_archive import IDailyCloseArchive
+from a_domain.ports.market.daily_history_source import IDailyHistorySource
+from a_domain.ports.market.price_provider import IRealtimeQuoteProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.rules.market.listing import HistoryAdjustmentRule
@@ -23,15 +24,16 @@ from c_infrastructure.database.models.ohlcv_dto import OhlcvDTO
 
 class CachedPriceProvider(ICachedPriceProvider):
     """
-    The history cache in ohlcv_data over the broker's market data. A sync takes one index range or one session at a
-    time under the cache's lock, so a read that needs a few sessions waits for at most one request of a backfill that
-    is running; the process's write lock orders the saves of every runtime's cache. A sync that the broker fails stops
+    The history cache in ohlcv_data over the exchanges' daily reports. A sync takes one index range or one session at a
+    time under the cache's lock, so a read that needs a few sessions waits for at most one session of a backfill that
+    is running; the process's write lock orders the saves of every runtime's cache. A sync that a report fails stops
     there, and the read serves what the cache holds.
     """
 
     def __init__(
         self,
-        broker: IBrokerQuoteProvider[Any],
+        quotes: IRealtimeQuoteProvider,
+        source: IDailyHistorySource,
         archive: IDailyCloseArchive,
         db: DatabaseConnector,
         market_clock: IMarketClock,
@@ -39,7 +41,8 @@ class CachedPriceProvider(ICachedPriceProvider):
         logger: ILoggingProvider,
         write_lock: asyncio.Lock,
     ) -> None:
-        self._broker = broker
+        self._quotes = quotes
+        self._source = source
         self._archive = archive
         self._db = db
         self._clock = market_clock
@@ -50,11 +53,12 @@ class CachedPriceProvider(ICachedPriceProvider):
         self._write_lock = write_lock
         self._sync_lock = asyncio.Lock()
         self._asked: dict[str, datetime] = {}
+        self._failed_at: datetime | None = None
         self._adjustment = HistoryAdjustmentRule()
 
     @override
     async def fetch_realtime_bars(self, stocks: list[Stock]) -> dict[str, Ohlcv]:
-        return await self._broker.fetch_realtime_bars(stocks)
+        return await self._quotes.fetch_realtime_bars(stocks)
 
     @override
     async def fetch_history(self, stocks: list[Stock], start_date: datetime, end_date: datetime) -> dict[str, list[Ohlcv]]:
@@ -70,10 +74,10 @@ class CachedPriceProvider(ICachedPriceProvider):
         }
         unadjustable = {bar.ts for bars in stored.values() for bar in bars[1:] if bar.change is None}
 
-        self._logger.info(f"Daily history from the broker's daily quotes: {len(stored)}/{len(stocks)} stocks, {len(held)} sessions")
+        self._logger.info(f"Daily history from the exchanges' reports: {len(stored)}/{len(stocks)} stocks, {len(held)} sessions")
         if unadjustable:
             self._logger.warning(
-                f"Daily history from {first} to {last}: {len(unadjustable)} sessions hold bars with no change from the snapshots "
+                f"Daily history from {first} to {last}: {len(unadjustable)} sessions hold bars with no change from the exchanges "
                 "or the open-data archive, so a split, a capital reduction or a dividend there shows as the gap it traded at"
             )
 
@@ -90,7 +94,8 @@ class CachedPriceProvider(ICachedPriceProvider):
         try:
             await self.sync_index(index.market, first, last)
         except Exception as error:
-            self._logger.warning(f"The broker's index bars failed ({type(error).__name__}: {error}); serving the cached ones")
+            self._failed_at = self._clock.now()
+            self._logger.warning(f"The exchange's index bars failed ({type(error).__name__}: {error}); serving the cached ones")
 
         return (await self.index_sessions(first, last)).get(index.market, [])
 
@@ -100,7 +105,7 @@ class CachedPriceProvider(ICachedPriceProvider):
         return self._clock.to_trading_date(start_date), last
 
     @override
-    async def sync(self, start_date: datetime, end_date: datetime) -> tuple[date, date]:
+    async def sync(self, start_date: datetime, end_date: datetime, *, reported: bool = False) -> tuple[date, date]:
         first, last = self.sessions_of(start_date, end_date)
 
         try:
@@ -109,17 +114,17 @@ class CachedPriceProvider(ICachedPriceProvider):
 
             index = await self.index_sessions(first, last)
             sessions = {self._clock.to_trading_date(bar.ts) for bars in index.values() for bar in bars}
-            missing = sorted(sessions - await self.held_sessions(first, last), reverse=True)
+            missing = sorted(sessions - await self.held_sessions(first, last, reported=reported), reverse=True)
             saved = [session for session in missing if await self.sync_session(session)]
-
-            if last == self._clock.last_settled_session():
-                await self.sync_changes(last)
         except Exception as error:
-            self._logger.warning(f"The broker's daily history failed ({type(error).__name__}: {error}); reading what the cache holds")
+            self._failed_at = self._clock.now()
+            self._logger.warning(
+                f"The exchanges' daily history failed ({type(error).__name__}: {error}); reading what the cache holds"
+            )
             return first, last
 
         if missing:
-            self._logger.info(f"Daily history: {len(saved)}/{len(missing)} sessions the cache lacked saved from the broker")
+            self._logger.info(f"Daily history: {len(saved)}/{len(missing)} sessions the cache lacked saved from the exchanges")
 
         return first, last
 
@@ -133,7 +138,7 @@ class CachedPriceProvider(ICachedPriceProvider):
                     continue
 
                 self._asked[question] = self._clock.now()
-                bars = await self._broker.fetch_index_bars(market, start, end)
+                bars = await self._source.index_bars(market, start, end)
 
                 async with self._write_lock:
                     await self.save_bars({f"^{market.value}": bars})
@@ -155,14 +160,14 @@ class CachedPriceProvider(ICachedPriceProvider):
 
     @override
     async def sync_session(self, session: date) -> bool:
-        question = f"daily quotes of {session}"
+        question = f"daily reports of {session}"
 
         async with self._sync_lock:
-            if session in await self.held_sessions(session, session) or not self.due(question, self._clock.now()):
+            if session in await self.held_sessions(session, session, reported=True) or not self.due(question, self._clock.now()):
                 return False
 
             self._asked[question] = self._clock.now()
-            bars = await self._broker.fetch_session_bars(session)
+            bars = await self._source.session_bars(session)
 
             async with self._write_lock:
                 await self.save_bars({stock_id: [bar] for stock_id, bar in bars.items()})
@@ -170,47 +175,20 @@ class CachedPriceProvider(ICachedPriceProvider):
         return bool(bars)
 
     @override
-    async def sync_changes(self, session: date) -> None:
-        question = f"changes of {session}"
-        lacking = (
-            select(OhlcvDTO)
-            .where(col(OhlcvDTO.ts) == self._clock.session_close(session), col(OhlcvDTO.change).is_(None))
-            .where(col(OhlcvDTO.stock_id).not_like("^%"))
-        )
-
-        async with self._sync_lock:
-            async with self._db.get_session() as db_session:
-                rows = (await db_session.execute(lacking)).scalars().all()
-
-            if not rows or not self.due(question, self._clock.now()):
-                return
-
-            self._asked[question] = self._clock.now()
-            changes = await self._broker.fetch_session_changes(session, [row.stock_id for row in rows])
-            bars = {
-                row.stock_id: [Ohlcv(**row.model_dump(exclude={"stock_id", "change"}), change=changes[row.stock_id])]
-                for row in rows
-                if row.stock_id in changes
-            }
-
-            async with self._write_lock:
-                await self.save_bars(bars)
-
-        self._logger.info(f"Daily history of {session}: {len(bars)}/{len(rows)} stocks without a change took it from the snapshots")
-
-    @override
     def due(self, question: str, now: datetime) -> bool:
-        asked = self._asked.get(question)
-        return asked is None or now - asked >= self._retry_interval
+        return all(asked is None or now - asked >= self._retry_interval for asked in (self._asked.get(question), self._failed_at))
 
     @override
-    async def held_sessions(self, first: date, last: date) -> set[date]:
+    async def held_sessions(self, first: date, last: date, *, reported: bool = False) -> set[date]:
         stamps = (
             select(col(OhlcvDTO.ts))
             .distinct()
             .where(col(OhlcvDTO.ts).between(self._clock.session_close(first), self._clock.session_close(last)))
             .where(col(OhlcvDTO.stock_id).not_like("^%"))
         )
+
+        if reported:
+            stamps = stamps.where(col(OhlcvDTO.change).is_not(None))
 
         async with self._db.get_session() as session:
             return {self._clock.to_trading_date(stamp) for stamp in (await session.execute(stamps)).scalars()}

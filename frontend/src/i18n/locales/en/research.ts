@@ -1,6 +1,7 @@
 const research = {
   signIn: 'Sign in to evaluate this stock with your strategy',
   back: 'Back',
+  noBars: 'No daily bars for this stock yet.',
   insufficient: 'Not enough data',
   loadFailed: 'This stock could not be loaded.',
   technicalFailed: 'The technical evaluation could not be loaded.',

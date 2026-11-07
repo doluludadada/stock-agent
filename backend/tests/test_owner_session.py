@@ -28,7 +28,7 @@ SOURCE = Path(__file__).resolve().parents[1] / "src"
 
 
 def settings_row(owner_id: str, revision: int = 0) -> TechnicalSettingsDTO:
-    return TechnicalSettingsDTO(owner_id=owner_id, active_strategy_id="trend", buzz_strategy_id="buzz", revision=revision)
+    return TechnicalSettingsDTO(owner_id=owner_id, active_strategy_id="trend", revision=revision)
 
 
 @pytest_asyncio.fixture
