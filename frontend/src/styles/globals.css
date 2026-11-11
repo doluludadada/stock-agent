@@ -47,6 +47,7 @@
   --chart-price: var(--palette-chart-series-1);
   --chart-ma-fast: var(--palette-chart-ma-fast);
   --chart-ma-slow: var(--palette-chart-ma-slow);
+  --chart-benchmark: var(--palette-chart-benchmark);
   --chart-volume: var(--palette-chart-volume);
   --chart-grid: var(--palette-chart-grid);
   --chart-axis: var(--palette-ink-faint);

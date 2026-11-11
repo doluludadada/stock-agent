@@ -47,10 +47,12 @@ from b_application.config.settings_loader import settings_revision, settings_tex
 from b_application.pipeline import Pipeline
 from b_application.schemas.pipeline_status import PipelineStatus
 from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
+from c_infrastructure.market.daily_bar_matrix_provider import DailyBarMatrixProvider
 from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection
 from c_infrastructure.system.attempt_log import MemoryAttemptLog
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 from c_infrastructure.system.settings_files import SettingsFiles
+from c_infrastructure.technical.candidate_backtester import ProcessPoolCandidateBacktester
 from d_presentation.cli import interactive, terminal
 from d_presentation.dependencies import OwnedPorts, ProviderDependencies, Runtime, compose_runtime
 from d_presentation.live_runtime import RuntimeSwitch
@@ -59,6 +61,7 @@ from support.fakes import (
     PROMPT_TEMPLATES,
     VALUATION_PROMPT_TEMPLATE,
     FakeAiProvider,
+    FakeBacktestRepository,
     FakeConversationRepository,
     FakeDailyCloseArchive,
     FakeFundamentalsProvider,
@@ -69,6 +72,7 @@ from support.fakes import (
     FakeSentimentClassifier,
     FakeSocialMediaProvider,
     FakeStockProvider,
+    FakeStrategySearchRepository,
     FakeTechnicalSettingsRepository,
     FakeTradingJournal,
     FakeUserStore,
@@ -395,6 +399,8 @@ def build_harness(
     sinopac_link = BrokerLink(broker=ExecutionProvider.SHIOAJI, up=True, simulation=config.environment.shioaji_simulation)
     real_broker = RecordingExecutionProvider(link=sinopac_link)
 
+    backtests = FakeBacktestRepository()
+    searches = FakeStrategySearchRepository()
     users = FakeUserStore()
     users.add(ADMINISTRATOR, ADMINISTRATOR_PASSWORD)
     owners: dict[UserId, OwnedPorts] = {}
@@ -404,7 +410,7 @@ def build_harness(
             return OwnedPorts(*(cast(Any, SignedOut(cast(type, field.type))) for field in fields(OwnedPorts)))
 
         if user.user_id == ADMINISTRATOR.user_id:
-            return OwnedPorts(journal, watchlist, technical_settings, knowledge, broker, ai, sentiment)
+            return OwnedPorts(journal, watchlist, technical_settings, knowledge, broker, ai, sentiment, backtests)
 
         return owners.setdefault(
             user.user_id,
@@ -416,6 +422,7 @@ def build_harness(
                 RecordingExecutionProvider(),
                 ai,
                 sentiment,
+                FakeBacktestRepository(),
             ),
         )
 
@@ -423,6 +430,9 @@ def build_harness(
         stock_provider=stocks,
         price_provider=prices,
         history_cache=None,
+        bar_matrix_provider=DailyBarMatrixProvider(stocks, prices, clock, logger),
+        candidate_backtester=ProcessPoolCandidateBacktester(config, clock, 0),
+        strategy_search_repository=searches,
         broker_market_data=login,
         shioaji=ShioajiConnection(client=FakeShioaji(), up=True) if login else None,
         daily_close_archive=archive,

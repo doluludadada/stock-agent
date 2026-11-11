@@ -236,6 +236,90 @@
     "options": []
   },
   {
+    "path": "strategy_search.workers",
+    "options": []
+  },
+  {
+    "path": "strategy_search.population",
+    "options": []
+  },
+  {
+    "path": "strategy_search.generations",
+    "options": []
+  },
+  {
+    "path": "strategy_search.train_share",
+    "options": []
+  },
+  {
+    "path": "strategy_search.validation_share",
+    "options": []
+  },
+  {
+    "path": "strategy_search.finalists",
+    "options": []
+  },
+  {
+    "path": "strategy_search.winners",
+    "options": []
+  },
+  {
+    "path": "strategy_search.luck_sample",
+    "options": []
+  },
+  {
+    "path": "strategy_search.min_trades_per_100_sessions",
+    "options": []
+  },
+  {
+    "path": "strategy_search.drawdown_penalty",
+    "options": []
+  },
+  {
+    "path": "strategy_search.tournament",
+    "options": []
+  },
+  {
+    "path": "strategy_search.max_mutations",
+    "options": []
+  },
+  {
+    "path": "strategy_search.attempts_per_child",
+    "options": []
+  },
+  {
+    "path": "strategy_search.period_step",
+    "options": []
+  },
+  {
+    "path": "strategy_search.constant_step",
+    "options": []
+  },
+  {
+    "path": "strategy_search.score_step",
+    "options": []
+  },
+  {
+    "path": "strategy_search.max_required_bars",
+    "options": []
+  },
+  {
+    "path": "strategy_search.max_rules",
+    "options": []
+  },
+  {
+    "path": "strategy_search.periods",
+    "options": []
+  },
+  {
+    "path": "strategy_search.levels",
+    "options": []
+  },
+  {
+    "path": "strategy_search.folder",
+    "options": []
+  },
+  {
     "path": "notifications.enabled",
     "options": []
   },
@@ -537,6 +621,10 @@
   },
   {
     "path": "accounts.max_concurrent_runs",
+    "options": []
+  },
+  {
+    "path": "accounts.saved_backtests",
     "options": []
   },
   {

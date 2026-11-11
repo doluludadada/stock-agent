@@ -7,12 +7,13 @@ from typing import Annotated, Self
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from a_domain.rules.technical.search import BreedingRule, SearchFitnessRule, SessionSplitRule, StrategyMutationRule
 from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
 from a_domain.rules.trading.account_value import AccountValueRule, PositionValueRule
 from a_domain.rules.trading.cost import TradingCostRule
 from a_domain.rules.trading.tick import LimitPriceRule, TickSizeRule
-from a_domain.types.enums import ShioajiCredential, SystemEnvironment
-from a_domain.types.values import FormulaId
+from a_domain.types.enums import FormulaScale, ShioajiCredential, SystemEnvironment
+from a_domain.types.values import FormulaId, IndicatorPeriod
 
 
 class AnalysisConfig(BaseModel):
@@ -94,6 +95,88 @@ class TechnicalConfig(BaseModel):
     def required_bars(self) -> int:
         """The daily bars every built-in strategy can run on: the most any of them needs."""
         return max(strategy.required_bars for strategy in self.built_in_strategies)
+
+
+class StrategySearchConfig(BaseModel):
+    """
+    How a strategy search breeds technical strategies on the held daily history and judges them. Every value comes
+    from the `strategy_search` section of config/appsetting.yaml; population and generations are the defaults of the
+    search command's options.
+    """
+
+    model_config = ConfigDict(use_attribute_docstrings=True)
+
+    workers: int = Field(ge=0)
+    """Processes that backtest candidates at once, each with a copy of the history; 0 backtests in the search's own process."""
+
+    population: int = Field(ge=1)
+    """New candidates per generation, and the fittest so far kept to breed them from."""
+
+    generations: int = Field(ge=0)
+    train_share: float = Field(gt=0, lt=1)
+    """The share of the sessions, from the first one, that trains."""
+
+    validation_share: float = Field(gt=0, lt=1)
+    """The share after train that validates. The rest is the holdout, read once for the report."""
+
+    finalists: int = Field(ge=1)
+    """The best on train backtested on validation, where the winners are picked."""
+
+    winners: int = Field(ge=1)
+    luck_sample: int = Field(ge=0)
+    """Candidates tried that traded enough on train whose holdout returns are the luck baseline."""
+
+    min_trades_per_100_sessions: float = Field(ge=0, allow_inf_nan=False)
+    drawdown_penalty: float = Field(ge=0, allow_inf_nan=False)
+    """Fitness is the return less this many times the deepest drawdown."""
+
+    tournament: int = Field(ge=1)
+    """A parent is the fittest on train of this many candidates drawn at random."""
+
+    max_mutations: int = Field(ge=1)
+    attempts_per_child: int = Field(ge=1)
+    """How many times a child that repeats a candidate tried before is drawn again."""
+
+    period_step: float = Field(gt=0, lt=1)
+    constant_step: float = Field(gt=0, lt=1)
+    score_step: int = Field(ge=1)
+    max_required_bars: int = Field(ge=1)
+    """The most daily bars a candidate may need. The spans start where a strategy that needs this many can be scored."""
+
+    max_rules: int = Field(ge=1, le=100)
+    periods: list[IndicatorPeriod] = Field(min_length=1)
+    """The periods a new indicator of a generated condition draws from."""
+
+    levels: dict[FormulaScale, list[float]]
+    """The levels a generated condition compares a number of each scale with."""
+
+    folder: str = Field(min_length=1)
+    """Where each search is saved, in a folder of its own, relative to the project root."""
+
+    def split_rule(self) -> SessionSplitRule:
+        return SessionSplitRule(train_share=self.train_share, validation_share=self.validation_share)
+
+    def fitness_rule(self) -> SearchFitnessRule:
+        return SearchFitnessRule(min_trades_per_100_sessions=self.min_trades_per_100_sessions, drawdown_penalty=self.drawdown_penalty)
+
+    def breeding_rule(self) -> BreedingRule:
+        mutation_rule = StrategyMutationRule(
+            period_step=self.period_step,
+            constant_step=self.constant_step,
+            score_step=self.score_step,
+            max_required_bars=self.max_required_bars,
+            max_rules=self.max_rules,
+            periods=tuple(self.periods),
+            levels={scale: tuple(levels) for scale, levels in self.levels.items()},
+        )
+
+        return BreedingRule(
+            tournament=self.tournament,
+            max_mutations=self.max_mutations,
+            attempts_per_child=self.attempts_per_child,
+            fitness_rule=self.fitness_rule(),
+            mutation_rule=mutation_rule,
+        )
 
 
 class MarketConfig(BaseModel):

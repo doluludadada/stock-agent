@@ -20,6 +20,7 @@ from a_domain.model.fundamentals.monthly_revenue import MonthlyRevenue
 from a_domain.model.fundamentals.quarter_financials import QuarterFinancials
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.trading.account import AccountOpening
+from a_domain.model.trading.backtest import BacktestInputs, BacktestTrade
 from a_domain.model.trading.order import Order
 from a_domain.model.valuation.scan import ScanCriteria
 from a_domain.model.valuation.valuation import PeMedian, ReportSection
@@ -301,6 +302,70 @@ class AccountValueResponse(Response):
     unrealized_pnl: float
     equity: float
     positions: list[PositionValueResponse]
+
+
+class BacktestRequest(Confirmed):
+    inputs: BacktestInputs
+    """What GET /v1/backtests/options answered, edited: a period inside the one it named, the cash and the two scores."""
+
+
+class BacktestOptionsResponse(BaseModel):
+    strategy_id: str
+    strategy_name: str
+    """The user's active technical strategy, which a backtest replays."""
+
+    inputs: BacktestInputs | None
+    """
+    The longest backtest the site's daily history allows, at the live settings: its `first` and `last` bound the period
+    a request may name, and its cash and scores are the defaults. None while the history is too short for the strategy.
+    """
+
+
+class BacktestSummary(Response):
+    """A saved backtest without its days and trades, for the list that compares them."""
+
+    backtest_id: UUID
+    created_at: datetime
+    strategy_id: str
+    strategy_name: str
+    inputs: BacktestInputs
+    stop_loss_pct: float
+    risk_per_trade_pct: float
+    """analysis.stop_loss_pct and analysis.risk_per_trade_pct when it ran."""
+
+    first_session: date
+    last_session: date
+    """The first and the last session replayed."""
+
+    final_equity: float
+    """Cash plus the open positions at the last session's close, before the costs of selling them."""
+
+    total_return_pct: float
+    benchmark_return_pct: float | None
+    """The TAIEX from the first session's close to the last one's. None when the history holds no index bar for both."""
+
+    max_drawdown_pct: float
+    """The deepest fall of the equity from an earlier high, as a fraction of that high. Like every *_pct, 0.1 is 10%."""
+
+    trade_count: int
+    winning_trades: int
+    """The trades with a PnL above zero; a trade still open counts at the last session's close."""
+
+    fee: int
+    tax: int
+    average_held_sessions: float | None
+    """None without a trade."""
+
+
+class BacktestResponse(BacktestSummary):
+    equity_curve: dict[date, AccountValueResponse]
+    """The account at the close of each session replayed, in session order."""
+
+    benchmark: list[Ohlcv]
+    """The TAIEX's daily bars over the same sessions, oldest first."""
+
+    trades: list[BacktestTrade]
+    """In the order they were sold, then the trades still open at the last session."""
 
 
 class RunReference(Response):

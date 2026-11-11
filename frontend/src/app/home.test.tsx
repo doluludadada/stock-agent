@@ -58,7 +58,7 @@ describe('the home page', { timeout: 20_000 }, () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Market overview' })).toBeInTheDocument()
     const nav = screen.getByRole('navigation', { name: 'Main navigation' })
     expect(texts(within(nav).getAllByText(/^(Analysis|Research|Mine)$/))).toEqual(['Research', 'Analysis', 'Mine'])
-    expect(texts(within(nav).getAllByRole('link'))).toEqual(['Market overview', 'Valuation', 'Analysis runs', 'Strategy library', 'Formula designer', 'Watchlist', 'Mock account', 'My settings'])
+    expect(texts(within(nav).getAllByRole('link'))).toEqual(['Market overview', 'Valuation', 'Analysis runs', 'Strategy library', 'Backtest', 'Formula designer', 'Watchlist', 'Mock account', 'My settings'])
     const tabs = screen.getByRole('navigation', { name: 'Main pages' })
     expect(texts(within(tabs).getAllByRole('link'))).toEqual(['Market', 'Analysis', 'Watchlist', 'Account'])
     expect(within(tabs).getByRole('link', { name: 'Market' })).toHaveAttribute('aria-current', 'page')
@@ -118,7 +118,7 @@ describe('the home page', { timeout: 20_000 }, () => {
     expect(within(main).getByText('Two workflows; one of yours runs at a time')).toBeInTheDocument()
     expect((await within(main).findByRole('region', { name: 'Open-data archive' })).textContent).toContain('Data accumulating 3/61')
     const nav = screen.getByRole('navigation', { name: 'Main navigation' })
-    expect(texts(within(nav).getAllByRole('link'))).toEqual(['Market overview', 'Analysis runs', 'Strategy library', 'Formula designer', 'Watchlist', 'Mock account', 'My settings'])
+    expect(texts(within(nav).getAllByRole('link'))).toEqual(['Market overview', 'Analysis runs', 'Strategy library', 'Backtest', 'Formula designer', 'Watchlist', 'Mock account', 'My settings'])
   })
 
   it('says why a public site has no valuation when a link opens it, and asks the server for none', async () => {

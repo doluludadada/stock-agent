@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 from typing import Self
 
@@ -5,6 +6,7 @@ from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from a_domain.rules.system.registration import RegistrationRule
+from a_domain.rules.trading.backtest import BacktestRule, OpenFillRule, SessionStopLossRule
 from a_domain.rules.trading.cost import AffordableQuantityRule
 from a_domain.rules.trading.decision import DecisionRule, RunDecisionsRule
 from a_domain.rules.trading.entry import EntryRule, ManualEntryRule
@@ -25,6 +27,7 @@ from b_application.config.trading_config import (
     MarketConfig,
     MockTradingConfig,
     ShioajiConfig,
+    StrategySearchConfig,
     TechnicalConfig,
     TradingConfig,
     WatchlistConfig,
@@ -98,6 +101,7 @@ class AppConfig(BaseSettings):
     tavily: TavilyConfig = Field(default_factory=TavilyConfig)
     analysis: AnalysisConfig
     technical: TechnicalConfig
+    strategy_search: StrategySearchConfig
     notifications: NotificationConfig = Field(default_factory=NotificationConfig)
     prompts: PromptsConfig = Field(default_factory=PromptsConfig)
     sentiment: SentimentConfig = Field(default_factory=SentimentConfig)
@@ -150,6 +154,29 @@ class AppConfig(BaseSettings):
         buy_cost_rule = BuyCostRule(limit_price_rule=self.market.limit_price_rule(), cost_rule=self.market.cost_rule())
 
         return RunDecisionsRule(decision_rule=DecisionRule(entry_rule=entry_rule, exit_rule=exit_rule), buy_cost_rule=buy_cost_rule)
+
+    def backtest_rule(self, buy_score: int, sell_score: int) -> BacktestRule:
+        """
+        The replay of one backtest: the live decisions, costs and stop-loss as configured, but for the two scores, which
+        each backtest chooses in place of analysis.min_combined_score_buy and analysis.max_combined_score_sell.
+        """
+        live = self.run_decisions_rule()
+        decision_rule = replace(
+            live.decision_rule,
+            entry_rule=replace(live.decision_rule.entry_rule, buy_threshold=buy_score),
+            exit_rule=replace(live.decision_rule.exit_rule, sell_threshold=sell_score),
+        )
+
+        return BacktestRule(
+            buy_score=buy_score,
+            run_decisions_rule=replace(live, decision_rule=decision_rule),
+            open_fill_rule=OpenFillRule(
+                lot_size=self.analysis.lot_size, affordable_quantity_rule=AffordableQuantityRule(cost_rule=self.market.cost_rule())
+            ),
+            session_stop_loss_rule=SessionStopLossRule(stop_loss_rule=self.stop_loss_rule()),
+            cost_rule=self.market.cost_rule(),
+            position_value_rule=self.market.position_value_rule(),
+        )
 
     def manual_entry_rule(self) -> ManualEntryRule:
         """ManualSignal's rule: the confirmed BUY skips the buy threshold, never the sizing."""

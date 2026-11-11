@@ -11,6 +11,7 @@ from a_domain.model.market.stock import Stock
 from a_domain.model.system.stats import SystemStats
 from a_domain.model.system.user import User, UserSession
 from a_domain.model.trading.account import Account
+from a_domain.model.trading.backtest import Backtest, BacktestInputs, SearchInputs
 from a_domain.model.trading.order import Order
 from a_domain.model.valuation.scan import MarketValuation, ScanCriteria, ValuationScan
 from a_domain.model.valuation.valuation import ReportSection, StockValuation, ValuationReport
@@ -18,10 +19,11 @@ from a_domain.ports.market.daily_close_archive import ArchivedMonth, ArchivedQua
 from a_domain.ports.system.settings_files import SettingChange, SettingField, SettingsEdit
 from a_domain.rules.market.breadth import MarketBreadth
 from a_domain.rules.system.registration import SignInOffer
+from a_domain.rules.technical.search import StrategySearch
 from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
 from a_domain.rules.watchlist.membership import WatchlistAddition
 from a_domain.types.enums import AiAnalysisFocus, AiProvider, MarketIndex, Role, UserStatus, WatchlistType, Workflow
-from a_domain.types.ids import RunId, SessionToken, UserId
+from a_domain.types.ids import BacktestId, RunId, SessionToken, UserId
 from a_domain.types.values import EmailAddress, NewPassword, PositiveFiniteFloat, Username
 from b_application.schemas.pipeline_status import PipelineStatus
 from b_application.use_cases.admin.editor_access import EditorAccess
@@ -29,6 +31,18 @@ from b_application.use_cases.admin.settings_confirmation import SettingsConfirma
 from b_application.use_cases.admin.settings_editor import SettingsEditor
 from b_application.use_cases.admin.settings_reader import SettingsReader
 from b_application.use_cases.admin.settings_save import SettingsSave
+from b_application.use_cases.backtest.backtest_lookup import BacktestLookup
+from b_application.use_cases.backtest.backtest_options import BacktestOptions
+from b_application.use_cases.backtest.backtest_removal import BacktestRemoval
+from b_application.use_cases.backtest.backtest_replay import BacktestReplay
+from b_application.use_cases.backtest.backtest_save import BacktestSave
+from b_application.use_cases.backtest.backtest_scores import BacktestScores
+from b_application.use_cases.backtest.saved_backtests import SavedBacktests
+from b_application.use_cases.backtest.search_history_loader import SearchHistoryLoader
+from b_application.use_cases.backtest.search_holdout import SearchHoldout
+from b_application.use_cases.backtest.search_validation import SearchValidation
+from b_application.use_cases.backtest.strategy_breeding import StrategyBreeding
+from b_application.use_cases.backtest.strategy_search_save import StrategySearchSave
 from b_application.use_cases.chat.chat_reply import ChatReply
 from b_application.use_cases.chat.dispatcher import Dispatcher
 from b_application.use_cases.collect.archive_warm_up import ArchiveWarmUp
@@ -172,6 +186,18 @@ class Pipeline:
     run_lookup: RunLookup
     active_watchlist: ActiveWatchlist
     account_history: AccountHistory
+    backtest_options: BacktestOptions
+    backtest_scores: BacktestScores
+    backtest_replay: BacktestReplay
+    backtest_save: BacktestSave
+    saved_backtests: SavedBacktests
+    backtest_lookup: BacktestLookup
+    backtest_removal: BacktestRemoval
+    search_history_loader: SearchHistoryLoader
+    strategy_breeding: StrategyBreeding
+    search_validation: SearchValidation
+    search_holdout: SearchHoldout
+    strategy_search_save: StrategySearchSave
     fundamentals_feed: FundamentalsFeed
     market_valuation_loader: MarketValuationLoader
     valuation_appraiser: ValuationAppraiser
@@ -472,6 +498,59 @@ class Pipeline:
         status.account, status.held_stocks, status.equity_curve, status.account_as_of = await self.account_history.execute(as_of)
 
         return status
+
+    async def load_backtest_options(self, built_in_strategy_id: str | None = None) -> tuple[TechnicalStrategy, BacktestInputs | None]:
+        """
+        The backtest page: the strategy a backtest would replay, the owner's active one or a built-in one, and the
+        inputs of the longest backtest the held daily history allows at the live settings; None while it allows none.
+        It loads no bar and records no run.
+        """
+        strategy = await self.strategy_loader.execute(Workflow.RESEARCH, built_in_strategy_id)
+
+        return strategy, await self.backtest_options.execute(strategy)
+
+    async def run_backtest(self, inputs: BacktestInputs, built_in_strategy_id: str | None = None) -> Backtest:
+        """
+        What the strategy would have done over the sessions `inputs` name: its scores of every listed stock on every
+        session, the live trading rules replayed on those scores alone, and the result saved for the user. It reads
+        only daily history the site already holds, asks no AI, touches no account, watchlist or journal, records no
+        run and never orders. BacktestPeriodUnavailable for a period the held history cannot replay.
+        """
+        strategy = await self.strategy_loader.execute(Workflow.RESEARCH, built_in_strategy_id)
+        bars, scores = await self.backtest_scores.execute(strategy, inputs)
+        backtest = await self.backtest_replay.execute(strategy, inputs, bars, scores)
+        await self.backtest_save.execute(backtest)
+
+        return backtest
+
+    async def search_strategies(self, inputs: SearchInputs) -> tuple[StrategySearch, str]:
+        """
+        A search for a better technical strategy than a built-in one at the two scores, on the held daily history: the
+        sessions split in time order, candidates of the level bred on train, the winners picked on validation and
+        reported on the holdout with the luck baseline, then the search saved, and where. Seconds per candidate across
+        strategy_search.workers processes. It reads the history as a backtest does, asks no broker or AI, orders
+        nothing, touches no account and changes no saved strategy or setting: adopting a winner is the owner's.
+        BacktestPeriodUnavailable for a history too short.
+        """
+        strategy = await self.strategy_loader.execute(Workflow.RESEARCH, inputs.strategy_id)
+        history = await self.search_history_loader.execute(strategy)
+        trials = await self.strategy_breeding.execute(strategy, inputs, history)
+        validated = await self.search_validation.execute(trials, history)
+        search = await self.search_holdout.execute(inputs, history, trials, validated)
+
+        return search, await self.strategy_search_save.execute(search)
+
+    async def load_backtests(self) -> list[Backtest]:
+        """The user's saved backtests, newest first."""
+        return await self.saved_backtests.execute()
+
+    async def load_backtest(self, backtest_id: BacktestId) -> Backtest | None:
+        """One of the user's saved backtests; None when the user has none of that id."""
+        return await self.backtest_lookup.execute(backtest_id)
+
+    async def delete_backtest(self, backtest_id: BacktestId) -> bool:
+        """Deletes one of the user's saved backtests, and answers whether the user had one of that id."""
+        return await self.backtest_removal.execute(backtest_id)
 
     async def load_market_valuation(self) -> MarketValuation:
         """

@@ -2,6 +2,7 @@ import enAccount from './locales/en/account'
 import enAttribution from './locales/en/attribution'
 import enAdmin from './locales/en/admin'
 import enAuth from './locales/en/auth'
+import enBacktest from './locales/en/backtest'
 import enBuilder from './locales/en/builder'
 import enCommon from './locales/en/common'
 import enFormula from './locales/en/formula'
@@ -15,6 +16,7 @@ import zhAccount from './locales/zh-TW/account'
 import zhAttribution from './locales/zh-TW/attribution'
 import zhAdmin from './locales/zh-TW/admin'
 import zhAuth from './locales/zh-TW/auth'
+import zhBacktest from './locales/zh-TW/backtest'
 import zhBuilder from './locales/zh-TW/builder'
 import zhCommon from './locales/zh-TW/common'
 import zhFormula from './locales/zh-TW/formula'
@@ -35,6 +37,7 @@ export const resources = {
     watchlist: enWatchlist,
     research: enResearch,
     runs: enRuns,
+    backtest: enBacktest,
     valuation: enValuation,
     account: enAccount,
     admin: enAdmin,
@@ -50,6 +53,7 @@ export const resources = {
     watchlist: zhWatchlist,
     research: zhResearch,
     runs: zhRuns,
+    backtest: zhBacktest,
     valuation: zhValuation,
     account: zhAccount,
     admin: zhAdmin,

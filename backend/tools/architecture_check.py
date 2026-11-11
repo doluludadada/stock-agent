@@ -163,6 +163,17 @@ PRESENTATION_SETTINGS = {
             "technical.built_in_strategies",
         }
     ),
+    # The strategy search command's options default to the search's settings, the strategy an owner starts with and the
+    # scores a run buys and sells at.
+    "d_presentation/cli/strategy_search.py": frozenset(
+        {
+            "strategy_search.population",
+            "strategy_search.generations",
+            "technical.initial_strategy_id",
+            "analysis.min_combined_score_buy",
+            "analysis.max_combined_score_sell",
+        }
+    ),
     # The menu prints the environment, and before a run on a real broker the server it trades on and the BUY limits the
     # order gates hold it to, so the user sees whether an order would reach a real account; it refuses what orders on
     # realtime quotes where the audience has none. Menus 5 and 6 print how undervaluation is computed, its caveat and

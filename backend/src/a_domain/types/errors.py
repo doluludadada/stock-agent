@@ -107,3 +107,7 @@ class LastAdministratorError(RuntimeError):
 
 class AiModelNotOffered(ValueError):
     """A user chose an AI model the site does not offer, neither ai.active_model nor one of ai.user_selectable. Nothing saved. 422."""
+
+
+class BacktestPeriodUnavailable(ValueError):
+    """A backtest was asked over sessions the daily history cannot replay. The message says which sessions it can. 422."""

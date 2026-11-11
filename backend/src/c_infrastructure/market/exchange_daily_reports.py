@@ -140,9 +140,12 @@ class ExchangeDailyReports(IDailyHistorySource):
         price_fields, volume_fields = feed.index_price_fields, feed.index_volume_fields
         unit = self._board_lot_shares if feed.index_volume_lots else 1
         number = self._listing.parse_number
+        served = {str(name).strip() for table in volumes.get("tables") or [volumes] for name in table.get("fields") or []}
+        earlier = volume_fields.earlier_volume if volume_fields.volume not in served else None
+        volume_name = earlier or volume_fields.volume
         traded = {
-            self.session_date(row[volume_fields.date]): (number(row[volume_fields.volume]), number(row[volume_fields.change]))
-            for row in self.rows(volumes, [volume_fields.date, volume_fields.volume, volume_fields.change])
+            self.session_date(row[volume_fields.date]): (number(row[volume_name]), number(row[volume_fields.change]))
+            for row in self.rows(volumes, [volume_fields.date, volume_name, volume_fields.change])
         }
         names = [price_fields.open, price_fields.high, price_fields.low, price_fields.close]
         bars = []

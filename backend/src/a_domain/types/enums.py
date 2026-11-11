@@ -850,6 +850,31 @@ class IndicatorKind(StrEnum):
             case _:
                 return (IndicatorOutput.VALUE,)
 
+    @property
+    def single_period(self) -> bool:
+        """Whether a period is the indicator's only parameter, so a strategy search can add one of its own."""
+        return self not in (IndicatorKind.MACD, IndicatorKind.BOLLINGER, IndicatorKind.STOCHASTIC)
+
+    def scale(self, output: IndicatorOutput) -> FormulaScale | None:
+        """What the output measures. None for the ATR, a price range that a generated rule never compares."""
+        match self:
+            case IndicatorKind.SMA:
+                return FormulaScale.PRICE
+            case IndicatorKind.VOLUME_SMA:
+                return FormulaScale.VOLUME
+            case IndicatorKind.RSI | IndicatorKind.MFI | IndicatorKind.STOCHASTIC | IndicatorKind.ADX:
+                return FormulaScale.OSCILLATOR
+            case IndicatorKind.MACD:
+                return FormulaScale.MOMENTUM
+            case IndicatorKind.OBV:
+                return FormulaScale.FLOW
+            case IndicatorKind.BOLLINGER:
+                return {IndicatorOutput.PERCENT_B: FormulaScale.FRACTION, IndicatorOutput.BANDWIDTH: FormulaScale.VOLATILITY}.get(
+                    output, FormulaScale.PRICE
+                )
+            case IndicatorKind.ATR:
+                return None
+
 
 class MarketField(StrEnum):
     """A field of one completed daily bar. Volume is in shares."""
@@ -859,6 +884,43 @@ class MarketField(StrEnum):
     LOW = auto()
     CLOSE = auto()
     VOLUME = auto()
+
+    @property
+    def scale(self) -> FormulaScale:
+        return FormulaScale.VOLUME if self is MarketField.VOLUME else FormulaScale.PRICE
+
+
+class FormulaScale(StrEnum):
+    """What a number of a formula measures. A strategy search generates comparisons of numbers of one scale only."""
+
+    PRICE = auto()
+    """A daily open, high, low or close, an average of closes or a Bollinger band."""
+
+    VOLUME = auto()
+    """Shares: a daily volume or an average of volumes."""
+
+    OSCILLATOR = auto()
+    """0 to 100: the RSI, the MFI, the stochastic %K and %D, the ADX and its directional indexes."""
+
+    MOMENTUM = auto()
+    """The MACD line, signal and histogram, differences of averages of closes."""
+
+    FLOW = auto()
+    """The on-balance volume and its average."""
+
+    FRACTION = auto()
+    """The Bollinger %B: where the close sits between the bands, 0 at the lower and 1 at the upper."""
+
+    VOLATILITY = auto()
+    """The Bollinger bandwidth: the width of the bands over their middle."""
+
+    @property
+    def multiplied(self) -> bool:
+        """
+        Whether a generated comparison sets the number against another one of its scale times a level: a price or a
+        volume of one stock means nothing for another, so neither is compared with a level of its own.
+        """
+        return self in (FormulaScale.PRICE, FormulaScale.VOLUME)
 
 
 class FormulaNode(StrEnum):
@@ -899,10 +961,88 @@ class ComparisonOperator(StrEnum):
     def is_crossing(self) -> bool:
         return self in (ComparisonOperator.CROSSES_ABOVE, ComparisonOperator.CROSSES_BELOW)
 
+    @property
+    def generated(self) -> bool:
+        """
+        Whether a strategy search's generated condition uses it. GTE and LTE differ from GT and LT only where two
+        computed numbers tie, and EQ and NE hold only there or everywhere else.
+        """
+        return self not in (ComparisonOperator.GTE, ComparisonOperator.LTE, ComparisonOperator.EQ, ComparisonOperator.NE)
+
 
 class GroupOperator(StrEnum):
     ALL = auto()
     ANY = auto()
+
+
+class StrategyMutation(StrEnum):
+    """One change a strategy search makes to a candidate. The strategy_search settings bound each one."""
+
+    PERIOD = auto()
+    """One parameter of an indicator the rules read, such as an average's period, moves by up to period_step of itself."""
+
+    CONSTANT = auto()
+    """One constant of a condition other than 0 moves by up to constant_step of itself."""
+
+    SCORING = auto()
+    """One scoring number, such as the base score or a rule's penalty, moves by up to score_step."""
+
+    THRESHOLD = auto()
+    """The score a backtest buys at, or the one it sells at, moves by up to score_step."""
+
+    DROP_RULE = auto()
+    """One rule goes; the last one stays."""
+
+    RESTORE_RULE = auto()
+    """One rule of the strategy the search started from that the candidate lacks comes back."""
+
+    EFFECT = auto()
+    """One rule gets another effect: block on fail, reduce the score on fail or increase it on pass."""
+
+    ADD_RULE = auto()
+    """
+    A rule with a generated condition joins: two numbers of one scale compared, or one with a level of its scale, from
+    the indicators the candidate holds, the daily bar's fields and new indicators of one period.
+    """
+
+
+class SearchLevel(StrEnum):
+    """How far a strategy search may change the strategy it starts from. Each level allows the mutations of the one before."""
+
+    TUNE = auto()
+    """The formulas keep their shape: their periods, constants and scoring numbers move, and so do the two scores."""
+
+    SELECT = auto()
+    """The strategy's own rules are kept or dropped, and each one's effect is chosen."""
+
+    GENERATE = auto()
+    """Rules with generated conditions join."""
+
+    @property
+    def mutations(self) -> tuple[StrategyMutation, ...]:
+        match self:
+            case SearchLevel.TUNE:
+                return StrategyMutation.PERIOD, StrategyMutation.CONSTANT, StrategyMutation.SCORING, StrategyMutation.THRESHOLD
+            case SearchLevel.SELECT:
+                return *SearchLevel.TUNE.mutations, StrategyMutation.DROP_RULE, StrategyMutation.RESTORE_RULE, StrategyMutation.EFFECT
+            case SearchLevel.GENERATE:
+                return *SearchLevel.SELECT.mutations, StrategyMutation.ADD_RULE
+
+
+class SearchSpan(StrEnum):
+    """
+    A part of the daily history a strategy search splits in time order. No choice of the search reads a span after the
+    one it chooses on, so the holdout tells how its winners do on sessions it never saw.
+    """
+
+    TRAIN = auto()
+    """The candidates are bred on it."""
+
+    VALIDATION = auto()
+    """The winners are picked on it, among the best on train."""
+
+    HOLDOUT = auto()
+    """Read once, for the report on the winners."""
 
 
 class SettingsFile(StrEnum):
@@ -1030,6 +1170,9 @@ class ErrorCode(StrEnum):
 
     OUTSIDE_FOLLOW_WINDOW = auto()
     """FollowRefusal.OUTSIDE_FOLLOW_WINDOW: the site places no order in the market's phase now."""
+
+    BACKTEST_PERIOD_UNAVAILABLE = auto()
+    """The daily history the site holds cannot replay the period asked: `detail` says which days a backtest may cover."""
 
     LISTING_UNAVAILABLE = auto()
     NOT_FOUND = auto()

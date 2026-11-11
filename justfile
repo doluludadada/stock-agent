@@ -34,6 +34,17 @@ archive-closes:
 archive-closes:
     cd backend; $env:PYTHONPATH="src"; uv run python -m d_presentation.cli.archive_closes
 
+# Searches for a better technical strategy than a built-in one on the held daily history and prints the report, for
+# example `just search-strategies --level tune --seed 1 --buy-score 70`; `--help` lists the options. It orders nothing,
+# asks no AI and changes no saved strategy or setting. Each search is saved under strategy_search.folder.
+[unix]
+search-strategies *options:
+    cd backend && PYTHONPATH=src uv run python -m d_presentation.cli.strategy_search {{options}}
+
+[windows]
+search-strategies *options:
+    cd backend; $env:PYTHONPATH="src"; uv run python -m d_presentation.cli.strategy_search {{options}}
+
 # The database commands (docs/database-migrations.md). Each opens only the database that db.backend selects, so it also
 # works on a database that startup refuses. Backups go to backups/ (owner-only); PostgreSQL's need pg_dump and pg_restore.
 

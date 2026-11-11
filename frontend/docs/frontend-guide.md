@@ -27,6 +27,8 @@ src/
     strategies/        strategy model, API mapping, library, formula designer
     runs/              start runs, follow their state, history and run details; a finished Full Cycle's follow into
                        the mock account, and each decision marked followed or open
+    backtest/          the active strategy replayed over a past period: the form from the server's options, the verdict
+                       against the TAIEX, both curves as returns on one chart, the trades, and the saved backtests
     valuation/         P/E valuation, undervalued scan, AI explanation on request
     watchlist/         server watchlist and its toggle button
     account/           mock account: the total P&L since it opened, positions, equity curve, the trades with the run
@@ -94,6 +96,7 @@ the contract by `catalog.test.ts`.
 | Runs, decisions, orders; a start of Buzz or Intraday on the broker chosen | `runs/api.ts` | `/v1/runs` |
 | A manual BUY of a stock a specific-stock run reported, on the broker chosen | `runs/api.ts` | `/v1/runs/{run_id}/manual-buy` |
 | A run's follow into the mock account: what is open, the refusal, the follows so far; starting one | `runs/api.ts` | `/v1/runs/{run_id}/follow` |
+| A backtest's options, a run that is saved, the saved backtests, one of them, a delete | `backtest/api.ts` | `/v1/backtests` |
 | Watchlist | `watchlist/api.ts` | `/v1/watchlist` |
 | Valuation | `valuation/api.ts` | `/v1/valuation` |
 | Account of a broker: now, the curve, the opening and the total P&L (none at a real broker) | `account/api.ts` | `/v1/account/history` |
@@ -199,6 +202,12 @@ secret: the server refuses one written into them, and its form shows none.
 - Price and volume are two synced charts (`shared/ui/price-volume-chart.tsx`), never one chart
   with two y-axes. The moving averages' colors pass the dataviz validator against both price colors.
 - Motion respects `prefers-reduced-motion` through `MotionConfig reducedMotion="user"` and a CSS fallback.
+
+A backtest's page is its address: `/backtest?id=` names the saved backtest on screen. A run can take tens of seconds, so
+its mutation has a key: the progress shows again on a page that was left and reopened, and the answer lands in the
+cache and the saved list either way. The strategy and the TAIEX are one chart of returns since the first session
+(`backtest/ReturnChart.tsx`), never two y-axes; the index's color (`--chart-benchmark`) passes the dataviz validator's
+separation checks against `--chart-price` in both themes, and its line is dashed too.
 
 `shared/ui/` holds vendored shadcn/ui sources and the project's own primitives (`panel`, `data-table`, `stat`,
 `segmented`, `range-tabs`, `show-more`, `range-meter`, `breadth-bar`, `quote-headline`, `state-block`, `page-header`,

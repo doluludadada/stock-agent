@@ -8,6 +8,7 @@ const common = {
     open: 'Open navigation',
     overview: 'Market overview',
     strategies: 'Strategy library',
+    backtest: 'Backtest',
     builder: 'Formula designer',
     runs: 'Analysis runs',
     valuation: 'Valuation',

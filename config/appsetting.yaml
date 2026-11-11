@@ -74,6 +74,53 @@ technical:
   # An owner's first settings copy every built-in strategy and select this one for every workflow.
   initial_strategy_id: balanced
 
+strategy_search:
+  # A strategy search breeds technical strategies from a built-in one on the held daily history and judges them on
+  # sessions it never chose on: `just search-strategies`. It reads the history as a backtest does, never orders, asks
+  # no broker or AI, and changes no saved strategy or setting.
+  # Processes that backtest candidates at once, each with its own copy of the history; 0 backtests in the command's.
+  workers: 8
+  # New candidates per generation, bred from the fittest so far: the command's defaults.
+  population: 40
+  generations: 40
+  # The sessions from the first one a strategy of max_required_bars bars can be scored on, in time order: this share
+  # trains, the next share validates, and the rest is the holdout, read once for the report.
+  train_share: 0.5
+  validation_share: 0.25
+  # The best on train backtested on validation, where the winners are picked; the winners the report shows.
+  finalists: 10
+  winners: 3
+  # The luck baseline: the holdout returns of this many candidates tried that traded enough on train.
+  luck_sample: 100
+  # Fitness is the return less drawdown_penalty times the deepest drawdown, for a backtest with at least this many
+  # closed trades per 100 sessions; one with fewer ranks below every one with enough.
+  min_trades_per_100_sessions: 10
+  drawdown_penalty: 0.5
+  # A parent is the fittest on train of `tournament` drawn at random; a child is it changed by 1 to max_mutations
+  # mutations. A child that repeats a candidate tried before is drawn again, up to attempts_per_child times.
+  tournament: 3
+  max_mutations: 3
+  attempts_per_child: 20
+  # A period moves by up to period_step of itself, a constant by up to constant_step, a score by up to score_step.
+  period_step: 0.3
+  constant_step: 0.2
+  score_step: 5
+  # No candidate needs more daily bars or holds more rules than these.
+  max_required_bars: 100
+  max_rules: 30
+  # A new indicator's period, and the levels a generated condition compares a number of each scale with: a price or a
+  # volume with another one times a level, the others with a level or another number of their scale.
+  periods: [5, 10, 14, 20, 30, 60]
+  levels:
+    price: [0.95, 1.0, 1.05]
+    volume: [0.5, 1.0, 1.5, 2.0]
+    oscillator: [20, 30, 40, 50, 60, 70, 80]
+    momentum: [0]
+    fraction: [0, 0.2, 0.5, 0.8, 1]
+    volatility: [0.05, 0.1, 0.2, 0.3]
+  # Each search is saved in a folder of its own under this one, relative to the project root.
+  folder: strategy_searches
+
 folder:
   news_archive_dir: "news_archive"
   buzz_archive_dir: "buzz_archive"
@@ -263,6 +310,8 @@ accounts:
   session_days: 14
   # Web workflow runs at once, every user's together; each user runs one at a time.
   max_concurrent_runs: 2
+  # Backtests kept per user, to compare them. Saving one more deletes the user's oldest.
+  saved_backtests: 20
 
 # The Shioaji login of a personal site: its realtime quotes, and the SinoPac orders of the runs that choose SinoPac.
 # The environment above decides the server and the credentials, which come from the environment or .env only: dev and
@@ -547,7 +596,8 @@ sources:
         index_prices_url: "https://www.tpex.org.tw/www/zh-tw/indexInfo/inx?date={date:%Y/%m/01}&response=json"
         index_price_fields: { date: "日期", open: "開市", high: "最高", low: "最低", close: "收市" }
         index_volume_url: "https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingIndex?date={date:%Y/%m/01}&response=json"
-        index_volume_fields: { date: "日期", volume: "成交張數", change: "漲/跌" }
+        # TPEX named the volume 成交股數（仟股） through 2024-12, in the same board lots.
+        index_volume_fields: { date: "日期", volume: "成交張數", change: "漲/跌", earlier_volume: "成交股數（仟股）" }
         index_volume_lots: true
   # The credit the Open Government Data License v1 asks for, in the form of its annex (https://data.gov.tw/license):
   # each providing agency and the datasets the app reads from it, the license's notice, and its name and address.

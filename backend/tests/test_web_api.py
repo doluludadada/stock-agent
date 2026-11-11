@@ -59,6 +59,11 @@ WRITES = [
     ("POST", "/v1/watchlist/manual/remove", {"stock_ids": ["2330"]}),
     ("PUT", "/v1/technical-settings", {"settings": settings_document()}),
 ]
+SAVED_BACKTEST = "00000000-0000-0000-0000-000000000002"
+BACKTEST_INPUTS = {"first": "2026-10-01", "last": "2026-10-16", "initial_cash": 1_000_000, "buy_score": 80, "sell_score": 30}
+BACKTEST_WRITES = [("POST", "/v1/backtests", {"inputs": BACKTEST_INPUTS}), ("POST", f"/v1/backtests/{SAVED_BACKTEST}/delete", {})]
+"""A replay of saved daily history, and the user's own saved results: neither reads an account or reaches a broker."""
+
 RESET_WRITES = [("POST", "/v1/account/reset", {"initial_cash": 500_000})]
 """It reopens the mock account, which places no order; its positions go, so it is left out of the writes run in a row."""
 
@@ -458,7 +463,7 @@ async def test_the_account_page_reads_the_mock_account_by_default_and_sinopac_wh
 # ---------------------------- Permission and scope -------------------------- #
 
 
-@pytest.mark.parametrize(("method", "path", "body"), WRITES + RESET_WRITES + ORDERING_WRITES + VALUATION_WRITES)
+@pytest.mark.parametrize(("method", "path", "body"), WRITES + RESET_WRITES + BACKTEST_WRITES + ORDERING_WRITES + VALUATION_WRITES)
 async def test_writes_need_a_session(method: str, path: str, body: dict[str, Any]) -> None:
     harness = build_harness()
     harness.list_stock("2330", rising_history(100.0))
@@ -470,7 +475,7 @@ async def test_writes_need_a_session(method: str, path: str, body: dict[str, Any
     assert (harness.journal.runs, harness.watchlist.rows, harness.technical_settings.saved) == ({}, [], harness_settings())
 
 
-@pytest.mark.parametrize(("method", "path", "body"), WRITES + RESET_WRITES + ORDERING_WRITES + VALUATION_WRITES)
+@pytest.mark.parametrize(("method", "path", "body"), WRITES + RESET_WRITES + BACKTEST_WRITES + ORDERING_WRITES + VALUATION_WRITES)
 async def test_writes_need_the_web_apps_header_so_another_site_cannot_send_them(method: str, path: str, body: dict[str, Any]) -> None:
     harness = build_harness()
     harness.list_stock("2330", rising_history(100.0))
@@ -484,7 +489,7 @@ async def test_writes_need_the_web_apps_header_so_another_site_cannot_send_them(
 
 
 @pytest.mark.parametrize("confirm", [{}, {"confirm": False}, {"confirm": "yes"}])
-@pytest.mark.parametrize(("method", "path", "body"), WRITES + RESET_WRITES + ORDERING_WRITES + VALUATION_WRITES)
+@pytest.mark.parametrize(("method", "path", "body"), WRITES + RESET_WRITES + BACKTEST_WRITES + ORDERING_WRITES + VALUATION_WRITES)
 async def test_writes_need_confirm_true(method: str, path: str, body: dict[str, Any], confirm: dict[str, Any]) -> None:
     harness = build_harness()
     harness.list_stock("2330", rising_history(100.0))
@@ -498,7 +503,15 @@ async def test_writes_need_confirm_true(method: str, path: str, body: dict[str, 
 
 
 PUBLIC_READS = ("/v1/technical-settings/built-in-strategies",)
-PRIVATE_READS = ("/v1/runs", "/v1/watchlist", "/v1/technical-settings", "/v1/account/history")
+PRIVATE_READS = (
+    "/v1/runs",
+    "/v1/watchlist",
+    "/v1/technical-settings",
+    "/v1/account/history",
+    "/v1/backtests",
+    "/v1/backtests/options",
+    f"/v1/backtests/{SAVED_BACKTEST}",
+)
 
 
 async def test_only_strategy_definitions_and_market_data_are_public() -> None:
@@ -508,7 +521,7 @@ async def test_only_strategy_definitions_and_market_data_are_public() -> None:
         forged = [(await client.get(path, cookies={"stock_agent_session": "forged"})).status_code for path in PRIVATE_READS]
 
     assert public == [200]
-    assert anonymous == forged == [401, 401, 401, 401]
+    assert anonymous == forged == [401] * len(PRIVATE_READS)
 
 
 async def test_a_run_s_decisions_and_orders_are_private() -> None:
@@ -551,8 +564,8 @@ async def test_the_api_writes_only_runs_watchlist_settings_and_settings_files_an
     writes = {(method, path) for method, path in every_write if not path.startswith("/v1/auth")}
 
     assert writes == {
-        (method, path.replace(FOLLOWED_RUN, "{run_id}"))
-        for method, path, _ in WRITES + RESET_WRITES + ORDERING_WRITES + VALUATION_WRITES
+        (method, path.replace(FOLLOWED_RUN, "{run_id}").replace(SAVED_BACKTEST, "{backtest_id}"))
+        for method, path, _ in WRITES + RESET_WRITES + BACKTEST_WRITES + ORDERING_WRITES + VALUATION_WRITES
     }
     assert every_write - writes == {("POST", f"/v1/auth/{step}") for step in ("setup", "register", "sign-in", "sign-out")} | {
         ("PUT", "/v1/auth/me/ai-model")

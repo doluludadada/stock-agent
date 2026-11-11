@@ -26,6 +26,7 @@ from a_domain.model.market.stock import Stock
 from a_domain.model.system.stats import SystemStats
 from a_domain.model.system.user import User, UserSession
 from a_domain.model.trading.account import Account, AccountOpening, AccountSnapshot, Position
+from a_domain.model.trading.backtest import Backtest
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.model.trading.watchlist import WatchlistEntry
@@ -39,6 +40,7 @@ from a_domain.ports.market.daily_close_archive import (
     ValuationRatios,
 )
 from a_domain.rules.fundamentals.trailing_eps import EpsFilings, QuarterEps
+from a_domain.rules.technical.search import StrategySearch
 from a_domain.rules.technical.strategy import TechnicalSettings
 from a_domain.rules.trading.cost import TradingCostRule
 from a_domain.rules.trading.order_rule import BrokerLink
@@ -63,7 +65,7 @@ from a_domain.types.errors import (
     TechnicalSettingsConflictError,
     UserExistsError,
 )
-from a_domain.types.ids import DecisionId, RunId, SessionToken, UserId
+from a_domain.types.ids import BacktestId, DecisionId, RunId, SessionToken, UserId
 from a_domain.types.values import FiscalQuarter, comparable_name
 from b_application.config.market_data_config import MarketHoursConfig
 from c_infrastructure.database.models.trading_journal_dto import RunStockReportDTO
@@ -308,6 +310,10 @@ class FakeOhlcvProvider:
 
     async def fetch_index_history(self, index: MarketIndex, start_date: datetime, end_date: datetime) -> list[Ohlcv]:
         return list(self.index_history.get(index, []))
+
+    async def held_span(self) -> tuple[date, date] | None:
+        sessions = sorted({bar.ts.date() for bars in self.history.values() for bar in bars})
+        return (sessions[0], sessions[-1]) if sessions else None
 
     async def fetch_realtime_bars(self, stocks: list[Stock]) -> dict[str, Ohlcv]:
         self.realtime_requests.extend(stock.stock_id for stock in stocks)
@@ -617,6 +623,38 @@ class RecordingExecutionProvider:
     async def reset(self, initial_cash: float, now: datetime) -> Account:
         self.cash, self.positions, self.opening = initial_cash, [], AccountOpening(initial_cash=initial_cash, opened_at=now)
         return await self.get_account()
+
+
+class FakeBacktestRepository:
+    """Like the SQL repository built for one owner: the owner's backtests, the newest `keep` after each save."""
+
+    def __init__(self) -> None:
+        self.backtests: list[Backtest] = []
+
+    async def save(self, backtest: Backtest, keep: int) -> None:
+        self.backtests = sorted([*self.backtests, backtest], key=lambda saved: saved.created_at, reverse=True)[:keep]
+
+    async def saved(self) -> list[Backtest]:
+        return list(self.backtests)
+
+    async def get(self, backtest_id: BacktestId) -> Backtest | None:
+        return next((backtest for backtest in self.backtests if backtest.backtest_id == backtest_id), None)
+
+    async def delete(self, backtest_id: BacktestId) -> bool:
+        kept = [backtest for backtest in self.backtests if backtest.backtest_id != backtest_id]
+        deleted, self.backtests = len(kept) < len(self.backtests), kept
+        return deleted
+
+
+class FakeStrategySearchRepository:
+    """The searches saved, in order, each answered with its number."""
+
+    def __init__(self) -> None:
+        self.searches: list[StrategySearch] = []
+
+    async def save(self, search: StrategySearch) -> str:
+        self.searches.append(search)
+        return f"search {len(self.searches)}"
 
 
 class FakeTechnicalSettingsRepository:

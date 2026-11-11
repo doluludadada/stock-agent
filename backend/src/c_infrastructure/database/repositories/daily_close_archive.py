@@ -234,6 +234,15 @@ class SqlDailyCloseArchive(IDailyCloseArchive):
         return history
 
     @override
+    async def held_span(self) -> tuple[date, date] | None:
+        span = select(func.min(col(DailyCloseDTO.session_date)), func.max(col(DailyCloseDTO.session_date)))
+
+        async with self._db.get_session() as session:
+            first, last = (await session.execute(span)).one()
+
+        return None if first is None or last is None else (first, last)
+
+    @override
     async def fetch_index_history(self, index: MarketIndex, start_date: datetime, end_date: datetime) -> list[Ohlcv]:
         first, last = self._market_clock.to_trading_date(start_date), self._market_clock.to_trading_date(end_date)
         statement = (

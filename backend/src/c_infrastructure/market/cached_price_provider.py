@@ -100,6 +100,18 @@ class CachedPriceProvider(ICachedPriceProvider):
         return (await self.index_sessions(first, last)).get(index.market, [])
 
     @override
+    async def held_span(self) -> tuple[date, date] | None:
+        span = select(func.min(col(OhlcvDTO.ts)), func.max(col(OhlcvDTO.ts))).where(col(OhlcvDTO.stock_id).not_like("^%"))
+
+        async with self._db.get_session() as session:
+            first, last = (await session.execute(span)).one()
+
+        if first is None or last is None:
+            return None
+
+        return self._clock.to_trading_date(first), self._clock.to_trading_date(last)
+
+    @override
     def sessions_of(self, start_date: datetime, end_date: datetime) -> tuple[date, date]:
         last = min(self._clock.to_trading_date(end_date), self._clock.last_settled_session())
         return self._clock.to_trading_date(start_date), last

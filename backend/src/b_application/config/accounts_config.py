@@ -64,6 +64,9 @@ class AccountsConfig(BaseSettings):
     max_concurrent_runs: Annotated[int, Field(gt=0, le=50)]
     """Workflow runs the Web API runs at once, every user's together, beside the one run per user."""
 
+    saved_backtests: Annotated[int, Field(gt=0, le=200)]
+    """Backtests kept per user, to compare them. Saving one more deletes the user's oldest."""
+
     def sign_in_name_limit(self) -> AttemptLimitRule:
         """Per name and client, so a stranger's guesses never lock the administrator out from another address."""
         return AttemptLimitRule(max_attempts=self.sign_in_failures_per_name, window=timedelta(minutes=self.sign_in_window_minutes))

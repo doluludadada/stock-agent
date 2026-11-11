@@ -16,6 +16,7 @@ from a_domain.types.enums import ErrorCode
 from a_domain.types.errors import (
     AiModelNotOffered,
     AlreadySetUpError,
+    BacktestPeriodUnavailable,
     BrokerUnavailable,
     LastAdministratorError,
     ListingUnavailableError,
@@ -84,6 +85,11 @@ of them is decided on its technical score alone, and every valuation endpoint an
 /v1/market/archive-status` says how many sessions the archive holds and how many the built-in strategies need, `GET
 /v1/market/stocks/{stock_id}/financials` answers a stock's archived quarters and monthly revenue, and `GET
 /v1/market/attribution` names the open data's providers, datasets and license, which a page showing it must credit.
+
+Backtests. `POST /v1/backtests` replays the user's active technical strategy over past sessions the site already
+holds, with the live trading rules on the technical score alone, and saves the result for the user (`GET
+/v1/backtests`, `GET /v1/backtests/{backtest_id}`). `GET /v1/backtests/options` names the period it may cover. A
+backtest asks no AI, touches no account, watchlist or run record, and never orders.
 
 Workflows run in the background, one at a time per user and a few at a time per server: a start answers 202 with the
 run id, and GET /v1/runs/{run_id} reports the run's state and its record; another user's run id answers 404. Run the
@@ -154,6 +160,7 @@ ERROR_ANSWERS: dict[type[Exception], tuple[int, ErrorCode]] = {
     SettingsEditError: (status.HTTP_422_UNPROCESSABLE_CONTENT, ErrorCode.SETTINGS_EDIT_REFUSED),
     AiModelNotOffered: (status.HTTP_422_UNPROCESSABLE_CONTENT, ErrorCode.AI_MODEL_NOT_OFFERED),
     InvalidSettingsError: (status.HTTP_422_UNPROCESSABLE_CONTENT, ErrorCode.SETTINGS_REFUSED),
+    BacktestPeriodUnavailable: (status.HTTP_422_UNPROCESSABLE_CONTENT, ErrorCode.BACKTEST_PERIOD_UNAVAILABLE),
     SignInThrottled: (status.HTTP_429_TOO_MANY_REQUESTS, ErrorCode.SIGN_IN_THROTTLED),
     TooManyRuns: (status.HTTP_429_TOO_MANY_REQUESTS, ErrorCode.TOO_MANY_RUNS),
     ListingUnavailableError: (status.HTTP_503_SERVICE_UNAVAILABLE, ErrorCode.LISTING_UNAVAILABLE),

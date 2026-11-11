@@ -87,6 +87,8 @@
   --palette-chart-series-1: oklch(0.49 0.16 262);
   --palette-chart-ma-fast: oklch(0.62 0.12 235);
   --palette-chart-ma-slow: oklch(0.45 0.2 300);
+  /* The index a backtest is compared with, drawn beside series-1: the pair passes the validator's separation checks. */
+  --palette-chart-benchmark: oklch(0.52 0.11 70);
   --shadow-card: 0 1px 2px oklch(0.21 0.02 262 / 4%), 0 1px 1px oklch(0.21 0.02 262 / 2%);
   --shadow-pop: 0 16px 40px -16px oklch(0.21 0.02 262 / 28%);
   --shadow-bar: 0 -1px 0 oklch(0.21 0.02 262 / 8%);
@@ -121,6 +123,7 @@
   --palette-chart-series-1: oklch(0.76 0.12 262);
   --palette-chart-ma-fast: oklch(0.6 0.12 235);
   --palette-chart-ma-slow: oklch(0.55 0.2 300);
+  --palette-chart-benchmark: oklch(0.66 0.12 75);
   --shadow-card: none;
   --shadow-pop: 0 18px 44px -16px oklch(0 0 0 / 70%);
   --shadow-bar: 0 -1px 0 oklch(0.955 0.004 262 / 8%);

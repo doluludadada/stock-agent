@@ -17,6 +17,7 @@ from a_domain.ports.chat.conversation_repository import IConversationRepository
 from a_domain.ports.chat.platform_provider import IPlatformProvider
 from a_domain.ports.market.broker_quote_provider import IBrokerQuoteProvider
 from a_domain.ports.market.cached_price_provider import ICachedPriceProvider
+from a_domain.ports.market.daily_bar_matrix_provider import IDailyBarMatrixProvider
 from a_domain.ports.market.daily_close_archive import IDailyCloseArchive
 from a_domain.ports.market.fundamentals_provider import IFundamentalsProvider
 from a_domain.ports.market.news_provider import INewsProvider
@@ -28,7 +29,10 @@ from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.notification_provider import INotificationProvider
 from a_domain.ports.system.settings_files import ISettingsFiles
 from a_domain.ports.system.user_store import IUserStore
+from a_domain.ports.trading.backtest_repository import IBacktestRepository
+from a_domain.ports.trading.candidate_backtester import ICandidateBacktester
 from a_domain.ports.trading.execution_provider import IExecutionProvider, ISimulatedExecutionProvider
+from a_domain.ports.trading.strategy_search_repository import IStrategySearchRepository
 from a_domain.ports.trading.trading_journal import ITradingJournal
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
 from a_domain.types.enums import AiProvider, ExecutionProvider, MarketType, Permission
@@ -49,6 +53,18 @@ from b_application.use_cases.admin.settings_confirmation import SettingsConfirma
 from b_application.use_cases.admin.settings_editor import SettingsEditor
 from b_application.use_cases.admin.settings_reader import SettingsReader
 from b_application.use_cases.admin.settings_save import SettingsSave
+from b_application.use_cases.backtest.backtest_lookup import BacktestLookup
+from b_application.use_cases.backtest.backtest_options import BacktestOptions
+from b_application.use_cases.backtest.backtest_removal import BacktestRemoval
+from b_application.use_cases.backtest.backtest_replay import BacktestReplay
+from b_application.use_cases.backtest.backtest_save import BacktestSave
+from b_application.use_cases.backtest.backtest_scores import BacktestScores
+from b_application.use_cases.backtest.saved_backtests import SavedBacktests
+from b_application.use_cases.backtest.search_history_loader import SearchHistoryLoader
+from b_application.use_cases.backtest.search_holdout import SearchHoldout
+from b_application.use_cases.backtest.search_validation import SearchValidation
+from b_application.use_cases.backtest.strategy_breeding import StrategyBreeding
+from b_application.use_cases.backtest.strategy_search_save import StrategySearchSave
 from b_application.use_cases.chat.chat_reply import ChatReply
 from b_application.use_cases.chat.dispatcher import Dispatcher
 from b_application.use_cases.collect.archive_warm_up import ArchiveWarmUp
@@ -124,6 +140,7 @@ from c_infrastructure.database.chroma.knowledge_repository import ChromaKnowledg
 from c_infrastructure.database.chroma.schema import ChromaCollection
 from c_infrastructure.database.db_connector import DatabaseConnector, OutdatedDatabaseError
 from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID, load_accounts_key
+from c_infrastructure.database.repositories.backtest_repository import SqlBacktestRepository
 from c_infrastructure.database.repositories.daily_close_archive import SqlDailyCloseArchive
 from c_infrastructure.database.repositories.sentiment_repository import SentimentRepository
 from c_infrastructure.database.repositories.trading_journal import TradingJournal
@@ -135,6 +152,7 @@ from c_infrastructure.feed.news_provider import NewsProvider
 from c_infrastructure.feed.ptt_provider import PttProvider
 from c_infrastructure.feed.tavily_provider import TavilySearchAdapter
 from c_infrastructure.market.cached_price_provider import CachedPriceProvider
+from c_infrastructure.market.daily_bar_matrix_provider import DailyBarMatrixProvider
 from c_infrastructure.market.exchange_daily_reports import ExchangeDailyReports
 from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider
 from c_infrastructure.market.twse_provider import TaiwanStockProvider
@@ -145,7 +163,9 @@ from c_infrastructure.system.chat_styler_service import ChatStylerService
 from c_infrastructure.system.logger_service import LoggerService
 from c_infrastructure.system.market_clock import TaiwanMarketClock
 from c_infrastructure.system.settings_files import SettingsFiles
+from c_infrastructure.technical.candidate_backtester import ProcessPoolCandidateBacktester
 from c_infrastructure.technical.sql_technical_settings_repository import SqlTechnicalSettingsRepository
+from c_infrastructure.technical.strategy_search_repository import FileStrategySearchRepository
 from c_infrastructure.trading.mock.mock_execution_provider import MockExecutionProvider
 from d_presentation.web.market_valuation_cache import MarketValuationCache
 
@@ -251,6 +271,7 @@ class OwnedPorts:
     goes through it.
     """
     sentiment_classifier: ISentimentClassifier
+    backtest_repository: IBacktestRepository
 
 
 @dataclass(slots=True)
@@ -262,6 +283,17 @@ class ProviderDependencies:
     """The daily history and realtime quotes the site may use: the exchanges' history cache, else the open-data archive."""
     history_cache: ICachedPriceProvider | None
     """The exchanges' history cache when price_provider is one, which the Web API's timer refreshes; None for the archive."""
+    bar_matrix_provider: IDailyBarMatrixProvider
+    """
+    price_provider's held history of every listed stock as one matrix, which the backtests of every user read. It lives
+    with the runtime: built at the first backtest, again when the source holds another span, and anew on new settings.
+    """
+    candidate_backtester: ICandidateBacktester
+    """
+    The strategy searches' backtests, in strategy_search.workers processes. It lives with the runtime, as the matrix
+    does; its processes start at the first search and stay for the next.
+    """
+    strategy_search_repository: IStrategySearchRepository
     broker_market_data: bool
     """Whether the site's realtime quotes are its broker login's market data. Without it, no quote is served."""
     shioaji: ShioajiConnection | None
@@ -532,11 +564,15 @@ async def build_provider_dependencies(
     archive = SqlDailyCloseArchive(db, market_clock, config.sources.exchange, config.analysis.material_information_days, logger)
     history_cache = create_history_cache(config, db, process, market_clock, quotes, archive, stock_provider)
     login = site_login(config)
+    price_provider = archive if history_cache is None else history_cache
 
     return ProviderDependencies(
         stock_provider=stock_provider,
-        price_provider=archive if history_cache is None else history_cache,
+        price_provider=price_provider,
         history_cache=history_cache,
+        bar_matrix_provider=DailyBarMatrixProvider(stock_provider, price_provider, market_clock, logger),
+        candidate_backtester=ProcessPoolCandidateBacktester(config, market_clock, config.strategy_search.workers),
+        strategy_search_repository=FileStrategySearchRepository(config.project_root / config.strategy_search.folder),
         broker_market_data=quotes is not None,
         shioaji=process.shioaji_connections.get(login) if login is not None else None,
         daily_close_archive=archive,
@@ -592,6 +628,7 @@ def create_owned_ports(
             mock_broker=MockExecutionProvider(owners_db, config, market_clock, logger),
             ai_provider=counted,
             sentiment_classifier=AiSentimentClassifier(counted, sentiment_repository, config, logger),
+            backtest_repository=SqlBacktestRepository(owners_db),
         )
 
     return owned_ports
@@ -722,6 +759,18 @@ def build_pipeline(
         run_lookup=RunLookup(journal),
         active_watchlist=ActiveWatchlist(owned.watchlist_repository),
         account_history=AccountHistory(broker, journal, stocks, prices, market_clock, config, logger),
+        backtest_options=BacktestOptions(prices, config),
+        backtest_scores=BacktestScores(dependencies.bar_matrix_provider, config, logger),
+        backtest_replay=BacktestReplay(stocks, prices, market_clock, config, logger),
+        backtest_save=BacktestSave(owned.backtest_repository, config),
+        saved_backtests=SavedBacktests(owned.backtest_repository),
+        backtest_lookup=BacktestLookup(owned.backtest_repository),
+        backtest_removal=BacktestRemoval(owned.backtest_repository),
+        search_history_loader=SearchHistoryLoader(dependencies.bar_matrix_provider, market_clock, config, logger),
+        strategy_breeding=StrategyBreeding(dependencies.candidate_backtester, config, logger),
+        search_validation=SearchValidation(dependencies.candidate_backtester, config),
+        search_holdout=SearchHoldout(dependencies.candidate_backtester, prices, market_clock, config),
+        strategy_search_save=StrategySearchSave(dependencies.strategy_search_repository),
         fundamentals_feed=FundamentalsFeed(dependencies.fundamentals_provider, stocks, market_clock, logger),
         market_valuation_loader=MarketValuationLoader(stocks, market_clock, config),
         valuation_appraiser=ValuationAppraiser(config),
@@ -782,13 +831,15 @@ def create_process_state(config: AppConfig) -> ProcessState:
 
 
 @asynccontextmanager
-async def open_runtime(config: AppConfig, process: ProcessState) -> AsyncGenerator[Runtime]:
+async def open_runtime(config: AppConfig, process: ProcessState, *, broker_login: bool = True) -> AsyncGenerator[Runtime]:
     """
     The whole startup for settings startup_settings passed: the accounts key (secrets/accounts.key created on the first
     start where the environment allows it), the database (opened and brought to the current schema), the Shioaji login
     that the realtime quotes and a Shioaji broker share (once per process, see ProcessState.shioaji_connections), every
     adapter and the check that the key opens the saved users. It raises one of STARTUP_REFUSALS for a setup it
     refuses, before any workflow runs. The database closes when the caller is done, or at once when a later step fails.
+    Without broker_login it makes no Shioaji login, as a personal site without the key pair: no realtime quote and no
+    SinoPac, for a command that reads only the held history.
     """
     accounts_key = load_accounts_key(config, process.logger)
     market_clock = TaiwanMarketClock(config.market_hours)
@@ -797,7 +848,7 @@ async def open_runtime(config: AppConfig, process: ProcessState) -> AsyncGenerat
         db = DatabaseConnector(config=config, logger=process.logger)
         opened.push_async_callback(db.close)
         await db.init_db()
-        quotes, real_broker = await connect_shioaji(config, process, market_clock)
+        quotes, real_broker = await connect_shioaji(config, process, market_clock) if broker_login else (None, None)
         dependencies = await build_provider_dependencies(config, db, process, market_clock, accounts_key, quotes, real_broker)
         await dependencies.user_store.check_key()
         yield compose_runtime(config, process.logger, market_clock, dependencies)

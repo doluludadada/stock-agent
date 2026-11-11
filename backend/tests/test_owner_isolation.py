@@ -25,7 +25,8 @@ from trading_stack import MovableClock, SilentLogger, analysed_stock, run_stats
 from a_domain.model.chat.message import Message, MessageRole
 from a_domain.model.market.article import Article
 from a_domain.model.system.user import User
-from a_domain.model.trading.account import AccountSnapshot, Position
+from a_domain.model.trading.account import Account, AccountSnapshot, Position
+from a_domain.model.trading.backtest import Backtest, BacktestInputs
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.model.trading.watchlist import WatchlistEntry
@@ -268,6 +269,60 @@ async def remove(owners: Owners) -> None:
 
     assert await owners.bob.watchlist_repository.remove(["2330"], WatchlistType.MANUAL) == []
     assert [found.stock_id for found in await owners.alice.watchlist_repository.get_active()] == ["2330"]
+
+
+# ------------------------------------------------------ the backtests ------------------------------------------------------ #
+
+
+def backtest_of(cash: float = 1_000_000) -> Backtest:
+    return Backtest(
+        created_at=AT,
+        strategy_id="trend",
+        strategy_name="Trend",
+        inputs=BacktestInputs(first=AT.date(), last=AT.date(), initial_cash=cash, buy_score=80, sell_score=30),
+        stop_loss_pct=0.1,
+        risk_per_trade_pct=0.02,
+        equity_curve={AT.date(): Account(cash=cash)},
+        benchmark=[],
+        trades=[],
+    )
+
+
+async def save_backtest(owners: Owners) -> None:
+    alices = backtest_of()
+    await owners.alice.backtest_repository.save(alices, keep=5)
+
+    with pytest.raises(IntegrityError):
+        await owners.bob.backtest_repository.save(replace(alices, strategy_name="Bob's"), keep=5)
+
+    await owners.bob.backtest_repository.save(backtest_of(cash=1), keep=1)
+
+    assert await owners.alice.backtest_repository.saved() == [alices]
+
+
+async def saved_backtests(owners: Owners) -> None:
+    alices = backtest_of()
+    await owners.alice.backtest_repository.save(alices, keep=5)
+
+    assert await owners.bob.backtest_repository.saved() == []
+    assert await owners.alice.backtest_repository.saved() == [alices]
+
+
+async def get_backtest(owners: Owners) -> None:
+    alices = backtest_of()
+    await owners.alice.backtest_repository.save(alices, keep=5)
+
+    assert await owners.bob.backtest_repository.get(alices.backtest_id) is None
+    assert await owners.alice.backtest_repository.get(alices.backtest_id) == alices
+
+
+async def delete_backtest(owners: Owners) -> None:
+    alices = backtest_of()
+    await owners.alice.backtest_repository.save(alices, keep=5)
+
+    assert await owners.bob.backtest_repository.delete(alices.backtest_id) is False
+    assert await owners.alice.backtest_repository.get(alices.backtest_id) == alices
+    assert await owners.alice.backtest_repository.delete(alices.backtest_id) is True
 
 
 # -------------------------------------------------- the technical settings ------------------------------------------------- #
@@ -518,6 +573,7 @@ CASES: dict[str, dict[str, Case]] = {
     },
     "ai_provider": {"generate_reply": generate_reply, "save_response": save_response},
     "sentiment_classifier": {"classify": classify},
+    "backtest_repository": {"save": save_backtest, "saved": saved_backtests, "get": get_backtest, "delete": delete_backtest},
 }
 """Every field of OwnedPorts, the ports dependencies.py builds per owner, and a two-owner case for each method of its adapter."""
 

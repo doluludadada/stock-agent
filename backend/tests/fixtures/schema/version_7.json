@@ -173,6 +173,49 @@
     ],
     "unique": []
   },
+  "backtests": {
+    "columns": {
+      "backtest": {
+        "class": "JSON",
+        "nullable": false,
+        "postgresql": "JSON",
+        "sqlite": "JSON"
+      },
+      "backtest_id": {
+        "class": "Uuid",
+        "nullable": false,
+        "postgresql": "UUID",
+        "sqlite": "CHAR(32)"
+      },
+      "created_at": {
+        "class": "UtcDateTime",
+        "nullable": false,
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
+        "sqlite": "DATETIME"
+      },
+      "owner_id": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR",
+        "sqlite": "VARCHAR"
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [
+      [
+        "ix_backtests_owner_created",
+        [
+          "owner_id",
+          "created_at"
+        ],
+        false
+      ]
+    ],
+    "primary_key": [
+      "backtest_id"
+    ],
+    "unique": []
+  },
   "daily_close_archive": {
     "columns": {
       "change": {

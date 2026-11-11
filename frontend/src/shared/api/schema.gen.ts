@@ -309,6 +309,94 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/backtests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Backtests
+         * @description The user's saved backtests, newest first: the site keeps the newest accounts.saved_backtests of each user.
+         */
+        get: operations["get_backtests_v1_backtests_get"];
+        put?: never;
+        /**
+         * Run Backtest
+         * @description Replays the user's active technical strategy over the period, day by day with the live trading rules, and answers
+         *     the backtest, saved for the user. A stock is decided on its technical score alone, as a run decides a stock the AI
+         *     is not asked about; a decision made after one session's close fills at the next open. It asks no AI, touches no
+         *     account and never orders. The answer comes when the replay is done: seconds, longer for the first one after a start.
+         */
+        post: operations["run_backtest_v1_backtests_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/backtests/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Backtest Options
+         * @description What the user may ask a backtest for: the strategy it would replay, and the inputs of the longest one the site's
+         *     daily history allows at the live settings. A backtest reads only sessions the site already holds.
+         */
+        get: operations["get_backtest_options_v1_backtests_options_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/backtests/{backtest_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Backtest
+         * @description One saved backtest of the user, with its days and trades. Another user's id answers 404.
+         */
+        get: operations["get_backtest_v1_backtests__backtest_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/backtests/{backtest_id}/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete Backtest
+         * @description Deletes one saved backtest of the user. Another user's id answers 404 and deletes nothing.
+         */
+        post: operations["delete_backtest_v1_backtests__backtest_id__delete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/market/archive-status": {
         parameters: {
             query?: never;
@@ -1124,6 +1212,206 @@ export interface components {
             /** Registration Open */
             registration_open: boolean;
         };
+        /**
+         * BacktestInputs
+         * @description What a user chooses for one backtest: the period, the cash it starts with and the scores that buy and sell.
+         */
+        BacktestInputs: {
+            /** @description A stock that passes the strategy with at least this score is bought: analysis.min_combined_score_buy in a run. */
+            buy_score: components["schemas"]["Score_int_"];
+            /**
+             * First
+             * Format: date
+             */
+            first: string;
+            initial_cash: components["schemas"]["PositiveFiniteFloat"];
+            /**
+             * Last
+             * Format: date
+             * @description The backtest covers every session from `first` to `last`, both included.
+             */
+            last: string;
+            /** @description A held stock at or below this score is sold: analysis.max_combined_score_sell in a run. */
+            sell_score: components["schemas"]["Score_int_"];
+        };
+        /** BacktestOptionsResponse */
+        BacktestOptionsResponse: {
+            inputs: components["schemas"]["BacktestInputs"] | null;
+            /** Strategy Id */
+            strategy_id: string;
+            /** Strategy Name */
+            strategy_name: string;
+        };
+        /** BacktestRequest */
+        BacktestRequest: {
+            /**
+             * Confirm
+             * @constant
+             */
+            confirm: true;
+            inputs: components["schemas"]["BacktestInputs"];
+        };
+        /** BacktestResponse */
+        BacktestResponse: {
+            /** Average Held Sessions */
+            average_held_sessions: number | null;
+            /**
+             * Backtest Id
+             * Format: uuid
+             */
+            backtest_id: string;
+            /** Benchmark */
+            benchmark: components["schemas"]["Ohlcv"][];
+            /** Benchmark Return Pct */
+            benchmark_return_pct: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Equity Curve */
+            equity_curve: {
+                [key: string]: components["schemas"]["AccountValueResponse"];
+            };
+            /** Fee */
+            fee: number;
+            /** Final Equity */
+            final_equity: number;
+            /**
+             * First Session
+             * Format: date
+             */
+            first_session: string;
+            inputs: components["schemas"]["BacktestInputs"];
+            /**
+             * Last Session
+             * Format: date
+             */
+            last_session: string;
+            /** Max Drawdown Pct */
+            max_drawdown_pct: number;
+            /** Risk Per Trade Pct */
+            risk_per_trade_pct: number;
+            /** Stop Loss Pct */
+            stop_loss_pct: number;
+            /** Strategy Id */
+            strategy_id: string;
+            /** Strategy Name */
+            strategy_name: string;
+            /** Tax */
+            tax: number;
+            /** Total Return Pct */
+            total_return_pct: number;
+            /** Trade Count */
+            trade_count: number;
+            /** Trades */
+            trades: components["schemas"]["BacktestTrade"][];
+            /** Winning Trades */
+            winning_trades: number;
+        };
+        /**
+         * BacktestSummary
+         * @description A saved backtest without its days and trades, for the list that compares them.
+         */
+        BacktestSummary: {
+            /** Average Held Sessions */
+            average_held_sessions: number | null;
+            /**
+             * Backtest Id
+             * Format: uuid
+             */
+            backtest_id: string;
+            /** Benchmark Return Pct */
+            benchmark_return_pct: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Fee */
+            fee: number;
+            /** Final Equity */
+            final_equity: number;
+            /**
+             * First Session
+             * Format: date
+             */
+            first_session: string;
+            inputs: components["schemas"]["BacktestInputs"];
+            /**
+             * Last Session
+             * Format: date
+             */
+            last_session: string;
+            /** Max Drawdown Pct */
+            max_drawdown_pct: number;
+            /** Risk Per Trade Pct */
+            risk_per_trade_pct: number;
+            /** Stop Loss Pct */
+            stop_loss_pct: number;
+            /** Strategy Id */
+            strategy_id: string;
+            /** Strategy Name */
+            strategy_name: string;
+            /** Tax */
+            tax: number;
+            /** Total Return Pct */
+            total_return_pct: number;
+            /** Trade Count */
+            trade_count: number;
+            /** Winning Trades */
+            winning_trades: number;
+        };
+        /**
+         * BacktestTrade
+         * @description One position of a backtest from its first BUY to its SELL, or to the backtest's last session when it is still held
+         *     then. Later BUYs of a held stock add to the same trade. Every field is in every answer, so the Web API's schema
+         *     requires each one.
+         */
+        BacktestTrade: {
+            /** @description Per share, the buy fees included, as Position.average_cost. */
+            average_cost: components["schemas"]["PositiveFiniteFloat"];
+            /**
+             * Bought On
+             * Format: date
+             * @description The session of the first BUY.
+             */
+            bought_on: string;
+            /** @description What sold it: the stop-loss or the score. None while the trade is still open at the last session. */
+            exit_source: components["schemas"]["SignalSource"] | null;
+            /**
+             * Fee
+             * @description The broker fees paid: every BUY's, and the SELL's once sold.
+             */
+            fee: number;
+            /**
+             * Held Sessions
+             * @description Sessions from the first BUY to the SELL, or to the last session.
+             */
+            held_sessions: number;
+            /**
+             * Pnl
+             * @description Net of every fee and the tax (Position.profit_on_sale). For a trade still open, what selling it at the last
+             *     session's close would bring.
+             */
+            pnl: number;
+            /** Quantity */
+            quantity: number;
+            /**
+             * Return Pct
+             * @description The PnL as a fraction of what the shares cost.
+             */
+            readonly return_pct: number;
+            /** @description The SELL's fill price. None while the trade is still open at the last session. */
+            sold_at: components["schemas"]["PositiveFiniteFloat"] | null;
+            /** Sold On */
+            sold_on: string | null;
+            stock_id: components["schemas"]["NonEmptyText"];
+            /** Stock Name */
+            stock_name: string | null;
+            /** Tax */
+            tax: number;
+        };
         BarsAgo: number;
         /** BollingerIndicator */
         BollingerIndicator: {
@@ -1297,7 +1585,7 @@ export interface components {
          *     refused file, a user who is not an administrator and an installation on a real broker.
          * @enum {string}
          */
-        ErrorCode: "sign_in_required" | "sign_in_refused" | "sign_in_throttled" | "registration_closed" | "setup_code_refused" | "already_set_up" | "user_exists" | "last_administrator" | "unknown_host" | "app_request_required" | "administrators_only" | "real_broker_refused" | "broker_unavailable" | "realtime_quotes_unavailable" | "mops_unavailable" | "password_required" | "password_refused" | "settings_file_refused" | "settings_file_missing" | "settings_conflict" | "settings_edit_refused" | "settings_refused" | "technical_settings_conflict" | "ai_model_not_offered" | "run_in_progress" | "too_many_runs" | "nothing_to_follow" | "outside_follow_window" | "listing_unavailable" | "not_found" | "invalid_request" | "body_too_large" | "request_refused";
+        ErrorCode: "sign_in_required" | "sign_in_refused" | "sign_in_throttled" | "registration_closed" | "setup_code_refused" | "already_set_up" | "user_exists" | "last_administrator" | "unknown_host" | "app_request_required" | "administrators_only" | "real_broker_refused" | "broker_unavailable" | "realtime_quotes_unavailable" | "mops_unavailable" | "password_required" | "password_refused" | "settings_file_refused" | "settings_file_missing" | "settings_conflict" | "settings_edit_refused" | "settings_refused" | "technical_settings_conflict" | "ai_model_not_offered" | "run_in_progress" | "too_many_runs" | "nothing_to_follow" | "outside_follow_window" | "backtest_period_unavailable" | "listing_unavailable" | "not_found" | "invalid_request" | "body_too_large" | "request_refused";
         /**
          * ErrorResponse
          * @description Every refusal: `detail` in words for a person, `code` for the client to switch on.
@@ -3060,6 +3348,161 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuthStatusResponse"];
+                };
+            };
+        };
+    };
+    get_backtests_v1_backtests_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestSummary"][];
+                };
+            };
+        };
+    };
+    run_backtest_v1_backtests_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BacktestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestResponse"];
+                };
+            };
+            /** @description invalid_request: a field of the body does not validate, and `detail` lists each one. backtest_period_unavailable: the period reaches outside the days the site's daily history can replay, or holds no session; `detail` says which days a backtest may cover. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_backtest_options_v1_backtests_options_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestOptionsResponse"];
+                };
+            };
+        };
+    };
+    get_backtest_v1_backtests__backtest_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                backtest_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestResponse"];
+                };
+            };
+            /** @description The user has no saved backtest of that id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_backtest_v1_backtests__backtest_id__delete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                backtest_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Confirmed"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The user has no saved backtest of that id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -68,6 +68,7 @@ const ERROR_CODES = {
   too_many_runs: true,
   nothing_to_follow: true,
   outside_follow_window: true,
+  backtest_period_unavailable: true,
   listing_unavailable: true,
   not_found: true,
   invalid_request: true,

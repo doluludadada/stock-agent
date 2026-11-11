@@ -414,6 +414,460 @@
         "title": "AuthStatusResponse",
         "type": "object"
       },
+      "BacktestInputs": {
+        "description": "What a user chooses for one backtest: the period, the cash it starts with and the scores that buy and sell.",
+        "properties": {
+          "buy_score": {
+            "$ref": "#/components/schemas/Score_int_",
+            "description": "A stock that passes the strategy with at least this score is bought: analysis.min_combined_score_buy in a run."
+          },
+          "first": {
+            "format": "date",
+            "title": "First",
+            "type": "string"
+          },
+          "initial_cash": {
+            "$ref": "#/components/schemas/PositiveFiniteFloat"
+          },
+          "last": {
+            "description": "The backtest covers every session from `first` to `last`, both included.",
+            "format": "date",
+            "title": "Last",
+            "type": "string"
+          },
+          "sell_score": {
+            "$ref": "#/components/schemas/Score_int_",
+            "description": "A held stock at or below this score is sold: analysis.max_combined_score_sell in a run."
+          }
+        },
+        "required": [
+          "first",
+          "last",
+          "initial_cash",
+          "buy_score",
+          "sell_score"
+        ],
+        "title": "BacktestInputs",
+        "type": "object"
+      },
+      "BacktestOptionsResponse": {
+        "properties": {
+          "inputs": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BacktestInputs"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "string"
+          },
+          "strategy_name": {
+            "title": "Strategy Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "strategy_id",
+          "strategy_name",
+          "inputs"
+        ],
+        "title": "BacktestOptionsResponse",
+        "type": "object"
+      },
+      "BacktestRequest": {
+        "properties": {
+          "confirm": {
+            "const": true,
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "inputs": {
+            "$ref": "#/components/schemas/BacktestInputs"
+          }
+        },
+        "required": [
+          "confirm",
+          "inputs"
+        ],
+        "title": "BacktestRequest",
+        "type": "object"
+      },
+      "BacktestResponse": {
+        "properties": {
+          "average_held_sessions": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Average Held Sessions"
+          },
+          "backtest_id": {
+            "format": "uuid",
+            "title": "Backtest Id",
+            "type": "string"
+          },
+          "benchmark": {
+            "items": {
+              "$ref": "#/components/schemas/Ohlcv"
+            },
+            "title": "Benchmark",
+            "type": "array"
+          },
+          "benchmark_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Return Pct"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "equity_curve": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/AccountValueResponse"
+            },
+            "propertyNames": {
+              "format": "date"
+            },
+            "title": "Equity Curve",
+            "type": "object"
+          },
+          "fee": {
+            "title": "Fee",
+            "type": "integer"
+          },
+          "final_equity": {
+            "title": "Final Equity",
+            "type": "number"
+          },
+          "first_session": {
+            "format": "date",
+            "title": "First Session",
+            "type": "string"
+          },
+          "inputs": {
+            "$ref": "#/components/schemas/BacktestInputs"
+          },
+          "last_session": {
+            "format": "date",
+            "title": "Last Session",
+            "type": "string"
+          },
+          "max_drawdown_pct": {
+            "title": "Max Drawdown Pct",
+            "type": "number"
+          },
+          "risk_per_trade_pct": {
+            "title": "Risk Per Trade Pct",
+            "type": "number"
+          },
+          "stop_loss_pct": {
+            "title": "Stop Loss Pct",
+            "type": "number"
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "string"
+          },
+          "strategy_name": {
+            "title": "Strategy Name",
+            "type": "string"
+          },
+          "tax": {
+            "title": "Tax",
+            "type": "integer"
+          },
+          "total_return_pct": {
+            "title": "Total Return Pct",
+            "type": "number"
+          },
+          "trade_count": {
+            "title": "Trade Count",
+            "type": "integer"
+          },
+          "trades": {
+            "items": {
+              "$ref": "#/components/schemas/BacktestTrade"
+            },
+            "title": "Trades",
+            "type": "array"
+          },
+          "winning_trades": {
+            "title": "Winning Trades",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "backtest_id",
+          "created_at",
+          "strategy_id",
+          "strategy_name",
+          "inputs",
+          "stop_loss_pct",
+          "risk_per_trade_pct",
+          "first_session",
+          "last_session",
+          "final_equity",
+          "total_return_pct",
+          "benchmark_return_pct",
+          "max_drawdown_pct",
+          "trade_count",
+          "winning_trades",
+          "fee",
+          "tax",
+          "average_held_sessions",
+          "equity_curve",
+          "benchmark",
+          "trades"
+        ],
+        "title": "BacktestResponse",
+        "type": "object"
+      },
+      "BacktestSummary": {
+        "description": "A saved backtest without its days and trades, for the list that compares them.",
+        "properties": {
+          "average_held_sessions": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Average Held Sessions"
+          },
+          "backtest_id": {
+            "format": "uuid",
+            "title": "Backtest Id",
+            "type": "string"
+          },
+          "benchmark_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Return Pct"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "fee": {
+            "title": "Fee",
+            "type": "integer"
+          },
+          "final_equity": {
+            "title": "Final Equity",
+            "type": "number"
+          },
+          "first_session": {
+            "format": "date",
+            "title": "First Session",
+            "type": "string"
+          },
+          "inputs": {
+            "$ref": "#/components/schemas/BacktestInputs"
+          },
+          "last_session": {
+            "format": "date",
+            "title": "Last Session",
+            "type": "string"
+          },
+          "max_drawdown_pct": {
+            "title": "Max Drawdown Pct",
+            "type": "number"
+          },
+          "risk_per_trade_pct": {
+            "title": "Risk Per Trade Pct",
+            "type": "number"
+          },
+          "stop_loss_pct": {
+            "title": "Stop Loss Pct",
+            "type": "number"
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "string"
+          },
+          "strategy_name": {
+            "title": "Strategy Name",
+            "type": "string"
+          },
+          "tax": {
+            "title": "Tax",
+            "type": "integer"
+          },
+          "total_return_pct": {
+            "title": "Total Return Pct",
+            "type": "number"
+          },
+          "trade_count": {
+            "title": "Trade Count",
+            "type": "integer"
+          },
+          "winning_trades": {
+            "title": "Winning Trades",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "backtest_id",
+          "created_at",
+          "strategy_id",
+          "strategy_name",
+          "inputs",
+          "stop_loss_pct",
+          "risk_per_trade_pct",
+          "first_session",
+          "last_session",
+          "final_equity",
+          "total_return_pct",
+          "benchmark_return_pct",
+          "max_drawdown_pct",
+          "trade_count",
+          "winning_trades",
+          "fee",
+          "tax",
+          "average_held_sessions"
+        ],
+        "title": "BacktestSummary",
+        "type": "object"
+      },
+      "BacktestTrade": {
+        "description": "One position of a backtest from its first BUY to its SELL, or to the backtest's last session when it is still held\nthen. Later BUYs of a held stock add to the same trade. Every field is in every answer, so the Web API's schema\nrequires each one.",
+        "properties": {
+          "average_cost": {
+            "$ref": "#/components/schemas/PositiveFiniteFloat",
+            "description": "Per share, the buy fees included, as Position.average_cost."
+          },
+          "bought_on": {
+            "description": "The session of the first BUY.",
+            "format": "date",
+            "title": "Bought On",
+            "type": "string"
+          },
+          "exit_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SignalSource"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What sold it: the stop-loss or the score. None while the trade is still open at the last session."
+          },
+          "fee": {
+            "description": "The broker fees paid: every BUY's, and the SELL's once sold.",
+            "minimum": 0.0,
+            "title": "Fee",
+            "type": "integer"
+          },
+          "held_sessions": {
+            "description": "Sessions from the first BUY to the SELL, or to the last session.",
+            "minimum": 0.0,
+            "title": "Held Sessions",
+            "type": "integer"
+          },
+          "pnl": {
+            "description": "Net of every fee and the tax (Position.profit_on_sale). For a trade still open, what selling it at the last\nsession's close would bring.",
+            "title": "Pnl",
+            "type": "number"
+          },
+          "quantity": {
+            "exclusiveMinimum": 0.0,
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "return_pct": {
+            "description": "The PnL as a fraction of what the shares cost.",
+            "readOnly": true,
+            "title": "Return Pct",
+            "type": "number"
+          },
+          "sold_at": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PositiveFiniteFloat"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The SELL's fill price. None while the trade is still open at the last session."
+          },
+          "sold_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sold On"
+          },
+          "stock_id": {
+            "$ref": "#/components/schemas/NonEmptyText"
+          },
+          "stock_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stock Name"
+          },
+          "tax": {
+            "minimum": 0.0,
+            "title": "Tax",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "stock_id",
+          "stock_name",
+          "quantity",
+          "bought_on",
+          "average_cost",
+          "sold_on",
+          "sold_at",
+          "exit_source",
+          "pnl",
+          "fee",
+          "tax",
+          "held_sessions",
+          "return_pct"
+        ],
+        "title": "BacktestTrade",
+        "type": "object"
+      },
       "BarsAgo": {
         "maximum": 250.0,
         "minimum": 0.0,
@@ -869,6 +1323,7 @@
           "too_many_runs",
           "nothing_to_follow",
           "outside_follow_window",
+          "backtest_period_unavailable",
           "listing_unavailable",
           "not_found",
           "invalid_request",
@@ -4170,7 +4625,7 @@
     }
   },
   "info": {
-    "description": "\nRuns the stock-agent workflows and reads what they recorded, on the same runtime as the CLI.\n\nUsers. Anyone may register (`POST /v1/auth/register`) while registration is open, and signs in with a username or an\nemail (`POST /v1/auth/sign-in`), which sets the HttpOnly session cookie `stock_agent_session`. Public: sign-in,\nregistration, the first-time setup, the built-in strategies and market data (`/v1/market`). Signed in: every other\nread and write, each on the user's own runs, decisions, orders, watchlist, mock account and saved technical settings.\nAdministrator: the users (`/v1/admin/users`) and the settings form (`/v1/admin/settings`). 401 means sign in: the\nsession is missing, expired or ended. 403 means signed in but not allowed, and never ends the session. Every write\nsends the header `X-Requested-With: stock-agent`, and every write but sign-in, sign-out, registration and setup\nrepeats `\"confirm\": true` in its body.\n\nOrders. Full Cycle, specific-stock analysis, valuation and market data never order. Buzz, Intraday and a manual BUY\nof a stock a specific-stock run reported (`POST /v1/runs/{run_id}/manual-buy`) send orders through the same gates and\ntrading journal as the CLI, on the broker their `broker` query names for the whole run: the user's mock account by\ndefault, or SinoPac (`shioaji`) for an administrator while the site's Shioaji login is up, on its simulation server\nin dev and test and on the real account in prod, each BUY within trading.max_order_value and the day's within\ntrading.max_daily_buy_value (`GET /v1/account/brokers` names them). A follow (`POST /v1/runs/{run_id}/follow`) places a\nfinished Full Cycle's open decisions in the user's mock account only, priced again: at a fresh realtime quote in\ncontinuous trading, or on a site without realtime quotes at the last session's official close while no session\ntrades. No endpoint cancels or modifies an order.\n\nOpen data. A public site (`audience: public`) uses only the TWSE and TPEX OpenAPI data the server archives: daily\nhistory and the index trend come from that archive, it has no realtime quote, so Buzz and Intraday answer 403\n`realtime_quotes_unavailable`, and it trades on the mock broker only. A personal site reads its daily history and\nindex trend from the exchanges' own daily reports; without a Shioaji login it has no realtime quote either, so it\nanswers Buzz and Intraday the same way. A public site reads no news site and no MOPS: the AI step\nreads the archived material information, the TWSE news naming the stock and its archived financials, a stock with none\nof them is decided on its technical score alone, and every valuation endpoint answers 403 `mops_unavailable`. `GET\n/v1/market/audience` answers the site's audience and what it allows, so the web app offers only that. `GET\n/v1/market/archive-status` says how many sessions the archive holds and how many the built-in strategies need, `GET\n/v1/market/stocks/{stock_id}/financials` answers a stock's archived quarters and monthly revenue, and `GET\n/v1/market/attribution` names the open data's providers, datasets and license, which a page showing it must credit.\n\nWorkflows run in the background, one at a time per user and a few at a time per server: a start answers 202 with the\nrun id, and GET /v1/runs/{run_id} reports the run's state and its record; another user's run id answers 404. Run the\nserver with one worker process.\n",
+    "description": "\nRuns the stock-agent workflows and reads what they recorded, on the same runtime as the CLI.\n\nUsers. Anyone may register (`POST /v1/auth/register`) while registration is open, and signs in with a username or an\nemail (`POST /v1/auth/sign-in`), which sets the HttpOnly session cookie `stock_agent_session`. Public: sign-in,\nregistration, the first-time setup, the built-in strategies and market data (`/v1/market`). Signed in: every other\nread and write, each on the user's own runs, decisions, orders, watchlist, mock account and saved technical settings.\nAdministrator: the users (`/v1/admin/users`) and the settings form (`/v1/admin/settings`). 401 means sign in: the\nsession is missing, expired or ended. 403 means signed in but not allowed, and never ends the session. Every write\nsends the header `X-Requested-With: stock-agent`, and every write but sign-in, sign-out, registration and setup\nrepeats `\"confirm\": true` in its body.\n\nOrders. Full Cycle, specific-stock analysis, valuation and market data never order. Buzz, Intraday and a manual BUY\nof a stock a specific-stock run reported (`POST /v1/runs/{run_id}/manual-buy`) send orders through the same gates and\ntrading journal as the CLI, on the broker their `broker` query names for the whole run: the user's mock account by\ndefault, or SinoPac (`shioaji`) for an administrator while the site's Shioaji login is up, on its simulation server\nin dev and test and on the real account in prod, each BUY within trading.max_order_value and the day's within\ntrading.max_daily_buy_value (`GET /v1/account/brokers` names them). A follow (`POST /v1/runs/{run_id}/follow`) places a\nfinished Full Cycle's open decisions in the user's mock account only, priced again: at a fresh realtime quote in\ncontinuous trading, or on a site without realtime quotes at the last session's official close while no session\ntrades. No endpoint cancels or modifies an order.\n\nOpen data. A public site (`audience: public`) uses only the TWSE and TPEX OpenAPI data the server archives: daily\nhistory and the index trend come from that archive, it has no realtime quote, so Buzz and Intraday answer 403\n`realtime_quotes_unavailable`, and it trades on the mock broker only. A personal site reads its daily history and\nindex trend from the exchanges' own daily reports; without a Shioaji login it has no realtime quote either, so it\nanswers Buzz and Intraday the same way. A public site reads no news site and no MOPS: the AI step\nreads the archived material information, the TWSE news naming the stock and its archived financials, a stock with none\nof them is decided on its technical score alone, and every valuation endpoint answers 403 `mops_unavailable`. `GET\n/v1/market/audience` answers the site's audience and what it allows, so the web app offers only that. `GET\n/v1/market/archive-status` says how many sessions the archive holds and how many the built-in strategies need, `GET\n/v1/market/stocks/{stock_id}/financials` answers a stock's archived quarters and monthly revenue, and `GET\n/v1/market/attribution` names the open data's providers, datasets and license, which a page showing it must credit.\n\nBacktests. `POST /v1/backtests` replays the user's active technical strategy over past sessions the site already\nholds, with the live trading rules on the technical score alone, and saves the result for the user (`GET\n/v1/backtests`, `GET /v1/backtests/{backtest_id}`). `GET /v1/backtests/options` names the period it may cover. A\nbacktest asks no AI, touches no account, watchlist or run record, and never orders.\n\nWorkflows run in the background, one at a time per user and a few at a time per server: a start answers 202 with the\nrun id, and GET /v1/runs/{run_id} reports the run's state and its record; another user's run id answers 404. Run the\nserver with one worker process.\n",
     "title": "TW-Stock-Alpha-Agent",
     "version": "0.2.0"
   },
@@ -4905,6 +5360,230 @@
         "summary": "Get Sign In Status",
         "tags": [
           "Sign-in"
+        ]
+      }
+    },
+    "/v1/backtests": {
+      "get": {
+        "description": "The user's saved backtests, newest first: the site keeps the newest accounts.saved_backtests of each user.",
+        "operationId": "get_backtests_v1_backtests_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BacktestSummary"
+                  },
+                  "title": "Response Get Backtests V1 Backtests Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Get Backtests",
+        "tags": [
+          "Backtests"
+        ]
+      },
+      "post": {
+        "description": "Replays the user's active technical strategy over the period, day by day with the live trading rules, and answers\nthe backtest, saved for the user. A stock is decided on its technical score alone, as a run decides a stock the AI\nis not asked about; a decision made after one session's close fills at the next open. It asks no AI, touches no\naccount and never orders. The answer comes when the replay is done: seconds, longer for the first one after a start.",
+        "operationId": "run_backtest_v1_backtests_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BacktestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "invalid_request: a field of the body does not validate, and `detail` lists each one. backtest_period_unavailable: the period reaches outside the days the site's daily history can replay, or holds no session; `detail` says which days a backtest may cover."
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Run Backtest",
+        "tags": [
+          "Backtests"
+        ]
+      }
+    },
+    "/v1/backtests/options": {
+      "get": {
+        "description": "What the user may ask a backtest for: the strategy it would replay, and the inputs of the longest one the site's\ndaily history allows at the live settings. A backtest reads only sessions the site already holds.",
+        "operationId": "get_backtest_options_v1_backtests_options_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestOptionsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Get Backtest Options",
+        "tags": [
+          "Backtests"
+        ]
+      }
+    },
+    "/v1/backtests/{backtest_id}": {
+      "get": {
+        "description": "One saved backtest of the user, with its days and trades. Another user's id answers 404.",
+        "operationId": "get_backtest_v1_backtests__backtest_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "backtest_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Backtest Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The user has no saved backtest of that id."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Get Backtest",
+        "tags": [
+          "Backtests"
+        ]
+      }
+    },
+    "/v1/backtests/{backtest_id}/delete": {
+      "post": {
+        "description": "Deletes one saved backtest of the user. Another user's id answers 404 and deletes nothing.",
+        "operationId": "delete_backtest_v1_backtests__backtest_id__delete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "backtest_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Backtest Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Confirmed"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The user has no saved backtest of that id."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Delete Backtest",
+        "tags": [
+          "Backtests"
         ]
       }
     },

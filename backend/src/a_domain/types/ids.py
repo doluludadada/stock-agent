@@ -10,6 +10,9 @@ DecisionId = NewType("DecisionId", UUID)
 OrderId = NewType("OrderId", UUID)
 """One order record."""
 
+BacktestId = NewType("BacktestId", UUID)
+"""One saved backtest."""
+
 
 def new_run_id() -> RunId:
     return RunId(uuid4())
@@ -21,6 +24,10 @@ def new_decision_id() -> DecisionId:
 
 def new_order_id() -> OrderId:
     return OrderId(uuid4())
+
+
+def new_backtest_id() -> BacktestId:
+    return BacktestId(uuid4())
 
 
 UserId = NewType("UserId", str)

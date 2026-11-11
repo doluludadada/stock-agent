@@ -196,6 +196,8 @@ class IndexVolumeFields(BaseModel):
     date: str
     volume: str
     change: str
+    earlier_volume: str | None = None
+    """The name the report gave its volume in earlier months, in the same unit: read where the report lacks `volume`."""
 
 
 class DailyReportFeed(BaseModel):

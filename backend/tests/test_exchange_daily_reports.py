@@ -159,6 +159,36 @@ async def test_an_index_is_each_session_of_the_months_asked_with_its_official_ch
     assert [day for _, day, _ in asked] == ["20250601", "20250601", "20250701", "20250701", "2025/07/01", "2025/07/01"]
 
 
+async def test_a_tpex_month_before_2025_names_its_volume_in_thousand_shares_and_reads_the_same(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fields and the first session TPEX served for November 2023, read on 2026-11-12."""
+    prices = {
+        "stat": "ok",
+        "tables": [
+            {
+                "fields": ["日期", "開市", "最高", "最低", "收市", "漲/跌"],
+                "data": [["2023/11/01", "209.96", "212.01", "209.96", "211.82", "2.17"]],
+            }
+        ],
+    }
+    volumes = {
+        "stat": "ok",
+        "tables": [
+            {
+                "fields": ["日期", "成交股數（仟股）", "金額（仟元）", "筆數", "櫃買指數", "漲/跌"],
+                "data": [["112/11/01", "587,692", "54,227,965", "454,411", 211.82, 2.17]],
+            }
+        ],
+    }
+    recorded = {("/www/zh-tw/indexInfo/inx", "2023/11/01"): prices, ("/www/zh-tw/afterTrading/tradingIndex", "2023/11/01"): volumes}
+    serve(monkeypatch, [], recorded=recorded)
+
+    bars = await reports().index_bars(MarketType.TPEX, date(2023, 11, 1), date(2023, 11, 1))
+
+    assert bars == [Ohlcv(CLOCK.session_close(date(2023, 11, 1)), 209.96, 212.01, 209.96, 211.82, 587_692_000, 2.17)]
+
+
 async def test_requests_to_one_site_wait_the_interval_whichever_runtime_asks_and_the_other_site_does_not_wait(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Protocol
 
 from a_domain.model.market.ohlcv import Ohlcv
@@ -13,6 +13,13 @@ class IPriceHistoryProvider(Protocol):
 
     async def fetch_index_history(self, index: MarketIndex, start_date: datetime, end_date: datetime) -> list[Ohlcv]:
         """The index's daily bars, oldest first, stamped like a stock's. Empty when the source has none."""
+        ...
+
+    async def held_span(self) -> tuple[date, date] | None:
+        """
+        The first and the last session the source already holds stocks' daily bars of, or None when it holds none. It
+        asks nothing of the exchanges: a read of that span fetches no older session.
+        """
         ...
 
 

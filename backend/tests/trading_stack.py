@@ -14,6 +14,7 @@ from support.fakes import (
     FakeNewsProvider,
     FakeSentimentClassifier,
     FakeSocialMediaProvider,
+    FakeStrategySearchRepository,
     FakeTechnicalSettingsRepository,
     FakeUserStore,
     FakeWatchlistRepository,
@@ -39,10 +40,12 @@ from b_application.use_cases.trade.order_execution import OrderExecution
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
 from c_infrastructure.database.repositories.trading_journal import TradingJournal
+from c_infrastructure.market.daily_bar_matrix_provider import DailyBarMatrixProvider
 from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection
 from c_infrastructure.system.attempt_log import MemoryAttemptLog
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
 from c_infrastructure.system.settings_files import SettingsFiles
+from c_infrastructure.technical.candidate_backtester import ProcessPoolCandidateBacktester
 from c_infrastructure.trading.mock.mock_execution_provider import MockExecutionProvider
 from d_presentation.dependencies import OwnedPorts, ProviderDependencies, compose_runtime, create_owned_ports
 
@@ -182,6 +185,9 @@ async def open_stack(
         stock_provider=stocks,
         price_provider=quotes,
         history_cache=None,
+        bar_matrix_provider=DailyBarMatrixProvider(stocks, quotes, clock, logger),
+        candidate_backtester=ProcessPoolCandidateBacktester(config, clock, 0),
+        strategy_search_repository=FakeStrategySearchRepository(),
         broker_market_data=True,
         shioaji=ShioajiConnection(client=FakeShioaji(), up=True),
         daily_close_archive=FakeDailyCloseArchive(),

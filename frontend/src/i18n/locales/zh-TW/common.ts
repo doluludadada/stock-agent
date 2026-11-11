@@ -11,6 +11,7 @@ const common: DictionaryShape<typeof en> = {
     open: '開啟導覽',
     overview: '市場總覽',
     strategies: '策略庫',
+    backtest: '策略回測',
     builder: '公式設計器',
     runs: '分析任務',
     valuation: '估值',

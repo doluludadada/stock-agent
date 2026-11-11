@@ -9,6 +9,8 @@ export const paths = {
   copyStrategy: (id: string) => `/strategies/new?from=${encodeURIComponent(id)}`,
   copyBuiltInStrategy: (id: string) => `/strategies/new?builtin=${encodeURIComponent(id)}`,
   editStrategy: (id: string) => `/strategies/${encodeURIComponent(id)}/edit`,
+  backtest: '/backtest',
+  savedBacktest: (id: string) => `/backtest?id=${encodeURIComponent(id)}`,
   valuation: '/valuation',
   watchlist: '/watchlist',
   account: '/account',
