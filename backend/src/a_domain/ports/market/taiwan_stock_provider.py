@@ -140,8 +140,8 @@ class ITaiwanStockProvider(IStockProvider, Protocol):
 
     def parse_monthly_revenue(self, row: dict[str, Any], market: MarketType) -> MonthlyRevenue | None:
         """
-        One company's revenue of the month its row names ('11509' is 2026-09), or None when the row names no company or
-        no valid month or served date.
+        One company's revenue of the month its row names ('11509', and '115/9' in MOPS's summary, are 2026-09), or None
+        when the row names no company or no valid month or served date ('1151109', or '115/11/09' in MOPS's summary).
         """
         ...
 

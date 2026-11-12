@@ -2,11 +2,11 @@
 The open-data archive keeps each stock's daily bars as its exchange listed them and adjusts them on read for the
 corporate actions between them (HistoryAdjustmentRule). Every row here is a real one, read on 2026-11-06: the stock's
 bars as TWSE's daily trading report of the stock (STOCK_DAY) lists them, and the TAIEX close and change of each session
-(FMTQIK).
+(FMTQIK); TWSE's ex-right references as its TWT49U report listed them on 2026-11-12.
 """
 
 from dataclasses import replace
-from datetime import date
+from datetime import date, datetime
 
 import pytest
 
@@ -19,8 +19,8 @@ from c_infrastructure.system.market_clock import TaiwanMarketClock
 CLOCK = TaiwanMarketClock(MarketHoursConfig())
 
 
-def adjusted_on_twse(history: list[Ohlcv], index: list[Ohlcv]) -> list[Ohlcv]:
-    return HistoryAdjustmentRule().apply(history, index, MarketType.TWSE)
+def adjusted_on_twse(history: list[Ohlcv], index: list[Ohlcv], references: dict[datetime, float] | None = None) -> list[Ohlcv]:
+    return HistoryAdjustmentRule().apply(history, index, MarketType.TWSE, references or {})
 
 
 def session(roc_date: str) -> date:
@@ -160,6 +160,40 @@ def test_an_ex_dividend_day_the_exchange_compares_to_no_reference_gets_no_factor
     assert adjusted == bars(EX_DIVIDEND_0050)
 
 
+@pytest.mark.parametrize("change", [0.0, None], ids=["X0.00 read as 0", "X0.00 left unread"])
+def test_an_ex_dividend_day_twse_listed_a_reference_of_is_adjusted_by_it(change: float | None) -> None:
+    history = bars(EX_DIVIDEND_0050)
+    history[2] = replace(history[2], change=change)
+    references = {CLOCK.session_close(date(2025, 7, 21)): 51.09}
+
+    adjusted = adjusted_on_twse(history, taiex(TAIEX_2025_07), references)
+
+    assert closes(adjusted) == [50.35, 51.09, 50.90, 50.55]
+    assert adjusted[2:] == history[2:]
+
+
+EX_DIVIDEND_1712 = [
+    ("114/03/12", 45.30, 45.70, 45.20, 45.45, 1978890, "+0.15"),
+    ("114/03/13", 43.00, 43.20, 42.70, 42.95, 5367790, "X0.00"),
+    ("114/03/14", 43.10, 44.45, 43.10, 43.40, 1712404, "+0.45"),
+]
+"""1712 went ex-dividend on 2025-03-13 and closed exactly at its reference, 42.95."""
+
+TAIEX_2025_03 = [("114/03/12", 22278.36, 207.27), ("114/03/13", 21961.68, -316.68), ("114/03/14", 21968.05, 6.37)]
+
+
+def test_an_ex_dividend_day_that_closed_at_its_reference_is_adjusted_by_it() -> None:
+    adjusted = adjusted_on_twse(bars(EX_DIVIDEND_1712), taiex(TAIEX_2025_03), {CLOCK.session_close(date(2025, 3, 13)): 42.95})
+
+    assert closes(adjusted) == [42.95, 42.95, 43.40]
+
+
+def test_a_reference_of_a_day_whose_change_compares_to_one_is_not_read() -> None:
+    adjusted = adjusted_on_twse(bars(EX_DIVIDEND_8467), taiex(TAIEX_2026_11), {CLOCK.session_close(date(2026, 11, 4)): 80.0})
+
+    assert closes(adjusted) == [94.32, 90.90, 88.00, 96.80]
+
+
 EX_DIVIDEND_8467 = [
     ("115/11/02", 96.10, 96.40, 96.00, 96.40, 3262, "-0.60"),
     ("115/11/03", 96.50, 96.90, 92.90, 92.90, 33709, "-3.50"),
@@ -214,4 +248,4 @@ TPEX_INDEX_2026_10 = [
 def test_a_tpex_stock_gets_no_factor_across_a_session_it_did_not_trade() -> None:
     history = bars(UNTRADED_2064)
 
-    assert HistoryAdjustmentRule().apply(history, taiex(TPEX_INDEX_2026_10), MarketType.TPEX) == history
+    assert HistoryAdjustmentRule().apply(history, taiex(TPEX_INDEX_2026_10), MarketType.TPEX, {}) == history

@@ -47,6 +47,7 @@ const admin: DictionaryShape<typeof en> = {
       valuation: '本益比估值',
       accounts: '帳號與用量',
       strategy_search: '策略搜尋',
+      ranking: '股票排名',
       sources: '資料來源',
     },
     group: {
@@ -260,6 +261,19 @@ const admin: DictionaryShape<typeof en> = {
         levels: '新條件可用的比較值',
         folder: '搜尋結果資料夾',
       },
+      ranking: {
+        decision_day: '每月決策日',
+        top: '持有檔數',
+        min_close: '最低收盤價（新台幣）',
+        min_traded_value: '每日最低成交值（新台幣）',
+        traded_value_sessions: '成交值平均的交易日數',
+        high_sessions: '高點的交易日數',
+        revenue_short_months: '近期營收月數',
+        revenue_long_months: '比較營收月數',
+        daily_limit: '計入的最大單日漲跌',
+        benchmark_id: '比較標的',
+        sessions_per_year: '每年交易日數',
+      },
       sources: {
         exchange: {
           twse_daily_quotes_url: '證交所每日行情網址',
@@ -298,6 +312,13 @@ const admin: DictionaryShape<typeof en> = {
             stock_code_pattern: '股票代號正規表示式',
           },
           daily_reports: '交易所網站的每日報表',
+          ex_right_references: {
+            url: '證交所除權息參考價網址',
+            date: '日期欄位',
+            stock_id: '股票代號欄位',
+            reference: '參考價欄位',
+            months_per_request: '每次請求的月數',
+          },
         },
         attribution: {
           providers: '提供機關與資料集',
@@ -313,6 +334,8 @@ const admin: DictionaryShape<typeof en> = {
           company_id_header: '公司代號欄位',
           eps_header_prefix: 'EPS 欄位開頭',
           no_data_marker: '查無資料文字',
+          monthly_revenue_url: '每月營收彙總表網址',
+          revenue_deadline_day: '每月營收申報期限（日）',
           request_interval_seconds: '請求間隔（秒）',
           timeout_seconds: '請求逾時（秒）',
           provisional_page_max_age_hours: '未定案頁面保留時間（小時）',
@@ -564,6 +587,19 @@ const admin: DictionaryShape<typeof en> = {
         levels: '產生的新條件依數值的種類，從這些比較值中挑選：價格與成交量乘上倍數，其餘直接比較。',
         folder: '每次搜尋存成這個資料夾下的一個子資料夾，相對於專案根目錄。',
       },
+      ranking: {
+        decision_day: '每個月在當月這一天或之後的第一個交易日收盤時決策，並從下一個交易日開盤起持有選出的股票。決策讀取在該交易日之前已到申報期限的最新月營收（公開資訊觀測站營收申報期限）。',
+        top: '排名持有分數最高的幾檔股票，等權重。',
+        min_close: '決策日收盤價（當日掛牌價格）不低於此價的股票才列入排名範圍。',
+        min_traded_value: '在成交值平均的交易日中，平均每日成交值不低於此新台幣金額的股票才列入範圍；沒有成交的交易日以 0 計。',
+        traded_value_sessions: '到決策日為止，平均成交值所用的交易日數。',
+        high_sessions: '接近高點的程度，是股票在決策日的總報酬指數除以其在這麼多個交易日內的最高指數。',
+        revenue_short_months: '營收加速度，是最近這幾個月的平均營收除以比較月份的平均營收。',
+        revenue_long_months: '近期營收所比較的最近月數的平均營收。缺任何一個月的股票沒有加速度。',
+        daily_limit: '交易所沒有給參考價的一根日線，單日漲跌超過此比例時視為公司行動而非報酬，在總報酬指數中以 0 計。',
+        benchmark_id: '排名回測所比較的股票，以總報酬在相同交易日中持有，例如 0050。',
+        sessions_per_year: '回測年化報酬所用的每年交易日數。',
+      },
       sources: {
         exchange: {
           twse_daily_quotes_url: '證交所 OpenAPI 的上市個股日成交資訊。網站的股票清單與每檔上市股票最新的官方收盤價都從這裡來。',
@@ -602,6 +638,13 @@ const admin: DictionaryShape<typeof en> = {
             stock_code_pattern: '從新聞標題找出股票代號的正規表示式，第一個群組是代號。標題把代號寫在括號內，可單獨出現，例如「(0053)」，或接在「證券代號：」之後。',
           },
           daily_reports: '個人網站讀取日線的來源，不需要登入。以市場（twse、tpex）為鍵的對照表，每個市場填入該交易所單日收盤行情、當月指數價格與當月市場成交量報表的網址（日期處寫 {date}），以及各報表的欄位名稱。index_volume_lots 表示成交量報表以張計。兩個市場都必須填寫。',
+          ex_right_references: {
+            url: '證交所某段日期的除權除息計算結果表（TWT49U），起始日寫 {first}、結束日寫 {last}。個人網站從中讀取每檔股票除權息日的參考價；證交所收盤行情在那天不與參考價比較，所以日線在除息時不會出現缺口。公開網站從不讀取它。',
+            date: '每列日期的欄位，為標示年、月、日的民國日期。',
+            stock_id: '每列股票代號的欄位，只讀四位數代號。',
+            reference: '證交所為除權息日訂定的參考價欄位。',
+            months_per_request: '一次請求涵蓋幾個月的日期。已知一季可行。',
+          },
         },
         attribution: {
           providers: '每個提供開放資料的機關一筆，包含機關的發布名稱（provider）與從該機關讀取的資料集名稱（datasets）。證交所與櫃買中心的每個資料集都要列出，未標示出處的利用視為自始未取得授權。',
@@ -617,6 +660,8 @@ const admin: DictionaryShape<typeof en> = {
           company_id_header: '公開資訊觀測站綜合損益表中公司代號的欄位名稱，沒有這個欄位的頁面不讀取。',
           eps_header_prefix: '公開資訊觀測站綜合損益表中基本每股盈餘欄位名稱的開頭。讀取第一個以此開頭的欄位，沒有這種欄位的頁面不讀取。',
           no_data_marker: '公開資訊觀測站查詢沒有結果時顯示的文字。頁面沒有表格但有這段文字時，視為沒有資料，而不是無法讀取。',
+          monthly_revenue_url: '公開資訊觀測站某個過去月份的每月營收彙總表（CSV），每個市場一個檔案。{market_code} 是上面的市場代碼，{roc_year} 是民國年，{month} 是月份。欄位與證交所、櫃買中心的每月營收彙總表相同。個人網站用 just backfill-history 把過去的月份讀進開放資料存檔；公開網站從不讀取它。',
+          revenue_deadline_day: '公司在下個月的這一天以前申報當月營收。回補會重讀某個月份，直到存檔中的資料是在這一天之後取得的；股票排名讀取在決策日之前已過申報期限的最新月份。',
           request_interval_seconds: '兩次向公開資訊觀測站請求之間最少隔多久。沒有快取時會送出十個請求到共用的公共服務，所以一次只送一個。',
           timeout_seconds: '等待公開資訊觀測站綜合損益表頁面的最長時間。',
           provisional_page_max_age_hours: '快取中尚未定案的頁面，超過這個時間就重新下載。頁面在該季申報期限加上寬限天數之後下載、且不是空白，才算定案。',

@@ -25,14 +25,17 @@ class FakeDailyHistory:
     """
     Serves each session's bars the test set (`sessions`) and each exchange's index over the sessions it set (`index`),
     each with its change from the session before it, as the reports give it. It also answers the realtime quotes the
-    test set (`realtime`), as the broker would. Records every request in `asked`.
+    test set (`realtime`), as the broker would, and TWSE's ex-right references the test set (`references`). Records
+    every request for bars in `asked` and every one for references in `references_asked`.
     """
 
     sessions: dict[date, dict[str, Ohlcv]] = field(default_factory=dict)
     index: dict[MarketType, list[date]] = field(default_factory=dict)
     realtime: dict[str, Ohlcv] = field(default_factory=dict)
+    references: dict[tuple[str, date], float] = field(default_factory=dict)
     failure: Exception | None = None
     asked: list[str] = field(default_factory=list)
+    references_asked: list[tuple[date, date]] = field(default_factory=list)
 
     async def fetch_realtime_bars(self, stocks: list[Stock]) -> dict[str, Ohlcv]:
         return {stock.stock_id: self.realtime[stock.stock_id] for stock in stocks if stock.stock_id in self.realtime}
@@ -49,6 +52,11 @@ class FakeDailyHistory:
         bars = [session_bar(day, 100.0 + day.day) for day in days]
         changed = bars[:1] + [replace(later, change=later.close - earlier.close) for earlier, later in pairwise(bars)]
         return [bar for bar in changed if first <= bar.ts.date() <= last]
+
+    async def ex_right_references(self, first: date, last: date) -> dict[tuple[str, date], float]:
+        self.references_asked.append((first, last))
+        self.fail_if_told()
+        return {key: price for key, price in self.references.items() if first <= key[1] <= last}
 
     async def get(self, market: MarketType, url: str) -> Any:
         raise AssertionError("the fake serves bars, never a report")

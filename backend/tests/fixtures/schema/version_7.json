@@ -289,6 +289,43 @@
     ],
     "unique": []
   },
+  "ex_right_references": {
+    "columns": {
+      "reference_price": {
+        "class": "Float",
+        "nullable": false,
+        "postgresql": "FLOAT",
+        "sqlite": "FLOAT"
+      },
+      "session_date": {
+        "class": "Date",
+        "nullable": false,
+        "postgresql": "DATE",
+        "sqlite": "DATE"
+      },
+      "stock_id": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR",
+        "sqlite": "VARCHAR"
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [
+      [
+        "ix_ex_right_references_session_date",
+        [
+          "session_date"
+        ],
+        false
+      ]
+    ],
+    "primary_key": [
+      "stock_id",
+      "session_date"
+    ],
+    "unique": []
+  },
   "exchange_news_archive": {
     "columns": {
       "published_on": {

@@ -23,6 +23,7 @@ from a_domain.types.errors import (
     MopsUnavailable,
     PasswordRefused,
     PasswordRequired,
+    RankingUnavailable,
     RealBrokerRefused,
     RealtimeQuotesUnavailable,
     RegistrationClosed,
@@ -90,6 +91,11 @@ Backtests. `POST /v1/backtests` replays the user's active technical strategy ove
 holds, with the live trading rules on the technical score alone, and saves the result for the user (`GET
 /v1/backtests`, `GET /v1/backtests/{backtest_id}`). `GET /v1/backtests/options` names the period it may cover. A
 backtest asks no AI, touches no account, watchlist or run record, and never orders.
+
+Rankings. `GET /v1/rankings/latest` answers the monthly stock ranking by revenue acceleration and nearness to the high at
+the latest decision session the site's daily history holds, and `GET /v1/rankings/backtest?first=&last=` replays it over
+a period against the ranking.benchmark_id held over the same sessions. Both read only the held history and the archived
+monthly revenue, which `just backfill-history` brings back; they ask no AI, touch no account and never order.
 
 Workflows run in the background, one at a time per user and a few at a time per server: a start answers 202 with the
 run id, and GET /v1/runs/{run_id} reports the run's state and its record; another user's run id answers 404. Run the
@@ -161,6 +167,7 @@ ERROR_ANSWERS: dict[type[Exception], tuple[int, ErrorCode]] = {
     AiModelNotOffered: (status.HTTP_422_UNPROCESSABLE_CONTENT, ErrorCode.AI_MODEL_NOT_OFFERED),
     InvalidSettingsError: (status.HTTP_422_UNPROCESSABLE_CONTENT, ErrorCode.SETTINGS_REFUSED),
     BacktestPeriodUnavailable: (status.HTTP_422_UNPROCESSABLE_CONTENT, ErrorCode.BACKTEST_PERIOD_UNAVAILABLE),
+    RankingUnavailable: (status.HTTP_422_UNPROCESSABLE_CONTENT, ErrorCode.RANKING_UNAVAILABLE),
     SignInThrottled: (status.HTTP_429_TOO_MANY_REQUESTS, ErrorCode.SIGN_IN_THROTTLED),
     TooManyRuns: (status.HTTP_429_TOO_MANY_REQUESTS, ErrorCode.TOO_MANY_RUNS),
     ListingUnavailableError: (status.HTTP_503_SERVICE_UNAVAILABLE, ErrorCode.LISTING_UNAVAILABLE),

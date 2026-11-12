@@ -7,6 +7,7 @@ from d_presentation.web.routers import (
     auth,
     backtests,
     market,
+    rankings,
     runs,
     technical_settings,
     valuation,
@@ -17,7 +18,7 @@ from d_presentation.web.session import AppRequest, KnownHost
 
 router = APIRouter(prefix="/v1")
 
-for module in (auth, runs, watchlist, technical_settings, account, backtests, market, valuation, admin, admin_users):
+for module in (auth, runs, watchlist, technical_settings, account, backtests, rankings, market, valuation, admin, admin_users):
     router.include_router(module.router, dependencies=[KnownHost, AppRequest])
 
 router.include_router(webhook_router.router, prefix="/webhook")

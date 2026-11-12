@@ -11,6 +11,8 @@ export const paths = {
   editStrategy: (id: string) => `/strategies/${encodeURIComponent(id)}/edit`,
   backtest: '/backtest',
   savedBacktest: (id: string) => `/backtest?id=${encodeURIComponent(id)}`,
+  /** The monthly ranking by revenue and nearness to the high, with its record against the benchmark. */
+  ranking: '/ranking',
   valuation: '/valuation',
   watchlist: '/watchlist',
   account: '/account',

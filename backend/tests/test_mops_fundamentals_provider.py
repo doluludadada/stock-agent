@@ -64,7 +64,9 @@ async def build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[MopsFu
     db = DatabaseConnector(config=cast(Any, config), logger=SilentLogger())
     await db.init_db()
     clock = MovableClock()
-    provider = MopsFundamentalsProvider(db=db, market_clock=clock, mops=SOURCES.mops, logger=SilentLogger(), write_lock=asyncio.Lock())
+    provider = MopsFundamentalsProvider(
+        db=db, market_clock=clock, mops=SOURCES.mops, listing=cast(Any, None), logger=SilentLogger(), write_lock=asyncio.Lock()
+    )
     mops = FakeMops()
     monkeypatch.setattr(provider, "download", mops.download)
     return provider, mops, clock
@@ -73,7 +75,12 @@ async def build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[MopsFu
 def parser() -> MopsFundamentalsProvider:
     """Parsing reads no database and no clock."""
     return MopsFundamentalsProvider(
-        db=cast(Any, None), market_clock=MovableClock(), mops=SOURCES.mops, logger=SilentLogger(), write_lock=asyncio.Lock()
+        db=cast(Any, None),
+        market_clock=MovableClock(),
+        mops=SOURCES.mops,
+        listing=cast(Any, None),
+        logger=SilentLogger(),
+        write_lock=asyncio.Lock(),
     )
 
 

@@ -45,6 +45,38 @@ search-strategies *options:
 search-strategies *options:
     cd backend; $env:PYTHONPATH="src"; uv run python -m d_presentation.cli.strategy_search {{options}}
 
+# Brings the history a stock ranking reads back to a first day on a personal site, for example `just backfill-history
+# 2017-01-01`: every market's monthly revenue from MOPS, each exchange's daily history and TWSE's ex-right references.
+# What it fetched is saved as it comes, so after a failure or a timeout run it again: it fetches only what is missing,
+# and ends with exit code 2 while anything is. It orders nothing and asks no AI.
+[unix]
+backfill-history first:
+    cd backend && PYTHONPATH=src uv run python -m d_presentation.cli.backfill_history {{first}}
+
+[windows]
+backfill-history first:
+    cd backend; $env:PYTHONPATH="src"; uv run python -m d_presentation.cli.backfill_history {{first}}
+
+# The monthly stock ranking by revenue acceleration and nearness to the high at the latest decision session the held
+# history holds. It reads only the held daily history and monthly revenue, orders nothing and asks no AI.
+[unix]
+ranking:
+    cd backend && PYTHONPATH=src uv run python -m d_presentation.cli.ranking latest
+
+[windows]
+ranking:
+    cd backend; $env:PYTHONPATH="src"; uv run python -m d_presentation.cli.ranking latest
+
+# The ranking replayed over a period against ranking.benchmark_id, for example `just ranking-backtest 2017-07-01
+# 2026-11-11`, or with `--holdings` after the dates every decision's stocks too.
+[unix]
+ranking-backtest first last *options:
+    cd backend && PYTHONPATH=src uv run python -m d_presentation.cli.ranking backtest {{first}} {{last}} {{options}}
+
+[windows]
+ranking-backtest first last *options:
+    cd backend; $env:PYTHONPATH="src"; uv run python -m d_presentation.cli.ranking backtest {{first}} {{last}} {{options}}
+
 # The database commands (docs/database-migrations.md). Each opens only the database that db.backend selects, so it also
 # works on a database that startup refuses. Backups go to backups/ (owner-only); PostgreSQL's need pg_dump and pg_restore.
 

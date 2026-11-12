@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Self
 
-from pydantic import BaseModel, NonNegativeInt, model_validator
+from pydantic import BaseModel, Field, NonNegativeInt, model_validator
 
 from a_domain.types.enums import FinancialStatement, IndustryFormat, MarketType
 
@@ -217,13 +217,28 @@ class DailyReportFeed(BaseModel):
     """Whether the volume report counts board lots (market.board_lot_shares shares each) instead of shares."""
 
 
+class ExRightReferenceFeed(BaseModel):
+    """
+    TWSE's ex-right and ex-dividend results of a range of dates on its site: where they are, a template of the first and
+    the last date; the fields of a row's ROC date, which marks its year, month and day with a character each, its stock
+    code and its reference price; and how many calendar months one request asks for.
+    """
+
+    url: str
+    date: str
+    stock_id: str
+    reference: str
+    months_per_request: int = Field(ge=1, le=12)
+
+
 class ExchangeSources(BaseModel):
     """
     The TWSE and TPEX OpenAPI: the listings with each stock's latest official close, the daily index reports, the
     company profiles with each company's industry, and the reports it serves only for their latest day, month or
     quarter: the material information, the EPS statistics, the valuation ratios, the balance sheets and income
     statements, the monthly revenue and TWSE's own news. Apart from them, each exchange's own reports of any date on
-    its site (`daily_reports`), which an open-data site never reads (Audience.open_data_only).
+    its site (`daily_reports`) and TWSE's ex-right references (`ex_right_references`), which an open-data site never
+    reads (Audience.open_data_only).
     """
 
     twse_daily_quotes_url: str
@@ -245,6 +260,7 @@ class ExchangeSources(BaseModel):
     monthly_revenue: dict[MarketType, MonthlyRevenueFeed]
     exchange_news: ExchangeNewsFeed
     daily_reports: dict[MarketType, DailyReportFeed]
+    ex_right_references: ExRightReferenceFeed
 
     @model_validator(mode="after")
     def _every_feed_serves_both_markets(self) -> Self:
@@ -266,9 +282,9 @@ class ExchangeSources(BaseModel):
 
 class MopsSources(BaseModel):
     """
-    MOPS: the bulk income statements (cumulative EPS). The headers are the Chinese column names those pages use. The
-    form fields and market codes are what the income-statement form posts, and the ages and intervals say how often
-    MOPS is asked.
+    MOPS: the bulk income statements (cumulative EPS) and the monthly revenue summary of any past month. The headers are
+    the Chinese column names those pages use. The form fields and market codes are what the income-statement form
+    posts, and the ages and intervals say how often MOPS is asked.
     """
 
     eps_url: str
@@ -280,6 +296,15 @@ class MopsSources(BaseModel):
     company_id_header: str
     eps_header_prefix: str
     no_data_marker: str
+    monthly_revenue_url: str
+    """
+    A past month's revenue summary of one market as CSV: a template of the market code, the ROC year and the month. Its
+    columns are those of sources.exchange.monthly_revenue.
+    """
+
+    revenue_deadline_day: int = Field(ge=1, le=28)
+    """Companies file a month's revenue by this day of the month after it."""
+
     request_interval_seconds: float
     """A cold load sends ten requests to a shared public service, so they go one at a time, this far apart."""
 

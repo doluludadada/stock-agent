@@ -3,6 +3,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { groupOf, sectionOf } from '@/features/admin-settings/form'
 import { BUILT_IN_IDS, builtInJson } from '@/features/strategies/model/built-ins.test-support'
+import { CAVEATS, PRESET_KEYS } from '@/features/ranking/model'
 import { QUARTER_FIGURES } from '@/features/stock-research/model'
 import { COMPARATORS, INDICATOR_CATALOG, INDICATOR_KINDS, RULE_EFFECTS } from '@/features/strategies/model/catalog'
 import openapi from '@/shared/api/openapi.json'
@@ -104,7 +105,7 @@ describe('translations', () => {
       ['auth', 'users.filter', ['all', 'administrator', 'user', 'deactivated']],
       ['auth', 'problem', ['required', 'usernameFormat', 'emailFormat', 'passwordShort', 'passwordLong', 'mismatch', 'wrongCode', 'taken.username', 'taken.email']],
       ['auth', 'alert', ['failed', 'closed', 'alreadySetUp', 'rateLimited']],
-      ['common', 'nav', ['overview', 'valuation', 'watchlist', 'account', 'settings', 'runs', 'strategies', 'backtest', 'builder', 'users', 'admin']],
+      ['common', 'nav', ['overview', 'valuation', 'watchlist', 'account', 'settings', 'runs', 'strategies', 'backtest', 'ranking', 'builder', 'users', 'admin']],
       ['backtest', 'verdict.result', ['up', 'down', 'flat']],
       ['backtest', 'verdict.index', ['ahead', 'behind', 'level', 'none']],
       ['backtest', 'exit', ['stopLoss', 'score', 'open', 'other']],
@@ -112,6 +113,12 @@ describe('translations', () => {
       ['backtest', 'preset', ['3M', '6M', '1Y', 'all']],
       ['backtest', 'trades.column', ['bought', 'sold', 'pnl', 'return', 'held']],
       ['backtest', 'notes', ['technicalOnly', 'nextOpen', 'listedToday']],
+      ['ranking', 'preset', PRESET_KEYS],
+      ['ranking', 'problem', ['dateRequired', 'firstAfterLast', 'afterToday']],
+      ['ranking', 'mark', ['entered', 'notBought']],
+      ['ranking', 'record.headline', ['ahead', 'behind', 'level', 'alone', 'short']],
+      ['ranking', 'curve.reading', ['log', 'linear']],
+      ['ranking', 'caveats', CAVEATS.flatMap((caveat) => [`${caveat}.title`, `${caveat}.detail`])],
       ['common', 'nav.section', ['analysis', 'research', 'mine', 'admin']],
       ['common', 'nav.tab', ['analysis', 'market', 'search', 'watchlist', 'account', 'more']],
       ['overview', 'index', openapi.components.schemas.MarketIndex.enum as string[]],

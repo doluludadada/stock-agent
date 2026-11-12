@@ -51,6 +51,7 @@ def cache_over(
         db=db,
         market_clock=clock,
         market_data=MarketDataConfig(),
+        reference_months=3,
         logger=logger or SilentLogger(),
         write_lock=asyncio.Lock(),
     )
@@ -233,3 +234,42 @@ async def test_after_a_failed_request_nothing_is_asked_again_before_the_retry_in
         asked.append(reports.asked[len(sum(asked, [])) :])
 
     assert asked == [["index twse 2026-10-10 2026-11-09"], [], [], ["index twse 2026-10-10 2026-11-09"]]
+
+
+async def test_a_dividend_twse_compared_to_no_reference_is_adjusted_by_its_ex_right_reference_the_sync_saved(
+    db: DatabaseConnector,
+) -> None:
+    clock = MovableClock(at(MONDAY, 16))
+    reports = reports_of(SESSIONS[:-1], {"2330": 100.0})
+    reports.sessions[MONDAY] = {"2330": session_bar(MONDAY, 97.0)}
+    reports.index = {MarketType.TWSE: SESSIONS, MarketType.TPEX: SESSIONS}
+    reports.references = {("2330", MONDAY): 98.0, ("2330", date(2026, 6, 15)): 50.0}
+    cache = cache_over(reports, db, clock)
+
+    history = (await cache.fetch_history(STOCKS[:1], *clock.history_window(30)))["2330"]
+
+    assert reports.references_asked == [(date(2026, 10, 10), MONDAY)]
+    assert [bar.close for bar in history[-2:]] == [98.0, 97.0]
+    assert await cache.ex_right_references(date(2026, 1, 1), MONDAY) == {"2330": {at(MONDAY, 13, 30): 98.0}}
+
+
+async def test_a_later_sync_asks_twse_only_from_the_latest_reference_held_and_a_longer_window_also_before_the_earliest(
+    db: DatabaseConnector,
+) -> None:
+    clock = MovableClock(at(MONDAY, 16))
+    reports = reports_of(SESSIONS, {"2330": 100.0})
+    reports.references = {("2330", date(2026, 10, 20)): 99.0}
+    cache = cache_over(reports, db, clock)
+    await cache.sync_references(date(2026, 10, 10), date(2026, 10, 31))
+    reports.references_asked.clear()
+
+    clock.current = at(MONDAY + timedelta(days=1), 16)
+    await cache.sync_references(date(2026, 1, 2), MONDAY)
+
+    assert reports.references_asked == [
+        (date(2026, 1, 2), date(2026, 3, 31)),
+        (date(2026, 4, 1), date(2026, 6, 30)),
+        (date(2026, 7, 1), date(2026, 9, 30)),
+        (date(2026, 10, 1), date(2026, 10, 20)),
+        (date(2026, 10, 20), MONDAY),
+    ]

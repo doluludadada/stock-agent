@@ -5,7 +5,7 @@ from itertools import groupby
 from operator import attrgetter
 from typing import override
 
-from sqlalchemy import func
+from sqlalchemy import Numeric, cast, func
 from sqlalchemy.exc import DBAPIError
 from sqlmodel import col, select
 
@@ -24,6 +24,7 @@ from a_domain.ports.market.daily_close_archive import (
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.rules.market.listing import HistoryAdjustmentRule
+from a_domain.rules.trading.ranking import ListedHistory, ListedHistoryRule
 from a_domain.types.enums import FinancialStatement, MarketIndex, MarketType
 from a_domain.types.errors import RealtimeQuotesUnavailable
 from a_domain.types.values import FiscalQuarter
@@ -161,6 +162,38 @@ class SqlDailyCloseArchive(IDailyCloseArchive):
         return [ArchivedMonth(year=year, month=month, companies=count) for year, month, count in rows]
 
     @override
+    async def revenue_served(self) -> dict[tuple[MarketType, int, int], date]:
+        period = (col(MonthlyRevenueDTO.market), col(MonthlyRevenueDTO.year), col(MonthlyRevenueDTO.month))
+
+        async with self._db.get_session() as session:
+            rows = (await session.execute(select(*period, func.max(col(MonthlyRevenueDTO.served_date))).group_by(*period))).all()
+
+        return {(MarketType(market), year, month): served for market, year, month, served in rows}
+
+    @override
+    async def revenue_history(self, first: date, last: date) -> dict[tuple[str, int, int], float | None]:
+        """Read as plain columns: the ranking reads every month of every company, which the table's rows take seconds to build."""
+        months = col(MonthlyRevenueDTO.year) * 12 + col(MonthlyRevenueDTO.month)
+        columns = (MonthlyRevenueDTO.stock_id, MonthlyRevenueDTO.year, MonthlyRevenueDTO.month, MonthlyRevenueDTO.revenue)
+        statement = select(*map(col, columns)).where(months.between(first.year * 12 + first.month, last.year * 12 + last.month))
+
+        async with self._db.get_session() as session:
+            return {(stock_id, year, month): revenue for stock_id, year, month, revenue in await session.execute(statement)}
+
+    @override
+    async def revenue_fingerprint(self) -> tuple[object, ...]:
+        revenue = col(MonthlyRevenueDTO.revenue)
+        statement = select(
+            func.count(),
+            func.count(revenue),
+            func.sum(cast(revenue, Numeric(asdecimal=False))),
+            func.max(col(MonthlyRevenueDTO.served_date)),
+        )
+
+        async with self._db.get_session() as session:
+            return tuple((await session.execute(statement)).one())
+
+    @override
     async def financials(self, stock_id: str) -> tuple[list[QuarterFinancials], list[MonthlyRevenue]]:
         reports = select(FinancialReportDTO).where(col(FinancialReportDTO.stock_id) == stock_id)
         eps_rows = select(YearToDateEpsDTO).where(col(YearToDateEpsDTO.stock_id) == stock_id)
@@ -229,9 +262,46 @@ class SqlDailyCloseArchive(IDailyCloseArchive):
 
         for (stock_id, market), run in groupby(rows, key=attrgetter("stock_id", "market")):
             listed = [row.to_domain(stamp(row.session_date)) for row in run]
-            history.setdefault(stock_id, []).extend(self._adjustment.apply(listed, indexes.get(market, []), MarketType(market)))
+            adjusted = self._adjustment.apply(listed, indexes.get(market, []), MarketType(market), {})
+            history.setdefault(stock_id, []).extend(adjusted)
 
         return history
+
+    @override
+    async def listed_history(self) -> ListedHistory | None:
+        statement = select(DailyCloseDTO).order_by(col(DailyCloseDTO.stock_id), col(DailyCloseDTO.session_date))
+
+        async with self._db.get_session() as session:
+            rows = (await session.execute(statement)).scalars().all()
+
+        history: dict[str, list[Ohlcv]] = {}
+
+        for row in rows:
+            history.setdefault(row.stock_id, []).append(row.to_domain(self._market_clock.session_close(row.session_date)))
+
+        return ListedHistoryRule().apply(history, {}, self._market_clock.to_trading_date) if history else None
+
+    @override
+    async def listed_fingerprint(self) -> tuple[object, ...]:
+        """Each sum adds exact numerics, so the order a database adds the bars in cannot move it."""
+        exact = Numeric(asdecimal=False)
+        figures = (
+            DailyCloseDTO.open,
+            DailyCloseDTO.high,
+            DailyCloseDTO.low,
+            DailyCloseDTO.close,
+            DailyCloseDTO.volume,
+            DailyCloseDTO.change,
+        )
+        sums = [func.sum(cast(col(figure), exact)) for figure in figures]
+
+        async with self._db.get_session() as session:
+            return tuple((await session.execute(select(func.count(), func.count(col(DailyCloseDTO.change)), *sums))).one())
+
+    @override
+    async def ex_right_references(self, first: date, last: date) -> dict[str, dict[datetime, float]]:
+        """None: TWSE serves them on its site alone, which a public site may not download."""
+        return {}
 
     @override
     async def held_span(self) -> tuple[date, date] | None:

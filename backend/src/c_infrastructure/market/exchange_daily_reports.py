@@ -14,7 +14,7 @@ from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.types.enums import MarketType
 from b_application.config.market_data_config import MarketDataConfig
-from b_application.config.sources_config import DailyReportFeed
+from b_application.config.sources_config import DailyReportFeed, ExRightReferenceFeed
 from c_infrastructure.market.twse_provider import ROC_YEAR_OFFSET, STOCK_CODE_LENGTH
 
 
@@ -23,8 +23,10 @@ class ExchangeDailyReports(IDailyHistorySource):
     The exchanges' own reports of each date on their sites (sources.exchange.daily_reports), measured on 2026-11-07:
     TWSE's MI_INDEX and TPEX's closing quotes list every security of one session, and per month TWSE's MI_5MINS_HIST and
     TPEX's index report give the index's prices, and TWSE's FMTQIK and TPEX's trading index report the market's volume
-    and the index's change. A date without a session answers no rows: TWSE says so in `stat`, TPEX serves an empty
-    table. An answer of another date than the one asked counts as none.
+    and the index's change. TWSE's TWT49U (sources.exchange.ex_right_references) lists the ex-right and ex-dividend
+    references of a range of dates, whose ROC dates mark the year, the month and the day with a character each. A date
+    without a session answers no rows: TWSE says so in `stat`, TPEX serves an empty table. An answer of another date
+    than the one asked counts as none.
 
     TWSE refuses an address for minutes after more than about 3 requests in 5 seconds. So a request to one site waits
     until market_data.history_request_interval_seconds after the request to it before, whichever runtime made that one:
@@ -34,6 +36,7 @@ class ExchangeDailyReports(IDailyHistorySource):
     def __init__(
         self,
         feeds: Mapping[MarketType, DailyReportFeed],
+        ex_right_feed: ExRightReferenceFeed,
         listing: ITaiwanStockProvider,
         request_slots: dict[MarketType, float],
         market_clock: IMarketClock,
@@ -42,6 +45,7 @@ class ExchangeDailyReports(IDailyHistorySource):
         logger: ILoggingProvider,
     ) -> None:
         self._feeds = feeds
+        self._ex_right_feed = ex_right_feed
         self._listing = listing
         self._request_slots = request_slots
         self._clock = market_clock
@@ -78,6 +82,26 @@ class ExchangeDailyReports(IDailyHistorySource):
 
         self._logger.info(f"Exchange index bars of {market.value} from {first} to {last}: {len(bars)} sessions")
         return sorted(bars, key=lambda bar: bar.ts)
+
+    @override
+    async def ex_right_references(self, first: date, last: date) -> dict[tuple[str, date], float]:
+        feed = self._ex_right_feed
+        answer = await self.get(MarketType.TWSE, feed.url.format(first=first, last=last))
+
+        if not answer.get("data"):
+            return {}
+
+        references: dict[tuple[str, date], float] = {}
+
+        for row in self.rows(answer, [feed.date, feed.stock_id, feed.reference]):
+            session = self.session_date("/".join(re.findall(r"\d+", row[feed.date])))
+            price = self._listing.parse_number(row[feed.reference])
+
+            if session is not None and price is not None and price > 0 and len(row[feed.stock_id]) == STOCK_CODE_LENGTH:
+                references[(row[feed.stock_id], session)] = price
+
+        self._logger.info(f"TWSE ex-right references from {first} to {last}: {len(references)}")
+        return references
 
     @override
     async def get(self, market: MarketType, url: str) -> Any:

@@ -33,6 +33,7 @@ export const routes: RouteObject[] = [
               { path: 'strategies/new', lazy: () => import('./routes/strategies').then((m) => ({ Component: m.NewStrategyRoute })) },
               { path: 'strategies/:id/edit', lazy: () => import('./routes/strategies').then((m) => ({ Component: m.EditStrategyRoute })) },
               { path: 'backtest', lazy: () => import('./routes/backtest').then((m) => ({ Component: m.BacktestRoute })) },
+              { path: 'ranking', lazy: () => import('./routes/ranking').then((m) => ({ Component: m.RankingRoute })) },
               { path: 'runs/:runId', lazy: () => import('./routes/runs').then((m) => ({ Component: m.RunRoute })) },
               { path: 'valuation', lazy: () => import('./routes/valuation').then((m) => ({ Component: m.ValuationRoute })) },
               { path: 'watchlist', lazy: () => import('./routes/watchlist').then((m) => ({ Component: m.WatchlistRoute })) },

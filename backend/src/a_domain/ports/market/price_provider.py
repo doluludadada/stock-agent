@@ -3,6 +3,7 @@ from typing import Protocol
 
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
+from a_domain.rules.trading.ranking import ListedHistory
 from a_domain.types.enums import MarketIndex
 
 
@@ -13,6 +14,31 @@ class IPriceHistoryProvider(Protocol):
 
     async def fetch_index_history(self, index: MarketIndex, start_date: datetime, end_date: datetime) -> list[Ohlcv]:
         """The index's daily bars, oldest first, stamped like a stock's. Empty when the source has none."""
+        ...
+
+    async def listed_history(self) -> ListedHistory | None:
+        """
+        Every stock's daily bars the source holds, delisted stocks too, as its exchange listed them, neither adjusted nor
+        given a change the exchange did not list, with TWSE's ex-right references the source holds (ListedHistory); None
+        while it holds no bar. It fetches nothing.
+        """
+        ...
+
+    async def listed_fingerprint(self) -> tuple[object, ...]:
+        """
+        What the bars of listed_history and the ex-right references add up to: how many the source holds, how many bars
+        give a change, and the sum of each of their figures. It differs after a bar or a reference is saved, and after one
+        is replaced or given its change unless the figures replaced cancel out in every sum, so what was built from the
+        source is as the source holds it for as long as this stays the same. It fetches nothing.
+        """
+        ...
+
+    async def ex_right_references(self, first: date, last: date) -> dict[str, dict[datetime, float]]:
+        """
+        TWSE's reference price of each stock on each of its ex-right or ex-dividend days from first to last that the
+        source holds, by stock id and the stamp of that session's bars: the price a bar of that session compares its close
+        to where the exchange gave it no change. fetch_history adjusts across those sessions with them.
+        """
         ...
 
     async def held_span(self) -> tuple[date, date] | None:

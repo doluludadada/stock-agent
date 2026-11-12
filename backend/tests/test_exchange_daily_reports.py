@@ -2,7 +2,7 @@
 A personal site's daily history comes from the exchanges' own reports of each date, read from answers recorded on
 2026-11-07 (tests/fixtures/exchange_reports): TWSE's MI_INDEX and TPEX's closing quotes of 2025-07-22, both of the
 Saturday 2025-07-19, and each exchange's index reports of June and July 2025, trimmed to the sessions around the month's
-turn.
+turn; and TWSE's ex-right references (TWT49U) of 2025's third quarter, recorded on 2026-11-12 and trimmed to four rows.
 """
 
 import asyncio
@@ -76,6 +76,7 @@ def reports(slots: dict[MarketType, float] | None = None, interval_seconds: floa
     exchange, market_data = shipped_config().sources.exchange, MarketDataConfig(history_request_interval_seconds=interval_seconds)
     return ExchangeDailyReports(
         feeds=exchange.daily_reports,
+        ex_right_feed=exchange.ex_right_references,
         listing=TaiwanStockProvider(exchange=exchange, market_clock=CLOCK, market_data=market_data, logger=SilentLogger()),
         request_slots={} if slots is None else slots,
         market_clock=CLOCK,
@@ -210,3 +211,33 @@ async def test_a_site_that_refuses_the_address_fails_the_session(monkeypatch: py
 
     with pytest.raises(httpx.HTTPStatusError, match="307"):
         await reports().session_bars(TUESDAY)
+
+
+async def test_twses_ex_right_references_of_a_range_are_each_four_digit_stocks_reference_price_by_day(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    asked: list[str] = []
+    real_client = httpx.AsyncClient
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        asked.append(str(request.url))
+        return httpx.Response(200, text=(FIXTURES / "twse_twt49u_2025q3.json").read_text())
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: real_client(transport=httpx.MockTransport(answer)))
+
+    references = await reports().ex_right_references(date(2025, 7, 1), date(2025, 9, 30))
+
+    assert asked == ["https://www.twse.com.tw/rwd/zh/exRight/TWT49U?startDate=20250701&endDate=20250930&response=json"]
+    assert references == {("1101", date(2025, 7, 2)): 25.15, ("0050", date(2025, 7, 21)): 51.09, ("2330", date(2025, 9, 16)): 1249.99}
+
+
+async def test_a_range_without_an_ex_right_day_has_no_reference(monkeypatch: pytest.MonkeyPatch) -> None:
+    real_client = httpx.AsyncClient
+    empty = {"stat": "no data", "data": []}
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kwargs: real_client(transport=httpx.MockTransport(lambda request: httpx.Response(200, json=empty))),
+    )
+
+    assert await reports().ex_right_references(date(2025, 1, 1), date(2025, 1, 5)) == {}

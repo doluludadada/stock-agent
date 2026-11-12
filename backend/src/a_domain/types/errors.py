@@ -111,3 +111,7 @@ class AiModelNotOffered(ValueError):
 
 class BacktestPeriodUnavailable(ValueError):
     """A backtest was asked over sessions the daily history cannot replay. The message says which sessions it can. 422."""
+
+
+class RankingUnavailable(LookupError):
+    """The daily history holds no decision session of the monthly ranking. The message says what it holds. 422."""

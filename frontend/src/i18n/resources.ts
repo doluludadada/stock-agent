@@ -7,6 +7,7 @@ import enBuilder from './locales/en/builder'
 import enCommon from './locales/en/common'
 import enFormula from './locales/en/formula'
 import enOverview from './locales/en/overview'
+import enRanking from './locales/en/ranking'
 import enResearch from './locales/en/research'
 import enRuns from './locales/en/runs'
 import enValuation from './locales/en/valuation'
@@ -21,6 +22,7 @@ import zhBuilder from './locales/zh-TW/builder'
 import zhCommon from './locales/zh-TW/common'
 import zhFormula from './locales/zh-TW/formula'
 import zhOverview from './locales/zh-TW/overview'
+import zhRanking from './locales/zh-TW/ranking'
 import zhResearch from './locales/zh-TW/research'
 import zhRuns from './locales/zh-TW/runs'
 import zhValuation from './locales/zh-TW/valuation'
@@ -38,6 +40,7 @@ export const resources = {
     research: enResearch,
     runs: enRuns,
     backtest: enBacktest,
+    ranking: enRanking,
     valuation: enValuation,
     account: enAccount,
     admin: enAdmin,
@@ -54,6 +57,7 @@ export const resources = {
     research: zhResearch,
     runs: zhRuns,
     backtest: zhBacktest,
+    ranking: zhRanking,
     valuation: zhValuation,
     account: zhAccount,
     admin: zhAdmin,

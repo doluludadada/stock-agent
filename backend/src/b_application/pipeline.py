@@ -21,8 +21,10 @@ from a_domain.rules.market.breadth import MarketBreadth
 from a_domain.rules.system.registration import SignInOffer
 from a_domain.rules.technical.search import StrategySearch
 from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
+from a_domain.rules.trading.ranking import Ranking
+from a_domain.rules.trading.ranking_backtest import RankingBacktest
 from a_domain.rules.watchlist.membership import WatchlistAddition
-from a_domain.types.enums import AiAnalysisFocus, AiProvider, MarketIndex, Role, UserStatus, WatchlistType, Workflow
+from a_domain.types.enums import AiAnalysisFocus, AiProvider, MarketIndex, MarketType, Role, UserStatus, WatchlistType, Workflow
 from a_domain.types.ids import BacktestId, RunId, SessionToken, UserId
 from a_domain.types.values import EmailAddress, NewPassword, PositiveFiniteFloat, Username
 from b_application.schemas.pipeline_status import PipelineStatus
@@ -48,6 +50,7 @@ from b_application.use_cases.chat.dispatcher import Dispatcher
 from b_application.use_cases.collect.archive_warm_up import ArchiveWarmUp
 from b_application.use_cases.collect.buzz_scanner import BuzzScanner
 from b_application.use_cases.collect.daily_close_archiver import DailyCloseArchiver
+from b_application.use_cases.collect.daily_history_backfill import DailyHistoryBackfill
 from b_application.use_cases.collect.daily_history_refresh import DailyHistoryRefresh
 from b_application.use_cases.collect.financials_lookup import FinancialsLookup
 from b_application.use_cases.collect.fundamentals_feed import FundamentalsFeed
@@ -60,6 +63,7 @@ from b_application.use_cases.collect.most_traded import MostTraded
 from b_application.use_cases.collect.news_feed import NewsFeed
 from b_application.use_cases.collect.official_change_feed import OfficialChangeFeed
 from b_application.use_cases.collect.realtime_quote_feed import RealtimeQuoteFeed
+from b_application.use_cases.collect.revenue_history_backfill import RevenueHistoryBackfill
 from b_application.use_cases.collect.stock_lookup import StockLookup
 from b_application.use_cases.collect.stock_search import StockSearch
 from b_application.use_cases.process.ai_analyser import AiAnalyser
@@ -68,6 +72,9 @@ from b_application.use_cases.process.sentiment_analyser import SentimentAnalyser
 from b_application.use_cases.process.strategy_loader import StrategyLoader
 from b_application.use_cases.process.technical_filter import TechnicalFilter
 from b_application.use_cases.process.technical_settings_editor import TechnicalSettingsEditor
+from b_application.use_cases.ranking.latest_ranking import LatestRanking
+from b_application.use_cases.ranking.ranking_history_loader import RankingHistoryLoader
+from b_application.use_cases.ranking.ranking_replay import RankingReplay
 from b_application.use_cases.ship.decision_memory import DecisionMemory
 from b_application.use_cases.ship.recent_runs import RecentRuns
 from b_application.use_cases.ship.reporting import Reporting
@@ -155,6 +162,8 @@ class Pipeline:
     official_change_feed: OfficialChangeFeed
     daily_close_archiver: DailyCloseArchiver
     daily_history_refresh: DailyHistoryRefresh
+    daily_history_backfill: DailyHistoryBackfill
+    revenue_history_backfill: RevenueHistoryBackfill
     archive_warm_up: ArchiveWarmUp
     financials_lookup: FinancialsLookup
     realtime_quote_feed: RealtimeQuoteFeed
@@ -198,6 +207,9 @@ class Pipeline:
     search_validation: SearchValidation
     search_holdout: SearchHoldout
     strategy_search_save: StrategySearchSave
+    ranking_history_loader: RankingHistoryLoader
+    latest_ranking: LatestRanking
+    ranking_replay: RankingReplay
     fundamentals_feed: FundamentalsFeed
     market_valuation_loader: MarketValuationLoader
     valuation_appraiser: ValuationAppraiser
@@ -540,6 +552,28 @@ class Pipeline:
 
         return search, await self.strategy_search_save.execute(search)
 
+    async def load_ranking(self) -> Ranking:
+        """
+        The monthly stock ranking by revenue acceleration and nearness to the high at the latest decision session the held
+        daily history holds: its stocks with their two factors, two ranks and score, the session and the revenue month it
+        read. It reads only the held history and the archived revenue, asks no AI, records no run and never orders.
+        RankingUnavailable while the history holds no decision session.
+        """
+        history = await self.ranking_history_loader.execute()
+
+        return await self.latest_ranking.execute(history)
+
+    async def run_ranking_backtest(self, first: date, last: date) -> RankingBacktest:
+        """
+        The monthly ranking replayed over the decision sessions from `first` to `last` against its benchmark held over
+        the same sessions, at the live fee and tax: its value at every session, each decision's ranking and holdings.
+        It reads only the held history and the archived revenue, saves nothing, asks no AI and never orders.
+        BacktestPeriodUnavailable for a period without a decision session.
+        """
+        history = await self.ranking_history_loader.execute()
+
+        return await self.ranking_replay.execute(history, first, last)
+
     async def load_backtests(self) -> list[Backtest]:
         """The user's saved backtests, newest first."""
         return await self.saved_backtests.execute()
@@ -613,6 +647,22 @@ class Pipeline:
         the open-data archive's. No run record.
         """
         return await self.daily_history_refresh.execute()
+
+    async def backfill_history(
+        self, first: date
+    ) -> tuple[tuple[list[date], list[date], list[tuple[MarketType, date, date]]] | None, tuple[int, int] | None]:
+        """
+        `just backfill-history`: what a ranking backtest from `first` reads, back to `first` on a personal site. Every
+        market's monthly revenue from MOPS's summary of each month into the open-data archive, the months read of those
+        due; then TWSE's ex-right references and each exchange's daily history into the history cache, the sessions it
+        holds, those it still lacks and the index ranges it could not read. Each part saves what it fetched as it comes,
+        so a rerun after a failure or a timeout fetches only what is still missing. A part the site does not read is
+        None: a public site reads neither. No run record, no broker, no AI.
+        """
+        revenue = await self.revenue_history_backfill.execute(first)
+        history = await self.daily_history_backfill.execute(first)
+
+        return history, revenue
 
     async def load_financials(self, stock_id: str) -> tuple[list[QuarterFinancials], list[MonthlyRevenue]]:
         """A stock's page: its archived quarters' figures and monthly revenue, oldest first. No run record."""

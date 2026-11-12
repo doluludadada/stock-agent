@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import ClassVar
 
 from pydantic import model_validator
@@ -39,3 +39,18 @@ class OhlcvDTO(SQLModel, table=True):
         if self.high > 0 and self.low > 0:
             assert self.high >= self.low, "high must be >= low"
         return self
+
+
+class ExRightReferenceDTO(SQLModel, table=True):
+    """
+    TWSE's reference price of a stock on one of its ex-right or ex-dividend days, as its TWT49U report listed it: the
+    price the history cache's bar of that session compares its close to where the closing quotes give no change.
+    """
+
+    __tablename__: ClassVar[str] = "ex_right_references"
+
+    stock_id: str = Field(primary_key=True)
+    session_date: date = Field(primary_key=True, index=True)
+    """Indexed on its own: a sync asks for the earliest and the latest day the cache holds."""
+
+    reference_price: float

@@ -5,7 +5,7 @@ the news and PTT clients send the headers the `sources` settings name.
 
 import asyncio
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -51,7 +51,12 @@ async def test_exchange_clients_keep_certificate_verification_on(clients: list[d
     await db.init_db()
     unspaced = SOURCES.mops.model_copy(update={"request_interval_seconds": 0.0})
     mops = MopsFundamentalsProvider(
-        db=db, market_clock=MovableClock(MONDAY_10_00), mops=unspaced, logger=SilentLogger(), write_lock=asyncio.Lock()
+        db=db,
+        market_clock=MovableClock(MONDAY_10_00),
+        mops=unspaced,
+        listing=cast(Any, None),
+        logger=SilentLogger(),
+        write_lock=asyncio.Lock(),
     )
 
     exchange = TaiwanStockProvider(

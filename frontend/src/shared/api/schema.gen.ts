@@ -611,6 +611,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/rankings/backtest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Ranking Backtest
+         * @description The monthly ranking replayed over the decision sessions from `first` to `last`: bought at each next open in equal
+         *     weights, at the site's fee and tax, against ranking.benchmark_id held over the same sessions by its total return.
+         *     It answers the value of both at every session, their total, annual and yearly returns and drawdowns, the costs, and
+         *     each decision's ranking and the stocks it held. It saves nothing, asks no AI and never orders.
+         */
+        get: operations["get_ranking_backtest_v1_rankings_backtest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/rankings/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Latest Ranking
+         * @description The monthly stock ranking by revenue acceleration and nearness to the 250-session high at the latest decision session
+         *     the site's daily history holds: the stocks to hold from the next session's open, best first, each with its two
+         *     factors, their ranks and its score, and the revenue month it read. It reads only the held history and the archived
+         *     monthly revenue; a month without revenue ranks nothing and says so in `scored`. The first answer after a start reads
+         *     every held bar, which takes seconds; later ones reuse it until the history holds another session.
+         */
+        get: operations["get_latest_ranking_v1_rankings_latest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/runs": {
         parameters: {
             query?: never;
@@ -1529,6 +1576,9 @@ export interface components {
              */
             confirm: true;
         };
+        Curve: {
+            [key: string]: number;
+        };
         "DataReference-Input": components["schemas"]["MarketValue"] | components["schemas"]["LatestPrice"] | components["schemas"]["IndicatorValue"];
         "DataReference-Output": components["schemas"]["MarketValue"] | components["schemas"]["LatestPrice"] | components["schemas"]["IndicatorValue"];
         /**
@@ -1585,7 +1635,7 @@ export interface components {
          *     refused file, a user who is not an administrator and an installation on a real broker.
          * @enum {string}
          */
-        ErrorCode: "sign_in_required" | "sign_in_refused" | "sign_in_throttled" | "registration_closed" | "setup_code_refused" | "already_set_up" | "user_exists" | "last_administrator" | "unknown_host" | "app_request_required" | "administrators_only" | "real_broker_refused" | "broker_unavailable" | "realtime_quotes_unavailable" | "mops_unavailable" | "password_required" | "password_refused" | "settings_file_refused" | "settings_file_missing" | "settings_conflict" | "settings_edit_refused" | "settings_refused" | "technical_settings_conflict" | "ai_model_not_offered" | "run_in_progress" | "too_many_runs" | "nothing_to_follow" | "outside_follow_window" | "backtest_period_unavailable" | "listing_unavailable" | "not_found" | "invalid_request" | "body_too_large" | "request_refused";
+        ErrorCode: "sign_in_required" | "sign_in_refused" | "sign_in_throttled" | "registration_closed" | "setup_code_refused" | "already_set_up" | "user_exists" | "last_administrator" | "unknown_host" | "app_request_required" | "administrators_only" | "real_broker_refused" | "broker_unavailable" | "realtime_quotes_unavailable" | "mops_unavailable" | "password_required" | "password_refused" | "settings_file_refused" | "settings_file_missing" | "settings_conflict" | "settings_edit_refused" | "settings_refused" | "technical_settings_conflict" | "ai_model_not_offered" | "run_in_progress" | "too_many_runs" | "nothing_to_follow" | "outside_follow_window" | "backtest_period_unavailable" | "ranking_unavailable" | "listing_unavailable" | "not_found" | "invalid_request" | "body_too_large" | "request_refused";
         /**
          * ErrorResponse
          * @description Every refusal: `detail` in words for a person, `code` for the client to switch on.
@@ -1659,6 +1709,7 @@ export interface components {
             refusal: components["schemas"]["FollowRefusal"] | null;
         };
         FormulaId: string;
+        Fraction: number;
         /**
          * GroupOperator
          * @enum {string}
@@ -2119,6 +2170,146 @@ export interface components {
             total_assets?: number | null;
             /** Total Liabilities */
             total_liabilities?: number | null;
+        };
+        /**
+         * RankedStock
+         * @description One stock of a ranking: its two factors, the rank of each among the universe's stocks that have it, and its score.
+         */
+        RankedStock: {
+            acceleration_rank: components["schemas"]["Fraction"];
+            /** @description Each factor's place among the universe's stocks that have it, from 0 for the lowest to 1 for the highest. */
+            nearness_rank: components["schemas"]["Fraction"];
+            /**
+             * Nearness To High
+             * @description The total-return level at the decision's close over its highest of the last high_sessions sessions: 1 at a high.
+             */
+            nearness_to_high: number;
+            /**
+             * Revenue Acceleration
+             * @description The mean revenue of the latest short months over the mean of the latest long months, up to the month read.
+             */
+            revenue_acceleration: number;
+            /**
+             * Score
+             * @description The sum of the two ranks.
+             */
+            score: number;
+            stock_id: components["schemas"]["NonEmptyText"];
+            /** Stock Name */
+            stock_name: string | null;
+        };
+        /**
+         * Ranking
+         * @description The monthly ranking at one decision session's close: the stocks to hold from the next session's open.
+         */
+        Ranking: {
+            /**
+             * Decided On
+             * Format: date
+             */
+            decided_on: string;
+            /**
+             * Revenue Month
+             * Format: date
+             * @description The first day of the month of revenue it read.
+             */
+            revenue_month: string;
+            /**
+             * Scored
+             * @description The universe's stocks with both factors, each of which has a score.
+             */
+            scored: number;
+            /**
+             * Stocks
+             * @description The `top` best scores, best first; equal scores in stock id order.
+             */
+            stocks: components["schemas"]["RankedStock"][];
+            /**
+             * Universe
+             * @description The stocks that passed the universe at the close: traded, liquid enough and priced at least min_close.
+             */
+            universe: number;
+        };
+        /**
+         * RankingBacktest
+         * @description What holding each month's ranking would have done over past sessions, as fractions of what it started with, against
+         *     the benchmark held over the same sessions. It placed no order and touched no account. Every *_return and drawdown is
+         *     a fraction: 0.1 is 10%.
+         */
+        RankingBacktest: {
+            /**
+             * Annual Return
+             * @description The compound annual return over the sessions after the first decision, sessions_per_year a year.
+             */
+            readonly annual_return: number | null;
+            /** Benchmark Annual Return */
+            readonly benchmark_annual_return: number | null;
+            /**
+             * Benchmark Curve
+             * @description The benchmark's total-return level over the same sessions, 1 at the first one. Empty when the history lacks it.
+             */
+            benchmark_curve: {
+                [key: string]: number;
+            };
+            benchmark_id: components["schemas"]["NonEmptyText"];
+            /** Benchmark Max Drawdown */
+            readonly benchmark_max_drawdown: number | null;
+            /** Benchmark Total Return */
+            readonly benchmark_total_return: number | null;
+            /** Benchmark Yearly Returns */
+            readonly benchmark_yearly_returns: {
+                [key: string]: number;
+            };
+            /**
+             * Costs
+             * @description The fees and the tax paid, each as a fraction of the value it was paid from, summed.
+             */
+            costs: number;
+            /** @description The portfolio's value at the close of its first decision, 1, and at the close of every session after it. */
+            equity_curve: components["schemas"]["Curve"];
+            /** Fee Rate */
+            fee_rate: number;
+            /**
+             * First
+             * Format: date
+             */
+            first: string;
+            /**
+             * Holdings
+             * @description The stocks held from the open of each session after a decision, best first, then those that could not be sold.
+             */
+            holdings: {
+                [key: string]: string[];
+            };
+            /**
+             * Last
+             * Format: date
+             * @description The period asked: its decisions are the decision sessions from `first` to `last`, its sessions end at `last`.
+             */
+            last: string;
+            /** Max Drawdown */
+            readonly max_drawdown: number;
+            /**
+             * Rankings
+             * @description Each decision's ranking, oldest first.
+             */
+            rankings: components["schemas"]["Ranking"][];
+            /** Sessions Per Year */
+            sessions_per_year: number;
+            /**
+             * Tax Rate
+             * @description market.fee_rate on every BUY and SELL, and market.tax_rate on every SELL, when it ran.
+             */
+            tax_rate: number;
+            /** Total Return */
+            readonly total_return: number;
+            /**
+             * Yearly Returns
+             * @description Each calendar year's return, from the last close before it, or the start, to its last close.
+             */
+            readonly yearly_returns: {
+                [key: string]: number;
+            };
         };
         /** RegistrationRequest */
         RegistrationRequest: {
@@ -3797,6 +3988,67 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ranking_backtest_v1_rankings_backtest_get: {
+        parameters: {
+            query: {
+                first: string;
+                last: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RankingBacktest"];
+                };
+            };
+            /** @description ranking_unavailable: the site's daily history holds no decision session yet; `detail` says what it holds. backtest_period_unavailable: the period holds no decision session the history holds; `detail` says which sessions it holds. invalid_request: a query parameter does not validate. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_latest_ranking_v1_rankings_latest_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ranking"];
+                };
+            };
+            /** @description ranking_unavailable: the site's daily history holds no decision session yet; `detail` says what it holds. backtest_period_unavailable: the period holds no decision session the history holds; `detail` says which sessions it holds. invalid_request: a query parameter does not validate. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

@@ -121,6 +121,35 @@ strategy_search:
   # Each search is saved in a folder of its own under this one, relative to the project root.
   folder: strategy_searches
 
+ranking:
+  # A monthly stock ranking by revenue acceleration and nearness to the high, which research on 2018 to 2026 found to beat
+  # 0050 after costs: `just ranking` prints the latest one and `just ranking-backtest` replays it. It reads only the held
+  # daily history and monthly revenue (`just backfill-history` brings them back), never orders and asks no AI.
+  # Each month decides at the close of its first session on this day of the month or later, which reads the newest month
+  # of revenue due before it (sources.mops.revenue_deadline_day), and holds the ranking from the next session's open.
+  decision_day: 13
+  # How many of the best scores it holds, in equal weights.
+  top: 20
+  # The universe: the stocks (no ETF) that traded at the decision, closed at min_close or more, and traded
+  # min_traded_value NT$ a session on average over the last traded_value_sessions sessions, a session without a trade
+  # counting 0.
+  min_close: 10
+  min_traded_value: 30000000
+  traded_value_sessions: 20
+  # Nearness to the high: the total-return level at the decision over its highest of the last high_sessions sessions.
+  high_sessions: 250
+  # Revenue acceleration: the mean revenue of the latest revenue_short_months over that of the latest revenue_long_months,
+  # up to the month read; none if any of them is missing.
+  revenue_short_months: 3
+  revenue_long_months: 12
+  # A day's move beyond this on a bar the exchange named no reference price for is a corporate action, not a return, and
+  # counts as 0 in the total-return level.
+  daily_limit: 0.105
+  # The backtest's benchmark, held over the same sessions by its total return, and the sessions a year its annual return
+  # counts.
+  benchmark_id: "0050"
+  sessions_per_year: 245
+
 folder:
   news_archive_dir: "news_archive"
   buzz_archive_dir: "buzz_archive"
@@ -599,6 +628,16 @@ sources:
         # TPEX named the volume 成交股數（仟股） through 2024-12, in the same board lots.
         index_volume_fields: { date: "日期", volume: "成交張數", change: "漲/跌", earlier_volume: "成交股數（仟股）" }
         index_volume_lots: true
+    # TWSE's ex-right and ex-dividend results of a range of dates on its site (TWT49U): each stock's reference price on
+    # its ex-day, where TWSE's closing quotes compare the close to no reference (X). A personal site reads it into its
+    # daily history, so a dividend shows no gap there; a public site never does. A quarter per request is measured to
+    # work (2026-11-12).
+    ex_right_references:
+      url: "https://www.twse.com.tw/rwd/zh/exRight/TWT49U?startDate={first:%Y%m%d}&endDate={last:%Y%m%d}&response=json"
+      date: "資料日期"
+      stock_id: "股票代號"
+      reference: "除權息參考價"
+      months_per_request: 3
   # The credit the Open Government Data License v1 asks for, in the form of its annex (https://data.gov.tw/license):
   # each providing agency and the datasets the app reads from it, the license's notice, and its name and address.
   # A use that does not show it holds no license (Article 3, paragraph 2). List every dataset read above.
@@ -665,6 +704,13 @@ sources:
     company_id_header: "公司代號"
     eps_header_prefix: "基本每股盈餘"
     no_data_marker: "查詢無資料"
+    # MOPS's monthly revenue summary of any past month, one CSV per market code above, ROC year and month: the summary the
+    # OpenAPI serves for its latest month alone (sources.exchange.monthly_revenue), with the same column names. A personal
+    # site reads it into the open-data archive's monthly revenue (`just backfill-history`); a public site never does.
+    monthly_revenue_url: "https://mopsov.twse.com.tw/nas/t21/{market_code}/t21sc03_{roc_year}_{month}.csv"
+    # Companies file each month's revenue by this day of the month after it, so a summary served later holds every
+    # company, and a decision after it reads that month.
+    revenue_deadline_day: 10
     request_interval_seconds: 2.0
     timeout_seconds: 60.0
     provisional_page_max_age_hours: 6

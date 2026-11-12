@@ -56,23 +56,26 @@ class HistoryAdjustmentRule:
     as traded. The latest bar is as listed.
 
     Every action whose reference the exchange gives this way is adjusted, whatever its kind: the ratio alone cannot tell
-    a cash dividend from a stock dividend or a split. There is no factor rather than a wrong one where the exchange
-    compared the close to no reference (no change, or a change of 0 on a close unlike the one before, as TWSE writes
-    X0.00 on an ex-dividend, ex-rights or capital-reduction day, which therefore stays as listed), across a session the
-    archive missed, and, on an exchange whose change after a session the stock did not trade is from a moved reference
-    (MarketType.changes_from_a_moved_reference), across such a session. `index` is the exchange index's close of each
-    session the archive holds the market's closes of; an index close whose own change does not lead back to the one
-    before it shows a session missing between them. A split's suspension is such a session too, so a split is adjusted
-    on TWSE only.
+    a cash dividend from a stock dividend or a split. Where the exchange compared the close to no reference (no change,
+    or a change of 0 on a close unlike the one before, as TWSE writes X0.00 on an ex-dividend, ex-rights or
+    capital-reduction day), the reference is the one `references` holds of the bar's stamp, TWSE's ex-right reference of
+    that day. There is no factor rather than a wrong one where there is none, so such a day stays as listed, across a
+    session the archive missed, and, on an exchange whose change after a session the stock did not trade is from a moved
+    reference (MarketType.changes_from_a_moved_reference), across such a session. `index` is the exchange index's close
+    of each session the archive holds the market's closes of; an index close whose own change does not lead back to the
+    one before it shows a session missing between them. A split's suspension is such a session too, so a split is
+    adjusted on TWSE only.
     """
 
-    def apply(self, bars: Sequence[Ohlcv], index: Sequence[Ohlcv], market: MarketType) -> list[Ohlcv]:
+    def apply(
+        self, bars: Sequence[Ohlcv], index: Sequence[Ohlcv], market: MarketType, references: Mapping[datetime, float]
+    ) -> list[Ohlcv]:
         sessions = self._sessions(index)
         adjusted, factor = list(bars[-1:]), 1.0
 
         for earlier, later in reversed(list(pairwise(bars))):
             if self._comparable(sessions.get(earlier.ts), sessions.get(later.ts), market):
-                factor *= self._factor(earlier, later)
+                factor *= self._factor(earlier, later, references.get(later.ts))
 
             adjusted.append(earlier if factor == 1 else self._scaled(earlier, factor))
 
@@ -86,7 +89,7 @@ class HistoryAdjustmentRule:
         sessions = {bar.ts: (0, 0) for bar in index[:1]}
 
         for place, (earlier, later) in enumerate(pairwise(index), start=1):
-            reference = self._reference(earlier.close, later)
+            reference = self._reference(earlier.close, later, None)
             follows = reference is not None and isclose(reference, earlier.close)
             sessions[later.ts] = (sessions[earlier.ts][0] + (0 if follows else 1), place)
 
@@ -99,21 +102,21 @@ class HistoryAdjustmentRule:
 
         return later[1] - earlier[1] == 1 or not market.changes_from_a_moved_reference
 
-    def _factor(self, earlier: Ohlcv, later: Ohlcv) -> float:
-        reference = self._reference(earlier.close, later)
+    def _factor(self, earlier: Ohlcv, later: Ohlcv, listed: float | None) -> float:
+        reference = self._reference(earlier.close, later, listed)
 
         if reference is None or isclose(reference, earlier.close):
             return 1.0
 
         return reference / earlier.close
 
-    def _reference(self, previous_close: float, bar: Ohlcv) -> float | None:
-        """The price the exchange compared the bar's close to, or None when it compared it to none."""
-        if bar.change is None:
-            return None
-
-        if bar.change == 0 and not isclose(bar.close, previous_close):
-            return None
+    def _reference(self, previous_close: float, bar: Ohlcv, listed: float | None) -> float | None:
+        """
+        The price the exchange compared the bar's close to; where its change compares to none, the ex-right reference
+        `listed` of its session, or None.
+        """
+        if bar.change is None or (bar.change == 0 and not isclose(bar.close, previous_close)):
+            return listed
 
         return bar.close - bar.change
 

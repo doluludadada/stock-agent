@@ -511,6 +511,8 @@ PRIVATE_READS = (
     "/v1/backtests",
     "/v1/backtests/options",
     f"/v1/backtests/{SAVED_BACKTEST}",
+    "/v1/rankings/latest",
+    "/v1/rankings/backtest?first=2026-10-01&last=2026-10-16",
 )
 
 

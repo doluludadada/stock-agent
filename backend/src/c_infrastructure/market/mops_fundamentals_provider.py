@@ -1,4 +1,6 @@
 import asyncio
+import csv
+import io
 import time
 from collections.abc import Collection
 from dataclasses import replace
@@ -8,7 +10,9 @@ from typing import override
 import httpx
 from bs4 import BeautifulSoup
 
+from a_domain.model.fundamentals.monthly_revenue import MonthlyRevenue
 from a_domain.ports.market.fundamentals_provider import IFundamentalsProvider
+from a_domain.ports.market.taiwan_stock_provider import ITaiwanStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.rules.fundamentals.filing import FilingDeadlineRule, FinalFilingsRule
@@ -23,16 +27,24 @@ from c_infrastructure.market.twse_provider import ROC_YEAR_OFFSET
 
 class MopsFundamentalsProvider(IFundamentalsProvider):
     """
-    Cumulative EPS from the MOPS bulk income statements (one page per market and quarter), cached in SQLite.
+    Cumulative EPS from the MOPS bulk income statements (one page per market and quarter), cached in SQLite, and the
+    monthly revenue summary of a past month (one CSV per market and month), read with the exchange listing's parser.
 
     A quarter's cached page is final, and never fetched again, once it was fetched after the quarter's last filing
     deadline plus grace and is not empty. Any other page is reused for `provisional_page_max_age_hours`.
     """
 
     def __init__(
-        self, db: DatabaseConnector, market_clock: IMarketClock, mops: MopsSources, logger: ILoggingProvider, write_lock: asyncio.Lock
+        self,
+        db: DatabaseConnector,
+        market_clock: IMarketClock,
+        mops: MopsSources,
+        listing: ITaiwanStockProvider,
+        logger: ILoggingProvider,
+        write_lock: asyncio.Lock,
     ) -> None:
         self._db = db
+        self._listing = listing
         # One page save at a time per process, every runtime's: two runs merging the same quarter at once would both insert it.
         self._write_lock = write_lock
         self._mops = mops
@@ -97,6 +109,31 @@ class MopsFundamentalsProvider(IFundamentalsProvider):
         self._logger.warning(f"{label}: refresh failed, using the page fetched at {fetched_at:%Y-%m-%d %H:%M}")
 
         return replace(cached, refresh_failed=True)
+
+    @override
+    async def fetch_monthly_revenues(self, market: MarketType, year: int, month: int) -> list[MonthlyRevenue] | None:
+        code = self._market_codes[market]
+        url = self._mops.monthly_revenue_url.format(market_code=code, roc_year=year - ROC_YEAR_OFFSET, month=month)
+        await self.wait_for_request_slot()
+
+        try:
+            async with httpx.AsyncClient(timeout=self._mops.timeout_seconds) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+        except Exception as error:
+            self._logger.warning(f"MOPS revenue {year}-{month:02d} {code}: request failed: {type(error).__name__}: {error}")
+            return None
+
+        rows = csv.DictReader(io.StringIO(response.content.decode("utf-8-sig", errors="replace")))
+        revenues = [revenue for row in rows if (revenue := self._listing.parse_monthly_revenue(row, market)) is not None]
+        served = [revenue for revenue in revenues if (revenue.year, revenue.month) == (year, month)]
+
+        if not served:
+            self._logger.warning(f"MOPS revenue {year}-{month:02d} {code}: no summary of that month ({len(response.content)} bytes)")
+            return None
+
+        self._logger.info(f"MOPS revenue {year}-{month:02d} {code}: {len(served)} companies")
+        return served
 
     @override
     def is_reusable(self, page: QuarterEps, now: datetime) -> bool:

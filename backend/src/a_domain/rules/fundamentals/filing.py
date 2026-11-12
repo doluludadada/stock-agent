@@ -1,10 +1,12 @@
 from collections.abc import Mapping
 from datetime import date, timedelta
+from typing import Annotated
 
-from pydantic import NonNegativeInt
+from pydantic import Field, NonNegativeInt
 from pydantic.dataclasses import dataclass
 
 from a_domain.rules.fundamentals.trailing_eps import EpsFilings
+from a_domain.types.enums import MarketType
 from a_domain.types.values import FiscalQuarter
 
 
@@ -60,3 +62,28 @@ class FilingWarningRule:
                 )
 
         return tuple(warnings)
+
+
+@dataclass(frozen=True)
+class RevenueMonthsRule:
+    """
+    The months of revenue a backfill from `first` reads, oldest first, each with its market: every market's months from
+    the one `first` falls in to the one before `today`'s, but those `served` holds as served after the deadline, the
+    `deadline_day` of the month after them, by when every company had filed. `served` is the latest day the archive's
+    revenue of each market's month was served, so a month read before its deadline is read again.
+    """
+
+    deadline_day: Annotated[int, Field(ge=1, le=28)]
+
+    def apply(self, first: date, today: date, served: Mapping[tuple[MarketType, int, int], date]) -> list[tuple[MarketType, int, int]]:
+        months = range(first.year * 12 + first.month - 1, today.year * 12 + today.month - 1)
+        due: list[tuple[MarketType, int, int]] = []
+
+        for index in months:
+            year, month = divmod(index, 12)
+            deadline = date(year + (month + 1) // 12, (month + 1) % 12 + 1, self.deadline_day)
+            due += [
+                (market, year, month + 1) for market in MarketType if not served.get((market, year, month + 1), deadline) > deadline
+            ]
+
+        return due

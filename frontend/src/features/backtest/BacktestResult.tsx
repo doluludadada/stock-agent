@@ -18,7 +18,7 @@ import { Stat } from '@/shared/ui/stat'
 import { StateBlock } from '@/shared/ui/state-block'
 import { lowerBuyScore, nextSort, returnCurve, sortTrades, tradeRows, verdictOf, winRate, type Backtest, type TradeRow, type TradeSort, type TradeSortKey, type Verdict } from './model'
 
-const ReturnChart = lazy(() => import('./ReturnChart').then((module) => ({ default: module.ReturnChart })))
+const ComparisonChart = lazy(() => import('@/shared/ui/comparison-chart').then((module) => ({ default: module.ComparisonChart })))
 
 const TRADES_SHOWN = 20
 
@@ -157,16 +157,17 @@ function CurvePanel({ backtest }: { backtest: Backtest }) {
   const { t } = useTranslation('backtest')
   const locale = useLocale()
   const format = useFormat()
-  const points = useMemo(() => returnCurve(backtest), [backtest])
+  const points = useMemo(() => returnCurve(backtest).map((point) => ({ date: point.date, value: point.strategy, benchmark: point.benchmark })), [backtest])
   return (
     <Panel title={t('curve.title')} description={t('curve.question')} aside={<span className="tabular">{t('period', { first: format.date(backtest.first_session), last: format.date(backtest.last_session) })}</span>}>
       <Suspense fallback={<Skeleton className="h-(--chart-price-height) rounded-xl" />}>
-        <ReturnChart
+        <ComparisonChart
           data={points}
-          strategyLabel={t('curve.strategy')}
+          valueLabel={t('curve.strategy')}
           benchmarkLabel={t('curve.benchmark')}
-          formatReturn={(ratio) => formatSignedPercent(locale, ratio)}
-          formatAxisReturn={(ratio) => formatSignedPercent(locale, ratio, 0)}
+          baseline={0}
+          formatValue={(ratio) => formatSignedPercent(locale, ratio)}
+          formatAxisValue={(ratio) => formatSignedPercent(locale, ratio, 0)}
           formatAxisDate={format.monthDay}
           formatTooltipDate={(date) => format.date(date, 'long')}
         />

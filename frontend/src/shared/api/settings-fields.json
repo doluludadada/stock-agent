@@ -320,6 +320,50 @@
     "options": []
   },
   {
+    "path": "ranking.decision_day",
+    "options": []
+  },
+  {
+    "path": "ranking.top",
+    "options": []
+  },
+  {
+    "path": "ranking.min_close",
+    "options": []
+  },
+  {
+    "path": "ranking.min_traded_value",
+    "options": []
+  },
+  {
+    "path": "ranking.traded_value_sessions",
+    "options": []
+  },
+  {
+    "path": "ranking.high_sessions",
+    "options": []
+  },
+  {
+    "path": "ranking.revenue_short_months",
+    "options": []
+  },
+  {
+    "path": "ranking.revenue_long_months",
+    "options": []
+  },
+  {
+    "path": "ranking.daily_limit",
+    "options": []
+  },
+  {
+    "path": "ranking.benchmark_id",
+    "options": []
+  },
+  {
+    "path": "ranking.sessions_per_year",
+    "options": []
+  },
+  {
     "path": "notifications.enabled",
     "options": []
   },
@@ -748,6 +792,26 @@
     "options": []
   },
   {
+    "path": "sources.exchange.ex_right_references.url",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.ex_right_references.date",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.ex_right_references.stock_id",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.ex_right_references.reference",
+    "options": []
+  },
+  {
+    "path": "sources.exchange.ex_right_references.months_per_request",
+    "options": []
+  },
+  {
     "path": "sources.attribution.providers",
     "options": []
   },
@@ -789,6 +853,14 @@
   },
   {
     "path": "sources.mops.no_data_marker",
+    "options": []
+  },
+  {
+    "path": "sources.mops.monthly_revenue_url",
+    "options": []
+  },
+  {
+    "path": "sources.mops.revenue_deadline_day",
     "options": []
   },
   {

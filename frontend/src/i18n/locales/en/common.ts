@@ -9,6 +9,7 @@ const common = {
     overview: 'Market overview',
     strategies: 'Strategy library',
     backtest: 'Backtest',
+    ranking: 'Revenue ranking',
     builder: 'Formula designer',
     runs: 'Analysis runs',
     valuation: 'Valuation',

@@ -70,6 +70,7 @@ from b_application.use_cases.chat.dispatcher import Dispatcher
 from b_application.use_cases.collect.archive_warm_up import ArchiveWarmUp
 from b_application.use_cases.collect.buzz_scanner import BuzzScanner
 from b_application.use_cases.collect.daily_close_archiver import DailyCloseArchiver
+from b_application.use_cases.collect.daily_history_backfill import DailyHistoryBackfill
 from b_application.use_cases.collect.daily_history_refresh import DailyHistoryRefresh
 from b_application.use_cases.collect.financials_lookup import FinancialsLookup
 from b_application.use_cases.collect.fundamentals_feed import FundamentalsFeed
@@ -82,6 +83,7 @@ from b_application.use_cases.collect.most_traded import MostTraded
 from b_application.use_cases.collect.news_feed import NewsFeed
 from b_application.use_cases.collect.official_change_feed import OfficialChangeFeed
 from b_application.use_cases.collect.realtime_quote_feed import RealtimeQuoteFeed
+from b_application.use_cases.collect.revenue_history_backfill import RevenueHistoryBackfill
 from b_application.use_cases.collect.stock_lookup import StockLookup
 from b_application.use_cases.collect.stock_search import StockSearch
 from b_application.use_cases.process.ai_analyser import AiAnalyser
@@ -90,6 +92,9 @@ from b_application.use_cases.process.sentiment_analyser import SentimentAnalyser
 from b_application.use_cases.process.strategy_loader import StrategyLoader
 from b_application.use_cases.process.technical_filter import TechnicalFilter
 from b_application.use_cases.process.technical_settings_editor import TechnicalSettingsEditor
+from b_application.use_cases.ranking.latest_ranking import LatestRanking
+from b_application.use_cases.ranking.ranking_history_loader import RankingHistoryLoader
+from b_application.use_cases.ranking.ranking_replay import RankingReplay
 from b_application.use_cases.ship.decision_memory import DecisionMemory
 from b_application.use_cases.ship.recent_runs import RecentRuns
 from b_application.use_cases.ship.reporting import Reporting
@@ -285,8 +290,9 @@ class ProviderDependencies:
     """The exchanges' history cache when price_provider is one, which the Web API's timer refreshes; None for the archive."""
     bar_matrix_provider: IDailyBarMatrixProvider
     """
-    price_provider's held history of every listed stock as one matrix, which the backtests of every user read. It lives
-    with the runtime: built at the first backtest, again when the source holds another span, and anew on new settings.
+    price_provider's held history of every listed stock as one matrix, which the backtests of every user read, and the
+    monthly ranking's history. It lives with the runtime: each is built at its first read, again when the source holds
+    other bars, and anew on new settings.
     """
     candidate_backtester: ICandidateBacktester
     """
@@ -480,14 +486,22 @@ def create_news_provider(config: AppConfig, logger: ILoggingProvider, archive: I
 
 
 def create_fundamentals_provider(
-    config: AppConfig, db: DatabaseConnector, process: ProcessState, market_clock: TaiwanMarketClock
+    config: AppConfig, db: DatabaseConnector, process: ProcessState, market_clock: TaiwanMarketClock, listing: TaiwanStockProvider
 ) -> IFundamentalsProvider | None:
-    """MOPS's income statements, or None for an audience that reads no MOPS, which never builds its adapter."""
+    """
+    MOPS's income statements and monthly revenue summaries, or None for an audience that reads no MOPS, which never builds
+    its adapter.
+    """
     if not config.audience.mops:
         return None
 
     return MopsFundamentalsProvider(
-        db=db, market_clock=market_clock, mops=config.sources.mops, logger=process.logger, write_lock=process.cache_writes
+        db=db,
+        market_clock=market_clock,
+        mops=config.sources.mops,
+        listing=listing,
+        logger=process.logger,
+        write_lock=process.cache_writes,
     )
 
 
@@ -527,6 +541,7 @@ def create_history_cache(
         quotes=quotes if quotes is not None else archive,
         source=ExchangeDailyReports(
             feeds=config.sources.exchange.daily_reports,
+            ex_right_feed=config.sources.exchange.ex_right_references,
             listing=stock_provider,
             request_slots=process.exchange_request_slots,
             market_clock=market_clock,
@@ -538,6 +553,7 @@ def create_history_cache(
         db=db,
         market_clock=market_clock,
         market_data=config.market_data,
+        reference_months=config.sources.exchange.ex_right_references.months_per_request,
         logger=process.logger,
         write_lock=process.cache_writes,
     )
@@ -570,13 +586,15 @@ async def build_provider_dependencies(
         stock_provider=stock_provider,
         price_provider=price_provider,
         history_cache=history_cache,
-        bar_matrix_provider=DailyBarMatrixProvider(stock_provider, price_provider, market_clock, logger),
+        bar_matrix_provider=DailyBarMatrixProvider(
+            stock_provider, price_provider, archive, market_clock, config.ranking.history_rule(), logger
+        ),
         candidate_backtester=ProcessPoolCandidateBacktester(config, market_clock, config.strategy_search.workers),
         strategy_search_repository=FileStrategySearchRepository(config.project_root / config.strategy_search.folder),
         broker_market_data=quotes is not None,
         shioaji=process.shioaji_connections.get(login) if login is not None else None,
         daily_close_archive=archive,
-        fundamentals_provider=create_fundamentals_provider(config, db, process, market_clock),
+        fundamentals_provider=create_fundamentals_provider(config, db, process, market_clock, stock_provider),
         news_provider=create_news_provider(config, logger, archive),
         social_media_provider=(
             PttProvider(config=config, logger=logger, stock_provider=stock_provider) if config.audience.realtime_quotes else None
@@ -726,6 +744,10 @@ def build_pipeline(
         official_change_feed=OfficialChangeFeed(stocks),
         daily_close_archiver=DailyCloseArchiver(stocks, dependencies.daily_close_archive, logger),
         daily_history_refresh=DailyHistoryRefresh(dependencies.history_cache, market_clock, config),
+        daily_history_backfill=DailyHistoryBackfill(dependencies.history_cache, market_clock),
+        revenue_history_backfill=RevenueHistoryBackfill(
+            dependencies.fundamentals_provider, dependencies.daily_close_archive, market_clock, config, logger
+        ),
         archive_warm_up=ArchiveWarmUp(dependencies.daily_close_archive, config),
         financials_lookup=FinancialsLookup(dependencies.daily_close_archive),
         realtime_quote_feed=RealtimeQuoteFeed(prices, market_clock, config, logger),
@@ -771,6 +793,9 @@ def build_pipeline(
         search_validation=SearchValidation(dependencies.candidate_backtester, config),
         search_holdout=SearchHoldout(dependencies.candidate_backtester, prices, market_clock, config),
         strategy_search_save=StrategySearchSave(dependencies.strategy_search_repository),
+        ranking_history_loader=RankingHistoryLoader(dependencies.bar_matrix_provider, logger),
+        latest_ranking=LatestRanking(stocks, config),
+        ranking_replay=RankingReplay(stocks, config, logger),
         fundamentals_feed=FundamentalsFeed(dependencies.fundamentals_provider, stocks, market_clock, logger),
         market_valuation_loader=MarketValuationLoader(stocks, market_clock, config),
         valuation_appraiser=ValuationAppraiser(config),

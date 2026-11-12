@@ -419,7 +419,8 @@ class TaiwanStockProvider(ITaiwanStockProvider):
         if not (stock_id := self.served_field(row, [feed.stock_id])):
             return None
 
-        year_month = self.served_field(row, [feed.year_month])
+        year_month = "".join(part.zfill(2) for part in self.served_field(row, [feed.year_month]).split("/"))
+        served = "".join(part.zfill(2) for part in self.served_field(row, [feed.served_date]).split("/"))
 
         try:
             return MonthlyRevenue(
@@ -427,7 +428,7 @@ class TaiwanStockProvider(ITaiwanStockProvider):
                 year=int(year_month[:-2]) + ROC_YEAR_OFFSET,
                 month=int(year_month[-2:]),
                 market=market,
-                served_date=self.parse_roc_date(self.served_field(row, [feed.served_date])),
+                served_date=self.parse_roc_date(served),
                 company_name=self.served_field(row, [feed.company_name]),
                 industry=self.served_field(row, [feed.industry]),
                 revenue=self.parse_number(self.served_field(row, [feed.revenue])),

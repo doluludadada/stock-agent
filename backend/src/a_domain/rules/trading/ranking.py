@@ -1,0 +1,307 @@
+from collections.abc import Callable, Mapping, Sequence
+from datetime import date, datetime
+from typing import Annotated, Self
+
+import numpy as np
+from pydantic import ConfigDict, Field, FiniteFloat, NonNegativeFloat, NonNegativeInt, PositiveInt, model_validator
+from pydantic.dataclasses import dataclass
+
+from a_domain.model.market.ohlcv import Ohlcv
+from a_domain.rules.technical.matrix import DailyBarMatrix, Flags, Floats
+from a_domain.rules.trading.backtest import DailyBarMatrixRule, last_closes
+from a_domain.types.enums import SecurityKind
+from a_domain.types.values import Fraction, NonEmptyText, ProperFraction
+
+type DayOfMonth = Annotated[int, Field(ge=1, le=28)]
+
+
+@dataclass(frozen=True, config=ConfigDict(arbitrary_types_allowed=True))
+class ListedHistory:
+    """
+    Every stock's daily bars as its exchange listed them, delisted stocks too, one row per stock and one column per
+    session: a past close is the price it traded at, never adjusted by a later action. With each bar's change from the
+    session's reference price, and the ex-right reference TWSE listed for its session; NaN where a bar has none.
+    """
+
+    bars: DailyBarMatrix
+    change: Floats
+    ex_right_reference: Floats
+
+
+@dataclass(frozen=True)
+class ListedHistoryRule:
+    """
+    The listed history of the stocks of `history` with their ex-right references, keyed as the bars are stamped. A
+    reference of a session the stock has no bar of is left out.
+    """
+
+    def apply(
+        self,
+        history: Mapping[str, Sequence[Ohlcv]],
+        references: Mapping[str, Mapping[datetime, float]],
+        trading_date: Callable[[datetime], date],
+    ) -> ListedHistory:
+        bars = DailyBarMatrixRule().apply(history, trading_date)
+        sessions = {session: column for column, session in enumerate(bars.sessions)}
+        rows = {stock_id: row for row, stock_id in enumerate(bars.stock_ids)}
+        columns = {stamp: sessions[trading_date(stamp)] for stamp in {bar.ts for listed in history.values() for bar in listed}}
+        change = np.full(bars.close.shape, np.nan)
+
+        for stock_id, row in rows.items():
+            change[row, [columns[bar.ts] for bar in history[stock_id]]] = [
+                np.nan if bar.change is None else bar.change for bar in history[stock_id]
+            ]
+
+        return ListedHistory(bars=bars, change=change, ex_right_reference=ex_right_matrix(references, rows, columns, bars.close))
+
+
+def ex_right_matrix(
+    references: Mapping[str, Mapping[datetime, float]], rows: Mapping[str, int], columns: Mapping[datetime, int], close: Floats
+) -> Floats:
+    """
+    Each reference in its stock's row and its stamp's column, in the shape of `close`, NaN everywhere else: a reference
+    of a stamp no bar has, or of a session its stock has no bar of, is left out.
+    """
+    placed = np.full(close.shape, np.nan)
+
+    for stock_id in references.keys() & rows.keys():
+        listed = [(columns[stamp], price) for stamp, price in references[stock_id].items() if stamp in columns]
+        placed[rows[stock_id], [column for column, _ in listed]] = [price for _, price in listed]
+
+    return np.where(np.isnan(close), np.nan, placed)
+
+
+@dataclass(frozen=True, config=ConfigDict(arbitrary_types_allowed=True))
+class RankingHistory:
+    """
+    What the ranking reads, each stock in its row of `bars`: its bars as listed; each bar's total return since the
+    stock's bar before (RankingHistoryRule), 0 where it has no bar; the total-return level, those returns compounded
+    from the first session, 1 before the stock's first bar; and its revenue of each of `months`, NaN where none is held.
+    """
+
+    bars: DailyBarMatrix
+    returns: Floats
+    level: Floats
+    revenue: Floats
+    months: tuple[date, ...]
+    """The first day of each revenue column's month, consecutive months, oldest first."""
+
+
+@dataclass(frozen=True)
+class RankingHistoryRule:
+    """
+    The ranking's history from the listed one and the revenue the archive holds. A bar's total return is its change
+    over the price the exchange compared its close to (close - change) where it gives a change, else its close over
+    TWSE's ex-right reference of the day, less 1; without either, its move from the stock's close before, but 0 when that
+    move is beyond `daily_limit`, which no trade can make, so it is an action the exchange named no reference of.
+    """
+
+    daily_limit: ProperFraction
+
+    def apply(self, listed: ListedHistory, revenues: Mapping[tuple[str, int, int], float | None]) -> RankingHistory:
+        close, change, ex_right = listed.bars.close, listed.change, listed.ex_right_reference
+        previous = np.roll(last_closes(close), 1, axis=1)
+        previous[:, 0] = np.nan
+
+        with np.errstate(all="ignore"):
+            moved = close / previous - 1
+            returns = np.select(
+                [~np.isnan(change) & (close - change > 0), ex_right > 0, ~np.isnan(moved)],
+                [change / (close - change), close / ex_right - 1, np.where(np.abs(moved) > self.daily_limit, 0.0, moved)],
+                default=0.0,
+            )
+
+        revenue, months = revenue_matrix(listed.bars.stock_ids, revenues)
+        return RankingHistory(bars=listed.bars, returns=returns, level=np.cumprod(1 + returns, axis=1), revenue=revenue, months=months)
+
+
+def revenue_matrix(stock_ids: Sequence[str], revenues: Mapping[tuple[str, int, int], float | None]) -> tuple[Floats, tuple[date, ...]]:
+    """
+    Each stock's revenue of each month from the first held to the last, NaN where none is held. `revenues` holds each
+    company's revenue of each month by stock id, year and month, None where its figure was left blank.
+    """
+    rows = {stock_id: row for row, stock_id in enumerate(stock_ids)}
+    held = [
+        (rows[stock_id], year * 12 + month - 1, amount) for (stock_id, year, month), amount in revenues.items() if stock_id in rows
+    ]
+    months = range(min((month for _, month, _ in held), default=0), max((month for _, month, _ in held), default=-1) + 1)
+    matrix = np.full((len(rows), len(months)), np.nan)
+
+    for row, month, amount in held:
+        matrix[row, month - months.start] = np.nan if amount is None else amount
+
+    return matrix, tuple(date(month // 12, month % 12 + 1, 1) for month in months)
+
+
+@dataclass(frozen=True)
+class DecisionSessionsRule:
+    """
+    Each month's decision session among `sessions`, oldest first, with the month of revenue it reads: the first session
+    whose day of the month is `decision_day` or later. It decides at that session's close and reads the newest month
+    whose revenue was due before it, by the `deadline_day` of the month after: the month before the session's when the
+    session falls after that day, else the month before that.
+    """
+
+    decision_day: DayOfMonth
+    deadline_day: DayOfMonth
+
+    def apply(self, sessions: Sequence[date]) -> list[tuple[int, date]]:
+        decisions: dict[tuple[int, int], tuple[int, date]] = {}
+
+        for column, session in enumerate(sessions):
+            if session.day < self.decision_day or (session.year, session.month) in decisions:
+                continue
+
+            month = session.year * 12 + session.month - (2 if session.day > self.deadline_day else 3)
+            decisions[(session.year, session.month)] = (column, date(month // 12, month % 12 + 1, 1))
+
+        return list(decisions.values())
+
+
+@dataclass(
+    frozen=True, kw_only=True, config=ConfigDict(json_schema_serialization_defaults_required=True, use_attribute_docstrings=True)
+)
+class RankedStock:
+    """One stock of a ranking: its two factors, the rank of each among the universe's stocks that have it, and its score."""
+
+    stock_id: NonEmptyText
+    stock_name: str | None = None
+    revenue_acceleration: FiniteFloat
+    """The mean revenue of the latest short months over the mean of the latest long months, up to the month read."""
+
+    nearness_to_high: FiniteFloat
+    """The total-return level at the decision's close over its highest of the last high_sessions sessions: 1 at a high."""
+
+    acceleration_rank: Fraction
+    nearness_rank: Fraction
+    """Each factor's place among the universe's stocks that have it, from 0 for the lowest to 1 for the highest."""
+
+    score: Annotated[float, Field(ge=0, le=2)]
+    """The sum of the two ranks."""
+
+
+@dataclass(frozen=True, kw_only=True, config=ConfigDict(use_attribute_docstrings=True))
+class Ranking:
+    """The monthly ranking at one decision session's close: the stocks to hold from the next session's open."""
+
+    decided_on: date
+    revenue_month: date
+    """The first day of the month of revenue it read."""
+
+    universe: NonNegativeInt
+    """The stocks that passed the universe at the close: traded, liquid enough and priced at least min_close."""
+
+    scored: NonNegativeInt
+    """The universe's stocks with both factors, each of which has a score."""
+
+    stocks: list[RankedStock]
+    """The `top` best scores, best first; equal scores in stock id order."""
+
+
+@dataclass(frozen=True)
+class MonthlyRankingRule:
+    """
+    The ranking at a decision session's close. The universe is every stock (no ETF) that traded that session, closed at
+    `min_close` or more, and traded `min_traded_value` a session on average over the last `traded_value_sessions`
+    sessions, a session without a trade counting 0. Each of its stocks has a revenue acceleration, the mean revenue of
+    the latest `short_months` over that of the latest `long_months` up to the month read, none if any of them is
+    missing, and a nearness to its high, its total-return level over the highest of the last `high_sessions` sessions.
+    Each factor is ranked among the stocks that have it (`ranks`), the score is the sum of the two ranks, and the `top`
+    best scores are the ranking. Prices are as listed, so a past close is the price it traded at.
+    """
+
+    top: PositiveInt
+    min_close: NonNegativeFloat
+    min_traded_value: NonNegativeFloat
+    traded_value_sessions: PositiveInt
+    high_sessions: PositiveInt
+    short_months: PositiveInt
+    long_months: PositiveInt
+
+    @model_validator(mode="after")
+    def _the_short_months_are_among_the_long(self) -> Self:
+        if self.short_months > self.long_months:
+            raise ValueError("short_months must not be more than long_months")
+
+        return self
+
+    def apply(self, history: RankingHistory, column: int, revenue_month: date, names: Mapping[str, str | None]) -> Ranking:
+        universe = self._universe(history.bars, column)
+        acceleration = np.where(universe, self._acceleration(history, revenue_month), np.nan)
+        nearness = np.where(universe, self._nearness(history.level, column), np.nan)
+        acceleration_rank, nearness_rank = ranks(acceleration), ranks(nearness)
+        score = acceleration_rank + nearness_rank
+        scored = np.flatnonzero(~np.isnan(score))
+        best = scored[np.argsort(-score[scored], kind="stable")][: self.top]
+        stocks = [
+            RankedStock(
+                stock_id=history.bars.stock_ids[row],
+                stock_name=names.get(history.bars.stock_ids[row]),
+                revenue_acceleration=float(acceleration[row]),
+                nearness_to_high=float(nearness[row]),
+                acceleration_rank=float(acceleration_rank[row]),
+                nearness_rank=float(nearness_rank[row]),
+                score=float(score[row]),
+            )
+            for row in best.tolist()
+        ]
+
+        return Ranking(
+            decided_on=history.bars.sessions[column],
+            revenue_month=revenue_month,
+            universe=int(universe.sum()),
+            scored=len(scored),
+            stocks=stocks,
+        )
+
+    def _universe(self, bars: DailyBarMatrix, column: int) -> Flags:
+        if column + 1 < self.traded_value_sessions:
+            return np.zeros(len(bars.stock_ids), dtype=np.bool_)
+
+        window = slice(column + 1 - self.traded_value_sessions, column + 1)
+        traded_value = np.nan_to_num(bars.close[:, window] * bars.volume[:, window]).mean(axis=1)
+        stock = np.array([SecurityKind.of(stock_id) == SecurityKind.STOCK for stock_id in bars.stock_ids])
+
+        with np.errstate(invalid="ignore"):
+            return stock & (bars.close[:, column] >= self.min_close) & (traded_value >= self.min_traded_value)
+
+    def _acceleration(self, history: RankingHistory, revenue_month: date) -> Floats:
+        first = history.months[0] if history.months else revenue_month
+        month = (revenue_month.year - first.year) * 12 + revenue_month.month - first.month
+
+        if month + 1 < self.long_months or month >= len(history.months):
+            return np.full(len(history.bars.stock_ids), np.nan)
+
+        short = np.sum(history.revenue[:, month + 1 - self.short_months : month + 1], axis=1) / self.short_months
+        long = np.sum(history.revenue[:, month + 1 - self.long_months : month + 1], axis=1) / self.long_months
+
+        with np.errstate(all="ignore"):
+            acceleration = short / long
+
+        return np.where(np.isfinite(acceleration), acceleration, np.nan)
+
+    def _nearness(self, level: Floats, column: int) -> Floats:
+        if column + 1 < self.high_sessions:
+            return np.full(level.shape[0], np.nan)
+
+        return level[:, column] / level[:, column + 1 - self.high_sessions : column + 1].max(axis=1)
+
+
+def ranks(values: Floats) -> Floats:
+    """
+    Each value's place among the values that are not NaN, from 0 for the lowest to 1 for the highest; equal values
+    share the mean of their places. NaN stays NaN, and so does every value while fewer than two are not NaN.
+    """
+    held = np.flatnonzero(~np.isnan(values))
+    places = np.full(len(values), np.nan)
+
+    if len(held) < 2:
+        return places
+
+    order = held[np.argsort(values[held], kind="stable")]
+    ordered = values[order]
+    starts = np.flatnonzero(np.r_[True, ordered[1:] != ordered[:-1]])
+    ends = np.r_[starts[1:], len(order)]
+    places[order] = np.repeat((starts + ends - 1) / 2, ends - starts) / (len(held) - 1)
+
+    return places

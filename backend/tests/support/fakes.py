@@ -44,6 +44,7 @@ from a_domain.rules.technical.search import StrategySearch
 from a_domain.rules.technical.strategy import TechnicalSettings
 from a_domain.rules.trading.cost import TradingCostRule
 from a_domain.rules.trading.order_rule import BrokerLink
+from a_domain.rules.trading.ranking import ListedHistory, ListedHistoryRule
 from a_domain.types.enums import (
     AiAnalysisFocus,
     AiProvider,
@@ -250,6 +251,25 @@ class FakeDailyCloseArchive:
         months = [(year, month) for _, year, month in self.monthly_revenues]
         return [ArchivedMonth(year=year, month=month, companies=months.count((year, month))) for year, month in sorted(set(months))]
 
+    async def revenue_served(self) -> dict[tuple[MarketType, int, int], date]:
+        served: dict[tuple[MarketType, int, int], date] = {}
+
+        for revenue in self.monthly_revenues.values():
+            key = (revenue.market, revenue.year, revenue.month)
+            served[key] = max(served.get(key, revenue.served_date), revenue.served_date)
+
+        return served
+
+    async def revenue_history(self, first: date, last: date) -> dict[tuple[str, int, int], float | None]:
+        return {
+            key: revenue.revenue
+            for key, revenue in self.monthly_revenues.items()
+            if (first.year, first.month) <= (revenue.year, revenue.month) <= (last.year, last.month)
+        }
+
+    async def revenue_fingerprint(self) -> tuple[object, ...]:
+        return tuple(self.monthly_revenues.values())
+
     async def financials(self, stock_id: str) -> tuple[list[QuarterFinancials], list[MonthlyRevenue]]:
         if stock_id in self.financials_failures:
             raise self.financials_failures[stock_id]
@@ -272,14 +292,21 @@ class FakeDailyCloseArchive:
 
 
 class FakeFundamentalsProvider:
-    """MOPS stand-in: cumulative EPS filed per quarter, quarters that fail to fetch, and quarters whose refresh failed."""
+    """
+    MOPS stand-in: cumulative EPS filed per quarter, quarters that fail to fetch, and quarters whose refresh failed; and
+    each market's monthly revenue summary per month, where a month it does not hold fails.
+    """
 
     def __init__(self) -> None:
+        self.monthly_revenue_summaries: dict[tuple[MarketType, int, int], list[MonthlyRevenue]] = {}
         self.cumulative_eps: dict[FiscalQuarter, dict[str, float]] = {}
         self.failed_quarters: set[FiscalQuarter] = set()
         self.refresh_failed_quarters: set[FiscalQuarter] = set()
         self.requested: list[set[FiscalQuarter]] = []
         self.fetched_at = datetime(2026, 10, 19, 18, 0)
+
+    async def fetch_monthly_revenues(self, market: MarketType, year: int, month: int) -> list[MonthlyRevenue] | None:
+        return self.monthly_revenue_summaries.get((market, year, month))
 
     async def fetch_cumulative_eps(self, quarters: Collection[FiscalQuarter]) -> EpsFilings:
         self.requested.append(set(quarters))
@@ -297,8 +324,14 @@ class FakeFundamentalsProvider:
 
 
 class FakeOhlcvProvider:
+    """
+    The price source in memory: each stock's bars as `history` holds them, served as the adjusted and as the listed
+    history alike, TWSE's ex-right references in `references`, each index's bars and the realtime quotes.
+    """
+
     def __init__(self) -> None:
         self.history: dict[str, list[Ohlcv]] = {}
+        self.references: dict[str, dict[datetime, float]] = {}
         self.index_history: dict[MarketIndex, list[Ohlcv]] = {}
         self.realtime: dict[str, Ohlcv] = {}
         self.history_requests: list[str] = []
@@ -314,6 +347,19 @@ class FakeOhlcvProvider:
     async def held_span(self) -> tuple[date, date] | None:
         sessions = sorted({bar.ts.date() for bars in self.history.values() for bar in bars})
         return (sessions[0], sessions[-1]) if sessions else None
+
+    async def listed_history(self) -> ListedHistory | None:
+        if not any(self.history.values()):
+            return None
+
+        return ListedHistoryRule().apply(self.history, self.references, lambda stamp: stamp.date())
+
+    async def listed_fingerprint(self) -> tuple[object, ...]:
+        bars = tuple((stock_id, *bars) for stock_id, bars in self.history.items())
+        return bars, tuple((stock_id, *days.items()) for stock_id, days in self.references.items())
+
+    async def ex_right_references(self, first: date, last: date) -> dict[str, dict[datetime, float]]:
+        return {stock_id: dict(days) for stock_id, days in self.references.items()}
 
     async def fetch_realtime_bars(self, stocks: list[Stock]) -> dict[str, Ohlcv]:
         self.realtime_requests.extend(stock.stock_id for stock in stocks)

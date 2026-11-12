@@ -11,6 +11,7 @@ from a_domain.rules.technical.search import BreedingRule, SearchFitnessRule, Ses
 from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
 from a_domain.rules.trading.account_value import AccountValueRule, PositionValueRule
 from a_domain.rules.trading.cost import TradingCostRule
+from a_domain.rules.trading.ranking import MonthlyRankingRule, RankingHistoryRule
 from a_domain.rules.trading.tick import LimitPriceRule, TickSizeRule
 from a_domain.types.enums import FormulaScale, ShioajiCredential, SystemEnvironment
 from a_domain.types.values import FormulaId, IndicatorPeriod
@@ -177,6 +178,52 @@ class StrategySearchConfig(BaseModel):
             fitness_rule=self.fitness_rule(),
             mutation_rule=mutation_rule,
         )
+
+
+class RankingConfig(BaseModel):
+    """
+    The monthly stock ranking by revenue acceleration and nearness to the high, and its backtest. Every value comes from
+    the `ranking` section of config/appsetting.yaml; the fees and the tax are the market's, the revenue deadline MOPS's.
+    """
+
+    model_config = ConfigDict(use_attribute_docstrings=True)
+
+    decision_day: int = Field(ge=1, le=28)
+    """Each month decides at the close of its first session on this day of the month or later."""
+
+    top: int = Field(ge=1)
+    """How many of the best scores it holds, in equal weights."""
+
+    min_close: float = Field(ge=0, allow_inf_nan=False)
+    min_traded_value: float = Field(ge=0, allow_inf_nan=False)
+    """NT$ a session on average over the last traded_value_sessions, a session without a trade counting 0."""
+
+    traded_value_sessions: int = Field(ge=1)
+    high_sessions: int = Field(ge=1)
+    """The sessions whose highest total-return level the level at the decision is compared with."""
+
+    revenue_short_months: int = Field(ge=1)
+    revenue_long_months: int = Field(ge=1)
+    daily_limit: float = Field(gt=0, lt=1)
+    """A move beyond it on a bar without a reference price counts as 0 in the total-return level."""
+
+    benchmark_id: str = Field(min_length=1)
+    sessions_per_year: float = Field(gt=0, allow_inf_nan=False)
+    """The sessions a year the annual returns count."""
+
+    def ranking_rule(self) -> MonthlyRankingRule:
+        return MonthlyRankingRule(
+            top=self.top,
+            min_close=self.min_close,
+            min_traded_value=self.min_traded_value,
+            traded_value_sessions=self.traded_value_sessions,
+            high_sessions=self.high_sessions,
+            short_months=self.revenue_short_months,
+            long_months=self.revenue_long_months,
+        )
+
+    def history_rule(self) -> RankingHistoryRule:
+        return RankingHistoryRule(daily_limit=self.daily_limit)
 
 
 class MarketConfig(BaseModel):

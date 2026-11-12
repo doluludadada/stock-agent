@@ -1,11 +1,11 @@
-import { Activity, Calculator, History, Layers, LayoutDashboard, Settings2, SlidersHorizontal, Sparkles, Star, UsersRound, Wallet, type LucideIcon } from 'lucide-react'
+import { Activity, Calculator, History, Layers, LayoutDashboard, ListOrdered, Settings2, SlidersHorizontal, Sparkles, Star, UsersRound, Wallet, type LucideIcon } from 'lucide-react'
 import { allows, type Audience, type Capability, type Schemas } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
 
 type Permission = Schemas['Permission']
 
 export interface NavItem {
-  key: 'overview' | 'valuation' | 'watchlist' | 'account' | 'settings' | 'runs' | 'strategies' | 'backtest' | 'builder' | 'users' | 'admin'
+  key: 'overview' | 'valuation' | 'watchlist' | 'account' | 'settings' | 'runs' | 'strategies' | 'backtest' | 'ranking' | 'builder' | 'users' | 'admin'
   to: string
   icon: LucideIcon
   /** Active only on this exact path, not on the paths under it. */
@@ -36,6 +36,7 @@ const SECTIONS: readonly NavSection[] = [
       RUNS,
       { key: 'strategies', to: paths.strategies, icon: Layers, end: true },
       { key: 'backtest', to: paths.backtest, icon: History, end: false },
+      { key: 'ranking', to: paths.ranking, icon: ListOrdered, end: false },
       { key: 'builder', to: paths.newStrategy, icon: Sparkles, end: false },
     ],
   },

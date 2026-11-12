@@ -430,7 +430,7 @@ def build_harness(
         stock_provider=stocks,
         price_provider=prices,
         history_cache=None,
-        bar_matrix_provider=DailyBarMatrixProvider(stocks, prices, clock, logger),
+        bar_matrix_provider=DailyBarMatrixProvider(stocks, prices, archive, clock, config.ranking.history_rule(), logger),
         candidate_backtester=ProcessPoolCandidateBacktester(config, clock, 0),
         strategy_search_repository=searches,
         broker_market_data=login,

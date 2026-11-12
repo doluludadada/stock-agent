@@ -29,6 +29,10 @@ src/
                        the mock account, and each decision marked followed or open
     backtest/          the active strategy replayed over a past period: the form from the server's options, the verdict
                        against the TAIEX, both curves as returns on one chart, the trades, and the saved backtests
+    ranking/           the monthly ranking by revenue acceleration and nearness to the high: the stocks it picks now and
+                       what changed since the month before, its backtest against the benchmark over a chosen period (the
+                       answer in a sentence, both curves, every year), the caveats the research measured, and every past
+                       decision with what it held
     valuation/         P/E valuation, undervalued scan, AI explanation on request
     watchlist/         server watchlist and its toggle button
     account/           mock account: the total P&L since it opened, positions, equity curve, the trades with the run
@@ -97,6 +101,7 @@ the contract by `catalog.test.ts`.
 | A manual BUY of a stock a specific-stock run reported, on the broker chosen | `runs/api.ts` | `/v1/runs/{run_id}/manual-buy` |
 | A run's follow into the mock account: what is open, the refusal, the follows so far; starting one | `runs/api.ts` | `/v1/runs/{run_id}/follow` |
 | A backtest's options, a run that is saved, the saved backtests, one of them, a delete | `backtest/api.ts` | `/v1/backtests` |
+| The latest monthly ranking; its replay over a period against the benchmark, with each decision's ranking and holdings | `ranking/api.ts` | `/v1/rankings/latest`, `/v1/rankings/backtest` |
 | Watchlist | `watchlist/api.ts` | `/v1/watchlist` |
 | Valuation | `valuation/api.ts` | `/v1/valuation` |
 | Account of a broker: now, the curve, the opening and the total P&L (none at a real broker) | `account/api.ts` | `/v1/account/history` |
@@ -205,14 +210,33 @@ secret: the server refuses one written into them, and its form shows none.
 
 A backtest's page is its address: `/backtest?id=` names the saved backtest on screen. A run can take tens of seconds, so
 its mutation has a key: the progress shows again on a page that was left and reopened, and the answer lands in the
-cache and the saved list either way. The strategy and the TAIEX are one chart of returns since the first session
-(`backtest/ReturnChart.tsx`), never two y-axes; the index's color (`--chart-benchmark`) passes the dataviz validator's
-separation checks against `--chart-price` in both themes, and its line is dashed too.
+cache and the saved list either way; the seconds waited so far show in a `ProgressNote`. A result and its benchmark are
+one chart from the same start (`shared/ui/comparison-chart.tsx`), never two y-axes: the backtest draws returns around 0,
+and the ranking draws what 1 put in is worth around 1. The benchmark's color (`--chart-benchmark`) passes the dataviz
+validator's separation checks against `--chart-price` in both themes, and its line is dashed too.
+
+The ranking page (`/ranking`) answers two questions side by side from 1280 px: which stocks the formula picks now, and
+whether following it would have beaten the benchmark. Its rules:
+
+- The address holds the period (`?period=5Y`, or `?first=&last=`; none is the whole history) and the decision whose
+  stocks are open (`?month=` with the decision's date), so both survive a reload. `ranking/model.ts` reads and writes them.
+- The first answer after a server start takes close to a minute and later ones seconds. The page asks for the latest
+  ranking first and for the replays only once it answered, shows the seconds waited, keeps the period before on screen
+  (dimmed) while the next one is computed, and keeps every answer for an hour (fresh for ten minutes). Typing two days
+  asks nothing; the Apply button does.
+- A curve that multiplies at least 4 times starts on a log axis with round multiples as ticks (`logAxis`), because a
+  linear axis presses the benchmark flat; the reader can switch.
+- What the API does not answer is derived in `ranking/model.ts` and said as an estimate where it is one: the stocks that
+  entered and left come from a second replay of the last two decisions (`periodBefore`); the decision day is the
+  earliest day of the month any decision seen fell on (`decisionDay`), and the next decision is the first weekday from
+  that day of the next month, shown with "about"; each month's result is the curve's change from its decision to the next.
+- The caveats (`CAVEATS`) are facts the research measured and the only performance figures written in the copy. Every
+  other figure comes from the API.
 
 `shared/ui/` holds vendored shadcn/ui sources and the project's own primitives (`panel`, `data-table`, `stat`,
 `segmented`, `range-tabs`, `show-more`, `range-meter`, `breadth-bar`, `quote-headline`, `state-block`, `page-header`,
-`field`, `password-input`, `avatar`, `price-volume-chart`, `price-trend`, `stock-picker`, `confirm-dialog`,
-`stock-ids-problem`). Lint relaxes only fast-refresh and a few a11y role rules there, to stay close to upstream.
+`field`, `password-input`, `avatar`, `price-volume-chart`, `price-trend`, `comparison-chart`, `progress-note`,
+`stock-picker`, `confirm-dialog`, `stock-ids-problem`). Lint relaxes only fast-refresh and a few a11y role rules there, to stay close to upstream.
 
 ## Internationalization
 

@@ -12,6 +12,8 @@ from a_domain.rules.trading.decision import DecisionRule, RunDecisionsRule
 from a_domain.rules.trading.entry import EntryRule, ManualEntryRule
 from a_domain.rules.trading.exit import ExitRule, StopLossRule
 from a_domain.rules.trading.order_rule import BrokerAccessRule, BuyLimitRule, OrderGateRule, OrderPriceRule, OrderRule
+from a_domain.rules.trading.ranking import DecisionSessionsRule
+from a_domain.rules.trading.ranking_backtest import RankingBacktestRule
 from a_domain.rules.trading.reason import AnalysisSummaryRule, EntryReasonRule, ExitReasonRule
 from a_domain.rules.trading.sizing import BuyCostRule, SizingRule
 from a_domain.types.enums import Audience, DatabaseBackend, SettingsFile, SystemEnvironment
@@ -26,6 +28,7 @@ from b_application.config.trading_config import (
     AnalysisConfig,
     MarketConfig,
     MockTradingConfig,
+    RankingConfig,
     ShioajiConfig,
     StrategySearchConfig,
     TechnicalConfig,
@@ -102,6 +105,7 @@ class AppConfig(BaseSettings):
     analysis: AnalysisConfig
     technical: TechnicalConfig
     strategy_search: StrategySearchConfig
+    ranking: RankingConfig
     notifications: NotificationConfig = Field(default_factory=NotificationConfig)
     prompts: PromptsConfig = Field(default_factory=PromptsConfig)
     sentiment: SentimentConfig = Field(default_factory=SentimentConfig)
@@ -176,6 +180,21 @@ class AppConfig(BaseSettings):
             session_stop_loss_rule=SessionStopLossRule(stop_loss_rule=self.stop_loss_rule()),
             cost_rule=self.market.cost_rule(),
             position_value_rule=self.market.position_value_rule(),
+        )
+
+    def decision_sessions_rule(self) -> DecisionSessionsRule:
+        """The ranking's decision sessions, each reading the newest month of revenue due before it."""
+        return DecisionSessionsRule(decision_day=self.ranking.decision_day, deadline_day=self.sources.mops.revenue_deadline_day)
+
+    def ranking_backtest_rule(self) -> RankingBacktestRule:
+        """The ranking's replay, which pays the market's fee on every trade and its stock tax on every sale."""
+        return RankingBacktestRule(
+            decision_rule=self.decision_sessions_rule(),
+            ranking_rule=self.ranking.ranking_rule(),
+            fee_rate=self.market.fee_rate,
+            tax_rate=self.market.tax_rate,
+            benchmark_id=self.ranking.benchmark_id,
+            sessions_per_year=self.ranking.sessions_per_year,
         )
 
     def manual_entry_rule(self) -> ManualEntryRule:

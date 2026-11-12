@@ -181,16 +181,17 @@ async def open_stack(
         assert user.user_id == LEGACY_OWNER_ID, f"the stack has one owner, not {user.user_id}"
         return owned
 
+    archive = FakeDailyCloseArchive()
     dependencies = ProviderDependencies(
         stock_provider=stocks,
         price_provider=quotes,
         history_cache=None,
-        bar_matrix_provider=DailyBarMatrixProvider(stocks, quotes, clock, logger),
+        bar_matrix_provider=DailyBarMatrixProvider(stocks, quotes, archive, clock, config.ranking.history_rule(), logger),
         candidate_backtester=ProcessPoolCandidateBacktester(config, clock, 0),
         strategy_search_repository=FakeStrategySearchRepository(),
         broker_market_data=True,
         shioaji=ShioajiConnection(client=FakeShioaji(), up=True),
-        daily_close_archive=FakeDailyCloseArchive(),
+        daily_close_archive=archive,
         fundamentals_provider=FakeFundamentalsProvider(),
         news_provider=FakeNewsProvider(),
         social_media_provider=FakeSocialMediaProvider(),

@@ -44,6 +44,7 @@ const admin = {
       valuation: 'P/E valuation',
       accounts: 'Accounts and usage',
       strategy_search: 'Strategy search',
+      ranking: 'Stock ranking',
       sources: 'Data sources',
     },
     group: {
@@ -257,6 +258,19 @@ const admin = {
         levels: 'Levels of a new condition',
         folder: 'Search results folder',
       },
+      ranking: {
+        decision_day: 'Decision day of the month',
+        top: 'Stocks held',
+        min_close: 'Lowest close (NT$)',
+        min_traded_value: 'Least traded value a session (NT$)',
+        traded_value_sessions: 'Sessions of the traded value',
+        high_sessions: 'Sessions of the high',
+        revenue_short_months: 'Recent revenue months',
+        revenue_long_months: 'Revenue months compared with',
+        daily_limit: 'Largest daily move counted',
+        benchmark_id: 'Benchmark stock',
+        sessions_per_year: 'Sessions a year',
+      },
       sources: {
         exchange: {
           twse_daily_quotes_url: 'TWSE daily quotes URL',
@@ -295,6 +309,13 @@ const admin = {
             stock_code_pattern: 'Stock code regex',
           },
           daily_reports: 'Daily reports on the exchanges’ sites',
+          ex_right_references: {
+            url: 'TWSE ex-right references URL',
+            date: 'Date column',
+            stock_id: 'Stock code column',
+            reference: 'Reference price column',
+            months_per_request: 'Months per request',
+          },
         },
         attribution: {
           providers: 'Providers and datasets',
@@ -310,6 +331,8 @@ const admin = {
           company_id_header: 'Company code header',
           eps_header_prefix: 'EPS header prefix',
           no_data_marker: 'No-data text',
+          monthly_revenue_url: 'Monthly revenue summary URL',
+          revenue_deadline_day: 'Monthly revenue deadline (day of month)',
           request_interval_seconds: 'Pause between requests (seconds)',
           timeout_seconds: 'Request timeout (seconds)',
           provisional_page_max_age_hours: 'Reuse a non-final page for (hours)',
@@ -561,6 +584,19 @@ const admin = {
         levels: 'A generated condition takes one of these levels by the scale of its number: a price or a volume times a level, the others against a level.',
         folder: 'Each search is saved in a folder of its own under this one, relative to the project root.',
       },
+      ranking: {
+        decision_day: 'Each month the ranking decides at the close of its first session on this day of the month or later, and holds its stocks from the next session’s open. It reads the newest month of revenue due before that session (the MOPS revenue deadline).',
+        top: 'How many of the best scores the ranking holds, in equal weights.',
+        min_close: 'A stock is in the ranking’s universe only when it closed at this price or more at the decision, as listed that day.',
+        min_traded_value: 'A stock is in the universe only when it traded this many NT dollars a session on average over the traded-value sessions, a session without a trade counting 0.',
+        traded_value_sessions: 'The sessions, up to the decision, whose traded value is averaged.',
+        high_sessions: 'Nearness to the high is the stock’s total-return level at the decision over its highest level of this many sessions.',
+        revenue_short_months: 'Revenue acceleration is the mean revenue of this many latest months over that of the months it is compared with.',
+        revenue_long_months: 'The latest months whose mean revenue the recent months are compared with. A stock missing any of them has no acceleration.',
+        daily_limit: 'A day’s move beyond this share, on a bar the exchange named no reference price for, is a corporate action, not a return, and counts as 0 in the total-return level.',
+        benchmark_id: 'The stock the ranking backtest compares with, held over the same sessions by its total return, such as 0050.',
+        sessions_per_year: 'The sessions a year the backtest’s annual returns count.',
+      },
       sources: {
         exchange: {
           twse_daily_quotes_url: 'TWSE’s daily trading report of every listed stock in its OpenAPI. The stock list and each listed stock’s latest official close come from it.',
@@ -599,6 +635,13 @@ const admin = {
             stock_code_pattern: 'A regex whose first group is a stock code that a news title names in parentheses, either alone, as in (0053), or after the label 證券代號.',
           },
           daily_reports: 'Where a personal site reads its daily history, without a login. A map keyed by market (twse, tpex). Each holds the URL of the exchange’s closing quotes of one date and of its index’s prices and its market’s volume of one month, with {date} where the date goes, and the column names each report uses. index_volume_lots says the volume report counts board lots. Both markets are required.',
+          ex_right_references: {
+            url: 'TWSE’s ex-right and ex-dividend results of a range of dates (TWT49U), with {first} and {last} where the first and the last date go. A personal site reads each stock’s reference price on its ex-day from it, since TWSE’s closing quotes compare that day’s close to no reference, so its daily history shows no gap at a dividend. A public site never reads it.',
+            date: 'The column of a row’s date, an ROC date that marks its year, month and day.',
+            stock_id: 'The column of a row’s stock code. Only four-digit codes are read.',
+            reference: 'The column of the reference price TWSE set for the ex-day.',
+            months_per_request: 'How many calendar months of dates one request asks for. A quarter is known to work.',
+          },
         },
         attribution: {
           providers: 'One entry per agency whose open data the app reads, with the name it publishes under (provider) and the datasets read from it (datasets). List every dataset the TWSE and TPEX feeds read, since a use without this credit holds no license.',
@@ -614,6 +657,8 @@ const admin = {
           company_id_header: 'The column name of the company code in the MOPS income statements. A page without it is not read.',
           eps_header_prefix: 'The start of the basic EPS column’s name in the MOPS income statements. The first column whose name starts with it is read, and a page without one is not read.',
           no_data_marker: 'The text a MOPS page shows when a query finds nothing. A page with this text and no table counts as empty instead of unreadable.',
+          monthly_revenue_url: 'MOPS’s monthly revenue summary of one past month as CSV, one file per market. {market_code} is the market code above, {roc_year} the ROC year and {month} the month. Its columns are the TWSE and TPEX monthly revenue summary’s. A personal site reads past months from it into the open-data archive with just backfill-history; a public site never reads it.',
+          revenue_deadline_day: 'Companies file each month’s revenue by this day of the month after it. A backfill reads a month again until the archive holds it as served after this day, and the stock ranking reads the latest month whose deadline passed before its decision.',
           request_interval_seconds: 'The least time between two requests to MOPS. A cold load sends ten requests to a shared public service, so they go one at a time.',
           timeout_seconds: 'How long the app waits for a MOPS income-statement page.',
           provisional_page_max_age_hours: 'A cached page that is not final yet is downloaded again once it is this old. A page is final once it was fetched after the quarter’s filing deadline plus the grace days and is not empty.',

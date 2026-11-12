@@ -63,7 +63,7 @@ class OpenDataDownload:
     What one run of the archive downloaded from the TWSE and TPEX OpenAPI: each listed stock with its latest official
     daily bar, each exchange's own index closes, the material information, each company's year-to-date EPS of the
     latest quarter, the valuation ratios, the balance sheets and income statements, the monthly revenue and TWSE's own
-    news, each as served.
+    news, each as served. A backfill of past months' revenue from MOPS saves one that holds that revenue alone.
     """
 
     stocks: list[Stock]
@@ -123,7 +123,10 @@ class IDailyCloseArchive(IOhlcvProvider, INewsProvider, Protocol):
     closes, the material information each company announced, the companies' year-to-date EPS, balance sheets and income
     statements of each quarter, their revenue of each month, each session's valuation ratios and TWSE's own news. What
     the archive did not save in time is lost. It is kept apart from the cached daily history of the exchanges' own
-    reports, which a public site may not download, so the two never mix.
+    reports, which a public site may not download, so the two never mix. The one exception is the monthly revenue: on a
+    personal site it also holds the months before the archive's first, read from MOPS's summary of each month
+    (IFundamentalsProvider.fetch_monthly_revenues), the same summary the OpenAPI serves for its latest month; a public
+    site never reads MOPS.
 
     It is the only price source of an open-data deployment (Audience.open_data_only): fetch_history serves the
     stocks' archived closes and fetch_index_history an index's, each bar stamped
@@ -159,6 +162,25 @@ class IDailyCloseArchive(IOhlcvProvider, INewsProvider, Protocol):
 
     async def months(self) -> list[ArchivedMonth]:
         """Every month the archive holds revenue of, oldest first."""
+        ...
+
+    async def revenue_served(self) -> dict[tuple[MarketType, int, int], date]:
+        """The latest day the archive's revenue of each market's companies of each month (year, month) was served."""
+        ...
+
+    async def revenue_history(self, first: date, last: date) -> dict[tuple[str, int, int], float | None]:
+        """
+        Every company's revenue of each month from first's to last's that the archive holds, by stock id, year and month;
+        None where the summary left the figure blank.
+        """
+        ...
+
+    async def revenue_fingerprint(self) -> tuple[object, ...]:
+        """
+        What the archived monthly revenue adds up to: how many months of companies it holds, how many give a revenue,
+        their sum and the latest day one was served. It differs after a month is archived or served again with another
+        figure, so what was built from revenue_history is as the archive holds it for as long as this stays the same.
+        """
         ...
 
     async def financials(self, stock_id: str) -> tuple[list[QuarterFinancials], list[MonthlyRevenue]]:

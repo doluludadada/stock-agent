@@ -1,5 +1,5 @@
-import { CalendarX, FlaskConical, LoaderCircle, SearchX } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { CalendarX, FlaskConical, SearchX } from 'lucide-react'
+import { useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { useTranslation } from '@/i18n'
 import { isApiError } from '@/shared/api'
@@ -7,6 +7,7 @@ import { Button } from '@/shared/ui/button'
 import { ErrorState } from '@/shared/ui/error-state'
 import { PageHeader } from '@/shared/ui/page-header'
 import { Panel } from '@/shared/ui/panel'
+import { ProgressNote } from '@/shared/ui/progress-note'
 import { RequireSignIn } from '@/shared/ui/require-sign-in'
 import { Skeleton } from '@/shared/ui/skeleton'
 import { StateBlock } from '@/shared/ui/state-block'
@@ -70,7 +71,7 @@ function Workbench() {
       )}
 
       <div className="min-w-0 space-y-4 lg:space-y-5">
-        {runningSince !== null && <RunProgress since={runningSince} />}
+        {runningSince !== null && <ProgressNote since={runningSince} title={(seconds) => t('progress.title', { seconds })} hint={t('progress.hint')} />}
         {shownId === null ? (
           runningSince === null && (
             <>
@@ -111,25 +112,5 @@ function Workbench() {
 
       <SavedBacktests className="xl:col-span-2" shownId={shownId} onDeleted={(id) => id === shownId && show(null)} />
     </div>
-  )
-}
-
-/** A run takes from under a second to tens of seconds: the seconds so far, and why the first one is the slow one. */
-function RunProgress({ since }: { since: number }) {
-  const { t } = useTranslation('backtest')
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000)
-    return () => window.clearInterval(timer)
-  }, [])
-  const seconds = Math.max(0, Math.floor((now - since) / 1000))
-  return (
-    <output className="flex items-start gap-3 rounded-2xl border border-primary/30 bg-brand-soft px-4 py-3.5 text-sm">
-      <LoaderCircle aria-hidden className="mt-0.5 size-4 shrink-0 animate-spin text-brand motion-reduce:animate-none" />
-      <div className="min-w-0 space-y-0.5">
-        <p className="font-medium">{t('progress.title', { seconds })}</p>
-        <p className="text-pretty text-muted-foreground">{t('progress.hint')}</p>
-      </div>
-    </output>
   )
 }

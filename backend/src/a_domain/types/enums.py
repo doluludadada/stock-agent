@@ -1174,6 +1174,9 @@ class ErrorCode(StrEnum):
     BACKTEST_PERIOD_UNAVAILABLE = auto()
     """The daily history the site holds cannot replay the period asked: `detail` says which days a backtest may cover."""
 
+    RANKING_UNAVAILABLE = auto()
+    """The daily history the site holds has no decision session of the monthly ranking yet: `detail` says what it holds."""
+
     LISTING_UNAVAILABLE = auto()
     NOT_FOUND = auto()
     INVALID_REQUEST = auto()
