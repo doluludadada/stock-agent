@@ -58,12 +58,12 @@ def test_a_block_map_is_written_in_block_style_at_its_column_and_the_comment_abo
 
 def test_a_flow_list_is_written_on_its_key_line_in_place_of_the_lines_it_took() -> None:
     texts = repository_texts()
-    after = edited(texts, ("behavior.web_search_triggers", ["latest", "新聞"]), ("technical.built_in_strategies", ["balanced"]))
+    after = edited(texts, ("behavior.web_search_triggers", ["latest", "新聞"]), ("strategy_search.periods", [5, 20, 60]))
     original = texts[SettingsFile.APPSETTING]
     triggers = re.compile(r"web_search_triggers:\n    \[\n.*?\n    \]\n", re.DOTALL)
 
     expected = triggers.sub("web_search_triggers: [latest, 新聞]\n", original, count=1).replace(
-        "built_in_strategies: [conservative, balanced, aggressive]", "built_in_strategies: [balanced]", 1
+        "periods: [5, 10, 14, 20, 30, 60]", "periods: [5, 20, 60]", 1
     )
     assert triggers.search(original) and after[SettingsFile.APPSETTING] == expected
 

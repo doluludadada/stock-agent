@@ -19,7 +19,7 @@ export function RankingPage() {
   const { t } = useTranslation('ranking')
   return (
     <div className="space-y-5 lg:space-y-6">
-      <PageHeader eyebrow={t('common:nav.section.analysis')} title={t('page.title')} description={t('page.description')} />
+      <PageHeader eyebrow={t('common:nav.section.research')} title={t('page.title')} description={t('page.description')} />
       <RequireSignIn layout="page" reason={t('signIn')}>
         <Workbench />
       </RequireSignIn>

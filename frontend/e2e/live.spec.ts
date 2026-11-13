@@ -14,7 +14,7 @@ type Strategy = { strategy_id: string; name: string; rules: { name: string }[]; 
 type Settings = { revision: number; strategies: Strategy[] }
 
 async function copyBalanced(page: Page, name: string): Promise<string> {
-  await page.getByRole('link', { name: '策略庫' }).first().click()
+  await page.goto('/strategies')
   await page.getByRole('button', { name: '新增策略' }).click()
   await page.getByRole('menuitem', { name: '複製 平衡型' }).click()
   await expect(page.getByLabel('策略名稱')).toHaveValue('平衡型 副本')
@@ -30,7 +30,7 @@ test('a built-in strategy copied in the designer saves on the server with all of
   await expect(page.getByText('登入後保存並使用你自己的策略')).toBeVisible()
   await signIn(page)
   await page.reload()
-  await expect(page.getByRole('radiogroup', { name: '使用中的策略' }).getByRole('radio'), 'one choice per built-in').toHaveText(['保守型', '平衡型', '積極型'])
+  await expect(page.getByRole('radiogroup', { name: '使用中的策略' }).getByRole('radio'), 'one choice per built-in').toHaveText(['平衡型'])
 
   const id = await copyBalanced(page, 'E2E 平衡副本')
   const saved = (await apiGet(page, '/v1/technical-settings')) as Settings
@@ -137,24 +137,30 @@ test('the research target can be changed through the listing search, kept in the
 test('after switching the strategy in use, the stock page evaluates with the new one', async ({ page, consoleErrors }) => {
   void consoleErrors
   await signIn(page)
+  await copyBalanced(page, 'E2E 切換用')
   await page.goto('/strategies')
-  const activate = async (name: string) => {
-    const choice = page.getByRole('radiogroup', { name: '使用中的策略' }).getByRole('radio', { name })
+  const activateBuiltIn = async () => {
+    const choice = page.getByRole('radiogroup', { name: '使用中的策略' }).getByRole('radio', { name: '平衡型' })
     if ((await choice.getAttribute('aria-checked')) !== 'true') await choice.click()
     await expect(choice).toHaveAttribute('aria-checked', 'true')
+  }
+  const activateOwn = async (name: string) => {
+    const row = page.getByRole('listitem', { name })
+    await row.getByRole('button', { name: '使用', exact: true }).click()
+    await expect(row.getByText('使用中')).toBeVisible()
   }
   const evaluatedWith = async (name: string) => {
     await page.getByRole('button', { name: '搜尋股票' }).click()
     await page.getByRole('dialog').getByRole('combobox').fill('2330')
     await page.getByRole('option', { name: /2330/ }).first().click({ timeout: 120_000 })
     await expect(page.getByRole('region', { name: '技術評估' })).toContainText(name, { timeout: 120_000 })
-    await page.getByRole('link', { name: '策略庫' }).first().click()
+    await page.goto('/strategies')
   }
-  await activate('平衡型')
+  await activateBuiltIn()
   await evaluatedWith('平衡型')
-  await activate('積極型')
-  await evaluatedWith('積極型')
-  await activate('平衡型')
+  await activateOwn('E2E 切換用')
+  await evaluatedWith('E2E 切換用')
+  await activateBuiltIn()
   await evaluatedWith('平衡型')
 })
 

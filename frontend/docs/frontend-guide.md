@@ -79,7 +79,7 @@ real code; there are no empty `api/` or `hooks/` layers.
 operators, effects) is the backend's, taken from the generated contract (`@/shared/api`, `schema.gen.ts`); a type test
 in `api/mapping.ts` fails to compile when the indicator shapes drift. The editor adds an id to every rule and
 condition, writes constants as tagged nodes and keeps a lone comparison as a `bare` group; `api/mapping.ts` is the one
-place that converts, and `mapping.test.ts` round-trips the three built-in strategies of `config/strategies` exactly.
+place that converts, and `mapping.test.ts` round-trips the built-in strategies of `config/strategies` exactly.
 
 All edits go through `applyEdit` (`model/edit.ts`). Validation (`model/validate.ts`) returns errors the backend would
 refuse and warnings it allows (mixed units); only errors block a save. The readable preview (`model/describe.ts`) is
@@ -161,7 +161,9 @@ stock page say it again beside the result (`NotAdviceNote`).
 
 ## Local persistence
 
-Only the theme and the locale stay in `localStorage` (`stock-agent.theme`, `stock-agent.locale`). The settings form
+The theme, the locale and the folded navigation sections the reader opened stay in `localStorage`
+(`stock-agent.theme`, `stock-agent.locale`, `stock-agent.nav.opened`); each works for the visit when storage is
+refused. The settings form
 keeps its unsaved changes in the page only and asks before the page is left with one. The settings files hold no
 secret: the server refuses one written into them, and its form shows none.
 
@@ -185,9 +187,16 @@ secret: the server refuses one written into them, and its form shows none.
   signed-out or failed state is a `StateBlock`; a figure the backend has no source for is one line that says so.
 - A stock's volume reads in lots through `useFormat().lots` ("3.7萬張"); a price from an older session carries its
   date (`useFormat().closeOn`, "11/2 收盤").
-- Navigation: a bottom tab bar under 768 px (market, analysis, search, watchlist, account, more), a rail of icons from 768 px
+- Navigation: a bottom tab bar under 768 px (ranking, market, search, watchlist, account, more), a rail of icons from 768 px
   and the full sidebar from 1024 px, all from one list (`app/layouts/navigation.ts`), which also feeds the search
-  palette's pages. Every control is at least 44 px tall under 768 px.
+  palette's pages. Every control is at least 44 px tall under 768 px. The list leads with the monthly ranking; the
+  home page stays the market overview.
+- A section marked `folded` (Technical strategies: the runs, the library, the backtest, the designer) shows only its
+  name as a button until the reader opens it, in the sidebar, the rail and the phone's sheet of all pages alike. Open,
+  it says why it is folded in one line (`nav.note.<key>`; the rail has no room for it). `showsItems` decides: a
+  section also shows open while the reader is on one of its pages, and its button rests then, so a page's own entry
+  never hides. The search palette lists every page whatever is folded. Each of the four pages says the same under
+  its title with a link to the ranking (`shared/ui/technical-strategy-note.tsx`, through `PageHeader`'s `note`).
 - No decorative motion: no entrance animations, glows, spotlights or textures. Motion is kept where it explains a
   change, such as a rule card added to or removed from the designer.
 - Market colors follow Taiwan usage: red is up, green is down. Every change also shows a sign,
@@ -235,6 +244,7 @@ whether following it would have beaten the benchmark. Its rules:
 
 `shared/ui/` holds vendored shadcn/ui sources and the project's own primitives (`panel`, `data-table`, `stat`,
 `segmented`, `range-tabs`, `show-more`, `range-meter`, `breadth-bar`, `quote-headline`, `state-block`, `page-header`,
+`technical-strategy-note`,
 `field`, `password-input`, `avatar`, `price-volume-chart`, `price-trend`, `comparison-chart`, `progress-note`,
 `stock-picker`, `confirm-dialog`, `stock-ids-problem`). Lint relaxes only fast-refresh and a few a11y role rules there, to stay close to upstream.
 

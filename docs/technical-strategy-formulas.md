@@ -64,10 +64,11 @@ The code is `backend/src/a_domain/rules/technical/formula.py` (parts and evaluat
 
 ## Built-in strategies
 
-`config/strategies/conservative.json`, `balanced.json` and `aggressive.json` each read on their own. They keep the
-thresholds and effects of the criteria classes they replaced: a seeded test scores 300 random stocks with HEAD's
-criteria and with the formulas and finds every score, pass, failure count and bonus equal
-(`backend/tests/test_built_in_strategies_regression.py`). Two rules changed form, not result: the Golden Cross margin is
+`config/strategies/balanced.json` reads on its own. It keeps the thresholds and effects of the criteria class it
+replaced: a seeded test scores 300 random stocks with HEAD's criteria and with the formulas and finds every score,
+pass, failure count and bonus equal (`backend/tests/test_built_in_strategies_regression.py`). `conservative.json` and
+`aggressive.json` shipped beside it until 2026-11-13 and passed the same test. They were removed after all three lost
+money in a backtest; an owner who first read the settings before then keeps the saved copies as their own strategies. Two rules changed form, not result: the Golden Cross margin is
 `(SMA20 - SMA60) / SMA60 < 0.03`, as the criterion computed it, and the daily range is `(high - low) / low`.
 
 Behavior that did change, by requirement:

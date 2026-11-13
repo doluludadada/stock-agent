@@ -13,20 +13,10 @@ const strategies: DictionaryShape<typeof en> = {
     increase_score_on_pass: '通過加分',
   },
   builtin: {
-    conservative: {
-      apiName: 'Conservative',
-      name: '保守型',
-      purpose: '23 條規則。11 條必須通過：股價站上 20 日與 60 日均線、均線多頭排列、MACD 與 RSI 50–65、KD 與布林不過熱、流動性與量能。',
-    },
     balanced: {
       apiName: 'Balanced',
       name: '平衡型',
       purpose: '23 條規則。趨勢、MACD、RSI 50–80 與流動性必須通過；ADX、布林、MFI、ATR 調整分數，黃金交叉或 OBV 走揚加分。',
-    },
-    aggressive: {
-      apiName: 'Aggressive',
-      name: '積極型',
-      purpose: '20 條規則。只要求股價站上 20 日均線、MACD 在訊號線上、RSI 低於 85 與流動性；動能與量能決定加減分。',
     },
   },
   inUse: '使用中',

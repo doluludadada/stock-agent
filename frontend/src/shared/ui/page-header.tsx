@@ -7,17 +7,20 @@ interface PageHeaderProps {
   eyebrow?: ReactNode
   /** One short line under the title. */
   description?: ReactNode
+  /** A quieter line under the description, such as where a page's subject moved to. */
+  note?: ReactNode
   actions?: ReactNode
   className?: string
 }
 
-export function PageHeader({ title, eyebrow, description, actions, className }: PageHeaderProps) {
+export function PageHeader({ title, eyebrow, description, note, actions, className }: PageHeaderProps) {
   return (
     <header className={cn('flex flex-wrap items-end justify-between gap-x-4 gap-y-3', className)}>
       <div className="min-w-0 space-y-1">
         {eyebrow && <p className="eyebrow">{eyebrow}</p>}
         <h1 className="display text-balance">{title}</h1>
         {description && <p className="text-sm text-pretty text-muted-foreground">{description}</p>}
+        {note}
       </div>
       {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
     </header>

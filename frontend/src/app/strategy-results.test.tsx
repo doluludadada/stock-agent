@@ -13,7 +13,7 @@ import { TEST_USER } from '@/test/users'
 function fakeBackend() {
   let active = 'balanced'
   let revision = 0
-  const settings = () => ({ active_strategy_id: active, strategies: [builtInJson('balanced'), builtInJson('aggressive')], revision })
+  const settings = () => ({ active_strategy_id: active, strategies: [builtInJson('balanced'), { ...builtInJson('balanced'), strategy_id: 'stg_mine', name: 'Mine' }], revision })
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
   const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input)
@@ -58,9 +58,9 @@ describe('saving or switching a strategy', () => {
     vi.unstubAllGlobals()
   })
 
-  async function switchToAggressive() {
+  async function switchToMine() {
     const save = renderHook(() => useSaveStrategySettings(), { wrapper })
-    const next = settingsFromApi({ ...backend.settings(), active_strategy_id: 'aggressive' })
+    const next = settingsFromApi({ ...backend.settings(), active_strategy_id: 'stg_mine' })
     await act(() => save.result.current.mutateAsync(next))
   }
 
@@ -69,11 +69,11 @@ describe('saving or switching a strategy', () => {
     expect(await screen.findByText('evaluated with balanced')).toBeInTheDocument()
     page.unmount()
 
-    await switchToAggressive()
+    await switchToMine()
 
     render(<StockEvaluation />, { wrapper })
     expect(screen.queryByText('evaluated with balanced')).not.toBeInTheDocument()
-    expect(await screen.findByText('evaluated with aggressive')).toBeInTheDocument()
+    expect(await screen.findByText('evaluated with stg_mine')).toBeInTheDocument()
   })
 
   it('never shows a technical valuation scan by the strategy that was replaced', async () => {
@@ -81,19 +81,19 @@ describe('saving or switching a strategy', () => {
     expect(await screen.findByText('scanned with balanced')).toBeInTheDocument()
     page.unmount()
 
-    await switchToAggressive()
+    await switchToMine()
 
     render(<TechnicalScan />, { wrapper })
     expect(screen.queryByText('scanned with balanced')).not.toBeInTheDocument()
-    expect(await screen.findByText('scanned with aggressive')).toBeInTheDocument()
+    expect(await screen.findByText('scanned with stg_mine')).toBeInTheDocument()
   })
 
   it('refreshes an evaluation that is on screen while the save lands', async () => {
     render(<StockEvaluation />, { wrapper })
     expect(await screen.findByText('evaluated with balanced')).toBeInTheDocument()
 
-    await switchToAggressive()
+    await switchToMine()
 
-    expect(await screen.findByText('evaluated with aggressive')).toBeInTheDocument()
+    expect(await screen.findByText('evaluated with stg_mine')).toBeInTheDocument()
   })
 })

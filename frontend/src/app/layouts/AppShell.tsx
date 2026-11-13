@@ -1,4 +1,4 @@
-import { Ellipsis, Search, WifiOff } from 'lucide-react'
+import { ChevronDown, Ellipsis, Search, WifiOff } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router'
 import { UserMenu } from '@/features/auth'
@@ -9,10 +9,11 @@ import { useOnline } from '@/shared/lib/use-online'
 import { cn } from '@/shared/lib/utils'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/shared/ui/sheet'
 import { BrandMark } from './BrandMark'
-import { isCurrent, navSections, TAB_PAGES, type NavItem, type NavSection } from './navigation'
+import { holdsCurrent, isCurrent, navSections, showsItems, TAB_PAGES, type NavItem, type NavSection } from './navigation'
 import { PreferenceControls, PreferenceMenu } from './PreferenceMenu'
 import { SiteFooter } from './SiteFooter'
 import { SearchField, SearchPalette } from './StockSearch'
+import { useOpenedSections } from './use-opened-sections'
 
 /**
  * One shell for every width: a tab bar on a phone, a rail of icons on a tablet, the full sidebar on a desktop. The
@@ -27,6 +28,7 @@ export function AppShell() {
   const [moreOpen, setMoreOpen] = useState(false)
   const audience = useAudience()
   const sections = navSections(current.status === 'signedIn' ? current.user.permissions : [], audience.data)
+  const folds = useOpenedSections()
 
   useEffect(() => {
     window.scrollTo({ top: 0 })
@@ -48,7 +50,7 @@ export function AppShell() {
             <BrandMark className="hidden lg:flex" />
           </div>
           <nav aria-label={t('nav.label')} className="flex-1 overflow-y-auto px-2 pt-2 pb-6 lg:px-3">
-            <SideNav sections={sections} />
+            <SideNav sections={sections} folds={folds} />
           </nav>
         </div>
       </aside>
@@ -73,22 +75,60 @@ export function AppShell() {
       </div>
 
       <TabBar onSearch={() => setSearching(true)} onMore={() => setMoreOpen(true)} moreActive={!Object.values(TAB_PAGES).some((item) => isCurrent(item, location.pathname))} />
-      <MoreSheet open={moreOpen} onOpenChange={setMoreOpen} sections={sections} />
+      <MoreSheet open={moreOpen} onOpenChange={setMoreOpen} sections={sections} folds={folds} />
       <SearchPalette open={searching} onOpenChange={setSearching} sections={sections} />
     </div>
   )
 }
 
-function SideNav({ sections }: { sections: NavSection[] }) {
+type Folds = ReturnType<typeof useOpenedSections>
+
+/**
+ * A folded section's name as the button that opens it. While the reader is on one of its pages the section stays open
+ * and the button rests, so the page's own entry never hides.
+ */
+function FoldButton({ section, folds, controls, className }: { section: NavSection; folds: Folds; controls: string; className?: string }) {
+  const { t } = useTranslation()
+  const location = useLocation()
+  const held = holdsCurrent(section, location.pathname)
+  const open = showsItems(section, folds.opened, location.pathname)
+  return (
+    <button
+      type="button"
+      aria-expanded={open}
+      aria-controls={controls}
+      disabled={held}
+      onClick={() => folds.toggle(section.key)}
+      className={cn('eyebrow rounded-lg transition-colors enabled:hover:bg-muted enabled:hover:text-foreground', className)}
+    >
+      {t(`nav.section.${section.key}`)}
+      {!held && <ChevronDown aria-hidden className={cn('size-4 shrink-0 transition-transform', open && 'rotate-180')} />}
+    </button>
+  )
+}
+
+function SideNav({ sections, folds }: { sections: NavSection[]; folds: Folds }) {
   const { t } = useTranslation()
   const location = useLocation()
   return (
     <div className="space-y-5">
-      {sections.map((section) => (
+      {sections.map((section, index) => (
         <div key={section.key} className="space-y-1">
-          <p className="eyebrow hidden px-2.5 pb-1 lg:block">{t(`nav.section.${section.key}`)}</p>
-          <div aria-hidden className="mx-3 mb-2 border-t first:hidden lg:hidden" />
-          <ul className="space-y-0.5">
+          {index > 0 && <div aria-hidden className="mx-3 mb-2 border-t lg:hidden" />}
+          {section.folded ? (
+            <FoldButton
+              section={section}
+              folds={folds}
+              controls={`side-${section.key}`}
+              className="flex min-h-14 w-full flex-col-reverse items-center justify-center gap-1 px-1 text-center text-[0.6875rem] leading-tight lg:min-h-9 lg:flex-row lg:justify-between lg:px-2.5 lg:text-left lg:text-[length:var(--font-size-caption)]"
+            />
+          ) : (
+            <p className="eyebrow hidden px-2.5 pb-1 lg:block">{t(`nav.section.${section.key}`)}</p>
+          )}
+          {section.folded && showsItems(section, folds.opened, location.pathname) && (
+            <p className="hidden px-2.5 pb-1 text-xs text-pretty text-muted-foreground lg:block">{t(`nav.note.${section.key}`)}</p>
+          )}
+          <ul id={`side-${section.key}`} hidden={!showsItems(section, folds.opened, location.pathname)} className="space-y-0.5">
             {section.items.map((item) => (
               <li key={item.key}>
                 <Link
@@ -114,7 +154,7 @@ function SideNav({ sections }: { sections: NavSection[] }) {
 
 const tabClass = 'flex min-h-11 flex-1 flex-col items-center justify-center gap-0.5 text-[0.6875rem] font-medium transition-colors'
 
-/** The phone's bottom bar: the market, the analysis runs, search, the watchlist, the account and everything else. */
+/** The phone's bottom bar: the ranking, the market, search, the watchlist, the account and everything else. */
 function TabBar({ onSearch, onMore, moreActive }: { onSearch: () => void; onMore: () => void; moreActive: boolean }) {
   const { t } = useTranslation()
   const location = useLocation()
@@ -133,8 +173,8 @@ function TabBar({ onSearch, onMore, moreActive }: { onSearch: () => void; onMore
       className="fixed inset-x-0 bottom-0 z-30 flex border-t bg-background/92 px-1 pb-[env(safe-area-inset-bottom)] shadow-bar backdrop-blur-md md:hidden"
     >
       <div className="flex h-(--tabbar-height) w-full items-stretch">
+        {tab('ranking', TAB_PAGES.ranking)}
         {tab('market', TAB_PAGES.market)}
-        {tab('analysis', TAB_PAGES.analysis)}
         <button type="button" onClick={onSearch} className={cn(tabClass, 'text-muted-foreground')}>
           <span className="grid size-9 place-items-center rounded-full bg-brand text-primary-foreground shadow-card">
             <Search aria-hidden className="size-4.5" />
@@ -153,7 +193,7 @@ function TabBar({ onSearch, onMore, moreActive }: { onSearch: () => void; onMore
 }
 
 /** Every page, the language and the theme, in a sheet that rises from the tab bar. */
-function MoreSheet({ open, onOpenChange, sections }: { open: boolean; onOpenChange: (open: boolean) => void; sections: NavSection[] }) {
+function MoreSheet({ open, onOpenChange, sections, folds }: { open: boolean; onOpenChange: (open: boolean) => void; sections: NavSection[]; folds: Folds }) {
   const { t } = useTranslation()
   const location = useLocation()
   return (
@@ -166,8 +206,15 @@ function MoreSheet({ open, onOpenChange, sections }: { open: boolean; onOpenChan
         <nav aria-label={t('nav.label')} className="space-y-5 px-4">
           {sections.map((section) => (
             <div key={section.key}>
-              <p className="eyebrow mb-2">{t(`nav.section.${section.key}`)}</p>
-              <ul className="grid grid-cols-2 gap-2">
+              {section.folded ? (
+                <FoldButton section={section} folds={folds} controls={`more-${section.key}`} className="-mx-2 mb-2 flex min-h-11 w-[calc(100%+1rem)] items-center justify-between px-2" />
+              ) : (
+                <p className="eyebrow mb-2">{t(`nav.section.${section.key}`)}</p>
+              )}
+              {section.folded && showsItems(section, folds.opened, location.pathname) && (
+                <p className="mb-2 text-xs text-pretty text-muted-foreground">{t(`nav.note.${section.key}`)}</p>
+              )}
+              <ul id={`more-${section.key}`} hidden={!showsItems(section, folds.opened, location.pathname)} className="grid grid-cols-2 gap-2">
                 {section.items.map((item) => (
                   <li key={item.key}>
                     <Link

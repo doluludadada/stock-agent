@@ -70,7 +70,7 @@ chat:
 
 technical:
   # The developer's strategies, in menu order: each is config/strategies/<id>.json. Saving settings never changes them.
-  built_in_strategies: [conservative, balanced, aggressive]
+  built_in_strategies: [balanced]
   # An owner's first settings copy every built-in strategy and select this one for every workflow.
   initial_strategy_id: balanced
 

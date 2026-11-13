@@ -1,7 +1,8 @@
 """
-The built-in strategies replaced HEAD's hand-written criteria classes (commit 1c256b7) with formulas. Their scores on
-300 seeded random stocks were recorded from those classes in tests/fixtures/technical/criteria_scores.jsonl; the
-formulas must reproduce every one: score, pass, how many hard and soft failures, and which bonuses were detected.
+The built-in strategies replaced HEAD's hand-written criteria classes (commit 1c256b7) with formulas. The scores of the
+one that still ships, on 300 seeded random stocks, were recorded from those classes in
+tests/fixtures/technical/criteria_scores.jsonl; its formulas must reproduce every one: score, pass, how many hard and
+soft failures, and which bonuses were detected.
 """
 
 import json

@@ -17,6 +17,7 @@ import { Skeleton } from '@/shared/ui/skeleton'
 import { StateBlock } from '@/shared/ui/state-block'
 import { RequireSignIn } from '@/shared/ui/require-sign-in'
 import { useBuiltInStrategies, useStrategySettings } from '../api/queries'
+import { TechnicalStrategyNote } from '@/shared/ui/technical-strategy-note'
 import { blankRule } from '../model/edit'
 import type { NodeId, Scoring, Strategy } from '../model/types'
 import { errorsOf, issuesByOwner, issuesByPath, requiredBars } from '../model/validate'
@@ -287,6 +288,7 @@ function StrategyHeading({ strategy, edit, issue }: { strategy: Strategy; edit: 
         className="display h-auto border-transparent bg-transparent px-2 py-1 -ml-2 shadow-none hover:border-input focus-visible:border-ring md:h-auto md:text-[length:inherit]"
       />
       <FieldError id="strategy-name-error" issue={nameIssue} />
+      <TechnicalStrategyNote />
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span className="font-mono">{t('name.id', { id: strategy.id })}</span>
         <span className="tabular">{t('preview.bars', { count: requiredBars(strategy) })}</span>

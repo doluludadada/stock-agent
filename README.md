@@ -100,7 +100,7 @@ A technical strategy is a list of rules, each a formula the user builds from par
 
 A stock with fewer daily bars than its strategy needs, or whose formulas divide by zero or read a value its history cannot give, fails the technical step with score 0. No rule result stands in for missing data.
 
-The developer ships three strategies, `config/strategies/conservative.json`, `balanced.json` and `aggressive.json`, listed under `technical.built_in_strategies` in `config/appsetting.yaml`. They score every stock as the criteria classes they replaced did (`backend/tests/test_built_in_strategies_regression.py`). An owner's first read of the settings saves an independent copy of all three, with `technical.initial_strategy_id` (`balanced`) selected for every workflow. Later saves go to the database through `PUT /v1/technical-settings` and never change the files. Menu 8 of the CLI loads a built-in strategy for the runs of that CLI session only.
+The developer ships one strategy, `config/strategies/balanced.json`, listed under `technical.built_in_strategies` in `config/appsetting.yaml`. It scores every stock as the criteria class it replaced did (`backend/tests/test_built_in_strategies_regression.py`). An owner's first read of the settings saves an independent copy of every built-in strategy, with `technical.initial_strategy_id` (`balanced`) selected for every workflow. The `conservative` and `aggressive` strategies no longer ship: an owner who first read while they did keeps the saved copies as their own strategies, and the one in use stays in use. Later saves go to the database through `PUT /v1/technical-settings` and never change the files. Menu 8 of the CLI loads a built-in strategy for the runs of that CLI session only.
 
 ## Watchlist Types
 

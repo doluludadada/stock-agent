@@ -173,12 +173,14 @@ describe('invalid drafts', () => {
 })
 
 describe('saved settings', () => {
+  /** The copy a first read saved while the app shipped an Aggressive built-in, which it no longer does. */
+  const retired: Strategy = { ...builtIn('balanced'), id: 'aggressive' as StrategyId, name: 'Aggressive' }
   const settings: StrategySettings = {
     activeStrategyId: 'balanced' as StrategyId,
-    strategies: [builtIn('balanced'), builtIn('aggressive')],
+    strategies: [builtIn('balanced'), retired],
     revision: 4,
   }
-  const builtIns = [builtIn('conservative'), builtIn('balanced'), builtIn('aggressive')]
+  const builtIns = [builtIn('balanced')]
   const edited = (strategy: Strategy): Strategy => ({ ...strategy, scoring: { ...strategy.scoring, baseScore: 60 } })
 
   it('adds or replaces one strategy and keeps the revision the save must carry', () => {
@@ -194,23 +196,29 @@ describe('saved settings', () => {
 
   it('counts a copy of a built-in as the built-in, and as the owner’s own once it changed', () => {
     const mine = copyOfBalanced()
-    expect(customStrategies({ ...settings, strategies: [...settings.strategies, mine] }, builtIns).map((item) => item.id)).toEqual([mine.id])
+    const own = (given: StrategySettings) => customStrategies(given, builtIns).map((item) => item.id)
+    expect(own({ ...settings, strategies: [builtIn('balanced'), mine] })).toEqual([mine.id])
     expect(builtInInUse(settings, builtIns)?.id).toBe('balanced')
 
-    const changed = { ...settings, strategies: [edited(builtIn('balanced')), builtIn('aggressive')] }
-    expect(customStrategies(changed, builtIns).map((item) => item.id)).toEqual(['balanced'])
+    const changed = { ...settings, strategies: [edited(builtIn('balanced'))] }
+    expect(own(changed)).toEqual(['balanced'])
     expect(builtInInUse(changed, builtIns)).toBeNull()
   })
 
+  it('counts a saved copy of a built-in that no longer ships as the owner’s own, in use or not', () => {
+    expect(customStrategies(settings, builtIns).map((item) => item.id)).toEqual(['aggressive'])
+    expect(builtInInUse({ ...settings, activeStrategyId: retired.id }, builtIns)).toBeNull()
+  })
+
   it('puts a built-in in use as it ships, bringing back a deleted copy and keeping a changed one under a new id', () => {
-    const conservative = builtIn('conservative')
-    expect(withBuiltInActive(settings, conservative, 'stg_new' as StrategyId)).toMatchObject({
-      activeStrategyId: 'conservative',
-      strategies: [{ id: 'balanced' }, { id: 'aggressive' }, { id: 'conservative' }],
+    const withoutBalanced = { ...settings, activeStrategyId: retired.id, strategies: [retired] }
+    expect(withBuiltInActive(withoutBalanced, builtIn('balanced'), 'stg_new' as StrategyId)).toMatchObject({
+      activeStrategyId: 'balanced',
+      strategies: [{ id: 'aggressive' }, { id: 'balanced' }],
       revision: 4,
     })
 
-    const changed = { ...settings, activeStrategyId: 'aggressive' as StrategyId, strategies: [edited(builtIn('balanced')), builtIn('aggressive')] }
+    const changed = { ...settings, activeStrategyId: retired.id, strategies: [edited(builtIn('balanced')), retired] }
     const next = withBuiltInActive(changed, builtIn('balanced'), 'stg_new' as StrategyId)
     expect(next).toMatchObject({ activeStrategyId: 'balanced', strategies: [{ id: 'balanced' }, { id: 'aggressive' }, { id: 'stg_new' }] })
     if (typeof next === 'string') throw new Error(next)

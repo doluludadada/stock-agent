@@ -17,7 +17,7 @@ import type {
 /**
  * The one boundary between the API's formula JSON and the editor model. Reading gives every rule and condition a
  * position-derived id and turns numbers into constant nodes; writing drops the ids and writes every default
- * (`output`, `bars_ago`) explicitly. `mapping.test.ts` sends the three built-in strategies of config/strategies through
+ * (`output`, `bars_ago`) explicitly. `mapping.test.ts` sends the built-in strategies of config/strategies through
  * both directions and requires the backend's exact JSON back.
  */
 

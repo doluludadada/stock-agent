@@ -11,13 +11,15 @@ import { StrategyLibraryPage } from './StrategyLibraryPage'
 
 const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
 
-const BUILT_INS = [builtInJson('conservative'), builtInJson('balanced'), builtInJson('aggressive')]
+const BUILT_INS = [builtInJson('balanced')]
+/** The copy a first read saved while the app shipped an Aggressive built-in, which it no longer does. */
+const RETIRED = { ...builtInJson('balanced'), strategy_id: 'aggressive', name: 'Aggressive' }
 const MINE = { ...builtInJson('balanced'), strategy_id: 'stg_mine', name: 'Mine' }
 
-/** The library of a user who has the first read's copies of the built-ins and one strategy of their own. */
+/** The library of a user who has the first read's copies, one of a built-in that no longer ships, and one strategy of their own. */
 async function renderLibrary(active: string) {
   const saved: unknown[] = []
-  const settings = { active_strategy_id: active, strategies: [...BUILT_INS, MINE], revision: 1 }
+  const settings = { active_strategy_id: active, strategies: [...BUILT_INS, RETIRED, MINE], revision: 1 }
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init?: RequestInit) => {
@@ -52,19 +54,31 @@ describe('the strategy library', { timeout: 20_000 }, () => {
     vi.unstubAllGlobals()
   })
 
-  it('picks the one strategy in use among the built-ins, and lists only the user’s own below', async () => {
-    const saved = await renderLibrary('balanced')
+  it('offers the one built-in, and lists the user’s own strategies below, a copy of a built-in that no longer ships among them', async () => {
+    await renderLibrary('balanced')
 
     const choice = screen.getByRole('radiogroup', { name: 'Strategy in use' })
-    expect(within(choice).getAllByRole('radio').map((option) => option.textContent)).toEqual(['Conservative', 'Balanced', 'Aggressive'])
+    expect(within(choice).getAllByRole('radio').map((option) => option.textContent)).toEqual(['Balanced'])
     expect(within(choice).getByRole('radio', { name: 'Balanced' })).toHaveAttribute('aria-checked', 'true')
     const mine = screen.getByRole('list')
-    expect(within(mine).getAllByRole('listitem').map((row) => row.getAttribute('aria-label'))).toEqual(['Mine'])
+    expect(within(mine).getAllByRole('listitem').map((row) => row.getAttribute('aria-label'))).toEqual(['Aggressive', 'Mine'])
     expect(screen.queryByText(/Social Buzz/)).not.toBeInTheDocument()
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'New strategy' }), { button: 0, ctrlKey: false })
+    expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual(['Blank strategy', 'Copy Balanced'])
+  })
 
-    fireEvent.click(within(choice).getByRole('radio', { name: 'Aggressive' }))
+  it('keeps a copy of a built-in that no longer ships in use until the user picks another strategy', async () => {
+    const saved = await renderLibrary('aggressive')
 
-    await waitFor(() => expect(saved).toEqual([expect.objectContaining({ active_strategy_id: 'aggressive', revision: 1 })]))
+    const choice = screen.getByRole('radiogroup', { name: 'Strategy in use' })
+    expect(within(choice).queryByRole('radio', { checked: true })).toBeNull()
+    expect(screen.getByText('Every workflow uses your strategy “Aggressive”.')).toBeInTheDocument()
+    expect(within(screen.getByRole('listitem', { name: 'Aggressive' })).getByText('In use')).toBeInTheDocument()
+    expect(saved).toEqual([])
+
+    fireEvent.click(within(choice).getByRole('radio', { name: 'Balanced' }))
+
+    await waitFor(() => expect(saved).toEqual([expect.objectContaining({ active_strategy_id: 'balanced', revision: 1 })]))
   })
 
   it('says which of the user’s own strategies is in use, and offers each one to use, edit, duplicate or delete', async () => {

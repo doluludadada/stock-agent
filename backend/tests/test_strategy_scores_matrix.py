@@ -175,9 +175,8 @@ def assert_every_cell_matches(strategy: TechnicalStrategy, matrix: DailyBarMatri
     return outcomes
 
 
-@pytest.mark.parametrize("strategy_id", ["aggressive", "balanced", "conservative"])
-def test_a_built_in_strategy_scores_every_cell_as_the_live_strategy(strategy_id: str) -> None:
-    strategy = next(strategy for strategy in shipped_config().technical.built_in_strategies if strategy.strategy_id == strategy_id)
+def test_the_built_in_strategy_scores_every_cell_as_the_live_strategy() -> None:
+    [strategy] = shipped_config().technical.built_in_strategies
 
     outcomes = assert_every_cell_matches(strategy, random_matrix(40, 150, 7), window_starts(150, 130, 8))
 

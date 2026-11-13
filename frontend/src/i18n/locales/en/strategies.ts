@@ -10,20 +10,10 @@ const strategies = {
     increase_score_on_pass: 'Add if passed',
   },
   builtin: {
-    conservative: {
-      apiName: 'Conservative',
-      name: 'Conservative',
-      purpose: '23 rules. Eleven must pass: price above the 20- and 60-day averages, aligned averages, MACD and RSI 50–65, calm Stochastic and Bollinger, liquidity and volume.',
-    },
     balanced: {
       apiName: 'Balanced',
       name: 'Balanced',
       purpose: '23 rules. Trend, MACD, RSI 50–80 and liquidity must pass; ADX, Bollinger, MFI and ATR adjust the score, and a golden cross or OBV trend adds to it.',
-    },
-    aggressive: {
-      apiName: 'Aggressive',
-      name: 'Aggressive',
-      purpose: '20 rules. Only price above the 20-day average, MACD above its signal, RSI below 85 and liquidity must pass; momentum and volume move the score.',
     },
   },
   inUse: 'In use',

@@ -386,10 +386,10 @@ async def test_a_built_in_strategy_id_is_checked_before_it_names_a_file_and_no_s
     project: Path, strategy_id: str, message: str
 ) -> None:
     async with serve(admin_harness(project)) as client:
-        response = await save(client, ("technical.built_in_strategies", ["conservative", "balanced", "aggressive", strategy_id]))
+        response = await save(client, ("technical.built_in_strategies", ["balanced", strategy_id]))
 
     [problem] = response.json()["problems"]
-    assert (problem["path"], problem["message"]) == ("technical.built_in_strategies.3", message)
+    assert (problem["path"], problem["message"]) == ("technical.built_in_strategies.1", message)
     assert str(project) not in response.text and "Errno" not in response.text
 
 

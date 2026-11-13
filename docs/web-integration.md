@@ -71,8 +71,8 @@ TypeScript 7. The one transport (`shared/api/http.ts`) types every request and a
 its endpoints, query keys and mapping.
 
 The formula editor keeps a model of its own (an id per rule and condition, constants as tagged nodes) and converts in
-one place, `features/strategies/api/mapping.ts`. Its test sends the three built-in strategies of `config/strategies`
-(23, 23 and 20 rules: every effect, `ne`-free comparisons, constants, `latest_price`, arithmetic, bare comparisons and
+one place, `features/strategies/api/mapping.ts`. Its test sends the built-in strategy of `config/strategies`
+(23 rules: every effect, `ne`-free comparisons, constants, `latest_price`, arithmetic, bare comparisons and
 every MACD output) through both directions and requires the backend's JSON back. `catalog.test.ts` compares every
 indicator kind, parameter bound and output with the contract. A save carries the revision it read; a 409 keeps the
 draft and offers to save it into the newer settings.
@@ -177,9 +177,13 @@ that can race the mock account's cash, which `formal-verify-order-gate` lists as
 
 ## Feature matrix
 
+The navigation leads with the monthly ranking, then the market overview and the valuation. The runs, the strategy
+library, the backtest and the formula designer are one section, Technical strategies, folded until the reader opens it;
+every one of them works as before. All three built-in strategies lost money in a backtest, so one, `balanced`, ships.
+
 | Feature | Status |
 | --- | --- |
-| Strategy library and formula designer | Live: built-ins and catalog from the API, owner strategies saved with revisions, copy, delete, select for runs and Buzz. |
+| Strategy library and formula designer | Live: the built-in and catalog from the API, owner strategies saved with revisions, copy, delete, select for runs and Buzz. |
 | Full Cycle and specific-stock runs | Live: start after confirming the AI cost, state polled until it ends, paged history, decisions, orders, reports saved with the run. |
 | Buzz and Intraday runs | Live on the account the start's confirmation chooses: the mock account, or SinoPac for an administrator while its login is up. |
 | Manual BUY | Live on a finished specific-stock run's page: the shares, the account and a confirmation that names SinoPac's server and limits. |

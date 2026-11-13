@@ -11,11 +11,11 @@ describe('the formula JSON boundary', () => {
     expect(strategy.rules).toHaveLength(api.rules.length)
   })
 
-  it('reads all 23, 23 and 20 built-in rules with every effect, constants, arithmetic, MACD outputs and latest_price', () => {
+  it('reads all 23 built-in rules with every effect, constants, arithmetic, MACD outputs and latest_price', () => {
     const strategies = BUILT_INS.map((id) => strategyFromApi(builtIn(id)))
     const text = JSON.stringify(strategies)
 
-    expect(strategies.map((strategy) => strategy.rules.length)).toEqual([23, 23, 20])
+    expect(strategies.map((strategy) => strategy.rules.length)).toEqual([23])
     for (const effect of ['block_on_fail', 'reduce_score_on_fail', 'increase_score_on_pass']) expect(text).toContain(`"effect":"${effect}"`)
     for (const node of ['"type":"latest_price"', '"type":"constant"', '"output":"histogram"', '"output":"signal"', '"type":"arithmetic"']) expect(text).toContain(node)
     expect(text).not.toContain('indicator_id')

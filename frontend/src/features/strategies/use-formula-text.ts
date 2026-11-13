@@ -15,7 +15,7 @@ export function useFormulaText(): FormulaText {
 }
 
 /**
- * A strategy's name is the owner's own text. The three built-in ids also get a translated name, while the name is
+ * A strategy's name is the owner's own text. A built-in id also gets a translated name, while the name is
  * still the built-in's, and a translated purpose: the backend stores no description. A rule's name is the owner's text
  * too, shown as typed, except a built-in strategy's own rule: in a strategy with a built-in id, a rule that still has
  * a name the built-ins ship reads in the reader's language. The strategy's id decides, never the name alone, so a

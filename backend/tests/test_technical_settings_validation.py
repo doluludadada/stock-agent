@@ -1,7 +1,6 @@
 """What the technical settings refuse, and the built-in strategies the developer ships in config/strategies/."""
 
 from pathlib import Path
-from typing import Any
 
 import pytest
 from pydantic import TypeAdapter, ValidationError
@@ -145,22 +144,17 @@ def test_invalid_settings_are_refused(document: Json) -> None:
 # ---------------------------- Built-in strategies ---------------------------- #
 
 
-def built_in_file(strategy_id: str) -> Any:
-    return (STRATEGY_FILES / f"{strategy_id}.json").read_bytes()
+def test_the_built_in_strategy_file_is_a_valid_strategy_that_needs_61_bars() -> None:
+    strategy = TypeAdapter(TechnicalStrategy).validate_json((STRATEGY_FILES / "balanced.json").read_bytes())
+
+    assert (strategy.strategy_id, len(strategy.rules), strategy.required_bars) == ("balanced", 23, 61)
 
 
-@pytest.mark.parametrize(("strategy_id", "rule_count"), [("conservative", 23), ("balanced", 23), ("aggressive", 20)])
-def test_each_built_in_strategy_file_is_a_valid_strategy_that_needs_61_bars(strategy_id: str, rule_count: int) -> None:
-    strategy = TypeAdapter(TechnicalStrategy).validate_json(built_in_file(strategy_id))
-
-    assert (strategy.strategy_id, len(strategy.rules), strategy.required_bars) == (strategy_id, rule_count, 61)
-
-
-def test_the_built_in_strategies_are_the_three_files_in_menu_order_and_every_owner_starts_on_balanced() -> None:
+def test_the_one_built_in_strategy_is_the_file_that_ships_and_every_owner_starts_on_it() -> None:
     technical = shipped_config().technical
     initial = technical.initial_settings
 
-    assert sorted(path.stem for path in STRATEGY_FILES.glob("*.json")) == ["aggressive", "balanced", "conservative"]
-    assert [strategy.strategy_id for strategy in technical.built_in_strategies] == ["conservative", "balanced", "aggressive"]
+    assert sorted(path.stem for path in STRATEGY_FILES.glob("*.json")) == ["balanced"]
+    assert [strategy.strategy_id for strategy in technical.built_in_strategies] == ["balanced"]
     assert (initial.active_strategy_id, initial.revision) == ("balanced", 0)
     assert initial.strategies == technical.built_in_strategies

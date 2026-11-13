@@ -34,7 +34,17 @@ pytestmark = pytest.mark.asyncio
 
 SETTINGS = TypeAdapter(TechnicalSettings)
 STRATEGY_FILES = Path(__file__).resolve().parents[2] / "config" / "strategies"
-INITIAL = shipped_config().technical.initial_settings
+SHIPPED = shipped_config().technical.initial_settings
+BALANCED = SHIPPED.active_strategy
+INITIAL = TechnicalSettings(
+    active_strategy_id="balanced",
+    strategies=(
+        replace(BALANCED, strategy_id="conservative", name="Conservative"),
+        BALANCED,
+        replace(BALANCED, strategy_id="aggressive", name="Aggressive"),
+    ),
+)
+"""What an owner holds who first read while three built-in strategies shipped: a copy under each of their ids."""
 OTHER_INITIAL = harness_settings()
 
 
@@ -106,6 +116,15 @@ async def test_a_save_from_an_older_revision_is_refused_and_changes_nothing(db: 
         await of(db, "alice").save(replace(read, active_strategy_id="conservative"))
 
     assert await of(db, "alice").load(INITIAL) == first
+
+
+async def test_an_owner_keeps_the_built_ins_that_no_longer_ship_and_the_one_of_them_in_use(db: DatabaseConnector) -> None:
+    held = await of(db, "alice").save(replace(await of(db, "alice").load(INITIAL), active_strategy_id="aggressive"))
+
+    assert [strategy.strategy_id for strategy in SHIPPED.strategies] == ["balanced"]
+    assert await of(db, "alice").load(SHIPPED) == held
+    assert [strategy.strategy_id for strategy in held.strategies] == ["conservative", "balanced", "aggressive"]
+    assert held.active_strategy.strategy_id == "aggressive"
 
 
 async def test_a_save_for_an_owner_who_never_loaded_is_refused_and_creates_nothing(db: DatabaseConnector) -> None:
@@ -195,7 +214,7 @@ async def test_a_copy_of_a_built_in_strategy_changes_alone(db: DatabaseConnector
         "your_balanced": 60,
     }
     assert (loaded.active_strategy.strategy_id, loaded.active_strategy.required_bars) == ("my_balanced", 84)
-    assert shipped_config().technical.built_in_strategies == INITIAL.strategies
+    assert shipped_config().technical.built_in_strategies == (BALANCED,)
 
 
 async def test_saving_settings_never_changes_the_built_in_strategy_files(db: DatabaseConnector) -> None:
@@ -205,7 +224,7 @@ async def test_saving_settings_never_changes_the_built_in_strategy_files(db: Dat
     await of(db, "alice").save(replace(read, strategies=tuple(with_period(strategy, "ind_a", 37) for strategy in read.strategies)))
 
     assert {path.name: path.read_bytes() for path in STRATEGY_FILES.glob("*.json")} == files
-    assert shipped_config().technical.built_in_strategies == INITIAL.strategies
+    assert shipped_config().technical.built_in_strategies == (BALANCED,)
     assert all(strategy.indicators["ind_a"].period == 37 for strategy in (await of(db, "alice").load(INITIAL)).strategies)
 
 
@@ -288,10 +307,8 @@ CUSTOM: Json = {
 
 
 def settings_json() -> Json:
-    built_ins = [
-        json.loads((STRATEGY_FILES / f"{strategy_id}.json").read_text()) for strategy_id in ("conservative", "balanced", "aggressive")
-    ]
-    return {"active_strategy_id": "custom", "strategies": [*built_ins, CUSTOM], "revision": 0}
+    built_in = json.loads((STRATEGY_FILES / "balanced.json").read_text())
+    return {"active_strategy_id": "custom", "strategies": [built_in, CUSTOM], "revision": 0}
 
 
 def unused_formula_words() -> list[str]:
@@ -319,7 +336,7 @@ async def test_settings_keep_every_formula_through_json_and_sql(tmp_path: Path, 
         await reopened.close()
 
     returned = json.loads(SETTINGS.dump_json(loaded))
-    assert returned["strategies"][3] == CUSTOM
+    assert returned["strategies"][1] == CUSTOM
     assert {key: value for key, value in returned.items() if key != "strategies"} == {"active_strategy_id": "custom", "revision": 0}
     assert SETTINGS.validate_python(returned) == SETTINGS.validate_python(document) == loaded
 

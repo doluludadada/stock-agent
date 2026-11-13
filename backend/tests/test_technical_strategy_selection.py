@@ -103,7 +103,7 @@ async def test_a_run_given_a_built_in_strategy_uses_it_and_leaves_the_saved_sett
     harness = build_harness()
     harness.list_stock("2330", rising_history(100.0), realtime_price=100.0)
 
-    with_built_in = await harness.pipeline.analyse_specific_stocks(["2330"], built_in_strategy_id="aggressive")
+    with_built_in = await harness.pipeline.analyse_specific_stocks(["2330"], built_in_strategy_id="balanced")
     with_saved = await harness.pipeline.analyse_specific_stocks(["2330"])
 
     assert reported(with_built_in, "2330") == (0, ["Need 61 daily bars; received 10"])
@@ -189,14 +189,14 @@ async def choose(
     return status, offered
 
 
-async def test_menu_8_offers_exactly_the_three_built_in_strategies_and_cancel(screen: io.StringIO) -> None:
+async def test_menu_8_offers_exactly_the_built_in_strategy_and_cancel(screen: io.StringIO) -> None:
     harness = build_harness()
 
     _, offered = await choose(harness, harness.session(), "8", "0")
 
     listed = [line for line in screen.getvalue().splitlines() if line.startswith("[")]
-    assert listed == ["[1] Conservative", "[2] Balanced", "[3] Aggressive", "[0] Cancel"]
-    assert offered == [["0", "1", "2", "3"]]
+    assert listed == ["[1] Balanced", "[0] Cancel"]
+    assert offered == [["0", "1"]]
 
 
 def built_in(strategy_id: str, base_score: int) -> TechnicalStrategy:

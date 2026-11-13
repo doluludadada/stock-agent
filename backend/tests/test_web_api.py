@@ -404,7 +404,7 @@ async def test_the_built_in_strategies_are_public_in_menu_order() -> None:
 
     built_ins = shipped_config().technical.built_in_strategies
     assert response.status_code == 200
-    assert [strategy["strategy_id"] for strategy in response.json()] == ["conservative", "balanced", "aggressive"]
+    assert [strategy["strategy_id"] for strategy in response.json()] == ["balanced"]
     assert TypeAdapter(tuple[TechnicalStrategy, ...]).validate_python(response.json()) == built_ins
 
 

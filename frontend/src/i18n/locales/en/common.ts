@@ -19,8 +19,9 @@ const common = {
     admin: 'System settings',
     users: 'Users',
     tabs: 'Main pages',
-    section: { analysis: 'Analysis', research: 'Research', mine: 'Mine', admin: 'Administration' },
-    tab: { analysis: 'Analysis', market: 'Market', watchlist: 'Watchlist', search: 'Search', account: 'Account', more: 'More' },
+    section: { research: 'Research', mine: 'Mine', technical: 'Technical strategies', admin: 'Administration' },
+    note: { technical: 'Did not profit in a backtest. Every page is kept.' },
+    tab: { ranking: 'Ranking', market: 'Market', watchlist: 'Watchlist', search: 'Search', account: 'Account', more: 'More' },
     moreTitle: 'All pages',
   },
   search: {
@@ -90,6 +91,10 @@ const common = {
   close: 'Close',
   loading: 'Loading…',
   notAdvice: 'For research and reference only, not investment advice.',
+  technicalNote: {
+    text: 'The built-in technical strategies did not profit in a backtest. The app’s attention is now on the monthly revenue ranking.',
+    link: 'Open the ranking',
+  },
   footer: {
     notAdvice: 'The analyses, scores and decisions on this site are for research and reference only and are not investment advice. Decide and invest at your own risk.',
     attribution: 'Data sources and license',

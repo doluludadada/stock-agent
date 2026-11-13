@@ -6,6 +6,7 @@ import { isApiError } from '@/shared/api'
 import { Button } from '@/shared/ui/button'
 import { ErrorState } from '@/shared/ui/error-state'
 import { PageHeader } from '@/shared/ui/page-header'
+import { TechnicalStrategyNote } from '@/shared/ui/technical-strategy-note'
 import { Panel } from '@/shared/ui/panel'
 import { ProgressNote } from '@/shared/ui/progress-note'
 import { RequireSignIn } from '@/shared/ui/require-sign-in'
@@ -22,7 +23,7 @@ export function BacktestPage() {
   const { t } = useTranslation('backtest')
   return (
     <div className="space-y-5 lg:space-y-6">
-      <PageHeader eyebrow={t('common:nav.section.analysis')} title={t('page.title')} description={t('page.description')} />
+      <PageHeader eyebrow={t('common:nav.section.technical')} title={t('page.title')} description={t('page.description')} note={<TechnicalStrategyNote />} />
       <RequireSignIn layout="page" reason={t('signIn')}>
         <Workbench />
       </RequireSignIn>

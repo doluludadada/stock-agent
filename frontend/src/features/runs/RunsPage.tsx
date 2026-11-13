@@ -20,6 +20,7 @@ import { Panel } from '@/shared/ui/panel'
 import { Skeleton } from '@/shared/ui/skeleton'
 import { StateBlock } from '@/shared/ui/state-block'
 import { StockIdsProblem } from '@/shared/ui/stock-ids-problem'
+import { TechnicalStrategyNote } from '@/shared/ui/technical-strategy-note'
 import { SignInActions } from '@/shared/ui/require-sign-in'
 import { PAGE_SIZE, useRunSignals, useRunsPage, useStartRun, type Run, type RunKind, type Signal } from './api'
 import { BrokerChoice } from './BrokerChoice'
@@ -48,7 +49,7 @@ export function RunsPage() {
   const kinds = audience.data ? offeredKinds(audience.data) : null
   return (
     <div className="space-y-5 lg:space-y-6">
-      <PageHeader eyebrow={t('common:nav.section.analysis')} title={t('title')} description={t('description')} />
+      <PageHeader eyebrow={t('common:nav.section.technical')} title={t('title')} description={t('description')} note={<TechnicalStrategyNote />} />
       {(current.status === 'checking' || audience.isPending) && <Skeleton className="h-40 rounded-2xl" />}
       {audience.isError && <ErrorState error={audience.error} title={t('common:audience.failed')} onRetry={() => void audience.refetch()} className="rounded-2xl border bg-card" />}
       {kinds && current.status === 'signedOut' && <Intro ended={current.ended} kinds={kinds} />}

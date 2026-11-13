@@ -22,8 +22,9 @@ const common: DictionaryShape<typeof en> = {
     admin: '系統設定',
     users: '使用者',
     tabs: '常用頁面',
-    section: { analysis: '分析', research: '研究', mine: '我的', admin: '管理' },
-    tab: { analysis: '分析', market: '市場', watchlist: '觀察清單', search: '搜尋', account: '模擬帳戶', more: '更多' },
+    section: { research: '研究', mine: '我的', technical: '技術策略', admin: '管理' },
+    note: { technical: '回測沒有獲利，功能都保留。' },
+    tab: { ranking: '排名', market: '市場', watchlist: '觀察清單', search: '搜尋', account: '模擬帳戶', more: '更多' },
     moreTitle: '所有頁面',
   },
   search: {
@@ -93,6 +94,10 @@ const common: DictionaryShape<typeof en> = {
   close: '關閉',
   loading: '載入中…',
   notAdvice: '僅供研究參考，不構成投資建議。',
+  technicalNote: {
+    text: '內建技術策略的回測沒有獲利，目前的重心是月營收排名。',
+    link: '前往月營收排名',
+  },
   footer: {
     notAdvice: '本站的分析、分數與決策僅供研究參考，不構成投資建議；投資請自行判斷並承擔風險。',
     attribution: '資料來源與授權',

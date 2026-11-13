@@ -119,8 +119,9 @@ describe('translations', () => {
       ['ranking', 'record.headline', ['ahead', 'behind', 'level', 'alone', 'short']],
       ['ranking', 'curve.reading', ['log', 'linear']],
       ['ranking', 'caveats', CAVEATS.flatMap((caveat) => [`${caveat}.title`, `${caveat}.detail`])],
-      ['common', 'nav.section', ['analysis', 'research', 'mine', 'admin']],
-      ['common', 'nav.tab', ['analysis', 'market', 'search', 'watchlist', 'account', 'more']],
+      ['common', 'nav.section', ['research', 'mine', 'technical', 'admin']],
+      ['common', 'nav.note', ['technical']],
+      ['common', 'nav.tab', ['ranking', 'market', 'search', 'watchlist', 'account', 'more']],
       ['overview', 'index', openapi.components.schemas.MarketIndex.enum as string[]],
       ['research', 'financials.figure', QUARTER_FIGURES.map((figure) => figure.key)],
     ]
