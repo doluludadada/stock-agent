@@ -4,6 +4,7 @@ import { Link } from 'react-router'
 import { useTranslation } from '@/i18n'
 import { isApiError, useShows } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
+import { useErrorReason } from '@/shared/lib/error-reason'
 import { Button } from '@/shared/ui/button'
 import { ErrorState } from '@/shared/ui/error-state'
 import { Label } from '@/shared/ui/label'
@@ -25,13 +26,13 @@ export function MySettingsPage({ mockAccount }: MySettingsPageProps) {
   const library = useShows('strategy_library')
   return (
     <div className="page-stack">
-      <PageHeader title={t('settings.title')} description={t('settings.description')} />
+      <PageHeader title={t('settings.title')} />
       <RequireSignIn layout="page" reason={t('settings.signIn')}>
         <div className="card-grid max-w-3xl">
           <AiModelPanel />
           {mockAccount}
           {library && (
-            <Panel title={t('settings.strategy.title')} description={t('settings.strategy.description')}>
+            <Panel title={t('settings.strategy.title')}>
               <Button asChild variant="outline" size="sm">
                 <Link to={paths.strategies}>
                   {t('settings.strategy.link')}
@@ -50,7 +51,7 @@ function AiModelPanel() {
   const { t } = useTranslation('auth')
   const models = useAiModels()
   return (
-    <Panel title={t('settings.aiModel.title')} description={t('settings.aiModel.description')}>
+    <Panel title={t('settings.aiModel.title')}>
       {models.isPending ? (
         <Skeleton className="h-16 rounded-xl" />
       ) : models.isError ? (
@@ -67,6 +68,7 @@ function AiModelSelect({ offer }: { offer: AiModels }) {
   const { t } = useTranslation('auth')
   const id = useId()
   const choose = useChooseAiModel()
+  const reason = useErrorReason()
   const providers = Object.keys(offer.models) as AiProvider[]
   const name = (provider: AiProvider) => t('settings.aiModel.option', { provider: t(`settings.provider.${provider}`), model: offer.models[provider] })
   const shown = choose.isPending ? (choose.variables ?? offer.site_default) : offer.in_use
@@ -74,7 +76,7 @@ function AiModelSelect({ offer }: { offer: AiModels }) {
     if (choose.isPending) return t('settings.aiModel.saving')
     if (choose.isSuccess) return t('settings.aiModel.saved', { name: name(choose.data.in_use) })
     if (isApiError(choose.error) && choose.error.code === 'ai_model_not_offered') return t('settings.aiModel.notOffered')
-    if (choose.isError) return t('settings.aiModel.failed', { reason: isApiError(choose.error) ? t(`common:errors.${choose.error.kind}`) : '' })
+    if (choose.isError) return t('settings.aiModel.failed', { reason: reason(choose.error) })
     return providers.length < 2 ? t('settings.aiModel.onlyDefault') : t('settings.aiModel.hint')
   }
   return (

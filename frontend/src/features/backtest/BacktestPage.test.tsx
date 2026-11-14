@@ -285,14 +285,15 @@ describe('the backtest page', () => {
     expect(runs(calls)).toHaveLength(0)
   })
 
-  it('shows a refused field in the server’s words at that field', async () => {
+  it('says at its field that the server refused a value, in the app’s words and not the server’s', async () => {
     const refusal = { detail: [{ loc: ['body', 'inputs', 'initial_cash'], msg: 'Input should be less than 1e12', type: 'less_than' }], code: 'invalid_request' }
     serve({ run: () => json(refusal, 422) })
     const user = userEvent.setup()
     open()
 
     await user.click(await screen.findByRole('button', { name: 'Run backtest' }))
-    await waitFor(() => expect(screen.getByLabelText('Starting cash')).toHaveAccessibleDescription('Input should be less than 1e12'))
+    await waitFor(() => expect(screen.getByLabelText('Starting cash')).toHaveAccessibleDescription('The server refused the input.'))
+    expect(screen.queryByText(/Input should be less than/)).not.toBeInTheDocument()
   })
 
   it('counts the seconds of a long run, takes no second one meanwhile, and shows the result when it comes', async () => {

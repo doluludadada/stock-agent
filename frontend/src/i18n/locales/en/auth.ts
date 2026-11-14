@@ -1,12 +1,4 @@
 const auth = {
-  intro: {
-    title: 'Taiwan stock research in one place',
-    points: {
-      ranking: 'A monthly ranking by revenue acceleration, with every decision recorded when it was made',
-      holdings: 'What you hold as one portfolio, each stock with its ranking score',
-      market: "Each session's index, breadth and industry moves after the close",
-    },
-  },
   field: {
     setupCode: 'Setup code',
     username: 'Username',
@@ -60,23 +52,20 @@ const auth = {
   setup: {
     eyebrow: 'First-time setup',
     title: 'Create the administrator',
-    lead: 'The first account of the site. It manages the users and the system settings.',
+    lead: 'The site’s first account, its administrator.',
     submit: 'Create and sign in',
-    note: 'Accounts registered later are users; you can make anyone an administrator at any time.',
   },
   signIn: {
     title: 'Sign in',
-    lead: 'Sign in with your username or email.',
     submit: 'Sign in',
     wrong: 'Wrong username, email or password. If your account was deactivated, ask an administrator.',
     ended: 'Your session ended. Sign in again to continue.',
     noAccount: 'No account yet?',
     registerLink: 'Create one',
-    closed: 'Registration is closed. Ask the site administrator for an account.',
+    closed: 'Registration is closed.',
   },
   register: {
     title: 'Create an account',
-    lead: 'An account keeps your own watchlist, mock account, analysis runs and strategies.',
     submit: 'Create account',
     haveAccount: 'Already have an account?',
     signInLink: 'Sign in',
@@ -85,18 +74,14 @@ const auth = {
   },
   menu: {
     label: 'Account menu of {{name}}',
-    users: 'Users',
-    settings: 'System settings',
     signOut: 'Sign out',
     signOutFailed: 'Signing out did not reach the server. You are still signed in. Try again.',
   },
   settings: {
     title: 'My settings',
-    description: 'Choices that apply only to your own runs.',
     signIn: 'Sign in to change your settings',
     aiModel: {
       title: 'AI model',
-      description: 'The model behind the AI analysis and the post sentiment of your runs, and your valuation explanations.',
       label: 'Model for your runs',
       option: '{{provider}} · {{model}}',
       siteDefault: '{{name}} (site default)',
@@ -111,7 +96,6 @@ const auth = {
     provider: { openai: 'OpenAI', grok: 'Grok', gemini: 'Gemini', groq: 'Groq', nvidia: 'NVIDIA', claude: 'Claude' },
     strategy: {
       title: 'Strategy',
-      description: 'The active strategy is chosen in the strategy library, where you also copy and edit strategies.',
       link: 'Open the strategy library',
     },
   },
@@ -157,7 +141,6 @@ const auth = {
     signIn: 'Sign in as an administrator to manage users',
     roles: {
       title: 'Roles',
-      question: 'What each account can do',
       administrator: "Manages the users and the system settings, and uses everything a user can. Sees no other user's data.",
       user: 'Has their own watchlist, mock account, analysis runs and strategies, and sees nobody else’s.',
       deactivated: 'Cannot sign in. Their data stays; an administrator can reactivate them at any time.',

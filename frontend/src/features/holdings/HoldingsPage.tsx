@@ -1,14 +1,13 @@
 import { Briefcase, CalendarClock, Ellipsis, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useId, useState, type ReactNode } from 'react'
-import { Link } from 'react-router'
 import { toast } from 'sonner'
 import { useTranslation } from '@/i18n'
 import { isApiError, useIsSignedIn } from '@/shared/api'
-import { paths } from '@/shared/config/paths'
 import { useErrorReason } from '@/shared/lib/error-reason'
-import { useFormat } from '@/shared/lib/format'
+import { DASH, useFormat } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
+import { StockLink, StockName } from '@/shared/ui/stock-name'
 import { Button } from '@/shared/ui/button'
 import { ChangeValue } from '@/shared/ui/change-value'
 import { Checkbox } from '@/shared/ui/checkbox'
@@ -42,8 +41,6 @@ import {
   type WatchedStock,
 } from './model'
 
-const DASH = '—'
-
 const NEW_ENTRY: EntrySeed = { draft: EMPTY_DRAFT, replaces: false }
 
 interface HoldingsPageProps {
@@ -65,7 +62,6 @@ export function HoldingsPage({ watched }: HoldingsPageProps) {
     <div className="page-stack">
       <PageHeader
         title={t('title')}
-        description={t('description')}
         actions={
           signedIn &&
           listed && (
@@ -132,7 +128,9 @@ function Portfolio({ watched, onEnter }: { watched: readonly WatchedStock[] | un
   return (
     <div className="card-stack">
       <div className={cn('card-stack', shown.isPlaceholderData && 'opacity-60')} aria-busy={shown.isPlaceholderData}>
-        <SummaryPanel holdings={data} />
+        <Panel>
+          <PortfolioFigures holdings={data} />
+        </Panel>
         <HoldingsPanel holdings={data} filter={filter} onEnter={onEnter} />
       </div>
       {watchedPanel}
@@ -181,23 +179,14 @@ function SourceFilter({ offered, chosen, onToggle }: { offered: readonly Holding
 }
 
 /**
- * The portfolio in figures, in the order they are asked: what it is worth and its gain or loss, how concentrated it
- * is, then how it stands in the ranking. The ranking's figures leave where the site hides the ranking from the viewer.
+ * The portfolio in figures: what it is worth and its gain or loss first, then its cost, how concentrated it is and how
+ * it stands in the ranking. The ranking's figures leave where the site hides the ranking from the viewer. `brief`
+ * keeps the worth, the gain or loss and the score: the home page's card.
  */
-function SummaryPanel({ holdings }: { holdings: Holdings }) {
-  const { t } = useTranslation('holdings')
-  return (
-    <Panel title={t('summary.title')} description={t('summary.question')}>
-      <PortfolioFigures holdings={holdings} />
-    </Panel>
-  )
-}
-
-/** The portfolio's figures without a card of their own: My holdings and the home page both show them. */
-export function PortfolioFigures({ holdings }: { holdings: Holdings }) {
+export function PortfolioFigures({ holdings, brief = false }: { holdings: Holdings; brief?: boolean }) {
   const { t } = useTranslation('holdings')
   const format = useFormat()
-  const share = (ratio: number) => `${format.number(ratio * 100, 1)}%`
+  const share = (ratio: number) => format.percent(ratio)
   return (
       <div className="grid gap-x-8 gap-y-5 @4xl:grid-cols-[auto_minmax(0,1fr)] @4xl:items-end">
         <div className="min-w-0 space-y-1.5">
@@ -210,12 +199,16 @@ export function PortfolioFigures({ holdings }: { holdings: Holdings }) {
           </p>
         </div>
         <dl className="grid grid-cols-2 gap-x-6 gap-y-4 @xl:grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] @4xl:border-l @4xl:pl-8">
-          <Stat size="lg" label={t('summary.cost')}>
-            {format.number(holdings.cost)}
-          </Stat>
-          <Stat size="lg" label={t('summary.concentration', { count: holdings.concentration_positions })}>
-            {share(holdings.concentration)}
-          </Stat>
+          {!brief && (
+            <>
+              <Stat size="lg" label={t('summary.cost')}>
+                {format.number(holdings.cost)}
+              </Stat>
+              <Stat size="lg" label={t('summary.concentration', { count: holdings.concentration_positions })}>
+                {share(holdings.concentration)}
+              </Stat>
+            </>
+          )}
           {holdings.top_share !== null && (
             <Stat size="lg" label={t('summary.topShare')}>
               {share(holdings.top_share)}
@@ -227,24 +220,8 @@ export function PortfolioFigures({ holdings }: { holdings: Holdings }) {
               <span className="block text-xs font-normal text-muted-foreground">{t('summary.unscored', { share: share(1 - holdings.scored_share) })}</span>
             </Stat>
           )}
-          {holdings.lowest && <ScoredStat label={t('summary.lowest')} holding={holdings.lowest} />}
-          {holdings.highest && <ScoredStat label={t('summary.highest')} holding={holdings.highest} />}
         </dl>
       </div>
-  )
-}
-
-function ScoredStat({ label, holding }: { label: string; holding: Holding }) {
-  const { t } = useTranslation('holdings')
-  const format = useFormat()
-  const score = holding.standing?.score
-  return (
-    <Stat size="lg" label={label}>
-      {score === null || score === undefined ? DASH : format.number(score)}
-      <Link to={paths.stock(holding.position.stock_id)} className="flex min-h-11 items-center truncate text-xs font-normal text-muted-foreground hover:text-brand focus-visible:text-brand md:min-h-0">
-        {holding.stock_name ?? t('unknownName')} {holding.position.stock_id}
-      </Link>
-    </Stat>
   )
 }
 
@@ -263,7 +240,7 @@ function HoldingsPanel({ holdings, filter, onEnter }: HoldingsPanelProps) {
   const rows = holdings.holdings
   const name = (row: Holding) => row.stock_name ?? t('unknownName')
   const shares = (row: Holding) => format.number(row.position.quantity)
-  const weight = (row: Holding) => `${format.number(row.weight * 100, 1)}%`
+  const weight = (row: Holding) => format.percent(row.weight)
   const closed = (row: Holding) => (row.position.marked_at ? format.closeOn(row.position.marked_at) : t('noClose'))
   const revenue = (row: Holding) => {
     const { figure, line } = revenueReading(row, t, format)
@@ -287,17 +264,12 @@ function HoldingsPanel({ holdings, filter, onEnter }: HoldingsPanelProps) {
       className: 'w-full max-w-0 min-w-40',
       cell: (row) => (
         <div className="min-w-0 space-y-1 py-1">
-          <Link to={paths.stock(row.position.stock_id)} className="stretched-link flex min-w-0 items-baseline gap-2 hover:text-brand focus-visible:text-brand">
-            <span className="truncate font-medium" title={row.stock_name ?? undefined}>
-              {name(row)}
-            </span>
-            <span className="shrink-0 font-mono text-xs text-muted-foreground">{row.position.stock_id}</span>
-          </Link>
+          <StockLink stockId={row.position.stock_id} name={row.stock_name} unnamed={t('unknownName')} className="min-h-0" />
           <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
             <Badge variant="outline" className="font-normal">
               {t(`source.${row.source}`)}
             </Badge>
-            <span className="tabular lg:hidden">{t('row.held', { shares: shares(row), cost: format.price(row.position.average_cost) })}</span>
+            <span className="tabular max-sm:hidden lg:hidden">{t('row.held', { shares: shares(row), cost: format.price(row.position.average_cost) })}</span>
           </p>
           <p className="tabular text-xs text-muted-foreground md:hidden">{t('row.valued', { value: format.number(row.position.market_value), weight: weight(row) })}</p>
           <p className="flex flex-wrap items-center gap-x-1.5 text-xs sm:hidden">
@@ -305,10 +277,10 @@ function HoldingsPanel({ holdings, filter, onEnter }: HoldingsPanelProps) {
             <ChangeValue value={row.position.unrealized_pnl} format="absolute" fractionDigits={0} />
             {row.position.unrealized_return !== null && <ChangeValue value={row.position.unrealized_return} format="percent" />}
           </p>
-          <p className="tabular text-xs text-pretty whitespace-normal text-muted-foreground xl:hidden">
+          <p className="tabular text-xs text-pretty whitespace-normal text-muted-foreground max-md:hidden xl:hidden">
             {t('row.closed', { price: format.price(row.position.mark_price), close: closed(row) })} · {revenue(row)}
           </p>
-          {row.standing && <RankingScoreLine standing={row.standing} className="text-xs md:hidden" />}
+          {row.standing && <RankingScoreLine standing={row.standing} brief className="text-xs md:hidden" />}
         </div>
       ),
     },
@@ -411,7 +383,7 @@ function HoldingsPanel({ holdings, filter, onEnter }: HoldingsPanelProps) {
   ]
 
   return (
-    <Panel flush title={t('list.title')} description={t('list.question', { count: rows.length })}>
+    <Panel flush title={t('list.title')} aside={<span className="tabular">{t('list.count', { count: rows.length })}</span>}>
       {filter}
       <UnreadNote holdings={holdings} className="border-b" />
       {rows.length === 0 ? <StateBlock icon={Briefcase} title={t('list.none')} /> : <DataTable rows={rows} columns={columns} rowKey={holdingKey} label={t('list.title')} />}
@@ -452,7 +424,7 @@ function WatchedPanel({ stocks, onEnter }: { stocks: readonly WatchedStock[]; on
   const [all, setAll] = useState(false)
   const shown = all ? stocks : stocks.slice(0, WATCHED_SHOWN)
   return (
-    <Panel title={t('watched.title')} description={t('watched.question')}>
+    <Panel title={t('watched.title')}>
       <ul className="flex flex-wrap gap-2">
         {shown.map((stock) => (
           <li key={stock.stockId}>
@@ -464,8 +436,7 @@ function WatchedPanel({ stocks, onEnter }: { stocks: readonly WatchedStock[]; on
               onClick={() => onEnter({ draft: { ...EMPTY_DRAFT, stockId: stock.stockId }, replaces: false })}
             >
               <Plus aria-hidden />
-              {stock.name ?? t('unknownName')}
-              <span className="font-mono text-xs text-muted-foreground">{stock.stockId}</span>
+              <StockName stockId={stock.stockId} name={stock.name} unnamed={t('unknownName')} className="font-normal" />
             </Button>
           </li>
         ))}

@@ -1,8 +1,14 @@
 import { useMemo } from 'react'
 import { useLocale, useTranslation } from '@/i18n'
 
-/** Locale-aware formatters. Every market date and time is read in Asia/Taipei. */
+/** Every market date and time is read in Asia/Taipei. */
 export const MARKET_TIME_ZONE = 'Asia/Taipei'
+
+/** What a figure shows where the server has none. */
+export const DASH = '—'
+
+/** A board lot on TWSE and TPEx is 1,000 shares; Taiwan investors read a stock's volume in lots (張). */
+const SHARES_PER_LOT = 1000
 
 const cache = new Map<string, Intl.NumberFormat | Intl.DateTimeFormat>()
 
@@ -26,102 +32,53 @@ function dateFormat(locale: string, options: Intl.DateTimeFormatOptions): Intl.D
   return formatter as Intl.DateTimeFormat
 }
 
-export function formatNumber(locale: string, value: number, fractionDigits = 0): string {
-  return numberFormat(locale, {
-    minimumFractionDigits: fractionDigits,
-    maximumFractionDigits: fractionDigits,
-  }).format(value)
-}
-
-export function formatPrice(locale: string, value: number): string {
-  return formatNumber(locale, value, value >= 1000 ? 0 : 2)
-}
-
-/** Signed value, so a change never relies on color alone: +1.25 / −0.80 / 0.00. */
-export function formatSigned(locale: string, value: number, fractionDigits = 2): string {
-  return numberFormat(locale, {
-    minimumFractionDigits: fractionDigits,
-    maximumFractionDigits: fractionDigits,
-    signDisplay: 'exceptZero',
-  }).format(value)
-}
-
-export function formatSignedPercent(locale: string, ratio: number, fractionDigits = 2): string {
-  return numberFormat(locale, {
-    style: 'percent',
-    minimumFractionDigits: fractionDigits,
-    maximumFractionDigits: fractionDigits,
-    signDisplay: 'exceptZero',
-  }).format(ratio)
-}
-
-/** A board lot on TWSE and TPEx is 1,000 shares; Taiwan investors read a stock's volume in lots (張). */
-export const SHARES_PER_LOT = 1000
-
-export function formatCompact(locale: string, value: number): string {
-  return numberFormat(locale, { notation: 'compact', maximumFractionDigits: 1 }).format(value)
-}
-
-/** Whole lots under ten thousand keep their digits and grouping; larger counts shorten to 萬 or K. */
-function formatLotCount(locale: string, lots: number): string {
-  return lots < 10_000 ? formatNumber(locale, Math.round(lots)) : formatCompact(locale, lots)
-}
-
-export function formatDate(locale: string, isoDate: string, style: 'short' | 'long' = 'short'): string {
-  const options: Intl.DateTimeFormatOptions =
-    style === 'long'
-      ? { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' }
-      : { year: 'numeric', month: '2-digit', day: '2-digit' }
-  return dateFormat(locale, options).format(toMarketDate(isoDate))
-}
-
-export function formatMonthDay(locale: string, isoDate: string): string {
-  return dateFormat(locale, { month: 'numeric', day: 'numeric' }).format(toMarketDate(isoDate))
-}
-
-export function formatDateTime(locale: string, isoDateTime: string): string {
-  return dateFormat(locale, {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(new Date(isoDateTime))
-}
-
-/** A moment's day and time in Taipei, short: 11/4 13:30. */
-export function formatMonthDayTime(locale: string, isoDateTime: string): string {
-  return dateFormat(locale, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(isoDateTime))
-}
-
-/** A calendar month: 2026年9月, September 2026. */
-export function formatYearMonth(locale: string, year: number, month: number): string {
-  return dateFormat(locale, { year: 'numeric', month: 'long' }).format(new Date(Date.UTC(year, month - 1, 15, 4)))
-}
+const digits = (fractionDigits: number): Intl.NumberFormatOptions => ({ minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits })
 
 /** A bare trading date (YYYY-MM-DD) is noon in Taipei, so no time zone shifts it to another day. */
 function toMarketDate(iso: string): Date {
   return iso.length === 10 ? new Date(`${iso}T12:00:00+08:00`) : new Date(iso)
 }
 
-/** The formatters bound to the reader's locale. */
+const DATE_STYLES = {
+  short: { year: 'numeric', month: '2-digit', day: '2-digit' },
+  long: { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' },
+} as const satisfies Record<string, Intl.DateTimeFormatOptions>
+
+const TIME: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit', hour12: false }
+
+/** The formatters bound to the reader's locale: the one way the app writes a number, a percentage or a date. */
 export function useFormat() {
   const locale = useLocale()
   const { t } = useTranslation()
-  return useMemo(
-    () => ({
-      number: (value: number, fractionDigits?: number) => formatNumber(locale, value, fractionDigits),
-      price: (value: number) => formatPrice(locale, value),
-      compact: (value: number) => formatCompact(locale, value),
-      /** A stock's volume in shares, read in lots: "8,234張", "3.7萬張", "37K lots". */
-      lots: (shares: number) => t('units.lots', { value: formatLotCount(locale, shares / SHARES_PER_LOT) }),
-      date: (isoDate: string, style?: 'short' | 'long') => formatDate(locale, isoDate, style),
-      monthDay: (isoDate: string) => formatMonthDay(locale, isoDate),
-      yearMonth: (year: number, month: number) => formatYearMonth(locale, year, month),
+  return useMemo(() => {
+    const number = (value: number, fractionDigits = 0) => numberFormat(locale, digits(fractionDigits)).format(value)
+    const compact = (value: number) => numberFormat(locale, { notation: 'compact', maximumFractionDigits: 1 }).format(value)
+    const monthDay = (isoDate: string) => dateFormat(locale, { month: 'numeric', day: 'numeric' }).format(toMarketDate(isoDate))
+    return {
+      number,
+      price: (value: number) => number(value, value >= 1000 ? 0 : 2),
+      /** Signed, so a change never relies on color alone: +1.25, −0.80, 0.00. */
+      signed: (value: number, fractionDigits = 2) => numberFormat(locale, { ...digits(fractionDigits), signDisplay: 'exceptZero' }).format(value),
+      /** A ratio as a percentage: 0.123 reads 12.3%. */
+      percent: (ratio: number, fractionDigits = 1) => numberFormat(locale, { ...digits(fractionDigits), style: 'percent' }).format(ratio),
+      signedPercent: (ratio: number, fractionDigits = 2) => numberFormat(locale, { ...digits(fractionDigits), style: 'percent', signDisplay: 'exceptZero' }).format(ratio),
+      compact,
+      /** A stock's volume in shares, read in lots: "8,234張", "3.7萬張", "37K lots". Under ten thousand lots keep their digits. */
+      lots: (shares: number) => {
+        const lots = shares / SHARES_PER_LOT
+        return t('units.lots', { value: lots < 10_000 ? number(Math.round(lots)) : compact(lots) })
+      },
+      date: (isoDate: string, style: keyof typeof DATE_STYLES = 'short') => dateFormat(locale, DATE_STYLES[style]).format(toMarketDate(isoDate)),
+      monthDay,
+      dateTime: (isoDateTime: string) => dateFormat(locale, { ...DATE_STYLES.short, ...TIME }).format(new Date(isoDateTime)),
+      /** A moment's day and time in Taipei, short: 11/4 13:30. */
+      monthDayTime: (isoDateTime: string) => dateFormat(locale, { month: 'numeric', day: 'numeric', ...TIME }).format(new Date(isoDateTime)),
+      /** A calendar month: 2026年9月, September 2026. */
+      yearMonth: (year: number, month: number) => dateFormat(locale, { year: 'numeric', month: 'long' }).format(new Date(Date.UTC(year, month - 1, 15, 4))),
       /** The session a price closed, said where it is not the latest: "11/2 收盤". */
-      closeOn: (isoDate: string) => t('units.closeOn', { date: formatMonthDay(locale, isoDate) }),
-    }),
-    [locale, t],
-  )
+      closeOn: (isoDate: string) => t('units.closeOn', { date: monthDay(isoDate) }),
+    }
+  }, [locale, t])
 }
+
+export type Format = ReturnType<typeof useFormat>

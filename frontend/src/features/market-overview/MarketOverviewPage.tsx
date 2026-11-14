@@ -2,7 +2,7 @@ import type { UseQueryResult } from '@tanstack/react-query'
 import { LineChart, SearchX } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
-import { useLocale, useTranslation } from '@/i18n'
+import { useTranslation } from '@/i18n'
 import {
   isApiError,
   useIndexHistory,
@@ -16,11 +16,12 @@ import {
 } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
 import { HISTORY_BARS } from '@/shared/lib/chart-range'
-import { directionOf } from '@/shared/lib/direction'
-import { formatNumber, formatSignedPercent, useFormat } from '@/shared/lib/format'
+import { DIRECTION_TONE, directionOf } from '@/shared/lib/direction'
+import { DASH, useFormat } from '@/shared/lib/format'
 import { isStockId } from '@/shared/lib/stock-ids'
 import { cn } from '@/shared/lib/utils'
 import { ArchiveWarmUp } from '@/shared/ui/archive-warm-up'
+import { StockLink } from '@/shared/ui/stock-name'
 import { Badge } from '@/shared/ui/badge'
 import { BreadthBar } from '@/shared/ui/breadth-bar'
 import { Button } from '@/shared/ui/button'
@@ -104,7 +105,6 @@ function TrendPanel({ target, history, onTarget }: { target: TrendTarget; histor
     <Panel
       className="order-1 md:col-span-2"
       title={title}
-      description={t('trend.question')}
       aside={
         <>
           {target.kind === 'stock' && (
@@ -138,16 +138,13 @@ function TrendPanel({ target, history, onTarget }: { target: TrendTarget; histor
 /** How broad the session's move was: one phrase for it, the split as a bar, and the counts. */
 function BreadthPanel({ breadth }: { breadth: UseQueryResult<MarketBreadth> }) {
   const { t } = useTranslation('overview')
-  const locale = useLocale()
   const format = useFormat()
   const market = breadth.data?.market
-  const total = market ? market.advancers + market.decliners + market.unchanged : 0
 
   return (
     <Panel
       className="order-2 md:col-span-2"
       title={t('breadth.title')}
-      description={breadth.data && t('breadth.question', { total: formatNumber(locale, total), date: format.monthDay(breadth.data.session_close) })}
     >
       {breadth.isPending ? (
         <Skeleton className="h-28 rounded-xl" />
@@ -165,13 +162,13 @@ function BreadthPanel({ breadth }: { breadth: UseQueryResult<MarketBreadth> }) {
           <BreadthBar up={market.advancers} flat={market.unchanged} down={market.decliners} />
           <dl className="grid grid-cols-3 gap-3">
             <Stat label={t('breadth.advancers')}>
-              <span className="text-up">{formatNumber(locale, market.advancers)}</span>
+              <span className="text-up">{format.number(market.advancers)}</span>
             </Stat>
             <Stat label={t('breadth.unchanged')} className="text-center">
-              <span className="text-flat">{formatNumber(locale, market.unchanged)}</span>
+              <span className="text-flat">{format.number(market.unchanged)}</span>
             </Stat>
             <Stat label={t('breadth.decliners')} className="text-right">
-              <span className="text-down">{formatNumber(locale, market.decliners)}</span>
+              <span className="text-down">{format.number(market.decliners)}</span>
             </Stat>
           </dl>
           </div>
@@ -189,7 +186,7 @@ function IndustryPanel({ breadth }: { breadth: UseQueryResult<MarketBreadth> }) 
   const { t } = useTranslation('overview')
   const ranked = useMemo(() => rankIndustries(breadth.data?.industries ?? {}), [breadth.data])
   return (
-    <Panel className="order-3" title={t('industries.title')} description={ranked.length > 0 ? t('industries.question', { count: ranked.length }) : undefined}>
+    <Panel className="order-3" title={t('industries.title')}>
       {breadth.isPending ? (
         <Skeleton className="h-56 rounded-xl" />
       ) : !breadth.data ? (
@@ -215,7 +212,7 @@ const HEAT: Record<'up' | 'down' | 'flat', Record<HeatLevel, string>> = {
 
 function HeatMap({ ranked }: { ranked: IndustryBreadth[] }) {
   const { t } = useTranslation('overview')
-  const locale = useLocale()
+  const format = useFormat()
   return (
     <ol aria-label={t('industries.title')} className="hidden grid-cols-3 gap-1.5 @xl:grid @2xl:grid-cols-4 @5xl:grid-cols-5">
       {ranked.map((industry) => {
@@ -228,10 +225,10 @@ function HeatMap({ ranked }: { ranked: IndustryBreadth[] }) {
             <p className="tabular mt-0.5 flex items-baseline justify-between gap-2">
               <span className="text-sm font-semibold">
                 <span className="sr-only">{t(`common:direction.${direction}`)} </span>
-                {formatSignedPercent(locale, industry.average_change_percent / 100)}
+                {format.signedPercent(industry.average_change_percent / 100)}
               </span>
               <span className="truncate text-[0.6875rem] text-muted-foreground">
-                {t('industries.moves', { up: formatNumber(locale, industry.advancers), down: formatNumber(locale, industry.decliners) })}
+                {t('industries.moves', { up: format.number(industry.advancers), down: format.number(industry.decliners) })}
               </span>
             </p>
           </li>
@@ -291,7 +288,7 @@ function IndustryEnds({ ranked }: { ranked: IndustryBreadth[] }) {
 }
 
 function IndustryRow({ row, widest }: { row: IndustryBreadth; widest: number }) {
-  const locale = useLocale()
+  const format = useFormat()
   const direction = directionOf(row.average_change_percent)
   return (
     <tr className="h-11">
@@ -299,15 +296,15 @@ function IndustryRow({ row, widest }: { row: IndustryBreadth; widest: number }) 
         {row.industry}
       </td>
       <td className="tabular w-20 pr-3 text-right text-xs whitespace-nowrap">
-        <span className="text-up">{formatNumber(locale, row.advancers)}</span>
+        <span className="text-up">{format.number(row.advancers)}</span>
         <span className="text-muted-foreground"> / </span>
-        <span className="text-down">{formatNumber(locale, row.decliners)}</span>
+        <span className="text-down">{format.number(row.decliners)}</span>
       </td>
       <td className="w-32 pr-4 md:pr-5">
         <span className="flex items-center justify-end gap-3">
           <span aria-hidden className="hidden h-1.5 w-10 overflow-hidden rounded-full bg-muted sm:block">
             <span
-              className={cn('block h-full min-w-1 rounded-full', direction === 'up' ? 'bg-up' : direction === 'down' ? 'bg-down' : 'bg-flat')}
+              className={cn('block h-full min-w-1 rounded-full', DIRECTION_TONE[direction].bar)}
               style={{ width: `${(Math.abs(row.average_change_percent) / widest) * 100}%` }}
             />
           </span>
@@ -324,7 +321,6 @@ function MostTradedPanel({ mostTraded }: { mostTraded: UseQueryResult<ListedStoc
   const format = useFormat()
   const [expanded, setExpanded] = useState(false)
   const stocks = mostTraded.data ?? []
-  const session = stocks[0]?.today?.ts
   const folded = new Set(expanded ? [] : stocks.slice(MOST_TRADED_SHOWN).map((stock) => stock.stock_id))
   const columns: Column<ListedStock>[] = [
     {
@@ -340,22 +336,17 @@ function MostTradedPanel({ mostTraded }: { mostTraded: UseQueryResult<ListedStoc
       header: t('mostTraded.column.stock'),
       className: 'w-full max-w-0',
       cell: (stock) => (
-        <Link to={paths.stock(stock.stock_id)} className="stretched-link block min-w-0 hover:text-brand focus-visible:text-brand">
-          <span className="block truncate font-medium" title={stock.name ?? undefined}>
-            {stock.name ?? stock.stock_id}
-          </span>
-          <span className="block font-mono text-xs text-muted-foreground">{stock.stock_id}</span>
-        </Link>
+        <StockLink stockId={stock.stock_id} name={stock.name} />
       ),
     },
-    { key: 'close', header: t('mostTraded.column.close'), numeric: true, cell: (stock) => (stock.today ? format.price(stock.today.close) : '—') },
+    { key: 'close', header: t('mostTraded.column.close'), numeric: true, cell: (stock) => (stock.today ? format.price(stock.today.close) : DASH) },
     {
       key: 'change',
       header: t('mostTraded.column.change'),
       numeric: true,
       cell: (stock) => {
         const change = listedChange(stock.today)
-        return change ? <ChangeValue value={change.ratio} format="percent" /> : '—'
+        return change ? <ChangeValue value={change.ratio} format="percent" /> : DASH
       },
     },
     {
@@ -364,7 +355,7 @@ function MostTradedPanel({ mostTraded }: { mostTraded: UseQueryResult<ListedStoc
       numeric: true,
       from: 'xl',
       className: 'text-muted-foreground',
-      cell: (stock) => (stock.today ? format.lots(stock.today.volume) : '—'),
+      cell: (stock) => (stock.today ? format.lots(stock.today.volume) : DASH),
     },
   ]
 
@@ -372,7 +363,6 @@ function MostTradedPanel({ mostTraded }: { mostTraded: UseQueryResult<ListedStoc
     <Panel
       className="order-4"
       title={t('mostTraded.title')}
-      description={session && t('mostTraded.question', { date: format.monthDay(session) })}
       flush
       footerClassName="xl:hidden"
       footer={

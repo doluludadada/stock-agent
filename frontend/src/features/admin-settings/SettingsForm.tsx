@@ -2,9 +2,10 @@ import { ChevronDown, Minus, Plus, Search, TriangleAlert } from 'lucide-react'
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { useBlocker, useSearchParams } from 'react-router'
 import { toast } from 'sonner'
-import { useLocale, useTranslation } from '@/i18n'
+import { useTranslation } from '@/i18n'
 import { useSession } from '@/shared/api'
-import { formatNumber } from '@/shared/lib/format'
+import { useErrorReason } from '@/shared/lib/error-reason'
+import { useFormat } from '@/shared/lib/format'
 import { useKeptDraft } from '@/shared/lib/kept-draft'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
@@ -43,6 +44,15 @@ import { confirmationRefusal, inputsOf, startGoogleConfirmation, takePendingSave
 import { problemMessage, reasonOf, refusalOf, type SaveRefusal, type SettingsProblem } from './model'
 import { PasswordDialog, type DialogRefusal } from './PasswordDialog'
 
+/** What a save was refused for: the server's problems, each at its setting, or one sentence of the form's own. */
+interface Refused {
+  problems: SettingsProblem[]
+  notice: string | null
+}
+
+const NOT_REFUSED: Refused = { problems: [], notice: null }
+const noticed = (notice: string): Refused => ({ problems: [], notice })
+
 /** Every setting of the settings files as a form of choices; a save runs on the new settings at once. */
 export function SettingsForm() {
   const { t } = useTranslation('admin')
@@ -68,15 +78,16 @@ function groupsOpenAtFirst(): SettingGroup[] {
 
 function FormBody({ fields, onStale }: { fields: SettingField[]; onStale: () => void }) {
   const { t } = useTranslation('admin')
+  const reason = useErrorReason()
   const save = useSaveSettings()
   const draft = useKeptDraft<Record<string, FieldInput>>('admin-settings')
   const [inputs, setInputs] = useState(draft.restored ?? NO_INPUTS)
-  const [refused, setRefused] = useState<SettingsProblem[]>([])
+  const [refused, setRefused] = useState(NOT_REFUSED)
   const [confirming, setConfirming] = useState(false)
   const [query, setQuery] = useState('')
   const [opened, setOpened] = useState(groupsOpenAtFirst)
   const { changes, problems } = useMemo(() => changesOf(fields, inputs), [fields, inputs])
-  const shown = [...problems, ...refused]
+  const shown = [...problems, ...refused.problems]
   const changed = useMemo(() => new Set(changes.map((change) => change.path)), [changes])
   const dirty = changes.length > 0 || problems.length > 0
   useEffect(() => draft.track(dirty ? inputs : null), [draft, dirty, inputs])
@@ -88,20 +99,20 @@ function FormBody({ fields, onStale }: { fields: SettingField[]; onStale: () => 
   const outcome = params.get('google')
 
   useEffect(() => {
-    const first = fields.find((field) => problemsAt(refused, field.path).length > 0)
+    const first = fields.find((field) => problemsAt(refused.problems, field.path).length > 0)
     if (first) document.getElementById(rowId(first.path))?.scrollIntoView({ block: 'center' })
   }, [refused, fields])
 
   const edit = useCallback((path: string, input: FieldInput) => {
     setInputs((current) => ({ ...current, [path]: input }))
     // An edit answers the refusal at its setting, and a refusal about no setting in particular.
-    setRefused((current) => current.filter((problem) => problem.path !== null && problemsAt([problem], path).length === 0))
+    setRefused((current) => ({ notice: null, problems: current.problems.filter((problem) => problem.path !== null && problemsAt([problem], path).length === 0) }))
   }, [])
 
   const saved = () => {
     setConfirming(false)
     setInputs(NO_INPUTS)
-    setRefused([])
+    setRefused(NOT_REFUSED)
     toast.success(t('saved'))
   }
 
@@ -111,8 +122,8 @@ function FormBody({ fields, onStale }: { fields: SettingField[]; onStale: () => 
     // A search may hide the setting the refusal is about.
     setQuery('')
     if (refusal.kind === 'conflict') onStale()
-    const general = refusal.kind === 'conflict' ? t('conflict') : refusal.detail
-    setRefused(refusal.kind === 'refused' && refusal.problems.length > 0 ? refusal.problems : [{ message: general, path: null }])
+    const general = refusal.kind === 'conflict' ? t('conflict') : reasonOf(refusal.error, t, reason)
+    setRefused(refusal.kind === 'refused' && refusal.problems.length > 0 ? { problems: refusal.problems, notice: null } : noticed(general))
   }
 
   const confirm = async (password: string): Promise<DialogRefusal | null> => {
@@ -137,9 +148,9 @@ function FormBody({ fields, onStale }: { fields: SettingField[]; onStale: () => 
     } catch (error) {
       const refusal = refusalOf(error)
       if (refusal.kind === 'refused' || refusal.kind === 'conflict') refuse(refusal)
-      else if (refusal.kind === 'googleRequired') setRefused([{ message: t('google.refused.required'), path: null }])
-      else if (refusal.kind === 'throttled') setRefused([{ message: t('google.refused.throttled'), path: null }])
-      else setRefused([{ message: reasonOf(error, t), path: null }])
+      else if (refusal.kind === 'googleRequired') setRefused(noticed(t('google.refused.required')))
+      else if (refusal.kind === 'throttled') setRefused(noticed(t('google.refused.throttled')))
+      else setRefused(noticed(reasonOf(error, t, reason)))
     }
   }
 
@@ -156,7 +167,7 @@ function FormBody({ fields, onStale }: { fields: SettingField[]; onStale: () => 
     if (!pending) return
     setInputs(inputsOf(fields, pending.changes))
     if (outcome === 'confirmed') void sendConfirmed(pending)
-    else setRefused([{ message: t(`google.refused.${confirmationRefusal(outcome)}`), path: null }])
+    else setRefused(noticed(t(`google.refused.${confirmationRefusal(outcome)}`)))
     // The return from Google is handled once, when the form first shows with ?google= in the address.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [outcome])
@@ -165,7 +176,7 @@ function FormBody({ fields, onStale }: { fields: SettingField[]; onStale: () => 
   const matches = (field: SettingField) =>
     !needle || [t(`form.field.${field.path}`), t(`form.help.${field.path}`), field.path].some((text) => text.toLowerCase().includes(needle))
   const groups = groupsOf(fields.filter(matches))
-  const elsewhere = problemsElsewhere(refused, fields)
+  const elsewhere = problemsElsewhere(refused.problems, fields)
   // The operator's settings stay folded until asked for, searched for, or a problem sits in one of them.
   // A folded group opens when asked for, when a search looks into it, and when a problem sits in one of its settings.
   const isOpen = (group: SettingGroup) =>
@@ -191,7 +202,7 @@ function FormBody({ fields, onStale }: { fields: SettingField[]; onStale: () => 
               variant="ghost"
               onClick={() => {
                 setInputs(NO_INPUTS)
-                setRefused([])
+                setRefused(NOT_REFUSED)
               }}
             >
               {t('discard')}
@@ -215,10 +226,11 @@ function FormBody({ fields, onStale }: { fields: SettingField[]; onStale: () => 
         </nav>
       </div>
 
-      {elsewhere.length > 0 && (
+      {(elsewhere.length > 0 || refused.notice) && (
         <div role="alert" className="flex items-start gap-2.5 rounded-xl border border-destructive/30 bg-danger-soft px-4 py-3 text-sm">
           <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-destructive" />
           <ul className="space-y-1 text-pretty">
+            {refused.notice && <li>{refused.notice}</li>}
             {elsewhere.map((problem) => (
               <li key={problem.message}>{problemMessage(problem, t)}</li>
             ))}
@@ -324,11 +336,11 @@ function GroupSection({ group, open, onToggle, children }: GroupSectionProps) {
 /** How a setting's values read: a number with its unit, an option by its name, and the file's own value marked as such. */
 function useWording() {
   const { t } = useTranslation('admin')
-  const locale = useLocale()
+  const format = useFormat()
   return useMemo(() => {
     const amount = (value: number, unit: SettingField['unit']): string => {
       const shown = shownAmount(value, unit)
-      const text = formatNumber(locale, shown.value, shown.decimals)
+      const text = format.number(shown.value, shown.decimals)
       return unit ? t(`form.unit.${unit}`, { value: text }) : text
     }
     // A built-in strategy's id is an option the server names at runtime, so it shows as it is.
@@ -340,7 +352,7 @@ function useWording() {
     }
     const entry = (field: SettingField, item: Entry): string => (item.custom ? t('form.custom', { value: value(field, item.value) }) : value(field, item.value))
     return { value, entry }
-  }, [t, locale])
+  }, [t, format])
 }
 
 /** Whether a choice shows as a row of buttons: a few options, none of them a long custom value. */

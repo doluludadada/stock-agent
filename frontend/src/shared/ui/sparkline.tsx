@@ -1,16 +1,14 @@
 import { useId } from 'react'
+import { DIRECTION_TONE, type Direction } from '@/shared/lib/direction'
 import { cn } from '@/shared/lib/utils'
 
 interface SparklineProps {
   values: readonly number[]
-  direction: 'up' | 'down' | 'flat'
+  direction: Direction
   className?: string
   width?: number
   height?: number
 }
-
-const strokeClass = { up: 'stroke-up', down: 'stroke-down', flat: 'stroke-flat' } as const
-const stopClass = { up: 'text-up', down: 'text-down', flat: 'text-flat' } as const
 
 /** A decorative trend line; the adjacent numbers carry the information. */
 export function Sparkline({ values, direction, className, width = 96, height = 28 }: SparklineProps) {
@@ -29,7 +27,7 @@ export function Sparkline({ values, direction, className, width = 96, height = 2
       viewBox={`0 0 ${width} ${height}`}
       width={width}
       height={height}
-      className={cn('overflow-visible', stopClass[direction], className)}
+      className={cn('overflow-visible', DIRECTION_TONE[direction].text, className)}
       preserveAspectRatio="none"
     >
       <defs>
@@ -39,7 +37,7 @@ export function Sparkline({ values, direction, className, width = 96, height = 2
         </linearGradient>
       </defs>
       <path d={area} fill={`url(#${gradientId})`} />
-      <path d={line} fill="none" strokeWidth={1.4} strokeLinejoin="round" strokeLinecap="round" className={strokeClass[direction]} />
+      <path d={line} fill="none" strokeWidth={1.4} strokeLinejoin="round" strokeLinecap="round" className={DIRECTION_TONE[direction].stroke} />
     </svg>
   )
 }

@@ -1,9 +1,9 @@
-import { useLocale, useTranslation } from '@/i18n'
+import { useTranslation } from '@/i18n'
 import { useIndexHistory, useMarketBreadth } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
 import { CHART_RANGES, HISTORY_BARS } from '@/shared/lib/chart-range'
 import { directionOf } from '@/shared/lib/direction'
-import { formatNumber, useFormat } from '@/shared/lib/format'
+import { useFormat } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { BreadthBar } from '@/shared/ui/breadth-bar'
 import { ChangeValue } from '@/shared/ui/change-value'
@@ -17,7 +17,6 @@ import { breadthMood, DEFAULT_INDEX, MOOD_TONE } from './model'
 /** The market in one row for the home page: the index's last close and its month, and how the session split. */
 export function MarketToday({ className }: { className?: string }) {
   const { t } = useTranslation('overview')
-  const locale = useLocale()
   const format = useFormat()
   const history = useIndexHistory(DEFAULT_INDEX, HISTORY_BARS)
   const breadth = useMarketBreadth()
@@ -35,7 +34,7 @@ export function MarketToday({ className }: { className?: string }) {
       ) : (
         <div className="grid items-center gap-x-8 gap-y-4 @3xl:grid-cols-[auto_auto_minmax(0,1fr)]">
           <QuoteHeadline
-            value={formatNumber(locale, last.close, 2)}
+            value={format.number(last.close, 2)}
             change={change}
             changeRatio={change !== null && before ? change / before.close : null}
             asOf={format.closeOn(last.ts)}
@@ -46,9 +45,9 @@ export function MarketToday({ className }: { className?: string }) {
               <p className="flex flex-wrap items-baseline justify-between gap-x-3 text-sm">
                 <span className={cn('font-semibold', MOOD_TONE[breadthMood(market)])}>{t(`breadth.mood.${breadthMood(market)}`)}</span>
                 <span className="tabular text-xs text-muted-foreground">
-                  <span className="text-up">{t('breadth.advancers')} {formatNumber(locale, market.advancers)}</span>
+                  <span className="text-up">{t('breadth.advancers')} {format.number(market.advancers)}</span>
                   {' · '}
-                  <span className="text-down">{t('breadth.decliners')} {formatNumber(locale, market.decliners)}</span>
+                  <span className="text-down">{t('breadth.decliners')} {format.number(market.decliners)}</span>
                   {' · '}
                   {t('breadth.average')} <ChangeValue value={market.average_change_percent / 100} format="percent" />
                 </span>

@@ -2,10 +2,10 @@ import { ShoppingCart } from 'lucide-react'
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { toast } from 'sonner'
-import { useLocale, useTranslation } from '@/i18n'
+import { useTranslation } from '@/i18n'
 import { chosenOffer, useBrokerOffers, type Broker } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
-import { formatNumber } from '@/shared/lib/format'
+import { useFormat } from '@/shared/lib/format'
 import { Button } from '@/shared/ui/button'
 import { ConfirmDialog } from '@/shared/ui/confirm-dialog'
 import { Field } from '@/shared/ui/field'
@@ -24,7 +24,7 @@ interface ManualBuyProps {
 /** A BUY of one stock the specific-stock run reported: the shares, the account where the user may choose, and a yes. */
 export function ManualBuy({ runId, stockId, name }: ManualBuyProps) {
   const { t } = useTranslation('runs')
-  const locale = useLocale()
+  const format = useFormat()
   const navigate = useNavigate()
   const buy = useManualBuy(runId)
   const refusal = useStartRefusal()
@@ -81,7 +81,7 @@ export function ManualBuy({ runId, stockId, name }: ManualBuyProps) {
           <BrokerChoice offers={offers} value={broker} onChange={setChosen} />
           {quantity !== null && (
             <p className="tabular text-sm font-medium">
-              {t('buy.summary', { stock, shares: formatNumber(locale, quantity), account: t(`common:broker.name.${broker}`) })}
+              {t('buy.summary', { stock, shares: format.number(quantity), account: t(`common:broker.name.${broker}`) })}
             </p>
           )}
         </div>

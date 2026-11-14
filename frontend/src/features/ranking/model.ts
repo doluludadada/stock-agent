@@ -1,15 +1,12 @@
 import type { Schemas } from '@/shared/api'
+import { isIsoDate, monthsBefore, periodProblems, type Period, type PeriodProblem } from '@/shared/lib/dates'
 
 export type Ranking = Schemas['Ranking']
 export type RankedStock = Schemas['RankedStock']
 export type RankingBacktest = Schemas['RankingBacktest']
 export type RankingFollow = Schemas['RankingFollowResponse']
 
-/** A span of calendar days as the backtest takes it, both ends included. */
-export interface Period {
-  first: string
-  last: string
-}
+export type { Period }
 
 export const PRESET_KEYS = ['all', '5Y', '3Y', '1Y'] as const
 export type PresetKey = (typeof PRESET_KEYS)[number]
@@ -21,8 +18,7 @@ export const DEFAULT_CHOICE: PeriodChoice = { kind: 'preset', key: 'all' }
 
 /** Earlier than any daily history the site can hold: the server starts at the first decision it has. */
 const BEFORE_ANY_HISTORY = '2000-01-01'
-const PRESET_YEARS: Record<Exclude<PresetKey, 'all'>, number> = { '5Y': 5, '3Y': 3, '1Y': 1 }
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
+const PRESET_MONTHS: Record<Exclude<PresetKey, 'all'>, number> = { '5Y': 60, '3Y': 36, '1Y': 12 }
 
 function utc(date: string): Date {
   return new Date(`${date}T00:00:00Z`)
@@ -32,26 +28,15 @@ function iso(date: Date): string {
   return date.toISOString().slice(0, 10)
 }
 
-function isDate(text: string | null): text is string {
-  return text !== null && ISO_DATE.test(text) && !Number.isNaN(utc(text).getTime())
-}
-
-/** The same day `years` earlier; February 29 becomes March 1. */
-function yearsBefore(date: string, years: number): string {
-  const day = utc(date)
-  day.setUTCFullYear(day.getUTCFullYear() - years)
-  return iso(day)
-}
-
 export function periodOf(choice: PeriodChoice, today: string): Period {
   if (choice.kind === 'custom') return choice.period
-  return { first: choice.key === 'all' ? BEFORE_ANY_HISTORY : yearsBefore(today, PRESET_YEARS[choice.key]), last: today }
+  return { first: choice.key === 'all' ? BEFORE_ANY_HISTORY : monthsBefore(today, PRESET_MONTHS[choice.key]), last: today }
 }
 
 /** The address's period: `?period=` names a quick one, `?first=&last=` two days; anything else is the whole history. */
 export function choiceOf(params: URLSearchParams): PeriodChoice {
   const [first, last] = [params.get('first'), params.get('last')]
-  if (isDate(first) && isDate(last) && first <= last) return { kind: 'custom', period: { first, last } }
+  if (isIsoDate(first) && isIsoDate(last) && first <= last) return { kind: 'custom', period: { first, last } }
   const key = PRESET_KEYS.find((preset) => preset === params.get('period'))
   return key ? { kind: 'preset', key } : DEFAULT_CHOICE
 }
@@ -62,16 +47,12 @@ export function choiceParams(choice: PeriodChoice): Record<string, string> {
   return choice.key === 'all' ? {} : { period: choice.key }
 }
 
-export type PeriodProblem = 'dateRequired' | 'firstAfterLast' | 'afterToday'
-
 export type ParsedPeriod = { ok: true; period: Period } | { ok: false; problems: Partial<Record<keyof Period, PeriodProblem>> }
 
-/** The two days typed as a period, or what is wrong at each. */
+/** The two days typed as a period that ends no later than today, or what is wrong at each. */
 export function parsePeriod(draft: Period, today: string): ParsedPeriod {
-  const first: PeriodProblem | null = !isDate(draft.first) ? 'dateRequired' : draft.first > today ? 'afterToday' : null
-  const last: PeriodProblem | null = !isDate(draft.last) ? 'dateRequired' : !first && draft.first > draft.last ? 'firstAfterLast' : null
-  if (!first && !last) return { ok: true, period: { first: draft.first, last: draft.last } }
-  return { ok: false, problems: { ...(first && { first }), ...(last && { last }) } }
+  const problems = periodProblems(draft, { last: today })
+  return Object.keys(problems).length === 0 ? { ok: true, period: { first: draft.first, last: draft.last } } : { ok: false, problems }
 }
 
 /** How far a stock closed from its highest total-return level of the last year of sessions. */

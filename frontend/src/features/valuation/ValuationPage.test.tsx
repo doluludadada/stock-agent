@@ -77,13 +77,13 @@ describe('the undervalued scan', () => {
     const user = userEvent.setup()
     renderPage()
 
-    const pe = within(await screen.findByRole('tabpanel')).getByLabelText('Target P/E')
+    const pe = within(await screen.findByRole('region', { name: 'Specific stocks' })).getByLabelText('Target P/E')
     await user.clear(pe)
     await user.type(pe, '31')
-    await user.click(screen.getByRole('tab', { name: 'Undervalued scan' }))
-    await user.click(screen.getByRole('tab', { name: 'Specific stocks' }))
+    await user.click(screen.getByRole('radio', { name: 'Undervalued scan' }))
+    await user.click(screen.getByRole('radio', { name: 'Specific stocks' }))
 
-    expect(within(screen.getByRole('tabpanel')).getByLabelText('Target P/E')).toHaveValue('31')
+    expect(within(screen.getByRole('region', { name: 'Specific stocks' })).getByLabelText('Target P/E')).toHaveValue('31')
   })
 
   it('asks the AI about the P/E the scan used, even after the field was edited', async () => {
@@ -93,10 +93,10 @@ describe('the undervalued scan', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('tab', { name: 'Undervalued scan' }))
+    await user.click(screen.getByRole('radio', { name: 'Undervalued scan' }))
     await user.click(screen.getByRole('button', { name: 'Scan' }))
     await screen.findByRole('link', { name: /TSMC/ })
-    const pe = within(screen.getByRole('tabpanel')).getByLabelText('Target P/E')
+    const pe = within(screen.getByRole('region', { name: 'Undervalued scan' })).getByLabelText('Target P/E')
     await user.clear(pe)
     await user.type(pe, '25')
     await user.click(screen.getByRole('button', { name: 'Explain with AI' }))
@@ -114,20 +114,20 @@ describe('the undervalued scan', () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(screen.getByRole('tab', { name: 'Undervalued scan' }))
+    await user.click(screen.getByRole('radio', { name: 'Undervalued scan' }))
     await user.click(screen.getByRole('button', { name: 'Scan' }))
     await user.click(await screen.findByRole('button', { name: 'Explain with AI' }))
     await user.click(await screen.findByRole('button', { name: 'Make the AI call' }))
     expect(screen.getByRole('button', { name: /Confirm the 1 survivors/ })).toBeDisabled()
 
-    await user.click(screen.getByRole('tab', { name: 'Specific stocks' }))
-    await user.click(screen.getByRole('tab', { name: 'Undervalued scan' }))
+    await user.click(screen.getByRole('radio', { name: 'Specific stocks' }))
+    await user.click(screen.getByRole('radio', { name: 'Undervalued scan' }))
     await user.click(screen.getByRole('button', { name: 'Scan' }))
     expect(await screen.findByRole('button', { name: 'The AI is writing…' })).toBeDisabled()
-    await user.click(screen.getByRole('tab', { name: 'Specific stocks' }))
+    await user.click(screen.getByRole('radio', { name: 'Specific stocks' }))
     answer()
     await waitFor(() => expect(server.answers.sent).toBe(1))
-    await user.click(screen.getByRole('tab', { name: 'Undervalued scan' }))
+    await user.click(screen.getByRole('radio', { name: 'Undervalued scan' }))
     await user.click(screen.getByRole('button', { name: 'Scan' }))
     expect(await screen.findByText('Earnings grew.')).toBeInTheDocument()
 

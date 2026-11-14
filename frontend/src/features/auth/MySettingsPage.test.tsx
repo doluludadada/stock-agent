@@ -86,12 +86,11 @@ describe('My settings', () => {
     expect(await screen.findByText('Saved. Your next runs use Claude · claude-haiku-5-5.')).toBeVisible()
   })
 
-  it('says the active strategy is chosen in the strategy library, with a link there', async () => {
+  it('links to the strategy library, where the active strategy is chosen', async () => {
     serve(OFFER)
     open()
 
-    expect(await screen.findByText(/The active strategy is chosen in the strategy library/)).toBeVisible()
-    expect(screen.getByRole('link', { name: 'Open the strategy library' })).toHaveAttribute('href', '/strategies')
+    expect(await screen.findByRole('link', { name: 'Open the strategy library' })).toHaveAttribute('href', '/strategies')
   })
 })
 

@@ -180,7 +180,7 @@ describe('My holdings', () => {
     expect(etf).toHaveTextContent('no close held, valued at cost')
     expect(etf).toHaveTextContent('no monthly revenue held')
 
-    expect(screen.getByText(/It measures those two things and predicts nothing/)).toBeVisible()
+    expect(screen.getByText(/It is no forecast\./)).toBeVisible()
     expect(screen.getByText('For research and reference only, not investment advice.')).toBeVisible()
   })
 
@@ -188,17 +188,14 @@ describe('My holdings', () => {
     serve(() => json(MIXED))
     open()
 
-    const summary = within(await screen.findByRole('region', { name: 'Portfolio' }))
-    expect(summary.getByText('815,646')).toBeVisible()
+    const summary = within((await screen.findByText('815,646')).closest('section')!)
     expect(summary.getByText('Unrealized P&L').parentElement).toHaveTextContent('+99,096')
     expect(summary.getByText('Unrealized P&L').parentElement).toHaveTextContent('+13.83%')
-    expect(summary.getByText('In the 3 largest stocks').parentElement).toHaveTextContent('100.0%')
-    expect(summary.getByText('In the ranking’s current top').parentElement).toHaveTextContent('75.9%')
+    expect(summary.getByText('Top 3 holdings').parentElement).toHaveTextContent('100.0%')
+    expect(summary.getByText('In this month’s ranking').parentElement).toHaveTextContent('75.9%')
     const weighted = summary.getByText('Value-weighted score').parentElement!
     expect(weighted).toHaveTextContent('99')
     expect(weighted).toHaveTextContent('24.1% of the value has no score')
-    expect(within(summary.getByText('Highest score').parentElement!).getByRole('link', { name: '台積電 2330' })).toHaveAttribute('href', '/stocks/2330')
-    expect(summary.getByText('Lowest score').parentElement).toHaveTextContent('99')
   })
 
   it('never tells the reader what to do with a holding', async () => {
@@ -217,7 +214,7 @@ describe('My holdings', () => {
     await rows()
     expect(screen.queryByText('Value-weighted score')).not.toBeInTheDocument()
     expect(screen.queryByRole('columnheader', { name: 'Ranking score' })).not.toBeInTheDocument()
-    expect(screen.queryByText(/predicts nothing/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/It is no forecast/)).not.toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: 'Revenue acceleration' })).toBeInTheDocument()
   })
 
@@ -252,7 +249,7 @@ describe('My holdings', () => {
     open()
 
     expect(await screen.findByText('No holdings yet')).toBeVisible()
-    expect(screen.getByText(/^This page reads what you hold as one portfolio/)).toBeVisible()
+    expect(screen.getByText('Enter a stock you hold elsewhere. It is a note, not an order.')).toBeVisible()
     expect(screen.queryByRole('table')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Enter a holding' }))
@@ -347,7 +344,8 @@ describe('My holdings', () => {
     await user.type(form.getByLabelText('Average cost per share (NT$)'), '100')
     await user.click(form.getByRole('button', { name: 'Keep the entry' }))
 
-    expect(await form.findByText(/^The stock listing is unavailable right now/)).toBeVisible()
+    expect(await form.findByText('Not kept. The list of stocks is unavailable right now. Try again later.')).toBeVisible()
+    expect(form.queryByText(/The listing is unavailable\./), 'never the server’s own sentence').not.toBeInTheDocument()
   })
 
   it('offers a change and a removal on a hand-entered row only, and removes after a yes', async () => {

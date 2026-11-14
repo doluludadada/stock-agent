@@ -3,7 +3,6 @@ import openapi from '@/shared/api/openapi.json'
 import {
   draftOf,
   lowerBuyScore,
-  monthsBefore,
   nextSort,
   parseDraft,
   periodPresets,
@@ -193,14 +192,14 @@ describe('the form', () => {
     expect(SCORE_RANGE).toEqual({ min: score.minimum, max: score.maximum })
   })
 
-  it('puts a refused field of the request at its form field, and leaves out a problem of no field', () => {
+  it('names the form fields a refusal is about, and leaves out a problem of no field', () => {
     expect(
       refusedFields([
         { location: ['body', 'inputs', 'buy_score'], message: 'Input should be less than or equal to 100' },
         { location: ['body', 'inputs', 'initial_cash'], message: 'Input should be greater than 0' },
         { location: ['body', 'inputs'], message: 'first must not be after last' },
       ]),
-    ).toEqual({ buy: 'Input should be less than or equal to 100', cash: 'Input should be greater than 0' })
+    ).toEqual(['buy', 'cash'])
   })
 })
 
@@ -217,18 +216,13 @@ describe('the quick periods', () => {
     expect(periodPresets({ first: '2026-09-01', last: '2026-11-11' }).map((preset) => preset.key)).toEqual(['all'])
     expect(periodPresets({ first: '2024-01-02', last: '2026-11-11' }).map((preset) => preset.key)).toEqual(['3M', '6M', '1Y', 'all'])
   })
-
-  it('count months back across a year and onto a shorter month', () => {
-    expect(monthsBefore('2026-02-10', 3)).toBe('2025-11-10')
-    expect(monthsBefore('2026-05-31', 3)).toBe('2026-02-28')
-    expect(monthsBefore('2024-05-31', 3)).toBe('2024-02-29')
-  })
 })
 
 describe('after a backtest that bought nothing', () => {
   it('suggests 70 for a higher buy score, then ten lower each time, never under the lowest score', () => {
     expect(lowerBuyScore(80)).toBe(70)
     expect(lowerBuyScore(70)).toBe(60)
+    expect(lowerBuyScore(95)).toBe(85)
     expect(lowerBuyScore(5)).toBe(0)
     expect(lowerBuyScore(0)).toBe(0)
   })

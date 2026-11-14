@@ -2,10 +2,10 @@ import { Activity, ArrowRight, ClipboardList, Megaphone, Play, Radar, ScanSearch
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { toast } from 'sonner'
-import { useLocale, useTranslation } from '@/i18n'
+import { useTranslation } from '@/i18n'
 import { paths } from '@/shared/config/paths'
 import { allows, chosenOffer, useAudience, useBrokerOffers, useSession, useShown, type Broker, type Capability, type Feature } from '@/shared/api'
-import { formatDateTime } from '@/shared/lib/format'
+import { DASH, useFormat } from '@/shared/lib/format'
 import { isAcceptedList, parseStockIds } from '@/shared/lib/stock-ids'
 import { ArchiveWarmUp } from '@/shared/ui/archive-warm-up'
 import { Badge } from '@/shared/ui/badge'
@@ -20,7 +20,6 @@ import { Panel } from '@/shared/ui/panel'
 import { Skeleton } from '@/shared/ui/skeleton'
 import { StateBlock } from '@/shared/ui/state-block'
 import { StockIdsProblem } from '@/shared/ui/stock-ids-problem'
-import { TechnicalStrategyNote } from '@/shared/ui/technical-strategy-note'
 import { SignInActions } from '@/shared/ui/require-sign-in'
 import { PAGE_SIZE, useRunSignals, useRunsPage, useStartRun, type Run, type RunKind, type Signal } from './api'
 import { BrokerChoice } from './BrokerChoice'
@@ -50,7 +49,7 @@ export function RunsPage() {
   const kinds = offered && !shown.pending ? KINDS.filter((item) => shown.shows(item.feature) && (!item.requires || allows(offered, item.requires))) : null
   return (
     <div className="page-stack">
-      <PageHeader title={t('title')} description={t('description')} note={<TechnicalStrategyNote />} />
+      <PageHeader title={t('title')} />
       {(shown.pending || audience.isPending) && <Skeleton className="h-40 rounded-2xl" />}
       {audience.isError && <ErrorState error={audience.error} title={t('common:audience.failed')} onRetry={() => void audience.refetch()} className="rounded-2xl border bg-card" />}
       {kinds && current.status === 'signedOut' && <Intro ended={current.ended} kinds={kinds} />}
@@ -238,11 +237,11 @@ const buyFirstThenScore = (a: Signal, b: Signal) => Number(b.action === 'buy') -
 
 function LatestRun({ run }: { run: Run }) {
   const { t } = useTranslation('runs')
-  const locale = useLocale()
+  const format = useFormat()
   const signals = useRunSignals(run.run_id, true)
   const summary = run.summary
   const strongest = signals.data ? [...signals.data].sort(buyFirstThenScore).slice(0, LATEST_SHOWN) : []
-  const timing = summary && t('timing', { start: formatDateTime(locale, summary.start_time), end: summary.end_time ? formatDateTime(locale, summary.end_time) : '—' })
+  const timing = summary && t('timing', { start: format.dateTime(summary.start_time), end: summary.end_time ? format.dateTime(summary.end_time) : DASH })
   const columns: Column<Signal>[] = [
     {
       key: 'stock',
@@ -319,8 +318,8 @@ function History() {
 /** Every run, newest first; a row opens the run. On a phone a row reads as the run and its state. */
 function RunsTable({ runs }: { runs: Run[] }) {
   const { t } = useTranslation('runs')
-  const locale = useLocale()
-  const started = (run: Run) => (run.summary ? formatDateTime(locale, run.summary.start_time) : '—')
+  const format = useFormat()
+  const started = (run: Run) => (run.summary ? format.dateTime(run.summary.start_time) : DASH)
   const columns: Column<Run>[] = [
     {
       key: 'started',
@@ -335,8 +334,8 @@ function RunsTable({ runs }: { runs: Run[] }) {
     },
     { key: 'workflow', header: t('column.workflow'), from: 'md', className: 'w-full whitespace-nowrap', cell: (run) => (run.summary ? t(`workflow.${run.summary.workflow}`) : t('unrecorded')) },
     { key: 'state', header: t('column.state'), className: 'whitespace-nowrap', cell: (run) => <RunStateBadge state={run.state} /> },
-    { key: 'signals', header: t('column.signals'), numeric: true, from: 'md', cell: (run) => run.summary?.signals_generated ?? '—' },
-    { key: 'orders', header: t('column.orders'), numeric: true, from: 'md', cell: (run) => run.summary?.orders_submitted ?? '—' },
+    { key: 'signals', header: t('column.signals'), numeric: true, from: 'md', cell: (run) => run.summary?.signals_generated ?? DASH },
+    { key: 'orders', header: t('column.orders'), numeric: true, from: 'md', cell: (run) => run.summary?.orders_submitted ?? DASH },
     { key: 'errors', header: t('column.errors'), numeric: true, from: 'sm', cell: (run) => run.summary?.errors.length ?? (run.error ? 1 : 0) },
   ]
   return <DataTable rows={runs} columns={columns} rowKey={(run) => run.run_id} label={t('historyTitle')} />

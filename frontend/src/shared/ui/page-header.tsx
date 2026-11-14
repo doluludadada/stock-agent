@@ -15,14 +15,12 @@ interface PageHeaderProps {
   tabTitle?: string
   /** One short line under the title. */
   description?: ReactNode
-  /** A quieter line under the description, such as where a page's subject moved to. */
-  note?: ReactNode
   actions?: ReactNode
   className?: string
 }
 
 /** The top of every page: its section, its one title, one line about it, and its actions. It names the browser tab too. */
-export function PageHeader({ title, tabTitle, description, note, actions, className }: PageHeaderProps) {
+export function PageHeader({ title, tabTitle, description, actions, className }: PageHeaderProps) {
   const eyebrow = useContext(PageSectionContext)
   usePageTitle(tabTitle ?? (typeof title === 'string' ? title : null))
   return (
@@ -31,7 +29,6 @@ export function PageHeader({ title, tabTitle, description, note, actions, classN
         {eyebrow && <p className="eyebrow">{eyebrow}</p>}
         <h1 className="display text-balance">{title}</h1>
         {description && <p className="text-sm text-pretty text-muted-foreground">{description}</p>}
-        {note}
       </div>
       {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
     </header>

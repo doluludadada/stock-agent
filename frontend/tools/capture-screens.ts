@@ -1,6 +1,6 @@
 /**
  * Screenshots of every page against a running app and backend, at 360, 768 and 1440 px in both themes, and an
- * audit of each: horizontal page scroll, controls under 44 px on a phone, text cut off, and page errors.
+ * audit of each: horizontal page scroll, controls under 44 px on a phone, text cut off, the words on it, and page errors.
  *
  *   bun tools/capture-screens.ts <out-dir> [--url http://127.0.0.1:4173] [--user name --password pw]
  *     [--member name --member-password pw] [--only overview,watchlist] [--widths 375,1440] [--themes light]
@@ -45,6 +45,8 @@ interface Finding {
   overflow: number
   smallTargets: string[]
   clipped: string[]
+  /** The words a reader faces in the page's content: each CJK character and each run of letters or digits is one. */
+  words: number
   errors: string[]
 }
 
@@ -171,7 +173,8 @@ async function audit(page: Page, width: number): Promise<Omit<Finding, 'shot' | 
         return (style.overflow === 'hidden' || style.overflowX === 'hidden' || style.textOverflow === 'ellipsis') && !element.title
       })
       .map((element) => `"${name(element)}" ${element.scrollWidth}>${element.clientWidth}`)
-    return { overflow: document.documentElement.scrollWidth - window.innerWidth, smallTargets, clipped }
+    const words = (document.querySelector('main') ?? document.body).innerText.match(/[\u3400-\u9fff]|[A-Za-z0-9][A-Za-z0-9.,%+\-/:]*/g)?.length ?? 0
+    return { overflow: document.documentElement.scrollWidth - window.innerWidth, smallTargets, clipped, words }
   }, width < 768)
 }
 

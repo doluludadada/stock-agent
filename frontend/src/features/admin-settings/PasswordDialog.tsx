@@ -1,6 +1,7 @@
 import { LoaderCircle, TriangleAlert } from 'lucide-react'
 import { useEffect, useRef, useState, type FormEvent, type RefObject } from 'react'
 import { useTranslation } from '@/i18n'
+import { useErrorReason } from '@/shared/lib/error-reason'
 import { Button } from '@/shared/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/shared/ui/dialog'
 import { Field } from '@/shared/ui/field'
@@ -67,6 +68,7 @@ interface PasswordFormProps {
 /** The dialog's body; it mounts each time the dialog opens, so a password typed before never comes back. */
 function PasswordForm({ field, onConfirm, onCancel, pending, setPending, throttledUntil, onThrottled }: PasswordFormProps) {
   const { t } = useTranslation('admin')
+  const reason = useErrorReason()
   const [password, setPassword] = useState('')
   const [refusal, setRefusal] = useState<DialogRefusal | null>(null)
   const wait = useSecondsUntil(throttledUntil)
@@ -93,7 +95,7 @@ function PasswordForm({ field, onConfirm, onCancel, pending, setPending, throttl
         ? t('password.throttledMinutes', { minutes: Math.floor(wait / 60), seconds: wait % 60 })
         : t('password.throttledSeconds', { seconds: wait })
       : refusal?.kind === 'failed'
-        ? t('password.failed', { reason: reasonOf(refusal.error, t) })
+        ? t('password.failed', { reason: reasonOf(refusal.error, t, reason) })
         : null
 
   return (

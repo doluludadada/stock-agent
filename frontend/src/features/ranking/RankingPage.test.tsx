@@ -74,6 +74,11 @@ function serve({ latest = () => json(LATEST), backtest = () => json(BACKTEST), f
   return asked
 }
 
+/** Opens what is one tap from the backtest's figures: the period, the curve, every year, every decision and the caveats. */
+async function openDetail() {
+  await userEvent.click(await screen.findByRole('button', { name: 'Period, chart and every decision' }))
+}
+
 function open(address = '/ranking', locale: 'en' | 'zh-TW' = 'en', mockAccount = false) {
   const i18n = initI18n('en')
   void i18n.changeLanguage(locale)
@@ -114,29 +119,44 @@ describe('the ranking page', () => {
     expect(rows[10]).toHaveTextContent(/[-−]2\.1%/)
     expect(within(rows[2]!).getByRole('link', { name: /6834/ })).toHaveAttribute('href', '/stocks/6834')
 
-    expect(screen.getByText('10/13/2026')).toBeVisible()
-    expect(screen.getByText('September 2026')).toBeVisible()
-    expect(screen.getByText('About 11/13')).toBeVisible()
-    expect(screen.getByText('757 stocks')).toBeVisible()
-    expect(screen.getByText('759 passed the traded-value and price floor')).toBeVisible()
+    expect(screen.getByText('10/13/2026 · September 2026 revenue')).toBeVisible()
+    expect(screen.getByText('Next decision about 11/13')).toBeVisible()
+    expect(screen.getByText('For research and reference only, not investment advice.')).toBeVisible()
+  })
+
+  it('puts the list first, then the backtest as three figures marked simulated, with the detail closed until asked for', async () => {
+    serve()
+    open()
+
+    const compared = await screen.findByRole('table', { name: 'The ranking against 0050' })
+    expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual(["This month's ranking", 'BacktestSimulated'])
+    expect(within(compared).getAllByRole('row').slice(1)).toHaveLength(3)
+    expect(screen.getByText('01/13/2023 to 10/30/2024')).toBeVisible()
+    for (const name of ['Every year', 'Backtest: every past decision']) expect(screen.queryByRole('table', { name })).not.toBeInTheDocument()
+    expect(screen.queryByText('This is a backtest, not a track record.')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Last 3 years' })).not.toBeInTheDocument()
+
+    await openDetail()
+    expect(screen.getByRole('table', { name: 'Every year' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Last 3 years' })).toBeVisible()
   })
 
   it('asks nothing about the mock account where the site does not show it', async () => {
     const asked = serve()
     open()
 
-    await screen.findByTestId('headline')
+    await screen.findByRole('table', { name: 'The ranking against 0050' })
     expect(screen.queryByRole('region', { name: 'The ranking in your mock account' })).not.toBeInTheDocument()
     expect(asked.filter((request) => request.endsWith('follow'))).toEqual([])
   })
 
-  it('says in one sentence that the mock account does not follow yet, and follows the ranking after a yes that lists every order', async () => {
+  it('says that the mock account does not follow yet, and follows the ranking after a yes that lists every order', async () => {
     const asked = serve({ follow: [NEVER_FOLLOWED, { ...NEVER_FOLLOWED, running: true }] })
     const user = userEvent.setup()
     open('/ranking', 'en', true)
 
     const block = await screen.findByRole('region', { name: 'The ranking in your mock account' })
-    expect(await within(block).findByText('Your mock account does not follow the ranking yet.')).toBeVisible()
+    expect(await within(block).findByText('Not followed yet.')).toBeVisible()
     expect(within(block).getByRole('link', { name: 'Mock account' })).toHaveAttribute('href', '/account')
     expect(within(block).queryByText('Holds')).not.toBeInTheDocument()
 
@@ -161,11 +181,10 @@ describe('the ranking page', () => {
 
     const block = await screen.findByRole('region', { name: 'The ranking in your mock account' })
     expect(await within(block).findByText('18 of 20')).toBeVisible()
-    expect(block).toHaveTextContent('Mock accountUp +3.12%0050, same sessionsUp +2.10%')
-    expect(within(block).getByText('Since the first follow on 09/15/2026, to the close of 10/13/2026, after fees and tax.')).toBeVisible()
-    expect(block).toHaveTextContent(`Not held yet: ${A_MONTH_IN.holdings.lacking.join(' ')}`)
+    expect(block).toHaveTextContent('Since 9/15Up +3.12%0050Up +2.10%')
+    expect(block).toHaveTextContent(`Lacks: ${A_MONTH_IN.holdings.lacking.join(' ')}`)
     expect(block).toHaveTextContent('Left the ranking, still held: 1101')
-    expect(within(block).getByText('To match this month’s ranking: 1 to sell, 2 to buy.')).toBeVisible()
+    expect(within(block).getByText('To catch up: sell 1, buy 2.')).toBeVisible()
 
     await user.click(within(block).getByRole('button', { name: 'Follow this month’s ranking' }))
     const listed = within(await screen.findByRole('alertdialog')).getAllByRole('listitem').map((item) => item.textContent)
@@ -178,9 +197,16 @@ describe('the ranking page', () => {
     open('/ranking', 'en', true)
 
     const block = await screen.findByRole('region', { name: 'The ranking in your mock account' })
-    expect(await within(block).findByText('Your mock account holds this month’s ranking.')).toBeVisible()
-    expect(within(block).getByText('20 of 20')).toBeVisible()
+    expect(await within(block).findByText('20 of 20')).toBeVisible()
+    expect(block, 'the figures say it; no sentence repeats them').not.toHaveTextContent(/holds this month/)
     expect(within(block).queryByRole('button', { name: 'Follow this month’s ranking' })).not.toBeInTheDocument()
+    cleanup()
+
+    serve({ follow: [{ ...A_MONTH_IN, holdings: held, refusal: 'nothing_to_follow', performance: null }] })
+    open('/ranking', 'en', true)
+    const unmeasured = await screen.findByRole('region', { name: 'The ranking in your mock account' })
+    expect(await within(unmeasured).findByText('20 of 20'), 'an account that holds the ranking with no return to measure yet').toBeVisible()
+    expect(unmeasured).not.toHaveTextContent(/ranks no stock|0050/)
     cleanup()
 
     serve({ follow: [{ ...NEVER_FOLLOWED, refusal: 'outside_follow_window' }] })
@@ -194,17 +220,17 @@ describe('the ranking page', () => {
     serve()
     open()
 
-    expect(await screen.findByText('Should be here by now')).toBeVisible()
-    expect(screen.getByText(/^Expected around 11\/13\./)).toBeVisible()
+    expect(await screen.findByText('The next decision is due')).toBeVisible()
   })
 
   it('marks the stocks that entered since the decision before and lists the ones that left', async () => {
     serve()
     open()
 
-    const changed = await screen.findByText('Against the decision before (9/14): 2 entered, 2 left, 18 stayed.')
-    expect(changed).toBeVisible()
-    const left = screen.getByRole('list', { name: 'Left' })
+    const changed = await screen.findByRole('button', { name: '2 new · 2 left' })
+    expect(changed).toHaveAttribute('aria-expanded', 'false')
+    await userEvent.click(changed)
+    const left = screen.getByRole('list', { name: 'Left the ranking' })
     expect(within(left).getByRole('link', { name: /Gamma/ })).toHaveAttribute('href', '/stocks/1101')
     expect(within(left).getByRole('link', { name: '1102' })).toHaveAttribute('href', '/stocks/1102')
     const rows = within(screen.getByRole('table', { name: "This month's ranking" })).getAllByRole('row').slice(1)
@@ -212,19 +238,16 @@ describe('the ranking page', () => {
     expect(within(rows[0]!).getByText('New')).toBeVisible()
   })
 
-  it('answers whether following it beat the benchmark: a sentence, both sides of each figure, every year and the costs', async () => {
+  it('answers whether following it beat the benchmark: both sides of each figure, then every year and the costs in the detail', async () => {
     const asked = serve()
     open()
 
-    expect(await screen.findByTestId('headline')).toHaveTextContent(
-      '01/13/2023 to 10/30/2024: trading to the ranking every month returned +79.6% a year on average. Holding 0050 over the same time returned +37.5% a year.',
-    )
-    expect(screen.getByRole('heading', { name: 'Backtest (simulated): would following it have beaten 0050?' })).toBeVisible()
-    const compared = screen.getByRole('table', { name: 'The ranking against 0050' })
-    expect(within(compared).getByRole('row', { name: /A year on average/ })).toHaveTextContent('+79.6%+37.5%')
-    expect(within(compared).getByRole('row', { name: /1 put in at the start became/ })).toHaveTextContent('2.81.7')
+    const compared = await screen.findByRole('table', { name: 'The ranking against 0050' })
+    expect(within(compared).getByRole('row', { name: /A year, on average/ })).toHaveTextContent('+79.6%+37.5%')
+    expect(within(compared).getByRole('row', { name: /1 put in became/ })).toHaveTextContent('2.81.7')
     expect(within(compared).getByRole('row', { name: /Deepest fall/ })).toHaveTextContent(/[-−]16\.6%[-−]21\.3%/)
-    expect(screen.getByText(/add up to about 9\.6% of the value they were paid from \(0\.1425% fee, 0\.3% tax on a sale\)/)).toBeVisible()
+    await openDetail()
+    expect(screen.getByText(/about 9\.6% of the assets over the period \(fee 0\.1425%, tax on a sale 0\.3%\)/)).toBeVisible()
 
     const years = screen.getByRole('table', { name: 'Every year' })
     expect(within(years).getByRole('row', { name: /2024/ })).toHaveTextContent('to 10/30')
@@ -242,31 +265,31 @@ describe('the ranking page', () => {
     })
     open()
 
+    await openDetail()
     const years = await screen.findByRole('table', { name: 'Every year' })
     expect(within(years).getByRole('row', { name: /2023/ })).toHaveTextContent('Lost money')
     expect(within(years).getByRole('row', { name: /2023/ })).toHaveTextContent('Behind 0050')
     expect(within(years).getByRole('row', { name: /2024/ })).not.toHaveTextContent('Lost money')
     expect(within(years).getByRole('row', { name: /2024/ })).toHaveTextContent('Behind 0050')
     expect(screen.getByText('2 years · 1 lost money · 2 behind the benchmark')).toBeVisible()
-    expect(screen.getByTestId('headline')).toHaveTextContent('returned +10.0% a year on average, less than the +20.0% a year of holding 0050.')
   })
 
-  it('says each measured caveat beside the record', async () => {
+  it('says each measured caveat in the backtest’s detail', async () => {
     serve()
     open()
 
+    await openDetail()
     expect(await screen.findByText('This is a backtest, not a track record.')).toBeVisible()
     expect(screen.getByText(/In 2018, 40 of the 521 liquid stocks had no revenue data, and 37 of them later delisted\./)).toBeVisible()
     expect(screen.getByText('The formula was the best of about 60 tried.')).toBeVisible()
     expect(screen.getByText(/It fell about 25% in 2022, and its deepest fall from a high was about 36%\./)).toBeVisible()
     expect(screen.getByText('Buying a few days late cut the result sharply.')).toBeVisible()
-    expect(within(document.getElementById('ranking-caveats')!).getByText('For research and reference only, not investment advice.')).toBeVisible()
   })
 
   it('asks for a quick period once, and for two typed days only when they are applied', async () => {
     const asked = serve()
     open()
-    await screen.findByTestId('headline')
+    await openDetail()
     const replays = () => asked.filter((item) => item !== 'latest' && !item.startsWith('2026-09-01'))
     expect(replays()).toEqual(['2000-01-01..2026-11-12'])
     expect(screen.getByRole('button', { name: 'Whole history' })).toHaveAttribute('aria-pressed', 'true')
@@ -298,6 +321,7 @@ describe('the ranking page', () => {
     serve()
     open()
 
+    await openDetail()
     const months = await screen.findByRole('table', { name: 'Backtest: every past decision' })
     expect(within(months).getAllByRole('row').slice(1)).toHaveLength(12)
     expect(within(months).getByRole('link', { name: 'Open the ranking of 09/13/2024' })).toHaveAttribute('href', '/ranking?month=2024-09-13')
@@ -336,12 +360,12 @@ describe('the ranking page', () => {
     open()
 
     expect(await screen.findByText(/^Computing… \d+ s$/)).toBeVisible()
-    expect(screen.getByText(/The first answer after it starts takes about a minute/)).toBeVisible()
+    expect(screen.getByText(/The first answer after a start takes about a minute/)).toBeVisible()
     expect(asked).toEqual(['latest'])
 
     answer(json(LATEST))
     expect(await screen.findByRole('table', { name: "This month's ranking" })).toBeVisible()
-    await screen.findByTestId('headline')
+    await screen.findByRole('table', { name: 'The ranking against 0050' })
     expect(screen.queryByText(/^Computing…/)).not.toBeInTheDocument()
   })
 
@@ -385,7 +409,7 @@ describe('the ranking page', () => {
     expect(screen.queryByRole('table', { name: 'Backtest: every past decision' })).not.toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: 'Show the whole history' }))
-    expect(await screen.findByTestId('headline')).toBeVisible()
+    expect(await screen.findByRole('table', { name: 'The ranking against 0050' })).toBeVisible()
     expect(asked).toContain('2000-01-01..2026-11-12')
   })
 
@@ -414,12 +438,13 @@ describe('the ranking page', () => {
     serve()
     open('/ranking', 'zh-TW')
 
-    expect(await screen.findByTestId('headline')).toHaveTextContent('2023/01/13 到 2024/10/30，每個月照排名換股，平均每年 +79.6%；同一段時間一直抱著 0050，平均每年 +37.5%。')
+    expect(await screen.findByRole('table', { name: '排名組合與 0050 的比較' })).toHaveTextContent('平均每年+79.6%+37.5%')
+    expect(screen.getByRole('heading', { name: /回測.*模擬/ })).toBeVisible()
     const rows = within(screen.getByRole('table', { name: '這個月的排名' })).getAllByRole('row').slice(1)
     expect(rows[0]).toHaveTextContent('2.09 倍')
     expect(rows[0]).toHaveTextContent('創一年新高')
-    expect(screen.getByText('和上次決策（9/14）相比：新進 2 檔、移出 2 檔、續抱 18 檔。')).toBeVisible()
-    expect(screen.getByText('約 11/13')).toBeVisible()
+    expect(screen.getByRole('button', { name: '新進 2 · 移出 2' })).toBeVisible()
+    expect(screen.getByText('下次決策約 11/13')).toBeVisible()
   })
 
   it('reads the mock account’s follow in Traditional Chinese', async () => {
@@ -427,9 +452,9 @@ describe('the ranking page', () => {
     open('/ranking', 'zh-TW', true)
 
     const block = await screen.findByRole('region', { name: '模擬帳戶跟單' })
-    expect(await within(block).findByText('18／20 檔')).toBeVisible()
-    expect(within(block).getByText('自 2026/09/15 第一次跟單，到 2026/10/13 收盤，已扣手續費與稅。')).toBeVisible()
-    expect(within(block).getByText('要跟上這個月的排名：賣出 1 檔、買進 2 檔。')).toBeVisible()
+    expect(await within(block).findByText('18／20')).toBeVisible()
+    expect(block).toHaveTextContent('自 9/15')
+    expect(within(block).getByText('要跟上：賣出 1 檔、買進 2 檔。')).toBeVisible()
     expect(within(block).getByRole('button', { name: '跟單這個月的排名' })).toBeEnabled()
   })
 })

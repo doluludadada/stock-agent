@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, within, waitFor } from '@testing-library/react'
 import { I18nextProvider } from 'react-i18next'
 import { MemoryRouter } from 'react-router'
 import { initI18n } from '@/i18n'
@@ -43,15 +43,12 @@ describe('the watchlist’s sources', () => {
 
   it('offer Social buzz where the site runs Buzz scans', async () => {
     open(PERSONAL_SITE)
-    await screen.findByText('Added by a Social Buzz scan. It expires on its own as well.')
-    expect((await filters()).some((label) => label?.startsWith('Social buzz'))).toBe(true)
+    await waitFor(async () => expect((await filters()).some((label) => label?.startsWith('Social buzz'))).toBe(true))
   })
 
-  it('leave Social buzz out of the filter and the notes on a public site, which runs none', async () => {
+  it('leave Social buzz out of the filter on a public site, which runs none', async () => {
     open(PUBLIC_SITE)
     expect(await filters()).toEqual(expect.arrayContaining([expect.stringMatching(/^Manual/), expect.stringMatching(/^Technical/)]))
     expect((await filters()).some((label) => label?.startsWith('Social buzz'))).toBe(false)
-    expect(screen.getByText(/^Added by a Full Cycle run/)).toBeInTheDocument()
-    expect(screen.queryByText(/Social Buzz scan/)).not.toBeInTheDocument()
   })
 })

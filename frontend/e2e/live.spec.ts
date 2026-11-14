@@ -123,7 +123,7 @@ test('the home page reads the market, the ranking, the holdings and the watchlis
   await expect(page.getByRole('heading', { name: '今日', level: 1 })).toBeVisible()
   await expect(page).toHaveTitle('今日 · Stock Agent')
   const main = page.getByRole('main')
-  const cards = { 加權指數: ['市場總覽', '/market'], 這個月的排名: ['全部 20 檔、實際紀錄與回測', '/ranking'], 我的持股: ['全部持股', '/holdings'], 觀察清單: ['完整清單', '/watchlist'] }
+  const cards = { 加權指數: ['市場總覽', '/market'], 這個月的排名: ['全部 20 檔與回測', '/ranking'], 我的持股: ['全部持股', '/holdings'], 觀察清單: ['完整清單', '/watchlist'] }
   for (const [card, [link, to]] of Object.entries(cards)) await expect(main.getByRole('region', { name: card }).getByRole('link', { name: link! }), card).toHaveAttribute('href', to!)
   await expect(main.getByRole('link', { name: '登入', exact: true }), 'a signed-in reader is asked nothing').toHaveCount(0)
   // The first ranking after a server start reads the whole history.
@@ -133,7 +133,7 @@ test('the home page reads the market, the ranking, the holdings and the watchlis
   const nav = page.getByRole('navigation', { name: '主要導覽' })
   await expect(nav.getByRole('link').first()).toHaveText('今日')
   await expect(nav.getByRole('link', { name: '今日' })).toHaveAttribute('aria-current', 'page')
-  await expect(nav.getByRole('button', { name: '其他工具' })).toHaveAttribute('aria-expanded', 'false')
+  await expect(nav.getByRole('button', { name: '輔助分析工具' })).toHaveAttribute('aria-expanded', 'false')
   await nav.getByRole('link', { name: '我的持股' }).click()
   await expect(page.getByRole('heading', { name: '我的持股', level: 1 })).toBeVisible()
   await expect(page).toHaveTitle('我的持股 · Stock Agent')
@@ -167,16 +167,20 @@ test('the ranking shows this month’s 20 stocks, a five-year backtest kept in t
   const served = (await apiGet(page, '/v1/rankings/latest')) as { stocks: { stock_id: string }[] }
   await expect(latest.getByRole('row').nth(1), 'the first row is the server’s first stock').toContainText(served.stocks[0]!.stock_id)
 
+  // The backtest shows as three figures marked simulated; its period and every decision are one tap away.
+  const backtest = page.getByRole('region', { name: /^回測/ }).first()
+  await expect(backtest.getByRole('table', { name: /排名組合與 .+ 的比較/ }).getByRole('row')).toHaveCount(4, { timeout: 180_000 })
+  await expect(backtest.getByText('模擬', { exact: true }), 'the backtest says it is simulated').toBeVisible()
+  await expect(page.getByRole('button', { name: '近 5 年' }), 'the detail is closed until asked for').toHaveCount(0)
+  await backtest.getByRole('button', { name: '期間、走勢與每次決策' }).click()
   await page.getByRole('button', { name: '近 5 年' }).click()
   await expect(page).toHaveURL(/[?&]period=5Y(&|$)/)
   await expect(page.getByRole('button', { name: '近 5 年' })).toHaveAttribute('aria-pressed', 'true')
-  await expect(page.getByTestId('headline')).toBeVisible({ timeout: 180_000 })
-  await expect(page.getByRole('heading', { name: /^回測（模擬）/ })).toBeVisible()
   await page.reload()
-  await expect(page.getByRole('button', { name: '近 5 年' }), 'the period survives a reload').toHaveAttribute('aria-pressed', 'true', { timeout: 180_000 })
+  await expect(page.getByRole('button', { name: '近 5 年' }), 'the period survives a reload and opens the detail').toHaveAttribute('aria-pressed', 'true', { timeout: 180_000 })
 
   const months = page.getByRole('region', { name: '回測：過去每一次決策' })
-  await expect(months.getByText(/^模擬：/), 'the past decisions say they are simulated').toBeVisible()
+  await expect(months.getByRole('table')).toBeVisible({ timeout: 180_000 })
   await expect(page.getByRole('main').getByText('僅供研究參考，不構成投資建議。').first()).toBeVisible()
   await page.screenshot({ path: `${SHOTS}/live-ranking.png`, fullPage: true })
 
@@ -226,7 +230,10 @@ test('after switching the strategy in use, the stock page evaluates with the new
     await page.getByRole('button', { name: '搜尋股票' }).click()
     await page.getByRole('dialog').getByRole('combobox').fill('2330')
     await page.getByRole('option', { name: /2330/ }).first().click({ timeout: 120_000 })
-    await expect(page.getByRole('region', { name: '技術評估' })).toContainText(name, { timeout: 120_000 })
+    // The technical evaluation is a supporting tool: closed until the reader opens it.
+    const evaluation = page.getByRole('region', { name: '技術評估' })
+    await evaluation.getByRole('button', { name: '技術評估' }).click({ timeout: 120_000 })
+    await expect(evaluation).toContainText(name, { timeout: 120_000 })
     await page.goto('/strategies')
   }
   await activateBuiltIn()

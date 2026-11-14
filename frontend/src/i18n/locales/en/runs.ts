@@ -2,7 +2,6 @@ const runs = {
   detailSignIn: 'Sign in to see this run',
   signIn: 'Sign in to start analyses and see your runs',
   title: 'Analysis runs',
-  description: 'Start an analysis and read what each run recorded. One run at a time.',
   startTitle: 'Start a run',
   startQuestion: 'Four workflows; one of yours runs at a time',
   startQuestionWithoutRealtime: 'Two workflows; one of yours runs at a time',
@@ -109,7 +108,6 @@ const runs = {
   runningNote: 'Running. The state updates by itself.',
   unfinishedNote: 'This run did not finish. Its record keeps what it completed.',
   summaryTitle: 'Counters',
-  summaryQuestion: 'What the run went through',
   counter: {
     scanned: 'Scanned',
     passedTechnical: 'Passed strategy',
@@ -121,7 +119,6 @@ const runs = {
   },
   errorsTitle: '{{count}} errors along the way',
   reportsTitle: 'Stock reports',
-  reportsQuestion: '{{count}} stocks, each with its scores',
   hardFailuresTitle: 'Excluded by {{count}} rules',
   score: { technical: 'Technical', ai: 'AI', composite: 'Composite' },
   signalsTitle: 'Decisions ({{count}})',
@@ -138,7 +135,6 @@ const runs = {
   followMark: { open: 'Open', followed: 'Followed' },
   follow: {
     title: 'Follow in your mock account',
-    question: 'How this run’s decisions would do if you had followed them',
     ready: {
       realtime_quote: 'Places the decisions of this run still open ({{count}}) in your mock account at a realtime quote now.',
       official_close: 'Places the decisions of this run still open ({{count}}) in your mock account at the official close of the last session.',

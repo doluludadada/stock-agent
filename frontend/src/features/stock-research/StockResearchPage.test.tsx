@@ -41,7 +41,7 @@ describe('the stock page', () => {
     expect(fetch.mock.calls.map(([url]) => url).filter((url) => url.includes('/technical'))).toEqual([])
   })
 
-  it('puts the AI brief under the revenue and the score, and above the chart', async () => {
+  it('reads revenue and score first, then the AI brief and the news, then the chart and the tables', async () => {
     vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
     const bars = ['2026-11-11', '2026-11-12'].map((day) => ({ ts: `${day}T13:30:00+08:00`, open: 2250, high: 2285, low: 2235, close: 2240, volume: 45_175_145, change: null }))
     vi.stubGlobal(
@@ -58,10 +58,11 @@ describe('the stock page', () => {
 
     await screen.findByText('No brief has been written today')
     await screen.findByRole('region', { name: 'Ranking score' })
-    expect(screen.getAllByRole('region').map((region) => region.getAttribute('aria-labelledby') && region.querySelector('h2')?.textContent).filter(Boolean).slice(0, 4)).toEqual([
+    expect(screen.getAllByRole('region').map((region) => region.getAttribute('aria-labelledby') && region.querySelector('h2')?.textContent).filter(Boolean).slice(0, 5)).toEqual([
       'Ranking score',
       'Monthly revenue',
       'AI brief',
+      'News and discussion',
       'Price and volume',
     ])
   })

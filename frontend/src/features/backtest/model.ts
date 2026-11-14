@@ -1,5 +1,6 @@
 import type { FieldProblem, Schemas } from '@/shared/api'
 import { sessionDate } from '@/shared/lib/chart-range'
+import { monthsBefore, periodProblems, type Period, type PeriodProblem } from '@/shared/lib/dates'
 import { directionOf, type Direction } from '@/shared/lib/direction'
 
 export type Backtest = Schemas['BacktestResponse']
@@ -149,24 +150,13 @@ export function draftOf(inputs: BacktestInputs): Draft {
 }
 
 /** The days a backtest may cover now: the period of the longest one the server allows. */
-export interface Bounds {
-  first: string
-  last: string
-}
+export type Bounds = Period
 
-export type DraftProblem = 'dateRequired' | 'beforeFirst' | 'afterLast' | 'firstAfterLast' | 'cash' | 'score'
+export type DraftProblem = PeriodProblem | 'cash' | 'score'
 
 export type ParsedDraft = { ok: true; inputs: BacktestInputs } | { ok: false; problems: Partial<Record<DraftField, DraftProblem>> }
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
 export const SCORE_RANGE = { min: 0, max: 100 } as const
-
-function dateProblem(date: string, bounds: Bounds): DraftProblem | null {
-  if (!ISO_DATE.test(date)) return 'dateRequired'
-  if (date < bounds.first) return 'beforeFirst'
-  if (date > bounds.last) return 'afterLast'
-  return null
-}
 
 function scoreProblem(text: string): DraftProblem | null {
   const score = Number(text)
@@ -176,30 +166,22 @@ function scoreProblem(text: string): DraftProblem | null {
 /** The typed form as the request's inputs, or what is wrong at each field, by the contract's own bounds. */
 export function parseDraft(draft: Draft, bounds: Bounds): ParsedDraft {
   const cash = Number(draft.cash)
-  const first = dateProblem(draft.first, bounds)
-  const last = dateProblem(draft.last, bounds)
-  const found: Record<DraftField, DraftProblem | null> = {
-    first,
-    last: last ?? (!first && draft.first > draft.last ? 'firstAfterLast' : null),
+  const found: Partial<Record<DraftField, DraftProblem | null>> = {
+    ...periodProblems(draft, bounds),
     cash: draft.cash.trim() !== '' && Number.isFinite(cash) && cash > 0 ? null : 'cash',
     buy: scoreProblem(draft.buy),
     sell: scoreProblem(draft.sell),
   }
-  const problems = Object.fromEntries(Object.entries(found).filter(([, problem]) => problem !== null)) as Partial<Record<DraftField, DraftProblem>>
+  const problems = Object.fromEntries(Object.entries(found).filter(([, problem]) => problem != null)) as Partial<Record<DraftField, DraftProblem>>
   if (Object.keys(problems).length > 0) return { ok: false, problems }
   return { ok: true, inputs: { first: draft.first, last: draft.last, initial_cash: cash, buy_score: Number(draft.buy), sell_score: Number(draft.sell) } }
 }
 
 const REQUEST_FIELD: Record<string, DraftField> = { first: 'first', last: 'last', initial_cash: 'cash', buy_score: 'buy', sell_score: 'sell' }
 
-/** A 422's problems by the form field each names, in the server's words; a problem of no single field is left out. */
-export function refusedFields(problems: readonly FieldProblem[]): Partial<Record<DraftField, string>> {
-  const fields: Partial<Record<DraftField, string>> = {}
-  for (const problem of problems) {
-    const field = REQUEST_FIELD[String(problem.location.at(-1))]
-    if (field) fields[field] ??= problem.message
-  }
-  return fields
+/** The form fields a 422's problems name; a problem of no single field is left out. */
+export function refusedFields(problems: readonly FieldProblem[]): DraftField[] {
+  return [...new Set(problems.flatMap((problem) => REQUEST_FIELD[String(problem.location.at(-1))] ?? []))]
 }
 
 export type PresetKey = '3M' | '6M' | '1Y' | 'all'
@@ -212,15 +194,6 @@ export interface PeriodPreset {
 
 const PRESET_MONTHS = { '3M': 3, '6M': 6, '1Y': 12 } as const
 
-/** The same day `months` earlier, or that month's last day when it is shorter. */
-export function monthsBefore(date: string, months: number): string {
-  const [year, month, day] = date.split('-').map(Number) as [number, number, number]
-  const target = new Date(Date.UTC(year, month - 1 - months, 1))
-  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate()
-  target.setUTCDate(Math.min(day, lastDay))
-  return target.toISOString().slice(0, 10)
-}
-
 /** The quick periods, each ending on the last day available; one the history is too short for is left out. */
 export function periodPresets(bounds: Bounds): PeriodPreset[] {
   const recent = (Object.keys(PRESET_MONTHS) as (keyof typeof PRESET_MONTHS)[])
@@ -229,7 +202,9 @@ export function periodPresets(bounds: Bounds): PeriodPreset[] {
   return [...recent, { key: 'all', first: bounds.first, last: bounds.last }]
 }
 
-/** The buy score to try after a backtest that bought nothing: the built-in strategies' technical score rarely passes 75. */
+/** How far under the buy score a backtest that bought nothing suggests trying next. */
+const BUY_SCORE_STEP = 10
+
 export function lowerBuyScore(buyScore: number): number {
-  return buyScore > 70 ? 70 : Math.max(buyScore - 10, SCORE_RANGE.min)
+  return Math.max(buyScore - BUY_SCORE_STEP, SCORE_RANGE.min)
 }

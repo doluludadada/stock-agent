@@ -2,10 +2,11 @@ import { History, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
-import { useLocale, useTranslation } from '@/i18n'
+import { useTranslation } from '@/i18n'
 import { isApiError } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
-import { formatMonthDayTime, formatNumber, useFormat } from '@/shared/lib/format'
+import { useErrorReason } from '@/shared/lib/error-reason'
+import { DASH, useFormat } from '@/shared/lib/format'
 import { Button } from '@/shared/ui/button'
 import { ChangeValue } from '@/shared/ui/change-value'
 import { ConfirmDialog } from '@/shared/ui/confirm-dialog'
@@ -27,12 +28,12 @@ interface SavedBacktestsProps {
 /** The earlier backtests side by side, newest first: each opens its result, and one can be deleted after a yes. */
 export function SavedBacktests({ shownId, onDeleted, className }: SavedBacktestsProps) {
   const { t } = useTranslation('backtest')
-  const locale = useLocale()
   const format = useFormat()
   const saved = useBacktests()
+  const reason = useErrorReason()
   const remove = useDeleteBacktest()
   const [deleting, setDeleting] = useState<BacktestSummary | null>(null)
-  const when = (backtest: BacktestSummary) => formatMonthDayTime(locale, backtest.created_at)
+  const when = (backtest: BacktestSummary) => format.monthDayTime(backtest.created_at)
   const period = (backtest: BacktestSummary) => t('period', { first: format.date(backtest.first_session), last: format.date(backtest.last_session) })
 
   const confirmDelete = () => {
@@ -46,8 +47,7 @@ export function SavedBacktests({ shownId, onDeleted, className }: SavedBacktests
       },
       onError: (error) => {
         if (isApiError(error, 'notFound')) return onDeleted(id)
-        const kind = isApiError(error) ? error.kind : 'server'
-        toast.error(t('saved.deleteFailed', { reason: t(`common:errors.${kind}`) }))
+        toast.error(t('saved.deleteFailed', { reason: reason(error) }))
       },
     })
   }
@@ -80,9 +80,9 @@ export function SavedBacktests({ shownId, onDeleted, className }: SavedBacktests
       header: t('saved.column.benchmark'),
       numeric: true,
       from: 'sm',
-      cell: (backtest) => (backtest.benchmark_return_pct === null ? '—' : <ChangeValue value={backtest.benchmark_return_pct} format="percent" />),
+      cell: (backtest) => (backtest.benchmark_return_pct === null ? DASH : <ChangeValue value={backtest.benchmark_return_pct} format="percent" />),
     },
-    { key: 'trades', header: t('saved.column.trades'), numeric: true, from: 'md', cell: (backtest) => formatNumber(locale, backtest.trade_count) },
+    { key: 'trades', header: t('saved.column.trades'), numeric: true, from: 'md', cell: (backtest) => format.number(backtest.trade_count) },
     {
       key: 'delete',
       header: t('saved.column.delete'),
@@ -96,7 +96,7 @@ export function SavedBacktests({ shownId, onDeleted, className }: SavedBacktests
   ]
 
   return (
-    <Panel className={className} flush title={t('saved.title')} description={t('saved.question')}>
+    <Panel className={className} flush title={t('saved.title')}>
       {saved.isPending ? (
         <Skeleton className="m-4 h-24 rounded-xl" />
       ) : saved.isError ? (

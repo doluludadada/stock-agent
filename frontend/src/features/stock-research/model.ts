@@ -171,7 +171,9 @@ const OBSERVATION = /^(.*): (detected|not detected)$/
 
 /**
  * The report names each rule it failed, and each scoring rule as `<name>: detected` or `<name>: not detected`. The
- * names are the strategy's own, a stable key into the rules the same answer carries.
+ * names are the strategy's own, a stable key into the rules the same answer carries. The contract answers the
+ * observations as these sentences only (`TechnicalReport.observations: string[]`), so the pattern stays until it
+ * answers the rule and whether it showed as fields.
  */
 export function reportChecks(report: TechnicalReport): { hard: Check[]; soft: Check[]; observations: Check[] } {
   return {

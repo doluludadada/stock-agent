@@ -6,7 +6,6 @@ import { isApiError } from '@/shared/api'
 import { Button } from '@/shared/ui/button'
 import { ErrorState } from '@/shared/ui/error-state'
 import { PageHeader } from '@/shared/ui/page-header'
-import { TechnicalStrategyNote } from '@/shared/ui/technical-strategy-note'
 import { Panel } from '@/shared/ui/panel'
 import { ProgressNote } from '@/shared/ui/progress-note'
 import { RequireSignIn } from '@/shared/ui/require-sign-in'
@@ -23,7 +22,7 @@ export function BacktestPage() {
   const { t } = useTranslation('backtest')
   return (
     <div className="page-stack">
-      <PageHeader title={t('page.title')} description={t('page.description')} note={<TechnicalStrategyNote />} />
+      <PageHeader title={t('page.title')} />
       <RequireSignIn layout="page" reason={t('signIn')}>
         <Workbench />
       </RequireSignIn>

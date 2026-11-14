@@ -1,9 +1,9 @@
 import type { UseQueryResult } from '@tanstack/react-query'
 import { CalendarX, DatabaseZap } from 'lucide-react'
-import { lazy, Suspense, useMemo, useState, type FormEvent } from 'react'
-import { useLocale, useTranslation } from '@/i18n'
+import { lazy, Suspense, useId, useMemo, useState, type FormEvent } from 'react'
+import { useTranslation } from '@/i18n'
 import { isApiError } from '@/shared/api'
-import { formatNumber, formatSigned, formatSignedPercent, useFormat } from '@/shared/lib/format'
+import { DASH, useFormat } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
@@ -15,14 +15,15 @@ import { Input } from '@/shared/ui/input'
 import { Panel } from '@/shared/ui/panel'
 import { ProgressNote } from '@/shared/ui/progress-note'
 import { Segmented } from '@/shared/ui/segmented'
+import { ShowMore } from '@/shared/ui/show-more'
 import { Skeleton } from '@/shared/ui/skeleton'
 import { StateBlock } from '@/shared/ui/state-block'
+import { Caveats } from './Caveats'
 import { BackfillCommand } from './LatestRanking'
 import {
   DEFAULT_CHOICE,
   defaultScale,
   growthCurve,
-  idleDecisions,
   logAxis,
   parsePeriod,
   PRESET_KEYS,
@@ -34,6 +35,7 @@ import {
   type Scale,
   type YearRow,
 } from './model'
+import { PastMonths } from './PastMonths'
 
 const ComparisonChart = lazy(() => import('@/shared/ui/comparison-chart').then((module) => ({ default: module.ComparisonChart })))
 
@@ -42,19 +44,39 @@ interface RankingRecordProps {
   today: string
   onChoose: (choice: PeriodChoice) => void
   query: UseQueryResult<RankingBacktest>
+  /** Whether the detail starts open: the address names a period or a month, which live there. */
+  detailAtFirst: boolean
 }
 
-/** Would following the ranking have beaten the benchmark: the period, the answer in a sentence and a small table, both curves, and every year. */
-export function RankingRecord({ choice, today, onChoose, query }: RankingRecordProps) {
+/**
+ * Would following the ranking have beaten the benchmark: the three figures of both, marked as simulated. The period,
+ * the curve, every year, every decision and what the figures leave out are one tap away.
+ */
+export function RankingRecord({ choice, today, onChoose, query, detailAtFirst }: RankingRecordProps) {
   const { t } = useTranslation('ranking')
+  const format = useFormat()
+  const detailId = useId()
+  const [detailed, setDetailed] = useState(detailAtFirst)
   const backtest = query.data
-  /** The period before stays on screen, dimmed, while the one chosen is computed. */
+  // The period before stays on screen, dimmed, while the one chosen is computed.
   const replacing = query.isPlaceholderData
+  const span = backtest ? spanOf(backtest) : null
   return (
     <div className="card-stack">
-      <Panel title={backtest ? t('record.title', { benchmark: backtest.benchmark_id }) : t('record.titlePending')} description={t('record.question')}>
+      <Panel
+        title={
+          <>
+            {t('record.title')}
+            <Badge variant="outline" className="border-gold/50 font-normal text-gold">
+              {t('record.simulated')}
+            </Badge>
+          </>
+        }
+        aside={span && <span className="tabular">{t('span', { first: format.date(span.first), last: format.date(span.last) })}</span>}
+        footer={backtest && <ShowMore expanded={detailed} onToggle={() => setDetailed(!detailed)} controls={detailId} moreLabel={t('record.more')} lessLabel={t('record.less')} />}
+      >
         <div className="space-y-4">
-          <PeriodChooser key={JSON.stringify(choice)} choice={choice} today={today} shown={backtest && !replacing ? spanOf(backtest) : null} onChoose={onChoose} />
+          {detailed && <PeriodChooser key={JSON.stringify(choice)} choice={choice} today={today} shown={span && !replacing ? span : null} onChoose={onChoose} />}
           {(query.isPending || replacing) && <Waiting />}
           {backtest ? (
             <div className={cn(replacing && 'opacity-50')} aria-busy={replacing}>
@@ -63,14 +85,20 @@ export function RankingRecord({ choice, today, onChoose, query }: RankingRecordP
           ) : query.isError ? (
             <Refusal error={query.error} onRetry={() => void query.refetch()} onAll={() => onChoose(DEFAULT_CHOICE)} />
           ) : (
-            <Skeleton className="h-56 rounded-xl" />
+            <Skeleton className="h-32 rounded-xl" />
           )}
         </div>
       </Panel>
       {backtest && (
-        <div className={cn('card-stack', replacing && 'opacity-50')} aria-busy={replacing}>
-          <CurvePanel key={`${backtest.first}:${backtest.last}`} backtest={backtest} />
-          <YearsPanel backtest={backtest} />
+        <div id={detailId} hidden={!detailed} className={cn('card-stack', replacing && 'opacity-50')} aria-busy={replacing}>
+          {detailed && (
+            <>
+              <CurvePanel key={`${backtest.first}:${backtest.last}`} backtest={backtest} />
+              <YearsPanel backtest={backtest} />
+              {!replacing && <PastMonths backtest={backtest} />}
+              <Caveats backtest={backtest} />
+            </>
+          )}
         </div>
       )}
     </div>
@@ -161,7 +189,7 @@ function PeriodChooser({ choice, today, shown, onChoose }: PeriodChooserProps) {
             <Input type="date" max={today} value={draft.first} onChange={(event) => setTyped({ ...draft, first: event.target.value })} />
           </Field>
           <Field label={t('period.last')} error={problem('last')}>
-            <Input type="date" value={draft.last} onChange={(event) => setTyped({ ...draft, last: event.target.value })} />
+            <Input type="date" max={today} value={draft.last} onChange={(event) => setTyped({ ...draft, last: event.target.value })} />
           </Field>
           <Button type="submit" className="col-span-2 @lg:col-span-1 @lg:mt-[1.625rem]">
             {t('period.apply')}
@@ -172,93 +200,61 @@ function PeriodChooser({ choice, today, shown, onChoose }: PeriodChooserProps) {
   )
 }
 
-/** The answer first as a sentence, then the same three figures of both side by side, then what the figures leave out. */
+/** The same three figures of the ranking and the benchmark, side by side. */
 function Verdict({ backtest }: { backtest: RankingBacktest }) {
   const { t } = useTranslation('ranking')
-  const locale = useLocale()
   const format = useFormat()
-  const span = spanOf(backtest)
-  const idle = idleDecisions(backtest)
   const benchmark = backtest.benchmark_id
-  const period = t('span', { first: format.date(span.first), last: format.date(span.last) })
-  const percent = (ratio: number) => formatSignedPercent(locale, ratio, 1)
-  const worth = (total: number) => t('record.worth', { value: formatNumber(locale, 1 + total, 1) })
-  const rate = (fraction: number) => `${Number((fraction * 100).toFixed(4))}%`
-  const [annual, benchmarkAnnual] = [backtest.annual_return, backtest.benchmark_annual_return]
-
-  const side = annual === null || benchmarkAnnual === null ? null : annual > benchmarkAnnual ? 'ahead' : annual < benchmarkAnnual ? 'behind' : 'level'
-  const headline =
-    annual === null
-      ? t('record.headline.short', { period })
-      : benchmarkAnnual === null || side === null
-        ? t('record.headline.alone', { period, annual: percent(annual) })
-        : t(`record.headline.${side}`, { period, annual: percent(annual), benchmarkAnnual: percent(benchmarkAnnual), benchmark })
-
-  const rows: { key: string; label: string; ranking: string; benchmark: string | null }[] = [
-    { key: 'annual', label: t('record.row.annual'), ranking: annual === null ? '—' : percent(annual), benchmark: benchmarkAnnual === null ? null : percent(benchmarkAnnual) },
-    { key: 'worth', label: t('record.row.worth'), ranking: worth(backtest.total_return), benchmark: backtest.benchmark_total_return === null ? null : worth(backtest.benchmark_total_return) },
-    { key: 'drawdown', label: t('record.row.drawdown'), ranking: percent(-backtest.max_drawdown), benchmark: backtest.benchmark_max_drawdown === null ? null : percent(-backtest.benchmark_max_drawdown) },
-  ]
+  const percent = (ratio: number | null) => (ratio === null ? DASH : format.signedPercent(ratio, 1))
+  const worth = (total: number | null) => (total === null ? DASH : t('record.worth', { value: format.number(1 + total, 1) }))
+  const drawdown = (depth: number | null) => (depth === null ? DASH : percent(-depth))
+  const rows = [
+    { key: 'annual', ranking: percent(backtest.annual_return), benchmark: percent(backtest.benchmark_annual_return) },
+    { key: 'worth', ranking: worth(backtest.total_return), benchmark: worth(backtest.benchmark_total_return) },
+    { key: 'drawdown', ranking: drawdown(backtest.max_drawdown), benchmark: drawdown(backtest.benchmark_max_drawdown) },
+  ] as const
 
   return (
-    <div className="space-y-4">
-      <p className="max-w-3xl text-title font-medium text-pretty" data-testid="headline">
-        {headline}
-      </p>
-      <table aria-label={t('record.compare', { benchmark })} className="w-full border-collapse text-sm">
-        <thead>
-          <tr className="border-b text-xs text-muted-foreground">
-            <th scope="col">
-              <span className="sr-only">{t('record.figure')}</span>
+    <table aria-label={t('record.compare', { benchmark })} className="w-full border-collapse text-sm">
+      <thead>
+        <tr className="border-b text-xs text-muted-foreground">
+          <th scope="col">
+            <span className="sr-only">{t('record.figure')}</span>
+          </th>
+          <th scope="col" className="px-2 py-1.5 text-right font-medium">
+            {t('series.ranking')}
+          </th>
+          <th scope="col" className="py-1.5 pl-2 text-right font-medium">
+            {benchmark}
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <tr key={row.key} className="border-b last:border-0">
+            <th scope="row" className="py-2.5 pr-2 text-left font-normal text-muted-foreground">
+              {t(`record.row.${row.key}`)}
             </th>
-            <th scope="col" className="px-2 py-1.5 text-right font-medium">
-              {t('series.ranking')}
-            </th>
-            <th scope="col" className="py-1.5 pl-2 text-right font-medium">
-              {benchmark}
-            </th>
+            <td className="tabular px-2 py-2.5 text-right text-figure-sm font-semibold whitespace-nowrap">{row.ranking}</td>
+            <td className="tabular py-2.5 pl-2 text-right text-figure-sm font-semibold whitespace-nowrap text-muted-foreground">{row.benchmark}</td>
           </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.key} className="border-b last:border-0">
-              <th scope="row" className="py-2.5 pr-2 text-left font-normal text-muted-foreground">
-                {row.label}
-              </th>
-              <td className="tabular px-2 py-2.5 text-right text-figure-sm font-semibold whitespace-nowrap">{row.ranking}</td>
-              <td className="tabular py-2.5 pl-2 text-right text-figure-sm font-semibold whitespace-nowrap text-muted-foreground">{row.benchmark ?? '—'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <ul className="space-y-1 text-xs text-pretty text-muted-foreground">
-        <li>{t('record.costs', { costs: formatNumber(locale, backtest.costs * 100, 1), fee: rate(backtest.fee_rate), tax: rate(backtest.tax_rate) })}</li>
-        {backtest.benchmark_total_return === null && <li>{t('record.noBenchmark', { benchmark })}</li>}
-        {idle > 0 && <li>{t('record.idle', { count: idle })}</li>}
-        <li>
-          {t('record.caveat')}{' '}
-          <a href="#ranking-caveats" className="tap text-brand underline-offset-4 hover:underline">
-            {t('record.caveatLink')}
-          </a>
-        </li>
-      </ul>
-    </div>
+        ))}
+      </tbody>
+    </table>
   )
 }
 
 function CurvePanel({ backtest }: { backtest: RankingBacktest }) {
   const { t } = useTranslation('ranking')
-  const locale = useLocale()
   const format = useFormat()
   const points = useMemo(() => growthCurve(backtest), [backtest])
   const [scale, setScale] = useState<Scale>(() => defaultScale(points))
   const axis = useMemo(() => logAxis(points), [points])
   const longSpan = points.length > 300
-  const times = (value: number, digits: number) => t('times', { value: formatNumber(locale, value, digits) })
+  const times = (value: number, digits: number) => t('times', { value: format.number(value, digits) })
   return (
     <Panel
       title={t('curve.title', { benchmark: backtest.benchmark_id })}
-      description={t('curve.question')}
       aside={
         <Segmented
           label={t('curve.scale')}
@@ -284,14 +280,12 @@ function CurvePanel({ backtest }: { backtest: RankingBacktest }) {
           formatTooltipDate={(date) => format.date(date, 'long')}
         />
       </Suspense>
-      <p className="mt-3 text-xs text-pretty text-muted-foreground">{t(`curve.reading.${scale}`)}</p>
     </Panel>
   )
 }
 
 function YearsPanel({ backtest }: { backtest: RankingBacktest }) {
   const { t } = useTranslation('ranking')
-  const locale = useLocale()
   const format = useFormat()
   const rows = useMemo(() => yearRows(backtest).reverse(), [backtest])
   const lostYears = rows.filter((row) => row.lost).length
@@ -323,18 +317,18 @@ function YearsPanel({ backtest }: { backtest: RankingBacktest }) {
       ),
     },
     { key: 'ranking', header: t('series.ranking'), numeric: true, cell: (row) => <ChangeValue value={row.ranking} format="percent" fractionDigits={1} /> },
-    { key: 'benchmark', header: backtest.benchmark_id, numeric: true, cell: (row) => (row.benchmark === null ? '—' : <ChangeValue value={row.benchmark} format="percent" fractionDigits={1} />) },
+    { key: 'benchmark', header: backtest.benchmark_id, numeric: true, cell: (row) => (row.benchmark === null ? DASH : <ChangeValue value={row.benchmark} format="percent" fractionDigits={1} />) },
     {
       key: 'gap',
       header: t('years.column.gap'),
       numeric: true,
       from: 'sm',
-      cell: (row) => (row.benchmark === null ? '—' : t('years.points', { value: formatSigned(locale, (row.ranking - row.benchmark) * 100, 1) })),
+      cell: (row) => (row.benchmark === null ? DASH : t('years.points', { value: format.signed((row.ranking - row.benchmark) * 100, 1) })),
     },
   ]
 
   return (
-    <Panel flush title={t('years.title')} description={t('years.question', { benchmark: backtest.benchmark_id })} aside={<span>{t('years.tally', { years: rows.length, lost: lostYears, behind: behindYears })}</span>}>
+    <Panel flush title={t('years.title')} aside={<span>{t('years.tally', { years: rows.length, lost: lostYears, behind: behindYears })}</span>}>
       <DataTable rows={rows} columns={columns} rowKey={(row) => String(row.year)} label={t('years.title')} />
     </Panel>
   )

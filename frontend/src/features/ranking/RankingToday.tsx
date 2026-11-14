@@ -28,7 +28,7 @@ export function RankingToday({ className }: { className?: string }) {
       flush
       className={className}
       title={t('latest.title')}
-      description={ranking ? t('today.decided', { date: format.date(ranking.decided_on), month: format.yearMonth(year, month) }) : t('today.lead')}
+      description={ranking && t('latest.decided', { date: format.date(ranking.decided_on), month: format.yearMonth(year, month) })}
       aside={<PanelLink to={paths.ranking}>{t('today.all')}</PanelLink>}
       footer={ranking && ranking.stocks.length > 0 && <NotAdviceNote className="px-2.5 py-1.5" />}
     >

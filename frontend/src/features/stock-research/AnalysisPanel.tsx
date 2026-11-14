@@ -1,7 +1,7 @@
 import { CircleDashed, Hourglass, Scale, TrendingDown, TrendingUp, type LucideIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useTranslation } from '@/i18n'
-import { useFormat } from '@/shared/lib/format'
+import { DASH, useFormat } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { ChangeValue } from '@/shared/ui/change-value'
 import { DataTable, type Column } from '@/shared/ui/data-table'
@@ -14,8 +14,6 @@ import { useStockAnalysis, type StockAnalysis } from './api'
 import { READING_TONE, shownQuarters, type QuarterResult, type ReadingTone, type RevenueMonth } from './model'
 
 /** A dash wherever a figure is not held or cannot be computed from what is held. */
-const DASH = '—'
-
 /** A year of months and two years of quarters are enough to see a trend; older ones stay in the financials below. */
 const MONTHS_SHOWN = 12
 const QUARTERS_SHOWN = 8
@@ -40,7 +38,7 @@ export function AnalysisPanel({ stockId }: { stockId: string }) {
   const { t } = useTranslation('research')
   const analysis = useStockAnalysis(stockId)
   return (
-    <Panel title={t('analysis.title')} description={t('analysis.question')} flush>
+    <Panel fold="phone" title={t('analysis.title')} flush>
       {analysis.isPending && <Skeleton className="m-4 h-72 rounded-lg" />}
       {analysis.isError && <ErrorState error={analysis.error} title={t('analysis.failed')} onRetry={() => void analysis.refetch()} />}
       {analysis.data && (
@@ -97,7 +95,6 @@ function Readings({ analysis }: { analysis: StockAnalysis }) {
           )
         })}
       </ul>
-      <p className="text-xs text-pretty text-muted-foreground">{t('analysis.reading.rules')}</p>
       <NotAdviceNote />
     </section>
   )
@@ -130,10 +127,7 @@ function Revenue({ revenue }: { revenue: StockAnalysis['revenue'] }) {
       caption={t('analysis.revenue.caption', { month: format.yearMonth(latest.year, latest.month), date: format.date(latest.served_date) })}
     >
       <DataTable rows={months} columns={columns} rowKey={(month) => `${month.year}-${month.month}`} label={t('analysis.revenue.title')} className="border-t" />
-      <Note>
-        {t('analysis.revenue.explained', { short: revenue.short_months, long: revenue.long_months })}{' '}
-        {latest.acceleration === null && t('analysis.revenue.short', { count: revenue.months.length, long: revenue.long_months })}
-      </Note>
+      {latest.acceleration === null && <Note>{t('analysis.revenue.short', { count: revenue.months.length, long: revenue.long_months })}</Note>}
     </Section>
   )
 }
@@ -150,7 +144,7 @@ function Earnings({ earnings }: { earnings: StockAnalysis['earnings'] }) {
     )
   }
   const money = (value: number | null) => (value === null ? DASH : format.number(value, 2))
-  const share = (value: number | null) => (value === null ? DASH : `${format.number(value * 100, 1)}%`)
+  const share = (value: number | null) => (value === null ? DASH : format.percent(value))
   const columns: Column<QuarterResult>[] = [
     { key: 'quarter', header: t('analysis.earnings.quarter'), cell: (quarter) => t('financials.quarter', quarter.quarter) },
     { key: 'own', header: t('analysis.earnings.quarterEps'), numeric: true, from: 'sm', cell: (quarter) => money(quarter.quarter_eps) },
@@ -182,10 +176,6 @@ function Earnings({ earnings }: { earnings: StockAnalysis['earnings'] }) {
         label={t('analysis.earnings.title')}
         className="border-t"
       />
-      <Note>
-        {t('analysis.earnings.explained')}{' '}
-        {earnings.filed_eps_fetched_at && t('analysis.earnings.filed', { date: format.date(earnings.filed_eps_fetched_at) })}
-      </Note>
     </Section>
   )
 }
@@ -223,7 +213,6 @@ function ValuationSection({ valuation }: { valuation: Valuation }) {
           </div>
         ))}
       </dl>
-      <Note>{t('analysis.valuation.explained', { first: valuation.first_session ? format.date(valuation.first_session) : DASH })}</Note>
     </Section>
   )
 }

@@ -1,8 +1,8 @@
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, type TooltipContentProps } from 'recharts'
 import type { NameType, ValueType } from 'recharts/types/component/DefaultTooltipContent'
-import { useLocale, useTranslation } from '@/i18n'
+import { useTranslation } from '@/i18n'
 import { useShows } from '@/shared/api'
-import { formatSignedPercent, useFormat } from '@/shared/lib/format'
+import { DASH, useFormat } from '@/shared/lib/format'
 import { ChangeValue } from '@/shared/ui/change-value'
 import { ErrorState } from '@/shared/ui/error-state'
 import { Panel } from '@/shared/ui/panel'
@@ -12,8 +12,6 @@ import { Stat } from '@/shared/ui/stat'
 import { useStockAnalysis, useStockRanking, type StockAnalysis } from './api'
 import { SECTION_ANCHORS } from './brief'
 import { chartMonths, type RevenueMonth } from './model'
-
-const DASH = '—'
 
 /**
  * The first thing a stock's page answers: how its revenue is doing and what the monthly ranking scores it. Both read
@@ -51,7 +49,7 @@ function ScorePanel({ stockId }: { stockId: string }) {
         date: format.date(ranking.data.decided_on),
         month: format.yearMonth(Number(ranking.data.revenue_month.slice(0, 4)), Number(ranking.data.revenue_month.slice(5, 7))),
       })
-    : t('score.question')
+    : undefined
   return (
     <Panel title={t('score.title')} description={decided}>
       {ranking.isPending && (
@@ -71,7 +69,7 @@ function RevenuePanel({ stockId }: { stockId: string }) {
   const { t } = useTranslation('research')
   const analysis = useStockAnalysis(stockId)
   return (
-    <Panel title={t('revenue.title')} description={t('revenue.question')}>
+    <Panel title={t('revenue.title')}>
       {analysis.isPending && <Skeleton className="h-64 rounded-lg" />}
       {analysis.isError && <ErrorState error={analysis.error} title={t('analysis.failed')} onRetry={() => void analysis.refetch()} />}
       {analysis.data && <Revenue revenue={analysis.data.revenue} />}
@@ -99,10 +97,7 @@ function Revenue({ revenue }: { revenue: StockAnalysis['revenue'] }) {
         </Stat>
       </dl>
       {months.length > 1 && <RevenueChart months={months} />}
-      <p className="text-xs leading-relaxed text-pretty text-muted-foreground">
-        {t('revenue.held', { count: revenue.months.length, date: format.date(latest.served_date) })}{' '}
-        {latest.acceleration === null && t('analysis.revenue.short', { count: revenue.months.length, long: revenue.long_months })}
-      </p>
+      {latest.acceleration === null && <p className="text-xs text-pretty text-muted-foreground">{t('analysis.revenue.short', { count: revenue.months.length, long: revenue.long_months })}</p>}
     </div>
   )
 }
@@ -110,7 +105,6 @@ function Revenue({ revenue }: { revenue: StockAnalysis['revenue'] }) {
 /** Each held month's revenue as a bar, up to three years, with the month, the revenue and its change on hover or touch. */
 function RevenueChart({ months }: { months: RevenueMonth[] }) {
   const { t } = useTranslation('research')
-  const locale = useLocale()
   const format = useFormat()
   const rows = months.map((month) => ({ ...month, label: `${month.year}-${String(month.month).padStart(2, '0')}`, amount: (month.revenue ?? 0) * 1000 }))
   const tooltip = (props: TooltipContentProps<ValueType, NameType>) => {
@@ -125,7 +119,7 @@ function RevenueChart({ months }: { months: RevenueMonth[] }) {
         </div>
         <div className="flex justify-between gap-4">
           <span className="text-muted-foreground">{t('analysis.yearOverYear')}</span>
-          <span className="tabular font-medium text-foreground">{month.year_over_year === null ? DASH : formatSignedPercent(locale, month.year_over_year, 1)}</span>
+          <span className="tabular font-medium text-foreground">{month.year_over_year === null ? DASH : format.signedPercent(month.year_over_year, 1)}</span>
         </div>
       </div>
     )

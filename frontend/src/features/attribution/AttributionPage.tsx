@@ -16,7 +16,7 @@ export function AttributionPage() {
   const attribution = useAttribution()
   return (
     <div className="page-stack">
-      <PageHeader title={t('title')} description={t('description')} />
+      <PageHeader title={t('title')} />
       {attribution.isPending && <PageSkeleton />}
       {attribution.isError && <ErrorState error={attribution.error} title={t('failed')} onRetry={() => void attribution.refetch()} framed />}
       {attribution.data && <Credit attribution={attribution.data} />}
@@ -28,7 +28,7 @@ function Credit({ attribution }: { attribution: Attribution }) {
   const { t } = useTranslation('attribution')
   return (
     <div className="card-grid xl:grid-cols-[minmax(0,1fr)_24rem]">
-      <Panel className="xl:col-start-2 xl:row-start-1" title={t('license.title')} description={t('license.question')}>
+      <Panel className="xl:col-start-2 xl:row-start-1" title={t('license.title')}>
         <div className="space-y-3 text-sm">
           <a href={attribution.license_url} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-1.5 font-medium text-brand hover:underline md:min-h-0">
             {attribution.license}
@@ -40,7 +40,7 @@ function Credit({ attribution }: { attribution: Attribution }) {
       </Panel>
       <div className="card-grid xl:col-start-1 xl:row-start-1">
         {attribution.providers.map((provider) => (
-          <Panel key={provider.provider} title={provider.provider} description={t('provider.question', { count: provider.datasets.length })}>
+          <Panel key={provider.provider} title={provider.provider}>
             <ul className="grid gap-x-6 gap-y-1.5 text-sm @lg:grid-cols-2">
               {provider.datasets.map((dataset) => (
                 <li key={dataset} className="border-l-2 pl-3 text-pretty">

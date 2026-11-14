@@ -8,12 +8,14 @@ export const strategyKeys = {
   settings: ['owner', 'technical-settings'] as const,
 }
 
-/** The developer's strategies; they change only with the server's deployment. */
+/** The developer's strategies change only with the server's deployment. */
+const BUILT_INS_STALE_MS = 10 * 60_000
+
 export function useBuiltInStrategies() {
   return useQuery({
     queryKey: strategyKeys.builtIns,
     queryFn: async ({ signal }) => (await apiRequest('get', '/v1/technical-settings/built-in-strategies', { signal })).map(strategyFromApi),
-    staleTime: 10 * 60_000,
+    staleTime: BUILT_INS_STALE_MS,
   })
 }
 

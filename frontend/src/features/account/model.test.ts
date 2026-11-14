@@ -25,8 +25,8 @@ describe('the account blotter', () => {
     const rows = holdings(value)
 
     expect(rows.map((row) => row.stock_id)).toEqual(['2317', '2330'])
-    expect(rows[0]).toMatchObject({ cost: 250_000, returnRatio: -0.04, weight: 0.48 })
-    expect(rows[1]).toMatchObject({ cost: 200_000, returnRatio: 0.1, weight: 0.44 })
+    expect(rows[0]).toMatchObject({ returnRatio: -0.04, weight: 0.48 })
+    expect(rows[1]).toMatchObject({ returnRatio: 0.1, weight: 0.44 })
   })
 
   it('measures the unrealized result against what the positions cost', () => {

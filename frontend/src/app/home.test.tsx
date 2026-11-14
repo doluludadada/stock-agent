@@ -80,7 +80,7 @@ describe('the home page', { timeout: 20_000 }, () => {
     expect(within(main).queryByRole('link', { name: 'Sign in' }), 'a signed-in reader is asked nothing').not.toBeInTheDocument()
 
     const nav = screen.getByRole('navigation', { name: 'Main navigation' })
-    expect(texts(within(nav).getAllByText(/^(Today|Research|Mine|Other tools)$/)), 'the home page stands alone, under no heading').toEqual(['Today', 'Research', 'Mine', 'Other tools'])
+    expect(texts(within(nav).getAllByText(/^(Today|Research|Mine|Supporting analysis tools)$/)), 'the home page stands alone, under no heading').toEqual(['Today', 'Research', 'Mine', 'Supporting analysis tools'])
     expect(texts(within(nav).getAllByRole('link'))).toEqual(['Today', 'Revenue ranking', 'Market overview', 'My holdings', 'Watchlist', 'My settings'])
     expect(within(nav).getByRole('link', { name: 'Today' })).toHaveAttribute('aria-current', 'page')
     const tabs = screen.getByRole('navigation', { name: 'Main pages' })
@@ -131,21 +131,19 @@ describe('the home page', { timeout: 20_000 }, () => {
   it('keeps the other tools in a section that opens on a click and stays as the reader left it', async () => {
     const first = renderApp('/', 'user')
     const nav = await screen.findByRole('navigation', { name: 'Main navigation' })
-    const section = within(nav).getByRole('button', { name: 'Other tools' })
+    const section = within(nav).getByRole('button', { name: 'Supporting analysis tools' })
     expect(section).toHaveAttribute('aria-expanded', 'false')
-    expect(within(nav).queryByText('Supporting analysis tools.')).not.toBeInTheDocument()
 
     fireEvent.click(section)
 
     expect(section).toHaveAttribute('aria-expanded', 'true')
-    expect(within(nav).getByText('Supporting analysis tools.')).toBeInTheDocument()
     expect(texts(within(nav).getAllByRole('link')).slice(6)).toEqual(TOOLS)
 
     first.unmount()
     renderApp('/', 'user')
     const again = await screen.findByRole('navigation', { name: 'Main navigation' })
-    expect(within(again).getByRole('button', { name: 'Other tools' }), 'the browser remembers').toHaveAttribute('aria-expanded', 'true')
-    fireEvent.click(within(again).getByRole('button', { name: 'Other tools' }))
+    expect(within(again).getByRole('button', { name: 'Supporting analysis tools' }), 'the browser remembers').toHaveAttribute('aria-expanded', 'true')
+    fireEvent.click(within(again).getByRole('button', { name: 'Supporting analysis tools' }))
     expect(within(again).queryByRole('link', { name: 'Backtest' })).not.toBeInTheDocument()
   })
 
@@ -159,23 +157,21 @@ describe('the home page', { timeout: 20_000 }, () => {
     renderApp('/', 'user')
     const nav = await screen.findByRole('navigation', { name: 'Main navigation' })
 
-    fireEvent.click(within(nav).getByRole('button', { name: 'Other tools' }))
+    fireEvent.click(within(nav).getByRole('button', { name: 'Supporting analysis tools' }))
 
     expect(within(nav).getByRole('link', { name: 'Strategy library' })).toBeInTheDocument()
   })
 
   it.each(['/runs', '/strategies', '/strategies/stg_1/edit', '/backtest', '/strategies/new'])(
-    'shows the section open on %s, one of its pages, which says where the app’s attention moved',
+    'shows the section open on %s, one of its pages, and marks that page alone',
     async (path) => {
       renderApp(path, 'user')
 
       const nav = await screen.findByRole('navigation', { name: 'Main navigation' })
-      const section = within(nav).getByRole('button', { name: 'Other tools' })
+      const section = within(nav).getByRole('button', { name: 'Supporting analysis tools' })
       expect(section).toHaveAttribute('aria-expanded', 'true')
       expect(section, 'it cannot close over the page the reader is on').toBeDisabled()
       expect(within(nav).getAllByRole('link', { current: 'page' })).toHaveLength(1)
-      const note = await within(screen.getByRole('main')).findByText(/The technical strategies are supporting analysis tools/)
-      expect(within(note).getByRole('link', { name: 'Open the ranking' })).toHaveAttribute('href', '/ranking')
     },
   )
 
@@ -183,7 +179,7 @@ describe('the home page', { timeout: 20_000 }, () => {
     renderApp(path, 'user')
 
     const nav = await screen.findByRole('navigation', { name: 'Main navigation' })
-    expect(await within(nav).findByRole('button', { name: 'Other tools' })).toBeDisabled()
+    expect(await within(nav).findByRole('button', { name: 'Supporting analysis tools' })).toBeDisabled()
     await waitFor(() => expect(texts(within(nav).getAllByRole('link', { current: 'page' }))).toEqual([path === '/account' ? 'Mock account' : 'Valuation']))
   })
 
@@ -215,7 +211,7 @@ describe('the home page', { timeout: 20_000 }, () => {
     const sheet = await screen.findByRole('dialog', { name: 'All pages' })
     expect(texts(within(sheet).getAllByRole('link')), 'the watchlist and the market, which the tab bar leaves out').toEqual(['Today', 'Revenue ranking', 'Market overview', 'My holdings', 'Watchlist', 'My settings'])
 
-    fireEvent.click(within(sheet).getByRole('button', { name: 'Other tools' }))
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Supporting analysis tools' }))
 
     expect(texts(within(sheet).getAllByRole('link')).slice(6)).toEqual(TOOLS)
   })

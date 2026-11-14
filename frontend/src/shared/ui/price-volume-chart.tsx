@@ -15,7 +15,7 @@ import {
 } from 'recharts'
 import type { NameType, ValueType } from 'recharts/types/component/DefaultTooltipContent'
 import type { PricePoint } from '@/shared/lib/chart-range'
-import { useFormat } from '@/shared/lib/format'
+import { DASH, useFormat } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 
 export interface ChartOverlay {
@@ -79,7 +79,7 @@ export function PriceVolumeChart({
                   <span aria-hidden className="h-0.5 w-3 rounded-full" style={{ background: `var(${overlay.colorVar})` }} />
                   {overlay.label}
                 </dt>
-                <dd className="tabular text-right text-foreground">{typeof value === 'number' ? formatValue(value) : '—'}</dd>
+                <dd className="tabular text-right text-foreground">{typeof value === 'number' ? formatValue(value) : DASH}</dd>
               </div>
             )
           })}

@@ -2,9 +2,9 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useId, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { useTranslation } from '@/i18n'
-import { paths } from '@/shared/config/paths'
-import { useFormat } from '@/shared/lib/format'
+import { DASH, useFormat } from '@/shared/lib/format'
 import { Badge } from '@/shared/ui/badge'
+import { StockChip } from '@/shared/ui/stock-name'
 import { ChangeValue } from '@/shared/ui/change-value'
 import { DataTable, type Column } from '@/shared/ui/data-table'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/shared/ui/dialog'
@@ -45,7 +45,7 @@ export function PastMonths({ backtest, className }: { backtest: RankingBacktest;
     const [year, monthNumber] = date.split('-').map(Number) as [number, number]
     return format.yearMonth(year, monthNumber)
   }
-  const result = (value: number | null) => (value === null ? <span className="text-muted-foreground">—</span> : <ChangeValue value={value} format="percent" fractionDigits={1} />)
+  const result = (value: number | null) => (value === null ? <span className="text-muted-foreground">{DASH}</span> : <ChangeValue value={value} format="percent" fractionDigits={1} />)
 
   const columns: Column<MonthRow>[] = [
     {
@@ -80,7 +80,6 @@ export function PastMonths({ backtest, className }: { backtest: RankingBacktest;
       className={className}
       flush
       title={t('months.title')}
-      description={t('months.question', { benchmark: backtest.benchmark_id })}
       aside={<span className="tabular">{t('months.count', { count: rows.length })}</span>}
       footer={rows.length > MONTHS_SHOWN && <ShowMore expanded={expanded} onToggle={() => setExpanded(!expanded)} controls={tableId} moreLabel={t('months.more', { count: rows.length })} lessLabel={t('months.less')} />}
     >
@@ -160,10 +159,7 @@ function MonthDialog({ row, benchmark, names, olderHref, newerHref }: MonthDialo
             <ul className="flex flex-wrap gap-1.5">
               {carried.map((stockId) => (
                 <li key={stockId}>
-                  <Link to={paths.stock(stockId)} className="inline-flex min-h-11 items-center gap-1 rounded-full border px-2.5 text-xs hover:border-primary/40 hover:text-brand md:min-h-6">
-                    {names.get(stockId) ?? stockId}
-                    {names.has(stockId) && <span className="font-mono text-muted-foreground">{stockId}</span>}
-                  </Link>
+                  <StockChip stockId={stockId} name={names.get(stockId)} />
                 </li>
               ))}
             </ul>

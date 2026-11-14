@@ -14,7 +14,6 @@ import { ErrorState } from '@/shared/ui/error-state'
 import { PageHeader } from '@/shared/ui/page-header'
 import { Segmented } from '@/shared/ui/segmented'
 import { Skeleton } from '@/shared/ui/skeleton'
-import { TechnicalStrategyNote } from '@/shared/ui/technical-strategy-note'
 import { RequireSignIn } from '@/shared/ui/require-sign-in'
 import { newIds } from '../api/mapping'
 import { useBuiltInStrategies, useSaveStrategySettings, useStrategySettings } from '../api/queries'
@@ -32,7 +31,7 @@ export function StrategyLibraryPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title={t('library.title')} note={<TechnicalStrategyNote />} actions={<NewStrategyMenu />} />
+      <PageHeader title={t('library.title')} actions={<NewStrategyMenu />} />
       <RequireSignIn layout="page" reason={t('signIn')}>
         <Library onView={setViewing} />
       </RequireSignIn>

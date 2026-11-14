@@ -1,12 +1,12 @@
-import { ArrowDown, ArrowLeft, CircleMinus, CirclePlus, CircleX, SearchX } from 'lucide-react'
+import { ArrowLeft, CircleMinus, CirclePlus, CircleX, SearchX } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
-import { useLocale, useTranslation } from '@/i18n'
+import { useTranslation } from '@/i18n'
 import { usePageTitle } from '@/shared/lib/page-title'
-import { isApiError, useIsSignedIn, useStockHistory, type StockHistory } from '@/shared/api'
+import { isApiError, useStockHistory, type StockHistory } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
 import { HISTORY_BARS, summarize } from '@/shared/lib/chart-range'
-import { formatNumber, formatSignedPercent, useFormat } from '@/shared/lib/format'
+import { DASH, useFormat } from '@/shared/lib/format'
 import { isStockId } from '@/shared/lib/stock-ids'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
@@ -81,7 +81,10 @@ function WithoutBars({ history, actions }: { history: StockHistory; actions: Sto
       <StockHeader history={history} actions={actions} />
       <p className="text-sm text-muted-foreground">{t('noBars')}</p>
       <StockSummary stockId={history.stock.stock_id} />
-      <StockReading stockId={history.stock.stock_id} />
+      <div id={SECTION_ANCHORS.news}>
+        <NewsPanel stockId={history.stock.stock_id} />
+      </div>
+      <StockTables stockId={history.stock.stock_id} />
     </div>
   )
 }
@@ -125,7 +128,6 @@ function StockHeader({ history, actions }: { history: StockHistory; actions: Sto
 
 function Research({ history, actions, strategyName, ruleSentences, ruleName }: Omit<StockResearchPageProps, 'code'> & { history: StockHistory }) {
   const { t } = useTranslation('research')
-  const signedIn = useIsSignedIn()
   const technical = useStockTechnical(history.stock.stock_id)
   const overlays = useMemo(
     () =>
@@ -145,47 +147,41 @@ function Research({ history, actions, strategyName, ruleSentences, ruleName }: O
 
       <StockSummary stockId={history.stock.stock_id} />
 
-      <BriefPanel stockId={history.stock.stock_id} />
-
       <div className="card-grid xl:grid-cols-12">
-        <div id={SECTION_ANCHORS.price} className="xl:col-span-8">
-          <Panel title={t('chart.title')} description={t('chart.question')}>
-            <PriceTrend bars={history.bars} name={name} kind="price" overlays={overlays} quote={false} />
-          </Panel>
+        <div className="min-w-0 xl:col-span-8">
+          <BriefPanel stockId={history.stock.stock_id} />
         </div>
-        <div className="grid content-start items-start gap-4 md:grid-cols-2 lg:gap-5 xl:col-span-4 xl:grid-cols-1">
-          <DayPanel history={history} />
-          <YearPanel history={history} />
-          <div className="md:col-span-2 xl:col-span-1">
-            <RequireSignIn reason={t('signIn')} className="rounded-2xl border bg-card">
-              <VerdictPanel technical={technical} strategyName={strategyName} />
-            </RequireSignIn>
-          </div>
+        <div id={SECTION_ANCHORS.news} className="min-w-0 xl:col-span-4">
+          <NewsPanel stockId={history.stock.stock_id} />
         </div>
       </div>
 
-      <StockReading stockId={history.stock.stock_id} />
+      <div className="card-grid xl:grid-cols-12">
+        <div id={SECTION_ANCHORS.price} className="xl:col-span-8">
+          <Panel title={t('chart.title')}>
+            <PriceTrend bars={history.bars} name={name} kind="price" overlays={overlays} quote={false} />
+          </Panel>
+        </div>
+        <div className="card-grid content-start md:grid-cols-2 xl:col-span-4 xl:grid-cols-1">
+          <DayPanel history={history} />
+          <YearPanel history={history} />
+        </div>
+      </div>
 
-      {signedIn && technical.data && <EvaluationDetails technical={technical.data} ruleSentences={ruleSentences} ruleName={ruleName} />}
+      <StockTables stockId={history.stock.stock_id} />
+
+      <RequireSignIn reason={t('signIn')} className="rounded-2xl border bg-card">
+        <Evaluation technical={technical} strategyName={strategyName} ruleSentences={ruleSentences} ruleName={ruleName} />
+      </RequireSignIn>
     </div>
   )
 }
 
-/**
- * What the site holds about the company itself, which needs no run and no session: the financial analysis first, the
- * news beside it from 1280 px, then the statements the analysis read.
- */
-function StockReading({ stockId }: { stockId: string }) {
+/** The tables behind the summary: the financial analysis, then the statements it read. Both start closed on a phone. */
+function StockTables({ stockId }: { stockId: string }) {
   return (
     <>
-      <div className="card-grid xl:grid-cols-12">
-        <div className="min-w-0 xl:col-span-8">
-          <AnalysisPanel stockId={stockId} />
-        </div>
-        <div id={SECTION_ANCHORS.news} className="min-w-0 xl:col-span-4">
-          <NewsPanel stockId={stockId} />
-        </div>
-      </div>
+      <AnalysisPanel stockId={stockId} />
       <div id={SECTION_ANCHORS.earnings}>
         <FinancialsPanel stockId={stockId} />
       </div>
@@ -200,7 +196,7 @@ function DayPanel({ history }: { history: StockHistory }) {
   const day = dayQuote(history.bars)
   if (!day) return null
   return (
-    <Panel title={t('day.title')} description={t('day.question', { date: format.monthDay(day.date) })}>
+    <Panel title={t('day.title')} aside={<span className="tabular">{format.monthDay(day.date)}</span>}>
       <dl className="grid grid-cols-3 gap-x-4 gap-y-3">
         <Stat label={t('day.open')}>
           <PriceValue value={day.open} reference={day.previousClose} />
@@ -211,8 +207,8 @@ function DayPanel({ history }: { history: StockHistory }) {
         <Stat label={t('day.low')}>
           <PriceValue value={day.low} reference={day.previousClose} />
         </Stat>
-        <Stat label={t('day.previousClose')}>{day.previousClose === null ? '—' : format.price(day.previousClose)}</Stat>
-        <Stat label={t('day.amplitude')}>{day.amplitude === null ? '—' : `${format.number(day.amplitude * 100, 2)}%`}</Stat>
+        <Stat label={t('day.previousClose')}>{day.previousClose === null ? DASH : format.price(day.previousClose)}</Stat>
+        <Stat label={t('day.amplitude')}>{day.amplitude === null ? DASH : format.percent(day.amplitude, 2)}</Stat>
         <Stat label={t('day.volume')}>{format.lots(day.volume)}</Stat>
       </dl>
     </Panel>
@@ -222,20 +218,19 @@ function DayPanel({ history }: { history: StockHistory }) {
 /** Where the close sits inside the last year's range. */
 function YearPanel({ history }: { history: StockHistory }) {
   const { t } = useTranslation('research')
-  const locale = useLocale()
   const format = useFormat()
   const year = yearRange(history.bars)
   if (!year) return null
   return (
-    <Panel title={t('year.title')} description={t('year.question', { count: year.sessions })}>
+    <Panel title={t('year.title')}>
       <div className="space-y-3">
         <RangeMeter low={year.low} high={year.high} value={year.close} lowLabel={t('year.low')} highLabel={t('year.high')} format={format.price} />
         <p className="flex flex-wrap justify-between gap-x-4 gap-y-1 border-t pt-3 text-xs text-muted-foreground">
           <span>
-            {t('year.fromHigh')} <span className="tabular font-medium text-foreground">{formatSignedPercent(locale, year.fromHigh, 1)}</span>
+            {t('year.fromHigh')} <span className="tabular font-medium text-foreground">{format.signedPercent(year.fromHigh, 1)}</span>
           </span>
           <span>
-            {t('year.fromLow')} <span className="tabular font-medium text-foreground">{formatSignedPercent(locale, year.fromLow, 1)}</span>
+            {t('year.fromLow')} <span className="tabular font-medium text-foreground">{format.signedPercent(year.fromLow, 1)}</span>
           </span>
         </p>
       </div>
@@ -243,78 +238,61 @@ function YearPanel({ history }: { history: StockHistory }) {
   )
 }
 
-/** The answer of the user's strategy for this stock: the score, pass or exclusion, and how many checks said what. */
-function VerdictPanel({ technical, strategyName }: { technical: TechnicalQuery; strategyName: StockResearchPageProps['strategyName'] }) {
+/**
+ * The answer of the viewer's technical strategy for this stock, closed until asked for: the score with pass or
+ * exclusion, every check in the reader's words, and each indicator it read at the last bar.
+ */
+function Evaluation({ technical, strategyName, ruleSentences, ruleName }: { technical: TechnicalQuery } & Pick<StockResearchPageProps, 'strategyName' | 'ruleSentences' | 'ruleName'>) {
   const { t } = useTranslation('research')
   const format = useFormat()
-  if (technical.isPending) return <Skeleton className="h-44 rounded-2xl" />
-  if (technical.isError) return <ErrorState error={technical.error} title={t('technicalFailed')} onRetry={() => void technical.refetch()} className="rounded-2xl border bg-card" />
-  const { report } = technical.data
-  const passed = report !== null && report.hard_failures.length === 0
-  const lastBar = technical.data.bar_times.at(-1)
+  const data = technical.data
+  const sentences = useMemo(() => (data && ruleSentences?.(data.strategy)) ?? new Map<string, string>(), [ruleSentences, data])
+  const lastBar = data?.bar_times.at(-1)
   return (
     <Panel
+      fold="always"
       title={t('evaluation.title')}
-      description={[strategyName(technical.data.strategy), lastBar && t('evaluation.lastBar', { date: format.monthDay(lastBar) })].filter(Boolean).join(' · ')}
-      aside={
-        report && (
-          <a href="#evaluation-details" className="inline-flex min-h-11 items-center gap-1 rounded-md px-1 text-xs hover:text-foreground md:min-h-0">
-            {t('evaluation.details')}
-            <ArrowDown aria-hidden className="size-3.5" />
-          </a>
-        )
-      }
+      description={data && [strategyName(data.strategy), lastBar && t('evaluation.lastBar', { date: format.monthDay(lastBar) })].filter(Boolean).join(' · ')}
     >
-      {report === null ? (
+      {technical.isPending ? (
+        <Skeleton className="h-44 rounded-lg" />
+      ) : technical.isError ? (
+        <ErrorState error={technical.error} title={t('technicalFailed')} onRetry={() => void technical.refetch()} />
+      ) : technical.data.report === null ? (
         <p className="text-sm text-muted-foreground">{t('evaluation.none')}</p>
       ) : (
-        <div className="space-y-4">
-          <div className="flex items-end justify-between gap-3">
-            <p className="flex items-baseline gap-1.5">
-              <span className="figure">{report.score}</span>
-              <span className="text-xs text-muted-foreground">{t('evaluation.score')}</span>
-            </p>
-            <span className={cn('rounded-full px-2.5 py-1 text-xs font-medium', passed ? 'bg-brand-soft text-brand' : 'bg-muted text-muted-foreground')}>
-              {t(passed ? 'evaluation.passed' : 'evaluation.excluded')}
-            </span>
-          </div>
-          <dl className="grid grid-cols-3 gap-2 text-center">
-            <VerdictCount label={t('evaluation.hard')} count={report.hard_failures.length} tone="text-destructive" />
-            <VerdictCount label={t('evaluation.soft')} count={report.soft_failures.length} tone="text-gold" />
-            <VerdictCount label={t('evaluation.observations')} count={report.observations.length} tone="text-brand" />
-          </dl>
-        </div>
+        <EvaluationReport technical={technical.data} report={technical.data.report} sentences={sentences} ruleName={(rule) => ruleName(technical.data.strategy, rule)} />
       )}
     </Panel>
   )
 }
 
-function VerdictCount({ label, count, tone }: { label: string; count: number; tone: string }) {
-  return (
-    <div className="rounded-xl bg-muted/70 px-2 py-2.5">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className={cn('tabular mt-0.5 text-lg font-semibold', count > 0 ? tone : 'text-muted-foreground')}>{count}</dd>
-    </div>
-  )
+interface EvaluationReportProps {
+  technical: StockTechnical
+  report: NonNullable<StockTechnical['report']>
+  sentences: ReadonlyMap<string, string>
+  ruleName: (name: string) => string
 }
 
-/** Every check the strategy made, in the reader's words, and each indicator it read at the last bar. */
-function EvaluationDetails({ technical, ruleSentences, ruleName }: { technical: StockTechnical } & Pick<StockResearchPageProps, 'ruleSentences' | 'ruleName'>) {
+function EvaluationReport({ technical, report, sentences, ruleName }: EvaluationReportProps) {
   const { t } = useTranslation('research')
-  const sentences = useMemo(() => ruleSentences?.(technical.strategy) ?? new Map<string, string>(), [ruleSentences, technical.strategy])
-  const name = (rule: string) => ruleName(technical.strategy, rule)
-  if (!technical.report) return null
-  const checks = reportChecks(technical.report)
+  const passed = report.hard_failures.length === 0
+  const checks = reportChecks(report)
   return (
-    <div id="evaluation-details" className="card-stack scroll-mt-20">
-      <Panel title={t('evaluation.detailsTitle')} description={t('evaluation.detailsQuestion')}>
-        <div className="grid gap-x-8 gap-y-6 @2xl:grid-cols-2 @5xl:grid-cols-3">
-          <CheckList icon={CircleX} tone="text-destructive" title={t('evaluation.hard')} checks={checks.hard} sentences={sentences} ruleName={name} />
-          <CheckList icon={CircleMinus} tone="text-gold" title={t('evaluation.soft')} checks={checks.soft} sentences={sentences} ruleName={name} />
-          <CheckList icon={CirclePlus} tone="text-brand" title={t('evaluation.observations')} checks={checks.observations} sentences={sentences} ruleName={name} />
-        </div>
-      </Panel>
-      <IndicatorPanel technical={technical} />
+    <div className="space-y-5">
+      <p className="flex items-baseline gap-2">
+        <span className="figure">{report.score}</span>
+        <span className="text-xs text-muted-foreground">{t('evaluation.score')}</span>
+        <span className={cn('ml-auto rounded-full px-2.5 py-1 text-xs font-medium', passed ? 'bg-brand-soft text-brand' : 'bg-muted text-muted-foreground')}>
+          {t(passed ? 'evaluation.passed' : 'evaluation.excluded')}
+        </span>
+      </p>
+      <div className="grid gap-x-8 gap-y-6 @2xl:grid-cols-2 @5xl:grid-cols-3">
+        <CheckList icon={CircleX} tone="text-destructive" title={t('evaluation.hard')} checks={checks.hard} sentences={sentences} ruleName={ruleName} />
+        <CheckList icon={CircleMinus} tone="text-gold" title={t('evaluation.soft')} checks={checks.soft} sentences={sentences} ruleName={ruleName} />
+        <CheckList icon={CirclePlus} tone="text-brand" title={t('evaluation.observations')} checks={checks.observations} sentences={sentences} ruleName={ruleName} />
+      </div>
+      <IndicatorReadings technical={technical} />
     </div>
   )
 }
@@ -368,31 +346,17 @@ function CheckList({
 /** The first readings are enough to scan; the rest open on request. */
 const READINGS_SHOWN = 8
 
-function IndicatorPanel({ technical }: { technical: StockTechnical }) {
+function IndicatorReadings({ technical }: { technical: StockTechnical }) {
   const { t } = useTranslation('research')
-  const locale = useLocale()
   const format = useFormat()
   /** A volume average reads in lots like every volume; other readings keep two decimals under 1,000. */
-  const reading = (strategy: StockTechnical, indicatorId: string, value: number) =>
-    strategy.strategy.indicators[indicatorId]?.kind === 'volume_sma' ? format.lots(value) : formatNumber(locale, value, Math.abs(value) >= 1000 ? 0 : 2)
+  const reading = (indicatorId: string, value: number) =>
+    technical.strategy.indicators[indicatorId]?.kind === 'volume_sma' ? format.lots(value) : format.number(value, Math.abs(value) >= 1000 ? 0 : 2)
   const [expanded, setExpanded] = useState(false)
   const readings = latestReadings(technical)
   return (
-    <Panel
-      title={t('indicator.title')}
-      description={t('indicator.question')}
-      footer={
-        readings.length > READINGS_SHOWN && (
-          <ShowMore
-            expanded={expanded}
-            onToggle={() => setExpanded(!expanded)}
-            controls="indicator-readings"
-            moreLabel={t('indicator.showAll', { count: readings.length })}
-            lessLabel={t('indicator.showLess')}
-          />
-        )
-      }
-    >
+    <section aria-label={t('indicator.title')} className="space-y-2.5 border-t pt-4">
+      <h3 className="text-sm font-medium">{t('indicator.title')}</h3>
       <dl id="indicator-readings" className="grid grid-cols-2 gap-2.5 @2xl:grid-cols-3 @4xl:grid-cols-4">
         {(expanded ? readings : readings.slice(0, READINGS_SHOWN)).map((row) => (
           <div key={row.indicatorId} className="min-w-0 rounded-xl bg-muted/70 px-3 py-2.5">
@@ -405,14 +369,17 @@ function IndicatorPanel({ technical }: { technical: StockTechnical }) {
                 : row.outputs.map(([output, value]) => (
                     <span key={output} className="flex items-baseline justify-between gap-2">
                       {row.outputs.length > 1 && <span className="truncate text-xs text-muted-foreground">{t(`formula:output.${output}`)}</span>}
-                      <span className="font-medium">{reading(technical, row.indicatorId, value)}</span>
+                      <span className="font-medium">{reading(row.indicatorId, value)}</span>
                     </span>
                   ))}
             </dd>
           </div>
         ))}
       </dl>
-    </Panel>
+      {readings.length > READINGS_SHOWN && (
+        <ShowMore expanded={expanded} onToggle={() => setExpanded(!expanded)} controls="indicator-readings" moreLabel={t('indicator.showAll', { count: readings.length })} lessLabel={t('indicator.showLess')} />
+      )}
+    </section>
   )
 }
 

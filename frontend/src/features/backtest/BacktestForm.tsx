@@ -4,6 +4,7 @@ import { Link } from 'react-router'
 import { useTranslation } from '@/i18n'
 import { isApiError } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
+import { useErrorReason } from '@/shared/lib/error-reason'
 import { useFormat } from '@/shared/lib/format'
 import { Button } from '@/shared/ui/button'
 import { Field } from '@/shared/ui/field'
@@ -28,6 +29,7 @@ interface BacktestFormProps {
 export function BacktestForm({ strategyName, bounds, draft, onDraft, running, noTradesAt, onDone }: BacktestFormProps) {
   const { t } = useTranslation('backtest')
   const format = useFormat()
+  const reason = useErrorReason()
   const run = useRunBacktest()
   const failure = useRunFailure()
   const [attempted, setAttempted] = useState(false)
@@ -36,13 +38,12 @@ export function BacktestForm({ strategyName, bounds, draft, onDraft, running, no
 
   const refusal = isApiError(failure.error) ? failure.error : null
   const periodRefused = refusal?.code === 'backtest_period_unavailable'
-  const refused = refusal ? refusedFields(refusal.problems) : {}
-  const failed = failure.error !== null && !periodRefused && Object.keys(refused).length === 0
-  const failedKind = refusal?.kind ?? 'server'
+  const refused = refusal ? refusedFields(refusal.problems) : []
+  const failed = failure.error !== null && !periodRefused && refused.length === 0
 
   const problem = (field: DraftField): string | null => {
     const found = attempted && !parsed.ok ? parsed.problems[field] : undefined
-    return found ? t(`problem.${found}`, { ...available, ...SCORE_RANGE }) : (refused[field] ?? null)
+    return found ? t(`problem.${found}`, { ...available, ...SCORE_RANGE }) : refused.includes(field) ? t('common:errors.invalid') : null
   }
   const change = (field: DraftField, value: string) => {
     if (failure.error) failure.dismiss()
@@ -56,7 +57,7 @@ export function BacktestForm({ strategyName, bounds, draft, onDraft, running, no
   }
 
   return (
-    <Panel title={t('form.title')} description={t('form.question')}>
+    <Panel title={t('form.title')}>
       <form onSubmit={submit} noValidate className="space-y-4">
         <p className="rounded-lg bg-muted px-3 py-2.5 text-sm">
           <span className="block text-xs text-muted-foreground">{t('form.strategy')}</span>
@@ -126,7 +127,7 @@ export function BacktestForm({ strategyName, bounds, draft, onDraft, running, no
 
         {failed && (
           <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm text-destructive">
-            {t('refusal.failed', { reason: [t(`common:errors.${failedKind}`), refusal?.kind === 'invalid' ? refusal.message : ''].filter(Boolean).join(' ') })}
+            {t('refusal.failed', { reason: reason(failure.error) })}
           </p>
         )}
 

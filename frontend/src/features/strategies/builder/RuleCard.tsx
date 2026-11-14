@@ -8,7 +8,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from '@/shared/ui/input'
 import { Label } from '@/shared/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
-import { ToggleGroup, ToggleGroupItem } from '@/shared/ui/toggle-group'
+import { Segmented } from '@/shared/ui/segmented'
 import { COMPARATORS, RULE_EFFECTS, isCrossing } from '../model/catalog'
 import { describeComparison, describeCondition } from '../model/describe'
 import { blankComparison, blankGroup, indicatorIdsOf, measuresVolume, type StrategyEdit } from '../model/edit'
@@ -18,6 +18,8 @@ import { isBlocking, ruleHasIssues, type IssueOwner, type ValidationIssue } from
 import { useFormulaText } from '../use-formula-text'
 import { Field, FieldError, type IssueLookup } from './fields'
 import { OperandEditor, type OperandContext } from './OperandEditor'
+
+const GROUP_OPERATORS = ['all', 'any'] as const satisfies readonly GroupOperator[]
 
 export interface EditorContext {
   strategy: Strategy
@@ -122,21 +124,13 @@ function GroupOperatorToggle({ group, edit }: { group: ConditionGroup; edit: Edi
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm">
       <span className="text-muted-foreground">{t('group.match')}</span>
-      <ToggleGroup
-        type="single"
-        variant="outline"
-        size="sm"
+      <Segmented
+        className="w-fit"
         value={group.operator}
-        onValueChange={(value) => value && edit({ type: 'setGroupOperator', groupId: group.id, operator: value as GroupOperator })}
-        aria-label={t('group.match')}
-      >
-        <ToggleGroupItem value="all" className="px-3 text-xs">
-          {t('group.all')}
-        </ToggleGroupItem>
-        <ToggleGroupItem value="any" className="px-3 text-xs">
-          {t('group.any')}
-        </ToggleGroupItem>
-      </ToggleGroup>
+        onChange={(operator) => edit({ type: 'setGroupOperator', groupId: group.id, operator })}
+        label={t('group.match')}
+        options={GROUP_OPERATORS.map((value) => ({ value, label: t(`group.${value}`) }))}
+      />
     </div>
   )
 }

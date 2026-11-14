@@ -5,13 +5,11 @@ const backtest: DictionaryShape<typeof en> = {
   signIn: '登入後回測你的策略',
   page: {
     title: '策略回測',
-    description: '照你現在的策略，過去這段期間會不會賺錢？逐日重播一次，並和加權指數比較。',
   },
   period: '{{first}} – {{last}}',
   sessions: '{{value}} 個交易日',
   form: {
     title: '新的回測',
-    question: '要重播的期間、資金與分數',
     loadFailed: '無法載入回測選項。',
     strategy: '回測的策略',
     changeStrategy: '更換策略',
@@ -99,7 +97,6 @@ const backtest: DictionaryShape<typeof en> = {
   },
   curve: {
     title: '策略與加權指數',
-    question: '兩者都從第一個交易日起算報酬率，畫在同一個座標上',
     strategy: '策略',
     benchmark: '加權指數',
   },
@@ -112,7 +109,6 @@ const backtest: DictionaryShape<typeof en> = {
   exit: { stopLoss: '停損', score: '分數', open: '持有中', other: '其他' },
   trades: {
     title: '交易明細',
-    question: '每筆部位從第一次買進到賣出；仍持有的以最後一天收盤價計算',
     count: '{{count}} 筆',
     none: '這段期間策略沒有買進任何股票。',
     sortBy: '依{{column}}排序',
@@ -133,7 +129,6 @@ const backtest: DictionaryShape<typeof en> = {
   },
   saved: {
     title: '已儲存的回測',
-    question: '你先前的回測，最新的在前，方便比較',
     none: '還沒有儲存的回測。',
     noneHint: '每次回測都會存在這裡。',
     loadFailed: '無法載入已儲存的回測。',

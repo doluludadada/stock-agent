@@ -155,7 +155,7 @@ the listing's day and the history's last bar, and keeps its session, so a page n
 One codebase runs as the owner's personal site and as a public site on open data only. `GET /v1/market/audience`
 answers the server's table of what its audience allows (`open_data_only`, `realtime_quotes`, `news_articles`, `mops`)
 and how it prices an order (`order_pricing`), read once per tab. A follow of a run says its price from it: a realtime
-quote, only in continuous trading, or the official close of the last session, only while no session trades. A navigation item (`NavItem.requires`) or a run kind (`KINDS` in `RunsPage.tsx`) names the capability
+quote, only in continuous trading, or the official close of the last session, only while no session trades. A page (`requires` in `app/pages.ts`) or a run kind (`KINDS` in `RunsPage.tsx`) names the capability
 it needs, and shows only once the server said the site has it, so a public visitor never sees Buzz, Intraday, the
 watchlist's Social buzz source or the valuation, even for a moment. A link to a page the site does not offer opens a short reason
 (`RequireCapability` in `app/router/RouteFallbacks.tsx`), not a page whose requests the server refuses. Hiding is never
@@ -164,8 +164,10 @@ the archive has come (`ArchiveWarmUp`) until it holds the sessions the strategie
 here is investment advice and links to the open data's credit, which its license requires; analysis results and the
 stock page say it again beside the result (`NotAdviceNote`).
 
-The stock page opens with what needs no run and no session. A viewer the site does not show the `ranking` feature
-gets no score block, and the page never asks for the score. `StockSummary` leads, right under the price: the ranking
+The stock page reads in one order: the price, the score and the revenue (`StockSummary`), the AI brief beside the news,
+the chart with the day and the year's range, then the tables (`AnalysisPanel`, `FinancialsPanel`), which start closed
+under 768 px, and last the viewer's technical evaluation, closed until asked for. A viewer the site does not show the
+`ranking` feature gets no score block, and the page never asks for the score. `StockSummary` leads, right under the price: the ranking
 score (0 to 100, the place among the scored stocks, the two factors' percentiles as bars, whether it is in the top, the
 decision day, or the reason a stock has no score, and one line that the score measures and does not predict) and the
 monthly revenue (the latest month, its change from a year before, the acceleration, and up to 36 months as bars that
@@ -191,10 +193,15 @@ administrators with the permission `see_administrator_features`; false until the
 when it is back in focus a minute later, and at once when a request is refused with the code `feature_hidden`
 (`app/providers/query-client.ts`), so a change reaches an open tab.
 
-- `app/pages.ts` is the one table of pages with the features each belongs to (`PAGE_FEATURES`; any one of them shows
-  the page, and a page that names none always shows). The navigation (`navSections`), the phone's tab bar, the search
-  palette's pages and the routes (`page()` in `app/router/router.tsx`, through `RequireFeature`) all read it, and
-  `app/pages.test.tsx` fails when a feature of the contract is named by no page.
+- `app/pages.ts` is the one table of pages (`PAGES`). An entry holds the page's address, the features it belongs to
+  (any one of them shows the page, and a page that names none always shows), the permission and the audience
+  capability its entries need, the module that loads it, and where the navigation lists it: its section, and whether
+  the phone's tab bar and the account menu list it too. The routes (`app/router/router.tsx`, through `RequireFeature`),
+  the sidebar, the phone's sheet and tab bar, the account menu and the search palette all read it
+  (`app/layouts/navigation.ts`), so a new page is one entry. A page that the navigation does not list names the listed
+  page it sits `under`, which stays marked while it is open. `app/pages.test.tsx` fails when a feature of the contract
+  is named by no page. An address that carries a value is a pattern in `shared/config/paths.ts`, which the table gives
+  to the router and a link fills.
 - A feature that opens no page is listed in `FEATURES_WITHOUT_PAGE` with the reason. `sinopac_ordering` is the one:
   seeing the SinoPac account (`sinopac_account`, the `brokerage` page) and ordering on it are two features, so
   ordering is named at no page, or a viewer who sees ordering alone would be let into the account. The server's
@@ -252,39 +259,44 @@ secret: the server refuses one written into them, and its form shows none.
   `Skeleton` of its content's height). Empty, signed out, refused and failed are a `StateBlock`, `framed` where it
   stands alone on the page. A failed request is an `ErrorState`, whose words come from `useErrorReason`
   (`shared/lib/error-reason.ts`): by the refusal's code where the app has words for it (`common:refusal.<code>`), else
-  by the kind of failure, never the server's own English sentence.
+  by the kind of failure, never the server's own English sentence. A form does the same: a value the server refused
+    reads `common:errors.invalid` at its field.
 - A link or a button inside running text takes `.tap`, which makes it 44 px tall under 768 px. A card's way to the
   page that holds the rest is a `PanelLink` in its title row.
-- Every card is a `Panel` (`shared/ui/panel.tsx`): a title, one line that says what the card answers, the content
-  and an optional footer such as `ShowMore`. Its body is a size container, so content lays out by the card's width
+- Every card is a `Panel` (`shared/ui/panel.tsx`): a title, the content and an optional footer such as `ShowMore`. A
+  card says its number or its list, not how it works: it takes a line under the title only where the title alone does
+  not say what it holds (a date, a strategy's name), and a caveat that must stay is one short line or a badge. With
+  `fold` the title is the button that opens the card, everywhere or under 768 px only, and the content mounts when it
+  opens. Its body is a size container, so content lays out by the card's width
   (`@md:`), not the window's. Every table is a `DataTable`: real column headers, rows at least 44 px tall, columns
   that step aside below a width (`from`), and on a phone the first cell carries what the hidden columns said.
 - Figures in a row use `Stat`; a hero price uses `QuoteHeadline`; a choice among a few uses `Segmented` (chart
   ranges are `RangeTabs`); a range position uses `RangeMeter`; a breadth split uses `BreadthBar`. An empty,
   signed-out or failed state is a `StateBlock`; a figure the backend has no source for is one line that says so.
-- A stock's volume reads in lots through `useFormat().lots` ("3.7萬張"); a price from an older session carries its
-  date (`useFormat().closeOn`, "11/2 收盤").
+- `useFormat()` (`shared/lib/format.ts`) is the one way to write a number, a percentage or a date, and `DASH` what a
+  missing figure shows. A stock's volume reads in lots through `useFormat().lots` ("3.7萬張"); a price from an older
+  session carries its date (`useFormat().closeOn`, "11/2 收盤"). A stock's name and code are `StockLink`, `StockName`
+  or `StockChip` (`shared/ui/stock-name.tsx`); an up, down or flat colour comes from `DIRECTION_TONE`
+  (`shared/lib/direction.ts`); calendar days and the check of a typed period are `shared/lib/dates.ts`.
 - Navigation: a bottom tab bar under 768 px (today, ranking, search, holdings, more), a rail of icons from 768 px
-  and the full sidebar from 1024 px, all from one list (`app/layouts/navigation.ts`), which also feeds the search
-  palette's pages. Every control is at least 44 px tall under 768 px. The order is the product's: Today (the home
+  and the full sidebar from 1024 px, all from the page table (`navSections` in `app/layouts/navigation.ts`), which also
+  feeds the search palette's pages. Every control is at least 44 px tall under 768 px. The order is the product's: Today (the home
   page), Research (the monthly ranking, the market overview), Mine (My holdings, the watchlist, the SinoPac account
-  for a user with `use_real_broker`, My settings), Other tools, Administration. An entry shows by the viewer's
-  permission (`needs`), the site's audience (`requires`) and the features of its page (`app/pages.ts`); a tab of the
-  bar whose page is hidden leaves the bar.
+  for a user with `use_real_broker`, My settings), Supporting analysis tools, Administration. An entry shows by the
+  viewer's permission (`needs`), the site's audience (`requires`) and the features of its page (`app/pages.ts`); a tab
+  of the bar whose page is hidden leaves the bar.
 - The home page (`/`, "Today") answers what to look at now, from what the other pages already ask the server: the
   index and the session's breadth in one row, this month's ranking (10 stocks beside the other cards, 5 in one
   column), the portfolio's figures and the watchlist's day. Each card is its feature's, leads to its page, and says
   its own loading, empty and failed state. The ranking decides once a month and the holdings may be empty, so neither
   alone is the home page. A visitor gets the public cards and one invitation to sign in. The market overview is
   `/market`.
-- A section marked `folded` (Other tools: the runs, the mock account, the valuation, the library, the backtest, the
-  designer) shows only its name as a button until the reader opens it, in the sidebar, the rail and the phone's sheet
-  of all pages alike. They are the pages the site shows administrators only by default. Open, it says why it is folded
-  in one line (`nav.note.<key>`; the rail has no room for it). `showsItems` decides: a section also shows open while
+- A folded section (`FOLDED_SECTIONS`: the supporting analysis tools, which are the runs, the mock account, the
+  valuation, the library, the backtest and the designer) shows only its name as a button until the reader opens it, in
+  the sidebar, the rail and the phone's sheet of all pages alike. They are the pages the site shows administrators only
+  by default. `showsItems` decides: a section also shows open while
   the reader is on one of its pages, and its button rests then, so a page's own entry never hides. The search palette
-  lists every page whatever is folded. Each of the four technical-strategy pages says under its title that the
-  strategies did not profit, with a link to the ranking (`shared/ui/technical-strategy-note.tsx`, through
-  `PageHeader`'s `note`).
+  lists every page whatever is folded.
 - No decorative motion: no entrance animations, glows, spotlights or textures. Motion is kept where it explains a
   change, such as a rule card added to or removed from the designer.
 - Market colors follow Taiwan usage: red is up, green is down. Every change also shows a sign,
@@ -332,16 +344,19 @@ and the ranking draws what 1 put in is worth around 1. The benchmark's color (`-
 validator's separation checks against `--chart-price` in both themes, and its line is dashed too.
 
 The ranking page (`/ranking`) leads with the stocks the formula picks now (`LatestRanking.tsx`), because they are
-what the reader came for. From 1280 px, beside them are the ranking in the mock account (`MockAccountFollow.tsx`)
-and whether following the ranking would have beaten the benchmark, which every title names a backtest and simulated.
-Narrower, they follow them. The operator's command (`just backfill-history`) shows only to a viewer with
+what the reader came for; the decision's date, the next one and what changed are one line each around the list. From
+1280 px, beside them are the ranking in the mock account (`MockAccountFollow.tsx`: what it holds, lacks and still
+holds, its return against the benchmark, one button) and the backtest (`RankingRecord.tsx`) as three figures of the
+ranking and the benchmark, marked simulated. The period, the curve, every year, every decision and the caveats are one
+tap away, and open at once when the address names a period or a month. Narrower, they follow the list. The operator's command (`just backfill-history`) shows only to a viewer with
 `see_administrator_features`. Its rules:
 
 - The mock account's block shows only where the site shows the viewer the mock account: the route hands
   `mockAccount` in, and without it the page never asks `/v1/rankings/follow`. An account that never followed gets one
   sentence and the button. One that did gets how many of the ranking's stocks it holds, its return since the first
   follow beside the benchmark's over the same sessions, the stocks it lacks and the holdings that left. The button
-  asks first, listing every sale and purchase, and leaves once the account holds the ranking. The block is under
+  asks first, listing every sale and purchase, and leaves once the account holds the ranking, when no sentence repeats
+  the figures. The block is under
   `['owner', 'run-results']`, and polls while the server says a run of the user runs. The window and price wording is
   the follow panel's (`runs:follow.*`).
 
@@ -363,9 +378,9 @@ Narrower, they follow them. The operator's command (`just backfill-history`) sho
 The mock account page (`/account`) is the mock account alone. The SinoPac account has its own page
 (`/account/sinopac`, `BrokerageAccountPage.tsx`), for a user with `use_real_broker`, and it only reads:
 
-- Its first card says which server the figures come from ("Simulation server, no real money" or "Real account") and
-  whether the site may order there, before any figure and whatever else the page shows. It says once that every
-  figure is the broker's own, with the time read.
+- Its first card says which server the figures come from ("Simulation server, no real money" or "Real account") and,
+  as a badge, whether the site may order there ("Ordering off" or "Ordering on"), before any figure and whatever else
+  the page shows. It says once that every figure is the broker's own, with the time read.
 - While the site's login is down the server sends no statement: the page says so and that the site retries, and asks
   for nothing else. An `administrators_only` answer shows `AdministratorsOnly`, the state `RequireSignIn` shows.
 - The statement reads in one order: the bank balance, market value and both P&Ls; the holdings at the broker's last
@@ -397,7 +412,7 @@ My holdings (`/holdings`) reads what the user holds as one portfolio. Its rules:
 
 `shared/ui/` holds vendored shadcn/ui sources and the project's own primitives (`panel`, `data-table`, `stat`,
 `segmented`, `range-tabs`, `show-more`, `range-meter`, `breadth-bar`, `quote-headline`, `state-block`, `page-header`,
-`technical-strategy-note`, `ranking-score`, `error-state`,
+`ranking-score`, `stock-name`, `error-state`,
 `field`, `password-input`, `avatar`, `price-volume-chart`, `price-trend`, `comparison-chart`, `progress-note`,
 `stock-picker`, `confirm-dialog`, `stock-ids-problem`). Lint relaxes only fast-refresh and a few a11y role rules there, to stay close to upstream.
 
@@ -431,7 +446,7 @@ names in the reader's language. `i18n.test.ts` fails when a rule in `config/stra
 
 `bun tools/capture-screens.ts <out-dir> --url <app> [--user name --password pw]` signs in through the API and saves
 every page at 360, 768 and 1440 px in both themes, with an audit of each (sideways scroll, controls under 44 px
-on a phone, text cut off, page errors) in `audit.json`.
+on a phone, text cut off, the words on the page, page errors) in `audit.json`.
 
 CI runs the first four in `.github/workflows/frontend.yml`, and the root `just frontend-check` runs them locally.
 E2E needs a real backend, so it runs only on your machine. [README.md](../README.md#browser-flows-e2e) says how and why.

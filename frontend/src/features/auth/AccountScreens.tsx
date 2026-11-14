@@ -20,7 +20,7 @@ export function SetupScreen({ onDone }: { onDone: () => void }) {
   const { t } = useTranslation('auth')
   const setUp = useSetUp()
   return (
-    <AuthFrame eyebrow={t('setup.eyebrow')} title={t('setup.title')} lead={t('setup.lead')} footer={t('setup.note')}>
+    <AuthFrame eyebrow={t('setup.eyebrow')} title={t('setup.title')} lead={t('setup.lead')}>
       <GoogleSignIn lead={t('google.setupLead')} />
       <NewAccountForm
         withSetupCode
@@ -62,7 +62,6 @@ export function SignInScreen({ registerHref, onDone }: { registerHref: string; o
   return (
     <AuthFrame
       title={t('signIn.title')}
-      lead={t('signIn.lead')}
       footer={
         status.data?.registration_open === false ? (
           t('signIn.closed')
@@ -126,7 +125,6 @@ export function RegisterScreen({ signInHref, onDone }: { signInHref: string; onD
   return (
     <AuthFrame
       title={t('register.title')}
-      lead={t('register.lead')}
       footer={
         <>
           {t('register.haveAccount')}{' '}

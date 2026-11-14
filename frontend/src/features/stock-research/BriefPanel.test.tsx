@@ -84,15 +84,15 @@ describe('a stock’s AI brief', () => {
     renderPanel()
 
     const panel = within(await screen.findByRole('region', { name: 'AI brief' }))
-    expect(await panel.findByText('AI-generated')).toBeInTheDocument()
+    expect(await panel.findByText('AI-generated, may be wrong')).toBeInTheDocument()
     expect(panel.getByText('claude-test-1')).toBeInTheDocument()
-    expect(panel.getByText('written 11/13, 09:00 Taipei time')).toBeInTheDocument()
-    expect(panel.getByText(/Covers the sessions from 10\/16\/2026 to 11\/12\/2026\./)).toBeInTheDocument()
+    expect(panel.getByText('11/13, 09:00 Taipei')).toBeInTheDocument()
+    expect(panel.getByText(/10\/16\/2026 to 11\/12\/2026\./)).toBeInTheDocument()
     expect(panel.getByText('+12.00%')).toHaveClass('text-up')
     expect(within(panel.getByRole('region', { name: 'What the company is' })).getByText(/It makes chips for other firms\./).textContent).toBe('It makes chips for other firms. Company listing · 11/13')
     const movement = within(panel.getByRole('region', { name: 'Why it rose or fell' }))
     expect(movement.getByText(/A report named new orders\./).textContent).toBe('A report named new orders. News · 11/11Board post · 11/9')
-    expect(panel.getByText(/describes that data, can be wrong, and is not advice/)).toBeInTheDocument()
+    expect(panel.getByText('For research and reference only, not investment advice.')).toBeInTheDocument()
     expect(panel.getByText('For research and reference only, not investment advice.')).toBeInTheDocument()
     expect(panel.queryByText(/This brief is in/)).not.toBeInTheDocument()
     expect(panel.queryByRole('button')).not.toBeInTheDocument()
@@ -123,7 +123,7 @@ describe('a stock’s AI brief', () => {
     backend([answer({ today: written })])
     renderPanel('zh-TW')
 
-    expect(await screen.findByText(/這篇摘要以英文寫成/)).toBeInTheDocument()
+    expect(await screen.findByText('以英文寫成。')).toBeInTheDocument()
     expect(screen.getByText('月營收 · 11/10', { selector: 'span' })).toBeInTheDocument()
   })
 
@@ -146,7 +146,7 @@ describe('a stock’s AI brief', () => {
     renderPanel()
 
     expect(await screen.findByText('Earlier brief, of 11/12/2026')).toBeInTheDocument()
-    expect(screen.getByText('This uses one of your AI calls today. The brief is then shared with every viewer.')).toBeInTheDocument()
+    expect(screen.getByText('Uses one of your AI calls today.')).toBeInTheDocument()
     expect(calls.post).toBe(0)
     await user.click(screen.getByRole('button', { name: 'Write today’s brief' }))
 
@@ -196,7 +196,7 @@ describe('a stock’s AI brief', () => {
     renderPanel()
 
     expect(await screen.findByText('Today’s limit of new briefs is reached')).toBeInTheDocument()
-    expect(screen.getByText('It renews at midnight Taiwan time. Briefs already written stay readable.')).toBeInTheDocument()
+    expect(screen.getByText('It resets at midnight in Taiwan.')).toBeInTheDocument()
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
   })
 

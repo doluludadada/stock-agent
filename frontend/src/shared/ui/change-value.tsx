@@ -1,15 +1,8 @@
 import { ArrowDownRight, ArrowUpRight, Minus } from 'lucide-react'
-import { useLocale, useTranslation } from '@/i18n'
-import { formatSigned, formatSignedPercent } from '@/shared/lib/format'
-import { directionOf, type Direction } from '@/shared/lib/direction'
+import { useTranslation } from '@/i18n'
+import { useFormat } from '@/shared/lib/format'
+import { DIRECTION_TONE, directionOf } from '@/shared/lib/direction'
 import { cn } from '@/shared/lib/utils'
-
-/** Taiwan convention: red rises, green falls. The sign, arrow and hidden word carry it too. */
-const directionText: Record<Direction, string> = {
-  up: 'text-up',
-  down: 'text-down',
-  flat: 'text-flat',
-}
 
 interface ChangeValueProps {
   value: number
@@ -21,16 +14,16 @@ interface ChangeValueProps {
 }
 
 export function ChangeValue({ value, format, fractionDigits = 2, arrow = false, pill = false, className }: ChangeValueProps) {
-  const locale = useLocale()
+  const numbers = useFormat()
   const { t } = useTranslation()
   const direction = directionOf(value)
   const Icon = direction === 'up' ? ArrowUpRight : direction === 'down' ? ArrowDownRight : Minus
-  const text = format === 'percent' ? formatSignedPercent(locale, value, fractionDigits) : formatSigned(locale, value, fractionDigits)
+  const text = format === 'percent' ? numbers.signedPercent(value, fractionDigits) : numbers.signed(value, fractionDigits)
   return (
     <span
       className={cn(
         'tabular inline-flex items-center gap-0.5 font-medium whitespace-nowrap',
-        directionText[direction],
+        DIRECTION_TONE[direction].text,
         pill && 'rounded-full px-2 py-0.5 text-xs',
         pill && direction === 'up' && 'bg-up-soft',
         pill && direction === 'down' && 'bg-down-soft',

@@ -1,20 +1,18 @@
 const research = {
-  signIn: 'Sign in to evaluate this stock with your strategy',
+  signIn: 'Sign in to see your strategy’s evaluation',
   back: 'Back',
   noBars: 'No daily bars for this stock yet.',
   insufficient: 'Not enough data',
   loadFailed: 'This stock could not be loaded.',
   technicalFailed: 'The technical evaluation could not be loaded.',
   market: { twse: 'TWSE', tpex: 'TPEx' },
-  notFound: { title: 'No listed stock with code {{code}}', description: 'Search by code or name in the bar at the top.' },
+  notFound: { title: 'No listed stock with code {{code}}', description: 'Search by code or name.' },
   chart: {
     title: 'Price and volume',
-    question: 'Daily closes, moving averages and volume',
     sma: '{{period}}-day MA',
   },
   day: {
     title: 'Last session',
-    question: 'The {{date}} session',
     open: 'Open',
     high: 'High',
     low: 'Low',
@@ -24,7 +22,6 @@ const research = {
   },
   year: {
     title: 'One-year range',
-    question: 'The last {{count}} sessions',
     low: 'Year low',
     high: 'Year high',
     fromHigh: 'From the high',
@@ -41,9 +38,6 @@ const research = {
     soft: 'Deductions',
     observations: 'Bonus checks',
     noneListed: 'None',
-    details: 'See the checks',
-    detailsTitle: 'The checks',
-    detailsQuestion: 'Which conditions exclude this stock, cost points or add them',
     detected: 'Showed',
     notDetected: 'Did not show',
   },
@@ -55,11 +49,10 @@ const research = {
   },
   financials: {
     title: 'Financials',
-    question: 'From the exchanges’ open data, as this site archived it',
     failed: 'The financials could not be loaded.',
     none: {
       title: 'No financials archived yet',
-      description: 'The exchanges’ open data serves only the latest quarter and month, and this site keeps them from the day it started.',
+      description: 'The site keeps each quarter and month from the day it started.',
     },
     month: 'Revenue of {{month}}',
     revenue: 'Revenue',
@@ -79,17 +72,14 @@ const research = {
       equity: 'Equity',
       book_value_per_share: 'Book value per share (TWD)',
     },
-    units:
-      'Income figures and EPS run from the year’s start to the quarter’s end; balance figures stand at the quarter’s end. Net income and equity are those attributable to the parent. Amounts in TWD.',
+    units: 'Income figures run from the start of the year to the quarter’s end. Amounts are in TWD.',
   },
   analysis: {
     title: 'Financial analysis',
-    question: 'What the revenue, earnings and valuation this site holds say about the stock',
     failed: 'The financial analysis could not be loaded.',
     yearOverYear: 'Year over year',
     reading: {
       title: 'The reading',
-      rules: 'Each sentence follows a fixed rule on the figures below. No AI wrote any of it.',
       kind: {
         revenue_accelerating_one: 'Revenue is accelerating: the {{short}}-month average has been above the {{long}}-month average for {{count}} month.',
         revenue_accelerating_other: 'Revenue is accelerating: the {{short}}-month average has been above the {{long}}-month average for {{count}} months in a row.',
@@ -132,7 +122,6 @@ const research = {
       month: 'Month',
       revenue: 'Revenue',
       acceleration: 'Acceleration',
-      explained: 'Acceleration is the ranking’s measure: the average revenue of the latest {{short}} months over the average of the latest {{long}}. Above ×1, the latest months run ahead. Revenue in TWD.',
       short: 'Months held: {{count}}, so no acceleration yet. It needs {{long}} months in a row.',
     },
     earnings: {
@@ -147,9 +136,6 @@ const research = {
       operatingMargin: 'Operating margin',
       netMargin: 'Net margin',
       debtRatio: 'Debt ratio',
-      explained:
-        'EPS in TWD. Year-to-date EPS runs from the year’s start to the quarter’s end and is compared with the same quarter a year before; a quarter’s own EPS needs the quarter before it. A dash means the figure is not held or the industry format does not report it.',
-      filed: 'EPS of quarters the open-data archive lacks comes from the MOPS filings this site fetched on {{date}}.',
     },
     valuation: {
       title: 'Valuation against its own history',
@@ -159,36 +145,31 @@ const research = {
       noPe: 'No P/E from the exchange, as for a company with losses.',
       short: 'Sessions held: {{count}} of the {{needed}} a median needs.',
       median: 'Median {{median}} over {{count}} sessions',
-      explained: 'As each exchange’s daily report gives them, held since {{first}}. The open data serves only the latest session, so the history starts the day this site began archiving.',
     },
   },
   score: {
     title: 'Ranking score',
-    question: 'How the monthly revenue ranking scores this stock',
     decided: 'Decided {{date}} on revenue of {{month}}',
-    loading: 'The first score after the server starts reads every held bar and can take a minute.',
-    unavailable: 'No score yet: this site’s daily history holds no decision day of the ranking.',
+    loading: 'The first score after a start can take a minute.',
+    unavailable: 'No score yet: the daily history holds no decision day.',
   },
   revenue: {
     title: 'Monthly revenue',
-    question: 'The latest month, its change from a year before and how the last months compare with the year',
     latest: 'Revenue of {{month}}',
     acceleration: '{{short}}-month over {{long}}-month average',
-    held: 'Months held: {{count}}. Latest served {{date}}. Revenue in TWD.',
     chart: 'Bar chart of the last {{count}} months of revenue; the monthly table below lists each figure.',
   },
   brief: {
     title: 'AI brief',
-    question: 'What the company is, and how the facts this site holds relate to its recent move',
     loadFailed: 'The brief could not be loaded.',
-    aiGenerated: 'AI-generated',
-    writtenAt: 'written {{time}} Taipei time',
-    window: 'Covers the sessions from {{first}} to {{last}}.',
-    windowChange: 'Close over them:',
+    aiGenerated: 'AI-generated, may be wrong',
+    writtenAt: '{{time}} Taipei',
+    window: '{{first}} to {{last}}.',
+    windowChange: 'Close:',
     noWindow: 'No window of sessions is held for this brief.',
     writtenIn: {
-      'zh-TW': 'This brief is in Traditional Chinese: the site writes one brief for every viewer, in the language its administrator set.',
-      en: 'This brief is in English: the site writes one brief for every viewer, in the language its administrator set.',
+      'zh-TW': 'Written in Traditional Chinese.',
+      en: 'Written in English.',
     },
     part: {
       company: 'What the company is',
@@ -211,19 +192,18 @@ const research = {
       title: 'Cited sources',
       onPage: '(shown on this page)',
     },
-    describes: 'An AI wrote this from the data this site holds. It describes that data, can be wrong, and is not advice.',
     earlier: 'Earlier brief, of {{date}}',
     none: {
       title: 'No brief has been written today',
-      description: 'The site writes one brief per stock and day, when a signed-in user asks for it.',
+      description: 'One a day for each stock, written when a signed-in user asks.',
     },
     write: 'Write today’s brief',
     retry: 'Try again',
-    writeNote: 'This uses one of your AI calls today. The brief is then shared with every viewer.',
+    writeNote: 'Uses one of your AI calls today.',
     signIn: 'Signed-in users can ask for today’s brief.',
     writing: {
       title: 'Today’s brief is being written',
-      description: 'The AI usually answers within half a minute. The brief shows here when it is done.',
+      description: 'Usually within half a minute.',
     },
     failed: {
       title: 'Today’s brief could not be written',
@@ -231,20 +211,16 @@ const research = {
     },
     limit: {
       title: 'Today’s limit of new briefs is reached',
-      description: 'It renews at midnight Taiwan time. Briefs already written stay readable.',
+      description: 'It resets at midnight in Taiwan.',
     },
   },
   news: {
     title: 'News and discussion',
-    question: {
-      articles: 'Company announcements, exchange news, news articles and PTT posts, newest first',
-      openData: 'Company announcements and exchange news from the open data, newest first',
-    },
     failed: 'The news could not be loaded.',
     none: {
       title: 'Nothing recent about this stock',
-      articles: 'No announcement, news article or post was found for it.',
-      openData: 'The open data holds no announcement or exchange news of it from the last weeks.',
+      articles: 'No announcement, news or post found.',
+      openData: 'No announcement or exchange news in recent weeks.',
     },
     source: {
       twse_mops: 'Company announcement',

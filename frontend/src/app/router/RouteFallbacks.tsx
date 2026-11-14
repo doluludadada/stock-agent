@@ -9,7 +9,7 @@ import { ErrorState } from '@/shared/ui/error-state'
 import { PageSkeleton } from '@/shared/ui/skeleton'
 import { StateBlock } from '@/shared/ui/state-block'
 import { paths } from '@/shared/config/paths'
-import { PAGE_FEATURES, type Page } from '../pages'
+import { PAGES, type Page } from '../pages'
 
 export function NotFoundRoute() {
   const { t } = useTranslation()
@@ -45,8 +45,9 @@ export function RouteErrorBoundary() {
         description={t('routeError.description')}
         framed
         action={
-          <Button type="button" variant="outline" onClick={() => window.location.assign(paths.home)}>
-            {t('routeError.reload')}
+          <Button asChild variant="outline">
+            {/* A plain link, not the router's: the page loads again, which clears what broke. */}
+            <a href={paths.home}>{t('notFound.home')}</a>
           </Button>
         }
       />
@@ -94,7 +95,7 @@ export function RequireCapability({ capability, title, reason, children }: { cap
 export function RequireFeature({ page }: { page: Page }) {
   const { t } = useTranslation()
   const shown = useShown()
-  const features = PAGE_FEATURES[page]
+  const { features } = PAGES[page]
   const children = <Outlet />
   if (features.length === 0) return children
   if (shown.pending) return <PageSkeleton />

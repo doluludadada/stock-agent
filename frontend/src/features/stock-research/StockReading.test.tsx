@@ -149,7 +149,7 @@ describe('the summary at the top of the page', () => {
     expect(score.getByText('Decided 11/13/2026 on revenue of October 2026')).toBeTruthy()
     expect(score.getByText('PR 92').textContent).toBe('PR 92×1.25')
     expect(score.getByText('PR 78').textContent).toBe('PR 7898.2%')
-    expect(score.getByText(/predicts nothing; the method’s evidence is a backtest\./)).toBeTruthy()
+    expect(score.getByText(/It is no forecast\./)).toBeTruthy()
   })
 
   it('shows the revenue alone, and never asks for the score, where the site does not show the viewer the ranking', async () => {
@@ -170,11 +170,10 @@ describe('the summary at the top of the page', () => {
 
   it('says there is no score yet while the site holds no decision day, and still shows the revenue', async () => {
     renderSummary(null)
-    expect(await screen.findByText('No score yet: this site’s daily history holds no decision day of the ranking.')).toBeTruthy()
+    expect(await screen.findByText('No score yet: the daily history holds no decision day.')).toBeTruthy()
     const revenue = within(screen.getByRole('region', { name: 'Monthly revenue' }))
     expect(await revenue.findByText('Revenue of October 2026')).toBeTruthy()
     expect(revenue.getByText('+59.7%')).toBeTruthy()
-    expect(revenue.getByText(/Months held: 2\. Latest served 11\/12\/2026/)).toBeTruthy()
     expect(revenue.getByText(/Months held: 2, so no acceleration yet/)).toBeTruthy()
   })
 })
@@ -196,7 +195,6 @@ describe('the financial analysis', () => {
     renderWith(thin, <AnalysisPanel stockId="2330" />)
     expect(await screen.findByText('October 2026 · served 11/12/2026')).toBeTruthy()
     expect(screen.getByText('11/12/2026 session')).toBeTruthy()
-    expect(screen.getByText(/MOPS filings this site fetched on 10\/19\/2026/)).toBeTruthy()
     const quarters = within(screen.getByRole('table', { name: 'Quarterly earnings' }))
     expect(quarters.getAllByRole('row').map((row) => row.textContent)).toEqual([
       'QuarterQuarter EPSEPS year to dateYear over yearGross marginOperating marginNet margin',

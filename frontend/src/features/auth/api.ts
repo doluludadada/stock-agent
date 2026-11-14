@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useEffect, useRef } from 'react'
-import { apiRequest, authStatusKey, isApiError, session, useHasPermission, useIsSignedIn, type Schemas, type User } from '@/shared/api'
+import { apiRequest, authStatusKey, isApiError, isSameSession, sentInSession, session, SITE_STATE_STALE_MS, useHasPermission, useIsSignedIn, type Schemas, type User } from '@/shared/api'
 
 export { useAuthStatus } from '@/shared/api'
 
@@ -37,7 +37,7 @@ export function useSessionProbe() {
         throw error
       }
     },
-    staleTime: 60_000,
+    staleTime: SITE_STATE_STALE_MS,
     refetchOnWindowFocus: true,
     retry: PROBE_RETRIES,
     refetchInterval: (query) => (query.state.status === 'error' ? PROBE_AGAIN_MS : false),
@@ -125,7 +125,10 @@ export function useChangeUser() {
   return useMutation({
     mutationFn: ({ userId, body }: { userId: string; body: Schemas['UserChangeRequest'] }) =>
       apiRequest('patch', '/v1/admin/users/{user_id}', { params: { user_id: userId }, body }),
-    onSuccess: (changed) => client.setQueryData<User[]>(authKeys.users, (users) => users?.map((user) => (user.user_id === changed.user_id ? changed : user))),
+    onMutate: sentInSession,
+    onSuccess: (changed, _, sent) => {
+      if (isSameSession(sent)) client.setQueryData<User[]>(authKeys.users, (users) => users?.map((user) => (user.user_id === changed.user_id ? changed : user)))
+    },
   })
 }
 
@@ -143,7 +146,10 @@ export function useChooseAiModel() {
   const client = useQueryClient()
   return useMutation({
     mutationFn: (aiModel: AiProvider | null) => apiRequest('put', '/v1/auth/me/ai-model', { body: { confirm: true, ai_model: aiModel } }),
-    onSuccess: (saved) => client.setQueryData(authKeys.aiModel, saved),
+    onMutate: sentInSession,
+    onSuccess: (saved, _, sent) => {
+      if (isSameSession(sent)) client.setQueryData(authKeys.aiModel, saved)
+    },
     onError: (error) => {
       if (isApiError(error) && error.code === 'ai_model_not_offered') void client.invalidateQueries({ queryKey: authKeys.aiModel })
     },

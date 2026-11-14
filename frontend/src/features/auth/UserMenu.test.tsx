@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
+import { Star } from 'lucide-react'
 import userEvent from '@testing-library/user-event'
 import { I18nextProvider } from 'react-i18next'
 import { MemoryRouter } from 'react-router'
@@ -7,9 +8,10 @@ import { Toaster } from 'sonner'
 import { initI18n } from '@/i18n'
 import { session, type User } from '@/shared/api'
 import { TEST_ADMIN, TEST_USER } from '@/test/users'
-import { UserMenu } from './UserMenu'
+import { UserMenu, type MenuLink } from './UserMenu'
 
-async function openMenu(user: User, locale: 'en' | 'zh-TW' = 'en') {
+async function openMenu(user: User, links: readonly MenuLink[]) {
+  const locale = 'en'
   session.signIn(user)
   const i18n = initI18n(locale)
   await i18n.changeLanguage(locale)
@@ -17,7 +19,7 @@ async function openMenu(user: User, locale: 'en' | 'zh-TW' = 'en') {
     <I18nextProvider i18n={i18n}>
       <QueryClientProvider client={new QueryClient()}>
         <MemoryRouter>
-          <UserMenu onSignedOut={() => undefined} />
+          <UserMenu links={links} onSignedOut={() => undefined} />
         </MemoryRouter>
       </QueryClientProvider>
     </I18nextProvider>,
@@ -40,7 +42,7 @@ describe('The account menu', () => {
       <I18nextProvider i18n={initI18n('en')}>
         <QueryClientProvider client={new QueryClient()}>
           <MemoryRouter>
-            <UserMenu onSignedOut={signedOut} />
+            <UserMenu links={[]} onSignedOut={signedOut} />
             <Toaster />
           </MemoryRouter>
         </QueryClientProvider>
@@ -55,19 +57,15 @@ describe('The account menu', () => {
     expect(signedOut).not.toHaveBeenCalled()
   })
 
-  it('links every signed-in user to My settings, and nothing of the administrator’s', async () => {
-    expect(await openMenu(TEST_USER)).toEqual([
+  it('lists the pages the shell hands it, in order, above sign-out', async () => {
+    const links = [
+      { to: '/settings', icon: Star, label: 'My settings' },
+      { to: '/admin/users', icon: Star, label: 'Users' },
+    ]
+    expect(await openMenu(TEST_ADMIN, links)).toEqual([
       ['My settings', '/settings'],
+      ['Users', '/admin/users'],
       ['Sign out', null],
-    ])
-  })
-
-  it('puts My settings beside the administrator’s pages', async () => {
-    expect(await openMenu(TEST_ADMIN, 'zh-TW')).toEqual([
-      ['我的設定', '/settings'],
-      ['使用者管理', '/admin/users'],
-      ['系統設定', '/admin/settings'],
-      ['登出', null],
     ])
   })
 })

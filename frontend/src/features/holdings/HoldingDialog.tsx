@@ -3,8 +3,10 @@ import { toast } from 'sonner'
 import { useTranslation } from '@/i18n'
 import { useListedNames } from '@/shared/api'
 import { sessionDate } from '@/shared/lib/chart-range'
+import { useErrorReason } from '@/shared/lib/error-reason'
 import { useFormat } from '@/shared/lib/format'
 import { Button } from '@/shared/ui/button'
+import { StockName } from '@/shared/ui/stock-name'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/shared/ui/dialog'
 import { Field } from '@/shared/ui/field'
 import { Input } from '@/shared/ui/input'
@@ -39,6 +41,7 @@ export function HoldingDialog({ seed, onClose }: { seed: EntrySeed | null; onClo
 function EntryForm({ seed, onClose }: { seed: EntrySeed; onClose: () => void }) {
   const { t } = useTranslation('holdings')
   const format = useFormat()
+  const reason = useErrorReason()
   const enter = useEnterHolding()
   const [draft, setDraft] = useState(seed.draft)
   const [checked, setChecked] = useState(false)
@@ -73,10 +76,7 @@ function EntryForm({ seed, onClose }: { seed: EntrySeed; onClose: () => void }) 
         <legend className="mb-1.5 text-sm leading-none font-medium">{t('form.stock')}</legend>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           {draft.stockId && (
-            <span className="flex min-w-0 items-baseline gap-2 text-sm">
-              <span className="truncate font-medium">{names.get(draft.stockId) ?? draft.stockId}</span>
-              <span className="shrink-0 font-mono text-xs text-muted-foreground">{draft.stockId}</span>
-            </span>
+            <StockName stockId={draft.stockId} name={names.get(draft.stockId)} className="text-sm" />
           )}
           {!seed.replaces && <StockPicker label={t(draft.stockId ? 'form.changeStock' : 'form.chooseStock')} onSelect={(stockId) => set({ stockId })} />}
         </div>
@@ -89,15 +89,15 @@ function EntryForm({ seed, onClose }: { seed: EntrySeed; onClose: () => void }) 
       <Field label={t('form.quantity')} hint={t('form.quantityHint')} error={problem('quantity')}>
         <Input inputMode="numeric" autoComplete="off" value={draft.quantity} onChange={(event) => set({ quantity: event.target.value })} />
       </Field>
-      <Field label={t('form.averageCost')} hint={t('form.averageCostHint')} error={problem('averageCost')}>
+      <Field label={t('form.averageCost')} error={problem('averageCost')}>
         <Input inputMode="decimal" autoComplete="off" value={draft.averageCost} onChange={(event) => set({ averageCost: event.target.value })} />
       </Field>
-      <Field label={t('form.openedOn')} hint={t('form.openedOnHint')} error={problem('openedOn')}>
+      <Field label={t('form.openedOn')} error={problem('openedOn')}>
         <Input type="date" max={today} value={draft.openedOn} onChange={(event) => set({ openedOn: event.target.value })} />
       </Field>
-      {(refusal === 'listingUnavailable' || refusal === 'failed') && (
+      {refusal === 'failed' && (
         <p role="alert" className="text-sm text-pretty text-destructive">
-          {refusal === 'failed' ? t('form.refusal.failed', { reason: enter.error?.message ?? '' }) : t('form.refusal.listingUnavailable')}
+          {t('form.refusal.failed', { reason: reason(enter.error) })}
         </p>
       )}
       <DialogFooter>

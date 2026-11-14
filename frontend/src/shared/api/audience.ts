@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { apiRequest } from './http'
+import { SITE_STATE_STALE_MS } from './query-keys'
 import type { components } from './schema.gen'
 
 /** Whom the site serves and what that allows, from the server's one table of each audience's capabilities. */
@@ -8,6 +9,7 @@ export type Audience = components['schemas']['AudienceResponse']
 export type Capability = { [K in keyof Audience]: Audience[K] extends boolean ? K : never }[keyof Audience]
 
 const audienceKey = ['public', 'audience'] as const
+const AUDIENCE_POLL_MS = 5 * 60_000
 
 /**
  * The audience changes only when the server restarts, but `realtime_quotes` also needs the runtime's Shioaji login,
@@ -18,9 +20,9 @@ export function useAudience() {
   return useQuery({
     queryKey: audienceKey,
     queryFn: ({ signal }) => apiRequest('get', '/v1/market/audience', { signal }),
-    staleTime: 60_000,
+    staleTime: SITE_STATE_STALE_MS,
     refetchOnWindowFocus: true,
-    refetchInterval: 5 * 60_000,
+    refetchInterval: AUDIENCE_POLL_MS,
   })
 }
 

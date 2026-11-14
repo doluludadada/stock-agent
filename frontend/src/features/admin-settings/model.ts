@@ -7,10 +7,11 @@ type Wording = (key: string, options: Record<string, unknown>) => string
 
 /**
  * What a problem says, in the reader's language: `admin:refusal.<code>` with the server's params for a code this app
- * words, such as pydantic's less_than_equal, else the server's own English.
+ * words, such as pydantic's less_than_equal, else that the server refused the value.
  */
 export function problemMessage(problem: SettingsProblem, t: Wording): string {
-  return problem.code ? t(`refusal.${problem.code}`, { ...problem.params, defaultValue: problem.message }) : problem.message
+  const refused = t('common:errors.invalid', {})
+  return problem.code ? t(`refusal.${problem.code}`, { ...problem.params, defaultValue: refused }) : refused
 }
 
 /** Why a save did not happen, in the terms the page answers each one. */
@@ -19,7 +20,7 @@ export type SaveRefusal =
   | { kind: 'googleRequired' }
   | { kind: 'throttled'; retryAfter: number | null }
   | { kind: 'conflict' }
-  | { kind: 'refused'; problems: SettingsProblem[]; detail: string }
+  | { kind: 'refused'; problems: SettingsProblem[]; error: unknown }
   | { kind: 'failed'; error: unknown }
 
 /** By the refusal's code, never its words or its status alone: a 403 can be a wrong password or a lost role. */
@@ -36,7 +37,7 @@ export function refusalOf(error: unknown): SaveRefusal {
       return { kind: 'conflict' }
     case 'settings_refused':
     case 'settings_edit_refused':
-      return { kind: 'refused', problems: problemsOf(error.body), detail: error.message }
+      return { kind: 'refused', problems: problemsOf(error.body), error }
     default:
       return { kind: 'failed', error }
   }
@@ -80,9 +81,7 @@ function hasReason(code: ErrorCode): code is keyof typeof REASONS {
   return Object.hasOwn(REASONS, code)
 }
 
-/** A failed request in the reader's words: the page's own refusals by code, else the kind of failure or the server's reason. */
-export function reasonOf(error: unknown, t: (key: string) => string): string {
-  if (!isApiError(error)) return t('common:errors.server')
-  if (error.code && hasReason(error.code)) return t(REASONS[error.code])
-  return error.kind === 'network' || error.kind === 'server' || error.kind === 'unavailable' ? t(`common:errors.${error.kind}`) : error.message
+/** A failed request in the reader's words: the page's own refusals by code, else what every page says (`useErrorReason`). */
+export function reasonOf(error: unknown, t: (key: string) => string, reason: (error: unknown) => string): string {
+  return isApiError(error) && error.code && hasReason(error.code) ? t(REASONS[error.code]) : reason(error)
 }

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiRequest, useHasPermission } from '@/shared/api'
+import { apiRequest, isSameSession, sentInSession, useHasPermission } from '@/shared/api'
 import type { SettingChange, SettingField } from './form'
 
 const FORM_KEY = ['admin', 'settings', 'form'] as const
@@ -19,6 +19,9 @@ export function useSaveSettings() {
   return useMutation({
     mutationFn: ({ changes, ...confirmation }: { changes: SettingChange[] } & ({ password: string } | { google_confirmation: string })) =>
       apiRequest('put', '/v1/admin/settings', { body: { confirm: true, changes, ...confirmation } }),
-    onSuccess: (fields) => client.setQueryData(FORM_KEY, fields),
+    onMutate: sentInSession,
+    onSuccess: (fields, _, sent) => {
+      if (isSameSession(sent)) client.setQueryData(FORM_KEY, fields)
+    },
   })
 }

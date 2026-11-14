@@ -1,7 +1,7 @@
 import { useId, useState, type FormEvent } from 'react'
-import { useLocale, useTranslation } from '@/i18n'
+import { useTranslation } from '@/i18n'
 import { isApiError } from '@/shared/api'
-import { formatDateTime, formatNumber } from '@/shared/lib/format'
+import { useFormat } from '@/shared/lib/format'
 import { Button } from '@/shared/ui/button'
 import { ConfirmDialog } from '@/shared/ui/confirm-dialog'
 import { ErrorState } from '@/shared/ui/error-state'
@@ -26,7 +26,7 @@ export function MockAccountPanel() {
   const opening = history.data?.opening
   if (!opening) return null
   return (
-    <Panel title={t('reset.title')} description={t('reset.question')}>
+    <Panel title={t('reset.title')}>
       <ResetForm opening={opening} />
     </Panel>
   )
@@ -34,7 +34,7 @@ export function MockAccountPanel() {
 
 function ResetForm({ opening }: { opening: AccountOpening }) {
   const { t } = useTranslation('account')
-  const locale = useLocale()
+  const format = useFormat()
   const reset = useResetAccount()
   const id = useId()
   const [amount, setAmount] = useState(opening.initial_cash)
@@ -50,7 +50,7 @@ function ResetForm({ opening }: { opening: AccountOpening }) {
   }
   const status = (): string => {
     if (reset.isPending) return t('reset.resetting')
-    if (reset.isSuccess) return t('reset.done', { date: formatDateTime(locale, reset.data.opened_at), cash: formatNumber(locale, reset.data.initial_cash) })
+    if (reset.isSuccess) return t('reset.done', { date: format.dateTime(reset.data.opened_at), cash: format.number(reset.data.initial_cash) })
     if (isApiError(reset.error) && reset.error.code === 'run_in_progress') return t('reset.busy')
     if (reset.isError) return t('reset.failed', { reason: isApiError(reset.error) ? t(`common:errors.${reset.error.kind}`) : '' })
     return ''
@@ -59,8 +59,8 @@ function ResetForm({ opening }: { opening: AccountOpening }) {
   return (
     <div className="space-y-4">
       <dl className="grid grid-cols-2 gap-4 @md:max-w-md">
-        <Stat label={t('reset.capital')}>{formatNumber(locale, opening.initial_cash)}</Stat>
-        <Stat label={t('reset.opened')}>{formatDateTime(locale, opening.opened_at)}</Stat>
+        <Stat label={t('reset.capital')}>{format.number(opening.initial_cash)}</Stat>
+        <Stat label={t('reset.opened')}>{format.dateTime(opening.opened_at)}</Stat>
       </dl>
       <form onSubmit={submit} className="grid gap-3 @md:max-w-xs">
         <div className="grid gap-1.5">
@@ -72,7 +72,7 @@ function ResetForm({ opening }: { opening: AccountOpening }) {
             <SelectContent>
               {startingCapitalChoices(opening.initial_cash).map((choice) => (
                 <SelectItem key={choice} value={String(choice)} className="tabular">
-                  {t(STARTING_CAPITALS.includes(choice) ? 'reset.amount' : 'reset.current', { amount: formatNumber(locale, choice) })}
+                  {t(STARTING_CAPITALS.includes(choice) ? 'reset.amount' : 'reset.current', { amount: format.number(choice) })}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -99,7 +99,7 @@ function ResetForm({ opening }: { opening: AccountOpening }) {
         onConfirm={confirm}
       >
         <div className="grid gap-3 text-sm">
-          <ConsequenceList title={t('reset.confirm.goes')} items={[t('reset.confirm.positions'), t('reset.confirm.cash', { cash: formatNumber(locale, amount) }), t('reset.confirm.history')]} />
+          <ConsequenceList title={t('reset.confirm.goes')} items={[t('reset.confirm.positions'), t('reset.confirm.cash', { cash: format.number(amount) }), t('reset.confirm.history')]} />
           <ConsequenceList title={t('reset.confirm.stays')} items={[t('reset.confirm.runs'), t('reset.confirm.follow')]} />
         </div>
       </ConfirmDialog>

@@ -2,14 +2,6 @@ import type en from '../en/auth'
 import type { DictionaryShape } from '../../types'
 
 const auth: DictionaryShape<typeof en> = {
-  intro: {
-    title: '台股研究，在同一個地方完成',
-    points: {
-      ranking: '每月依營收加速度排名，每次決策都在當下記錄',
-      holdings: '把你的持股當成一個投資組合，每檔都有排行分數',
-      market: '每個交易日收盤後的大盤、漲跌家數與產業強弱',
-    },
-  },
   field: {
     setupCode: '設定碼',
     username: '使用者名稱',
@@ -63,23 +55,20 @@ const auth: DictionaryShape<typeof en> = {
   setup: {
     eyebrow: '首次設定',
     title: '建立管理員帳號',
-    lead: '這是網站的第一個帳號，負責管理使用者與系統設定。',
+    lead: '網站的第一個帳號，也是管理員。',
     submit: '建立帳號並登入',
-    note: '之後註冊的帳號都是一般使用者，你可以隨時把任何人設為管理員。',
   },
   signIn: {
     title: '登入',
-    lead: '用使用者名稱或電子郵件登入。',
     submit: '登入',
     wrong: '帳號或密碼不正確。如果帳號已停用，請洽網站管理員。',
     ended: '你已經登出了，請重新登入以繼續。',
     noAccount: '還沒有帳號？',
     registerLink: '建立帳號',
-    closed: '目前不開放註冊，需要帳號請洽網站管理員。',
+    closed: '目前不開放註冊。',
   },
   register: {
     title: '建立帳號',
-    lead: '有了帳號，就能擁有自己的觀察清單、模擬帳戶、分析任務與策略。',
     submit: '建立帳號',
     haveAccount: '已經有帳號了？',
     signInLink: '登入',
@@ -88,18 +77,14 @@ const auth: DictionaryShape<typeof en> = {
   },
   menu: {
     label: '{{name}} 的帳號選單',
-    users: '使用者管理',
-    settings: '系統設定',
     signOut: '登出',
     signOutFailed: '登出沒有送達伺服器，你仍在登入狀態，請再試一次。',
   },
   settings: {
     title: '我的設定',
-    description: '只套用在你自己的分析任務上的設定。',
     signIn: '登入以變更你的設定',
     aiModel: {
       title: 'AI 模型',
-      description: '你的分析任務中 AI 分析與貼文情緒判讀，以及估值說明所使用的模型。',
       label: '分析使用的模型',
       option: '{{provider}} · {{model}}',
       siteDefault: '{{name}}（網站預設）',
@@ -114,7 +99,6 @@ const auth: DictionaryShape<typeof en> = {
     provider: { openai: 'OpenAI', grok: 'Grok', gemini: 'Gemini', groq: 'Groq', nvidia: 'NVIDIA', claude: 'Claude' },
     strategy: {
       title: '策略',
-      description: '使用中的策略在策略庫中選擇，也可以在那裡複製與編輯策略。',
       link: '前往策略庫',
     },
   },
@@ -157,7 +141,6 @@ const auth: DictionaryShape<typeof en> = {
     signIn: '以管理員帳號登入後，才能管理使用者',
     roles: {
       title: '角色說明',
-      question: '每種帳號可以做什麼',
       administrator: '管理使用者與系統設定，也能使用一般使用者的所有功能；看不到其他人的資料。',
       user: '擁有自己的觀察清單、模擬帳戶、分析任務與策略，看不到別人的資料。',
       deactivated: '不能登入，資料會保留，管理員可以隨時重新啟用。',

@@ -57,11 +57,12 @@ function reducer(state: DraftState, action: DraftAction): DraftState {
 export type SaveOutcome =
   | { ok: true; settings: StrategySettings }
   | { ok: false; reason: 'invalid' | 'full' | 'conflict' | 'notLoaded' }
-  | { ok: false; reason: 'refused'; problems: { rule: number | null; message: string }[] }
+  | { ok: false; reason: 'refused'; rules: (number | null)[] }
   | { ok: false; reason: 'failed'; error: unknown }
 
-function refusedProblems(problems: readonly FieldProblem[], strategyIndex: number) {
-  return problems.map((problem) => ({ rule: ruleIndexOf(problem.location, strategyIndex), message: problem.message }))
+/** The rule each problem of a refused save is about, once; null stands for the strategy as a whole. */
+function refusedRules(problems: readonly FieldProblem[], strategyIndex: number): (number | null)[] {
+  return [...new Set(problems.map((problem) => ruleIndexOf(problem.location, strategyIndex)))]
 }
 
 /**
@@ -114,7 +115,7 @@ export function useStrategyDraft(initial: Strategy, name: string) {
       }
       if (isApiError(error, 'invalid')) {
         const index = next.strategies.findIndex((item) => item.id === strategy.id)
-        return { ok: false, reason: 'refused', problems: refusedProblems(error.problems, index) }
+        return { ok: false, reason: 'refused', rules: refusedRules(error.problems, index) }
       }
       return { ok: false, reason: 'failed', error }
     }

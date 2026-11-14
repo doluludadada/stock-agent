@@ -1,8 +1,8 @@
 import { ExternalLink, Newspaper } from 'lucide-react'
 import { useState } from 'react'
-import { useLocale, useTranslation } from '@/i18n'
+import { useTranslation } from '@/i18n'
 import { useAllows } from '@/shared/api'
-import { formatDate, formatMonthDayTime } from '@/shared/lib/format'
+import { useFormat } from '@/shared/lib/format'
 import { Badge } from '@/shared/ui/badge'
 import { ErrorState } from '@/shared/ui/error-state'
 import { Panel } from '@/shared/ui/panel'
@@ -29,7 +29,6 @@ export function NewsPanel({ stockId }: { stockId: string }) {
   return (
     <Panel
       title={t('news.title')}
-      description={t(articles ? 'news.question.articles' : 'news.question.openData')}
       flush
       footer={
         items.length > ITEMS_SHOWN && (
@@ -61,10 +60,10 @@ export function NewsPanel({ stockId }: { stockId: string }) {
 
 function NewsRow({ item }: { item: NewsItem }) {
   const { t } = useTranslation('research')
-  const locale = useLocale()
+  const format = useFormat()
   const url = outboundUrl(item.url)
   const text = newsText(item)
-  const time = NEWS_SOURCES[item.source].dayOnly ? formatDate(locale, item.published_at) : formatMonthDayTime(locale, item.published_at)
+  const time = NEWS_SOURCES[item.source].dayOnly ? format.date(item.published_at) : format.monthDayTime(item.published_at)
   return (
     <li className="space-y-1.5 px-4 py-3 md:px-5">
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">

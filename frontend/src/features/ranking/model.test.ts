@@ -46,7 +46,7 @@ describe('the period', () => {
   it('asks for the whole history from before any the site can hold, and a quick period back from today', () => {
     expect(periodOf({ kind: 'preset', key: 'all' }, TODAY)).toEqual({ first: '2000-01-01', last: TODAY })
     expect(periodOf({ kind: 'preset', key: '5Y' }, TODAY)).toEqual({ first: '2021-11-12', last: TODAY })
-    expect(periodOf({ kind: 'preset', key: '1Y' }, '2024-02-29')).toEqual({ first: '2023-03-01', last: '2024-02-29' })
+    expect(periodOf({ kind: 'preset', key: '1Y' }, '2024-02-29')).toEqual({ first: '2023-02-28', last: '2024-02-29' })
     expect(periodOf({ kind: 'custom', period: { first: '2023-01-01', last: '2024-10-31' } }, TODAY)).toEqual({ first: '2023-01-01', last: '2024-10-31' })
   })
 
@@ -68,7 +68,8 @@ describe('the period', () => {
     expect(parsePeriod({ first: '2023-01-01', last: '2024-10-31' }, TODAY)).toEqual({ ok: true, period: { first: '2023-01-01', last: '2024-10-31' } })
     expect(parsePeriod({ first: '', last: '2024-10-31' }, TODAY)).toEqual({ ok: false, problems: { first: 'dateRequired' } })
     expect(parsePeriod({ first: '2024-11-01', last: '2024-10-31' }, TODAY)).toEqual({ ok: false, problems: { last: 'firstAfterLast' } })
-    expect(parsePeriod({ first: '2026-12-01', last: '' }, TODAY)).toEqual({ ok: false, problems: { first: 'afterToday', last: 'dateRequired' } })
+    expect(parsePeriod({ first: '2023-01-01', last: '2099-01-01' }, TODAY), 'a period ends no later than today').toEqual({ ok: false, problems: { last: 'afterLast' } })
+    expect(parsePeriod({ first: '2026-12-01', last: '' }, TODAY)).toEqual({ ok: false, problems: { first: 'afterLast', last: 'dateRequired' } })
   })
 })
 

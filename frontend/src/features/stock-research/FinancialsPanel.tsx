@@ -1,6 +1,6 @@
 import { FileSpreadsheet } from 'lucide-react'
 import { useTranslation } from '@/i18n'
-import { useFormat } from '@/shared/lib/format'
+import { DASH, useFormat } from '@/shared/lib/format'
 import { ChangeValue } from '@/shared/ui/change-value'
 import { DataTable, type Column } from '@/shared/ui/data-table'
 import { ErrorState } from '@/shared/ui/error-state'
@@ -18,14 +18,12 @@ const QUARTER_SHOWN_FROM = [undefined, undefined, 'md', 'lg'] as const
 type MonthlyRevenue = StockFinancials['monthly_revenues'][number]
 
 /** A dash wherever the company's industry format reports no such figure. */
-const DASH = '—'
-
 /** The stock's archived quarters and its latest month's revenue, as the exchanges' open data served them. */
 export function FinancialsPanel({ stockId }: { stockId: string }) {
   const { t } = useTranslation('research')
   const financials = useStockFinancials(stockId)
   return (
-    <Panel title={t('financials.title')} description={t('financials.question')} flush>
+    <Panel fold="phone" title={t('financials.title')} flush>
       {financials.isPending && <Skeleton className="m-4 h-56 rounded-lg" />}
       {financials.isError && <ErrorState error={financials.error} title={t('financials.failed')} onRetry={() => void financials.refetch()} />}
       {financials.data && <Financials financials={financials.data} />}

@@ -2,13 +2,11 @@ const backtest = {
   signIn: 'Sign in to backtest your strategy',
   page: {
     title: 'Backtest',
-    description: 'Would your strategy have made money over a past period? Replay it day by day and compare it with the TAIEX.',
   },
   period: '{{first}} – {{last}}',
   sessions: '{{value}} sessions',
   form: {
     title: 'New backtest',
-    question: 'The period, the cash and the scores to replay',
     loadFailed: 'Could not load the backtest options.',
     strategy: 'Strategy tested',
     changeStrategy: 'Change strategy',
@@ -96,7 +94,6 @@ const backtest = {
   },
   curve: {
     title: 'Strategy against the TAIEX',
-    question: 'Both as a return since the first session, on one axis',
     strategy: 'Strategy',
     benchmark: 'TAIEX',
   },
@@ -109,7 +106,6 @@ const backtest = {
   exit: { stopLoss: 'Stop-loss', score: 'Score', open: 'Still open', other: 'Other' },
   trades: {
     title: 'Trades',
-    question: 'Each position from its first buy to its sale; one still open is valued at the last close',
     count: '{{count}} trades',
     none: 'The strategy bought nothing in this period.',
     sortBy: 'Sort by {{column}}',
@@ -130,7 +126,6 @@ const backtest = {
   },
   saved: {
     title: 'Saved backtests',
-    question: 'Your earlier backtests, newest first, to compare',
     none: 'No saved backtest yet.',
     noneHint: 'Every backtest you run is saved here.',
     loadFailed: 'Could not load the saved backtests.',

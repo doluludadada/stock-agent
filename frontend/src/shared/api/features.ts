@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { apiRequest } from './http'
+import { SITE_STATE_STALE_MS } from './query-keys'
 import type { components } from './schema.gen'
 import { useSession, type Permission } from './session'
 
@@ -22,7 +23,7 @@ export function useAuthStatus() {
   return useQuery({
     queryKey: authStatusKey,
     queryFn: ({ signal }) => apiRequest('get', '/v1/auth/status', { signal }),
-    staleTime: 60_000,
+    staleTime: SITE_STATE_STALE_MS,
     refetchOnWindowFocus: true,
   })
 }

@@ -19,7 +19,7 @@ test('a strategy built from blank in the designer, opened from the navigation, s
   void consoleErrors
   await page.goto('/')
   expect(await page.evaluate(() => typeof crypto.randomUUID), 'the page has no secure context').toBe('undefined')
-  await page.getByRole('button', { name: '其他工具' }).click()
+  await page.getByRole('button', { name: '輔助分析工具' }).click()
   await page.getByRole('link', { name: '公式設計器' }).click()
   await page.waitForURL('**/strategies/new')
   await expect(page.getByText('尚未儲存').first()).toBeVisible()

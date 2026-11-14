@@ -21,14 +21,17 @@ export function rankIndustries(industries: MarketBreadth['industries']): Industr
 
 export type BreadthMood = 'broadUp' | 'leaningUp' | 'mixed' | 'leaningDown' | 'broadDown'
 
+/** The share of rising stocks, among those that moved, at which a session reads as each mood. A wording choice of this page, not a market rule. */
+const MOOD_SHARE = { broadUp: 0.75, leaningUp: 0.55, leaningDown: 0.45, broadDown: 0.25 } as const
+
 /** The session in one phrase, from the share of rising stocks among those that moved. */
 export function breadthMood({ advancers, decliners }: Breadth): BreadthMood {
   const moved = advancers + decliners
   const up = moved === 0 ? 0.5 : advancers / moved
-  if (up >= 0.75) return 'broadUp'
-  if (up >= 0.55) return 'leaningUp'
-  if (up > 0.45) return 'mixed'
-  if (up > 0.25) return 'leaningDown'
+  if (up >= MOOD_SHARE.broadUp) return 'broadUp'
+  if (up >= MOOD_SHARE.leaningUp) return 'leaningUp'
+  if (up > MOOD_SHARE.leaningDown) return 'mixed'
+  if (up > MOOD_SHARE.broadDown) return 'leaningDown'
   return 'broadDown'
 }
 

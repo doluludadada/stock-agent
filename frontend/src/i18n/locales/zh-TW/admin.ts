@@ -4,7 +4,6 @@ import type { DictionaryShape } from '../../types'
 const admin: DictionaryShape<typeof en> = {
   signIn: '以管理員帳號登入後，才能修改系統設定',
   title: '系統設定',
-  description: '修改儲存後立即生效。',
   loadFailed: '無法讀取設定。',
   search: {
     label: '搜尋設定',

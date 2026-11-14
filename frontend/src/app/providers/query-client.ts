@@ -1,5 +1,7 @@
 import { MutationCache, QueryCache, QueryClient } from '@tanstack/react-query'
-import { authStatusKey, isApiError } from '@/shared/api'
+import { authStatusKey, isApiError, session } from '@/shared/api'
+
+const DEFAULT_STALE_MS = 30_000
 
 /**
  * Server state lives in one query cache. Query keys start with their scope ('public', 'owner' or 'admin'), so the
@@ -16,7 +18,7 @@ export function createQueryClient(): QueryClient {
     mutationCache: new MutationCache({ onError: rereadHiddenFeatures }),
     defaultOptions: {
       queries: {
-        staleTime: 30_000,
+        staleTime: DEFAULT_STALE_MS,
         refetchOnWindowFocus: false,
         retry: (failures, error) => failures < 1 && (isApiError(error, 'network') || isApiError(error, 'unavailable')),
       },
@@ -24,4 +26,26 @@ export function createQueryClient(): QueryClient {
     },
   })
   return client
+}
+
+function viewer(): string {
+  const current = session.current()
+  return `${session.generation()}:${current.status === 'signedIn' ? current.user.role : ''}`
+}
+
+/**
+ * Keeps the cache to the viewer it was filled for: when another user holds the tab, the user signs out, the server ends
+ * the session or the role changes, the private queries go, and so does every mutation, whose state (a backtest still
+ * running, a refusal on screen) is the last viewer's. Returns the function that stops it.
+ */
+export function scopeCacheToSession(client: QueryClient): () => void {
+  let seen = viewer()
+  return session.subscribe(() => {
+    const now = viewer()
+    if (now === seen) return
+    seen = now
+    client.removeQueries({ queryKey: ['owner'] })
+    client.removeQueries({ queryKey: ['admin'] })
+    client.getMutationCache().clear()
+  })
 }

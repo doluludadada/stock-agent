@@ -3,7 +3,7 @@ import { useId } from 'react'
 import { Link, useLocation } from 'react-router'
 import { useLocale, useTranslation } from '@/i18n'
 import { useSession } from '@/shared/api'
-import { formatMonthDayTime, useFormat } from '@/shared/lib/format'
+import { useFormat } from '@/shared/lib/format'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { ChangeValue } from '@/shared/ui/change-value'
@@ -27,7 +27,7 @@ export function BriefPanel({ stockId }: { stockId: string }) {
   const write = useWriteStockBrief(stockId)
   const viewer = useSession().status
   return (
-    <Panel title={t('brief.title')} description={t('brief.question')}>
+    <Panel title={t('brief.title')}>
       {brief.data ? (
         <View view={briefView(brief.data, { pending: write.isPending, error: write.error }, viewer)} onWrite={() => write.mutate()} />
       ) : brief.isError ? (
@@ -104,8 +104,8 @@ function Earlier({ brief }: { brief: StockBrief }) {
 
 function ShownBrief({ brief }: { brief: StockBrief }) {
   const { t } = useTranslation('research')
-  const locale = useLocale()
   const format = useFormat()
+  const locale = useLocale()
   const sources = brief.sources ?? []
   return (
     <div className="space-y-4">
@@ -116,7 +116,7 @@ function ShownBrief({ brief }: { brief: StockBrief }) {
             {t('brief.aiGenerated')}
           </Badge>
           <span className="font-mono break-all">{brief.model}</span>
-          {brief.written_at && <time dateTime={brief.written_at}>{t('brief.writtenAt', { time: formatMonthDayTime(locale, brief.written_at) })}</time>}
+          {brief.written_at && <time dateTime={brief.written_at}>{t('brief.writtenAt', { time: format.monthDayTime(brief.written_at) })}</time>}
         </p>
         {brief.window_first && brief.window_last ? (
           <p>
@@ -136,10 +136,7 @@ function ShownBrief({ brief }: { brief: StockBrief }) {
       <Part title={t('brief.part.company')} sentences={brief.company ?? []} sources={sources} />
       <Part title={t('brief.part.movement')} sentences={brief.movement ?? []} sources={sources} />
       <CitedSources sources={usedSources(brief)} />
-      <div className="space-y-1.5 border-t pt-3">
-        <p className="text-xs text-pretty text-muted-foreground">{t('brief.describes')}</p>
-        <NotAdviceNote />
-      </div>
+      <NotAdviceNote className="border-t pt-3" />
     </div>
   )
 }

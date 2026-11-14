@@ -2,7 +2,6 @@ const common = {
   brand: { home: 'Stock Agent home', tagline: 'Taiwan stock research' },
   home: {
     title: 'Today',
-    description: '{{date}}. The market, this month’s ranking, your holdings and your watchlist.',
   },
   skipToContent: 'Skip to content',
   stockIds: { invalid: 'Not stock ids: {{ids}}', tooMany: 'At most {{max}} stocks at a time.' },
@@ -26,8 +25,7 @@ const common = {
     admin: 'System settings',
     users: 'Users',
     tabs: 'Main pages',
-    section: { today: 'Today', research: 'Research', mine: 'Mine', tools: 'Other tools', admin: 'Administration' },
-    note: { tools: 'Supporting analysis tools.' },
+    section: { today: 'Today', research: 'Research', mine: 'Mine', tools: 'Supporting analysis tools', admin: 'Administration' },
     tab: { home: 'Today', ranking: 'Ranking', holdings: 'Holdings', search: 'Search', more: 'More' },
     moreTitle: 'All pages',
   },
@@ -131,13 +129,8 @@ const common = {
       no_revenue_history: 'This site does not hold every month of revenue the acceleration needs.',
       short_price_history: 'This site’s daily history is shorter than the sessions the high needs.',
     },
-    method:
-      'The score is a stock’s place in the monthly ranking as a percentile, from its revenue acceleration and its nearness to the one-year high. It measures those two things and predicts nothing; the method’s evidence is a backtest.',
+    method: 'A percentile in the monthly ranking, from revenue acceleration and nearness to the one-year high. It is no forecast.',
     open: 'Open the ranking',
-  },
-  technicalNote: {
-    text: 'The technical strategies are supporting analysis tools. The app’s attention is now on the monthly revenue ranking.',
-    link: 'Open the ranking',
   },
   footer: {
     notAdvice: 'The analyses, scores and decisions on this site are for research and reference only and are not investment advice. Decide and invest at your own risk.',
@@ -159,8 +152,7 @@ const common = {
   },
   routeError: {
     title: 'Something went wrong on this page',
-    description: 'Reload the page to continue.',
-    reload: 'Reload the overview',
+    description: 'Go back to the home page and try again.',
   },
 }
 

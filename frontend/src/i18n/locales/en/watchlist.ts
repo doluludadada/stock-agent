@@ -2,9 +2,6 @@ const watchlist = {
   signIn: 'Sign in to see your watchlist',
   today: { all: 'The whole list' },
   title: 'Watchlist',
-  lead: 'Stocks you follow, with each close and its month.',
-  description: '{{count}} stocks. Stocks you add stay; the ones a run adds expire on their own.',
-  count: 'Showing {{count}} of {{total}}',
   addedAt: 'since {{date}}',
   expires: 'until {{date}}',
   unknownName: 'No longer listed',
@@ -32,7 +29,7 @@ const watchlist = {
   column: { stock: 'Stock', trend: 'Last month', close: 'Close', change: 'Change', source: 'Source', actions: 'Actions' },
   summary: {
     title: 'At the close',
-    question: 'How your stocks did on {{date}}',
+    question: 'Close of {{date}}',
     waiting: 'How your stocks did in the latest session',
     withNote: '{{main}}. {{note}}.',
     pending: 'Loading {{count}} quotes',
@@ -46,16 +43,9 @@ const watchlist = {
     worst: 'Worst',
   },
   list: { title: 'Stocks' },
-  sources: {
-    title: 'Where the list comes from',
-    question: '{{count}} ways a stock gets here',
-    manual: 'Added by you, from here or from a stock page. It stays until you remove it.',
-    technical: 'Added by a Full Cycle run when its technical strategy passed the stock. It expires at the next session’s close.',
-    buzz: 'Added by a Social Buzz scan. It expires on its own as well.',
-  },
   empty: {
     title: 'Your watchlist is empty',
-    description: 'Add a stock by its code or name, or from a stock page.',
+    description: 'Add a stock to follow its close and its month.',
   },
   toast: {
     added: '{{name}} added to the manual watchlist',

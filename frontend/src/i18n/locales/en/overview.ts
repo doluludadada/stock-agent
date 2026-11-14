@@ -13,12 +13,10 @@ const overview = {
     taiex: 'TAIEX',
   },
   trend: {
-    question: 'Closes over the range, and volume',
     failed: 'Prices could not be loaded',
   },
   breadth: {
     title: 'Advancers and decliners',
-    question: '{{total}} listed stocks on {{date}}',
     advancers: 'Up',
     decliners: 'Down',
     unchanged: 'Unchanged',
@@ -28,7 +26,6 @@ const overview = {
   },
   industries: {
     title: 'Industries',
-    question: '{{count}} industries by average change',
     column: { industry: 'Industry', moves: 'Up / down', average: 'Average change' },
     ends: {
       gainers: 'Largest gains',
@@ -45,7 +42,6 @@ const overview = {
   },
   mostTraded: {
     title: 'Most traded',
-    question: 'The largest volume on {{date}}',
     failed: 'The most traded stocks could not be loaded',
     empty: 'No trades in the latest session.',
     showAll: 'Show all {{count}}',

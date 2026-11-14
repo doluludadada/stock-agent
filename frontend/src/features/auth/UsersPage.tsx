@@ -317,7 +317,7 @@ function NewPasswordDialog({
 function RolesPanel() {
   const { t } = useTranslation('auth')
   return (
-    <Panel className="xl:col-span-4" title={t('users.roles.title')} description={t('users.roles.question')}>
+    <Panel className="xl:col-span-4" title={t('users.roles.title')}>
       <dl className="space-y-4 text-sm">
         <div className="space-y-1.5">
           <dt>

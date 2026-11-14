@@ -5,9 +5,6 @@ const watchlist: DictionaryShape<typeof en> = {
   today: { all: '完整清單' },
   signIn: '登入後查看你的觀察清單',
   title: '觀察清單',
-  lead: '你關注的股票，每檔的收盤與近一個月走勢。',
-  description: '共 {{count}} 檔。手動加入的會一直保留，分析任務加入的會自行到期。',
-  count: '顯示 {{count}} / {{total}} 檔',
   addedAt: '{{date}} 加入',
   expires: '至 {{date}}',
   unknownName: '已不在上市櫃清單中',
@@ -35,7 +32,7 @@ const watchlist: DictionaryShape<typeof en> = {
   column: { stock: '股票', trend: '近一個月', close: '收盤', change: '漲跌', source: '來源', actions: '操作' },
   summary: {
     title: '收盤表現',
-    question: '你的股票在 {{date}} 收盤的表現',
+    question: '{{date}} 收盤',
     waiting: '你的股票在最近一個交易日的表現',
     withNote: '{{main}}。{{note}}。',
     pending: '還在載入 {{count}} 檔的報價',
@@ -49,16 +46,9 @@ const watchlist: DictionaryShape<typeof en> = {
     worst: '表現最弱',
   },
   list: { title: '股票' },
-  sources: {
-    title: '清單從哪裡來',
-    question: '股票加入觀察清單的 {{count}} 種方式',
-    manual: '你自己加入的，從這裡或個股頁加入。會一直保留，直到你移除。',
-    technical: '完整流程中技術策略通過的股票，到下一個交易日收盤時自動到期。',
-    buzz: '社群熱度掃描找到的股票，同樣會自動到期。',
-  },
   empty: {
     title: '觀察清單是空的',
-    description: '用代號或名稱加入，或從個股頁加入。',
+    description: '加入股票，追蹤它的收盤與近一個月走勢。',
   },
   toast: {
     added: '已把 {{name}} 加入手動觀察清單',

@@ -12,7 +12,7 @@ import { accountProblems, EMPTY_ACCOUNT_FORM, type AccountField, type AccountFor
 interface AuthFrameProps {
   eyebrow?: string
   title: string
-  lead: string
+  lead?: string
   children: ReactNode
   footer?: ReactNode
 }
@@ -25,7 +25,7 @@ export function AuthFrame({ eyebrow, title, lead, children, footer }: AuthFrameP
       <header className="space-y-2">
         {eyebrow && <p className="eyebrow text-brand">{eyebrow}</p>}
         <h1 className="display">{title}</h1>
-        <p className="text-sm text-pretty text-muted-foreground">{lead}</p>
+        {lead && <p className="text-sm text-pretty text-muted-foreground">{lead}</p>}
       </header>
       <div className="grid gap-4">{children}</div>
       {footer && <div className="border-t pt-5 text-sm text-muted-foreground">{footer}</div>}

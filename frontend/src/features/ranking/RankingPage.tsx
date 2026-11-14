@@ -8,11 +8,9 @@ import { PageHeader } from '@/shared/ui/page-header'
 import { RequireSignIn } from '@/shared/ui/require-sign-in'
 import { PageSkeleton } from '@/shared/ui/skeleton'
 import { useLatestRanking, useRankingBacktest } from './api'
-import { Caveats } from './Caveats'
 import { LatestRanking, type PreviousRanking } from './LatestRanking'
 import { MockAccountFollow } from './MockAccountFollow'
-import { choiceOf, choiceParams, decisionDay, periodBefore, periodOf, rankingBefore, type PeriodChoice } from './model'
-import { PastMonths } from './PastMonths'
+import { choiceOf, choiceParams, decisionDay, periodBefore, periodOf, rankingBefore } from './model'
 import { NoHistory, RankingRecord, Waiting } from './RankingRecord'
 
 interface RankingPageProps {
@@ -20,12 +18,11 @@ interface RankingPageProps {
   mockAccount: boolean
 }
 
-/** Which stocks the ranking picks now, the ranking in the viewer's mock account, and what a backtest says following it would have done. */
 export function RankingPage({ mockAccount }: RankingPageProps) {
   const { t } = useTranslation('ranking')
   return (
     <div className="page-stack">
-      <PageHeader title={t('page.title')} description={t('page.description')} />
+      <PageHeader title={t('page.title')} />
       <RequireSignIn layout="page" reason={t('signIn')}>
         <Workbench mockAccount={mockAccount} />
       </RequireSignIn>
@@ -33,31 +30,30 @@ export function RankingPage({ mockAccount }: RankingPageProps) {
   )
 }
 
+/** The address parameters that live in the backtest's detail, so an address that names one opens it. */
+const DETAIL_PARAMS = ['period', 'first', 'last', 'month']
+
 /**
- * The month's stocks lead, because they are what the reader came for. From 1280 px the mock account's follow and the
- * backtest sit beside them; narrower, they follow them. The caveats and the backtest's past months run across.
- * The period and the month open are the address's, so both survive a reload. The replays are asked only once the
- * latest ranking has answered: the server reads its whole history for the first answer, and one read serves the rest.
+ * The month's stocks lead. The mock account's follow and the backtest's figures come after them, beside them from
+ * 1280 px. The replays are asked only once the latest ranking has answered: the server reads its whole history for
+ * the first answer, and one read serves the rest.
  */
 function Workbench({ mockAccount }: RankingPageProps) {
   const { t } = useTranslation('ranking')
   const [params, setParams] = useSearchParams()
   const [today] = useState(() => sessionDate(new Date().toISOString()))
+  const [detailAtFirst] = useState(() => DETAIL_PARAMS.some((name) => params.has(name)))
   const choice = useMemo(() => choiceOf(params), [params])
   const latest = useLatestRanking()
   const decidedOn = latest.data?.decided_on ?? null
   const record = useRankingBacktest(decidedOn ? periodOf(choice, today) : null, { keepShown: true })
   const before = useRankingBacktest(decidedOn ? periodBefore(decidedOn) : null)
-  const choose = (next: PeriodChoice) => setParams(choiceParams(next))
 
   if (latest.isPending) {
     return (
       <div className="card-stack">
         <Waiting />
-        <div className="card-grid xl:grid-cols-2">
-          <PageSkeleton />
-          <PageSkeleton />
-        </div>
+        <PageSkeleton />
       </div>
     )
   }
@@ -72,15 +68,14 @@ function Workbench({ mockAccount }: RankingPageProps) {
   const ranking = latest.data
   const previous: PreviousRanking = before.data ? { status: 'ready', ranking: rankingBefore(before.data.rankings, ranking.decided_on) } : before.isError ? { status: 'failed' } : { status: 'loading' }
   const decisions = [ranking.decided_on, ...(record.data?.rankings ?? []).map((item) => item.decided_on), ...(before.data?.rankings ?? []).map((item) => item.decided_on)]
-  const shown = record.data && !record.isPlaceholderData ? record.data : null
 
   return (
     <div className="card-grid xl:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
-      <LatestRanking className={mockAccount ? 'xl:row-span-2' : undefined} ranking={ranking} previous={previous} decisionDay={decisionDay(decisions)!} today={today} />
-      {mockAccount && <MockAccountFollow ranking={ranking} />}
-      <RankingRecord choice={choice} today={today} onChoose={choose} query={record} />
-      <Caveats className="xl:col-span-2" />
-      {shown && <PastMonths className="xl:col-span-2" backtest={shown} />}
+      <LatestRanking ranking={ranking} previous={previous} decisionDay={decisionDay(decisions)!} today={today} />
+      <div className="card-stack">
+        {mockAccount && <MockAccountFollow ranking={ranking} />}
+        <RankingRecord choice={choice} today={today} onChoose={(next) => setParams(choiceParams(next))} query={record} detailAtFirst={detailAtFirst} />
+      </div>
     </div>
   )
 }

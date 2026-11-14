@@ -10,7 +10,7 @@ export function AdminSettingsPage() {
   const { t } = useTranslation('admin')
   return (
     <div className="page-stack">
-      <PageHeader title={t('title')} description={t('description')} />
+      <PageHeader title={t('title')} />
       <RequireSignIn needs="edit_system_settings" layout="page" reason={t('signIn')}>
         <SettingsForm />
       </RequireSignIn>

@@ -3,10 +3,10 @@ import { CopyCheck } from 'lucide-react'
 import { useId, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { toast } from 'sonner'
-import { useLocale, useTranslation } from '@/i18n'
+import { useTranslation } from '@/i18n'
 import { isApiError, useAudience, type Schemas } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
-import { formatMonthDayTime, formatNumber, formatPrice } from '@/shared/lib/format'
+import { useFormat } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { useErrorReason } from '@/shared/lib/error-reason'
 import { Button } from '@/shared/ui/button'
@@ -39,7 +39,7 @@ export function FollowPanel({ runId, follow, decisions, names }: FollowPanelProp
   if (audience.isError) return <ErrorState error={audience.error} title={t('common:audience.failed')} onRetry={() => void audience.refetch()} className="rounded-2xl border bg-card" />
   if (follow.isPending || audience.isPending) return <Skeleton className="h-32 rounded-2xl" />
   return (
-    <Panel title={t('follow.title')} description={t('follow.question')} flush>
+    <Panel title={t('follow.title')} flush>
       <FollowAction
         runId={runId}
         follow={follow.data}
@@ -76,7 +76,7 @@ interface FollowActionProps extends Omit<FollowPanelProps, 'follow'> {
 function FollowAction({ runId, follow, pricing, quoted, decisions, names }: FollowActionProps) {
   const { t } = useTranslation('runs')
   const reason = useErrorReason()
-  const locale = useLocale()
+  const format = useFormat()
   const navigate = useNavigate()
   const start = useFollowRun(runId)
   const [confirming, setConfirming] = useState(false)
@@ -129,7 +129,7 @@ function FollowAction({ runId, follow, pricing, quoted, decisions, names }: Foll
                 <span className="font-mono">{decision.stock_id}</span> {names.get(decision.stock_id)}
               </span>
               <span className="tabular shrink-0">
-                {t(`action.${decision.action}`)} · {t('follow.shares', { count: formatNumber(locale, decision.quantity) })}
+                {t(`action.${decision.action}`)} · {t('follow.shares', { count: format.number(decision.quantity) })}
               </span>
             </li>
           ))}
@@ -143,7 +143,7 @@ function FollowAction({ runId, follow, pricing, quoted, decisions, names }: Foll
 /** Every follow of the run so far, each with what became of its order and a link to the follow's own run. */
 function Follows({ items, names }: { items: FollowItem[]; names: ReadonlyMap<string, string> }) {
   const { t } = useTranslation('runs')
-  const locale = useLocale()
+  const format = useFormat()
   const stock = (item: FollowItem) => [item.decision.stock_id, names.get(item.decision.stock_id)].filter(Boolean).join(' ')
   const columns: Column<FollowItem>[] = [
     {
@@ -151,7 +151,7 @@ function Follows({ items, names }: { items: FollowItem[]; names: ReadonlyMap<str
       header: t('follow.column.followedAt'),
       className: 'whitespace-nowrap',
       cell: (item) => {
-        const time = formatMonthDayTime(locale, item.order.created_at)
+        const time = format.monthDayTime(item.order.created_at)
         return (
           <Link to={paths.run(item.order.run_id)} aria-label={t('follow.openFollow', { time })} className="stretched-link block min-w-0 hover:text-brand focus-visible:text-brand">
             <span className="tabular block font-medium">{time}</span>
@@ -175,9 +175,9 @@ function Follows({ items, names }: { items: FollowItem[]; names: ReadonlyMap<str
 
 function Outcome({ order }: { order: Order }) {
   const { t } = useTranslation('runs')
-  const locale = useLocale()
+  const format = useFormat()
   if (order.filled_quantity > 0 && order.average_filled_price !== null) {
-    const figures = { shares: formatNumber(locale, order.filled_quantity), ordered: formatNumber(locale, order.quantity), price: formatPrice(locale, order.average_filled_price) }
+    const figures = { shares: format.number(order.filled_quantity), ordered: format.number(order.quantity), price: format.price(order.average_filled_price) }
     return t(order.filled_quantity < order.quantity ? 'follow.filledPart' : 'follow.filled', figures)
   }
   const status = t(`orderStatus.${order.status}`)

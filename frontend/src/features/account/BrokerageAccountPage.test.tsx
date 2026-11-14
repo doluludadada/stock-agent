@@ -64,8 +64,7 @@ function open(user: User = HOLDER) {
   )
 }
 
-const ORDERING_OFF =
-  'Ordering on SinoPac is off. This site can read this account and cannot place an order on it. An administrator turns it on in the settings (Features, SinoPac ordering), which asks for the settings confirmation.'
+const ORDERING_OFF = 'Ordering off'
 
 describe('the SinoPac account', () => {
   afterEach(() => {
@@ -80,8 +79,8 @@ describe('the SinoPac account', () => {
     expect(await screen.findByText('Simulation server, no real money')).toBeVisible()
     expect(screen.queryByText('Real account')).not.toBeInTheDocument()
     expect(screen.getByText(ORDERING_OFF)).toBeVisible()
-    expect(screen.getByText(/^Every figure on this page is the broker’s own, read 11\/13\/2026, 14:00\./)).toBeVisible()
-    expect(await screen.findByRole('link', { name: 'These holdings, analysed, in My holdings' })).toHaveAttribute('href', '/holdings')
+    expect(screen.getByText('The broker’s own figures, read 11/13/2026, 14:00.')).toBeVisible()
+    expect(await screen.findByRole('link', { name: 'My holdings' })).toHaveAttribute('href', '/holdings')
   })
 
   it('says it shows the real account, and that a run started on SinoPac can order within the BUY limits', async () => {
@@ -90,7 +89,7 @@ describe('the SinoPac account', () => {
 
     expect(await screen.findByText('Real account')).toBeVisible()
     expect(screen.queryByText('Simulation server, no real money')).not.toBeInTheDocument()
-    expect(screen.getByText(/^Ordering on SinoPac is on\. A run you start on SinoPac can order on this account, within the BUY limits/)).toBeVisible()
+    expect(screen.getByText('Ordering on')).toBeVisible()
     expect(screen.queryByText(ORDERING_OFF)).not.toBeInTheDocument()
   })
 
@@ -129,7 +128,7 @@ describe('the SinoPac account', () => {
     open()
 
     expect(await screen.findByText('The site’s SinoPac login is down')).toBeVisible()
-    expect(screen.getByText(/The site retries the login by itself/)).toBeVisible()
+    expect(screen.getByText('The site reconnects by itself.')).toBeVisible()
     expect(screen.getByText('Simulation server, no real money'), 'the server still says which it is').toBeVisible()
     expect(screen.getByText(ORDERING_OFF)).toBeVisible()
     expect(screen.queryByRole('table')).not.toBeInTheDocument()

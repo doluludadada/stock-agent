@@ -1,11 +1,14 @@
 import { ArrowRight, FlaskConical, Landmark, ReceiptText, Unplug, Wallet } from 'lucide-react'
-import { useMemo, type ReactNode } from 'react'
+import { useMemo } from 'react'
 import { Link } from 'react-router'
-import { useLocale, useTranslation } from '@/i18n'
+import { useTranslation } from '@/i18n'
 import { isApiError, useListedNames, useShows } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
-import { formatDateTime, formatNumber, formatSigned, useFormat } from '@/shared/lib/format'
+import { DASH, useFormat } from '@/shared/lib/format'
+import { cn } from '@/shared/lib/utils'
+import { Badge } from '@/shared/ui/badge'
 import { ChangeValue } from '@/shared/ui/change-value'
+import { StockLink } from '@/shared/ui/stock-name'
 import { DataTable, type Column } from '@/shared/ui/data-table'
 import { ErrorState } from '@/shared/ui/error-state'
 import { PageHeader } from '@/shared/ui/page-header'
@@ -17,8 +20,6 @@ import { StateBlock } from '@/shared/ui/state-block'
 import { useBrokerageAccount, useTrades, type BrokerageAccount, type BrokerageStatement, type BrokerFill, type BrokerPosition, type Settlement } from './api'
 import { TradesPanel } from './Trades'
 
-const DASH = '—'
-
 /**
  * The SinoPac account as the broker reports it. The page only reads: which server it shows and whether the site may
  * order there lead, then the account while the site's login is up.
@@ -27,7 +28,7 @@ export function BrokerageAccountPage() {
   const { t } = useTranslation('account')
   return (
     <div className="page-stack">
-      <PageHeader title={t('page.shioaji.title')} description={t('page.shioaji.description')} />
+      <PageHeader title={t('page.shioaji.title')} />
       <RequireSignIn layout="page" needs="use_real_broker" reason={t('brokerage.signIn')}>
         <Brokerage />
       </RequireSignIn>
@@ -59,21 +60,25 @@ function Brokerage() {
 /** Which server the figures come from and whether the site may order there, before any figure. */
 function ServerPanel({ account }: { account: BrokerageAccount }) {
   const { t } = useTranslation('account')
-  const locale = useLocale()
+  const format = useFormat()
   const analysed = useShows('holdings')
   const server = account.simulation ? 'simulation' : 'live'
   const Icon = account.simulation ? FlaskConical : Landmark
   return (
     <Panel>
-      <div className="space-y-3">
-        <p className="flex items-center gap-2 text-title font-semibold">
-          <Icon aria-hidden className="size-4.5 shrink-0 text-gold" />
-          {t(`brokerage.server.${server}`)}
+      <div className="space-y-2">
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-2 text-title font-semibold">
+          <span className="flex items-center gap-2">
+            <Icon aria-hidden className="size-4.5 shrink-0 text-gold" />
+            {t(`brokerage.server.${server}`)}
+          </span>
+          <Badge variant="outline" className={cn('font-normal', account.ordering ? 'border-gold/50 text-gold' : 'text-muted-foreground')}>
+            {t(account.ordering ? 'brokerage.ordering.on' : 'brokerage.ordering.off')}
+          </Badge>
         </p>
-        <p className="text-sm text-pretty">{t(account.ordering ? 'brokerage.ordering.on' : 'brokerage.ordering.off')}</p>
         {account.statement && (
           <p className="flex flex-wrap items-center gap-x-3 text-xs text-pretty text-muted-foreground">
-            {t('brokerage.own', { time: formatDateTime(locale, account.statement.read_at) })}
+            {t('brokerage.own', { time: format.dateTime(account.statement.read_at) })}
             {analysed && (
               <Link to={paths.holdings} className="inline-flex min-h-11 items-center gap-1 text-brand underline-offset-4 hover:underline md:min-h-0">
                 {t('brokerage.analysis')}
@@ -99,10 +104,9 @@ function Statement({ statement }: { statement: BrokerageStatement }) {
       <SummaryPanel statement={statement} className="md:col-span-2" />
       <PositionsPanel positions={statement.positions} names={names} className="md:col-span-2" />
       <SettlementsPanel settlements={statement.settlements} />
-      <FillsPanel title={t('brokerage.fills.title')} description={t('brokerage.fills.question')} none={t('brokerage.fills.none')} fills={statement.fills} names={names} />
+      <FillsPanel title={t('brokerage.fills.title')} none={t('brokerage.fills.none')} fills={statement.fills} names={names} />
       <FillsPanel
         title={t('brokerage.sales.title')}
-        description={t('brokerage.sales.question', { date: since })}
         none={t('brokerage.sales.none', { date: since })}
         fills={statement.sales}
         names={names}
@@ -116,16 +120,15 @@ function Statement({ statement }: { statement: BrokerageStatement }) {
 
 function SummaryPanel({ statement, className }: { statement: BrokerageStatement; className?: string }) {
   const { t } = useTranslation('account')
-  const locale = useLocale()
   const format = useFormat()
   return (
     <Panel className={className}>
       <dl className="grid grid-cols-2 gap-x-6 gap-y-4 @xl:grid-cols-4">
         <Stat size="lg" label={t('brokerage.summary.balance')}>
-          {formatNumber(locale, statement.balance)}
+          {format.number(statement.balance)}
         </Stat>
         <Stat size="lg" label={t('value.marketValue')}>
-          {formatNumber(locale, statement.market_value)}
+          {format.number(statement.market_value)}
         </Stat>
         <Stat size="lg" label={t('value.unrealized')}>
           <ChangeValue value={statement.unrealized_pnl} format="absolute" fractionDigits={0} />
@@ -138,23 +141,8 @@ function SummaryPanel({ statement, className }: { statement: BrokerageStatement;
   )
 }
 
-function StockLink({ stockId, names, children }: { stockId: string; names: ReadonlyMap<string, string>; children?: ReactNode }) {
-  return (
-    <Link to={paths.stock(stockId)} className="stretched-link flex min-w-0 flex-col justify-center hover:text-brand focus-visible:text-brand">
-      <span className="flex min-w-0 items-baseline gap-2">
-        <span className="truncate font-medium" title={names.get(stockId)}>
-          {names.get(stockId) ?? stockId}
-        </span>
-        <span className="shrink-0 font-mono text-xs text-muted-foreground">{stockId}</span>
-      </span>
-      {children}
-    </Link>
-  )
-}
-
 function PositionsPanel({ positions, names, className }: { positions: readonly BrokerPosition[]; names: ReadonlyMap<string, string>; className?: string }) {
   const { t } = useTranslation('account')
-  const locale = useLocale()
   const format = useFormat()
   const columns: Column<BrokerPosition>[] = [
     {
@@ -162,17 +150,17 @@ function PositionsPanel({ positions, names, className }: { positions: readonly B
       header: t('column.stock'),
       className: 'w-full max-w-0',
       cell: (row) => (
-        <StockLink stockId={row.stock_id} names={names}>
+        <StockLink stockId={row.stock_id} name={names.get(row.stock_id)}>
           <span className="tabular truncate text-xs text-muted-foreground md:hidden">
-            {t('brokerage.positions.line', { shares: formatNumber(locale, row.quantity), cost: format.price(row.average_cost), price: format.price(row.mark_price) })}
+            {t('brokerage.positions.line', { shares: format.number(row.quantity), cost: format.price(row.average_cost), price: format.price(row.mark_price) })}
           </span>
         </StockLink>
       ),
     },
-    { key: 'quantity', header: t('column.quantity'), numeric: true, from: 'md', cell: (row) => formatNumber(locale, row.quantity) },
+    { key: 'quantity', header: t('column.quantity'), numeric: true, from: 'md', cell: (row) => format.number(row.quantity) },
     { key: 'cost', header: t('column.averageCost'), numeric: true, from: 'md', cell: (row) => format.price(row.average_cost) },
     { key: 'price', header: t('brokerage.positions.price'), numeric: true, from: 'md', cell: (row) => format.price(row.mark_price) },
-    { key: 'value', header: t('column.marketValue'), numeric: true, cell: (row) => formatNumber(locale, row.market_value) },
+    { key: 'value', header: t('column.marketValue'), numeric: true, cell: (row) => format.number(row.market_value) },
     {
       key: 'pnl',
       header: t('column.unrealized'),
@@ -186,7 +174,7 @@ function PositionsPanel({ positions, names, className }: { positions: readonly B
     },
   ]
   return (
-    <Panel className={className} title={t('brokerage.positions.title')} description={t('brokerage.positions.question', { count: positions.length })} flush>
+    <Panel className={className} title={t('brokerage.positions.title')} flush>
       {positions.length === 0 ? (
         <StateBlock icon={Wallet} title={t('brokerage.positions.none')} />
       ) : (
@@ -198,7 +186,6 @@ function PositionsPanel({ positions, names, className }: { positions: readonly B
 
 function SettlementsPanel({ settlements, className }: { settlements: readonly Settlement[]; className?: string }) {
   const { t } = useTranslation('account')
-  const locale = useLocale()
   const format = useFormat()
   const columns: Column<Settlement>[] = [
     { key: 'day', header: t('brokerage.settlements.day'), className: 'tabular w-full whitespace-nowrap', cell: (row) => format.date(row.settles_on) },
@@ -208,14 +195,14 @@ function SettlementsPanel({ settlements, className }: { settlements: readonly Se
       numeric: true,
       cell: (row) => (
         <span className="flex flex-col items-end leading-tight sm:flex-row sm:items-baseline sm:justify-end sm:gap-2">
-          <span className="font-medium">{formatSigned(locale, row.amount, 0)}</span>
+          <span className="font-medium">{format.signed(row.amount, 0)}</span>
           {row.amount !== 0 && <span className="text-xs text-muted-foreground">{t(row.amount < 0 ? 'brokerage.settlements.pay' : 'brokerage.settlements.receive')}</span>}
         </span>
       ),
     },
   ]
   return (
-    <Panel className={className} title={t('brokerage.settlements.title')} description={t('brokerage.settlements.question')} flush>
+    <Panel className={className} title={t('brokerage.settlements.title')} flush>
       {settlements.length === 0 ? (
         <StateBlock icon={ReceiptText} title={t('brokerage.settlements.none')} />
       ) : (
@@ -227,7 +214,6 @@ function SettlementsPanel({ settlements, className }: { settlements: readonly Se
 
 interface FillsPanelProps {
   title: string
-  description: string
   none: string
   fills: readonly BrokerFill[]
   names: ReadonlyMap<string, string>
@@ -238,15 +224,14 @@ interface FillsPanelProps {
 
 type FillRow = BrokerFill & { key: string }
 
-function FillsPanel({ title, description, none, fills, names, past = false, className }: FillsPanelProps) {
+function FillsPanel({ title, none, fills, names, past = false, className }: FillsPanelProps) {
   const { t } = useTranslation('account')
-  const locale = useLocale()
   const format = useFormat()
   // The broker gives a deal no id, so its place in the answer names its row.
   const rows = useMemo(() => fills.map((fill, index): FillRow => ({ ...fill, key: String(index) })), [fills])
   const side = (row: FillRow) => t(`runs:action.${row.action}`)
   const line = (row: FillRow) => {
-    const said = { side: side(row), shares: formatNumber(locale, row.quantity), price: format.price(row.price) }
+    const said = { side: side(row), shares: format.number(row.quantity), price: format.price(row.price) }
     return past ? t('brokerage.fill.lineDated', { ...said, date: format.monthDay(row.filled_on) }) : t('brokerage.fill.line', said)
   }
   const columns: Column<FillRow>[] = [
@@ -256,13 +241,13 @@ function FillsPanel({ title, description, none, fills, names, past = false, clas
       header: t('column.stock'),
       className: 'w-full max-w-0',
       cell: (row) => (
-        <StockLink stockId={row.stock_id} names={names}>
+        <StockLink stockId={row.stock_id} name={names.get(row.stock_id)}>
           <span className="tabular truncate text-xs text-muted-foreground md:hidden">{line(row)}</span>
         </StockLink>
       ),
     },
     { key: 'side', header: t('brokerage.fill.side'), from: 'md', className: 'whitespace-nowrap', cell: side },
-    { key: 'shares', header: t('column.quantity'), numeric: true, from: 'md', cell: (row) => formatNumber(locale, row.quantity) },
+    { key: 'shares', header: t('column.quantity'), numeric: true, from: 'md', cell: (row) => format.number(row.quantity) },
     { key: 'price', header: t('brokerage.fill.price'), numeric: true, from: 'md', cell: (row) => format.price(row.price) },
     ...(past
       ? [
@@ -276,7 +261,7 @@ function FillsPanel({ title, description, none, fills, names, past = false, clas
       : []),
   ]
   return (
-    <Panel className={className} title={title} description={description} flush>
+    <Panel className={className} title={title} flush>
       {rows.length === 0 ? <StateBlock icon={ReceiptText} title={none} /> : <DataTable rows={rows} columns={columns} rowKey={(row) => row.key} label={title} />}
     </Panel>
   )
@@ -289,5 +274,5 @@ function SiteOrders({ className }: { className?: string }) {
   const rows = useMemo(() => trades.data?.pages.flatMap((page) => page.trades), [trades.data])
   const codes = useMemo(() => [...new Set((rows ?? []).map((trade) => trade.order.stock_id))], [rows])
   const names = useListedNames(codes)
-  return <TradesPanel trades={trades} rows={rows} names={names} title={t('brokerage.orders.title')} description={t('brokerage.orders.question')} none={t('brokerage.orders.none')} className={className} />
+  return <TradesPanel trades={trades} rows={rows} names={names} title={t('brokerage.orders.title')} none={t('brokerage.orders.none')} className={className} />
 }

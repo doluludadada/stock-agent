@@ -4,13 +4,11 @@ import { Link } from 'react-router'
 import { useTranslation } from '@/i18n'
 import type { Schemas } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
-import { useFormat } from '@/shared/lib/format'
+import { DASH, useFormat } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 
 /** A stock's standing in the monthly ranking, as the stock page and a holding both carry it. */
 export type RankingStanding = Schemas['StockRankingResponse']
-
-const DASH = '—'
 
 /** A stock the ranking left out with no reason given has no daily history here, the first reason the ranking checks. */
 const exclusionOf = (standing: RankingStanding) => standing.exclusion ?? 'no_history'
@@ -68,7 +66,7 @@ export function RankingScore({ standing }: { standing: RankingStanding }) {
       <p className="text-sm text-muted-foreground">{t('score.place', { place: format.number(place), scored: format.number(standing.scored) })}</p>
       <dl className="grid gap-3">
         <Factor label={t('score.acceleration')} percentile={stock.acceleration_rank * 100} value={`×${format.number(stock.revenue_acceleration, 2)}`} />
-        <Factor label={t('score.nearness')} percentile={stock.nearness_rank * 100} value={`${format.number(stock.nearness_to_high * 100, 1)}%`} />
+        <Factor label={t('score.nearness')} percentile={stock.nearness_rank * 100} value={format.percent(stock.nearness_to_high)} />
       </dl>
     </div>
   )
@@ -95,10 +93,10 @@ function Factor({ label, percentile, value }: { label: string; percentile: numbe
 }
 
 /**
- * The same score in a table row: the figure with its place, the two factors' percentiles in one line, and a mark only
- * while the ranking holds the stock; or the reason it has no score.
+ * The same score in a table row: the figure with its place, the two factors' percentiles in one line (left out when
+ * `brief`, on a phone), and a mark only while the ranking holds the stock; or the reason it has no score.
  */
-export function RankingScoreLine({ standing, className }: { standing: RankingStanding; className?: string }) {
+export function RankingScoreLine({ standing, brief = false, className }: { standing: RankingStanding; brief?: boolean; className?: string }) {
   const { t } = useTranslation()
   const format = useFormat()
   const scored = scoredOf(standing)
@@ -120,9 +118,11 @@ export function RankingScoreLine({ standing, className }: { standing: RankingSta
         </span>
         {standing.in_top && <TopMark standing={standing} className="px-2 py-0.5" />}
       </span>
-      <span className="tabular text-xs whitespace-normal text-muted-foreground">
-        {t('score.factors', { acceleration: format.number(stock.acceleration_rank * 100), nearness: format.number(stock.nearness_rank * 100) })}
-      </span>
+      {!brief && (
+        <span className="tabular text-xs whitespace-normal text-muted-foreground">
+          {t('score.factors', { acceleration: format.number(stock.acceleration_rank * 100), nearness: format.number(stock.nearness_rank * 100) })}
+        </span>
+      )}
     </span>
   )
 }

@@ -42,8 +42,8 @@ export function useRemoveHolding() {
   })
 }
 
-/** Why the server kept no entry: a stock the listing does not hold, the listing itself unavailable, or anything else. */
-export type EntryRefusal = 'unlisted' | 'listingUnavailable' | 'failed'
+/** Why the server kept no entry: a stock the listing does not hold, which the form says at the stock, or anything else. */
+export type EntryRefusal = 'unlisted' | 'failed'
 
 const UNLISTED = 'unlisted_stock'
 
@@ -55,6 +55,5 @@ function namesUnlisted(body: unknown): boolean {
 
 export function entryRefusalOf(error: unknown): EntryRefusal {
   if (isApiError(error, 'invalid') && namesUnlisted(error.body)) return 'unlisted'
-  if (isApiError(error) && error.code === 'listing_unavailable') return 'listingUnavailable'
   return 'failed'
 }

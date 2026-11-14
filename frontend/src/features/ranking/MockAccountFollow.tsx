@@ -2,11 +2,10 @@ import { CopyCheck } from 'lucide-react'
 import { useId, useState } from 'react'
 import { toast } from 'sonner'
 import { useTranslation } from '@/i18n'
-import { isApiError, useAudience } from '@/shared/api'
+import { isApiError, useAudience, type Audience } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
 import { useErrorReason } from '@/shared/lib/error-reason'
-import { useFormat } from '@/shared/lib/format'
-import { cn } from '@/shared/lib/utils'
+import { DASH, useFormat } from '@/shared/lib/format'
 import { Button } from '@/shared/ui/button'
 import { ChangeValue } from '@/shared/ui/change-value'
 import { ConfirmDialog } from '@/shared/ui/confirm-dialog'
@@ -17,59 +16,55 @@ import { Stat } from '@/shared/ui/stat'
 import { useFollowRanking, useRankingFollow } from './api'
 import type { Ranking, RankingFollow } from './model'
 
-/**
- * The ranking in the viewer's mock account: which of this month's stocks it holds, what it made since it first
- * followed against the benchmark, and the one action that brings it to the ranking.
- */
+/** The ranking in the viewer's mock account: what it holds, lacks and still holds, its return against the benchmark, and the one action. */
 export function MockAccountFollow({ ranking, className }: { ranking: Ranking; className?: string }) {
   const { t } = useTranslation('ranking')
   const follow = useRankingFollow()
   const audience = useAudience()
-  const content = () => {
-    if (follow.isError) return <ErrorState error={follow.error} title={t('follow.loadFailed')} onRetry={() => void follow.refetch()} />
-    if (audience.isError) return <ErrorState error={audience.error} title={t('common:audience.failed')} onRetry={() => void audience.refetch()} />
-    if (follow.isPending || audience.isPending) return <Skeleton className="h-24" />
-    return (
-      <div className="flex flex-col gap-4">
-        {follow.data.performance && <Standing follow={follow.data} count={ranking.stocks.length} />}
-        <Action
-          follow={follow.data}
-          names={new Map(ranking.stocks.map((stock) => [stock.stock_id, stock.stock_name]))}
-          pricing={audience.data.order_pricing}
-          quoted={audience.data.order_pricing !== 'realtime_quote' || audience.data.realtime_quotes}
-        />
-      </div>
-    )
-  }
   return (
-    <Panel className={className} title={t('follow.title')} description={t('follow.question')} aside={<PanelLink to={paths.account}>{t('follow.account')}</PanelLink>}>
-      {content()}
+    <Panel className={className} title={t('follow.title')} aside={<PanelLink to={paths.account}>{t('follow.account')}</PanelLink>}>
+      {follow.isError ? (
+        <ErrorState error={follow.error} title={t('follow.loadFailed')} onRetry={() => void follow.refetch()} />
+      ) : audience.isError ? (
+        <ErrorState error={audience.error} title={t('common:audience.failed')} onRetry={() => void audience.refetch()} />
+      ) : follow.isPending || audience.isPending ? (
+        <Skeleton className="h-16" />
+      ) : (
+        <div className="flex flex-col gap-3">
+          {(follow.data.performance || follow.data.holdings.held.length > 0) && <Standing follow={follow.data} count={ranking.stocks.length} />}
+          <Action follow={follow.data} ranked={ranking.stocks} audience={audience.data} />
+        </div>
+      )}
     </Panel>
   )
+}
+
+function Return({ value }: { value: number | null | undefined }) {
+  return value == null ? DASH : <ChangeValue value={value} format="percent" />
 }
 
 function Standing({ follow, count }: { follow: RankingFollow; count: number }) {
   const { t } = useTranslation('ranking')
   const format = useFormat()
-  const { holdings } = follow
-  const performance = follow.performance!
-  const figure = (value: number | null | undefined) => (value == null ? '—' : <ChangeValue value={value} format="percent" />)
+  const { holdings, performance } = follow
   return (
     <>
       <dl className="grid grid-cols-3 gap-3">
         <Stat label={t('follow.holds')} size="lg">
           {t('follow.heldOf', { held: holdings.held.length, count })}
         </Stat>
-        <Stat label={t('follow.accountReturn')} size="lg">
-          {figure(performance.account_return)}
-        </Stat>
-        <Stat label={t('follow.benchmarkReturn', { benchmark: performance.benchmark_id })} size="lg">
-          {figure(performance.benchmark_return)}
-        </Stat>
+        {/* An account that holds the ranking's stocks without a follow since it opened has no return to compare. */}
+        {performance && (
+          <>
+            <Stat label={t('follow.since', { since: format.monthDay(performance.since) })} size="lg">
+              <Return value={performance.account_return} />
+            </Stat>
+            <Stat label={performance.benchmark_id} size="lg">
+              <Return value={performance.benchmark_return} />
+            </Stat>
+          </>
+        )}
       </dl>
-      <p className="text-xs text-pretty text-muted-foreground">
-        {performance.until ? t('follow.span', { since: format.date(performance.since), until: format.date(performance.until) }) : t('follow.spanPending', { since: format.date(performance.since) })}
-      </p>
       {holdings.lacking.length > 0 && <StockLine label={t('follow.lacking')} stockIds={holdings.lacking} />}
       {holdings.left.length > 0 && <StockLine label={t('follow.left')} stockIds={holdings.left} />}
     </>
@@ -84,57 +79,67 @@ function StockLine({ label, stockIds }: { label: string; stockIds: string[] }) {
   )
 }
 
-interface ActionProps {
-  follow: RankingFollow
-  names: ReadonlyMap<string, string | null | undefined>
-  pricing: 'realtime_quote' | 'official_close'
-  /** Whether the site has the price it follows at now: a site that follows at a realtime quote needs its Shioaji login. */
-  quoted: boolean
+const REFUSALS: Record<string, 'follow.upToDate' | 'runs:follow.refused.window' | 'runs:follow.refused.quotes' | 'runs:busy'> = {
+  nothing_to_follow: 'follow.upToDate',
+  outside_follow_window: 'runs:follow.refused.window',
+  realtime_quotes_unavailable: 'runs:follow.refused.quotes',
+  run_in_progress: 'runs:busy',
 }
 
-/** One sentence that says where the account stands, and the button while a follow has something to trade. */
-function Action({ follow, names, pricing, quoted }: ActionProps) {
+interface ActionProps {
+  follow: RankingFollow
+  ranked: Ranking['stocks']
+  audience: Audience
+}
+
+/** Why the account cannot follow now, or the button; an account that holds the ranking shows neither. */
+function Action({ follow, ranked, audience }: ActionProps) {
   const { t } = useTranslation('ranking')
   const reason = useErrorReason()
   const start = useFollowRanking()
   const [confirming, setConfirming] = useState(false)
   const leadId = useId()
   const { holdings, refusal } = follow
+  const pricing = audience.order_pricing
+  // A site that follows at a realtime quote needs its Shioaji login for the price.
+  const quoted = pricing !== 'realtime_quote' || audience.realtime_quotes
   const upToDate = refusal === 'nothing_to_follow'
   const ready = quoted && refusal === null && !follow.running
   const lead = follow.running
     ? t('follow.running')
     : upToDate
-      ? t(follow.performance ? 'follow.upToDate' : 'follow.nothing')
+      ? ranked.length > 0
+        ? null
+        : t('follow.nothing')
       : !quoted
         ? t('runs:follow.noQuotes')
         : refusal === 'outside_follow_window'
           ? t(`runs:follow.window.${pricing}`)
-          : follow.performance
+          : holdings.held.length > 0
             ? t('follow.behind', { sells: holdings.left.length, buys: holdings.lacking.length })
             : t('follow.never')
+  const names = new Map(ranked.map((stock) => [stock.stock_id, stock.stock_name]))
   const trades = [...holdings.left.map((stockId) => ({ stockId, action: 'sell' as const })), ...holdings.lacking.map((stockId) => ({ stockId, action: 'buy' as const }))]
 
-  const refusalText = (error: Error): string => {
-    const code = isApiError(error) ? error.code : null
-    if (code === 'nothing_to_follow') return t('follow.upToDate')
-    if (code === 'outside_follow_window') return t('runs:follow.refused.window')
-    if (code === 'realtime_quotes_unavailable') return t('runs:follow.refused.quotes')
-    if (code === 'run_in_progress') return t('runs:busy')
-    return t('runs:follow.failed', { reason: reason(error) })
-  }
   const confirm = () => {
     setConfirming(false)
-    start.mutate(undefined, { onSuccess: () => toast.success(t('runs:follow.started')), onError: (error) => toast.error(refusalText(error)) })
+    start.mutate(undefined, {
+      onSuccess: () => toast.success(t('runs:follow.started')),
+      onError: (error) => {
+        const own = isApiError(error) && error.code ? REFUSALS[error.code] : undefined
+        toast.error(own ? t(own) : t('runs:follow.failed', { reason: reason(error) }))
+      },
+    })
   }
 
+  if (lead === null) return null
   return (
-    <div className="flex flex-col gap-3 @2xl:flex-row @2xl:items-center @2xl:justify-between">
-      <p id={leadId} className={cn('text-sm text-pretty', !ready && 'text-muted-foreground')}>
+    <div className="flex flex-col gap-3 @lg:flex-row @lg:items-center @lg:justify-between">
+      <p id={leadId} className="text-sm text-pretty text-muted-foreground">
         {lead}
       </p>
       {!upToDate && (
-        <Button type="button" className="shrink-0 self-start @2xl:self-auto" disabled={!ready || start.isPending} aria-describedby={leadId} onClick={() => setConfirming(true)}>
+        <Button type="button" className="shrink-0 self-start @lg:self-auto" disabled={!ready || start.isPending} aria-describedby={leadId} onClick={() => setConfirming(true)}>
           <CopyCheck aria-hidden />
           {t('follow.button')}
         </Button>

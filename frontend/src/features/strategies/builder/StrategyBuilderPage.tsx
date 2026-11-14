@@ -18,7 +18,6 @@ import { Skeleton } from '@/shared/ui/skeleton'
 import { StateBlock } from '@/shared/ui/state-block'
 import { RequireSignIn } from '@/shared/ui/require-sign-in'
 import { useBuiltInStrategies, useStrategySettings } from '../api/queries'
-import { TechnicalStrategyNote } from '@/shared/ui/technical-strategy-note'
 import { blankRule } from '../model/edit'
 import type { NodeId, Scoring, Strategy } from '../model/types'
 import { errorsOf, issuesByOwner, issuesByPath, requiredBars } from '../model/validate'
@@ -81,7 +80,7 @@ function Builder({ initial, isNew, name }: { initial: Strategy; isNew: boolean; 
   const { t } = useTranslation('builder')
   const navigate = useNavigate()
   const { draft, edit, issues, attempted, dirty, save, saving, conflict, serverChanged, revision, blocker } = useStrategyDraft(initial, name)
-  const [refused, setRefused] = useState<{ rule: number | null; message: string }[]>([])
+  const [refused, setRefused] = useState<(number | null)[]>([])
   const [expanded, setExpanded] = useState<Set<NodeId>>(() => {
     const first = initial.rules[0]?.condition.conditions[0]
     return new Set(isNew && initial.rules.length === 1 && first ? [first.id] : [])
@@ -137,7 +136,7 @@ function Builder({ initial, isNew, name }: { initial: Strategy; isNew: boolean; 
         toast.error(t('save.conflict'))
         return
       case 'refused':
-        setRefused(result.problems)
+        setRefused(result.rules)
         toast.error(t('save.refused'))
         return
       case 'full':
@@ -191,10 +190,10 @@ function Builder({ initial, isNew, name }: { initial: Strategy; isNew: boolean; 
         <div role="alert" className="space-y-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm">
           <p className="font-medium">{t('save.refusedTitle')}</p>
           <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
-            {refused.map((problem, index) => (
-              <li key={index}>
-                {problem.rule !== null && <span className="font-medium text-foreground">{t('rule.label', { index: problem.rule + 1 })}: </span>}
-                {problem.message}
+            {refused.map((rule) => (
+              <li key={rule ?? 'strategy'}>
+                {rule !== null && <span className="font-medium text-foreground">{t('rule.label', { index: rule + 1 })}: </span>}
+                {t('common:errors.invalid')}
               </li>
             ))}
           </ul>
@@ -292,7 +291,6 @@ function StrategyHeading({ strategy, edit, issue }: { strategy: Strategy; edit: 
         className="display h-auto min-h-11 border-transparent bg-transparent px-2 py-1 -ml-2 shadow-none hover:border-input focus-visible:border-ring md:h-auto md:text-[length:inherit]"
       />
       <FieldError id="strategy-name-error" issue={nameIssue} />
-      <TechnicalStrategyNote />
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span className="font-mono">{t('name.id', { id: strategy.id })}</span>
         <span className="tabular">{t('preview.bars', { count: requiredBars(strategy) })}</span>

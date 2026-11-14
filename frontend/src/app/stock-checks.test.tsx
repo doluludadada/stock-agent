@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { I18nextProvider } from 'react-i18next'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import { builtInJson } from '@/features/strategies/model/built-ins.test-support'
@@ -58,7 +58,10 @@ describe('the stock page’s checks', () => {
       </I18nextProvider>,
     )
 
-    const details = await screen.findByRole('region', { name: '評估明細' }, { timeout: 15_000 })
+    // The strategy's evaluation is a supporting tool: it stays closed until the reader opens it.
+    fireEvent.click(await screen.findByRole('button', { name: '技術評估' }, { timeout: 15_000 }))
+    const details = await screen.findByRole('region', { name: '技術評估' })
+    await within(details).findByRole('heading', { name: /排除項目/ }, { timeout: 15_000 })
     const excluded = within(details).getByRole('heading', { name: /排除項目/ }).closest('section')!
     expect(excluded.textContent).not.toContain(excluding!.name)
     expect(within(excluded).getByTitle('股價站上 20 日均線').textContent).toMatch(/[一-鿿]/)

@@ -1,12 +1,13 @@
 import { ArrowRight, CopyCheck, FlaskConical, LineChart, Wallet } from 'lucide-react'
 import { lazy, Suspense, useMemo, useState, type FormEvent } from 'react'
 import { Link } from 'react-router'
-import { useLocale, useTranslation } from '@/i18n'
+import { useTranslation } from '@/i18n'
 import { useListedNames } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
 import { directionOf } from '@/shared/lib/direction'
-import { formatCompact, formatDateTime, formatMonthDayTime, formatNumber, useFormat } from '@/shared/lib/format'
+import { useFormat } from '@/shared/lib/format'
 import { Badge } from '@/shared/ui/badge'
+import { StockLink, StockName } from '@/shared/ui/stock-name'
 import { Button } from '@/shared/ui/button'
 import { ChangeValue } from '@/shared/ui/change-value'
 import { DataTable, type Column } from '@/shared/ui/data-table'
@@ -25,14 +26,12 @@ import { equityPoints, holdings, moveBetween, totalReturn, unrealizedRatio, type
 
 const ValueChart = lazy(() => import('@/shared/ui/value-chart').then((module) => ({ default: module.ValueChart })))
 
-const percent = (locale: string, ratio: number) => `${formatNumber(locale, ratio * 100, 1)}%`
-
 /** The mock account: play money a finished run's decisions are followed into. A real broker's account has its own page. */
 export function AccountPage() {
   const { t } = useTranslation('account')
   return (
     <div className="page-stack">
-      <PageHeader title={t('page.mock.title')} description={t('page.mock.description')} />
+      <PageHeader title={t('page.mock.title')} />
       <RequireSignIn layout="page" reason={t('signIn')}>
         <Account />
       </RequireSignIn>
@@ -68,7 +67,7 @@ function Account() {
       <AllocationPanel value={data.current} names={names} className="md:col-span-2 xl:col-span-1" />
       <Positions value={data.current} liveStockIds={data.live_stock_ids} names={names} className="md:col-span-2" />
       {!empty && (
-        <TradesPanel trades={trades} rows={tradeRows} names={names} title={t('trades.title')} description={t('trades.question')} none={t('trades.none')} className="md:col-span-2" />
+        <TradesPanel trades={trades} rows={tradeRows} names={names} title={t('trades.title')} none={t('trades.none')} className="md:col-span-2" />
       )}
       <AsOfPanel />
       <AboutPanel />
@@ -78,7 +77,6 @@ function Account() {
 
 function Summary({ history, className }: { history: AccountHistory; className?: string }) {
   const { t } = useTranslation('account')
-  const locale = useLocale()
   const format = useFormat()
   const value = history.current
   const points = useMemo(() => equityPoints(history), [history])
@@ -90,7 +88,7 @@ function Summary({ history, className }: { history: AccountHistory; className?: 
       <div className="grid gap-x-8 gap-y-5 @4xl:grid-cols-[auto_minmax(0,1fr)] @4xl:items-end">
         <div className="min-w-0 space-y-1.5">
           <p className="text-xs text-muted-foreground">{t('value.equity')}</p>
-          <p className="figure">{formatNumber(locale, value.equity)}</p>
+          <p className="figure">{format.number(value.equity)}</p>
           {total && (
             <p className="flex flex-wrap items-center gap-1.5 text-sm">
               <span className="text-muted-foreground">{t('summary.total')}</span>
@@ -117,7 +115,7 @@ function Summary({ history, className }: { history: AccountHistory; className?: 
         <dl className="grid grid-cols-2 gap-x-6 gap-y-4 @xl:grid-cols-[repeat(auto-fit,minmax(8rem,1fr))] @4xl:border-l @4xl:pl-8">
           {history.opening && (
             <Stat size="lg" label={t('summary.startingCapital')}>
-              {formatNumber(locale, history.opening.initial_cash)}
+              {format.number(history.opening.initial_cash)}
               <span className="block text-xs font-normal text-muted-foreground">{t('summary.since', { date: format.monthDay(history.opening.opened_at) })}</span>
             </Stat>
           )}
@@ -128,10 +126,10 @@ function Summary({ history, className }: { history: AccountHistory; className?: 
             </span>
           </Stat>
           <Stat size="lg" label={t('value.cash')}>
-            {formatNumber(locale, value.cash)}
+            {format.number(value.cash)}
           </Stat>
           <Stat size="lg" label={t('value.marketValue')}>
-            {formatNumber(locale, value.market_value)}
+            {format.number(value.market_value)}
           </Stat>
           <Stat size="lg" label={t('summary.positions')}>
             {t('summary.count', { count: value.positions.length })}
@@ -144,7 +142,6 @@ function Summary({ history, className }: { history: AccountHistory; className?: 
 
 function EquityPanel({ history, className }: { history: AccountHistory; className?: string }) {
   const { t } = useTranslation('account')
-  const locale = useLocale()
   const format = useFormat()
   const points = useMemo(() => equityPoints(history), [history])
   const first = points[0]
@@ -159,7 +156,6 @@ function EquityPanel({ history, className }: { history: AccountHistory; classNam
     <Panel
       className={className}
       title={t('curveTitle')}
-      description={t('curveQuestion')}
       aside={first && last && <span className="tabular">{format.monthDay(first.date)} – {format.monthDay(last.date)}</span>}
     >
       {!first || !last ? (
@@ -171,23 +167,23 @@ function EquityPanel({ history, className }: { history: AccountHistory; classNam
               data={points}
               direction={directionOf(last.value - first.value)}
               label={t('curveLabel')}
-              formatValue={(value) => formatNumber(locale, value)}
-              formatAxisValue={(value) => formatCompact(locale, value)}
+              formatValue={(value) => format.number(value)}
+              formatAxisValue={(value) => format.compact(value)}
               formatAxisDate={format.monthDay}
               formatTooltipDate={(date) => format.date(date, 'long')}
             />
           </Suspense>
           <dl className="grid grid-cols-3 gap-4 border-t pt-4">
             <Stat label={t('curve.start')}>
-              {formatNumber(locale, first.value)}
+              {format.number(first.value)}
               {day(first)}
             </Stat>
             <Stat label={t('curve.high')}>
-              {extremes.high && formatNumber(locale, extremes.high.value)}
+              {extremes.high && format.number(extremes.high.value)}
               {day(extremes.high)}
             </Stat>
             <Stat label={t('curve.low')}>
-              {extremes.low && formatNumber(locale, extremes.low.value)}
+              {extremes.low && format.number(extremes.low.value)}
               {day(extremes.low)}
             </Stat>
           </dl>
@@ -200,19 +196,19 @@ function EquityPanel({ history, className }: { history: AccountHistory; classNam
 /** Stocks against cash as one bar, then each position's share of the equity as a ranked bar list in one hue. */
 function AllocationPanel({ value, names, className }: { value: AccountValue; names: ReadonlyMap<string, string>; className?: string }) {
   const { t } = useTranslation('account')
-  const locale = useLocale()
+  const format = useFormat()
   const rows = useMemo(() => holdings(value), [value])
   const stocks = value.equity ? value.market_value / value.equity : 0
   const cash = value.equity ? value.cash / value.equity : 0
   const widest = Math.max(...rows.map((row) => row.weight), 0)
 
   return (
-    <Panel className={className} title={t('allocation.title')} description={t('allocation.question')}>
+    <Panel className={className} title={t('allocation.title')}>
       <div className="space-y-4">
         <div className="space-y-2">
           <StackedBar
             className="h-2.5"
-            label={t('allocation.bar', { stocks: percent(locale, stocks), cash: percent(locale, cash) })}
+            label={t('allocation.bar', { stocks: format.percent(stocks), cash: format.percent(cash) })}
             segments={[
               { key: 'stocks', value: value.market_value, className: 'bg-brand' },
               { key: 'cash', value: Math.max(value.cash, 0), className: 'bg-faint/40' },
@@ -221,11 +217,11 @@ function AllocationPanel({ value, names, className }: { value: AccountValue; nam
           <p className="tabular flex justify-between text-xs">
             <span className="flex items-center gap-1.5">
               <span aria-hidden className="size-2 rounded-full bg-brand" />
-              {t('allocation.stocks')} {percent(locale, stocks)}
+              {t('allocation.stocks')} {format.percent(stocks)}
             </span>
             <span className="flex items-center gap-1.5">
               <span aria-hidden className="size-2 rounded-full bg-faint/40" />
-              {t('allocation.cash')} {percent(locale, cash)}
+              {t('allocation.cash')} {format.percent(cash)}
             </span>
           </p>
         </div>
@@ -235,11 +231,8 @@ function AllocationPanel({ value, names, className }: { value: AccountValue; nam
             <ul className="space-y-2.5">
               {rows.map((row) => (
                 <li key={row.stock_id} className="grid grid-cols-[minmax(0,1fr)_3.5rem] items-center gap-x-3 gap-y-1 text-sm">
-                  <span className="flex min-w-0 items-baseline gap-2">
-                    <span className="truncate">{names.get(row.stock_id) ?? row.stock_id}</span>
-                    <span className="font-mono text-xs text-muted-foreground">{row.stock_id}</span>
-                  </span>
-                  <span className="tabular text-right">{percent(locale, row.weight)}</span>
+                  <StockName stockId={row.stock_id} name={names.get(row.stock_id)} />
+                  <span className="tabular text-right">{format.percent(row.weight)}</span>
                   <span aria-hidden className="col-span-2 h-1.5 overflow-hidden rounded-full bg-muted">
                     <span className="block h-full rounded-full bg-brand/70" style={{ width: `${widest ? (row.weight / widest) * 100 : 0}%` }} />
                   </span>
@@ -262,7 +255,6 @@ interface PositionsProps {
 
 function Positions({ value, liveStockIds, names, className }: PositionsProps) {
   const { t } = useTranslation('account')
-  const locale = useLocale()
   const format = useFormat()
   const rows = useMemo(() => holdings(value), [value])
   const live = new Set(liveStockIds)
@@ -272,15 +264,10 @@ function Positions({ value, liveStockIds, names, className }: PositionsProps) {
       header: t('column.stock'),
       className: 'w-full max-w-0',
       cell: (row) => (
-        <Link to={paths.stock(row.stock_id)} className="stretched-link flex min-w-0 items-baseline gap-2 hover:text-brand focus-visible:text-brand">
-          <span className="truncate font-medium" title={names.get(row.stock_id)}>
-            {names.get(row.stock_id) ?? row.stock_id}
-          </span>
-          <span className="shrink-0 font-mono text-xs text-muted-foreground">{row.stock_id}</span>
-        </Link>
+        <StockLink stockId={row.stock_id} name={names.get(row.stock_id)} />
       ),
     },
-    { key: 'quantity', header: t('column.quantity'), numeric: true, from: 'md', cell: (row) => formatNumber(locale, row.quantity) },
+    { key: 'quantity', header: t('column.quantity'), numeric: true, from: 'md', cell: (row) => format.number(row.quantity) },
     { key: 'cost', header: t('column.averageCost'), numeric: true, from: 'md', cell: (row) => format.price(row.average_cost) },
     { key: 'price', header: t('column.markPrice'), numeric: true, from: 'sm', cell: (row) => format.price(row.mark_price) },
     {
@@ -292,12 +279,12 @@ function Positions({ value, liveStockIds, names, className }: PositionsProps) {
           {!row.marked_at
             ? t('unpriced')
             : live.has(row.stock_id)
-              ? t('realtime', { time: formatMonthDayTime(locale, row.marked_at) })
+              ? t('realtime', { time: format.monthDayTime(row.marked_at) })
               : t('dailyClose', { date: format.monthDay(row.marked_at) })}
         </span>
       ),
     },
-    { key: 'value', header: t('column.marketValue'), numeric: true, cell: (row) => formatNumber(locale, row.market_value) },
+    { key: 'value', header: t('column.marketValue'), numeric: true, cell: (row) => format.number(row.market_value) },
     {
       key: 'pnl',
       header: t('column.unrealized'),
@@ -309,7 +296,7 @@ function Positions({ value, liveStockIds, names, className }: PositionsProps) {
         </span>
       ),
     },
-    { key: 'weight', header: t('column.weight'), numeric: true, from: 'lg', cell: (row) => <span className="text-muted-foreground">{percent(locale, row.weight)}</span> },
+    { key: 'weight', header: t('column.weight'), numeric: true, from: 'lg', cell: (row) => <span className="text-muted-foreground">{format.percent(row.weight)}</span> },
   ]
 
   return (
@@ -347,7 +334,7 @@ function GetStarted({ className }: { className?: string }) {
  */
 function AsOfPanel() {
   const { t } = useTranslation('account')
-  const locale = useLocale()
+  const format = useFormat()
   const [draft, setDraft] = useState('')
   const [asOf, setAsOf] = useState<string | null>(null)
   const lookup = useAccountHistory(asOf, asOf !== null)
@@ -357,7 +344,7 @@ function AsOfPanel() {
     setAsOf(/^\d{4}-\d{2}-\d{2}$/.test(draft) ? draft : null)
   }
   return (
-    <Panel title={t('asOfLabel')} description={t('asOfQuestion')}>
+    <Panel title={t('asOfLabel')}>
       <form onSubmit={submit} className="flex flex-wrap items-center gap-2">
         <Input type="date" value={draft} onChange={(event) => setDraft(event.target.value)} aria-label={t('asOfLabel')} className="w-44" />
         <Button type="submit" variant="outline" disabled={busy}>
@@ -373,11 +360,11 @@ function AsOfPanel() {
           <ErrorState error={lookup.error} title={t('loadFailed')} onRetry={() => void lookup.refetch()} />
         ) : lookup.data.as_of ? (
           <div className="space-y-3">
-            <p className="tabular text-xs text-muted-foreground">{t('asOfTitle', { time: formatDateTime(locale, lookup.data.as_of.last_fill_at) })}</p>
+            <p className="tabular text-xs text-muted-foreground">{t('asOfTitle', { time: format.dateTime(lookup.data.as_of.last_fill_at) })}</p>
             <dl className="grid grid-cols-2 gap-4 @xl:grid-cols-4">
-              <Stat label={t('value.equity')}>{formatNumber(locale, lookup.data.as_of.value.equity)}</Stat>
-              <Stat label={t('value.cash')}>{formatNumber(locale, lookup.data.as_of.value.cash)}</Stat>
-              <Stat label={t('value.marketValue')}>{formatNumber(locale, lookup.data.as_of.value.market_value)}</Stat>
+              <Stat label={t('value.equity')}>{format.number(lookup.data.as_of.value.equity)}</Stat>
+              <Stat label={t('value.cash')}>{format.number(lookup.data.as_of.value.cash)}</Stat>
+              <Stat label={t('value.marketValue')}>{format.number(lookup.data.as_of.value.market_value)}</Stat>
               <Stat label={t('value.unrealized')}>
                 <ChangeValue value={lookup.data.as_of.value.unrealized_pnl} format="absolute" fractionDigits={0} />
               </Stat>

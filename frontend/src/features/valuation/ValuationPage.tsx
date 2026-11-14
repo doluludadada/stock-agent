@@ -2,10 +2,10 @@ import { Calculator, Info, Radar, Sparkles, TriangleAlert } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
-import { useLocale, useTranslation } from '@/i18n'
+import { useTranslation } from '@/i18n'
 import { paths } from '@/shared/config/paths'
 import { useErrorReason } from '@/shared/lib/error-reason'
-import { formatDate, formatNumber, formatPrice, formatSignedPercent } from '@/shared/lib/format'
+import { DASH, useFormat } from '@/shared/lib/format'
 import { isAcceptedList, parseStockIds } from '@/shared/lib/stock-ids'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
@@ -18,18 +18,20 @@ import { Panel } from '@/shared/ui/panel'
 import { Stat } from '@/shared/ui/stat'
 import { StateBlock } from '@/shared/ui/state-block'
 import { StockIdsProblem } from '@/shared/ui/stock-ids-problem'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/ui/tabs'
 import { RequireSignIn } from '@/shared/ui/require-sign-in'
+import { Segmented } from '@/shared/ui/segmented'
 import { useExplaining, useExplanation, useMarketValuation, useValuationScan, useValuedStocks, type ValuationReport } from './api'
 import { DEFAULT_MIN_UNDERVALUATION_PERCENT, DEFAULT_TARGET_PE, parseMinUndervaluation, parseTargetPe } from './model'
 
+const TABS = ['stocks', 'scan'] as const
+
 export function ValuationPage() {
   const { t } = useTranslation('valuation')
-  const [tab, setTab] = useState('stocks')
+  const [tab, setTab] = useState<(typeof TABS)[number]>('stocks')
   return (
     <div className="page-stack">
       <div className="space-y-3">
-        <PageHeader title={t('title')} description={t('description')} />
+        <PageHeader title={t('title')} />
         <p className="flex items-start gap-2 text-xs text-muted-foreground">
           <Info aria-hidden className="mt-px size-3.5 shrink-0 text-gold" />
           {t('notAdvice')}
@@ -38,20 +40,17 @@ export function ValuationPage() {
       <RequireSignIn layout="page" reason={t('signIn')}>
         <div className="card-grid xl:grid-cols-[minmax(0,1fr)_22rem]">
           <MarketReference className="xl:col-start-2 xl:row-start-1" />
-          <Panel className="xl:col-start-1 xl:row-span-2 xl:row-start-1" title={t('toolTitle')} description={t('toolQuestion')}>
-            <Tabs value={tab} onValueChange={setTab} className="gap-4">
-              <TabsList className="w-full md:w-fit">
-                <TabsTrigger value="stocks">{t('tab.stocks')}</TabsTrigger>
-                <TabsTrigger value="scan">{t('tab.scan')}</TabsTrigger>
-              </TabsList>
+          <Panel className="xl:col-start-1 xl:row-span-2 xl:row-start-1" title={t('toolTitle')}>
+            <div className="space-y-4">
+              <Segmented value={tab} onChange={setTab} label={t('toolTitle')} options={TABS.map((value) => ({ value, label: t(`tab.${value}`) }))} />
               {/* Both stay mounted, so what was typed and found in one is still there after a look at the other. */}
-              <TabsContent value="stocks" forceMount hidden={tab !== 'stocks'}>
+              <section aria-label={t('tab.stocks')} hidden={tab !== 'stocks'}>
                 <SpecificStocks />
-              </TabsContent>
-              <TabsContent value="scan" forceMount hidden={tab !== 'scan'}>
+              </section>
+              <section aria-label={t('tab.scan')} hidden={tab !== 'scan'}>
                 <Scan />
-              </TabsContent>
-            </Tabs>
+              </section>
+            </div>
           </Panel>
           <HowPanel className="xl:col-start-2 xl:row-start-2" />
         </div>
@@ -64,7 +63,7 @@ export function ValuationPage() {
 function HowPanel({ className }: { className?: string }) {
   const { t } = useTranslation('valuation')
   return (
-    <Panel className={className} title={t('how.title')} description={t('how.question')}>
+    <Panel fold="always" className={className} title={t('how.title')}>
       <ul className="space-y-3 text-sm text-pretty text-muted-foreground">
         <li>{t('how.fair')}</li>
         <li>{t('formula')}</li>
@@ -78,10 +77,10 @@ function HowPanel({ className }: { className?: string }) {
 
 function MarketReference({ className }: { className?: string }) {
   const { t } = useTranslation('valuation')
-  const locale = useLocale()
+  const format = useFormat()
   const market = useMarketValuation()
   return (
-    <Panel className={className} title={t('marketTitle')} description={market.data && t('lastSession', { date: formatDate(locale, market.data.last_closed_session) })}>
+    <Panel className={className} title={t('marketTitle')} description={market.data && t('lastSession', { date: format.date(market.data.last_closed_session) })}>
       {market.isPending ? (
         <p className="text-sm text-muted-foreground">{t('loadingMarket')}</p>
       ) : market.isError ? (
@@ -90,13 +89,13 @@ function MarketReference({ className }: { className?: string }) {
         <>
           <dl className="grid grid-cols-2 gap-x-4 gap-y-4 @md:grid-cols-3 @lg:gap-x-6">
             <Stat label={t('valued')} size="lg">
-              {formatNumber(locale, market.data.valued_stocks)}
+              {format.number(market.data.valued_stocks)}
             </Stat>
             <Stat label={t('medianPe')} size="lg">
-              {market.data.median_pe ? formatNumber(locale, market.data.median_pe.value, 2) : '—'}
+              {market.data.median_pe ? format.number(market.data.median_pe.value, 2) : DASH}
             </Stat>
             <Stat label={t('medianSample')} size="lg">
-              {market.data.median_pe ? formatNumber(locale, market.data.median_pe.sample_size) : '—'}
+              {market.data.median_pe ? format.number(market.data.median_pe.sample_size) : DASH}
             </Stat>
           </dl>
           {market.data.source_warnings.length > 0 && (
@@ -160,7 +159,7 @@ function SpecificStocks() {
 
 function Scan() {
   const { t } = useTranslation('valuation')
-  const locale = useLocale()
+  const format = useFormat()
   const [pe, setPe] = useState(DEFAULT_TARGET_PE)
   const [minimum, setMinimum] = useState(DEFAULT_MIN_UNDERVALUATION_PERCENT)
   const [request, setRequest] = useState<{ targetPe: number; minUndervaluation: number; technical: boolean } | null>(null)
@@ -201,7 +200,7 @@ function Scan() {
               {t('survivors', { count: scan.data.survivors.length })}{' '}
               {eliminated.length > 0 && (
                 <span className="text-muted-foreground">
-                  {t('eliminatedAt')} {eliminated.map(([reason, count]) => `${t(`elimination.${reason}`)} ${formatNumber(locale, count ?? 0)}`).join(' · ')}
+                  {t('eliminatedAt')} {eliminated.map(([reason, count]) => `${t(`elimination.${reason}`)} ${format.number(count ?? 0)}`).join(' · ')}
                 </span>
               )}
             </p>
@@ -240,7 +239,7 @@ function ReportCard({
   explain?: number
 }) {
   const { t } = useTranslation('valuation')
-  const locale = useLocale()
+  const format = useFormat()
   const { valuation } = report
   const industryMedian = valuation.industry_median_pe
   const eps = valuation.eps
@@ -255,24 +254,24 @@ function ReportCard({
       }
       aside={
         report.undervaluation !== null && (
-          <span className={cn('tabular text-sm font-semibold', report.undervaluation > 0 ? 'text-brand' : 'text-foreground')}>{formatSignedPercent(locale, report.undervaluation, 1)}</span>
+          <span className={cn('tabular text-sm font-semibold', report.undervaluation > 0 ? 'text-brand' : 'text-foreground')}>{format.signedPercent(report.undervaluation, 1)}</span>
         )
       }
     >
       <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm">
         <dt className="text-muted-foreground">{t('close')}</dt>
         <dd className="tabular text-right">
-          {valuation.close ? `${formatPrice(locale, valuation.close.close)} · ${formatDate(locale, valuation.close.ts)}` : t('noClose')}
+          {valuation.close ? `${format.price(valuation.close.close)} · ${format.date(valuation.close.ts)}` : t('noClose')}
           {!valuation.close_is_fresh && <span className="ml-1 text-gold">{t('staleClose')}</span>}
         </dd>
         <dt className="text-muted-foreground">{t('eps')}</dt>
-        <dd className="tabular text-right">{'value' in eps ? `${formatNumber(locale, eps.value, 2)} · ${eps.period_label} · ${t(`epsKind.${eps.kind}`)}` : t(`epsUnavailable.${eps.reason}`)}</dd>
+        <dd className="tabular text-right">{'value' in eps ? `${format.number(eps.value, 2)} · ${eps.period_label} · ${t(`epsKind.${eps.kind}`)}` : t(`epsUnavailable.${eps.reason}`)}</dd>
         <dt className="text-muted-foreground">{t('currentPe')}</dt>
-        <dd className="tabular text-right">{typeof valuation.current_pe === 'string' ? t(`peNotApplicable.${valuation.current_pe}`) : formatNumber(locale, valuation.current_pe.value, 2)}</dd>
+        <dd className="tabular text-right">{typeof valuation.current_pe === 'string' ? t(`peNotApplicable.${valuation.current_pe}`) : format.number(valuation.current_pe.value, 2)}</dd>
         {industryMedian && (
           <>
             <dt className="text-muted-foreground">{t('industryMedian', { industry: valuation.stock.industry })}</dt>
-            <dd className="tabular text-right">{formatNumber(locale, industryMedian.value, 2)}</dd>
+            <dd className="tabular text-right">{format.number(industryMedian.value, 2)}</dd>
           </>
         )}
       </dl>
@@ -280,9 +279,9 @@ function ReportCard({
         <dl className="mt-3 grid grid-cols-3 divide-x rounded-lg border text-center">
           {(['conservative', 'base', 'optimistic'] as const).map((name) => (
             <div key={name} className="px-2 py-2">
-              <dt className="text-xs text-muted-foreground">{t(`scenario.${name}`, { pe: formatNumber(locale, scenarios[name].target_pe, 1) })}</dt>
-              <dd className="tabular text-sm font-semibold">{formatPrice(locale, scenarios[name].fair_price)}</dd>
-              <dd className="tabular text-xs text-muted-foreground">{formatSignedPercent(locale, scenarios[name].undervaluation, 1)}</dd>
+              <dt className="text-xs text-muted-foreground">{t(`scenario.${name}`, { pe: format.number(scenarios[name].target_pe, 1) })}</dt>
+              <dd className="tabular text-sm font-semibold">{format.price(scenarios[name].fair_price)}</dd>
+              <dd className="tabular text-xs text-muted-foreground">{format.signedPercent(scenarios[name].undervaluation, 1)}</dd>
             </div>
           ))}
         </dl>

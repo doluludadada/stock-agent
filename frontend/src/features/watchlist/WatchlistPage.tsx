@@ -9,6 +9,7 @@ import { directionOf } from '@/shared/lib/direction'
 import { useFormat } from '@/shared/lib/format'
 import { useErrorReason } from '@/shared/lib/error-reason'
 import { Badge } from '@/shared/ui/badge'
+import { StockLink } from '@/shared/ui/stock-name'
 import { BreadthBar } from '@/shared/ui/breadth-bar'
 import { Button } from '@/shared/ui/button'
 import { ChangeValue } from '@/shared/ui/change-value'
@@ -49,7 +50,6 @@ export function WatchlistPage() {
     <div className="page-stack">
       <PageHeader
         title={t('title')}
-        description={entries.data ? t('description', { count: rows.length }) : t('lead')}
         actions={entries.data && rows.length > 0 && addControl}
       />
       <RequireSignIn reason={t('signIn')} layout="page">
@@ -67,18 +67,14 @@ export function WatchlistPage() {
   )
 }
 
-/**
- * The list beside its summary from 1280 px; above it, narrower. Each stock's quote comes from the shared market data,
- * so a stock opened from the list is already loaded.
- */
+/** The list, then how it did in the latest session, beside it from 1280 px. */
 function Watchlist({ rows }: { rows: WatchRow[] }) {
   const codes = useMemo(() => rows.map((row) => row.stockId), [rows])
   const { quotes, trends } = useStockQuotes(codes)
   return (
     <div className="card-grid xl:grid-cols-[minmax(0,1fr)_22rem]">
-      <DayPanel rows={rows} quotes={quotes} className="xl:col-start-2 xl:row-start-1" />
-      <StockList rows={rows} quotes={quotes} trends={trends} className="xl:col-start-1 xl:row-span-2 xl:row-start-1" />
-      <SourcesPanel className="hidden xl:col-start-2 xl:row-start-2 xl:flex" />
+      <StockList rows={rows} quotes={quotes} trends={trends} />
+      <DayPanel rows={rows} quotes={quotes} />
     </div>
   )
 }
@@ -179,15 +175,9 @@ function StockList({ rows, quotes, trends, className }: StockListProps) {
       header: t('column.stock'),
       className: 'w-full max-w-0',
       cell: (row) => (
-        <div className="min-w-0 py-1">
-          <Link to={paths.stock(row.stockId)} className="stretched-link flex min-w-0 items-baseline gap-2 hover:text-brand focus-visible:text-brand">
-            <span className="truncate font-medium" title={row.name ?? undefined}>
-              {row.name ?? t('unknownName')}
-            </span>
-            <span className="shrink-0 font-mono text-xs text-muted-foreground">{row.stockId}</span>
-          </Link>
-          <p className="mt-0.5 truncate text-xs text-muted-foreground lg:hidden">{sourceText(row.entries, t, format)}</p>
-        </div>
+        <StockLink stockId={row.stockId} name={row.name} unnamed={t('unknownName')}>
+          <span className="truncate text-xs text-muted-foreground lg:hidden">{sourceText(row.entries, t, format)}</span>
+        </StockLink>
       ),
     },
     { key: 'trend', header: t('column.trend'), from: 'md', cell: (row) => <Trend state={trends.get(row.stockId)} /> },
@@ -249,7 +239,6 @@ function StockList({ rows, quotes, trends, className }: StockListProps) {
       className={className}
       flush
       title={t('list.title')}
-      description={t('count', { count: shown.length, total: rows.length })}
       aside={
         <Button type="button" variant={editing ? 'secondary' : 'ghost'} size="sm" aria-pressed={editing} aria-controls={listId} onClick={() => setEditing(!editing)}>
           <PencilLine aria-hidden />
@@ -310,28 +299,6 @@ function Close({ state, latest }: { state: Loadable<StockQuote> | undefined; lat
       <span className="font-semibold">{format.price(state.value.close)}</span>
       {older && <span className="text-xs font-normal text-gold">{format.closeOn(state.value.session)}</span>}
     </span>
-  )
-}
-
-/** Where the list comes from, beside it on a wide screen. */
-function SourcesPanel({ className }: { className?: string }) {
-  const { t } = useTranslation('watchlist')
-  const sources = watchlistSources(useAllows('realtime_quotes'))
-  return (
-    <Panel className={className} title={t('sources.title')} description={t('sources.question', { count: sources.length })}>
-      <dl className="space-y-3.5 text-sm">
-        {sources.map((type) => (
-          <div key={type} className="space-y-1">
-            <dt>
-              <Badge variant="outline" className="font-normal">
-                {t(`type.${type}`)}
-              </Badge>
-            </dt>
-            <dd className="text-pretty text-muted-foreground">{t(`sources.${type}`)}</dd>
-          </div>
-        ))}
-      </dl>
-    </Panel>
   )
 }
 

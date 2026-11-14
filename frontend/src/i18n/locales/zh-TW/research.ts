@@ -2,22 +2,20 @@ import type en from '../en/research'
 import type { DictionaryShape } from '../../types'
 
 const research: DictionaryShape<typeof en> = {
-  signIn: '登入後用你的策略評估這檔股票',
+  signIn: '登入後查看你的策略評估',
   back: '返回',
   noBars: '這檔股票還沒有日線資料。',
   insufficient: '資料不足',
   loadFailed: '無法載入這檔股票。',
   technicalFailed: '無法載入技術評估。',
   market: { twse: '上市', tpex: '上櫃' },
-  notFound: { title: '找不到代號 {{code}} 的上市櫃股票', description: '請從上方搜尋列以代號或名稱搜尋。' },
+  notFound: { title: '找不到代號 {{code}} 的上市櫃股票', description: '請以代號或名稱搜尋。' },
   chart: {
     title: '價格與成交量',
-    question: '每日收盤、均線與成交量',
     sma: '{{period}} 日均線',
   },
   day: {
     title: '當日行情',
-    question: '{{date}} 交易日',
     open: '開盤',
     high: '最高',
     low: '最低',
@@ -27,7 +25,6 @@ const research: DictionaryShape<typeof en> = {
   },
   year: {
     title: '一年區間',
-    question: '近 {{count}} 個交易日',
     low: '一年最低',
     high: '一年最高',
     fromHigh: '距最高',
@@ -44,9 +41,6 @@ const research: DictionaryShape<typeof en> = {
     soft: '扣分項目',
     observations: '加分檢查',
     noneListed: '無',
-    details: '查看評估明細',
-    detailsTitle: '評估明細',
-    detailsQuestion: '哪些條件排除這檔股票、扣分或加分',
     detected: '有出現',
     notDetected: '未出現',
   },
@@ -58,11 +52,10 @@ const research: DictionaryShape<typeof en> = {
   },
   financials: {
     title: '財務數據',
-    question: '取自證交所與櫃買中心的開放資料，本站自開站起逐期保存',
     failed: '無法載入財務數據。',
     none: {
       title: '尚未保存財務數據',
-      description: '證交所與櫃買中心的開放資料只提供最近一季與最近一個月，本站從開站那天起保存。',
+      description: '本站從開站那天起逐期保存。',
     },
     month: '{{month}}營收',
     revenue: '營業收入',
@@ -82,16 +75,14 @@ const research: DictionaryShape<typeof en> = {
       equity: '權益',
       book_value_per_share: '每股淨值（元）',
     },
-    units: '損益項目與每股盈餘為年初至該季底的累計，資產負債項目為該季底的數字；淨利與權益為歸屬於母公司業主者。金額單位為新臺幣。',
+    units: '損益為年初至該季底累計；金額單位為新臺幣。',
   },
   analysis: {
     title: '財務分析',
-    question: '從本站保存的營收、獲利與評價數據，看這檔股票的現況',
     failed: '無法載入財務分析。',
     yearOverYear: '年增率',
     reading: {
       title: '數據解讀',
-      rules: '每一句都是依固定規則從下方數據得出，沒有任何一句由 AI 撰寫。',
       kind: {
         revenue_accelerating_one: '營收加速中：近 {{short}} 個月平均營收已連續 {{count}} 個月高於近 {{long}} 個月平均。',
         revenue_accelerating_other: '營收加速中：近 {{short}} 個月平均營收已連續 {{count}} 個月高於近 {{long}} 個月平均。',
@@ -134,7 +125,6 @@ const research: DictionaryShape<typeof en> = {
       month: '月份',
       revenue: '營業收入',
       acceleration: '營收加速度',
-      explained: '營收加速度是月排行使用的指標：近 {{short}} 個月平均營收除以近 {{long}} 個月平均營收，高於 ×1 表示近期營收走在長期平均之前。金額單位為新臺幣。',
       short: '目前保存 {{count}} 個月，還算不出加速度：需要連續 {{long}} 個月。',
     },
     earnings: {
@@ -149,8 +139,6 @@ const research: DictionaryShape<typeof en> = {
       operatingMargin: '營業利益率',
       netMargin: '淨利率',
       debtRatio: '負債比率',
-      explained: '每股盈餘單位為元。累計每股盈餘為年初至該季底的累計，並與去年同期比較；單季每股盈餘需要前一季的數字才算得出。「—」表示本站未保存該數字，或該產業的財報格式沒有這個項目。',
-      filed: '開放資料未涵蓋的季度，其每股盈餘取自本站於 {{date}} 從公開資訊觀測站取得的財報。',
     },
     valuation: {
       title: '評價與自身歷史比較',
@@ -160,36 +148,31 @@ const research: DictionaryShape<typeof en> = {
       noPe: '交易所未提供本益比，虧損的公司即是如此。',
       short: '只保存 {{count}} 個交易日，中位數需要 {{needed}} 個。',
       median: '{{count}} 個交易日的中位數 {{median}}',
-      explained: '數字取自證交所與櫃買中心的每日報表，自 {{first}} 起保存。開放資料只提供最近一個交易日，所以歷史從本站開始保存那天起算。',
     },
   },
   score: {
     title: '排行分數',
-    question: '月營收排行給這檔股票的分數',
     decided: '{{date}} 依 {{month}} 營收決定',
-    loading: '伺服器啟動後第一次計算分數要讀取所有保存的日線，可能需要一分鐘。',
-    unavailable: '尚無分數：本站的日線資料還沒有涵蓋月排行的任何一個決策日。',
+    loading: '啟動後第一次計算約需一分鐘。',
+    unavailable: '尚無分數：日線資料還沒有涵蓋決策日。',
   },
   revenue: {
     title: '月營收',
-    question: '最新月份、與去年同月相比，以及近幾個月相對全年的走勢',
     latest: '{{month}}營收',
     acceleration: '近 {{short}} 個月平均／近 {{long}} 個月平均',
-    held: '保存 {{count}} 個月，最新一筆於 {{date}} 公布。金額單位為新臺幣。',
     chart: '近 {{count}} 個月營收長條圖；下方月營收表列出每一筆數字。',
   },
   brief: {
     title: 'AI 摘要',
-    question: '這家公司在做什麼，以及本站保存的資料和近期漲跌的關係',
     loadFailed: '無法載入摘要。',
-    aiGenerated: 'AI 生成',
-    writtenAt: '台北時間 {{time}} 寫成',
-    window: '涵蓋 {{first}} 到 {{last}} 的交易日。',
-    windowChange: '這段期間收盤價：',
+    aiGenerated: 'AI 生成，可能有錯',
+    writtenAt: '台北時間 {{time}}',
+    window: '{{first}} 到 {{last}}。',
+    windowChange: '收盤價',
     noWindow: '這篇摘要沒有保存對應的交易日區間。',
     writtenIn: {
-      'zh-TW': '這篇摘要以繁體中文寫成：本站每天為所有人寫同一篇，語言由管理員設定。',
-      en: '這篇摘要以英文寫成：本站每天為所有人寫同一篇，語言由管理員設定。',
+      'zh-TW': '以繁體中文寫成。',
+      en: '以英文寫成。',
     },
     part: {
       company: '這家公司在做什麼',
@@ -212,19 +195,18 @@ const research: DictionaryShape<typeof en> = {
       title: '引用的資料',
       onPage: '（在本頁查看）',
     },
-    describes: '這段文字由 AI 依本站保存的資料寫成，只是描述資料，可能有錯，不是投資建議。',
     earlier: '{{date}} 的舊摘要',
     none: {
       title: '今天還沒有摘要',
-      description: '每檔股票每天只寫一篇，由登入的使用者提出後才寫。',
+      description: '每檔每天一篇，登入後提出才寫。',
     },
     write: '寫今天的摘要',
     retry: '再試一次',
-    writeNote: '這會用掉你今天的一次 AI 使用次數，寫好後所有人都看得到。',
+    writeNote: '會用掉你今天的一次 AI 次數。',
     signIn: '登入後就能請 AI 寫今天的摘要。',
     writing: {
       title: '正在寫今天的摘要',
-      description: 'AI 通常在半分鐘內完成，寫好後會顯示在這裡。',
+      description: '通常半分鐘內完成。',
     },
     failed: {
       title: '今天的摘要沒有寫成',
@@ -232,20 +214,16 @@ const research: DictionaryShape<typeof en> = {
     },
     limit: {
       title: '今天新寫摘要的檔數已達上限',
-      description: '台灣時間午夜後恢復，已經寫好的摘要仍然可以閱讀。',
+      description: '台灣時間午夜後恢復。',
     },
   },
   news: {
     title: '新聞與討論',
-    question: {
-      articles: '公司重大訊息、證交所新聞、財經新聞與 PTT 股板文章，由新到舊',
-      openData: '開放資料中的公司重大訊息與證交所新聞，由新到舊',
-    },
     failed: '無法載入新聞。',
     none: {
       title: '近期沒有這檔股票的消息',
-      articles: '沒有找到它的重大訊息、新聞或討論文章。',
-      openData: '開放資料中近幾週沒有它的重大訊息或證交所新聞。',
+      articles: '沒有找到重大訊息、新聞或討論。',
+      openData: '近幾週沒有重大訊息或證交所新聞。',
     },
     source: {
       twse_mops: '重大訊息',

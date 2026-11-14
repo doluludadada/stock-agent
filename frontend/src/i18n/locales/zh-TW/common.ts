@@ -5,7 +5,6 @@ const common: DictionaryShape<typeof en> = {
   brand: { home: 'Stock Agent 首頁', tagline: '台股研究' },
   home: {
     title: '今日',
-    description: '{{date}}。大盤、本月排名、你的持股與觀察清單，一頁看完。',
   },
   skipToContent: '跳到主要內容',
   stockIds: { invalid: '不是股票代號：{{ids}}', tooMany: '每次最多 {{max}} 檔股票。' },
@@ -27,10 +26,9 @@ const common: DictionaryShape<typeof en> = {
     holdings: '我的持股',
     settings: '我的設定',
     admin: '系統設定',
-    users: '使用者',
+    users: '使用者管理',
     tabs: '常用頁面',
-    section: { today: '今日', research: '研究', mine: '我的', tools: '其他工具', admin: '管理' },
-    note: { tools: '輔助分析工具。' },
+    section: { today: '今日', research: '研究', mine: '我的', tools: '輔助分析工具', admin: '管理' },
     tab: { home: '今日', ranking: '排名', holdings: '持股', search: '搜尋', more: '更多' },
     moreTitle: '所有頁面',
   },
@@ -134,12 +132,8 @@ const common: DictionaryShape<typeof en> = {
       no_revenue_history: '本站沒有保存計算營收加速度所需的每個月營收。',
       short_price_history: '本站保存的日線天數不足以計算高點。',
     },
-    method: '分數是一檔股票在月營收排行中的名次百分位，由營收加速度與接近一年高點的程度兩項因子決定。它只衡量這兩件事，不是對股價的預測；這套方法的依據是回測。',
+    method: '月排名中的名次百分位，由營收加速度與接近一年高點的程度決定，不是預測。',
     open: '查看月排行',
-  },
-  technicalNote: {
-    text: '技術策略是輔助分析工具，目前的重心是月營收排名。',
-    link: '前往月營收排名',
   },
   footer: {
     notAdvice: '本站的分析、分數與決策僅供研究參考，不構成投資建議；投資請自行判斷並承擔風險。',
@@ -160,8 +154,7 @@ const common: DictionaryShape<typeof en> = {
   },
   routeError: {
     title: '這個頁面發生問題',
-    description: '重新載入頁面即可繼續。',
-    reload: '重新載入市場總覽',
+    description: '回到首頁再試一次。',
   },
 }
 

@@ -1,7 +1,6 @@
 const admin = {
   signIn: 'Sign in as an administrator to change the system settings',
   title: 'System settings',
-  description: 'A change applies as soon as you save it.',
   loadFailed: 'The settings could not be read.',
   search: {
     label: 'Find a setting',

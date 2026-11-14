@@ -1,7 +1,7 @@
 import { Search } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
-import { useLocale, useTranslation } from '@/i18n'
-import { formatDate, formatPrice } from '@/shared/lib/format'
+import { useTranslation } from '@/i18n'
+import { useFormat } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { Button } from './button'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from './command'
@@ -14,7 +14,7 @@ import { useStockSearch } from '@/shared/api'
  */
 export function StockSearchCommand({ onSelect, children, className }: { onSelect: (stockId: string) => void; children?: ReactNode; className?: string }) {
   const { t } = useTranslation()
-  const locale = useLocale()
+  const format = useFormat()
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState('')
   const [selectedFor, setSelectedFor] = useState<string | undefined>()
@@ -40,8 +40,8 @@ export function StockSearchCommand({ onSelect, children, className }: { onSelect
                 <span className="w-14 font-mono text-xs text-muted-foreground">{stock.stockId}</span>
                 <span className="flex-1 truncate">{stock.name}</span>
                 {stock.close !== null && (
-                  <span className="tabular text-xs" title={stock.session ? t('search.closeOn', { date: formatDate(locale, stock.session) }) : undefined}>
-                    {formatPrice(locale, stock.close)}
+                  <span className="tabular text-xs" title={stock.session ? t('search.closeOn', { date: format.date(stock.session) }) : undefined}>
+                    {format.price(stock.close)}
                   </span>
                 )}
               </CommandItem>

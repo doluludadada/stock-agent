@@ -22,7 +22,7 @@ export function HoldingsToday({ className }: { className?: string }) {
     </Button>
   )
   return (
-    <Panel className={className} title={t('title')} description={t('summary.question')} aside={<PanelLink to={paths.holdings}>{t('today.all')}</PanelLink>}>
+    <Panel className={className} title={t('title')} aside={<PanelLink to={paths.holdings}>{t('today.all')}</PanelLink>}>
       <RequireSignIn reason={t('signIn')}>
         {holdings.isPending ? (
           <Skeleton className="h-32 rounded-lg" />
@@ -35,7 +35,7 @@ export function HoldingsToday({ className }: { className?: string }) {
         ) : holdings.data.holdings.length === 0 ? (
           <StateBlock icon={Briefcase} title={t('empty.title')} description={t('today.empty')} action={enter} />
         ) : (
-          <PortfolioFigures holdings={holdings.data} />
+          <PortfolioFigures holdings={holdings.data} brief />
         )}
       </RequireSignIn>
     </Panel>

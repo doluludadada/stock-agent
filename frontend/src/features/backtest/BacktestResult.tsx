@@ -1,12 +1,11 @@
 import { ArrowDown, ArrowUp, ArrowUpDown, Info, ReceiptText, SearchX } from 'lucide-react'
 import { lazy, Suspense, useId, useMemo, useState } from 'react'
-import { Link } from 'react-router'
-import { useLocale, useTranslation } from '@/i18n'
-import { paths } from '@/shared/config/paths'
+import { useTranslation } from '@/i18n'
 import { PRICE_TONE } from '@/shared/lib/direction'
-import { formatDateTime, formatNumber, formatSignedPercent, useFormat } from '@/shared/lib/format'
+import { DASH, useFormat } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
+import { StockLink } from '@/shared/ui/stock-name'
 import { Button } from '@/shared/ui/button'
 import { ChangeValue } from '@/shared/ui/change-value'
 import { DataTable, type Column } from '@/shared/ui/data-table'
@@ -45,23 +44,22 @@ export function BacktestResult({ backtest, onReuse, onTryBuyScore }: BacktestRes
 /** The verdict in one or two sentences; the same words lead the page and name a saved backtest for screen readers. */
 function useVerdictText(backtest: Backtest, verdict: Verdict) {
   const { t } = useTranslation('backtest')
-  const locale = useLocale()
   const format = useFormat()
   const period = t('period', { first: format.date(backtest.first_session), last: format.date(backtest.last_session) })
-  const ratio = formatSignedPercent(locale, verdict.ratio)
+  const ratio = format.signedPercent(verdict.ratio)
   const result = verdict.traded
-    ? t(`verdict.result.${verdict.outcome}`, { period, amount: formatNumber(locale, Math.abs(verdict.profit)), ratio })
-    : t('verdict.noTrades', { period, cash: formatNumber(locale, backtest.final_equity) })
+    ? t(`verdict.result.${verdict.outcome}`, { period, amount: format.number(Math.abs(verdict.profit)), ratio })
+    : t('verdict.noTrades', { period, cash: format.number(backtest.final_equity) })
   const index =
     verdict.benchmark === null || verdict.lead === null
       ? t('verdict.index.none')
-      : t(`verdict.index.${verdict.lead.side}`, { benchmark: formatSignedPercent(locale, verdict.benchmark), points: formatNumber(locale, verdict.lead.points * 100, 1) })
+      : t(`verdict.index.${verdict.lead.side}`, { benchmark: format.signedPercent(verdict.benchmark), points: format.number(verdict.lead.points * 100, 1) })
   return { result, index }
 }
 
 function VerdictPanel({ backtest, onReuse, onTryBuyScore }: BacktestResultProps) {
   const { t } = useTranslation('backtest')
-  const locale = useLocale()
+  const format = useFormat()
   const verdict = useMemo(() => verdictOf(backtest), [backtest])
   const text = useVerdictText(backtest, verdict)
   const wins = winRate(backtest)
@@ -70,7 +68,7 @@ function VerdictPanel({ backtest, onReuse, onTryBuyScore }: BacktestResultProps)
   return (
     <Panel
       title={t('result.title')}
-      description={t('result.ran', { strategy: backtest.strategy_name, sessions, time: formatDateTime(locale, backtest.created_at) })}
+      description={t('result.ran', { strategy: backtest.strategy_name, sessions, time: format.dateTime(backtest.created_at) })}
       aside={
         <Button type="button" variant="outline" size="sm" onClick={onReuse}>
           {t('result.reuse')}
@@ -79,7 +77,7 @@ function VerdictPanel({ backtest, onReuse, onTryBuyScore }: BacktestResultProps)
     >
       <div className="space-y-5">
         <div className="space-y-2">
-          <p className={cn('figure', PRICE_TONE[verdict.outcome])}>{formatSignedPercent(locale, verdict.ratio)}</p>
+          <p className={cn('figure', PRICE_TONE[verdict.outcome])}>{format.signedPercent(verdict.ratio)}</p>
           <p className="max-w-3xl text-title font-medium text-pretty" data-testid="verdict">
             {text.result} <span className="font-normal text-muted-foreground">{text.index}</span>
           </p>
@@ -87,8 +85,8 @@ function VerdictPanel({ backtest, onReuse, onTryBuyScore }: BacktestResultProps)
         {!verdict.traded && <NoTrades buyScore={inputs.buy_score} onTryBuyScore={onTryBuyScore} />}
         <dl className="grid grid-cols-2 gap-x-6 gap-y-4 border-t pt-4 @xl:grid-cols-4">
           <Stat size="lg" label={t('stat.finalEquity')}>
-            {formatNumber(locale, backtest.final_equity)}
-            <span className="block text-xs font-normal text-muted-foreground">{t('stat.from', { cash: formatNumber(locale, inputs.initial_cash) })}</span>
+            {format.number(backtest.final_equity)}
+            <span className="block text-xs font-normal text-muted-foreground">{t('stat.from', { cash: format.number(inputs.initial_cash) })}</span>
           </Stat>
           <Stat size="lg" label={t('stat.totalReturn')}>
             <ChangeValue value={backtest.total_return_pct} format="percent" />
@@ -97,34 +95,34 @@ function VerdictPanel({ backtest, onReuse, onTryBuyScore }: BacktestResultProps)
             </span>
           </Stat>
           <Stat size="lg" label={t('stat.benchmark')}>
-            {backtest.benchmark_return_pct === null ? '—' : <ChangeValue value={backtest.benchmark_return_pct} format="percent" />}
+            {backtest.benchmark_return_pct === null ? DASH : <ChangeValue value={backtest.benchmark_return_pct} format="percent" />}
             <span className="block text-xs font-normal text-muted-foreground">{t('stat.sameSessions')}</span>
           </Stat>
           <Stat size="lg" label={t('stat.maxDrawdown')}>
-            {formatSignedPercent(locale, -backtest.max_drawdown_pct)}
+            {format.signedPercent(-backtest.max_drawdown_pct)}
             <span className="block text-xs font-normal text-muted-foreground">{t('stat.fromHigh')}</span>
           </Stat>
           <Stat size="lg" label={t('stat.trades')}>
-            {formatNumber(locale, backtest.trade_count)}
+            {format.number(backtest.trade_count)}
             {wins !== null && (
               <span className="block text-xs font-normal text-muted-foreground">
-                {t('stat.wins', { wins: backtest.winning_trades, rate: formatNumber(locale, wins * 100, 0) })}
+                {t('stat.wins', { wins: backtest.winning_trades, rate: format.number(wins * 100, 0) })}
               </span>
             )}
           </Stat>
           <Stat size="lg" label={t('stat.averageHeld')}>
-            {backtest.average_held_sessions === null ? '—' : t('sessions', { value: formatNumber(locale, backtest.average_held_sessions, 1) })}
+            {backtest.average_held_sessions === null ? DASH : t('sessions', { value: format.number(backtest.average_held_sessions, 1) })}
           </Stat>
           <Stat size="lg" label={t('stat.costs')}>
-            {formatNumber(locale, backtest.fee + backtest.tax)}
+            {format.number(backtest.fee + backtest.tax)}
             <span className="block text-xs font-normal text-muted-foreground">
-              {t('stat.feeAndTax', { fee: formatNumber(locale, backtest.fee), tax: formatNumber(locale, backtest.tax) })}
+              {t('stat.feeAndTax', { fee: format.number(backtest.fee), tax: format.number(backtest.tax) })}
             </span>
           </Stat>
           <Stat size="lg" label={t('stat.scores')}>
             {t('stat.buySell', { buy: inputs.buy_score, sell: inputs.sell_score })}
             <span className="block text-xs font-normal text-muted-foreground">
-              {t('stat.rules', { stopLoss: formatNumber(locale, backtest.stop_loss_pct * 100, 1), risk: formatNumber(locale, backtest.risk_per_trade_pct * 100, 1) })}
+              {t('stat.rules', { stopLoss: format.number(backtest.stop_loss_pct * 100, 1), risk: format.number(backtest.risk_per_trade_pct * 100, 1) })}
             </span>
           </Stat>
         </dl>
@@ -155,19 +153,18 @@ function NoTrades({ buyScore, onTryBuyScore }: { buyScore: number; onTryBuyScore
 
 function CurvePanel({ backtest }: { backtest: Backtest }) {
   const { t } = useTranslation('backtest')
-  const locale = useLocale()
   const format = useFormat()
   const points = useMemo(() => returnCurve(backtest).map((point) => ({ date: point.date, value: point.strategy, benchmark: point.benchmark })), [backtest])
   return (
-    <Panel title={t('curve.title')} description={t('curve.question')} aside={<span className="tabular">{t('period', { first: format.date(backtest.first_session), last: format.date(backtest.last_session) })}</span>}>
+    <Panel title={t('curve.title')} aside={<span className="tabular">{t('period', { first: format.date(backtest.first_session), last: format.date(backtest.last_session) })}</span>}>
       <Suspense fallback={<Skeleton className="h-(--chart-price-height) rounded-xl" />}>
         <ComparisonChart
           data={points}
           valueLabel={t('curve.strategy')}
           benchmarkLabel={t('curve.benchmark')}
           baseline={0}
-          formatValue={(ratio) => formatSignedPercent(locale, ratio)}
-          formatAxisValue={(ratio) => formatSignedPercent(locale, ratio, 0)}
+          formatValue={(ratio) => format.signedPercent(ratio)}
+          formatAxisValue={(ratio) => format.signedPercent(ratio, 0)}
           formatAxisDate={format.monthDay}
           formatTooltipDate={(date) => format.date(date, 'long')}
         />
@@ -205,7 +202,6 @@ const EXIT_TONE: Record<TradeRow['exit'], string> = {
 
 function TradesPanel({ backtest }: { backtest: Backtest }) {
   const { t } = useTranslation('backtest')
-  const locale = useLocale()
   const format = useFormat()
   const tableId = useId()
   const [sort, setSort] = useState<TradeSort>({ key: 'bought', descending: false })
@@ -244,23 +240,19 @@ function TradesPanel({ backtest }: { backtest: Backtest }) {
       header: t('trades.column.stock'),
       className: 'w-full max-w-0',
       cell: (row) => (
-        <Link to={paths.stock(row.stockId)} className="flex min-h-11 min-w-0 flex-col justify-center hover:text-brand focus-visible:text-brand md:min-h-0">
-          <span className="flex min-w-0 items-baseline gap-2">
-            <span className="truncate font-medium">{row.name ?? row.stockId}</span>
-            {row.name !== null && <span className="shrink-0 font-mono text-xs text-muted-foreground">{row.stockId}</span>}
-          </span>
+        <StockLink stockId={row.stockId} name={row.name} stretched={false}>
           <span className="tabular truncate text-xs text-muted-foreground lg:hidden">
             {t('trades.line', { bought: format.monthDay(row.boughtOn), cost: format.price(row.averageCost), sold: sold(row) })}
           </span>
-        </Link>
+        </StockLink>
       ),
     },
     { key: 'bought', header: sortable('bought'), numeric: true, from: 'lg', cell: (row) => day(row.boughtOn, row.averageCost) },
     { key: 'sold', header: sortable('sold'), numeric: true, from: 'lg', cell: (row) => (row.sale ? day(row.sale.on, row.sale.at) : <span className="text-muted-foreground">{t('exit.open')}</span>) },
-    { key: 'quantity', header: t('trades.column.quantity'), numeric: true, from: 'xl', cell: (row) => formatNumber(locale, row.quantity) },
+    { key: 'quantity', header: t('trades.column.quantity'), numeric: true, from: 'xl', cell: (row) => format.number(row.quantity) },
     { key: 'pnl', header: sortable('pnl'), numeric: true, cell: (row) => <ChangeValue value={row.pnl} format="absolute" fractionDigits={0} /> },
     { key: 'return', header: sortable('return'), numeric: true, from: 'sm', cell: (row) => <ChangeValue value={row.returnRatio} format="percent" /> },
-    { key: 'held', header: sortable('held'), numeric: true, from: 'md', cell: (row) => formatNumber(locale, row.heldSessions) },
+    { key: 'held', header: sortable('held'), numeric: true, from: 'md', cell: (row) => format.number(row.heldSessions) },
     {
       key: 'exit',
       header: t('trades.column.exit'),
@@ -277,7 +269,6 @@ function TradesPanel({ backtest }: { backtest: Backtest }) {
     <Panel
       flush
       title={t('trades.title')}
-      description={t('trades.question')}
       aside={rows.length > 0 && <span className="tabular">{t('trades.count', { count: rows.length })}</span>}
       footer={
         rows.length > TRADES_SHOWN && (

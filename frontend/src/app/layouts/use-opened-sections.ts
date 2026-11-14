@@ -1,7 +1,5 @@
 import { useCallback, useState } from 'react'
-import type { NavSection } from './navigation'
-
-type SectionKey = NavSection['key']
+import type { SectionKey } from '../pages'
 
 export const OPENED_SECTIONS_STORAGE_KEY = 'stock-agent.nav.opened'
 

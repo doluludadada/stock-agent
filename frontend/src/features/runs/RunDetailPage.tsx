@@ -2,12 +2,13 @@ import { ArrowLeft, ArrowRight, ClipboardList, ReceiptText, SearchX } from 'luci
 import type { UseQueryResult } from '@tanstack/react-query'
 import { useMemo, type ReactNode } from 'react'
 import { Link } from 'react-router'
-import { useLocale, useTranslation } from '@/i18n'
+import { useTranslation } from '@/i18n'
 import { usePageTitle } from '@/shared/lib/page-title'
 import { paths } from '@/shared/config/paths'
 import { isApiError, useAllows, useShows } from '@/shared/api'
-import { formatDateTime, formatNumber, formatPrice } from '@/shared/lib/format'
+import { DASH, useFormat } from '@/shared/lib/format'
 import { ArchiveWarmUp } from '@/shared/ui/archive-warm-up'
+import { StockLink } from '@/shared/ui/stock-name'
 import { Badge } from '@/shared/ui/badge'
 import { DataTable, type Column } from '@/shared/ui/data-table'
 import { ErrorState } from '@/shared/ui/error-state'
@@ -104,7 +105,7 @@ function RunDetail({ runId, renderWatch, ruleName }: RunDetailPageProps) {
 
 function Header({ run }: { run: Run }) {
   const { t } = useTranslation('runs')
-  const locale = useLocale()
+  const format = useFormat()
   const summary = run.summary
   const title = summary ? t(`workflow.${summary.workflow}`) : t('unrecorded')
   usePageTitle(title)
@@ -120,7 +121,7 @@ function Header({ run }: { run: Run }) {
         )}
       </div>
       <p className="tabular flex flex-wrap gap-x-3 text-xs text-muted-foreground">
-        {summary && <span>{t('timing', { start: formatDateTime(locale, summary.start_time), end: summary.end_time ? formatDateTime(locale, summary.end_time) : '—' })}</span>}
+        {summary && <span>{t('timing', { start: format.dateTime(summary.start_time), end: summary.end_time ? format.dateTime(summary.end_time) : DASH })}</span>}
         <span className="font-mono">{run.run_id}</span>
       </p>
       {summary?.followed_run_id && (
@@ -148,7 +149,7 @@ function Summary({ summary }: { summary: NonNullable<Run['summary']> }) {
     ['stale', summary.stale_market_data_count],
   ] as const
   return (
-    <Panel title={t('summaryTitle')} description={t('summaryQuestion')}>
+    <Panel title={t('summaryTitle')}>
       <dl className="grid grid-cols-3 gap-x-6 gap-y-4 @xl:grid-cols-4 @4xl:grid-cols-7">
         {counters.map(([key, value]) => (
           <Stat key={key} label={t(`counter.${key}`)} size="lg">
@@ -170,30 +171,27 @@ interface ReportsProps extends Pick<RunDetailPageProps, 'renderWatch' | 'ruleNam
 /** One card per stock: its scores, the price the run read, the rules that excluded it and the AI's summary. */
 function Reports({ reports, buyFrom, renderWatch, ruleName }: ReportsProps) {
   const { t } = useTranslation('runs')
-  const locale = useLocale()
+  const format = useFormat()
   return (
-    <Panel title={t('reportsTitle')} description={t('reportsQuestion', { count: reports.length })}>
+    <Panel title={t('reportsTitle')}>
       <ul className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,20rem),1fr))] gap-3">
         {reports.map((report) => (
           <li key={report.stock_id} className="flex flex-col gap-3 rounded-xl border bg-background/60 p-4">
             <div className="flex items-start justify-between gap-3">
-              <Link to={paths.stock(report.stock_id)} className="flex min-h-11 min-w-0 flex-col justify-center hover:text-brand md:min-h-0">
-                <span className="truncate font-semibold">{report.name ?? report.stock_id}</span>
-                <span className="font-mono text-xs text-muted-foreground">{report.stock_id}</span>
-              </Link>
+              <StockLink stockId={report.stock_id} name={report.name} stretched={false} />
               <div className="flex shrink-0 items-center gap-1">
                 {buyFrom && <ManualBuy runId={buyFrom} stockId={report.stock_id} name={report.name} />}
                 {renderWatch?.(report.stock_id, report.name ?? report.stock_id)}
               </div>
             </div>
             <dl className="grid grid-cols-3 gap-3 rounded-lg bg-muted/60 px-3 py-2.5">
-              <Stat label={t('score.technical')}>{report.technical_report?.score ?? '—'}</Stat>
-              <Stat label={t('score.ai')}>{report.ai_report?.score ?? '—'}</Stat>
-              <Stat label={t('score.composite')}>{report.composite_score ?? '—'}</Stat>
+              <Stat label={t('score.technical')}>{report.technical_report?.score ?? DASH}</Stat>
+              <Stat label={t('score.ai')}>{report.ai_report?.score ?? DASH}</Stat>
+              <Stat label={t('score.composite')}>{report.composite_score ?? DASH}</Stat>
             </dl>
             <p className="tabular text-xs text-muted-foreground">
-              {report.current_price !== null ? formatPrice(locale, report.current_price) : '—'}
-              {report.latest_market_data_at && ` · ${formatDateTime(locale, report.latest_market_data_at)}`}
+              {report.current_price !== null ? format.price(report.current_price) : DASH}
+              {report.latest_market_data_at && ` · ${format.dateTime(report.latest_market_data_at)}`}
             </p>
             {report.technical_report && report.technical_report.hard_failures.length > 0 && (
               <div className="space-y-1.5">
@@ -217,7 +215,7 @@ function Reports({ reports, buyFrom, renderWatch, ruleName }: ReportsProps) {
 
 function Signals({ query, marks }: { query: UseQueryResult<Signal[]>; marks: ReadonlyMap<string, FollowMark> | undefined }) {
   const { t } = useTranslation('runs')
-  const locale = useLocale()
+  const format = useFormat()
   if (query.isPending) return <Skeleton className="h-32 rounded-2xl" />
   if (query.isError) return <ErrorState error={query.error} title={t('signalsFailed')} onRetry={() => void query.refetch()} className="rounded-2xl border bg-card" />
   const signals = query.data
@@ -234,8 +232,8 @@ function Signals({ query, marks }: { query: UseQueryResult<Signal[]>; marks: Rea
     { key: 'action', header: t('column.action'), cell: (signal) => t(`action.${signal.action}`) },
     ...(marks ? [{ key: 'follow', header: t('column.follow'), cell: (signal: Signal) => <FollowBadge mark={marks.get(signal.decision_id)} /> }] : []),
     { key: 'score', header: t('column.score'), numeric: true, cell: (signal) => signal.score },
-    { key: 'quantity', header: t('column.quantity'), numeric: true, from: 'sm', cell: (signal) => formatNumber(locale, signal.quantity) },
-    { key: 'price', header: t('column.price'), numeric: true, from: 'sm', cell: (signal) => formatPrice(locale, signal.price_at_signal) },
+    { key: 'quantity', header: t('column.quantity'), numeric: true, from: 'sm', cell: (signal) => format.number(signal.quantity) },
+    { key: 'price', header: t('column.price'), numeric: true, from: 'sm', cell: (signal) => format.price(signal.price_at_signal) },
     { key: 'reason', header: t('column.reason'), from: 'lg', className: 'w-full min-w-48 whitespace-normal text-xs text-muted-foreground', cell: (signal) => signal.reason },
   ]
   return (
@@ -261,7 +259,7 @@ function FollowBadge({ mark }: { mark: FollowMark | undefined }) {
 
 function Orders({ query }: { query: UseQueryResult<Order[]> }) {
   const { t } = useTranslation('runs')
-  const locale = useLocale()
+  const format = useFormat()
   if (query.isPending) return <Skeleton className="h-24 rounded-2xl" />
   if (query.isError) return <ErrorState error={query.error} title={t('ordersFailed')} onRetry={() => void query.refetch()} className="rounded-2xl border bg-card" />
   const orders = query.data
@@ -269,9 +267,9 @@ function Orders({ query }: { query: UseQueryResult<Order[]> }) {
     { key: 'stock', header: t('column.stock'), className: 'font-mono', cell: (order) => order.stock_id },
     { key: 'action', header: t('column.action'), cell: (order) => t(`action.${order.action}`) },
     { key: 'status', header: t('column.status'), cell: (order) => t(`orderStatus.${order.status}`) },
-    { key: 'quantity', header: t('column.quantity'), numeric: true, cell: (order) => `${formatNumber(locale, order.filled_quantity)} / ${formatNumber(locale, order.quantity)}` },
-    { key: 'price', header: t('column.price'), numeric: true, from: 'sm', cell: (order) => (order.limit_price !== null ? formatPrice(locale, order.limit_price) : '—') },
-    { key: 'costs', header: t('column.costs'), numeric: true, from: 'md', cell: (order) => formatNumber(locale, order.fee + order.tax) },
+    { key: 'quantity', header: t('column.quantity'), numeric: true, cell: (order) => `${format.number(order.filled_quantity)} / ${format.number(order.quantity)}` },
+    { key: 'price', header: t('column.price'), numeric: true, from: 'sm', cell: (order) => (order.limit_price !== null ? format.price(order.limit_price) : DASH) },
+    { key: 'costs', header: t('column.costs'), numeric: true, from: 'md', cell: (order) => format.number(order.fee + order.tax) },
     { key: 'reason', header: t('column.reason'), from: 'lg', className: 'w-full min-w-48 whitespace-normal text-xs text-muted-foreground', cell: (order) => order.reason ?? '' },
   ]
   return (

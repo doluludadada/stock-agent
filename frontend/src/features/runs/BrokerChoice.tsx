@@ -1,7 +1,7 @@
 import { ShieldAlert } from 'lucide-react'
-import { useLocale, useTranslation } from '@/i18n'
+import { useTranslation } from '@/i18n'
 import type { Broker, BrokerOffer } from '@/shared/api'
-import { formatNumber } from '@/shared/lib/format'
+import { useFormat } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { Segmented } from '@/shared/ui/segmented'
 
@@ -14,7 +14,7 @@ interface BrokerChoiceProps {
 /** Which account a run orders on, shown unless the mock account is all there is: a real broker always shows its server and limits. */
 export function BrokerChoice({ offers, value, onChange }: BrokerChoiceProps) {
   const { t } = useTranslation('runs')
-  const locale = useLocale()
+  const format = useFormat()
   if (offers.every((offer) => offer.broker === 'mock')) return null
   const chosen = offers.find((offer) => offer.broker === value)
   return (
@@ -33,7 +33,7 @@ export function BrokerChoice({ offers, value, onChange }: BrokerChoiceProps) {
             {t(chosen.simulation ? 'broker.server.simulation' : 'broker.server.live', { name: t(`common:broker.name.${chosen.broker}`) })}
           </p>
           <p className="text-xs text-pretty text-muted-foreground">
-            {t('broker.limits', { order: formatNumber(locale, chosen.max_order_value), daily: formatNumber(locale, chosen.max_daily_buy_value) })}
+            {t('broker.limits', { order: format.number(chosen.max_order_value), daily: format.number(chosen.max_daily_buy_value) })}
           </p>
         </div>
       )}

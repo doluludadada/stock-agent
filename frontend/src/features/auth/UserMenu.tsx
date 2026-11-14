@@ -1,9 +1,8 @@
-import { ChevronDown, LogIn, LogOut, Settings2, SlidersHorizontal, UsersRound } from 'lucide-react'
+import { ChevronDown, LogIn, LogOut, type LucideIcon } from 'lucide-react'
 import { Link, useLocation } from 'react-router'
 import { toast } from 'sonner'
 import { useTranslation } from '@/i18n'
-import { hasPermission, useSession } from '@/shared/api'
-import { paths } from '@/shared/config/paths'
+import { useSession } from '@/shared/api'
 import { cn } from '@/shared/lib/utils'
 import { Avatar } from '@/shared/ui/avatar'
 import { Button } from '@/shared/ui/button'
@@ -28,11 +27,14 @@ export function RoleBadge({ kind, className }: { kind: Role; className?: string 
   )
 }
 
-/**
- * The header's account control: who is signed in, their role, My settings, the administrator's pages to a user with the
- * permission, and sign-out; sign-in otherwise.
- */
-export function UserMenu({ onSignedOut }: { onSignedOut: () => void }) {
+export interface MenuLink {
+  to: string
+  icon: LucideIcon
+  label: string
+}
+
+/** The header's account control: who is signed in, their role, the pages the shell lists here, and sign-out; sign-in otherwise. */
+export function UserMenu({ links: pages, onSignedOut }: { links: readonly MenuLink[]; onSignedOut: () => void }) {
   const { t } = useTranslation('auth')
   const current = useSession()
   const links = useAuthLinks()
@@ -60,8 +62,6 @@ export function UserMenu({ onSignedOut }: { onSignedOut: () => void }) {
   }
 
   const { user } = current
-  const manageUsers = hasPermission(current, 'manage_users')
-  const editSettings = hasPermission(current, 'edit_system_settings')
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -83,28 +83,14 @@ export function UserMenu({ onSignedOut }: { onSignedOut: () => void }) {
           </span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem asChild>
-          <Link to={paths.mySettings}>
-            <SlidersHorizontal aria-hidden />
-            {t('settings.title')}
-          </Link>
-        </DropdownMenuItem>
-        {manageUsers && (
-          <DropdownMenuItem asChild>
-            <Link to={paths.users}>
-              <UsersRound aria-hidden />
-              {t('menu.users')}
+        {pages.map(({ to, icon: Icon, label }) => (
+          <DropdownMenuItem key={to} asChild>
+            <Link to={to}>
+              <Icon aria-hidden />
+              {label}
             </Link>
           </DropdownMenuItem>
-        )}
-        {editSettings && (
-          <DropdownMenuItem asChild>
-            <Link to={paths.adminSettings}>
-              <Settings2 aria-hidden />
-              {t('menu.settings')}
-            </Link>
-          </DropdownMenuItem>
-        )}
+        ))}
         <DropdownMenuSeparator />
         <DropdownMenuItem disabled={signOut.isPending} onSelect={() => signOut.mutate(undefined, { onSuccess: onSignedOut, onError: () => toast.error(t('menu.signOutFailed')) })}>
           <LogOut aria-hidden />

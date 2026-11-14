@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useShows } from './features'
 import { apiRequest } from './http'
+import { SITE_STATE_STALE_MS } from './query-keys'
 import type { components } from './schema.gen'
 import { useIsSignedIn } from './session'
 
@@ -44,7 +45,7 @@ export function useBrokers() {
     queryKey: brokersKey,
     queryFn: async ({ signal }) => (await apiRequest('get', '/v1/account/brokers', { signal })).flatMap(offerOf),
     enabled: signedIn,
-    staleTime: 60_000,
+    staleTime: SITE_STATE_STALE_MS,
     refetchOnWindowFocus: true,
   })
 }
