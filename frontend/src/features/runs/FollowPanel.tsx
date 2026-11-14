@@ -8,6 +8,7 @@ import { isApiError, useAudience, type Schemas } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
 import { formatMonthDayTime, formatNumber, formatPrice } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
+import { useErrorReason } from '@/shared/lib/error-reason'
 import { Button } from '@/shared/ui/button'
 import { ConfirmDialog } from '@/shared/ui/confirm-dialog'
 import { DataTable, type Column } from '@/shared/ui/data-table'
@@ -74,6 +75,7 @@ interface FollowActionProps extends Omit<FollowPanelProps, 'follow'> {
 
 function FollowAction({ runId, follow, pricing, quoted, decisions, names }: FollowActionProps) {
   const { t } = useTranslation('runs')
+  const reason = useErrorReason()
   const locale = useLocale()
   const navigate = useNavigate()
   const start = useFollowRun(runId)
@@ -89,7 +91,7 @@ function FollowAction({ runId, follow, pricing, quoted, decisions, names }: Foll
     if (code === 'outside_follow_window') return t('follow.refused.window')
     if (code === 'realtime_quotes_unavailable') return t('follow.refused.quotes')
     if (code === 'run_in_progress') return t('busy')
-    return t('follow.failed', { reason: error.message })
+    return t('follow.failed', { reason: reason(error) })
   }
   const confirm = () => {
     setConfirming(false)

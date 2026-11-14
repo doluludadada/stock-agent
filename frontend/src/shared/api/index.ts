@@ -1,8 +1,9 @@
 export { ApiError, apiRequest, isApiError, type ApiErrorKind, type ErrorCode, type FieldProblem } from './http'
-export { hasPermission, session, useHasPermission, useIsSignedIn, useSession, type Permission, type Session, type User } from './session'
+export { hasPermission, isSameSession, sentInSession, session, useHasPermission, useIsSignedIn, useSession, type Permission, type Session, type User } from './session'
 export { runResultsKey, strategyResultsKey } from './query-keys'
 export { allows, useAllows, useAudience, type Audience, type Capability } from './audience'
-export { brokersKey, chosenOffer, MOCK_ONLY, useBrokers, type Broker, type BrokerOffer } from './brokers'
+export { authStatusKey, shows, useAuthStatus, useShown, useShows, type Feature, type FeatureVisibility, type Visibilities } from './features'
+export { brokersKey, chosenOffer, useBrokerOffers, useBrokers, type Broker, type BrokerOffer } from './brokers'
 export {
   marketKeys,
   useArchiveStatus,

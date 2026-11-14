@@ -43,6 +43,7 @@ describe('the stock page’s checks', () => {
           })
         }
         if (url === '/v1/market/stocks/2330/financials') return json({ stock_id: '2330', quarters: [], monthly_revenues: [] })
+        if (/\/(analysis|news|ranking)$/.test(url)) return new Response(JSON.stringify({ detail: 'not held', code: 'not_found' }), { status: 404 })
         if (url.startsWith('/v1/market/stocks/2330')) return json({ stock: { stock_id: '2330', name: '台積電', market: 'twse', today: bars[1] }, bars, notes: [] })
         return json([])
       }),

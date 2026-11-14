@@ -24,6 +24,7 @@ from b_application.config.app_config import AppConfig
 from b_application.config.settings_loader import (
     InvalidSettingsError,
     get_project_root,
+    settings_notices,
     settings_revision,
     settings_texts,
     startup_settings,
@@ -194,13 +195,15 @@ class RuntimeSwitch:
         changes: Sequence[SettingChange],
         *,
         password: SecretStr | None,
+        google_confirmation: str | None = None,
         client: str,
         host: str,
     ) -> list[SettingsEdit]:
         """
         The settings form's save, running at once or refused with nothing written and the app as it was. The request's
         runtime must still be current: a page that read settings the server no longer runs is a conflict. The
-        administrator's Pipeline reviews the changes and confirms the password; changes that change no file end there.
+        administrator's Pipeline reviews the changes and confirms the password, or for an administrator without one the
+        fresh Google authentication `google_confirmation` names; changes that change no file end there.
         Work that started earlier finishes on the runtime it holds.
         """
         async with self.lock:
@@ -208,7 +211,7 @@ class RuntimeSwitch:
                 raise SettingsConflictError("The server reloaded its settings after this page read them; read them again")
 
             pipeline = opened.runtime.pipeline_for(administrator, ExecutionProvider.MOCK)
-            edits = await pipeline.review_settings_form(administrator, changes, host, password, client)
+            edits = await pipeline.review_settings_form(administrator, changes, host, password, google_confirmation, client)
 
             if not edits:
                 return []
@@ -292,6 +295,10 @@ async def open_runtime_switch(project_root: Path | None = None) -> AsyncGenerato
     root = project_root or get_project_root()
     config = startup_settings(root)
     process = create_process_state(config)
+
+    for notice in settings_notices(root):
+        process.logger.warning(notice)
+
     switch = RuntimeSwitch(lambda candidate: open_runtime(candidate, process), root, process.logger)
     await switch.start(config)
 
@@ -330,7 +337,8 @@ async def collect_daily_data(switch: RuntimeSwitch) -> None:
     settings, on the current runtime: first the TWSE and TPEX open data the OpenAPI serves only for its latest session,
     day, month or quarter (closes, material information, EPS statistics, valuation ratios, balance sheets, income
     statements, monthly revenue and TWSE news) into the archive, then, on a personal site, the exchanges' daily reports
-    of the sessions its history cache lacks. Before them, a Shioaji login that is down is made again
+    of the sessions its history cache lacks, then the news of the stocks users hold or watch into the article store.
+    Before them, a Shioaji login that is down is made again
     (RuntimeSwitch.log_in_again). A step never stops it on an error of its own: it logs it, goes on to the next and
     tries again at the next interval. The lifespan cancels it at shutdown and waits until the step it stopped has ended.
     """
@@ -344,6 +352,7 @@ async def collect_daily_data(switch: RuntimeSwitch) -> None:
             for step, failure in (
                 (pipeline.archive_daily_closes, "The open data could not be archived"),
                 (pipeline.refresh_daily_history, "The exchanges' daily history could not be refreshed"),
+                (pipeline.refresh_article_store, "The article store could not be refreshed"),
             ):
                 try:
                     await step()

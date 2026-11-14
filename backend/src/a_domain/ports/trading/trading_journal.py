@@ -6,7 +6,7 @@ from a_domain.model.system.stats import SystemStats
 from a_domain.model.trading.account import AccountSnapshot
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.signal import TradeSignal
-from a_domain.types.enums import ExecutionProvider
+from a_domain.types.enums import ExecutionProvider, Workflow
 from a_domain.types.ids import RunId
 
 
@@ -74,6 +74,13 @@ class ITradingJournal(Protocol):
         `limit` orders of runs on `broker` that filled at least one share, created at or after `since`, newest first,
         after the `offset` newest. Each comes with the run whose decision it carried out: a follow's order with the run
         it followed, every other order with its own run.
+        """
+        ...
+
+    async def first_fill(self, workflow: Workflow, broker: ExecutionProvider, since: datetime | None) -> datetime | None:
+        """
+        When the first order of a run of `workflow` on `broker` that filled at least one share was created, at or after
+        `since` (ever for None). None when no such order filled.
         """
         ...
 

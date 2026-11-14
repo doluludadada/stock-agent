@@ -10,7 +10,7 @@ class IDailyHistorySource(Protocol):
     """
     The exchanges' own reports of each date, which a personal site reads its daily history from without a login: every
     listed stock's official bar of one session, with its change from the session's reference price, each exchange's own
-    index (the TAIEX, the TPEx Index) per session, and TWSE's ex-right references. A failed request raises.
+    index (the TAIEX, the TPEx Index) per session, and each exchange's ex-right references. A failed request raises.
     """
 
     async def session_bars(self, session: date) -> dict[str, Ohlcv]:
@@ -26,11 +26,11 @@ class IDailyHistorySource(Protocol):
         """The market's own index per session from first to last, oldest first, each with its official change."""
         ...
 
-    async def ex_right_references(self, first: date, last: date) -> dict[tuple[str, date], float]:
+    async def ex_right_references(self, market: MarketType, first: date, last: date) -> dict[tuple[str, date], float]:
         """
-        TWSE's reference price of each stock with a four-digit code on each of its ex-right or ex-dividend days from first
-        to last, by stock id and day, in one request: the price its closing quotes compare to no reference that day. A
-        range without such a day has none.
+        The exchange's reference price of each of its stocks with a four-digit code on each of its ex-right or
+        ex-dividend days from first to last, by stock id and day, in one request: the price its closing quotes compare
+        to no reference that day. A range without such a day has none.
         """
         ...
 

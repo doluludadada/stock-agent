@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { useTranslation } from '@/i18n'
 import { paths } from '@/shared/config/paths'
 import { isApiError } from '@/shared/api'
+import { useErrorReason } from '@/shared/lib/error-reason'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { ConfirmDialog } from '@/shared/ui/confirm-dialog'
@@ -72,6 +73,7 @@ function NewStrategyMenu() {
 
 /** The one strategy every workflow uses, picked among the built-ins, and the owner's own strategies below it. */
 function Library({ onView }: { onView: (strategy: Strategy) => void }) {
+  const reason = useErrorReason()
   const { t } = useTranslation('strategies')
   const labels = useStrategyLabels()
   const settings = useStrategySettings()
@@ -93,7 +95,7 @@ function Library({ onView }: { onView: (strategy: Strategy) => void }) {
     save.mutate(next, {
       onSuccess: (saved) => toast.success(success, { description: t('toast.saved', { revision: saved.revision }) }),
       onError: (error) =>
-        isApiError(error, 'conflict') ? toast.error(t('toast.conflict')) : toast.error(t('toast.failed', { reason: error.message })),
+        isApiError(error, 'conflict') ? toast.error(t('toast.conflict')) : toast.error(t('toast.failed', { reason: reason(error) })),
     })
 
   const chooseBuiltIn = (id: string) => {
@@ -192,7 +194,7 @@ function MyStrategy({ strategy, active, busy, deleteBlocked, onActivate, onDelet
 
   return (
     <li aria-label={name} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
-      <div className="min-w-0 flex-1">
+      <div className="min-w-48 flex-1">
         <div className="flex items-center gap-2">
           <span className="truncate font-medium">{name}</span>
           {active && <Badge>{t('inUse')}</Badge>}
@@ -224,12 +226,17 @@ function MyStrategy({ strategy, active, busy, deleteBlocked, onActivate, onDelet
           className="text-muted-foreground hover:text-destructive"
           onClick={onDelete}
           disabled={busy || blocked !== undefined}
-          title={blocked}
-          aria-label={blocked ? `${t('action.deleteNamed', { name })}: ${blocked}` : t('action.deleteNamed', { name })}
+          aria-label={t('action.deleteNamed', { name })}
+          aria-describedby={blocked ? `${strategy.id}-delete-blocked` : undefined}
         >
           <Trash2 aria-hidden />
         </Button>
       </div>
+      {blocked && (
+        <p id={`${strategy.id}-delete-blocked`} className="w-full text-xs text-pretty text-muted-foreground">
+          {blocked}
+        </p>
+      )}
     </li>
   )
 }

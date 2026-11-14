@@ -9,7 +9,7 @@ import { Button } from '@/shared/ui/button'
 import { Field } from '@/shared/ui/field'
 import { Input } from '@/shared/ui/input'
 import { Panel } from '@/shared/ui/panel'
-import { useRunBacktest } from './api'
+import { useRunBacktest, useRunFailure } from './api'
 import { parseDraft, periodPresets, refusedFields, SCORE_RANGE, type Bounds, type Draft, type DraftField } from './model'
 
 interface BacktestFormProps {
@@ -29,14 +29,15 @@ export function BacktestForm({ strategyName, bounds, draft, onDraft, running, no
   const { t } = useTranslation('backtest')
   const format = useFormat()
   const run = useRunBacktest()
+  const failure = useRunFailure()
   const [attempted, setAttempted] = useState(false)
   const parsed = parseDraft(draft, bounds)
   const available = { first: format.date(bounds.first), last: format.date(bounds.last) }
 
-  const refusal = isApiError(run.error) ? run.error : null
+  const refusal = isApiError(failure.error) ? failure.error : null
   const periodRefused = refusal?.code === 'backtest_period_unavailable'
   const refused = refusal ? refusedFields(refusal.problems) : {}
-  const failed = run.isError && !periodRefused && Object.keys(refused).length === 0
+  const failed = failure.error !== null && !periodRefused && Object.keys(refused).length === 0
   const failedKind = refusal?.kind ?? 'server'
 
   const problem = (field: DraftField): string | null => {
@@ -44,7 +45,7 @@ export function BacktestForm({ strategyName, bounds, draft, onDraft, running, no
     return found ? t(`problem.${found}`, { ...available, ...SCORE_RANGE }) : (refused[field] ?? null)
   }
   const change = (field: DraftField, value: string) => {
-    if (run.isError) run.reset()
+    if (failure.error) failure.dismiss()
     onDraft({ ...draft, [field]: value })
   }
   const submit = (event: FormEvent) => {
@@ -61,7 +62,7 @@ export function BacktestForm({ strategyName, bounds, draft, onDraft, running, no
           <span className="block text-xs text-muted-foreground">{t('form.strategy')}</span>
           <span className="flex flex-wrap items-baseline justify-between gap-x-3">
             <span className="font-medium">{strategyName}</span>
-            <Link to={paths.strategies} className="text-xs text-brand underline-offset-4 hover:underline">
+            <Link to={paths.strategies} className="tap text-xs text-brand underline-offset-4 hover:underline">
               {t('form.changeStrategy')}
             </Link>
           </span>
@@ -80,7 +81,7 @@ export function BacktestForm({ strategyName, bounds, draft, onDraft, running, no
                   variant={chosen ? 'secondary' : 'outline'}
                   aria-pressed={chosen}
                   onClick={() => {
-                    if (run.isError) run.reset()
+                    if (failure.error) failure.dismiss()
                     onDraft({ ...draft, first: preset.first, last: preset.last })
                   }}
                 >

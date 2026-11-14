@@ -1,3 +1,4 @@
+import asyncio
 import re
 from collections import Counter
 from datetime import date, datetime, timedelta
@@ -20,13 +21,14 @@ from a_domain.ports.market.daily_close_archive import (
     ArchivedSession,
     IDailyCloseArchive,
     OpenDataDownload,
+    ValuationRatios,
 )
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.rules.market.listing import HistoryAdjustmentRule
 from a_domain.rules.trading.ranking import ListedHistory, ListedHistoryRule
 from a_domain.types.enums import FinancialStatement, MarketIndex, MarketType
-from a_domain.types.errors import RealtimeQuotesUnavailable
+from a_domain.types.errors import ArchiveSaveRefused, RealtimeQuotesUnavailable
 from a_domain.types.values import FiscalQuarter
 from b_application.config.sources_config import ExchangeSources
 from c_infrastructure.database.db_connector import UPSERT, DatabaseConnector
@@ -39,6 +41,7 @@ from c_infrastructure.database.models.daily_close_archive_dto import (
     MonthlyRevenueDTO,
     ValuationRatiosDTO,
     YearToDateEpsDTO,
+    replacing,
 )
 
 
@@ -47,8 +50,9 @@ class SqlDailyCloseArchive(IDailyCloseArchive):
     The archive in daily_close_archive, index_close_archive, material_information_archive, quarter_eps_archive,
     valuation_ratio_archive, financial_report_archive, monthly_revenue_archive and exchange_news_archive, shared by every
     owner. A save is one upsert per table, so the Web API's timer and `just archive-closes` saving the same data at once
-    never collide, and each table commits on its own: a table the database refuses is logged by its name, and the others
-    are still saved, since the source serves the rest only until its next period. A read of history takes the sessions
+    never collide, and each table commits on its own: a table the database refuses is logged by its name, the others
+    are still saved, since the source serves the rest only until its next period, and the save then raises
+    ArchiveSaveRefused with the tables refused, so no caller counts them as saved. A read of history takes the sessions
     of its window's two dates, as the market clock dates them, and adjusts each stock's bars of each market it was
     listed on against the index closes of the sessions that hold that market's closes; a read of news takes the
     announcements and the TWSE news of the last `material_information_days`, a news item dated by its day and stamped
@@ -74,6 +78,7 @@ class SqlDailyCloseArchive(IDailyCloseArchive):
     @override
     async def save(self, download: OpenDataDownload) -> None:
         session_of = self._market_clock.to_trading_date
+        refused: list[str] = []
         rows = {
             DailyCloseDTO: [
                 DailyCloseDTO.from_domain(stock, bar, session_of(bar.ts)) for stock in download.stocks for bar in stock.ohlcv
@@ -93,13 +98,14 @@ class SqlDailyCloseArchive(IDailyCloseArchive):
             if saved := [dto.model_dump() for dto in dtos]:
                 try:
                     async with self._db.get_session() as session:
-                        statement = UPSERT[session.get_bind().dialect.name](table)
-                        keys = [column.name for column in statement.table.primary_key]
-                        replaced = {name: statement.excluded[name] for name in saved[0] if name not in keys}
-                        await session.execute(statement.on_conflict_do_update(index_elements=keys, set_=replaced), saved)
+                        await session.execute(replacing(UPSERT[session.get_bind().dialect.name], table), saved)
                         await session.commit()
                 except DBAPIError as error:
                     self._logger.error(f"Could not save {table.__tablename__}; the other tables are saved on their own: {error.orig}")
+                    refused.append(table.__tablename__)
+
+        if refused:
+            raise ArchiveSaveRefused(f"The database refused {', '.join(refused)}; the archive's other tables are saved.")
 
     @override
     async def sessions(self) -> list[ArchivedSession]:
@@ -172,13 +178,22 @@ class SqlDailyCloseArchive(IDailyCloseArchive):
 
     @override
     async def revenue_history(self, first: date, last: date) -> dict[tuple[str, int, int], float | None]:
-        """Read as plain columns: the ranking reads every month of every company, which the table's rows take seconds to build."""
+        """
+        Read as plain columns, a year a statement: the ranking reads every month of every company, which the table's
+        rows take seconds to build, and one statement over them all keeps the event loop from every other request
+        while its answer is read.
+        """
         months = col(MonthlyRevenueDTO.year) * 12 + col(MonthlyRevenueDTO.month)
         columns = (MonthlyRevenueDTO.stock_id, MonthlyRevenueDTO.year, MonthlyRevenueDTO.month, MonthlyRevenueDTO.revenue)
         statement = select(*map(col, columns)).where(months.between(first.year * 12 + first.month, last.year * 12 + last.month))
+        held_years = select(col(MonthlyRevenueDTO.year)).distinct().where(col(MonthlyRevenueDTO.year).between(first.year, last.year))
 
         async with self._db.get_session() as session:
-            return {(stock_id, year, month): revenue for stock_id, year, month, revenue in await session.execute(statement)}
+            return {
+                (stock_id, year, month): revenue
+                for held_year in (await session.execute(held_years)).scalars().all()
+                for stock_id, year, month, revenue in await session.execute(statement.where(col(MonthlyRevenueDTO.year) == held_year))
+            }
 
     @override
     async def revenue_fingerprint(self) -> tuple[object, ...]:
@@ -216,6 +231,17 @@ class SqlDailyCloseArchive(IDailyCloseArchive):
             for quarter in sorted(filed.keys() | eps.keys())
         ]
         return quarters, [revenue.to_domain() for revenue in revenue_rows]
+
+    @override
+    async def valuation_history(self, stock_id: str) -> list[ValuationRatios]:
+        statement = (
+            select(ValuationRatiosDTO)
+            .where(col(ValuationRatiosDTO.stock_id) == stock_id)
+            .order_by(col(ValuationRatiosDTO.session_date))
+        )
+
+        async with self._db.get_session() as session:
+            return [row.to_domain() for row in (await session.execute(statement)).scalars()]
 
     @override
     async def official_changes(self, stock_ids: list[str], first: date, last: date) -> dict[tuple[str, date], float]:
@@ -269,17 +295,32 @@ class SqlDailyCloseArchive(IDailyCloseArchive):
 
     @override
     async def listed_history(self) -> ListedHistory | None:
-        statement = select(DailyCloseDTO).order_by(col(DailyCloseDTO.stock_id), col(DailyCloseDTO.session_date))
+        """Read as plain columns and placed in a worker thread, so the event loop answers other requests meanwhile."""
+        figures = (
+            DailyCloseDTO.open,
+            DailyCloseDTO.high,
+            DailyCloseDTO.low,
+            DailyCloseDTO.close,
+            DailyCloseDTO.volume,
+            DailyCloseDTO.change,
+        )
+        listed = select(col(DailyCloseDTO.stock_id), col(DailyCloseDTO.session_date), *map(col, figures))
 
         async with self._db.get_session() as session:
-            rows = (await session.execute(statement)).scalars().all()
+            rows = (await session.execute(listed.order_by(col(DailyCloseDTO.stock_id), col(DailyCloseDTO.session_date)))).all()
 
-        history: dict[str, list[Ohlcv]] = {}
+        def placed() -> ListedHistory:
+            history: dict[str, list[Ohlcv]] = {}
 
-        for row in rows:
-            history.setdefault(row.stock_id, []).append(row.to_domain(self._market_clock.session_close(row.session_date)))
+            for stock_id, day, open_price, high, low, close, volume, change in rows:
+                stamp = self._market_clock.session_close(day)
+                history.setdefault(stock_id, []).append(
+                    Ohlcv(ts=stamp, open=open_price, high=high, low=low, close=close, volume=volume, change=change)
+                )
 
-        return ListedHistoryRule().apply(history, {}, self._market_clock.to_trading_date) if history else None
+            return ListedHistoryRule().apply(history, {}, self._market_clock.to_trading_date)
+
+        return await asyncio.to_thread(placed) if rows else None
 
     @override
     async def listed_fingerprint(self) -> tuple[object, ...]:
@@ -300,7 +341,7 @@ class SqlDailyCloseArchive(IDailyCloseArchive):
 
     @override
     async def ex_right_references(self, first: date, last: date) -> dict[str, dict[datetime, float]]:
-        """None: TWSE serves them on its site alone, which a public site may not download."""
+        """None: the exchanges serve a range of them on their sites alone, which a public site may not download."""
         return {}
 
     @override
@@ -356,6 +397,22 @@ class SqlDailyCloseArchive(IDailyCloseArchive):
             ]
 
         return sorted(filed + naming, key=lambda article: article.published_at, reverse=True)[:limit]
+
+    @override
+    async def archived_articles(self, since: datetime) -> list[Article]:
+        now = self._market_clock.now()
+        announcements = select(MaterialInformationDTO).where(col(MaterialInformationDTO.announced_at) >= since)
+        news = select(ExchangeNewsDTO).where(col(ExchangeNewsDTO.published_on) >= self._market_clock.to_market_datetime(since).date())
+
+        async with self._db.get_session() as session:
+            filed = [row.to_domain(now) for row in (await session.execute(announcements)).scalars()]
+            naming = [
+                item.to_domain(stock_id, self._market_clock.session_close(item.published_on), now)
+                for item in (await session.execute(news)).scalars()
+                for stock_id in dict.fromkeys(self._stock_codes.findall(item.title))
+            ]
+
+        return filed + naming
 
     @override
     def save_as_md_file(self, stock_id: str, articles: list[Article]) -> None:

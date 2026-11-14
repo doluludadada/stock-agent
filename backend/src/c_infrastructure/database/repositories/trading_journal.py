@@ -12,7 +12,7 @@ from a_domain.model.trading.account import AccountSnapshot
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.ports.trading.trading_journal import ITradingJournal
-from a_domain.types.enums import ExecutionProvider, TradeAction
+from a_domain.types.enums import ExecutionProvider, TradeAction, Workflow
 from a_domain.types.ids import RunId
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.trading_journal_dto import (
@@ -169,6 +169,26 @@ class TradingJournal(ITradingJournal):
             followed = {row.run_id: SystemStats(**row.model_dump()) for row in followed_rows.scalars()}
 
         return [(order, followed.get(run.followed_run_id, run) if run.followed_run_id else run) for order, run in pairs]
+
+    @override
+    async def first_fill(self, workflow: Workflow, broker: ExecutionProvider, since: datetime | None) -> datetime | None:
+        statement = (
+            select(OrderDTO.created_at)
+            .join(WorkflowRunDTO, col(WorkflowRunDTO.run_id) == col(OrderDTO.run_id))
+            .where(
+                col(OrderDTO.filled_quantity) > 0,
+                col(WorkflowRunDTO.workflow) == workflow,
+                col(WorkflowRunDTO.execution_provider) == broker,
+            )
+            .order_by(col(OrderDTO.created_at))
+            .limit(1)
+        )
+
+        if since is not None:
+            statement = statement.where(col(OrderDTO.created_at) >= since)
+
+        async with self._db.owner_session() as session:
+            return (await session.execute(statement)).scalar_one_or_none()
 
     @override
     async def buy_orders(self, broker: ExecutionProvider, since: datetime) -> list[Order]:

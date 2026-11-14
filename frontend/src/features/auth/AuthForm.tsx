@@ -1,6 +1,7 @@
 import { CircleAlert } from 'lucide-react'
 import { useState, type FormEvent, type ReactNode } from 'react'
 import { useTranslation } from '@/i18n'
+import { usePageTitle } from '@/shared/lib/page-title'
 import { isApiError } from '@/shared/api'
 import { Button } from '@/shared/ui/button'
 import { Field } from '@/shared/ui/field'
@@ -18,6 +19,7 @@ interface AuthFrameProps {
 
 /** The heading, form and footer of the setup, sign-in and register screens. */
 export function AuthFrame({ eyebrow, title, lead, children, footer }: AuthFrameProps) {
+  usePageTitle(typeof title === 'string' ? title : null)
   return (
     <div className="w-full max-w-sm space-y-7">
       <header className="space-y-2">
@@ -25,7 +27,7 @@ export function AuthFrame({ eyebrow, title, lead, children, footer }: AuthFrameP
         <h1 className="display">{title}</h1>
         <p className="text-sm text-pretty text-muted-foreground">{lead}</p>
       </header>
-      {children}
+      <div className="grid gap-4">{children}</div>
       {footer && <div className="border-t pt-5 text-sm text-muted-foreground">{footer}</div>}
     </div>
   )
@@ -42,14 +44,14 @@ export function FormAlert({ children }: { children: ReactNode }) {
 }
 
 /** What a refusal means for a form: a problem under one field, or a line above the button. */
-type Refusal = { field: AccountField; problem: AccountProblem } | { alert: 'failed' | 'closed' | 'alreadySetUp' | 'rateLimited'; minutes?: number }
+type Refusal = { field: AccountField; problem: AccountProblem } | { alert: 'failed' | 'closed' | 'alreadySetUp' | 'taken' | 'rateLimited'; minutes?: number }
 
 const FORMAT_PROBLEM: Partial<Record<AccountField, AccountProblem>> = { username: 'usernameFormat', email: 'emailFormat', password: 'passwordShort' }
 
 /**
  * Reads the server's answer to a setup or a registration. The setup's only 403 is a wrong code and its 409 a site
- * already set up; a registration's 403 is registration closed and its 409 a taken name, which the server names only
- * in its message.
+ * already set up; a registration's 403 is registration closed and its 409 a taken username or email. The code says
+ * taken and only the server's words say which of the two, so the form says it of both.
  */
 function refusalOf(error: unknown, setup: boolean): Refusal {
   if (!isApiError(error)) return { alert: 'failed' }
@@ -58,7 +60,7 @@ function refusalOf(error: unknown, setup: boolean): Refusal {
       return setup ? { field: 'setupCode', problem: 'wrongCode' } : { alert: 'closed' }
     case 'conflict':
       if (setup) return { alert: 'alreadySetUp' }
-      return { field: /\bemail\b/i.test(error.message) ? 'email' : 'username', problem: 'taken' }
+      return error.code === 'user_exists' ? { alert: 'taken' } : { alert: 'failed' }
     case 'invalid': {
       const field = error.problems[0]?.location.at(-1)
       const named = field === 'setup_code' ? 'setupCode' : field
@@ -122,7 +124,7 @@ export function NewAccountForm({ submitLabel, withSetupCode = false, onSubmit }:
   const message = (field: AccountField) => {
     const problem = problems[field]
     if (!problem) return null
-    return problem === 'taken' ? t(field === 'email' ? 'problem.taken.email' : 'problem.taken.username') : t(`problem.${problem}`)
+    return t(`problem.${problem}`)
   }
 
   return (

@@ -109,6 +109,12 @@ class SignalSource(StrEnum):
     FOLLOW = auto()
     """The user followed a decision another run recorded: same stock, action and shares, priced again when followed."""
 
+    RANKING = auto()
+    """
+    The user's mock account followed the monthly ranking: a SELL of a holding the ranking left, or a BUY of a ranked
+    stock it lacked, at an equal weight of the account.
+    """
+
 
 class OrderType(StrEnum):
     MARKET = auto()
@@ -171,6 +177,9 @@ class RejectReason(StrEnum):
 
     BROKER_NOT_OFFERED = auto()
     """The site's audience or its order pricing offers no such broker: a public site orders on the mock account only."""
+
+    ORDERING_OFF = auto()
+    """The site does not let the user order on the real broker: the visibility of its ordering feature (features.*) hides it."""
 
     REAL_BROKER_REFUSED = auto()
     """A real broker's order of a user who is not, as saved at the send, an active administrator (USE_REAL_BROKER)."""
@@ -276,12 +285,16 @@ class OrderPricing(StrEnum):
 
 
 class FollowRefusal(StrEnum):
-    """Why a run's decisions cannot be followed into the user's mock account now. The Web API answers each as its code."""
+    """
+    Why a run's decisions, or the monthly ranking, cannot be followed into the user's mock account now. The Web API
+    answers each as its code.
+    """
 
     NOTHING_TO_FOLLOW = auto()
     """
     The run has no decision left to follow: it is not a finished Full Cycle, it decided no BUY and no SELL of a stock
-    the account holds, or a follow order of each filled since the mock account opened.
+    the account holds, or a follow order of each filled since the mock account opened. The ranking has none either: the
+    account holds each of its stocks and nothing else, or it ranks no stock.
     """
 
     OUTSIDE_FOLLOW_WINDOW = auto()
@@ -327,6 +340,14 @@ class InformationSource(StrEnum):
         return self in {InformationSource.PTT_STOCK, InformationSource.PTT_GOSSIPING}
 
     @property
+    def is_open_data(self) -> bool:
+        """
+        The exchanges' open data, whose text a site may show in full under its license: a company's material information
+        and TWSE's own news. A news site's or a board's text is theirs, so the stock page shows its title and links out.
+        """
+        return self in {InformationSource.TWSE_MOPS, InformationSource.TWSE_NEWS}
+
+    @property
     def label(self) -> str:
         match self:
             case InformationSource.TWSE_MOPS:
@@ -335,6 +356,164 @@ class InformationSource(StrEnum):
                 return "TWSE news"
             case _:
                 return self.value
+
+
+class BriefStatus(StrEnum):
+    """Where a stock's AI brief of one day stands. One brief exists per stock and Taipei calendar day, for the whole site."""
+
+    WRITING = auto()
+    """A request claimed the day's brief and the AI is asked. A claim older than stock_page.brief.claim_minutes was left behind."""
+
+    WRITTEN = auto()
+    """The AI's reply passed the reply contract and the day's brief is kept. Nothing follows: the day spends no second call."""
+
+    FAILED = auto()
+    """The AI call failed or its reply broke the contract. A viewer may ask again, which claims the day anew."""
+
+    @property
+    def next_statuses(self) -> frozenset[BriefStatus]:
+        match self:
+            case BriefStatus.WRITING:
+                return frozenset({BriefStatus.WRITTEN, BriefStatus.FAILED})
+            case BriefStatus.FAILED:
+                return frozenset({BriefStatus.WRITING})
+            case BriefStatus.WRITTEN:
+                return frozenset()
+
+
+class BriefLanguage(StrEnum):
+    """The language the site's AI briefs are written in. Its value is the web app's locale code."""
+
+    TRADITIONAL_CHINESE = "zh-TW"
+    ENGLISH = "en"
+
+    @property
+    def label(self) -> str:
+        """The language as the prompt names it to the AI."""
+        match self:
+            case BriefLanguage.TRADITIONAL_CHINESE:
+                return "Traditional Chinese as written in Taiwan"
+            case BriefLanguage.ENGLISH:
+                return "English"
+
+
+class EmbeddingPooling(StrEnum):
+    """How a text embedding model's output for a text's tokens becomes the text's one vector, as the model's card states it."""
+
+    CLS = auto()
+    """The output of the first token."""
+
+    MEAN = auto()
+    """The mean of every token's output."""
+
+
+class BriefSourceKind(StrEnum):
+    """What kind of held item a brief's sentence cites, so the stock page can name it and link to where it shows it."""
+
+    COMPANY = auto()
+    """The company's name, market and industry in the exchange's listing, and its revenue of the latest held months."""
+
+    PRICE = auto()
+    """The closes of the brief's window of sessions, from the site's daily history."""
+
+    REVENUE = auto()
+    """One held month of revenue."""
+
+    EARNINGS = auto()
+    """One held quarter's EPS and margins."""
+
+    RANKING = auto()
+    """The stock's standing in the monthly ranking."""
+
+    ANNOUNCEMENT = auto()
+    """Material information the company announced."""
+
+    EXCHANGE_NEWS = auto()
+    """An item of TWSE's own news."""
+
+    NEWS = auto()
+    """A news site's article, by its headline."""
+
+    POST = auto()
+    """A stock board's post, by its title."""
+
+    @property
+    def label(self) -> str:
+        """The kind as the prompt names it to the AI."""
+        return self.value.replace("_", " ")
+
+
+class ReadingKind(StrEnum):
+    """
+    One sentence of a stock page's reading of its held figures, which the web app says in the reader's language. A
+    reading with a count names how many months, quarters or sessions it holds for.
+    """
+
+    REVENUE_ACCELERATING = auto()
+    """The latest months' average revenue has been above the longer average for `count` months in a row."""
+
+    REVENUE_SLOWING = auto()
+    """The latest months' average revenue has been below the longer average for `count` months in a row."""
+
+    REVENUE_GROWING = auto()
+    """Revenue has been above the same month a year before for `count` months in a row."""
+
+    REVENUE_SHRINKING = auto()
+    """Revenue has been below the same month a year before for `count` months in a row."""
+
+    REVENUE_HISTORY_SHORT = auto()
+    """Only `count` months of revenue are held, too few for the acceleration."""
+
+    NO_REVENUE = auto()
+    EPS_UP = auto()
+    """The EPS of the year to the quarter's end has been above a year before for `count` quarters in a row."""
+
+    EPS_DOWN = auto()
+    """The EPS of the year to the quarter's end has been below a year before for `count` quarters in a row."""
+
+    EPS_HISTORY_SHORT = auto()
+    """`count` quarters of EPS are held, the latest with no change from a year before: that quarter is not held, or was a loss."""
+
+    NO_EPS = auto()
+    PE_ABOVE_MEDIAN = auto()
+    """The latest P/E is above the median of the `count` sessions held."""
+
+    PE_BELOW_MEDIAN = auto()
+    """The latest P/E is below the median of the `count` sessions held."""
+
+    PE_AT_MEDIAN = auto()
+    NO_PE = auto()
+    """The exchange gives no P/E for the latest session, as for a company with losses."""
+
+    VALUATION_HISTORY_SHORT = auto()
+    """Only `count` sessions of valuation ratios are held, too few to compare the latest with."""
+
+    NO_VALUATION = auto()
+
+
+class RankingExclusion(StrEnum):
+    """Why the monthly ranking gives a stock no score at a decision session, the first that applies."""
+
+    NO_HISTORY = auto()
+    """The held daily history has no bar of it."""
+
+    NOT_A_STOCK = auto()
+    """An ETF, which the ranking's universe leaves out."""
+
+    NOT_TRADED = auto()
+    """It did not trade at the decision session."""
+
+    PRICE_UNDER_FLOOR = auto()
+    """It closed under ranking.min_close."""
+
+    ILLIQUID = auto()
+    """Its average traded value over ranking.traded_value_sessions is under ranking.min_traded_value."""
+
+    NO_REVENUE_HISTORY = auto()
+    """The revenue of one of the ranking.revenue_long_months months the acceleration reads is not held."""
+
+    SHORT_PRICE_HISTORY = auto()
+    """The held history is shorter than the ranking.high_sessions sessions the nearness to the high reads."""
 
 
 class SentimentLabel(StrEnum):
@@ -420,6 +599,27 @@ class ExecutionProvider(StrEnum):
             case ExecutionProvider.SHIOAJI:
                 return True
 
+    @property
+    def account_feature(self) -> Feature:
+        """The feature reading the broker's account belongs to: the site shows the account only with it."""
+        match self:
+            case ExecutionProvider.MOCK:
+                return Feature.MOCK_ACCOUNT
+            case ExecutionProvider.SHIOAJI:
+                return Feature.SINOPAC_ACCOUNT
+
+    @property
+    def ordering_feature(self) -> Feature:
+        """
+        The feature ordering on the broker belongs to: the site offers the broker for a run only with it, and a real
+        broker's order is refused at the send without it (BrokerAccessRule).
+        """
+        match self:
+            case ExecutionProvider.MOCK:
+                return Feature.MOCK_ACCOUNT
+            case ExecutionProvider.SHIOAJI:
+                return Feature.SINOPAC_ORDERING
+
 
 class SystemEnvironment(StrEnum):
     """
@@ -497,6 +697,11 @@ class SystemEnvironment(StrEnum):
             credential for credential in SystemEnvironment.PROD.shioaji_credentials if credential not in self.shioaji_credentials
         )
 
+    @property
+    def api_docs(self) -> bool:
+        """The Web API serves /docs, /redoc and /openapi.json to anyone who reaches it: on a developer's machine only."""
+        return self == SystemEnvironment.DEV
+
 
 class Audience(StrEnum):
     """
@@ -536,7 +741,8 @@ class Audience(StrEnum):
     def realtime_quotes(self) -> bool:
         """
         Shioaji's realtime quotes, which price every order: Buzz, Intraday and manual BUY need them. Open data has none.
-        Without them Buzz never runs, so neither does PTT, which only Buzz reads. A personal site without a Shioaji
+        Without them Buzz never runs, and PTT, which Buzz and a personal site's stock pages read, is never built. A
+        personal site without a Shioaji
         login has none either: every quote is refused, so nothing is ordered.
         """
         return not self.open_data_only
@@ -584,6 +790,9 @@ class Workflow(StrEnum):
     The user's follow of a finished run's decisions into their mock account, as its own recorded run that names the run
     it followed.
     """
+
+    RANKING_FOLLOW = auto()
+    """The user's follow of the monthly ranking's latest decision into their mock account, as its own recorded run."""
 
     VALUATION = auto()
     """Menus 5 and 6. Read-only: no run record, no order."""
@@ -1062,8 +1271,9 @@ class SettingsFile(StrEnum):
 
 class InstructionKey(StrEnum):
     """
-    A key of config/instructions.yaml: an AI prompt, and the setting load_settings copies it into. One table for the
-    copy, for refusing any other key of the file, and for placing a refused prompt back on its line there.
+    A key of config/instructions.yaml: an AI prompt, or a text the site applies beside one, and the setting
+    load_settings copies it into. One table for the copy, for refusing any other key of the file, and for placing a
+    refused prompt back on its line there.
     """
 
     SYSTEM_PROMPT = "system_prompt"
@@ -1072,6 +1282,11 @@ class InstructionKey(StrEnum):
     ANALYSIS_REPORT_MOMENTUM = "ai_analysis_report_prompt_momentum"
     VALUATION_EXPLANATION = "ai_valuation_explanation_prompt"
     SOCIAL_SENTIMENT = "social_sentiment_prompt"
+    STOCK_BRIEF = "stock_brief_prompt"
+    STOCK_BRIEF_ADVICE_PHRASES = "stock_brief_advice_phrases"
+    STOCK_BRIEF_RISE_QUERY = "stock_brief_rise_query"
+    STOCK_BRIEF_FALL_QUERY = "stock_brief_fall_query"
+    STOCK_BRIEF_COMPANY_QUERY = "stock_brief_company_query"
 
     @property
     def settings_path(self) -> str:
@@ -1088,6 +1303,15 @@ class InstructionKey(StrEnum):
                 return "prompts.valuation_explanation"
             case InstructionKey.SOCIAL_SENTIMENT:
                 return "prompts.social_sentiment"
+            case InstructionKey.STOCK_BRIEF:
+                return "prompts.stock_brief"
+            case (
+                InstructionKey.STOCK_BRIEF_ADVICE_PHRASES
+                | InstructionKey.STOCK_BRIEF_RISE_QUERY
+                | InstructionKey.STOCK_BRIEF_FALL_QUERY
+                | InstructionKey.STOCK_BRIEF_COMPANY_QUERY
+            ):
+                return f"prompts.{self.value}"
 
 
 class SettingsAction(StrEnum):
@@ -1095,7 +1319,9 @@ class SettingsAction(StrEnum):
 
 
 class SettingKind(StrEnum):
-    """How the administrator's settings form shows a setting and takes its new value."""
+    """
+    The control the administrator's settings form gives a setting. All but the last three are chosen, never typed.
+    """
 
     SWITCH = auto()
     """On or off."""
@@ -1106,20 +1332,205 @@ class SettingKind(StrEnum):
     CHOICES = auto()
     """Any of the setting's options, in order."""
 
-    INTEGER = auto()
-    """A whole number."""
+    STEPS = auto()
+    """A number picked from the setting's steps, the values that make sense for it."""
 
-    NUMBER = auto()
-    """A number, whole or decimal."""
+    RANGE = auto()
+    """A number moved between the setting's minimum and maximum by its step."""
+
+    DATE = auto()
+    """A day, picked from a calendar."""
+
+    TIME = auto()
+    """A time of day, picked from a clock."""
 
     TEXT = auto()
-    """A text of one line or several, such as an AI prompt."""
+    """A text of one line or several, such as an AI prompt. Typed."""
 
     LINES = auto()
-    """A list of texts or numbers, one per line."""
+    """A list of texts or numbers, one per line. Typed."""
 
     STRUCTURE = auto()
-    """A map, or a list of maps or lists, taken whole."""
+    """A map, or a list of maps or lists, taken whole. Typed."""
+
+    @property
+    def typed(self) -> bool:
+        """The administrator types the value, so the form keeps the setting in its advanced group."""
+        match self:
+            case SettingKind.TEXT | SettingKind.LINES | SettingKind.STRUCTURE:
+                return True
+            case _:
+                return False
+
+
+class SettingGroup(StrEnum):
+    """What an administrator comes to the settings form to do. Each setting shows under one, in this order."""
+
+    SITE_ACCESS = auto()
+    """Who may sign in and register, and how much each user may use."""
+
+    FEATURES = auto()
+    """Which parts of the site show, and to whom."""
+
+    RANKING = auto()
+    """The monthly ranking and its backtest."""
+
+    DATA_HISTORY = auto()
+    """What the site collects and keeps, how often, and how old it may be."""
+
+    AI = auto()
+    """The AI models, their search, and the analyses that call them."""
+
+    TRADING_LIMITS = auto()
+    """Analysis thresholds, costs, the mock account and the limits of a real broker."""
+
+    ADVANCED = auto()
+    """Typed settings and the wiring of data sources: addresses, column names, patterns, prompts and file paths."""
+
+
+class SettingUnit(StrEnum):
+    """What a setting's number counts, so the form words a value as 2%, 15 minutes or NT$100,000."""
+
+    PERCENT = auto()
+    """A fraction shown as a percentage: 0.02 is 2%."""
+
+    SECONDS = auto()
+    MINUTES = auto()
+    HOURS = auto()
+    DAYS = auto()
+    TWD = auto()
+    """New Taiwan dollars."""
+
+    BYTES = auto()
+
+
+class Feature(StrEnum):
+    """
+    A part of the product the site shows or hides. Its value names its setting under `features` in
+    config/appsetting.yaml, which holds its FeatureVisibility. The Web API's routes name the feature they belong to
+    (shows() in d_presentation/web/session.py), and the web app's navigation and pages name the same members, so the
+    three never disagree about what a feature covers.
+    """
+
+    MARKET_OVERVIEW = auto()
+    """The home page: the index trend, the most traded stocks and the session's breadth."""
+
+    RANKING = auto()
+    """The monthly ranking and its backtest."""
+
+    STOCK_PAGES = auto()
+    """A stock's page: its financials and its evaluation by the active strategy."""
+
+    WATCHLIST = auto()
+    VALUATION = auto()
+    """The P/E valuation, the undervalued scan and their AI explanations."""
+
+    FULL_CYCLE = auto()
+    """Starting the after-market full-universe analysis."""
+
+    SPECIFIC_STOCK = auto()
+    """Starting the analysis of chosen stocks, and its manual BUY."""
+
+    BUZZ = auto()
+    """Starting Social Buzz."""
+
+    INTRADAY = auto()
+    """Starting Intraday."""
+
+    STRATEGY_LIBRARY = auto()
+    """The technical strategies, and the choice of the active one."""
+
+    STRATEGY_DESIGNER = auto()
+    """Writing and changing a technical strategy."""
+
+    STRATEGY_BACKTEST = auto()
+    """Replaying the active strategy over a past period."""
+
+    MOCK_ACCOUNT = auto()
+    """The mock account, its trades, its reset, and every order placed on it: a follow, Buzz, Intraday, a manual BUY."""
+
+    SINOPAC_ACCOUNT = auto()
+    """
+    Reading the SinoPac account as the broker reports it: holdings, cash and settlements, profit and loss, fills. It
+    never orders, and showing it grants nothing: only a user with USE_REAL_BROKER reads the account, while the login is up.
+    """
+
+    SINOPAC_ORDERING = auto()
+    """
+    Every order placed on the SinoPac account. While it is off, no run starts on SinoPac and no order reaches it,
+    whatever the environment and whoever the user is. A run already under way when it is turned off sends no order
+    after that: each order asks the switch the site holds at the send (IOrderingSwitch), not the settings the run
+    started on. Showing it grants nothing more: USE_REAL_BROKER, the broker's login and the order gates still decide at
+    each order.
+    """
+
+    HOLDINGS = auto()
+    """My holdings: the holdings a user enters by hand, analysed with those of the accounts the site shows the user."""
+
+    @property
+    def run_start(self) -> bool:
+        """The feature starts a kind of run. A user who may start none has no runs page."""
+        match self:
+            case Feature.FULL_CYCLE | Feature.SPECIFIC_STOCK | Feature.BUZZ | Feature.INTRADAY:
+                return True
+            case _:
+                return False
+
+
+class HoldingSource(StrEnum):
+    """Where a holding of the My holdings page comes from. A holding is counted under its one source."""
+
+    BROKERAGE = auto()
+    """The SinoPac account, as the broker reports it now."""
+
+    MOCK = auto()
+    """The user's mock account."""
+
+    MANUAL = auto()
+    """Entered by hand by the user."""
+
+    @property
+    def feature(self) -> Feature:
+        """The feature the source's holdings belong to: the page reads a source only where the site shows the viewer it."""
+        match self:
+            case HoldingSource.BROKERAGE:
+                return Feature.SINOPAC_ACCOUNT
+            case HoldingSource.MOCK:
+                return Feature.MOCK_ACCOUNT
+            case HoldingSource.MANUAL:
+                return Feature.HOLDINGS
+
+    @property
+    def permission(self) -> Permission | None:
+        """The permission reading the source needs beyond its feature: the real broker's account is the site's own, not a user's."""
+        match self:
+            case HoldingSource.BROKERAGE:
+                return Permission.USE_REAL_BROKER
+            case HoldingSource.MOCK | HoldingSource.MANUAL:
+                return None
+
+
+class FeatureVisibility(StrEnum):
+    """Who the site shows a feature to. The Web API refuses the feature's routes to everyone else."""
+
+    OFF = auto()
+    """Nobody."""
+
+    ADMINISTRATORS = auto()
+    """Only a user whose role has SEE_ADMINISTRATOR_FEATURES."""
+
+    EVERYONE = auto()
+    """Every signed-in user. A page that needs no sign-in stays open to a visitor too."""
+
+    def shown_to(self, permissions: frozenset[Permission]) -> bool:
+        """Whether a viewer with these permissions sees the feature; a visitor has none."""
+        match self:
+            case FeatureVisibility.OFF:
+                return False
+            case FeatureVisibility.ADMINISTRATORS:
+                return Permission.SEE_ADMINISTRATOR_FEATURES in permissions
+            case FeatureVisibility.EVERYONE:
+                return True
 
 
 class ErrorCode(StrEnum):
@@ -1140,6 +1551,9 @@ class ErrorCode(StrEnum):
     UNKNOWN_HOST = auto()
     APP_REQUEST_REQUIRED = auto()
     ADMINISTRATORS_ONLY = auto()
+    FEATURE_HIDDEN = auto()
+    """The site does not show the route's feature to this viewer (features.* in appsetting.yaml)."""
+
     REAL_BROKER_REFUSED = auto()
     """A user without USE_REAL_BROKER asked for a run or an account on a real broker."""
 
@@ -1154,6 +1568,7 @@ class ErrorCode(StrEnum):
 
     PASSWORD_REQUIRED = auto()
     PASSWORD_REFUSED = auto()
+    GOOGLE_CONFIRMATION_REQUIRED = auto()
     SETTINGS_FILE_REFUSED = auto()
     SETTINGS_FILE_MISSING = auto()
     SETTINGS_CONFLICT = auto()
@@ -1176,6 +1591,15 @@ class ErrorCode(StrEnum):
 
     RANKING_UNAVAILABLE = auto()
     """The daily history the site holds has no decision session of the monthly ranking yet: `detail` says what it holds."""
+
+    TOO_MANY_BACKTESTS = auto()
+    """accounts.max_backtests_per_user of the user's strategy backtests and ranking backtests replay or wait already."""
+
+    AI_ALLOWANCE_SPENT = auto()
+    """Today's paid AI calls are spent, the user's (accounts.daily_ai_calls) or every user's together, until midnight Taiwan time."""
+
+    BRIEF_LIMIT_REACHED = auto()
+    """stock_page.brief.daily_stocks stocks got a new AI brief today already. Stored briefs stay readable."""
 
     LISTING_UNAVAILABLE = auto()
     NOT_FOUND = auto()
@@ -1219,6 +1643,9 @@ class Permission(StrEnum):
     total, which never refuses them. Checked where dependencies.py builds the user's AI provider.
     """
 
+    SEE_ADMINISTRATOR_FEATURES = auto()
+    """Use a feature the site shows to administrators only (FeatureVisibility.ADMINISTRATORS). Checked by shows()."""
+
     UNCAPPED_RUNS = auto()
     """
     Start a Web run while the server runs its most at once (accounts.max_concurrent_runs), so other users' runs never
@@ -1261,6 +1688,45 @@ class AttemptLimit(StrEnum):
     Passwords an administrator re-entered to save or restore a settings file, per administrator and client address.
     Its own count, so the editor cannot guess the password faster than the sign-in allows, nor lock the sign-in out.
     """
+
+    GOOGLE_SIGN_IN = auto()
+    """Sign-ins with Google one client address started, and its returns from Google. A return that succeeds takes both back."""
+
+
+class GoogleRefusal(StrEnum):
+    """
+    Why a sign-in with Google, or a settings confirmation by one, ended without what it was for. The web app shows its
+    own words for each; the label is what the server logs.
+    """
+
+    NOT_OFFERED = auto()
+    FLOW_MISSING = auto()
+    """The browser returned without the cookie its start set: it expired, or the start was at another address of the site."""
+
+    STATE_MISMATCH = auto()
+    CANCELLED = auto()
+    """Google sent the browser back with an error instead of a code, as when the person cancels."""
+
+    PROVIDER_FAILED = auto()
+    """Google's token endpoint refused the code, did not answer, or answered no ID token the app can read."""
+
+    TOKEN_REFUSED = auto()
+    """The ID token names another issuer, audience or nonce, or expired."""
+
+    EMAIL_UNVERIFIED = auto()
+    NOT_ALLOWED = auto()
+    """The email is on neither list and registration is closed. No account is created."""
+
+    DEACTIVATED = auto()
+    STALE_AUTHENTICATION = auto()
+    """A settings confirmation whose Google authentication is older than accounts.google_fresh_authentication_seconds, or undated."""
+
+    NOT_ADMINISTRATOR = auto()
+    """A settings confirmation by a Google account that is no active administrator's."""
+
+    @property
+    def label(self) -> str:
+        return self.value.replace("_", " ")
 
 
 class UserStatus(StrEnum):

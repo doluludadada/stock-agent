@@ -1,10 +1,12 @@
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { apiRequest, useIsSignedIn } from '@/shared/api'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { apiRequest, runResultsKey, useIsSignedIn } from '@/shared/api'
 import type { Period } from './model'
 
 export const rankingKeys = {
   latest: ['owner', 'ranking', 'latest'] as const,
   backtest: (period: Period) => ['owner', 'ranking', 'backtest', period.first, period.last] as const,
+  /** Under the run results: a run's end and a reset of the mock account change what the account holds. */
+  follow: [...runResultsKey, 'ranking-follow'] as const,
 }
 
 /**
@@ -39,5 +41,30 @@ export function useRankingBacktest(period: Period | null, { keepShown = false }:
     staleTime: FRESH_MS,
     gcTime: KEPT_MS,
     placeholderData: keepShown ? keepPreviousData : undefined,
+  })
+}
+
+/** A follow takes seconds; polling every few seconds shows its end soon without loading the server. */
+const RUN_POLL_MS = 4000
+/** A follow refused outside its window is asked again each minute, so the button opens with the window. */
+const WINDOW_POLL_MS = 60_000
+
+/** The viewer's mock account against the latest ranking, and what following the ranking did so far. */
+export function useRankingFollow() {
+  const signedIn = useIsSignedIn()
+  return useQuery({
+    queryKey: rankingKeys.follow,
+    queryFn: ({ signal }) => apiRequest('get', '/v1/rankings/follow', { signal }),
+    enabled: signedIn,
+    refetchInterval: (query) => (query.state.data?.running ? RUN_POLL_MS : query.state.data?.refusal === 'outside_follow_window' ? WINDOW_POLL_MS : false),
+  })
+}
+
+/** Starts the follow of the latest ranking into the mock account, as a run whose id the answer carries. */
+export function useFollowRanking() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: () => apiRequest('post', '/v1/rankings/follow', { body: { confirm: true } }),
+    onSettled: () => client.invalidateQueries({ queryKey: runResultsKey }),
   })
 }

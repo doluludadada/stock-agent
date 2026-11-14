@@ -19,23 +19,23 @@ class IPriceHistoryProvider(Protocol):
     async def listed_history(self) -> ListedHistory | None:
         """
         Every stock's daily bars the source holds, delisted stocks too, as its exchange listed them, neither adjusted nor
-        given a change the exchange did not list, with TWSE's ex-right references the source holds (ListedHistory); None
+        given a change the exchange did not list, with the ex-right references the source holds (ListedHistory); None
         while it holds no bar. It fetches nothing.
         """
         ...
 
     async def listed_fingerprint(self) -> tuple[object, ...]:
         """
-        What the bars of listed_history and the ex-right references add up to: how many the source holds, how many bars
-        give a change, and the sum of each of their figures. It differs after a bar or a reference is saved, and after one
-        is replaced or given its change unless the figures replaced cancel out in every sum, so what was built from the
-        source is as the source holds it for as long as this stays the same. It fetches nothing.
+        What tells whether the bars of listed_history and the ex-right references are the ones a reader built from:
+        it differs after a bar or a reference is saved, replaced or given its change, by this process or another, so
+        what was built from the source is as the source holds it for as long as this stays the same. It may differ
+        after a save that changed nothing. It costs the same however many bars the source holds, and fetches nothing.
         """
         ...
 
     async def ex_right_references(self, first: date, last: date) -> dict[str, dict[datetime, float]]:
         """
-        TWSE's reference price of each stock on each of its ex-right or ex-dividend days from first to last that the
+        Its exchange's reference price of each stock on each of its ex-right or ex-dividend days from first to last that the
         source holds, by stock id and the stamp of that session's bars: the price a bar of that session compares its close
         to where the exchange gave it no change. fetch_history adjusts across those sessions with them.
         """

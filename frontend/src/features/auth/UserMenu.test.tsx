@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { I18nextProvider } from 'react-i18next'
 import { MemoryRouter } from 'react-router'
+import { Toaster } from 'sonner'
 import { initI18n } from '@/i18n'
 import { session, type User } from '@/shared/api'
 import { TEST_ADMIN, TEST_USER } from '@/test/users'
@@ -26,7 +27,33 @@ async function openMenu(user: User, locale: 'en' | 'zh-TW' = 'en') {
 }
 
 describe('The account menu', () => {
-  afterEach(() => session.signOut())
+  afterEach(() => {
+    session.signOut()
+    vi.unstubAllGlobals()
+  })
+
+  it('says a sign-out the server did not answer failed, and leaves the user signed in', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('Failed to fetch'))))
+    const signedOut = vi.fn()
+    session.signIn(TEST_USER)
+    render(
+      <I18nextProvider i18n={initI18n('en')}>
+        <QueryClientProvider client={new QueryClient()}>
+          <MemoryRouter>
+            <UserMenu onSignedOut={signedOut} />
+            <Toaster />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </I18nextProvider>,
+    )
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: /mei/ }))
+    await user.click(screen.getByRole('menuitem', { name: 'Sign out' }))
+
+    expect(await screen.findByText('Signing out did not reach the server. You are still signed in. Try again.')).toBeVisible()
+    expect(session.current()).toEqual({ status: 'signedIn', user: TEST_USER })
+    expect(signedOut).not.toHaveBeenCalled()
+  })
 
   it('links every signed-in user to My settings, and nothing of the administrator’s', async () => {
     expect(await openMenu(TEST_USER)).toEqual([

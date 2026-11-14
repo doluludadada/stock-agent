@@ -7,8 +7,9 @@ Run from backend/:
 A value config/appsetting.yaml sets must have no second copy in code, so each such field should be required. The
 script walks AppConfig's fields and the settings models they hold, and prints one line per field whose code default
 and YAML value both exist: `DIFFERS` or `same`, its dotted path, the code default and the YAML value, which is
-parsed with the field's type first. A settings model that the YAML sets is walked, not listed. It exits 1 when any
-field has both and 0 when none does.
+parsed with the field's type first. A settings model that the YAML sets is walked, not listed. A field whose class
+names what the site goes without while a file does not set it (`without` in its json_schema_extra) has no default to
+copy: its empty code value means unset, so it is not listed. It exits 1 when any field has both and 0 when none does.
 """
 
 import argparse
@@ -53,7 +54,7 @@ def duplicated_settings(model: type[BaseModel], values: Mapping[str, Any], prefi
         if nested is not None and isinstance(values[name], Mapping):
             yield from duplicated_settings(nested, values[name], f"{prefix}{name}.")
             continue
-        if field.is_required():
+        if field.is_required() or (isinstance(field.json_schema_extra, dict) and "without" in field.json_schema_extra):
             continue
         shipped = TypeAdapter(field.annotation).validate_python(values[name])
         yield DuplicatedSetting(f"{prefix}{name}", field.get_default(call_default_factory=True), shipped)

@@ -14,7 +14,7 @@ just run-fn   # frontend dev server on http://127.0.0.1:5173
 ```
 
 The first start creates `secrets/accounts.key`, the key of the saved usernames and emails: back up `secrets/` with the
-database. The `ACCOUNTS_KEY` variable overrides the file, for Docker or production; `environment: prod` requires it
+database. The `ACCOUNTS_KEY` variable overrides the file; `environment: prod` requires it
 and never creates the file. The dev server
 forwards same-origin `/v1` requests to `STOCK_AGENT_API_URL` (default `http://127.0.0.1:8800`) and adds nothing to
 them: no credential and no CORS header. `HOST` and `PORT` move the backend. On the first start with no user, the
@@ -26,10 +26,37 @@ The server checks every request. Hiding a menu is never the protection.
 
 | Access | Credential | Opens |
 | --- | --- | --- |
-| Public | none | `/v1/auth/status`, `/setup` (with the console's setup code), `/register`, `/sign-in`, `/sign-out`; `GET /v1/technical-settings/built-in-strategies`, `/v1/market/stocks?query`, `/v1/market/most-traded`, `/v1/market/breadth`, `/v1/market/stocks/{id}`, `/v1/market/indexes/{index}` |
+| Public | none | `/v1/auth/status`, `/setup` (with the console's setup code), `/register`, `/sign-in`, `/sign-out`, `/google/start`, `/google/callback`; `GET /v1/technical-settings/built-in-strategies`, `/v1/market/stocks?query`, `/v1/market/most-traded`, `/v1/market/breadth`, `/v1/market/stocks/{id}`, `/v1/market/indexes/{index}` |
 | Signed in | the session cookie | `/v1/auth/me`, every other write, and the user's own runs, decisions, orders, watchlist, mock account, saved strategies, `/v1/market/stocks/{id}/technical`, valuation |
 | Administrator | the session cookie of an administrator | `/v1/admin/users*` and `/v1/admin/settings` |
 
+- Each feature of the site has a visibility under `features` in `config/appsetting.yaml`: `off`, `administrators`
+  or `everyone` (every signed-in user; a route that needs no sign-in stays open to a visitor). `Feature` in
+  `a_domain/types/enums.py` is the one list. A route names its feature with `shows(Feature.X)` (`web/session.py`) and
+  answers 403 `feature_hidden` to a viewer who may not see it, after the sign-in check and before everything else.
+  `tests/test_feature_visibility.py` fails when a feature gates no route. `GET /v1/auth/status` answers every
+  feature's visibility in `features`, and the web app shows a page when it is `everyone`, or `administrators` and the
+  user has the permission `see_administrator_features`. A save in the settings page applies at once.
+
+  | Feature | Routes it gates | Shipped |
+  | --- | --- | --- |
+  | `market_overview` | `/v1/market/most-traded`, `/breadth` | everyone |
+  | `ranking` | `/v1/rankings/*` | everyone |
+  | `stock_pages` | `/v1/market/stocks/{id}/financials`, `/analysis`, `/news`, `/technical`, and `/ranking`, the stock's score, which needs `ranking` shown to the viewer too | everyone |
+  | `watchlist` | `/v1/watchlist/*` | everyone |
+  | `valuation` | `/v1/valuation/*` | administrators |
+  | `full_cycle`, `specific_stock`, `buzz`, `intraday` | each one's start under `/v1/runs`; `specific_stock` also the manual BUY. A run's own pages (`GET /v1/runs*`) need any one of the four | administrators |
+  | `strategy_library`, `strategy_designer` | `PUT /v1/technical-settings` (either one) | administrators |
+  | `strategy_backtest` | `/v1/backtests/*` | administrators |
+  | `mock_account` | `/v1/account/history`, `/trades` and every order route with `broker=mock`, `/v1/account/reset`, `POST /v1/runs/{id}/follow`, `/v1/rankings/follow` (with `ranking`); the mock account's holdings in `/v1/holdings` | administrators |
+  | `sinopac_account` | `/v1/account/brokerage`, and `/v1/account/history` and `/trades` with `broker=shioaji`; the SinoPac account's holdings in `/v1/holdings`. Reading only, and only for a user with `use_real_broker` | administrators |
+  | `sinopac_ordering` | every order route with `broker=shioaji`, and SinoPac in `/v1/account/brokers`. Off, no order reaches SinoPac: `BrokerAccessRule` refuses it at the send too | off |
+  | `holdings` | `/v1/holdings/*` | everyone |
+
+  The listing search, a stock's bars, the index trend, `GET /v1/technical-settings` and the audience are read by
+  several features and stay ungated. A visibility is one more gate and never replaces one: SinoPac shown to everyone
+  still answers a user 403 `real_broker_refused`, and every order gate still checks each order. The CLI has no such
+  gate: only an administrator signs in to it.
 - `POST /v1/auth/sign-in` (a username or an email, in any case, and the password) sets `stock_agent_session`:
   HttpOnly, SameSite=Strict, Path=/v1, Secure when the request came over https, for `accounts.session_days`. The
   server keeps only the token's SHA-256 and reads the session and its user on every request, so a deactivation or a
@@ -44,11 +71,16 @@ The server checks every request. Hiding a menu is never the protection.
 - Each user's data is their own: another user's run id answers 404. A user runs one workflow at a time, and users
   together run `accounts.max_concurrent_runs` at once (429 past it); an administrator's run always starts. A user's paid AI calls stop at `accounts.daily_ai_calls`
   a day and every user's together at `accounts.daily_ai_calls_total`; an administrator's count but are never refused.
+- The server replays `accounts.max_concurrent_backtests` strategy backtests and ranking backtests at once, every
+  user's together, and one more waits its turn. A user's request past `accounts.max_backtests_per_user` replaying or
+  waiting answers 429 `too_many_backtests`.
+- Registration ships closed (`accounts.registration_open: false`), and `environment: prod` refuses to start with it
+  open. The API docs (`/docs`, `/redoc`, `/openapi.json`) are served only in `environment: dev`.
 - Behind a reverse proxy, the proxy must pass the visitor's address and scheme, or every visitor shares the proxy's
   address in the attempt limits and the cookie loses `Secure` under TLS: `proxy_set_header X-Forwarded-For
   $remote_addr; proxy_set_header X-Forwarded-Proto $scheme;` in nginx, and uvicorn's `--proxy-headers` with
-  `FORWARDED_ALLOW_IPS` naming the proxy's address (127.0.0.1 by default; the proxy's bridge address in Docker).
-  `frontend/docs/deployment.md` has the full setup. `Secure` follows the request's scheme rather than being always
+  `FORWARDED_ALLOW_IPS` naming the proxy's address (127.0.0.1 by default; `compose.yml` sets it to its own network).
+  `frontend/docs/deployment.md` has the full setup, and the Docker Compose deployment. `Secure` follows the request's scheme rather than being always
   on, because the owner also signs in over plain http on the local network from a phone, where a `Secure` cookie
   would never come back.
 - `/v1` answers only the host names in `api.allowed_hosts` (127.0.0.1 and localhost by default): a page on another
@@ -60,11 +92,131 @@ The server checks every request. Hiding a menu is never the protection.
 - Messages from the server reach the browser through `public_text`: credentials, key-like query parameters and file
   system paths are replaced and long messages are cut. The full text stays in the server log.
 
+## Sign in with Google
+
+A site that has a Google OAuth client signs users in with Google next to the password sign-in. The browser goes to
+`GET /v1/auth/google/start`, signs in at Google, and comes back to `GET /v1/auth/google/callback`. The callback sets the
+same session cookie as `POST /v1/auth/sign-in` and sends the browser to the app. The page loads no script from Google,
+so the Content-Security-Policy of the app stays as it is.
+
+### Set up sign-in with Google
+
+Google accepts a redirect URI only over https, at a host name under a public suffix. A Tailscale name such as
+`my-server.my-tailnet.ts.net`, served by `tailscale serve`, meets both rules. An IP address does not. The one exception
+is `http://localhost`, for development.
+
+1. Open the [Google Cloud Console](https://console.cloud.google.com/) and create a project, or select one.
+2. Open **Google Auth Platform**. On **Branding**, enter an app name and your email. On **Audience**, select the user
+   type **External**, keep the publishing status **Testing**, and add your Gmail address under **Test users**. In
+   testing mode, only the test users can sign in.
+3. On **Clients**, create a client of the application type **Web application**. Under **Authorized redirect URIs**, add
+   exactly `https://<host name of the site>/v1/auth/google/callback`. Leave **Authorized JavaScript origins** empty.
+4. Copy the client ID and the client secret into `.env`:
+
+   ```bash
+   GOOGLE_CLIENT_ID="<client ID>"
+   GOOGLE_CLIENT_SECRET="<client secret>"
+   ```
+
+5. In `config/appsetting.yaml`, set the address of the site and your email, and check that `api.allowed_hosts` names
+   the host:
+
+   ```yaml
+   api:
+     allowed_hosts: ["127.0.0.1", "localhost", "<host name of the site>"]
+   accounts:
+     public_origin: "https://<host name of the site>"
+     google_administrator_emails: ["<your Gmail address>"]
+   ```
+
+6. Restart the server. `GET /v1/auth/status` now answers `"google_sign_in": true`, and the sign-in page and the
+   first-time setup page show **Sign in with Google**.
+
+The server builds the redirect URI from `accounts.public_origin`, never from the request's Host header. Startup refuses
+a setup that is not whole or not safe, and the message names what to change: one or two of the three values without the
+others, a public origin that is not https (only `http://localhost` and `http://127.0.0.1` may be http), a public
+origin whose host `api.allowed_hosts` leaves out, and a Google address that is not https.
+
+### Who may sign in
+
+The server reads the email from Google's ID token and uses it only when Google says that the email is verified. It
+compares the whole email, in any case. No setting takes a domain or a wildcard.
+
+| The email | Result |
+| --- | --- |
+| In `accounts.google_administrator_emails` | Signs in as an administrator. The first sign-in creates the account. On an installation with no user, the account takes the place of the first-time setup, and the setup code still works for anyone else. An account that has the email is used, and a user is made an administrator. |
+| In `accounts.google_allowed_emails` | Signs in as a user, whether registration is open or not. The first sign-in creates the account. |
+| On neither list | Signs in as a user only while `accounts.registration_open` is true. Otherwise the browser returns to the sign-in page with a refusal, and no account is created. |
+| Of a deactivated account | Refused, whatever list names the email. |
+
+An installation with no user accepts only an administrator email, so the first account is always an administrator.
+
+An account that a sign-in with Google creates has no password: `GET /v1/auth/me` answers `"has_password": false`. Its
+username is the part of the email before the `@`.
+
+The app never verified the email of an account that someone registered with a password. A sign-in with Google
+therefore removes the password and ends the sessions of the account it finds, unless that account is already an
+administrator. Without this rule, a person who registered your address before you could keep a password to your
+account.
+
+### Use the CLI or a password with a Google account
+
+The CLI and `POST /v1/auth/sign-in` need a password. To give a Google account one, run `just reset-password <username
+or email>` on the server. The account then signs in both ways. An administrator can also set a password for another
+user on the users page, but the next sign-in with Google of a user who is not an administrator removes it again.
+
+### How the flow is protected
+
+- The start makes a random `state`, a random `nonce` and a PKCE verifier, and sends Google the S256 challenge. The three
+  values travel in the cookie `stock_agent_google_flow`: HttpOnly, SameSite=Lax, Path=/v1/auth/google, for
+  `accounts.google_flow_minutes`. The cookie is Lax because Google's redirect back is a navigation from another site,
+  which never carries a Strict cookie. The callback clears it, so a return from Google works once.
+- The callback refuses a `state` that is not the cookie's, exchanges the code at Google's token endpoint with the
+  client secret and the verifier, and checks the ID token: the issuer, this client as the only audience, the expiry,
+  the `nonce`, and `email_verified`.
+- The server does not check the signature of the ID token against Google's keys. The token comes straight from Google's
+  token endpoint over TLS, on a request that the client secret authenticates, and OpenID Connect Core 3.1.3.7 allows
+  TLS server validation in place of the signature check for this flow. The token never leaves the server. The settings
+  refuse a token endpoint that is not https. This choice needs no JWT library and no cache of Google's keys.
+- The session cookie keeps its flags: HttpOnly, SameSite=Strict, Path=/v1. A browser stores a Strict cookie that a
+  response to a cross-site navigation sets. The app then reads `/v1/auth/me` with a request of its own, which is
+  same-site and carries the cookie. `frontend/e2e/google.spec.ts` proves this in a browser, with Google's stand-in
+  on another site than the app.
+- Every start and every return from Google counts toward `accounts.sign_in_failures_per_client` per client address in
+  `accounts.sign_in_window_minutes`. A return that proves a Google identity takes itself and its start back. Past the
+  limit, the browser returns to the app with `?google=throttled`.
+- The log names why a sign-in was refused and the client address. It holds no code, token, `state`, client secret or
+  email, and the access log writes the two Google endpoints without their query.
+
+### Confirm a settings save without a password
+
+A save of the settings needs the administrator's password again, so a stolen session alone changes no setting. An
+administrator without a password confirms each save with a fresh sign-in to Google instead:
+
+1. The app makes a random id for the save, keeps the changes in the tab's session storage, and sends the browser to
+   `GET /v1/auth/google/start?confirmation=<id>`.
+2. The server asks Google for `max_age=0` and for the `auth_time` claim.
+3. The callback accepts the ID token only when `auth_time` is at most `accounts.google_fresh_authentication_seconds`
+   old and the email is an active administrator's. It then grants that administrator the id, for the same number of
+   seconds, and returns the browser to the settings form.
+4. The app sends the save with `"google_confirmation": "<id>"`. The grant is used up, whether the save succeeds or not.
+
+A Google session that was left open confirms nothing, and a grant confirms one save by one administrator. Without a
+grant, the save answers 403 `google_confirmation_required`. An administrator who has a password confirms with the
+password only. A save that would leave an administrator without a password no way to sign in is refused: it must keep
+Google set up and the administrator's email on the list.
+
+Google's documentation does not list `max_age`, and says that the token carries `auth_time` when the request asks for
+it and the client's settings enable it. If Google returns no `auth_time`, or an old one, the server refuses the
+confirmation and the settings form says so. Sign out of Google and sign in again, then save, or set a password with
+`just reset-password`. The round trip with the real Google is not proven yet: the tests and the browser run use the
+stand-in `backend/tests/support/fake_google.py`.
+
 ## Contract
 
 `frontend/src/shared/api/openapi.json` is the API's OpenAPI document and `indicator-outputs.json` the outputs of each
 indicator kind. `cd backend && PYTHONPATH=src uv run python tools/export_openapi.py` writes both, and
-`settings-fields.json`, the settings form's paths and options; `tests/test_openapi_snapshot.py` fails while any of the
+`settings-fields.json`, the settings form's paths with each one's control, group, options and unit; `tests/test_openapi_snapshot.py` fails while any of the
 three is out of date. `cd frontend && bun run api:types` generates `schema.gen.ts` from it, through
 openapi-typescript in its own TypeScript 5 install (`frontend/tools/openapi`), because the app compiles with
 TypeScript 7. The one transport (`shared/api/http.ts`) types every request and answer from that file; each feature owns
@@ -79,8 +231,9 @@ draft and offers to save it into the newer settings.
 
 ## Settings files
 
-`/v1/admin/settings` is the system settings as a form: every setting of `config/appsetting.yaml` and the AI prompts of
-`config/instructions.yaml`, and no YAML. `tests/test_settings_refusal.py` fails when `config/*.yaml` and `SettingsFile`
+`/v1/admin/settings` is the system settings as a form: the settings of `config/appsetting.yaml` an administrator
+changes and the AI prompts of `config/instructions.yaml`, and no YAML. The settings only an operator changes, in the
+file, are not on it. `tests/test_settings_refusal.py` fails when `config/*.yaml` and `SettingsFile`
 disagree. Both routes need a signed-in administrator (`PrivateAccess` and `EditSystemSettings`: 401 signed out, 403 for
 a user, who stays signed in), and the save the `X-Requested-With: stock-agent` header and `"confirm": true`.
 
@@ -89,15 +242,29 @@ a user, who stays signed in), and the save the `X-Requested-With: stock-agent` h
 | `GET /v1/admin/settings` | `[SettingField]`, in the settings classes' order |
 | `PUT /v1/admin/settings` `{confirm: true, changes: [{path, value}], password}` | `[SettingField]` after the save |
 
-- A `SettingField` is `{path, kind, value, options, minimum, maximum, exclusive_minimum, exclusive_maximum,
+- A `SettingField` is `{path, kind, group, value, options, steps, minimum, maximum, step, unit, nullable,
   restart_only}`. `path` is the setting's dotted path (`ai.temperature`; a prompt by its settings path,
-  `ai.system_prompt`). `kind` (`SettingKind`) picks the control: `switch`, `choice` (one of `options`), `choices`
-  (several of `options`), `integer`, `number` (with the schema's bounds), `text`, `lines` (a list of plain values) or
-  `structure` (a map or a nested list, edited as JSON). `value` is what the file sets, as JSON, or the setting's
-  default when the file leaves it out. `restart_only` marks `environment` and `audience`, which a save never changes.
+  `ai.system_prompt`). `kind` (`SettingKind`) picks the control, and all but the last three are chosen, never typed:
+  `switch`, `choice` (one of `options`), `choices` (several of `options`), `steps` (a number picked from `steps`),
+  `range` (a number moved from `minimum` to `maximum` by `step`), `date`, `time`, and the typed `text`, `lines` (a
+  list of plain values) and `structure` (a map or a nested list, edited as JSON). `unit` (`SettingUnit`) says what a
+  number counts, and `nullable` that the setting may be unset. `group` (`SettingGroup`) is where the page shows it:
+  `site_access`, `features`, `ranking`, `data_history`, `ai`, `trading_limits` or `advanced`, which holds every typed
+  setting. `value` is what the file sets, as JSON, or the setting's default when
+  the file leaves it out; a value that is none of the options or steps still shows and stays until the administrator
+  picks another. `restart_only` marks `environment` and `audience`, which a save never changes.
+- A settings class says what the form cannot read from the type, in the field's `json_schema_extra`: `steps` (the
+  numbers that make sense), `step`, `unit`, `options` (choices the settings do not enforce, such as the benchmark's
+  ETFs), `strategy` (the built-in strategies on disk are the options) and `group` (on a section in `AppConfig`, or
+  on one field). `operator_only`, on a section or on one field, keeps a setting off the form: the addresses and
+  patterns of the data sources, the database, the folders, the exchange's hours and tick tables, the strategy
+  search's tuning, the hosts and the editor's limits. The form does not show one, and a change to one answers 422
+  `settings_edit_refused` like an unknown path; the file, the load and the start's notices read it as before. Without any of them a whole number with both bounds is a `range`, or `steps` of round numbers when
+  the bounds lie more than 100 apart, an enum a `choice`, a bool a `switch` and a text typed under `advanced`.
+  `tests/test_settings_form.py` fails for a number that has neither steps nor both bounds.
   The fields come from the settings classes (`settings_fields` in `settings_loader.py`) with no field the environment
-  owns (an API key, a database password) and none the loader sets, so a setting added to a settings class appears on
-  the page by itself. `tools/export_openapi.py` also writes the paths and options to
+  owns (an API key, a database password), none the loader sets and none marked `operator_only`, so a setting added
+  to a settings class appears on the page by itself. `tools/export_openapi.py` also writes each path with its control, group, options and unit to
   `frontend/src/shared/api/settings-fields.json`, and the frontend's i18n test requires a label and a help for each.
 - A change is `{path, value}` for one field. The server writes it into the file in place: every other line, comment
   and key stays, a text with a line break is written as a block, a map or a list replaces the old one, and a setting
@@ -160,9 +327,12 @@ Full Cycle, specific-stock analysis, valuation and market data never order. `POS
 `/v1/runs/intraday` and `/v1/runs/{id}/manual-buy` (a manual BUY of a stock a finished specific-stock run reported,
 with the user's shares) start menus 2 and 3 and menu 4's manual BUY on the account their `broker` query names for the
 whole run, through the same order gates and trading journal as the CLI: the user's mock account by default, or SinoPac
-for an administrator while the site's Shioaji login is up (`broker_pipeline`; 403 `real_broker_refused` or
-`broker_unavailable` before the run starts). At each order `BrokerAccessRule` checks again that the order reaches the
-broker the run chose, that the user is still an active administrator, that the login is up on the server the environment
+for an administrator while the site's Shioaji login is up and `features.sinopac_ordering` shows the user ordering
+there (`broker_pipeline`; 403 `feature_hidden`, `real_broker_refused` or `broker_unavailable` before the run starts). At
+each order `BrokerAccessRule` checks again that the order reaches the broker the run chose, that
+`features.sinopac_ordering`, as the site holds it at that moment and not as the run's settings held it at its start,
+lets the user order there (`RealBrokerOrdererRule`, `ORDERING_OFF` otherwise), that the
+user is still an active administrator, that the login is up on the server the environment
 trades on, and `BuyLimitRule` holds every SinoPac BUY to `trading.max_order_value` and the day's to
 `trading.max_daily_buy_value`. `GET /v1/account/brokers` answers what each start's confirmation names.
 
@@ -171,6 +341,20 @@ run of its own (`Workflow.FOLLOW`) through the same order loop. `Audience.order_
 realtime quote in continuous trading on a personal site; on a public site, which has no realtime quote, the official
 close of the last closed session while no session trades, on the mock broker only (`OrderPricing.OFFICIAL_CLOSE`).
 The order-gate check drives it as route `F` on both audiences, with `P11_OFFICIAL_CLOSE` and `P12_FOLLOW_ONCE`.
+
+`POST /v1/rankings/follow` brings the user's mock account to the monthly ranking's latest decision, as a run of its own
+(`Workflow.RANKING_FOLLOW`) through the same order loop, gates and pricing as a follow of a run, on the mock account
+only. It sells each holding the ranking left, then buys each ranked stock the account lacks: the account's value over
+the ranking's stocks, capped by its share of the cash the sales free, in whole lots of `analysis.lot_size`
+(`RankingFollowRule`). A ranked stock already held is left as it is, so a second follow of the same decision answers
+409 `nothing_to_follow`, and a stock whose order was refused stays open to the next follow. A ranking that ranks no
+stock sells nothing. `GET /v1/rankings/follow` answers what the account holds and lacks of the ranking, the holdings
+that left it, whether a run of the user runs now, and the account's return since its first ranking follow against
+`ranking.benchmark_id` over the same sessions, from the close before that follow. Both need the `ranking` and the
+`mock_account` features. The ranking's backtest buys at the open of the session after the decision and resets every
+holding to an equal weight each month; a follow buys at the price of the moment it is started, in whole shares, and
+keeps the holdings that stay, so the two results differ. The order-gate check drives it as route `K`, with
+`P17_RANKING_FOLLOW`.
 
 One run at a time holds per server process only. A CLI on the same database can run beside it; on the mock broker
 that can race the mock account's cash, which `formal-verify-order-gate` lists as not covered.
@@ -191,10 +375,12 @@ every one of them works as before. All three built-in strategies lost money in a
 | Stock search and stock page | Live: listing search, cached daily bars, the active strategy's evaluation and indicator readings from the backend. No realtime quote on the Web. |
 | Market overview | Live: the TAIEX daily trend over 1M to 1Y (TWSE's own monthly index reports on a personal site, kept like a stock's history, or the open-data archive on a public one; any listed stock or ETF can replace it through `?target=`), the latest session's most traded stocks, and its breadth: advancers, decliners and unchanged stocks from the TWSE and TPEX listings' own change, and each industry's counts and average change, industries from the company profiles. The TPEx Index is kept only to adjust the TPEX stocks' history, and not shown. |
 | Valuation | Live: market reference, specific stocks at a target P/E, undervalued scan with an explicit technical step, AI explanation per confirmed click. |
-| Mock account | Live: positions, P&L, equity curve and as-of; an administrator switches to the SinoPac account while its login is up. |
+| Mock account | Live: positions, P&L, equity curve and as-of. |
+| SinoPac account | Live at `/account/sinopac` for an administrator: `GET /v1/account/brokerage` answers which server the login is on (simulation or the real account), whether it is up and whether the site may order there, and the account as the broker reports it: balance, settlements, positions with the broker's prices and unrealized P&L, today's deals, past sales with their realized P&L. It never orders; ordering is `features.sinopac_ordering`, off by default. |
+| My holdings | Live at `/holdings`: `GET /v1/holdings` answers the SinoPac account's, the mock account's and the hand-entered holdings as one portfolio, each holding under its source, at the last closes held, with each stock's ranking score or the reason it has none, the concentration, the share in the ranking's top and the value-weighted score. Hand entry through the stock search; a watched stock can be added as a holding. Analysis, not advice. |
 | Backtest | Live at `/backtest`: `POST /v1/backtests` replays the user's active strategy over held daily history with the live trading rules on the technical score alone, saves it per user (`accounts.saved_backtests`), and never orders; `GET /v1/backtests/options` names the period. The page shows the return against the TAIEX, each trade and the saved backtests. A strategy search has no page: `just search-strategies`. |
-| Monthly ranking | Live at `/ranking`: `GET /v1/rankings/latest` answers the stocks the ranking picks at the latest decision the held history holds, and `GET /v1/rankings/backtest?first=&last=` replays it against `ranking.benchmark_id`; neither saves or orders. The page shows the stocks with both factors in words, what changed since the month before, the record against the benchmark with its caveats, and every past decision. The API answers no `ranking.*` setting, so the page derives the decision day from the decisions it sees and words the factor windows (3 and 12 months, a year of sessions) as the defaults. |
-| Settings administration | Live: every setting of `appsetting.yaml` and the AI prompts as one form generated from the server's fields, with no YAML; a value out of bounds held at its field, a save with the administrator's password that runs at once, each refusal shown at its setting; an edit on disk loaded by the server. |
+| Monthly ranking | Live at `/ranking`: `GET /v1/rankings/latest` answers the stocks the ranking picks at the latest decision the held history holds, and `GET /v1/rankings/backtest?first=&last=` replays it against `ranking.benchmark_id`; neither saves or orders. The page shows the stocks with both factors in words, what changed since the month before, the record against the benchmark with its caveats, and every past decision. The API answers no `ranking.*` setting, so the page derives the decision day from the decisions it sees and words the factor windows (3 and 12 months, a year of sessions) as the defaults. With the `mock_account` feature the page also holds the ranking in the mock account (`GET`/`POST /v1/rankings/follow`, below). All are signed-in: the ranking's sources are for a personal site. |
+| Settings administration | Live: the settings of `appsetting.yaml` an administrator changes and the AI prompts as one form generated from the server's fields, with no YAML; a value out of bounds held at its field, a save with the administrator's password that runs at once, each refusal shown at its setting; an edit on disk loaded by the server. |
 | Hot reload | A Web save applies at once; an edit made on disk applies within `api.settings_poll_seconds`, or is reported when the app would not start with it. |
 | Accounts | Live: first-time setup with the console's code, sign-in by username or email, open registration, the account menu, and the administrator's users page (role, status, a new password). Each user has their own watchlist, mock account, runs and strategies. |
 
@@ -299,6 +485,11 @@ more in total is mostly the year of 0050 daily bars.
 
 ## Residual risks
 
+- Sign-in with Google is proven against a stand-in for Google only. The round trip with the real Google, and whether
+  Google returns `auth_time` for a settings confirmation, wait for the owner's OAuth client.
+- An account that signs in with Google is matched by its email. While registration is open, a person can register
+  another person's address with a password first. The first sign-in with Google then removes that password, but what
+  the person saved in the account stays there.
 - `bun audit` still lists deepmerge (low, no fixed release) and minimatch (moderate) under the `shadcn` CLI, a
   development tool that never reaches the browser or the production install (`bun audit --prod` finds nothing).
 - pip-audit still lists chromadb (no fixed release), filelock (fix needs a major) and

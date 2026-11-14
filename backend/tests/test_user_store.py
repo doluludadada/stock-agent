@@ -144,6 +144,11 @@ async def test_an_unknown_name_and_a_wrong_password_get_the_same_answer(store: S
 async def test_the_database_holds_no_username_email_or_password_in_the_clear(
     backend: DatabaseBackend, database: DatabaseConnector, store: SqlUserStore, tmp_path: Path
 ) -> None:
+    """
+    Each text searched for is too long, or holds a character no encoded value has, for the rows' random bytes to spell
+    it: a three-letter name such as bob shows up in a hash, an index or a sealed value about once in 200 runs.
+    """
+    await store.create(user("u-3", "carol-the-third", "carol@example.com"), PASSWORD)
     engine = raw_engine(backend, tmp_path)
 
     async with engine.connect() as connection:
@@ -152,7 +157,7 @@ async def test_the_database_holds_no_username_email_or_password_in_the_clear(
     await engine.dispose()
     stored = repr(rows).lower()
 
-    assert not any(secret in stored for secret in ("alice", "example.com", "bob", PASSWORD.get_secret_value()))
+    assert not any(secret in stored for secret in ("carol-the-third", "example.com", PASSWORD.get_secret_value()))
     assert all("$argon2id$v=19$m=19456,t=2,p=1$" in str(row) for row in rows)
 
 
@@ -313,3 +318,41 @@ async def test_startup_refuses_another_key_than_the_users_were_saved_with(
 
     with pytest.raises(AccountsKeyError, match="Restore the original secrets/accounts.key"):
         await SqlUserStore(database, new_key(), SilentLogger()).check_key()
+
+
+@pytest.mark.asyncio
+async def test_an_account_without_a_password_is_found_by_its_email_and_no_password_signs_it_in(
+    store: SqlUserStore, database: DatabaseConnector
+) -> None:
+    await store.create(replace(user("u-3", "carol", "Carol@Gmail.example"), has_password=False), None)
+
+    async with database.get_session() as session:
+        stored = (await session.get_one(UserDTO, "u-3")).password_hash
+
+    found = await store.find_by_name("carol@gmail.EXAMPLE")
+    attempts = [await store.verify_password("carol", SecretStr(guess)) for guess in (stored, "", "carol", PASSWORD.get_secret_value())]
+
+    assert found is not None and (found.user_id, found.has_password) == ("u-3", False)
+    assert attempts == [None] * 4 and not stored.startswith("$argon2")
+    assert (await store.verify_password("bob", PASSWORD)).has_password is True
+
+
+@pytest.mark.asyncio
+async def test_a_save_takes_a_password_away_with_the_sessions_and_a_new_password_brings_it_back(store: SqlUserStore) -> None:
+    bob = await store.find(UserId("u-2"))
+    session = await store.open_session(bob.user_id, NOW, NOW + timedelta(days=1))
+
+    await store.save(bob, NOW)
+    kept = await store.session_user(session.token, NOW)
+    await store.save(replace(bob, has_password=False), NOW)
+    without = await store.find(bob.user_id)
+    later = await store.open_session(bob.user_id, NOW, NOW + timedelta(days=1))
+    await store.save(without, NOW)
+
+    assert kept is not None and await store.session_user(session.token, NOW) is None
+    assert without.has_password is False and await store.verify_password("bob", PASSWORD) is None
+    assert await store.session_user(later.token, NOW) is not None
+
+    await store.save(replace(without, has_password=True), NOW, SecretStr("a new password for bob"))
+
+    assert (await store.verify_password("bob", SecretStr("a new password for bob"))).has_password is True

@@ -129,6 +129,10 @@ class SettingsFiles(ISettingsFiles):
         path.chmod(0o600)
 
     @override
+    def built_in_strategy_ids(self) -> list[str]:
+        return sorted(path.stem for path in (self._project_root / "config" / "strategies").glob("*.json"))
+
+    @override
     def check(
         self, candidates: Mapping[SettingsFile, str], environment: SystemEnvironment, audience: Audience, host: str
     ) -> tuple[SettingsProblem, ...]:

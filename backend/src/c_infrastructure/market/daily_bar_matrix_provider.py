@@ -17,7 +17,8 @@ class DailyBarMatrixProvider(IDailyBarMatrixProvider):
     """
     The matrix of every listed stock's history from the price source, kept in this object for as long as the source
     holds the same first and last session, and the ranking's history, kept for as long as the source's listed bars and
-    references and the archive's revenue add up to the same (listed_fingerprint, revenue_fingerprint). dependencies.py
+    references and the archive's revenue are the ones it was built from (listed_fingerprint, revenue_fingerprint), which
+    a repeat load asks in two short statements. dependencies.py
     builds one per runtime, so new settings start from an empty one. One load builds at a time, and the callers that
     wait get what it built. The matrix's bars become arrays, and the ranking's returns are worked out, in a worker thread.
     """

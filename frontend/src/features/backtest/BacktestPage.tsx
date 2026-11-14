@@ -10,7 +10,7 @@ import { TechnicalStrategyNote } from '@/shared/ui/technical-strategy-note'
 import { Panel } from '@/shared/ui/panel'
 import { ProgressNote } from '@/shared/ui/progress-note'
 import { RequireSignIn } from '@/shared/ui/require-sign-in'
-import { Skeleton } from '@/shared/ui/skeleton'
+import { PageSkeleton } from '@/shared/ui/skeleton'
 import { StateBlock } from '@/shared/ui/state-block'
 import { useBacktest, useBacktestOptions, useRunningSince } from './api'
 import { BacktestForm } from './BacktestForm'
@@ -22,8 +22,8 @@ import { SavedBacktests } from './SavedBacktests'
 export function BacktestPage() {
   const { t } = useTranslation('backtest')
   return (
-    <div className="space-y-5 lg:space-y-6">
-      <PageHeader eyebrow={t('common:nav.section.technical')} title={t('page.title')} description={t('page.description')} note={<TechnicalStrategyNote />} />
+    <div className="page-stack">
+      <PageHeader title={t('page.title')} description={t('page.description')} note={<TechnicalStrategyNote />} />
       <RequireSignIn layout="page" reason={t('signIn')}>
         <Workbench />
       </RequireSignIn>
@@ -50,11 +50,11 @@ function Workbench() {
   const noTradesAt = shown.data && shown.data.trade_count === 0 ? shown.data.inputs.buy_score : null
 
   return (
-    <div className="grid items-start gap-4 lg:gap-5 xl:grid-cols-[22rem_minmax(0,1fr)]">
+    <div className="card-grid xl:grid-cols-[22rem_minmax(0,1fr)]">
       {options.isPending ? (
-        <Skeleton className="h-96 rounded-2xl" />
+        <PageSkeleton />
       ) : options.isError ? (
-        <ErrorState error={options.error} title={t('form.loadFailed')} onRetry={() => void options.refetch()} className="rounded-2xl border bg-card py-12" />
+        <ErrorState error={options.error} title={t('form.loadFailed')} onRetry={() => void options.refetch()} framed />
       ) : defaults === null ? (
         <Panel title={t('form.title')}>
           <StateBlock icon={CalendarX} title={t('tooShort.title')} description={t('tooShort.description', { strategy: options.data.strategy_name })} />
@@ -71,7 +71,7 @@ function Workbench() {
         />
       )}
 
-      <div className="min-w-0 space-y-4 lg:space-y-5">
+      <div className="card-stack">
         {runningSince !== null && <ProgressNote since={runningSince} title={(seconds) => t('progress.title', { seconds })} hint={t('progress.hint')} />}
         {shownId === null ? (
           runningSince === null && (
@@ -83,7 +83,7 @@ function Workbench() {
             </>
           )
         ) : shown.isPending ? (
-          <Skeleton className="h-96 rounded-2xl" />
+          <PageSkeleton />
         ) : shown.isError ? (
           isApiError(shown.error, 'notFound') ? (
             <Panel>
@@ -99,7 +99,7 @@ function Workbench() {
               />
             </Panel>
           ) : (
-            <ErrorState error={shown.error} title={t('result.loadFailed')} onRetry={() => void shown.refetch()} className="rounded-2xl border bg-card py-12" />
+            <ErrorState error={shown.error} title={t('result.loadFailed')} onRetry={() => void shown.refetch()} framed />
           )
         ) : (
           <BacktestResult

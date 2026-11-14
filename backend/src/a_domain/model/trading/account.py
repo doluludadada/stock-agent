@@ -1,9 +1,10 @@
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID, uuid4
 
 from pydantic import ConfigDict, Field, FiniteFloat, PositiveInt, validate_call
 from pydantic.dataclasses import dataclass
 
+from a_domain.types.enums import TradeAction
 from a_domain.types.ids import OrderId, RunId
 from a_domain.types.values import NonEmptyText, NonNegativeFiniteFloat, PositiveFiniteFloat
 
@@ -62,6 +63,11 @@ class Position:
     def unrealized_pnl(self) -> float:
         """The mark's unrealized PnL. 0 when there is no mark or the mark was taken without the trading costs."""
         return self.mark.unrealized_pnl if self.mark and self.mark.unrealized_pnl is not None else 0.0
+
+    @property
+    def unrealized_return(self) -> float | None:
+        """The mark's unrealized PnL over the cost basis: 0.1 is 10% up. None where the mark carries no PnL."""
+        return None if self.mark is None or self.mark.unrealized_pnl is None else self.mark.unrealized_pnl / self.cost_basis
 
     @validate_call
     def profit_on_sale(self, quantity: PositiveInt, net_proceeds: FiniteFloat) -> float:
@@ -230,3 +236,67 @@ class AccountSnapshot:
     run_id: RunId
     order_id: OrderId
     account: Account
+
+
+@dataclass(frozen=True, kw_only=True)
+class Settlement:
+    """Cash a real broker settles for the account on one day: negative to pay for purchases, positive to receive from sales."""
+
+    settles_on: date
+    amount: FiniteFloat
+
+
+@dataclass(frozen=True, kw_only=True)
+class BrokerFill:
+    """
+    One execution as a real broker reports it, in shares: a deal of today, or a past sale with the profit or loss the
+    broker says it realized, its own fees and tax included.
+    """
+
+    stock_id: NonEmptyText
+    action: TradeAction
+    quantity: PositiveInt
+    price: PositiveFiniteFloat
+    filled_on: date
+    realized_pnl: FiniteFloat | None = None
+    """The broker's own figure for a past sale. None for a deal of today, which the broker has not settled yet."""
+
+
+@dataclass(frozen=True, kw_only=True)
+class BrokerageStatement:
+    """
+    A real broker's account as the broker itself reports it at `read_at`: every figure is the broker's, none computed
+    by the app's cost rules. It carries no account number, person id or token.
+    """
+
+    read_at: datetime
+    simulation: bool
+    """Whether the login that answered is on the broker's simulation server, which holds no real money."""
+
+    balance: FiniteFloat
+    """The bank balance of the account's settlement account."""
+
+    settlements: list[Settlement]
+    positions: list[Position]
+    """Each marked with the broker's last price and the unrealized PnL the broker computes for it."""
+
+    fills: list[BrokerFill]
+    """Today's deals, newest last as the broker lists them."""
+
+    sales: list[BrokerFill]
+    """The past sales from `sales_from` to today, each with its realized PnL."""
+
+    sales_from: date
+
+    @property
+    def market_value(self) -> float:
+        return sum(position.market_value for position in self.positions)
+
+    @property
+    def unrealized_pnl(self) -> float:
+        return sum(position.unrealized_pnl for position in self.positions)
+
+    @property
+    def realized_pnl(self) -> float:
+        """The realized PnL of the sales listed."""
+        return sum(sale.realized_pnl or 0.0 for sale in self.sales)

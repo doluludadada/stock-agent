@@ -402,9 +402,9 @@ async def checkout(self, cart_id: CartId) -> PipelineStatus:
   - The builders in `dependencies.py`. One constructor argument per line is wiring, not logic,
     and splitting it would add groups.
   - The operations in the Pipeline (4.2). An operation is a flat list of use case calls.
-    stock-agent's operations send orders with the same inline five-line loop six times: twice in
-    Buzz, twice in Intraday, once in the manual BUY and once in a follow. Splitting an operation
-    would hide the order of its steps.
+    stock-agent's operations send orders with the same inline five-line loop seven times: twice in
+    Buzz, twice in Intraday, once in the manual BUY, once in a follow of a run and once in a follow
+    of the ranking. Splitting an operation would hide the order of its steps.
 - Reduce nesting only with early returns.
 - Names say what something is. No single-letter names except `i`, `j`, `k` in loops. No
   abbreviations (`membership`, not `mship`; `configuration` or `config`, but pick one).

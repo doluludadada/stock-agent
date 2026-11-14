@@ -1,11 +1,12 @@
-import { Activity, Calculator, History, Layers, LayoutDashboard, ListOrdered, Settings2, SlidersHorizontal, Sparkles, Star, UsersRound, Wallet, type LucideIcon } from 'lucide-react'
-import { allows, type Audience, type Capability, type Schemas } from '@/shared/api'
+import { Activity, Briefcase, Calculator, CandlestickChart, History, Home, Landmark, Layers, ListOrdered, Settings2, SlidersHorizontal, Sparkles, Star, UsersRound, Wallet, type LucideIcon } from 'lucide-react'
+import { allows, shows, type Audience, type Capability, type Feature, type Schemas, type Visibilities } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
+import { PAGE_FEATURES, type Page } from '../pages'
 
 type Permission = Schemas['Permission']
 
 export interface NavItem {
-  key: 'overview' | 'valuation' | 'watchlist' | 'account' | 'settings' | 'runs' | 'strategies' | 'backtest' | 'ranking' | 'builder' | 'users' | 'admin'
+  key: Extract<Page, 'home' | 'overview' | 'valuation' | 'watchlist' | 'holdings' | 'account' | 'brokerage' | 'settings' | 'runs' | 'strategies' | 'backtest' | 'ranking' | 'builder' | 'users' | 'admin'>
   to: string
   icon: LucideIcon
   /** Active only on this exact path, not on the paths under it. */
@@ -19,7 +20,7 @@ export interface NavItem {
 }
 
 export interface NavSection {
-  key: 'research' | 'mine' | 'technical' | 'admin'
+  key: 'today' | 'research' | 'mine' | 'tools' | 'admin'
   items: readonly NavItem[]
   /**
    * Folded away until the reader opens it: pages that are kept but are no longer where the app's attention is. It
@@ -28,19 +29,31 @@ export interface NavSection {
   folded?: true
 }
 
+const HOME: NavItem = { key: 'home', to: paths.home, icon: Home, end: true }
 const RANKING: NavItem = { key: 'ranking', to: paths.ranking, icon: ListOrdered, end: false }
-const OVERVIEW: NavItem = { key: 'overview', to: paths.market, icon: LayoutDashboard, end: true, alsoUnder: '/stocks/' }
+const OVERVIEW: NavItem = { key: 'overview', to: paths.market, icon: CandlestickChart, end: false, alsoUnder: '/stocks/' }
 const WATCHLIST: NavItem = { key: 'watchlist', to: paths.watchlist, icon: Star, end: false }
-const ACCOUNT: NavItem = { key: 'account', to: paths.account, icon: Wallet, end: false }
+const HOLDINGS: NavItem = { key: 'holdings', to: paths.holdings, icon: Briefcase, end: false }
+// The SinoPac account's address sits under the mock account's, so the mock account marks its exact path only.
+const ACCOUNT: NavItem = { key: 'account', to: paths.account, icon: Wallet, end: true }
+const BROKERAGE: NavItem = { key: 'brokerage', to: paths.brokerage, icon: Landmark, end: false, needs: 'use_real_broker' }
 
+/**
+ * The order is the product's: the home page, then what has evidence (the ranking, with the market around it), then
+ * what is the reader's own. The tools kept for the administrator (analysis runs, the technical strategies, valuation
+ * and the mock account they trade on) fold away under one name.
+ */
 const SECTIONS: readonly NavSection[] = [
-  { key: 'research', items: [RANKING, OVERVIEW, { key: 'valuation', to: paths.valuation, icon: Calculator, end: false, requires: 'mops' }] },
-  { key: 'mine', items: [WATCHLIST, ACCOUNT, { key: 'settings', to: paths.mySettings, icon: SlidersHorizontal, end: true }] },
+  { key: 'today', items: [HOME] },
+  { key: 'research', items: [RANKING, OVERVIEW] },
+  { key: 'mine', items: [HOLDINGS, WATCHLIST, BROKERAGE, { key: 'settings', to: paths.mySettings, icon: SlidersHorizontal, end: true }] },
   {
-    key: 'technical',
+    key: 'tools',
     folded: true,
     items: [
       { key: 'runs', to: paths.runs, icon: Activity, end: false },
+      ACCOUNT,
+      { key: 'valuation', to: paths.valuation, icon: Calculator, end: false, requires: 'mops' },
       { key: 'strategies', to: paths.strategies, icon: Layers, end: true },
       { key: 'backtest', to: paths.backtest, icon: History, end: false },
       { key: 'builder', to: paths.newStrategy, icon: Sparkles, end: false, alsoUnder: '/strategies/' },
@@ -55,18 +68,34 @@ const SECTIONS: readonly NavSection[] = [
   },
 ]
 
-const shown = (item: NavItem, permissions: readonly Permission[], audience: Audience | undefined) =>
-  (!item.needs || permissions.includes(item.needs)) && (!item.requires || allows(audience, item.requires))
+/** The features a page belongs to; the site shows its entry to a viewer who sees any one of them. */
+export function featuresOf(item: NavItem): readonly Feature[] {
+  return PAGE_FEATURES[item.key]
+}
 
-/** The sections a viewer with these permissions sees on a site of this audience; a section with nothing left disappears. */
-export function navSections(permissions: readonly Permission[], audience: Audience | undefined): NavSection[] {
-  return SECTIONS.map((section) => ({ ...section, items: section.items.filter((item) => shown(item, permissions, audience)) })).filter(
-    (section) => section.items.length > 0,
+export interface Viewer {
+  permissions: readonly Permission[]
+  audience: Audience | undefined
+  /** Whom the site shows each feature to; undefined until the server has said, which hides every page that names one. */
+  visibilities: Visibilities | undefined
+}
+
+function shown(item: NavItem, { permissions, audience, visibilities }: Viewer): boolean {
+  const features = featuresOf(item)
+  return (
+    (!item.needs || permissions.includes(item.needs)) &&
+    (!item.requires || allows(audience, item.requires)) &&
+    (features.length === 0 || features.some((feature) => shows(visibilities, permissions, feature)))
   )
 }
 
-/** The phone's tab bar: the four places used during a session; search and the other pages sit between and after them. */
-export const TAB_PAGES = { ranking: RANKING, market: OVERVIEW, watchlist: WATCHLIST, account: ACCOUNT } as const
+/** The sections this viewer sees on this site; a section with nothing left disappears. */
+export function navSections(viewer: Viewer): NavSection[] {
+  return SECTIONS.map((section) => ({ ...section, items: section.items.filter((item) => shown(item, viewer)) })).filter((section) => section.items.length > 0)
+}
+
+/** The phone's tab bar: the home page, the ranking and the holdings; search sits between them, every other page in the sheet after them. */
+export const TAB_PAGES = { home: HOME, ranking: RANKING, holdings: HOLDINGS } as const
 
 /** Whether a path is the item's page: the sidebar, the more sheet and the tab bar all mark the same item. */
 export function isCurrent(item: NavItem, pathname: string): boolean {

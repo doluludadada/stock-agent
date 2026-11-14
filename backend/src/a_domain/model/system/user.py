@@ -27,6 +27,11 @@ class User:
     The AI model the user chose for their own runs on My settings, None for the site's default. A choice the site stopped
     offering stays saved, and the user's runs use the site's default until it is offered again.
     """
+    has_password: bool = True
+    """
+    Whether a password signs the user in. False for an account that signs in with Google only: it has no password to
+    sign in to the CLI with or to re-enter for a settings save, until `just reset-password` or an administrator sets one.
+    """
 
     @computed_field
     @property
@@ -43,3 +48,20 @@ class UserSession:
     user_id: UserId
     created_at: datetime
     expires_at: datetime
+
+
+@dataclass(frozen=True, kw_only=True)
+class SignInFlow:
+    """
+    One sign-in a browser started at the identity provider: what the provider must send back (`state`), what its ID
+    token must carry (`nonce`), and the PKCE verifier of the code. The browser's flow cookie carries it between the
+    start and the return, until `expires_at`, so only the browser that started a flow can finish it.
+    """
+
+    state: str
+    nonce: str
+    code_verifier: str
+    started_at: datetime
+    expires_at: datetime
+    confirmation: str | None = None
+    """The settings save this flow confirms, by the id the web app made for it; None for a sign-in."""

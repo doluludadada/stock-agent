@@ -42,6 +42,14 @@ export const session = {
   },
 }
 
+/**
+ * For a mutation that writes its answer into the cache and may outlive its page: `onMutate: sentInSession` notes the
+ * session it was sent in, and `isSameSession(sent)` in `onSuccess` is false once another user holds the tab, whose
+ * cache the answer must not enter.
+ */
+export const sentInSession = (): number => generation
+export const isSameSession = (sent: number): boolean => sent === generation
+
 export function hasPermission(state: Session, permission: Permission): boolean {
   return state.status === 'signedIn' && state.user.permissions.includes(permission)
 }

@@ -197,13 +197,14 @@ async def test_requests_to_one_site_wait_the_interval_whichever_runtime_asks_and
     serve(monkeypatch, asked)
     slots: dict[MarketType, float] = {}
     retired, current = reports(slots, interval_seconds=0.3), reports(slots, interval_seconds=0.3)
+    start = time.monotonic()
 
     await asyncio.gather(retired.session_bars(TUESDAY), current.session_bars(TUESDAY))
 
     twse = [moment for host, _, moment in asked if host == "www.twse.com.tw"]
     tpex = [moment for host, _, moment in asked if host == "www.tpex.org.tw"]
-    assert twse[1] - twse[0] >= 0.29 and tpex[1] - tpex[0] >= 0.29
-    assert tpex[0] - twse[0] < 0.3
+    assert twse[1] >= start + 0.3 and tpex[1] >= start + 0.3
+    assert [host for host, _, _ in asked] == ["www.twse.com.tw", "www.tpex.org.tw", "www.twse.com.tw", "www.tpex.org.tw"]
 
 
 async def test_a_site_that_refuses_the_address_fails_the_session(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -225,7 +226,7 @@ async def test_twses_ex_right_references_of_a_range_are_each_four_digit_stocks_r
 
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: real_client(transport=httpx.MockTransport(answer)))
 
-    references = await reports().ex_right_references(date(2025, 7, 1), date(2025, 9, 30))
+    references = await reports().ex_right_references(MarketType.TWSE, date(2025, 7, 1), date(2025, 9, 30))
 
     assert asked == ["https://www.twse.com.tw/rwd/zh/exRight/TWT49U?startDate=20250701&endDate=20250930&response=json"]
     assert references == {("1101", date(2025, 7, 2)): 25.15, ("0050", date(2025, 7, 21)): 51.09, ("2330", date(2025, 9, 16)): 1249.99}
@@ -240,4 +241,34 @@ async def test_a_range_without_an_ex_right_day_has_no_reference(monkeypatch: pyt
         lambda **kwargs: real_client(transport=httpx.MockTransport(lambda request: httpx.Response(200, json=empty))),
     )
 
-    assert await reports().ex_right_references(date(2025, 1, 1), date(2025, 1, 5)) == {}
+    assert await reports().ex_right_references(MarketType.TWSE, date(2025, 1, 1), date(2025, 1, 5)) == {}
+
+
+async def test_tpexs_ex_right_references_of_a_range_are_each_four_digit_stocks_reference_price_by_day(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    asked: list[str] = []
+    real_client = httpx.AsyncClient
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        asked.append(str(request.url))
+        return httpx.Response(200, text=(FIXTURES / "tpex_exdailyq_2025q3.json").read_text())
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: real_client(transport=httpx.MockTransport(answer)))
+
+    references = await reports().ex_right_references(MarketType.TPEX, date(2025, 7, 1), date(2025, 9, 30))
+
+    assert asked == ["https://www.tpex.org.tw/www/zh-tw/bulletin/exDailyQ?startDate=2025/07/01&endDate=2025/09/30&response=json"]
+    assert references == {("2230", date(2025, 7, 1)): 102.5, ("6488", date(2025, 7, 16)): 304.0, ("8069", date(2025, 7, 24)): 211.01}
+
+
+async def test_a_tpex_range_without_an_ex_right_day_has_no_reference(monkeypatch: pytest.MonkeyPatch) -> None:
+    real_client = httpx.AsyncClient
+    empty = {"date": "20261114~20261114", "tables": [{"fields": ["除權息日期", "代號", "除權息參考價"], "data": []}], "stat": "ok"}
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kwargs: real_client(transport=httpx.MockTransport(lambda request: httpx.Response(200, json=empty))),
+    )
+
+    assert await reports().ex_right_references(MarketType.TPEX, date(2026, 11, 14), date(2026, 11, 14)) == {}

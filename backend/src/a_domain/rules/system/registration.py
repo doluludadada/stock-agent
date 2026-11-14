@@ -23,7 +23,11 @@ class RegistrationRule:
 
 @dataclass(frozen=True)
 class SignInOffer:
-    """What the sign-in screen offers: the first-time setup while no user exists, and registration while the rule allows it."""
+    """
+    What the sign-in screen offers: the first-time setup while no user exists, registration while the rule allows it,
+    and sign-in with Google while the installation has its client and its public origin.
+    """
 
     needs_first_administrator: bool
     registration_open: bool
+    google_sign_in: bool = False

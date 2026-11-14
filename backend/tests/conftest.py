@@ -1,7 +1,8 @@
 """Fixtures any test module may ask for by name."""
 
 import importlib
-from collections.abc import AsyncIterator
+import time
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
 import pytest
@@ -28,6 +29,16 @@ def no_sinopac(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError("a test built a real Shioaji client: patch shioaji.Shioaji with FakeShioaji")
 
     monkeypatch.setattr(shioaji, "Shioaji", refuse)
+
+
+@pytest.fixture
+def server_in_utc(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """The process's own time zone is UTC, as in the deployed container, and the machine's again after the test."""
+    monkeypatch.setenv("TZ", "UTC")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
 
 
 @pytest.fixture(params=BACKENDS)

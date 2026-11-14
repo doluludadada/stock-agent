@@ -11,7 +11,10 @@ from b_application.config.app_config import AppConfig
 
 
 class ValuationExplainer:
-    """Use Case: asks the AI to explain a valuation the domain already computed. A failed call keeps the numbers and says why."""
+    """
+    Use Case: asks the AI to explain a valuation the domain already computed. A failed call keeps the numbers and says
+    that the AI gave no explanation; what the provider answered goes to the log alone, never into the report.
+    """
 
     def __init__(self, ai_provider: IAiProvider, market_clock: IMarketClock, config: AppConfig, logger: ILoggingProvider) -> None:
         valuation = config.valuation
@@ -45,7 +48,7 @@ class ValuationExplainer:
             response = await self._ai_provider.generate_reply((message,))
         except Exception as error:
             self._logger.error(f"Valuation explanation failed for {stock_id}: {error}")
-            return self._sections_rule.apply(ValuationExplanation.without_ai(report, f"AI explanation unavailable: {error}"))
+            return self._sections_rule.apply(ValuationExplanation.without_ai(report, "AI explanation unavailable"))
 
         self._ai_provider.save_response(stock_id, response.content)
 

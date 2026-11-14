@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Query, status
 
 from a_domain.model.valuation.scan import MarketValuation, ScanCriteria
-from a_domain.types.enums import ScanStep
+from a_domain.types.enums import Feature, ScanStep
 from d_presentation.web.schemas import (
     ErrorResponse,
     ExplanationRequest,
@@ -14,12 +14,12 @@ from d_presentation.web.schemas import (
     ValuationReportsResponse,
     ValuationScanResponse,
 )
-from d_presentation.web.session import MarketValuationDependency, Mops, NotFound, PrivateAccess, UserPipeline
+from d_presentation.web.session import MarketValuationDependency, Mops, NotFound, PrivateAccess, UserPipeline, shows
 
 router = APIRouter(
     prefix="/valuation",
     tags=["Valuation"],
-    dependencies=[Mops, PrivateAccess],
+    dependencies=[Mops, PrivateAccess, shows(Feature.VALUATION)],
     responses={
         status.HTTP_403_FORBIDDEN: {
             "model": ErrorResponse,

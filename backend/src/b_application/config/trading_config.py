@@ -7,13 +7,14 @@ from typing import Annotated, Self
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from a_domain.rules.fundamentals.stock_analysis import RevenueTrendRule
 from a_domain.rules.technical.search import BreedingRule, SearchFitnessRule, SessionSplitRule, StrategyMutationRule
 from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
 from a_domain.rules.trading.account_value import AccountValueRule, PositionValueRule
 from a_domain.rules.trading.cost import TradingCostRule
 from a_domain.rules.trading.ranking import MonthlyRankingRule, RankingHistoryRule
 from a_domain.rules.trading.tick import LimitPriceRule, TickSizeRule
-from a_domain.types.enums import FormulaScale, ShioajiCredential, SystemEnvironment
+from a_domain.types.enums import FormulaScale, SettingUnit, ShioajiCredential, SystemEnvironment
 from a_domain.types.values import FormulaId, IndicatorPeriod
 
 
@@ -22,33 +23,41 @@ class AnalysisConfig(BaseModel):
 
     model_config = ConfigDict(use_attribute_docstrings=True)
 
-    technical_weight: float = Field(ge=0, le=1)
-    ai_weight: float = Field(ge=0, le=1)
+    technical_weight: float = Field(ge=0, le=1, json_schema_extra={"step": 0.05, "unit": SettingUnit.PERCENT})
+    ai_weight: float = Field(ge=0, le=1, json_schema_extra={"step": 0.05, "unit": SettingUnit.PERCENT})
 
-    min_combined_score_buy: int = Field(ge=0, le=100)
-    max_combined_score_sell: int = Field(ge=0, le=100)
+    min_combined_score_buy: int = Field(ge=0, le=100, json_schema_extra={"step": 5})
+    max_combined_score_sell: int = Field(ge=0, le=100, json_schema_extra={"step": 5})
 
-    risk_per_trade_pct: float = Field(ge=0.01, le=0.1)
-    stop_loss_pct: float = Field(ge=0.01, le=0.5)
+    risk_per_trade_pct: float = Field(
+        ge=0.01, le=0.1, json_schema_extra={"steps": [0.01, 0.02, 0.03, 0.05, 0.1], "unit": SettingUnit.PERCENT}
+    )
+    stop_loss_pct: float = Field(
+        ge=0.01, le=0.5, json_schema_extra={"steps": [0.03, 0.05, 0.07, 0.08, 0.1, 0.15, 0.2, 0.3, 0.5], "unit": SettingUnit.PERCENT}
+    )
 
-    lot_size: int = Field(gt=0)
+    lot_size: int = Field(gt=0, json_schema_extra={"steps": [1, 1000]})
     """A BUY quantity is a multiple of this many shares: 1 sizes odd lots, 1000 whole board lots."""
 
-    reason_item_limit: int = Field(gt=0)
+    reason_item_limit: int = Field(gt=0, json_schema_extra={"steps": [1, 2, 3, 5, 10]})
     """Most AI factors and soft technical failures a decision reason lists."""
 
-    article_fetch_limit: int = Field(ge=1, le=100)
+    article_fetch_limit: int = Field(ge=1, le=100, json_schema_extra={"steps": [5, 10, 20, 50, 100]})
 
-    material_information_days: int = Field(ge=1, le=365)
+    material_information_days: int = Field(
+        ge=1, le=365, json_schema_extra={"steps": [7, 14, 30, 60, 90, 180, 365], "unit": SettingUnit.DAYS}
+    )
     """
     How many days back an audience without news articles (public) reads a stock's archived material information for
     the AI step. A stock with none in them is decided on its technical score alone.
     """
 
-    lookback_days: int = Field(ge=30)
+    lookback_days: int = Field(ge=30, json_schema_extra={"steps": [60, 90, 120, 180, 250, 365], "unit": SettingUnit.DAYS})
     """The shortest daily-history window fetched, in calendar days."""
 
-    history_calendar_days_per_bar: float = Field(ge=1, allow_inf_nan=False)
+    history_calendar_days_per_bar: float = Field(
+        ge=1, allow_inf_nan=False, json_schema_extra={"steps": [1.5, 1.7, 1.9, 2.0, 2.5], "unit": SettingUnit.DAYS}
+    )
     """
     Calendar days fetched for each daily bar a strategy needs. Weekends, holidays and trading halts have no bar, so a
     strategy that needs 84 bars fetches max(lookback_days, 84 x this) calendar days. The window is only an estimate:
@@ -75,10 +84,10 @@ class TechnicalConfig(BaseModel):
     load_settings reads each built-in strategy from config/strategies/<id>.json.
     """
 
-    built_in_strategies: Annotated[tuple[TechnicalStrategy, ...], Field(min_length=1)]
+    built_in_strategies: Annotated[tuple[TechnicalStrategy, ...], Field(min_length=1, json_schema_extra={"strategy": True})]
     """The developer's strategies, in menu order. Saving settings never changes them."""
 
-    initial_strategy_id: FormulaId
+    initial_strategy_id: FormulaId = Field(json_schema_extra={"strategy": True})
     """The active strategy of an owner's first settings."""
 
     @model_validator(mode="after")
@@ -107,44 +116,44 @@ class StrategySearchConfig(BaseModel):
 
     model_config = ConfigDict(use_attribute_docstrings=True)
 
-    workers: int = Field(ge=0)
+    workers: int = Field(ge=0, le=64, json_schema_extra={"steps": [0, 1, 2, 4, 8, 16, 32]})
     """Processes that backtest candidates at once, each with a copy of the history; 0 backtests in the search's own process."""
 
-    population: int = Field(ge=1)
+    population: int = Field(ge=1, le=1000, json_schema_extra={"steps": [10, 20, 40, 80, 160]})
     """New candidates per generation, and the fittest so far kept to breed them from."""
 
-    generations: int = Field(ge=0)
-    train_share: float = Field(gt=0, lt=1)
+    generations: int = Field(ge=0, le=1000, json_schema_extra={"steps": [0, 10, 20, 40, 80, 160]})
+    train_share: float = Field(gt=0, lt=1, json_schema_extra={"steps": [0.4, 0.5, 0.6, 0.7], "unit": SettingUnit.PERCENT})
     """The share of the sessions, from the first one, that trains."""
 
-    validation_share: float = Field(gt=0, lt=1)
+    validation_share: float = Field(gt=0, lt=1, json_schema_extra={"steps": [0.15, 0.2, 0.25, 0.3], "unit": SettingUnit.PERCENT})
     """The share after train that validates. The rest is the holdout, read once for the report."""
 
-    finalists: int = Field(ge=1)
+    finalists: int = Field(ge=1, le=1000, json_schema_extra={"steps": [5, 10, 20, 50]})
     """The best on train backtested on validation, where the winners are picked."""
 
-    winners: int = Field(ge=1)
-    luck_sample: int = Field(ge=0)
+    winners: int = Field(ge=1, le=100, json_schema_extra={"steps": [1, 3, 5, 10]})
+    luck_sample: int = Field(ge=0, le=10_000, json_schema_extra={"steps": [0, 50, 100, 200, 500]})
     """Candidates tried that traded enough on train whose holdout returns are the luck baseline."""
 
-    min_trades_per_100_sessions: float = Field(ge=0, allow_inf_nan=False)
-    drawdown_penalty: float = Field(ge=0, allow_inf_nan=False)
+    min_trades_per_100_sessions: float = Field(ge=0, allow_inf_nan=False, json_schema_extra={"steps": [0, 1, 2, 5, 10, 20]})
+    drawdown_penalty: float = Field(ge=0, allow_inf_nan=False, json_schema_extra={"steps": [0, 0.25, 0.5, 1, 2]})
     """Fitness is the return less this many times the deepest drawdown."""
 
-    tournament: int = Field(ge=1)
+    tournament: int = Field(ge=1, le=100, json_schema_extra={"steps": [2, 3, 5, 8]})
     """A parent is the fittest on train of this many candidates drawn at random."""
 
-    max_mutations: int = Field(ge=1)
-    attempts_per_child: int = Field(ge=1)
+    max_mutations: int = Field(ge=1, le=20, json_schema_extra={"steps": [1, 2, 3, 5]})
+    attempts_per_child: int = Field(ge=1, le=1000, json_schema_extra={"steps": [5, 10, 20, 50]})
     """How many times a child that repeats a candidate tried before is drawn again."""
 
-    period_step: float = Field(gt=0, lt=1)
-    constant_step: float = Field(gt=0, lt=1)
-    score_step: int = Field(ge=1)
-    max_required_bars: int = Field(ge=1)
+    period_step: float = Field(gt=0, lt=1, json_schema_extra={"steps": [0.1, 0.2, 0.3, 0.5], "unit": SettingUnit.PERCENT})
+    constant_step: float = Field(gt=0, lt=1, json_schema_extra={"steps": [0.1, 0.2, 0.3, 0.5], "unit": SettingUnit.PERCENT})
+    score_step: int = Field(ge=1, le=50, json_schema_extra={"steps": [1, 5, 10]})
+    max_required_bars: int = Field(ge=1, le=1000, json_schema_extra={"steps": [60, 100, 120, 250]})
     """The most daily bars a candidate may need. The spans start where a strategy that needs this many can be scored."""
 
-    max_rules: int = Field(ge=1, le=100)
+    max_rules: int = Field(ge=1, le=100, json_schema_extra={"steps": [10, 20, 30, 50, 100]})
     periods: list[IndicatorPeriod] = Field(min_length=1)
     """The periods a new indicator of a generated condition draws from."""
 
@@ -184,31 +193,36 @@ class RankingConfig(BaseModel):
     """
     The monthly stock ranking by revenue acceleration and nearness to the high, and its backtest. Every value comes from
     the `ranking` section of config/appsetting.yaml; the fees and the tax are the market's, the revenue deadline MOPS's.
+    `retired` names the settings this section once had and no longer reads (settings_notices).
     """
 
-    model_config = ConfigDict(use_attribute_docstrings=True)
+    model_config = ConfigDict(
+        use_attribute_docstrings=True, json_schema_extra={"retired": ["timestamp_calendars", "timestamp_timeout_seconds"]}
+    )
 
     decision_day: int = Field(ge=1, le=28)
     """Each month decides at the close of its first session on this day of the month or later."""
 
-    top: int = Field(ge=1)
+    top: int = Field(ge=1, json_schema_extra={"steps": [10, 15, 20, 30, 50]})
     """How many of the best scores it holds, in equal weights."""
 
-    min_close: float = Field(ge=0, allow_inf_nan=False)
-    min_traded_value: float = Field(ge=0, allow_inf_nan=False)
+    min_close: float = Field(ge=0, allow_inf_nan=False, json_schema_extra={"steps": [0, 5, 10, 20, 50], "unit": SettingUnit.TWD})
+    min_traded_value: float = Field(
+        ge=0, allow_inf_nan=False, json_schema_extra={"steps": [0, 10000000, 30000000, 50000000, 100000000], "unit": SettingUnit.TWD}
+    )
     """NT$ a session on average over the last traded_value_sessions, a session without a trade counting 0."""
 
-    traded_value_sessions: int = Field(ge=1)
-    high_sessions: int = Field(ge=1)
+    traded_value_sessions: int = Field(ge=1, json_schema_extra={"steps": [5, 10, 20, 60]})
+    high_sessions: int = Field(ge=1, json_schema_extra={"steps": [60, 120, 250, 500]})
     """The sessions whose highest total-return level the level at the decision is compared with."""
 
-    revenue_short_months: int = Field(ge=1)
-    revenue_long_months: int = Field(ge=1)
-    daily_limit: float = Field(gt=0, lt=1)
+    revenue_short_months: int = Field(ge=1, json_schema_extra={"steps": [1, 2, 3, 6]})
+    revenue_long_months: int = Field(ge=1, json_schema_extra={"steps": [6, 12, 24]})
+    daily_limit: float = Field(gt=0, lt=1, json_schema_extra={"steps": [0.1, 0.105, 0.11, 0.15], "unit": SettingUnit.PERCENT})
     """A move beyond it on a bar without a reference price counts as 0 in the total-return level."""
 
-    benchmark_id: str = Field(min_length=1)
-    sessions_per_year: float = Field(gt=0, allow_inf_nan=False)
+    benchmark_id: str = Field(min_length=1, json_schema_extra={"options": ["0050", "006208"]})
+    sessions_per_year: float = Field(gt=0, allow_inf_nan=False, json_schema_extra={"steps": [240, 245, 250, 252]})
     """The sessions a year the annual returns count."""
 
     def ranking_rule(self) -> MonthlyRankingRule:
@@ -222,6 +236,10 @@ class RankingConfig(BaseModel):
             long_months=self.revenue_long_months,
         )
 
+    def revenue_trend_rule(self) -> RevenueTrendRule:
+        """The stock page's and the holdings page's revenue trend, whose acceleration is the ranking's own measure."""
+        return RevenueTrendRule(short_months=self.revenue_short_months, long_months=self.revenue_long_months)
+
     def history_rule(self) -> RankingHistoryRule:
         return RankingHistoryRule(daily_limit=self.daily_limit)
 
@@ -229,28 +247,28 @@ class RankingConfig(BaseModel):
 class MarketConfig(BaseModel):
     """Universal market trading rules and friction costs. Every value comes from the `market` section of config/appsetting.yaml."""
 
-    fee_rate: float = Field(ge=0)
-    tax_rate: float = Field(ge=0)
+    fee_rate: float = Field(ge=0, json_schema_extra={"steps": [0.000399, 0.000855, 0.001425], "unit": SettingUnit.PERCENT})
+    tax_rate: float = Field(ge=0, json_schema_extra={"steps": [0.0015, 0.003], "unit": SettingUnit.PERCENT})
     """Securities transaction tax on a stock SELL."""
 
-    etf_tax_rate: float = Field(ge=0)
+    etf_tax_rate: float = Field(ge=0, json_schema_extra={"steps": [0.001, 0.003], "unit": SettingUnit.PERCENT})
     """Securities transaction tax on an ETF SELL (codes starting with 00)."""
 
     bond_etf_tax_exempt_until: date
     """The last trading date on which a bond ETF SELL (a 00 code ending in B) pays no transaction tax; after it, etf_tax_rate."""
 
-    min_fee: int = Field(ge=0)
+    min_fee: int = Field(ge=0, json_schema_extra={"steps": [0, 1, 20], "unit": SettingUnit.TWD})
 
-    board_lot_shares: int = Field(gt=0)
+    board_lot_shares: int = Field(gt=0, json_schema_extra={"steps": [100, 1000]})
     """Shares in one board lot, the exchange's trading unit. Fewer shares trade as an odd lot."""
 
-    stock_ticks: dict[Decimal, Decimal]
+    stock_ticks: dict[Decimal, Decimal] = Field(json_schema_extra={"operator_only": True})
     """A stock's price ticks: from each band's lowest price up, a limit price is a multiple of the band's tick."""
 
-    etf_ticks: dict[Decimal, Decimal]
+    etf_ticks: dict[Decimal, Decimal] = Field(json_schema_extra={"operator_only": True})
     """An ETF's price ticks, banded like stock_ticks."""
 
-    tick_float_tolerance: Decimal = Field(gt=0, lt=Decimal("0.5"))
+    tick_float_tolerance: Decimal = Field(gt=0, lt=Decimal("0.5"), json_schema_extra={"operator_only": True})
     """A quote this close to a tick, as a fraction of the tick, is that tick carried through a binary float."""
 
     def cost_rule(self) -> TradingCostRule:
@@ -286,11 +304,31 @@ class TradingConfig(BaseModel):
 
     model_config = ConfigDict(use_attribute_docstrings=True)
 
-    max_order_value: float = Field(gt=0, allow_inf_nan=False)
+    max_order_value: float = Field(
+        gt=0,
+        allow_inf_nan=False,
+        json_schema_extra={"steps": [10000, 20000, 50000, 100000, 200000, 500000, 1000000], "unit": SettingUnit.TWD},
+    )
     """Most NT$ one BUY on a real broker may cost at its limit price, fees aside."""
 
-    max_daily_buy_value: float = Field(gt=0, allow_inf_nan=False)
+    max_daily_buy_value: float = Field(
+        gt=0,
+        allow_inf_nan=False,
+        json_schema_extra={"steps": [50000, 100000, 300000, 500000, 1000000, 3000000], "unit": SettingUnit.TWD},
+    )
     """Most NT$ the BUYs on a real broker of one Taiwan calendar day may cost together at their limit prices."""
+
+
+class HoldingsConfig(BaseModel):
+    """The My holdings page and the SinoPac account page. A settings file without the section runs on these defaults."""
+
+    model_config = ConfigDict(use_attribute_docstrings=True)
+
+    concentration_positions: int = Field(default=3, ge=1, le=20, json_schema_extra={"steps": [1, 3, 5, 10]})
+    """The largest stocks whose share of the holdings' value the page shows as the concentration."""
+
+    realized_days: int = Field(default=90, ge=1, le=366, json_schema_extra={"steps": [30, 90, 180, 366], "unit": SettingUnit.DAYS})
+    """How many days back the SinoPac account page asks the broker for the sales it settled."""
 
 
 class MockTradingConfig(BaseModel):
@@ -302,8 +340,10 @@ class MockTradingConfig(BaseModel):
 
     model_config = ConfigDict(use_attribute_docstrings=True)
 
-    initial_cash: float = Field(default=1_000_000, gt=0)
-    max_fill_quantity: int | None = Field(default=None, gt=0)
+    initial_cash: float = Field(
+        default=1_000_000, gt=0, json_schema_extra={"steps": [100000, 500000, 1000000, 3000000, 10000000], "unit": SettingUnit.TWD}
+    )
+    max_fill_quantity: int | None = Field(default=None, gt=0, json_schema_extra={"steps": [1000, 5000, 10000, 50000]})
     """Most shares the simulated market fills per order at the limit price. Unset fills any quantity."""
 
 
@@ -333,10 +373,10 @@ class ShioajiConfig(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore", env_prefix="SHIOAJI_")
 
-    poll_interval_seconds: float = Field(ge=0)
+    poll_interval_seconds: float = Field(ge=0, json_schema_extra={"steps": [0.2, 0.5, 1, 2], "unit": SettingUnit.SECONDS})
     """Wait between two reads of an order's status at the broker. It comes from config/appsetting.yaml, like max_polls."""
 
-    max_polls: int = Field(gt=0)
+    max_polls: int = Field(gt=0, json_schema_extra={"steps": [5, 10, 20, 30]})
     """Reads of an order's status before the adapter cancels it, and again after the cancel request."""
 
     api_key: SecretStr | None = Field(default=None, validation_alias=ShioajiCredential.API_KEY.value)
@@ -387,7 +427,7 @@ class ShioajiConfig(BaseSettings):
 class WatchlistConfig(BaseModel):
     model_config = ConfigDict(use_attribute_docstrings=True)
 
-    automatic_expiry_sessions: int = Field(default=1, gt=0)
+    automatic_expiry_sessions: int = Field(default=1, gt=0, json_schema_extra={"steps": [1, 2, 3, 5, 10]})
     """
     A TECHNICAL or BUZZ entry stays active through the close of this many trading sessions after its workflow
     last selected it: 1 keeps Friday evening's Full Cycle entries through Monday's session.

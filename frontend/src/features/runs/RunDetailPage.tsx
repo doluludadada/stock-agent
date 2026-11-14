@@ -3,8 +3,9 @@ import type { UseQueryResult } from '@tanstack/react-query'
 import { useMemo, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { useLocale, useTranslation } from '@/i18n'
+import { usePageTitle } from '@/shared/lib/page-title'
 import { paths } from '@/shared/config/paths'
-import { isApiError, useAllows } from '@/shared/api'
+import { isApiError, useAllows, useShows } from '@/shared/api'
 import { formatDateTime, formatNumber, formatPrice } from '@/shared/lib/format'
 import { ArchiveWarmUp } from '@/shared/ui/archive-warm-up'
 import { Badge } from '@/shared/ui/badge'
@@ -12,7 +13,7 @@ import { DataTable, type Column } from '@/shared/ui/data-table'
 import { ErrorState } from '@/shared/ui/error-state'
 import { NotAdviceNote } from '@/shared/ui/not-advice-note'
 import { Panel } from '@/shared/ui/panel'
-import { Skeleton } from '@/shared/ui/skeleton'
+import { PageSkeleton, Skeleton } from '@/shared/ui/skeleton'
 import { Stat } from '@/shared/ui/stat'
 import { StateBlock } from '@/shared/ui/state-block'
 import { RequireSignIn } from '@/shared/ui/require-sign-in'
@@ -45,7 +46,7 @@ function RunDetail({ runId, renderWatch, ruleName }: RunDetailPageProps) {
   const signals = useRunSignals(runId, ended)
   const orders = useRunOrders(runId, ended)
   /** Only a finished analysis records decisions it never ordered, which a user may follow into the mock account. */
-  const followable = run.data?.state === 'finished' && run.data.summary?.workflow === 'full_cycle'
+  const followable = useShows('mock_account') && run.data?.state === 'finished' && run.data.summary?.workflow === 'full_cycle'
   const follow = useRunFollow(runId, followable)
   const quoted = useAllows('realtime_quotes')
   /** A finished specific-stock analysis offers a BUY of each stock it reported, priced on a realtime quote. */
@@ -60,19 +61,20 @@ function RunDetail({ runId, renderWatch, ruleName }: RunDetailPageProps) {
       {t('back')}
     </Link>
   )
-  if (run.isPending) return <Skeleton className="h-96 rounded-2xl" />
+  if (run.isPending) return <PageSkeleton />
   if (isApiError(run.error, 'notFound')) {
     return (
       <div className="space-y-3">
         {back}
-        <StateBlock icon={SearchX} title={t('notFound')} className="rounded-2xl border bg-card py-12" />
+        <StateBlock icon={SearchX} title={t('notFound')} framed />
       </div>
     )
   }
-  if (run.isError) return <ErrorState error={run.error} title={t('loadFailed')} onRetry={() => void run.refetch()} className="rounded-2xl border bg-card py-12" />
+  // A poll that fails once keeps the run on screen; the next poll asks again.
+  if (run.data === undefined) return <ErrorState error={run.error} title={t('loadFailed')} onRetry={() => void run.refetch()} framed />
 
   return (
-    <div className="space-y-5 lg:space-y-6">
+    <div className="page-stack">
       <div className="space-y-3">
         {back}
         <Header run={run.data} />
@@ -90,7 +92,7 @@ function RunDetail({ runId, renderWatch, ruleName }: RunDetailPageProps) {
       {followable && <FollowPanel runId={runId} follow={follow} decisions={signals.data} names={names} />}
       {(run.data.reports ?? []).length > 0 && <Reports reports={run.data.reports ?? []} buyFrom={buyable ? runId : null} renderWatch={renderWatch} ruleName={ruleName} />}
       {ended && (
-        <div className="grid items-start gap-4 lg:gap-5 xl:grid-cols-2">
+        <div className="card-grid xl:grid-cols-2">
           <Signals query={signals} marks={marks} />
           <Orders query={orders} />
         </div>
@@ -104,10 +106,12 @@ function Header({ run }: { run: Run }) {
   const { t } = useTranslation('runs')
   const locale = useLocale()
   const summary = run.summary
+  const title = summary ? t(`workflow.${summary.workflow}`) : t('unrecorded')
+  usePageTitle(title)
   return (
     <header className="space-y-1.5">
       <div className="flex flex-wrap items-center gap-2.5">
-        <h1 className="display">{summary ? t(`workflow.${summary.workflow}`) : t('unrecorded')}</h1>
+        <h1 className="display">{title}</h1>
         <RunStateBadge state={run.state} />
         {summary && (
           <Badge variant="outline" className="font-normal">

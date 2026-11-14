@@ -13,10 +13,11 @@ from pathlib import Path
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
-from support.harness import ADMINISTRATOR, build_harness, runtime_for
+from support.harness import ADMINISTRATOR, CliHarness, build_harness, rising_history, runtime_for
 from trading_stack import run_stats
 
-from a_domain.types.enums import Audience, SettingsFile
+from a_domain.model.trading.account import Position
+from a_domain.types.enums import Audience, ExecutionProvider, OrderStatus, RejectReason, SettingsFile
 from a_domain.types.ids import RunId
 from b_application.config.app_config import AppConfig
 from b_application.schemas.pipeline_status import PipelineStatus
@@ -40,8 +41,8 @@ class Opened:
 class RecordingOpener:
     """Opens a runtime over the harness's fakes for each config and records when the runtime it opened closes."""
 
-    def __init__(self, failure: Exception | None = None) -> None:
-        self.harness = build_harness()
+    def __init__(self, failure: Exception | None = None, harness: CliHarness | None = None) -> None:
+        self.harness = harness or build_harness()
         self.opened: list[Opened] = []
         self.failure = failure
 
@@ -122,6 +123,30 @@ async def test_a_reload_while_a_run_holds_the_old_runtime_closes_it_only_after_t
 
     assert isinstance(reload, SettingsReloaded)
     assert [opened.closed for opened in opener.opened] == [True, False] and switch.running == reload.revisions
+
+
+async def test_turning_sinopac_ordering_off_stops_the_orders_of_a_sinopac_run_already_under_way(project: Path) -> None:
+    edit(project, 'sinopac_ordering: "off"', "sinopac_ordering: administrators")
+    harness = build_harness(sinopac=True)
+    harness.list_stock("2317", rising_history(100.0), realtime_price=80.0)
+    harness.real_broker.positions = [Position(stock_id="2317", quantity=1000, average_cost=100.0)]
+    switch = await started(project, RecordingOpener(harness=harness))
+
+    with switch.hold() as run:
+        pipeline = run.runtime.pipeline_for(harness.administrator, ExecutionProvider.SHIOAJI)
+        while_on = await pipeline.run_intraday()
+        sent = list(harness.real_broker.placed)
+
+        edit(project, "sinopac_ordering: administrators", 'sinopac_ordering: "off"')
+        reload = await switch.reload()
+        after_off = await pipeline.run_intraday()
+
+    assert isinstance(reload, SettingsReloaded)
+    assert [order.stock_id for order in sent] == ["2317"] and [order.status for order in while_on.orders] == [OrderStatus.FILLED]
+    assert harness.real_broker.placed == sent and harness.broker.placed == []
+    assert [(order.status, order.reason) for order in after_off.orders] == [
+        (OrderStatus.REJECTED, f"{RejectReason.ORDERING_OFF.name}: this site has ordering on shioaji off: features.sinopac_ordering")
+    ]
 
 
 async def test_a_run_its_request_started_keeps_a_retired_runtime_open_until_the_run_ends(project: Path) -> None:

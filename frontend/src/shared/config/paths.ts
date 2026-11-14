@@ -1,7 +1,8 @@
 /** The app's addresses. Features link with these; app/router maps the same paths to their pages. */
 export const paths = {
-  /** The home page: the market overview. */
-  market: '/',
+  /** The home page: what changed since the last visit, card by card. */
+  home: '/',
+  market: '/market',
   runs: '/runs',
   run: (id: string) => `/runs/${encodeURIComponent(id)}`,
   strategies: '/strategies',
@@ -15,7 +16,11 @@ export const paths = {
   ranking: '/ranking',
   valuation: '/valuation',
   watchlist: '/watchlist',
+  /** The user's holdings as one portfolio: the brokerage account's, the mock account's and the ones entered by hand. */
+  holdings: '/holdings',
   account: '/account',
+  /** The SinoPac account as the broker reports it. */
+  brokerage: '/account/sinopac',
   mySettings: '/settings',
   adminSettings: '/admin/settings',
   users: '/admin/users',

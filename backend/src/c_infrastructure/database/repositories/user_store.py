@@ -18,7 +18,7 @@ from a_domain.types.enums import AiProvider, Role, UserStatus
 from a_domain.types.errors import AlreadySetUpError, LastAdministratorError, UserExistsError
 from a_domain.types.ids import SessionToken, UserId
 from c_infrastructure.database.db_connector import DatabaseConnector
-from c_infrastructure.database.models.user_dto import UserDTO, UserKeys, UserSessionDTO
+from c_infrastructure.database.models.user_dto import NO_PASSWORD, UserDTO, UserKeys, UserSessionDTO
 
 
 class AccountsKeyError(RuntimeError):
@@ -32,8 +32,9 @@ class SqlUserStore(IUserStore):
     """
     The users and user_sessions tables. Passwords are hashed with argon2id at OWASP's parameters (2 passes, 19 MiB, 1
     lane) in a worker thread, at most two at a time, so a flood of sign-ins can neither stall a running workflow nor
-    claim the machine's memory. An unknown sign-in name is checked against a dummy hash, so it costs a wrong password's
-    time. The username and the email are sealed and indexed with the keys UserKeys derives from the accounts key.
+    claim the machine's memory. An unknown sign-in name, and an account without a password, is checked against a dummy
+    hash, so it costs a wrong password's time. The username and the email are sealed and indexed with the keys UserKeys
+    derives from the accounts key.
     """
 
     def __init__(self, db: DatabaseConnector, key: SecretStr, logger: ILoggingProvider) -> None:
@@ -67,9 +68,12 @@ class SqlUserStore(IUserStore):
             return (await session.execute(select(func.count()).select_from(UserDTO))).scalar_one()
 
     @override
-    async def create(self, user: User, password: SecretStr) -> None:
-        async with self._hashing:
-            password_hash = await asyncio.to_thread(self._hasher.hash, password.get_secret_value())
+    async def create(self, user: User, password: SecretStr | None) -> None:
+        password_hash = NO_PASSWORD
+
+        if password is not None:
+            async with self._hashing:
+                password_hash = await asyncio.to_thread(self._hasher.hash, password.get_secret_value())
 
         row = UserDTO.from_domain(user, password_hash, self._keys)
         taken = select(UserDTO.username_index).where(
@@ -96,15 +100,17 @@ class SqlUserStore(IUserStore):
         async with self._db.get_session() as session:
             row = (await session.execute(select(UserDTO).where(UserDTO.named(identifier, self._keys)))).scalars().first()
 
+        known = row is not None and row.password_hash != NO_PASSWORD
+
         async with self._hashing:
             try:
                 await asyncio.to_thread(
-                    self._hasher.verify, row.password_hash if row else self._dummy_hash, password.get_secret_value()
+                    self._hasher.verify, row.password_hash if row and known else self._dummy_hash, password.get_secret_value()
                 )
             except VerificationError, InvalidHashError:
                 return None
 
-            if row is None or row.status != UserStatus.ACTIVE:
+            if row is None or not known or row.status != UserStatus.ACTIVE:
                 return None
 
             if self._hasher.check_needs_rehash(row.password_hash):
@@ -172,7 +178,7 @@ class SqlUserStore(IUserStore):
 
     @override
     async def save(self, user: User, now: datetime, password: SecretStr | None = None) -> None:
-        password_hash = None
+        password_hash = None if user.has_password else NO_PASSWORD
 
         if password is not None:
             async with self._hashing:
@@ -187,10 +193,10 @@ class SqlUserStore(IUserStore):
             row = await session.get_one(UserDTO, user.user_id)
             row.role, row.status, row.updated_at = user.role, user.status, now
 
-            if password_hash is not None:
+            if changed := password_hash not in (None, row.password_hash):
                 row.password_hash = password_hash
 
-            if user.status != UserStatus.ACTIVE or password_hash is not None:
+            if user.status != UserStatus.ACTIVE or changed:
                 await session.execute(delete(UserSessionDTO).where(col(UserSessionDTO.user_id) == user.user_id))
 
             await session.flush()

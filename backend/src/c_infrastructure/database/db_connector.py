@@ -20,7 +20,7 @@ from a_domain.types.errors import SignInRequired
 from a_domain.types.ids import UserId
 from b_application.config.app_config import AppConfig
 from c_infrastructure.database.models.backups import DatabaseCommandError, copy_sqlite, run_postgresql_client
-from c_infrastructure.database.models.owned_rows import OWNER_COLUMN, guard_session
+from c_infrastructure.database.models.owned_rows import OWNER_COLUMN, guard_session, hide_refused_values
 from c_infrastructure.database.models.schema_version_dto import (
     SCHEMA_VERSION,
     OutdatedDatabaseError,
@@ -38,7 +38,12 @@ row at once never both insert it.
 
 
 class DatabaseConnector(IDatabaseConnector[AsyncSession]):
-    """The explicitly selected local SQLite or service PostgreSQL database; credentials never select the backend."""
+    """
+    The explicitly selected local SQLite or service PostgreSQL database; credentials never select the backend. A
+    statement the database refuses raises with its text and without the values it was given (hide_parameters), and
+    without the row or the key PostgreSQL quotes after its message (hide_refused_values), so no saved value reaches a
+    log or a run's record through an error.
+    """
 
     def __init__(self, config: AppConfig, logger: ILoggingProvider) -> None:
         self._logger = logger
@@ -57,11 +62,12 @@ class DatabaseConnector(IDatabaseConnector[AsyncSession]):
                 port=config.db.port,
                 database=config.db.name,
             )
-            self._engine = create_async_engine(connection_url, echo=False, pool_pre_ping=True)
+            self._engine = create_async_engine(connection_url, echo=False, pool_pre_ping=True, hide_parameters=True)
+            event.listen(self._engine.sync_engine, "handle_error", hide_refused_values)
         else:
             self._logger.info("Initialising local SQLite (aiosqlite) connection...")
             self._sqlite_path = config.project_root / "stock_agent.db"
-            self._engine = create_async_engine(f"sqlite+aiosqlite:///{self._sqlite_path}", echo=False)
+            self._engine = create_async_engine(f"sqlite+aiosqlite:///{self._sqlite_path}", echo=False, hide_parameters=True)
             # SQLite ignores foreign keys unless each connection turns them on; PostgreSQL always checks them.
             event.listen(
                 self._engine.sync_engine, "connect", lambda connection, _: connection.cursor().execute("PRAGMA foreign_keys=ON")

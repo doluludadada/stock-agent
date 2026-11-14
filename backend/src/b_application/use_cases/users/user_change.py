@@ -28,6 +28,7 @@ class UserChange:
             return None
 
         user.role, user.status = role or user.role, status or user.status
+        user.has_password = user.has_password or password is not None
         await self._user_store.save(user, self._market_clock.now(), password)
 
         self._logger.info(f"User {user_id} changed: role={user.role}, status={user.status}, password {'set' if password else 'kept'}.")

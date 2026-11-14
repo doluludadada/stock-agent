@@ -14,8 +14,8 @@ export function AuthGate() {
   const session = useSession()
   const location = useLocation()
   const needsSetup = status.data?.needs_first_administrator === true
-  if (needsSetup && location.pathname !== paths.setup) return <Navigate to={paths.setup} replace />
-  if (status.data && !needsSetup && location.pathname === paths.setup) return <Navigate to={session.status === 'signedIn' ? paths.market : paths.signIn} replace />
+  if (needsSetup && location.pathname !== paths.setup) return <Navigate to={{ pathname: paths.setup, search: location.search }} replace />
+  if (status.data && !needsSetup && location.pathname === paths.setup) return <Navigate to={session.status === 'signedIn' ? paths.home : paths.signIn} replace />
   return (
     <AuthLinksProvider value={{ signIn: paths.signInThen, register: status.data?.registration_open === false ? null : paths.register }}>
       <Outlet />
@@ -25,14 +25,14 @@ export function AuthGate() {
 
 export function SetupRoute() {
   const navigate = useNavigate()
-  return <SetupScreen onDone={() => navigate(paths.market, { replace: true })} />
+  return <SetupScreen onDone={() => navigate(paths.home, { replace: true })} />
 }
 
 export function SignInRoute() {
   const [params] = useSearchParams()
   const navigate = useNavigate()
   const session = useSession()
-  const next = safeNext(params.get('next'), paths.market)
+  const next = safeNext(params.get('next'), paths.home)
   if (session.status === 'signedIn') return <Navigate to={next} replace />
   return <SignInScreen registerHref={paths.register} onDone={() => navigate(next, { replace: true })} />
 }
@@ -40,6 +40,6 @@ export function SignInRoute() {
 export function RegisterRoute() {
   const navigate = useNavigate()
   const session = useSession()
-  if (session.status === 'signedIn') return <Navigate to={paths.market} replace />
-  return <RegisterScreen signInHref={paths.signIn} onDone={() => navigate(paths.market, { replace: true })} />
+  if (session.status === 'signedIn') return <Navigate to={paths.home} replace />
+  return <RegisterScreen signInHref={paths.signIn} onDone={() => navigate(paths.home, { replace: true })} />
 }

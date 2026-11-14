@@ -1,12 +1,14 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, within } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { I18nextProvider } from 'react-i18next'
 import { MemoryRouter, Route, Routes, useParams } from 'react-router'
 import { initI18n } from '@/i18n'
 import { session, type Schemas } from '@/shared/api'
 import { PERSONAL_SITE } from '@/test/audiences'
+import { OPEN_SITE } from '@/test/features'
 import { TEST_USER } from '@/test/users'
+import { runKeys } from './api'
 import { RunDetailPage } from './RunDetailPage'
 
 const RUN = '11111111-1111-4111-8111-111111111111'
@@ -34,6 +36,7 @@ describe('a finished run whose decisions or orders failed to load', () => {
   it('says the load failed and retries it, instead of saying the run made no decision and placed no order', async () => {
     let failing = true
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/v1/auth/status') return json(OPEN_SITE)
       if (url === `/v1/runs/${RUN}`) return json({ run_id: RUN, state: 'finished', error: null, summary: null, reports: [] })
       return failing ? json({ detail: 'boom' }, 500) : json([])
     }))
@@ -54,8 +57,53 @@ describe('a finished run whose decisions or orders failed to load', () => {
   })
 })
 
+describe('a running run whose poll fails', () => {
+  beforeEach(() => session.signIn(TEST_USER))
+  afterEach(() => {
+    session.signOut()
+    vi.unstubAllGlobals()
+  })
+
+  it('stays on screen, and shows the run’s end when a later poll answers', async () => {
+    const server: { answer: 'running' | 'down' | 'finished' } = { answer: 'running' }
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/v1/auth/status') return json(OPEN_SITE)
+      if (url !== `/v1/runs/${RUN}`) return json([])
+      if (server.answer === 'down') return json({ detail: 'boom' }, 500)
+      return json({ run_id: RUN, state: server.answer, error: null, summary: null, reports: [] })
+    }))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <I18nextProvider i18n={initI18n('en')}>
+        <QueryClientProvider client={client}>
+          <MemoryRouter>
+            <RunDetailPage runId={RUN} ruleName={(name) => name} />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </I18nextProvider>,
+    )
+    expect(await screen.findByText('Running. The state updates by itself.')).toBeVisible()
+
+    server.answer = 'down'
+    await act(async () => {
+      await client.refetchQueries({ queryKey: runKeys.run(RUN) })
+      // The page hears of the failed poll a moment after the poll settles.
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
+    expect(client.getQueryState(runKeys.run(RUN))?.status).toBe('error')
+    expect(screen.getByText('Running. The state updates by itself.')).toBeVisible()
+    expect(screen.getByText(RUN)).toBeVisible()
+    expect(screen.queryByText('The runs could not be loaded.')).not.toBeInTheDocument()
+
+    server.answer = 'finished'
+    await act(() => client.refetchQueries({ queryKey: runKeys.run(RUN) }))
+    expect(await screen.findByText('The run recorded no decision.')).toBeVisible()
+    expect(screen.queryByText('Running. The state updates by itself.')).not.toBeInTheDocument()
+  })
+})
+
 const FOLLOW_RUN = '22222222-2222-4222-8222-222222222222'
-const BUY = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+const BUY ='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const SELL = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
 const HOLD = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
 
@@ -137,6 +185,7 @@ function serve({ follow, audience = PERSONAL_SITE }: Site) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/v1/auth/status') return json(OPEN_SITE)
       if (url === '/v1/market/audience') return json(audience)
       if (url === `/v1/runs/${RUN}`) {
         const reports = [{ stock_id: '2330', name: 'TSMC', technical_report: null, ai_report: null, composite_score: 80, current_price: 500, latest_market_data_at: null }]
@@ -276,6 +325,7 @@ function serveSpecific({ audience = PERSONAL_SITE, brokers = [MOCK, SINOPAC] }: 
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/v1/auth/status') return json(OPEN_SITE)
       if (url === '/v1/market/audience') return json(audience)
       if (url === '/v1/account/brokers') return json(brokers)
       if (url === `/v1/runs/${RUN}`) {

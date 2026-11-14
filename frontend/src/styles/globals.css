@@ -168,6 +168,46 @@
 }
 
 @layer utilities {
+  /* A page: its header and its blocks in one column. Pages use this and never space themselves. */
+  .page-stack {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-page);
+    min-width: 0;
+  }
+  .page-stack > * {
+    min-width: 0;
+  }
+  /* The cards of a page side by side; the page names only its columns. */
+  .card-grid {
+    display: grid;
+    align-items: start;
+    gap: var(--space-grid);
+  }
+  .card-grid > * {
+    min-width: 0;
+  }
+  /* Cards under one another inside a page's block, at the grid's own gap. */
+  .card-stack {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-grid);
+    min-width: 0;
+  }
+  .card-stack > * {
+    min-width: 0;
+  }
+  /* A link or a button inside running text: as tall as a finger needs on a phone, as tall as its line elsewhere. */
+  .tap {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--touch-target);
+  }
+  @media (min-width: 48rem) {
+    .tap {
+      min-height: 0;
+    }
+  }
   .tabular {
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum";

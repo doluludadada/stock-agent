@@ -1,0 +1,126 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { I18nextProvider } from 'react-i18next'
+import { createMemoryRouter, RouterProvider } from 'react-router'
+import { Toaster } from 'sonner'
+import { initI18n } from '@/i18n'
+import { session } from '@/shared/api'
+import { TEST_ADMIN } from '@/test/users'
+import { AdminSettingsPage } from './AdminSettingsPage'
+import type { SettingField } from './form'
+import { startGoogleConfirmation, takePendingSave } from './googleConfirmation'
+
+const GOOGLE_ONLY_ADMIN = { ...TEST_ADMIN, has_password: false }
+const STORAGE_KEY = 'stock-agent.settings-confirmation'
+const TEMPERATURE: SettingField = {
+  path: 'ai.temperature',
+  kind: 'range',
+  group: 'ai',
+  value: 0.7,
+  options: [],
+  steps: [],
+  minimum: 0,
+  maximum: 2,
+  step: 0.1,
+  unit: null,
+  nullable: false,
+  restart_only: false,
+}
+
+/** The settings API in memory: a save needs the confirmation id the test says Google granted. */
+function fakeServer(granted: string | null) {
+  const saves: Record<string, unknown>[] = []
+  const json = (body: unknown, code = 200) => new Response(JSON.stringify(body), { status: code, headers: { 'Content-Type': 'application/json' } })
+  const fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+    if ((init?.method ?? 'GET') === 'GET') return json([TEMPERATURE])
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>
+    saves.push(body)
+    if (body.google_confirmation !== granted) return json({ detail: 'Confirm the save with a fresh Google sign-in.', code: 'google_confirmation_required' }, 403)
+    return json([{ ...TEMPERATURE, value: 0.3 }])
+  })
+  return { saves, fetch }
+}
+
+function renderPage(server: ReturnType<typeof fakeServer>, entry = '/admin/settings') {
+  vi.stubGlobal('fetch', server.fetch)
+  const i18n = initI18n('en')
+  void i18n.changeLanguage('en')
+  session.signIn(GOOGLE_ONLY_ADMIN)
+  const router = createMemoryRouter([{ path: '/admin/settings', element: <AdminSettingsPage /> }], { initialEntries: [entry] })
+  render(
+    <I18nextProvider i18n={i18n}>
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <RouterProvider router={router} />
+        <Toaster />
+      </QueryClientProvider>
+    </I18nextProvider>,
+  )
+  return router
+}
+
+describe('a settings save by an administrator without a password', { timeout: 30_000 }, () => {
+  beforeEach(() => {
+    Element.prototype.scrollIntoView = () => undefined
+    sessionStorage.clear()
+  })
+
+  afterEach(() => {
+    session.signOut()
+    vi.unstubAllGlobals()
+  })
+
+  it('asks to confirm with Google, never for a password', async () => {
+    const user = userEvent.setup({ delay: null })
+    renderPage(fakeServer(null))
+
+    fireEvent.change(await screen.findByRole('slider', { name: 'Temperature' }), { target: { value: '0.3' } })
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+
+    const dialog = await screen.findByRole('alertdialog', { name: 'Save the settings?' })
+    expect(within(dialog).getByRole('button', { name: 'Confirm with Google' })).toBeVisible()
+    expect(within(dialog).queryByLabelText('Your password')).not.toBeInTheDocument()
+  })
+
+  it('keeps the changes under a fresh id while the browser goes to the start of the confirmation', () => {
+    const visited: string[] = []
+    startGoogleConfirmation([{ path: 'ai.temperature', value: 0.3 }], (address) => visited.push(address))
+
+    const pending = takePendingSave()
+    expect(pending?.changes).toEqual([{ path: 'ai.temperature', value: 0.3 }])
+    expect(pending?.id).toMatch(/^[0-9a-f]{32}$/)
+    expect(visited).toEqual([`/v1/auth/google/start?confirmation=${pending?.id}`])
+    expect(takePendingSave()).toBeNull()
+  })
+
+  it('sends the waiting save with the confirmation once Google confirmed it, and clears the address', async () => {
+    const server = fakeServer('a'.repeat(32))
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ id: 'a'.repeat(32), changes: [{ path: 'ai.temperature', value: 0.3 }] }))
+    const router = renderPage(server, '/admin/settings?google=confirmed')
+
+    expect(await screen.findByText('Saved. The server runs on the new settings now.')).toBeVisible()
+    expect(server.saves).toEqual([{ confirm: true, changes: [{ path: 'ai.temperature', value: 0.3 }], google_confirmation: 'a'.repeat(32) }])
+    expect(screen.getByRole('slider', { name: 'Temperature' })).toHaveValue('0.3')
+    expect(router.state.location.search).toBe('')
+    expect(sessionStorage.getItem(STORAGE_KEY)).toBeNull()
+  })
+
+  it('says why Google did not confirm, sends nothing and keeps what was typed', async () => {
+    const server = fakeServer(null)
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ id: 'b'.repeat(32), changes: [{ path: 'ai.temperature', value: 0.3 }] }))
+    renderPage(server, '/admin/settings?google=stale_authentication')
+
+    expect(await screen.findByText(/Google did not ask you to sign in again/)).toBeVisible()
+    await waitFor(() => expect(screen.getByRole('slider', { name: 'Temperature' })).toHaveValue('0.3'))
+    expect(server.saves).toEqual([])
+  })
+
+  it('says to save again when the server no longer holds the confirmation', async () => {
+    const server = fakeServer('another-id')
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ id: 'c'.repeat(32), changes: [{ path: 'ai.temperature', value: 0.3 }] }))
+    renderPage(server, '/admin/settings?google=confirmed')
+
+    expect(await screen.findByText(/used already or took too long/)).toBeVisible()
+    expect(screen.getByRole('slider', { name: 'Temperature' })).toHaveValue('0.3')
+  })
+})

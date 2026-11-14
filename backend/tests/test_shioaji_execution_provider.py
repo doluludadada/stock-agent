@@ -1,13 +1,13 @@
 import asyncio
 import traceback
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 import shioaji
 from shioaji.constant import Action, OrderType as BrokerTimeInForce, Status, StockOrderCond, StockOrderLot, StockPriceType, Unit
 from shioaji.error import TimeoutError as ShioajiTimeoutError, TokenError
 from shioaji.position import AccountBalance
-from support.fake_shioaji import FakeShioaji, Report, position
+from support.fake_shioaji import FakeShioaji, Report, position, sale
 from support.fakes import RecordingLogger
 from support.settings import environment_setup, shipped_config
 from trading_stack import SilentLogger
@@ -399,6 +399,57 @@ async def test_get_account_refuses_a_balance_the_broker_reports_as_an_error() ->
 
     with pytest.raises(RuntimeError, match="^Shioaji answered the account balance with an error message$"):
         await provider(client).get_account()
+
+
+async def test_the_statement_is_the_account_as_the_broker_reports_it_and_sends_nothing() -> None:
+    client = FakeShioaji(
+        settlement_amounts=(-10_000.0, 0.0, 20_000.0),
+        holdings=[
+            position("2330", 1500, 95.5).model_copy(update={"last_price": 104.0, "pnl": 12_345.0}),
+            position("2603", 2000, 50.0, cond=StockOrderCond.MarginTrading),
+            position("6505", 37, 80.0).model_copy(update={"last_price": 0.0}),
+        ],
+        profit_losses=[sale("2317", 1000, 58.0, -2_300.0, "2026-10-09"), sale("1101", 37, 35.0, 10.0, "2025-09-01")],
+    )
+    broker = provider(client)
+    await broker.place_order(order(quantity=1500))
+    sent = list(client.placed)
+
+    statement = await broker.statement(date(2026, 7, 21), date(2026, 10, 19))
+
+    assert (statement.simulation, statement.balance, statement.sales_from) == (True, 1_000_000, date(2026, 7, 21))
+    assert [(settlement.settles_on, settlement.amount) for settlement in statement.settlements] == [
+        (date(2026, 10, 19), -10_000),
+        (date(2026, 10, 20), 0),
+        (date(2026, 10, 21), 20_000),
+    ]
+    assert [
+        (held.stock_id, held.quantity, held.average_cost, held.mark and (held.mark.price, held.mark.unrealized_pnl))
+        for held in statement.positions
+    ] == [("2330", 1500, 95.5, (104.0, 12_345.0)), ("6505", 37, 80.0, None)]
+    assert (statement.market_value, statement.unrealized_pnl) == (1500 * 104.0 + 37 * 80.0, 12_345.0)
+    assert [(fill.stock_id, fill.action, fill.quantity, fill.price, fill.filled_on) for fill in statement.fills] == [
+        ("2330", TradeAction.BUY, 1000, 100.0, date(2026, 10, 19)),
+        ("2330", TradeAction.BUY, 500, 100.0, date(2026, 10, 19)),
+    ]
+    assert [(sold.stock_id, sold.quantity, sold.price, sold.filled_on, sold.realized_pnl) for sold in statement.sales] == [
+        ("2317", 1000, 58.0, date(2026, 10, 9), -2_300.0)
+    ]
+    assert (statement.realized_pnl, client.profit_loss_requests) == (-2_300.0, [("2026-07-21", "2026-10-19", Unit.Share)])
+    assert (client.placed, client.cancelled) == (sent, [])
+    assert private_parts(repr(statement)) == []
+
+
+@pytest.mark.parametrize(
+    "read", ["account_balance", "settlements", "list_positions", "update_status", "list_trades", "list_profit_loss"]
+)
+async def test_a_refused_read_of_the_statement_says_only_the_error_type_and_status(read: str) -> None:
+    client = FakeShioaji(refusals={read: sdk_refusal()})
+
+    with pytest.raises(RuntimeError, match="^Shioaji answered TokenError, status 401$") as refused:
+        await provider(client).statement(date(2026, 7, 21), date(2026, 10, 19))
+
+    assert private_parts(raised(refused.value)) == [] and client.placed == []
 
 
 async def test_the_test_environment_logs_in_to_simulation_with_only_the_test_key_pair_and_no_ca() -> None:

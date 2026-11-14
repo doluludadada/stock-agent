@@ -1,5 +1,6 @@
 const watchlist = {
   signIn: 'Sign in to see your watchlist',
+  today: { all: 'The whole list' },
   title: 'Watchlist',
   lead: 'Stocks you follow, with each close and its month.',
   description: '{{count}} stocks. Stocks you add stay; the ones a run adds expire on their own.',

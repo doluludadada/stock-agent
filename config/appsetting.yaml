@@ -235,6 +235,39 @@ quality:
   min_chars_news: 200
   min_chars_gossip: 50
 
+stock_page:
+  # A stock's page: its financial analysis reads held data only. On a personal site its news and board posts are
+  # fetched when a page asks, then served again for this many minutes before the news sites and PTT are asked anew.
+  news_freshness_minutes: 30
+  # The stocks whose fetched news and posts stay in memory, the most recently asked first.
+  news_held_stocks: 300
+  # The sessions of a valuation ratio the page needs before it compares the latest with their median.
+  valuation_min_sessions: 60
+  # How many of the latest quarters the page reads the EPS of from the MOPS pages a personal site holds
+  # (`just backfill-history` brings them back).
+  eps_quarters: 12
+  brief:
+    # The page's AI brief: what the company is and how the held facts of a recent window relate to the stock's move.
+    # One is written per stock and Taiwan calendar day for the whole site, when a signed-in viewer asks for it; every
+    # later viewer reads the stored one. Its prompt is stock_brief_prompt in config/instructions.yaml.
+    # How many stocks may get a new brief per Taiwan calendar day, for all users together.
+    daily_stocks: 30
+    # The language every brief is written in: zh-TW or en.
+    language: zh-TW
+    # The latest sessions whose price move a brief describes.
+    window_sessions: 20
+    # What it says about the stock it searches for in the article store (article_store below), with the queries
+    # stock_brief_rise_query, stock_brief_fall_query and stock_brief_company_query of config/instructions.yaml.
+  article_store:
+    # What the site read about each stock is kept so that it accumulates: announcements and TWSE news with their text,
+    # and on a personal site news articles and PTT posts. Articles enter when a stock page asks for the stock's news,
+    # when the Web API's timer reads the stocks users hold or watch, and with
+    # `just backfill-articles`. Each has a vector, computed on the server, that finds it by meaning.
+    # An article published longer ago than this many days is dropped.
+    retention_days: 730
+    # The most articles kept of one stock, the newest first.
+    max_per_stock: 300
+
 market:
   fee_rate: 0.001425
   # Securities transaction tax on a SELL: stocks, and ETFs (codes starting with 00).
@@ -324,8 +357,9 @@ accounts:
   # Paid AI calls of every user together per Taiwan calendar day. Past it, users' calls are refused until midnight.
   # An administrator's calls count toward it and are never refused.
   daily_ai_calls_total: 600
-  # Anyone may register as a user once the first administrator exists. A user trades on their own mock account only.
-  registration_open: true
+  # true: anyone may register as a user once the first administrator exists. A user trades on their own mock account
+  # only. prod, the environment with the real SinoPac account, refuses to start with it on.
+  registration_open: false
   # Failed sign-ins before the next is refused for the window: per sign-in name and client address, and per address.
   sign_in_failures_per_name: 5
   sign_in_failures_per_client: 20
@@ -339,8 +373,39 @@ accounts:
   session_days: 14
   # Web workflow runs at once, every user's together; each user runs one at a time.
   max_concurrent_runs: 2
+  # Strategy backtests and ranking backtests the Web API replays at once, every user's together. One more waits its
+  # turn. A replay holds years of daily history in memory and a core.
+  max_concurrent_backtests: 2
+  # Backtests one user may have replaying or waiting before the next is refused. The ranking page asks for two at once.
+  max_backtests_per_user: 4
   # Backtests kept per user, to compare them. Saving one more deletes the user's oldest.
   saved_backtests: 20
+  # Sign-in with Google. The site offers it when GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are set in the environment or
+  # .env and public_origin is set here: all three, or none. docs/web-integration.md has the steps.
+  # The address the browser reaches the site at, without a path or a trailing slash, such as
+  # https://my-server.my-tailnet.ts.net. It must be https; only http://localhost and http://127.0.0.1 may be http. Its
+  # host must be in api.allowed_hosts. Google sends the browser back to <public_origin>/v1/auth/google/callback.
+  public_origin: ""
+  # Google accounts that sign in as administrators, by their whole email, in any case. No domain wildcards. The first
+  # sign-in creates the account, on an installation with no user yet too.
+  google_administrator_emails: []
+  # Google accounts that sign in as users, whether registration is open or not. An email on neither list signs in
+  # with Google only while registration_open is true.
+  google_allowed_emails: []
+  # Google's OpenID Connect addresses. The token endpoint must be https: the app trusts the ID token because it comes
+  # straight from Google over TLS. They have no default: a file without one of them offers no sign-in with Google.
+  google_issuer: https://accounts.google.com
+  google_authorization_endpoint: https://accounts.google.com/o/oauth2/v2/auth
+  google_token_endpoint: https://oauth2.googleapis.com/token
+  # Seconds the token endpoint may take to answer.
+  google_timeout_seconds: 10
+  # Minutes a browser may take at Google between the start of a sign-in and its return.
+  google_flow_minutes: 10
+  # An administrator without a password confirms a save of the settings by signing in to Google again. Seconds that
+  # authentication may be old, and seconds the confirmation then waits for its save.
+  google_fresh_authentication_seconds: 300
+  # Seconds Google's clock and the server's may differ when an ID token's times are checked.
+  google_clock_skew_seconds: 30
 
 # The Shioaji login of a personal site: its realtime quotes, and the SinoPac orders of the runs that choose SinoPac.
 # The environment above decides the server and the credentials, which come from the environment or .env only: dev and
@@ -352,6 +417,12 @@ shioaji:
   poll_interval_seconds: 0.5
   # Reads of an order's status before a working order is cancelled, and again after the cancel request.
   max_polls: 10
+
+holdings:
+  # The largest stocks whose share of the holdings' value the My holdings page shows as the concentration.
+  concentration_positions: 3
+  # How many days back the SinoPac account page asks the broker for the sales it settled.
+  realized_days: 90
 
 watchlist:
   # A TECHNICAL or BUZZ entry stays active through the close of this many trading sessions after its workflow last
@@ -628,15 +699,23 @@ sources:
         # TPEX named the volume 成交股數（仟股） through 2024-12, in the same board lots.
         index_volume_fields: { date: "日期", volume: "成交張數", change: "漲/跌", earlier_volume: "成交股數（仟股）" }
         index_volume_lots: true
-    # TWSE's ex-right and ex-dividend results of a range of dates on its site (TWT49U): each stock's reference price on
-    # its ex-day, where TWSE's closing quotes compare the close to no reference (X). A personal site reads it into its
-    # daily history, so a dividend shows no gap there; a public site never does. A quarter per request is measured to
-    # work (2026-11-12).
+    # Each exchange's ex-right and ex-dividend results of a range of dates on its site (TWSE's TWT49U, TPEX's
+    # exDailyQ): each stock's reference price on its ex-day, where the closing quotes compare the close to no reference
+    # (TWSE writes X, TPEX a word). A personal site reads them into its daily history, so a dividend shows no gap
+    # there; a public site never does. {first} and {last} are the range asked. A quarter per request is measured to
+    # work (TWSE 2026-11-12, TPEX 2026-11-14, which serves 2010 and 2017 alike and nothing of 2007).
     ex_right_references:
-      url: "https://www.twse.com.tw/rwd/zh/exRight/TWT49U?startDate={first:%Y%m%d}&endDate={last:%Y%m%d}&response=json"
-      date: "資料日期"
-      stock_id: "股票代號"
-      reference: "除權息參考價"
+      reports:
+        twse:
+          url: "https://www.twse.com.tw/rwd/zh/exRight/TWT49U?startDate={first:%Y%m%d}&endDate={last:%Y%m%d}&response=json"
+          date: "資料日期"
+          stock_id: "股票代號"
+          reference: "除權息參考價"
+        tpex:
+          url: "https://www.tpex.org.tw/www/zh-tw/bulletin/exDailyQ?startDate={first:%Y/%m/%d}&endDate={last:%Y/%m/%d}&response=json"
+          date: "除權息日期"
+          stock_id: "代號"
+          reference: "除權息參考價"
       months_per_request: 3
   # The credit the Open Government Data License v1 asks for, in the form of its annex (https://data.gov.tw/license):
   # each providing agency and the datasets the app reads from it, the license's notice, and its name and address.
@@ -761,3 +840,32 @@ sources:
     multicast_timeout_seconds: 10.0
     sentence_endings: "。.！!？?"
     max_message_length: 400
+
+# Whom the site shows each feature to: off (nobody), administrators, or everyone (every signed-in user; a page that
+# needs no sign-in stays open to a visitor). The Web API refuses a hidden feature's requests, and the web app hides its
+# pages. A save in the settings page applies at once. A file without this section runs on these same defaults.
+features:
+  market_overview: everyone
+  ranking: everyone
+  stock_pages: everyone
+  watchlist: everyone
+  valuation: administrators
+  # The four kinds of analysis run. A user who may start none has no runs page.
+  full_cycle: administrators
+  specific_stock: administrators
+  buzz: administrators
+  intraday: administrators
+  # The technical-strategy pages.
+  strategy_library: administrators
+  strategy_designer: administrators
+  strategy_backtest: administrators
+  # The mock account and every order placed on it.
+  mock_account: administrators
+  # Reading SinoPac's account as the broker reports it: holdings, cash, settlements, profit and loss, fills. It never
+  # orders, and only an administrator reads it.
+  sinopac_account: administrators
+  # Ordering on SinoPac. Off, no order reaches SinoPac, whatever the environment and whoever the user is. Turning it
+  # on grants nothing more: only an administrator may order there, and every order gate still checks each order.
+  sinopac_ordering: "off"
+  # My holdings: the holdings a user enters by hand, analysed with those of the accounts the site shows the user.
+  holdings: everyone

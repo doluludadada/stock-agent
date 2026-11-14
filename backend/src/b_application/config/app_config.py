@@ -11,21 +11,37 @@ from a_domain.rules.trading.cost import AffordableQuantityRule
 from a_domain.rules.trading.decision import DecisionRule, RunDecisionsRule
 from a_domain.rules.trading.entry import EntryRule, ManualEntryRule
 from a_domain.rules.trading.exit import ExitRule, StopLossRule
-from a_domain.rules.trading.order_rule import BrokerAccessRule, BuyLimitRule, OrderGateRule, OrderPriceRule, OrderRule
+from a_domain.rules.trading.follow import RankingFollowRule
+from a_domain.rules.trading.order_rule import (
+    BrokerAccessRule,
+    BrokerLoginRule,
+    BuyLimitRule,
+    OrderGateRule,
+    OrderPriceRule,
+    OrderRule,
+    RealBrokerOrdererRule,
+)
 from a_domain.rules.trading.ranking import DecisionSessionsRule
-from a_domain.rules.trading.ranking_backtest import RankingBacktestRule
+from a_domain.rules.trading.ranking_backtest import RankingBacktestRule, RankingPortfolioRule
 from a_domain.rules.trading.reason import AnalysisSummaryRule, EntryReasonRule, ExitReasonRule
 from a_domain.rules.trading.sizing import BuyCostRule, SizingRule
-from a_domain.types.enums import Audience, DatabaseBackend, SettingsFile, SystemEnvironment
+from a_domain.types.enums import Audience, DatabaseBackend, SettingGroup, SettingsFile, SystemEnvironment
 from b_application.config.accounts_config import AccountsConfig
 from b_application.config.ai_config import AiConfig, BehaviorConfig, PromptsConfig, SentimentConfig, TavilyConfig
-from b_application.config.api_config import ApiConfig
+from b_application.config.api_config import ApiConfig, FeaturesConfig
 from b_application.config.chat_config import ChatConfig, LineConfig, NotificationConfig
-from b_application.config.collect_config import CollectRulesConfig, FolderConfig, FreshnessConfig, QualityFiltersConfig
+from b_application.config.collect_config import (
+    CollectRulesConfig,
+    FolderConfig,
+    FreshnessConfig,
+    QualityFiltersConfig,
+    StockPageConfig,
+)
 from b_application.config.market_data_config import MarketDataConfig, MarketHoursConfig
 from b_application.config.sources_config import SourcesConfig
 from b_application.config.trading_config import (
     AnalysisConfig,
+    HoldingsConfig,
     MarketConfig,
     MockTradingConfig,
     RankingConfig,
@@ -85,43 +101,65 @@ class AppConfig(BaseSettings):
     project_root: Path = Field(exclude=True)
     """Set by load_settings, never by a settings file: `exclude` marks a field the loader sets, and the key check refuses it."""
 
-    environment: SystemEnvironment = Field(SystemEnvironment.DEV, json_schema_extra={"restart_only": True})
+    environment: SystemEnvironment = Field(
+        SystemEnvironment.DEV, json_schema_extra={"restart_only": True, "group": SettingGroup.SITE_ACCESS}
+    )
     """`restart_only` marks a setting a reload or a save refuses to change: validate_started_setup_unchanged."""
 
-    audience: Audience = Field(Audience.PERSONAL, json_schema_extra={"restart_only": True})
-    """Whom this deployment serves, and with it which data and brokers it may use: Audience's table."""
+    audience: Audience = Field(Audience.PERSONAL, json_schema_extra={"restart_only": True, "group": SettingGroup.SITE_ACCESS})
+    """
+    Whom this deployment serves, and with it which data and brokers it may use: Audience's table. `group` names the
+    SettingGroup the settings form shows a setting or a whole section under; a typed setting always shows under ADVANCED.
+    """
 
     settings_revisions: dict[SettingsFile, str] = Field(default_factory=dict, exclude=True)
     """The revision of each settings file this configuration was loaded from, set by load_settings like project_root."""
 
-    ai: AiConfig
-    line: LineConfig = Field(default_factory=LineConfig)
-    api: ApiConfig = Field(default_factory=ApiConfig)
-    behavior: BehaviorConfig
-    db: DbConfig
-    chat: ChatConfig
-    folder: FolderConfig = Field(default_factory=FolderConfig)
-    tavily: TavilyConfig = Field(default_factory=TavilyConfig)
-    analysis: AnalysisConfig
-    technical: TechnicalConfig
-    strategy_search: StrategySearchConfig
-    ranking: RankingConfig
-    notifications: NotificationConfig = Field(default_factory=NotificationConfig)
-    prompts: PromptsConfig = Field(default_factory=PromptsConfig)
-    sentiment: SentimentConfig = Field(default_factory=SentimentConfig)
-    collect_rules: CollectRulesConfig
-    quality: QualityFiltersConfig = Field(default_factory=QualityFiltersConfig)
-    market: MarketConfig
-    freshness: FreshnessConfig = Field(default_factory=FreshnessConfig)
-    market_hours: MarketHoursConfig = Field(default_factory=MarketHoursConfig)
-    market_data: MarketDataConfig = Field(default_factory=MarketDataConfig)
-    trading: TradingConfig
-    mock_trading: MockTradingConfig = Field(default_factory=MockTradingConfig)
-    shioaji: ShioajiConfig
-    watchlist: WatchlistConfig = Field(default_factory=WatchlistConfig)
-    valuation: ValuationConfig
-    accounts: AccountsConfig
-    sources: SourcesConfig
+    ai: AiConfig = Field(json_schema_extra={"group": SettingGroup.AI})
+    line: LineConfig = Field(default_factory=LineConfig, json_schema_extra={"group": SettingGroup.ADVANCED})
+    api: ApiConfig = Field(default_factory=ApiConfig, json_schema_extra={"group": SettingGroup.ADVANCED})
+    behavior: BehaviorConfig = Field(json_schema_extra={"group": SettingGroup.AI, "operator_only": True})
+    """
+    `operator_only` marks a setting, or every setting of a section, that only an operator who edits
+    config/appsetting.yaml changes: the settings form neither shows it nor accepts a change to it. The file, the load
+    and the start's notices read it like any other setting.
+    """
+
+    db: DbConfig = Field(json_schema_extra={"group": SettingGroup.ADVANCED, "operator_only": True})
+    chat: ChatConfig = Field(json_schema_extra={"group": SettingGroup.ADVANCED, "operator_only": True})
+    folder: FolderConfig = Field(
+        default_factory=FolderConfig, json_schema_extra={"group": SettingGroup.ADVANCED, "operator_only": True}
+    )
+    tavily: TavilyConfig = Field(default_factory=TavilyConfig, json_schema_extra={"group": SettingGroup.AI})
+    analysis: AnalysisConfig = Field(json_schema_extra={"group": SettingGroup.TRADING_LIMITS})
+    technical: TechnicalConfig = Field(json_schema_extra={"group": SettingGroup.TRADING_LIMITS})
+    strategy_search: StrategySearchConfig = Field(json_schema_extra={"group": SettingGroup.ADVANCED, "operator_only": True})
+    ranking: RankingConfig = Field(json_schema_extra={"group": SettingGroup.RANKING})
+    notifications: NotificationConfig = Field(
+        default_factory=NotificationConfig, json_schema_extra={"group": SettingGroup.TRADING_LIMITS}
+    )
+    prompts: PromptsConfig = Field(default_factory=PromptsConfig, json_schema_extra={"group": SettingGroup.AI})
+    sentiment: SentimentConfig = Field(default_factory=SentimentConfig, json_schema_extra={"group": SettingGroup.DATA_HISTORY})
+    collect_rules: CollectRulesConfig = Field(json_schema_extra={"group": SettingGroup.DATA_HISTORY, "operator_only": True})
+    quality: QualityFiltersConfig = Field(default_factory=QualityFiltersConfig, json_schema_extra={"group": SettingGroup.DATA_HISTORY})
+    stock_page: StockPageConfig = Field(default_factory=StockPageConfig, json_schema_extra={"group": SettingGroup.DATA_HISTORY})
+    market: MarketConfig = Field(json_schema_extra={"group": SettingGroup.TRADING_LIMITS})
+    freshness: FreshnessConfig = Field(default_factory=FreshnessConfig, json_schema_extra={"group": SettingGroup.DATA_HISTORY})
+    market_hours: MarketHoursConfig = Field(
+        default_factory=MarketHoursConfig, json_schema_extra={"group": SettingGroup.ADVANCED, "operator_only": True}
+    )
+    market_data: MarketDataConfig = Field(default_factory=MarketDataConfig, json_schema_extra={"group": SettingGroup.DATA_HISTORY})
+    trading: TradingConfig = Field(json_schema_extra={"group": SettingGroup.TRADING_LIMITS})
+    mock_trading: MockTradingConfig = Field(
+        default_factory=MockTradingConfig, json_schema_extra={"group": SettingGroup.TRADING_LIMITS}
+    )
+    shioaji: ShioajiConfig = Field(json_schema_extra={"group": SettingGroup.TRADING_LIMITS})
+    holdings: HoldingsConfig = Field(default_factory=HoldingsConfig, json_schema_extra={"group": SettingGroup.TRADING_LIMITS})
+    watchlist: WatchlistConfig = Field(default_factory=WatchlistConfig, json_schema_extra={"group": SettingGroup.DATA_HISTORY})
+    valuation: ValuationConfig = Field(json_schema_extra={"group": SettingGroup.AI})
+    accounts: AccountsConfig = Field(json_schema_extra={"group": SettingGroup.SITE_ACCESS})
+    sources: SourcesConfig = Field(json_schema_extra={"group": SettingGroup.ADVANCED, "operator_only": True})
+    features: FeaturesConfig = Field(default_factory=FeaturesConfig, json_schema_extra={"group": SettingGroup.FEATURES})
 
     def sizing_rule(self) -> SizingRule:
         return SizingRule(
@@ -186,15 +224,29 @@ class AppConfig(BaseSettings):
         """The ranking's decision sessions, each reading the newest month of revenue due before it."""
         return DecisionSessionsRule(decision_day=self.ranking.decision_day, deadline_day=self.sources.mops.revenue_deadline_day)
 
-    def ranking_backtest_rule(self) -> RankingBacktestRule:
-        """The ranking's replay, which pays the market's fee on every trade and its stock tax on every sale."""
-        return RankingBacktestRule(
-            decision_rule=self.decision_sessions_rule(),
-            ranking_rule=self.ranking.ranking_rule(),
+    def ranking_portfolio_rule(self) -> RankingPortfolioRule:
+        """How given rankings are held: the market's fee on every trade and its stock tax on every sale, against the benchmark."""
+        return RankingPortfolioRule(
             fee_rate=self.market.fee_rate,
             tax_rate=self.market.tax_rate,
             benchmark_id=self.ranking.benchmark_id,
             sessions_per_year=self.ranking.sessions_per_year,
+        )
+
+    def ranking_backtest_rule(self) -> RankingBacktestRule:
+        """The ranking's replay: each decision session's ranking, held as ranking_portfolio_rule holds them."""
+        return RankingBacktestRule(
+            decision_rule=self.decision_sessions_rule(),
+            ranking_rule=self.ranking.ranking_rule(),
+            portfolio_rule=self.ranking_portfolio_rule(),
+        )
+
+    def ranking_follow_rule(self) -> RankingFollowRule:
+        """RankingFollowSignals' rule: the mock account's lot size, the order's limit and the market's fee and tax."""
+        return RankingFollowRule(
+            lot_size=self.analysis.lot_size,
+            limit_price_rule=self.market.limit_price_rule(),
+            affordable_quantity_rule=AffordableQuantityRule(cost_rule=self.market.cost_rule()),
         )
 
     def manual_entry_rule(self) -> ManualEntryRule:
@@ -207,12 +259,17 @@ class AppConfig(BaseSettings):
         return OrderRule(gate_rule=OrderGateRule(price_rule=price_rule), limit_price_rule=self.market.limit_price_rule())
 
     def broker_access_rule(self) -> BrokerAccessRule:
-        """OrderExecution's check at the send: the brokers both the audience and its order pricing offer, the environment's server."""
+        """
+        OrderPreparation's check at the send: the brokers both the audience and its order pricing offer and the
+        environment's server. Whom features.* lets order on a broker is no part of it: OrderPreparation reads that from
+        the site's ordering switch at each send.
+        """
         limit_rule = BuyLimitRule(max_order_value=self.trading.max_order_value, max_daily_buy_value=self.trading.max_daily_buy_value)
 
         return BrokerAccessRule(
             brokers=self.audience.brokers & self.audience.order_pricing.brokers,
-            simulation=self.environment.shioaji_simulation,
+            orderer_rule=RealBrokerOrdererRule(),
+            login_rule=BrokerLoginRule(simulation=self.environment.shioaji_simulation),
             limit_rule=limit_rule,
         )
 

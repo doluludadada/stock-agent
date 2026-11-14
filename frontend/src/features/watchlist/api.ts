@@ -14,6 +14,34 @@ export function useWatchlistEntries() {
   })
 }
 
+/** One watched stock, however it got on the list. */
+export interface WatchedStock {
+  stockId: string
+  name: string | null
+}
+
+const NO_STOCKS: readonly WatchedStock[] = []
+
+function watchedStocks(entries: readonly WatchlistEntry[]): WatchedStock[] {
+  const names = new Map(entries.map((entry) => [entry.stock_id, entry.name ?? null]))
+  return [...names].map(([stockId, name]) => ({ stockId, name }))
+}
+
+/**
+ * The stocks on the user's watchlist, each once, for a route to hand to a page of another feature. Asked only while
+ * `shown`, which the route sets where the site shows the viewer the watchlist; empty until then and until it answers.
+ */
+export function useWatchedStocks(shown: boolean): readonly WatchedStock[] {
+  const signedIn = useIsSignedIn()
+  const { data } = useQuery({
+    queryKey: watchlistKeys.all,
+    queryFn: ({ signal }) => apiRequest('get', '/v1/watchlist', { signal }),
+    enabled: signedIn && shown,
+    select: watchedStocks,
+  })
+  return data ?? NO_STOCKS
+}
+
 type Change = { action: 'add' | 'remove'; stockIds: string[] }
 
 /**

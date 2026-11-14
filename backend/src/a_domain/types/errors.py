@@ -1,6 +1,8 @@
 from datetime import datetime
 from typing import Literal
 
+from a_domain.types.enums import GoogleRefusal
+
 
 class IllegalOrderTransition(ValueError):
     pass
@@ -40,6 +42,28 @@ class PasswordRequired(PermissionError):
 
 class PasswordRefused(PermissionError):
     """The password re-entered for a settings save is not the administrator's. Counted toward its limit; the session stays. 403."""
+
+
+class GoogleConfirmationRequired(PermissionError):
+    """
+    A save of the settings by an administrator without a password came without a fresh Google authentication made for
+    it, or with one already used or expired. Nothing was written. 403.
+    """
+
+
+class IdentityProviderError(RuntimeError):
+    """
+    The identity provider's token endpoint refused the code, did not answer, or answered no ID token the app can read.
+    The message carries no token, code or secret.
+    """
+
+
+class GoogleSignInRefused(PermissionError):
+    """A sign-in with Google, or a settings confirmation by one, that the app refused. The browser goes back to the app with it."""
+
+    def __init__(self, refusal: GoogleRefusal) -> None:
+        super().__init__(f"Google sign-in refused: {refusal.label}.")
+        self.refusal = refusal
 
 
 class SignInRequired(PermissionError):
@@ -113,5 +137,26 @@ class BacktestPeriodUnavailable(ValueError):
     """A backtest was asked over sessions the daily history cannot replay. The message says which sessions it can. 422."""
 
 
+class ArchiveSaveRefused(RuntimeError):
+    """The database refused some of the open-data archive's tables a save held rows for. The message names them; the rest are saved."""
+
+
 class RankingUnavailable(LookupError):
     """The daily history holds no decision session of the monthly ranking. The message says what it holds. 422."""
+
+
+class AiAllowanceSpentError(RuntimeError):
+    """
+    Today's paid AI calls are spent, the user's or every user's together. Every AI caller of a run already treats a
+    failed call as a missing AI result: AiAnalyser records a run error and the stock gets no AI score, so no automatic
+    BUY; ValuationExplainer returns the sections without AI text; SentimentAnalyser records an error. The stock brief
+    lets it through, so the page says the allowance is spent. 429.
+    """
+
+
+class BriefLimitReached(RuntimeError):
+    """stock_page.brief.daily_stocks stocks got a new AI brief today, so no other stock gets one until midnight Taiwan time. 429."""
+
+
+class IllegalBriefTransition(RuntimeError):
+    """A stock brief was moved to a status its current status does not allow. A programming error."""

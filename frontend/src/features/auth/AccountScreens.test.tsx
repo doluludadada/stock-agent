@@ -72,12 +72,12 @@ describe('registration', { timeout: 20_000 }, () => {
     vi.unstubAllGlobals()
   })
 
-  it('names a taken email under the email field and keeps what was typed', async () => {
+  it('says a taken username or email from the refusal code, whatever the words, and keeps what was typed', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string) => {
         if (url === '/v1/auth/status') return json({ needs_first_administrator: false, registration_open: true })
-        if (url === '/v1/auth/register') return json({ detail: 'That email is taken.' }, 409)
+        if (url === '/v1/auth/register') return json({ detail: 'Ce nom est pris.', code: 'user_exists' }, 409)
         return json({}, 404)
       }),
     )
@@ -88,8 +88,72 @@ describe('registration', { timeout: 20_000 }, () => {
     await fillAccount(user, { username: TEST_USER.username, email: TEST_USER.email, password: 'watchlist mei 88' })
     await user.click(screen.getByRole('button', { name: 'Create account' }))
 
-    expect(await screen.findByText('This email already has an account.')).toBeVisible()
-    expect(screen.getByLabelText('Email')).toHaveAttribute('aria-invalid', 'true')
+    expect(await screen.findByRole('alert')).toHaveTextContent('This username or email already has an account. Sign in, or choose another.')
     expect(screen.getByLabelText('Username')).toHaveValue('mei')
+  })
+
+  it('signs in without registering again when the account was made and only the sign-in after it failed', async () => {
+    const server = { accounts: 0, registrations: 0, signInWorks: false }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url === '/v1/auth/status') return json({ needs_first_administrator: false, registration_open: true })
+        if (url === '/v1/auth/register') {
+          server.registrations += 1
+          if (server.accounts > 0) return json({ detail: 'That username is taken.', code: 'user_exists' }, 409)
+          server.accounts += 1
+          return json(TEST_USER, 201)
+        }
+        if (url === '/v1/auth/sign-in') return server.signInWorks ? json(TEST_USER) : json({ detail: 'boom' }, 500)
+        return json({}, 404)
+      }),
+    )
+    const done = vi.fn()
+    const user = userEvent.setup({ delay: null })
+    renderScreen(<RegisterScreen signInHref="/sign-in" onDone={done} />)
+
+    await screen.findByRole('heading', { name: 'Create an account' })
+    await fillAccount(user, { username: TEST_USER.username, email: TEST_USER.email, password: 'watchlist mei 88' })
+    await user.click(screen.getByRole('button', { name: 'Create account' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('The server did not answer. Try again.')
+
+    server.signInWorks = true
+    await user.click(screen.getByRole('button', { name: 'Create account' }))
+
+    await vi.waitFor(() => expect(done).toHaveBeenCalled())
+    expect(server.registrations).toBe(1)
+    expect(session.current()).toEqual({ status: 'signedIn', user: TEST_USER })
+  })
+
+  it('registers again when the form was changed after such a failure', async () => {
+    const registered: string[] = []
+    let signInWorks = false
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === '/v1/auth/status') return json({ needs_first_administrator: false, registration_open: true })
+        if (url === '/v1/auth/register') {
+          registered.push((JSON.parse(String(init?.body)) as { username: string }).username)
+          return json(TEST_USER, 201)
+        }
+        if (url === '/v1/auth/sign-in') return signInWorks ? json(TEST_USER) : json({ detail: 'boom' }, 500)
+        return json({}, 404)
+      }),
+    )
+    const done = vi.fn()
+    const user = userEvent.setup({ delay: null })
+    renderScreen(<RegisterScreen signInHref="/sign-in" onDone={done} />)
+
+    await screen.findByRole('heading', { name: 'Create an account' })
+    await fillAccount(user, { username: 'mei', email: TEST_USER.email, password: 'watchlist mei 88' })
+    await user.click(screen.getByRole('button', { name: 'Create account' }))
+    await screen.findByRole('alert')
+
+    signInWorks = true
+    await user.type(screen.getByLabelText('Username'), '2')
+    await user.click(screen.getByRole('button', { name: 'Create account' }))
+
+    await vi.waitFor(() => expect(done).toHaveBeenCalled())
+    expect(registered).toEqual(['mei', 'mei2'])
   })
 })

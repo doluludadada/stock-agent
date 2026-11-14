@@ -67,7 +67,8 @@ class PipelineStatus:
     manual_stocks: list[Stock] = field(default_factory=list)
     """
     StockLookup, or the stock buy_manually was given. They stay here whatever their technical verdict, so that
-    specific-stock analysis goes on through news and AI. A follow's: the stocks of the decisions it may take.
+    specific-stock analysis goes on through news and AI. A follow's: the stocks of the decisions it may take, or the
+    stocks a ranking follow trades.
     """
 
     survivors: list[Stock] = field(default_factory=list)
@@ -101,7 +102,7 @@ class PipelineStatus:
     """FollowCandidates: every follow of the followed run's decisions so far, each with its order."""
 
     follow_refusal: FollowRefusal | None = None
-    """FollowCandidates: why a follow may not start now. None when it may."""
+    """FollowCandidates, or RankingFollowCandidates: why a follow may not start now. None when it may."""
 
     manual_buy_refusal: str | None = None
     """ManualSignal: why the confirmed manual BUY of this run sent no order. Unset when it made an orderable decision."""

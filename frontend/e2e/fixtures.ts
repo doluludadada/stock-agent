@@ -39,6 +39,15 @@ export async function horizontalOverflow(page: Page): Promise<number> {
 }
 
 /**
+ * Makes this page what a browser makes of the site reached over plain http at a host name, the deployment guide's
+ * first mode: no secure context, so no crypto.randomUUID. The suite itself runs on the loopback address, which a
+ * browser always treats as secure.
+ */
+export async function withoutSecureContext(page: Page) {
+  await page.addInitScript(() => Reflect.deleteProperty(Crypto.prototype, 'randomUUID'))
+}
+
+/**
  * The first administrator, set up through the API when the backend has none yet; accounts.spec.ts drives the same
  * setup through the page. The same browser context then holds the session cookie.
  */

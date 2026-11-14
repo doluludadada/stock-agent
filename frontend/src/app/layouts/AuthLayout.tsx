@@ -1,4 +1,4 @@
-import { LineChart, Star, Wallet } from 'lucide-react'
+import { Briefcase, LineChart, ListOrdered } from 'lucide-react'
 import { Outlet } from 'react-router'
 import { useTranslation } from '@/i18n'
 import { BrandMark } from './BrandMark'
@@ -6,9 +6,9 @@ import { PreferenceMenu } from './PreferenceMenu'
 import { SiteFooter } from './SiteFooter'
 
 const POINTS = [
+  { key: 'ranking', icon: ListOrdered },
+  { key: 'holdings', icon: Briefcase },
   { key: 'market', icon: LineChart },
-  { key: 'watchlist', icon: Star },
-  { key: 'account', icon: Wallet },
 ] as const
 
 /** Setup, sign-in and registration: the form alone on a phone, beside what the site offers on a wide screen. */

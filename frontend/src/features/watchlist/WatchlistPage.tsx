@@ -1,5 +1,5 @@
 import { PencilLine, Search, Star, Trash2 } from 'lucide-react'
-import { useId, useMemo, useState } from 'react'
+import { useId, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
 import { useTranslation } from '@/i18n'
@@ -7,6 +7,7 @@ import { isApiError, useAllows, useStockQuotes, type Loadable, type StockQuote }
 import { paths } from '@/shared/config/paths'
 import { directionOf } from '@/shared/lib/direction'
 import { useFormat } from '@/shared/lib/format'
+import { useErrorReason } from '@/shared/lib/error-reason'
 import { Badge } from '@/shared/ui/badge'
 import { BreadthBar } from '@/shared/ui/breadth-bar'
 import { Button } from '@/shared/ui/button'
@@ -19,7 +20,7 @@ import { Panel } from '@/shared/ui/panel'
 import { RequireSignIn } from '@/shared/ui/require-sign-in'
 import { Segmented } from '@/shared/ui/segmented'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
-import { Skeleton } from '@/shared/ui/skeleton'
+import { PageSkeleton, Skeleton } from '@/shared/ui/skeleton'
 import { Sparkline } from '@/shared/ui/sparkline'
 import { Stat } from '@/shared/ui/stat'
 import { StateBlock } from '@/shared/ui/state-block'
@@ -29,6 +30,7 @@ import { byStock, daySummary, latestSession, shownRows, SORT_KEYS, watchlistSour
 
 export function WatchlistPage() {
   const { t } = useTranslation('watchlist')
+  const reason = useErrorReason()
   const entries = useWatchlistEntries()
   const change = useWatchlistChange()
   const rows = useMemo(() => byStock(entries.data ?? []), [entries.data])
@@ -38,26 +40,25 @@ export function WatchlistPage() {
       { action: 'add', stockIds: [stockId] },
       {
         onSuccess: () => toast.success(t('toast.added', { name: stockId })),
-        onError: (error) => toast.error(isApiError(error, 'invalid') ? t('toast.unlisted', { code: stockId }) : t('toast.failed', { reason: error.message })),
+        onError: (error) => toast.error(isApiError(error, 'invalid') ? t('toast.unlisted', { code: stockId }) : t('toast.failed', { reason: reason(error) })),
       },
     )
   const addControl = <StockPicker label={t('action.addStock')} onSelect={add} />
 
   return (
-    <div className="space-y-5 lg:space-y-6">
+    <div className="page-stack">
       <PageHeader
-        eyebrow={t('common:nav.section.mine')}
         title={t('title')}
         description={entries.data ? t('description', { count: rows.length }) : t('lead')}
         actions={entries.data && rows.length > 0 && addControl}
       />
       <RequireSignIn reason={t('signIn')} layout="page">
         {entries.isPending ? (
-          <Skeleton className="h-96 rounded-2xl" />
+          <PageSkeleton />
         ) : entries.isError ? (
-          <ErrorState error={entries.error} title={t('loadFailed')} onRetry={() => void entries.refetch()} className="rounded-2xl border bg-card py-12" />
+          <ErrorState error={entries.error} title={t('loadFailed')} onRetry={() => void entries.refetch()} framed />
         ) : rows.length === 0 ? (
-          <StateBlock icon={Star} title={t('empty.title')} description={t('empty.description')} className="rounded-2xl border bg-card py-12" action={addControl} />
+          <StateBlock icon={Star} title={t('empty.title')} description={t('empty.description')} framed action={addControl} />
         ) : (
           <Watchlist rows={rows} />
         )}
@@ -74,25 +75,36 @@ function Watchlist({ rows }: { rows: WatchRow[] }) {
   const codes = useMemo(() => rows.map((row) => row.stockId), [rows])
   const { quotes, trends } = useStockQuotes(codes)
   return (
-    <div className="grid items-start gap-4 lg:gap-5 xl:grid-cols-[minmax(0,1fr)_22rem]">
-      <SummaryPanel rows={rows} quotes={quotes} className="xl:col-start-2 xl:row-start-1" />
+    <div className="card-grid xl:grid-cols-[minmax(0,1fr)_22rem]">
+      <DayPanel rows={rows} quotes={quotes} className="xl:col-start-2 xl:row-start-1" />
       <StockList rows={rows} quotes={quotes} trends={trends} className="xl:col-start-1 xl:row-span-2 xl:row-start-1" />
       <SourcesPanel className="hidden xl:col-start-2 xl:row-start-2 xl:flex" />
     </div>
   )
 }
 
-/** "How did my stocks do": in the latest session, never mixing in a stock whose close is older. */
-function SummaryPanel({ rows, quotes, className }: { rows: WatchRow[]; quotes: Quotes; className?: string }) {
+interface DayPanelProps {
+  rows: WatchRow[]
+  quotes: Quotes
+  /** The card's name where it stands outside the watchlist, and its way to the list. */
+  title?: string
+  aside?: ReactNode
+  className?: string
+}
+
+/**
+ * "How did my stocks do": in the latest session, never mixing in a stock whose close is older. The watchlist and the
+ * home page show the same card.
+ */
+export function DayPanel({ rows, quotes, title, aside, className }: DayPanelProps) {
   const { t } = useTranslation('watchlist')
   const format = useFormat()
   const summary = daySummary(rows, quotes)
   const pending = rows.filter((row) => (quotes.get(row.stockId)?.status ?? 'loading') === 'loading').length
   const main = summary.session ? t('summary.question', { date: format.monthDay(summary.session) }) : t('summary.waiting')
   const note = pending > 0 ? t('summary.pending', { count: pending }) : summary.earlier > 0 ? t('summary.earlier', { count: summary.earlier }) : null
-  const description = note ? t('summary.withNote', { main, note }) : main
   return (
-    <Panel className={className} title={t('summary.title')} description={description}>
+    <Panel className={className} title={title ?? t('summary.title')} description={note ? t('summary.withNote', { main, note }) : main} aside={aside}>
       <dl className="grid grid-cols-2 gap-x-4 gap-y-5 @2xl:grid-cols-4 @2xl:gap-x-6">
         <div className="col-span-2 space-y-2.5 @2xl:col-span-1">
           <Stat label={t('summary.moves')}>
@@ -139,6 +151,7 @@ interface StockListProps {
 
 function StockList({ rows, quotes, trends, className }: StockListProps) {
   const { t } = useTranslation('watchlist')
+  const reason = useErrorReason()
   const format = useFormat()
   const change = useWatchlistChange()
   const listId = useId()
@@ -156,7 +169,7 @@ function StockList({ rows, quotes, trends, className }: StockListProps) {
       { action: 'remove', stockIds: [row.stockId] },
       {
         onSuccess: () => toast.success(t('toast.removed', { name: row.name ?? row.stockId })),
-        onError: (error) => toast.error(t('toast.failed', { reason: error.message })),
+        onError: (error) => toast.error(t('toast.failed', { reason: reason(error) })),
       },
     )
 

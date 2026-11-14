@@ -29,7 +29,7 @@ bun run build
 
 `just frontend-check` runs these from the repository root, and CI runs the same steps in
 `.github/workflows/frontend.yml`. `bun tools/capture-screens.ts <out-dir> --url <app>`
-signs in through the API and saves every page at 375, 768, 1024 and 1440 px in both themes, with an audit of each in
+signs in through the API and saves every page at 360, 768 and 1440 px in both themes, with an audit of each in
 `audit.json`; besides signing in, it only reads.
 
 ## Browser flows (E2E)

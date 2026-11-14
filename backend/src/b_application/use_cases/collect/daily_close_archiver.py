@@ -16,7 +16,8 @@ class DailyCloseArchiver:
     the listings are cached, each exchange's own index closes, the material information, the latest quarter's EPS
     statistics, the valuation ratios, the latest quarter's balance sheets and income statements, the latest month's
     revenue and TWSE's own news, each under the date or period its own row names. Saving the same data again changes
-    nothing. It answers every date, quarter and month the archive holds.
+    nothing. It answers every date, quarter and month the archive holds; ArchiveSaveRefused when the database refused
+    part of it, which a run reports as its failure.
     """
 
     def __init__(self, stock_provider: ITaiwanStockProvider, archive: IDailyCloseArchive, logger: ILoggingProvider) -> None:

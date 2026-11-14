@@ -1,6 +1,6 @@
 """
 `just backfill-history` brings what a ranking backtest reads back to a first day (Pipeline.backfill_history): the daily
-history and TWSE's ex-right references into the history cache, over the exchanges' reports scripted without the network,
+history and the exchanges' ex-right references into the history cache, over the exchanges' reports scripted without the network,
 and every market's monthly revenue from MOPS into the open-data archive. A failure keeps what was saved, and a rerun
 asks only for what is still missing.
 """
@@ -56,7 +56,7 @@ async def test_a_backfill_holds_every_session_from_its_first_day_and_a_rerun_aft
     )
 
     assert (held, missing, unread) == (SESSIONS[11:], SESSIONS[:11], [])
-    assert reports.references_asked == [(SESSIONS[0], MONDAY)]
+    assert reports.references_asked == [(market, SESSIONS[0], MONDAY) for market in MarketType]
 
     reports.stop, reports.asked = None, []
     rerun = await DailyHistoryBackfill(cache_over(reports, database, clock), clock).execute(SESSIONS[0])
@@ -80,6 +80,26 @@ async def test_a_backfill_goes_back_before_the_earliest_session_the_cache_holds(
     assert (held, missing, unread) == ([*earlier, *SESSIONS], [], [])
 
 
+async def test_a_backfill_names_the_ex_right_references_a_failed_request_left_unread_and_a_rerun_reads_them(
+    database: DatabaseConnector,
+) -> None:
+    clock = MovableClock(at(MONDAY, 16))
+    reports = FakeDailyHistory(sessions=reported(SESSIONS, 100.0), index={market: SESSIONS for market in MarketType})
+    reports.tpex_references = {("6488", SESSIONS[3]): 99.0}
+    reports.references_failing = {(MarketType.TPEX, SESSIONS[0]): httpx.ReadTimeout("The read operation timed out")}
+
+    answer = await DailyHistoryBackfill(cache_over(reports, database, clock), clock).execute(SESSIONS[0])
+
+    assert answer == ([], SESSIONS, [(MarketType.TPEX, SESSIONS[0], MONDAY)])
+
+    reports.references_failing = {}
+    rerun_cache = cache_over(reports, database, clock)
+    rerun = await DailyHistoryBackfill(rerun_cache, clock).execute(SESSIONS[0])
+
+    assert rerun == (SESSIONS, [], [])
+    assert await rerun_cache.ex_right_references(SESSIONS[0], MONDAY) == {"6488": {at(SESSIONS[3], 13, 30): 99.0}}
+
+
 async def test_the_operation_reads_the_revenue_of_every_month_from_the_first_day_and_a_public_site_backfills_nothing() -> None:
     harness = build_harness(now=at(date(2025, 2, 12), 18))
     filed = date(2025, 2, 12)
@@ -93,9 +113,10 @@ async def test_the_operation_reads_the_revenue_of_every_month_from_the_first_day
         config=harness_config().model_copy(update={"audience": Audience.PUBLIC})
     ).runtime.signed_out.backfill_history(date(2025, 1, 1))
 
-    assert personal == (None, (2, 2))
+    assert personal[:2] == (None, (2, 2))
+    assert personal[2] is not None
     assert sorted(harness.archive.monthly_revenues) == [("2330", 2025, 1), ("6488", 2025, 1)]
-    assert public == (None, None)
+    assert public == (None, None, None)
 
 
 async def test_a_backfill_whose_reports_fail_names_each_exchanges_index_range_it_could_not_read(database: DatabaseConnector) -> None:

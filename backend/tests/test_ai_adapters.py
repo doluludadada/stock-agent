@@ -389,7 +389,8 @@ class RecordingAnthropic:
 def claude_reply(stop_reason: str, *texts: str) -> SimpleNamespace:
     thinking = SimpleNamespace(type="thinking", thinking="")
     blocks = [thinking, *(SimpleNamespace(type="text", text=text) for text in texts)]
-    return SimpleNamespace(content=blocks, stop_reason=stop_reason, _request_id="req_test")
+    usage = SimpleNamespace(input_tokens=1, output_tokens=1)
+    return SimpleNamespace(content=blocks, stop_reason=stop_reason, usage=usage, _request_id="req_test")
 
 
 @pytest.fixture

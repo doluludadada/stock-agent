@@ -40,7 +40,7 @@ async function renderOverview(site: Audience = PERSONAL_SITE) {
     <I18nextProvider i18n={initI18n('en')}>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <MemoryRouter>
-          <MarketOverviewPage strategy={null} />
+          <MarketOverviewPage />
         </MemoryRouter>
       </QueryClientProvider>
     </I18nextProvider>,

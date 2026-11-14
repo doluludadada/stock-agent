@@ -8,14 +8,19 @@ import chromadb
 from support.fake_shioaji import FakeShioaji
 from support.fakes import (
     FakeAiProvider,
+    FakeArticleIndex,
+    FakeArticleStore,
     FakeConversationRepository,
     FakeDailyCloseArchive,
     FakeFundamentalsProvider,
     FakeNewsProvider,
     FakeSentimentClassifier,
     FakeSocialMediaProvider,
+    FakeStockBriefRepository,
     FakeStrategySearchRepository,
     FakeTechnicalSettingsRepository,
+    FakeTextEmbedder,
+    FakeUsersStocks,
     FakeUserStore,
     FakeWatchlistRepository,
 )
@@ -30,6 +35,7 @@ from a_domain.model.system.stats import SystemStats
 from a_domain.model.system.user import User
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.ports.trading.execution_provider import IExecutionProvider
+from a_domain.rules.trading.ranking import ListedHistory, ListedHistoryRule
 from a_domain.types.enums import ExecutionProvider, Workflow
 from b_application.config.app_config import AppConfig
 from b_application.config.market_data_config import MarketHoursConfig
@@ -85,12 +91,21 @@ class QuoteFeed:
     async def fetch_history(self, stocks: list[Stock], start_date: datetime, end_date: datetime) -> dict[str, list[Ohlcv]]:
         return {stock.stock_id: self.daily[stock.stock_id] for stock in stocks if stock.stock_id in self.daily}
 
+    async def listed_history(self) -> ListedHistory | None:
+        if not any(self.daily.values()):
+            return None
+
+        return ListedHistoryRule().apply(self.daily, {}, lambda stamp: stamp.astimezone(TAIWAN_TIMEZONE).date())
+
+    async def listed_fingerprint(self) -> tuple[object, ...]:
+        return tuple((stock_id, *bars) for stock_id, bars in self.daily.items())
+
 
 class StockDirectory:
     """The exchange listing: every stock id the stack's tests trade, each a new identity-only Stock per call."""
 
     async def get_all(self) -> list[Stock]:
-        return [Stock(stock_id=stock_id) for stock_id in ("2330", "2603")]
+        return [Stock(stock_id=stock_id) for stock_id in ("2330", "2603", "2317", "1101")]
 
     async def get_by_id(self, stock_id: str) -> Stock | None:
         return Stock(stock_id=stock_id)
@@ -134,6 +149,7 @@ class TradingStack:
     order_execution: OrderExecution
     account_history: AccountHistory
     watchlist: FakeWatchlistRepository
+    archive: FakeDailyCloseArchive
 
 
 async def open_stack(
@@ -189,6 +205,12 @@ async def open_stack(
         bar_matrix_provider=DailyBarMatrixProvider(stocks, quotes, archive, clock, config.ranking.history_rule(), logger),
         candidate_backtester=ProcessPoolCandidateBacktester(config, clock, 0),
         strategy_search_repository=FakeStrategySearchRepository(),
+        stock_brief_repository=FakeStockBriefRepository(),
+        article_store=FakeArticleStore(
+            clock, config.stock_page.article_store.retention(), config.stock_page.article_store.max_per_stock
+        ),
+        article_index=FakeArticleIndex(FakeTextEmbedder()),
+        users_stocks=FakeUsersStocks(),
         broker_market_data=True,
         shioaji=ShioajiConnection(client=FakeShioaji(), up=True),
         daily_close_archive=archive,
@@ -205,7 +227,9 @@ async def open_stack(
         real_broker=real_broker,
         owned_ports=owned_ports,
     )
-    pipeline = compose_runtime(config, logger, clock, dependencies).pipeline_for(users.by_id[LEGACY_OWNER_ID], broker)
+    runtime = compose_runtime(config, logger, clock, dependencies)
+    runtime.become_current()
+    pipeline = runtime.pipeline_for(users.by_id[LEGACY_OWNER_ID], broker)
 
     return TradingStack(
         config,
@@ -219,4 +243,5 @@ async def open_stack(
         pipeline.order_execution,
         pipeline.account_history,
         watchlist,
+        archive,
     )

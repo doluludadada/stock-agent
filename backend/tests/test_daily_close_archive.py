@@ -44,7 +44,7 @@ from a_domain.types.enums import (
     MarketIndex,
     MarketType,
 )
-from a_domain.types.errors import ListingUnavailableError, RealtimeQuotesUnavailable
+from a_domain.types.errors import ArchiveSaveRefused, ListingUnavailableError, RealtimeQuotesUnavailable
 from a_domain.types.values import FiscalQuarter
 from b_application.config.api_config import ApiConfig
 from b_application.config.market_data_config import MarketDataConfig, MarketHoursConfig
@@ -455,36 +455,37 @@ async def test_archiving_the_same_sessions_again_changes_nothing(
     assert await database_snapshot(backend, tmp_path) == archived
 
 
-REFUSED_ANNOUNCEMENTS = {
-    DatabaseBackend.SQLITE: [
-        "CREATE TRIGGER refuse_announcements BEFORE INSERT ON material_information_archive "
-        "BEGIN SELECT RAISE(ABORT, 'refused by the test'); END"
-    ],
-    DatabaseBackend.POSTGRESQL: [
+def refusing(table: str, backend: DatabaseBackend) -> list[str]:
+    """The statements of a trigger that makes the backend's database refuse every row of the table until it is dropped."""
+    if backend == DatabaseBackend.SQLITE:
+        return [f"CREATE TRIGGER refuse_rows BEFORE INSERT ON {table} BEGIN SELECT RAISE(ABORT, 'refused by the test'); END"]
+
+    return [
         "CREATE FUNCTION refuse_insert() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'refused by the test'; END $$",
-        "CREATE TRIGGER refuse_announcements BEFORE INSERT ON material_information_archive "
-        "FOR EACH ROW EXECUTE FUNCTION refuse_insert()",
-    ],
-}
-"""A trigger on each backend that makes the database refuse every row of material_information_archive."""
+        f"CREATE TRIGGER refuse_rows BEFORE INSERT ON {table} FOR EACH ROW EXECUTE FUNCTION refuse_insert()",
+    ]
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
-async def test_a_table_the_database_refuses_is_logged_by_name_and_every_other_table_is_still_saved(
+async def test_a_table_the_database_refuses_fails_the_run_by_name_once_every_other_table_is_saved(
     backend: DatabaseBackend, tmp_path: Path, payloads: dict[str, list[dict[str, str]]]
 ) -> None:
     connector = await started_database(backend, tmp_path)
     engine = raw_engine(backend, tmp_path)
 
     async with engine.begin() as connection:
-        for statement in REFUSED_ANNOUNCEMENTS[backend]:
+        for statement in refusing("material_information_archive", backend):
             await connection.execute(text(statement))
 
     await engine.dispose()
     logger = RecordingLogger()
 
     try:
-        sessions, quarters, months = await archive_run(connector, logger)
+        with pytest.raises(ArchiveSaveRefused, match="refused material_information_archive;"):
+            await archive_run(connector, logger)
+
+        archive = sql_archive(connector)
+        sessions, quarters, months = await archive.sessions(), await archive.quarters(), await archive.months()
     finally:
         await connector.close()
 

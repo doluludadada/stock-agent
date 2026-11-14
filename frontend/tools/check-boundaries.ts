@@ -2,7 +2,8 @@
  * Enforces the frontend ownership rules in docs/frontend-guide.md:
  *   app -> features -> shared; features never import each other; outside code uses a feature only
  *   through its index.ts; shared and i18n never import business code. It also rejects raw colors in
- *   app/feature code, `href="#"` placeholders and empty click handlers.
+ *   app/feature code, `href="#"` placeholders, empty click handlers and `crypto.randomUUID`, which a browser gives
+ *   only to a secure context: the site also runs over plain http at a host name, where a call to it throws.
  * Run: bun tools/check-boundaries.ts [srcDir]
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs'
@@ -61,6 +62,7 @@ function checkImport(from: Area, target: string): string | null {
 const RAW_COLOR = /(['"`][^'"`]*?)(#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?|oklch|oklab)\()/
 const PLACEHOLDER_HREF = /href=["']#["']/
 const EMPTY_HANDLER = /on[A-Z]\w*=\{\s*\(\s*\)\s*=>\s*(?:\{\s*\}|undefined|null)\s*\}/
+const SECURE_CONTEXT_ONLY = /crypto\.randomUUID\(/
 
 export function findViolations(srcDir: string): Violation[] {
   const violations: Violation[] = []
@@ -82,6 +84,7 @@ export function findViolations(srcDir: string): Violation[] {
     }
     if (PLACEHOLDER_HREF.test(text)) violations.push({ file: relative, rule: 'placeholder-link', detail: 'href="#" is a fake link' })
     if (EMPTY_HANDLER.test(text)) violations.push({ file: relative, rule: 'empty-handler', detail: 'an event handler that does nothing' })
+    if (SECURE_CONTEXT_ONLY.test(text)) violations.push({ file: relative, rule: 'secure-context-only', detail: 'crypto.randomUUID is missing on a plain http site: use randomHex of shared/lib/random-id.ts' })
   }
   return violations
 }

@@ -5,9 +5,9 @@ const auth: DictionaryShape<typeof en> = {
   intro: {
     title: '台股研究，在同一個地方完成',
     points: {
-      market: '每個交易日收盤後的大盤走勢、漲跌家數與產業強弱',
-      watchlist: '你的觀察清單，每檔的收盤與走勢一眼看完',
-      account: '用模擬帳戶驗證策略，不必動用真錢',
+      ranking: '每月依營收加速度排名，每次決策都在當下記錄',
+      holdings: '把你的持股當成一個投資組合，每檔都有排行分數',
+      market: '每個交易日收盤後的大盤、漲跌家數與產業強弱',
     },
   },
   field: {
@@ -22,23 +22,41 @@ const auth: DictionaryShape<typeof en> = {
   hint: {
     setupCode: '伺服器啟動時會在主控台印出這組一次性的設定碼，只在網站還沒有任何帳號時有效。',
     username: '3 到 32 個字元，以英文字母或數字開頭，可用點、底線或連字號',
-    password: '至少 12 個字元',
+    password: '至少 8 個字元',
   },
   problem: {
     required: '請填寫這個欄位。',
     usernameFormat: '請用 3 到 32 個英文字母、數字、點、底線或連字號，並以字母或數字開頭。',
     emailFormat: '電子郵件格式不正確。',
-    passwordShort: '密碼至少需要 12 個字元。',
+    passwordShort: '密碼至少需要 8 個字元。',
     passwordLong: '密碼最多 256 個字元。',
     mismatch: '兩次輸入的密碼不一樣。',
-    taken: { username: '這個使用者名稱已經有人使用。', email: '這個電子郵件已經註冊過。' },
     wrongCode: '設定碼不正確，請對照伺服器主控台印出的那一組。',
   },
   alert: {
     failed: '伺服器沒有回應，請再試一次。',
     closed: '目前不開放註冊，需要帳號請洽網站管理員。',
     alreadySetUp: '這個網站已經有管理員了，請直接登入。',
+    taken: '這個使用者名稱或電子郵件已經註冊過，請直接登入，或換一個。',
     rateLimited: '嘗試次數太多，請在 {{minutes}} 分鐘後再試。',
+  },
+  google: {
+    signIn: '使用 Google 登入',
+    or: '或',
+    setupLead: '如果你的電子郵件已列為網站的管理員，可以直接用 Google 登入建立管理員帳號，不需要設定碼。',
+    refused: {
+      not_offered: '這個網站沒有提供 Google 登入。',
+      flow_missing: 'Google 登入花了太久，或是從網站的另一個網址開始的。請從這個頁面再試一次。',
+      state_mismatch: 'Google 的回應和這個瀏覽器開始的登入對不上，請再試一次。',
+      cancelled: '已取消 Google 登入。',
+      provider_failed: 'Google 沒有完成登入，請稍後再試。',
+      token_refused: '無法接受 Google 的回應，請再試一次。',
+      email_unverified: 'Google 尚未驗證這個帳號的電子郵件，因此無法在這裡登入。',
+      not_allowed: '這個 Google 帳號不在網站允許的名單內，沒有建立任何帳號。需要帳號請洽網站管理員。',
+      deactivated: '這個電子郵件的帳號已停用，請洽網站管理員。',
+      throttled: '這個位址的登入嘗試太多次，請稍後再試。',
+      failed: 'Google 登入沒有成功，請再試一次。',
+    },
   },
   showPassword: '顯示密碼',
   hidePassword: '隱藏密碼',
@@ -73,6 +91,7 @@ const auth: DictionaryShape<typeof en> = {
     users: '使用者管理',
     settings: '系統設定',
     signOut: '登出',
+    signOutFailed: '登出沒有送達伺服器，你仍在登入狀態，請再試一次。',
   },
   settings: {
     title: '我的設定',
@@ -101,7 +120,6 @@ const auth: DictionaryShape<typeof en> = {
   },
   role: { administrator: '管理員', user: '一般使用者' },
   users: {
-    eyebrow: '管理',
     title: '使用者',
     description: '誰可以使用這個網站，以及誰能管理它。',
     summary: '共 {{count}} 個帳號 · 管理員 {{admins}} 位 · 停用 {{deactivated}} 個',

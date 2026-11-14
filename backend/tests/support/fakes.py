@@ -5,16 +5,20 @@ behind that port would observe: rows written, prompts sent, orders placed.
 """
 
 import inspect
+import itertools
 import json
+import math
 import re
-from collections.abc import Collection
+import zlib
+from collections.abc import Collection, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
 from pydantic import SecretStr
 
+from a_domain.model.analysis.stock_brief import StockBrief
 from a_domain.model.chat.conversation import Conversation
 from a_domain.model.chat.message import Message
 from a_domain.model.fundamentals.eps import Eps
@@ -25,7 +29,15 @@ from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.model.system.stats import SystemStats
 from a_domain.model.system.user import User, UserSession
-from a_domain.model.trading.account import Account, AccountOpening, AccountSnapshot, Position
+from a_domain.model.trading.account import (
+    Account,
+    AccountOpening,
+    AccountSnapshot,
+    BrokerageStatement,
+    BrokerFill,
+    Position,
+    Settlement,
+)
 from a_domain.model.trading.backtest import Backtest
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.signal import TradeSignal
@@ -39,6 +51,7 @@ from a_domain.ports.market.daily_close_archive import (
     OpenDataDownload,
     ValuationRatios,
 )
+from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.rules.fundamentals.trailing_eps import EpsFilings, QuarterEps
 from a_domain.rules.technical.search import StrategySearch
 from a_domain.rules.technical.strategy import TechnicalSettings
@@ -48,6 +61,7 @@ from a_domain.rules.trading.ranking import ListedHistory, ListedHistoryRule
 from a_domain.types.enums import (
     AiAnalysisFocus,
     AiProvider,
+    BriefStatus,
     ExecutionProvider,
     FinancialStatement,
     MarketIndex,
@@ -58,6 +72,7 @@ from a_domain.types.enums import (
     TradeAction,
     UserStatus,
     WatchlistType,
+    Workflow,
 )
 from a_domain.types.errors import (
     AlreadySetUpError,
@@ -216,6 +231,10 @@ class FakeDailyCloseArchive:
         )
         self.exchange_news.update({news.url: news for news in download.exchange_news})
 
+    async def valuation_history(self, stock_id: str) -> list[ValuationRatios]:
+        held = [ratios for (held_id, _), ratios in self.valuation_ratios.items() if held_id == stock_id]
+        return sorted(held, key=lambda ratios: ratios.session_date)
+
     async def sessions(self) -> list[ArchivedSession]:
         stocks = [day for _, day in self.stock_closes]
         indexes = [day for _, day in self.index_closes]
@@ -287,6 +306,9 @@ class FakeDailyCloseArchive:
         )
         return [replace(article) for article in reversed(held)][:limit]
 
+    async def archived_articles(self, since: datetime) -> list[Article]:
+        return [replace(article) for article in self.announcements.values() if article.published_at >= since]
+
     def save_as_md_file(self, stock_id: str, articles: list[Article]) -> None:
         return None
 
@@ -304,6 +326,11 @@ class FakeFundamentalsProvider:
         self.refresh_failed_quarters: set[FiscalQuarter] = set()
         self.requested: list[set[FiscalQuarter]] = []
         self.fetched_at = datetime(2026, 10, 19, 18, 0)
+        self.held_pages: dict[tuple[MarketType, FiscalQuarter], QuarterEps] = {}
+        """The pages already held, which the stock page reads without a fetch."""
+
+    async def load_page(self, market: MarketType, quarter: FiscalQuarter) -> QuarterEps | None:
+        return self.held_pages.get((market, quarter))
 
     async def fetch_monthly_revenues(self, market: MarketType, year: int, month: int) -> list[MonthlyRevenue] | None:
         return self.monthly_revenue_summaries.get((market, year, month))
@@ -370,9 +397,14 @@ class FakeNewsProvider:
     def __init__(self) -> None:
         self.articles: dict[str, list[Article]] = {}
         self.requested: list[str] = []
+        self.failure: Exception | None = None
 
     async def fetch_news(self, stock_id: str, limit: int = 10) -> list[Article]:
         self.requested.append(stock_id)
+
+        if self.failure is not None:
+            raise self.failure
+
         return [replace(article) for article in self.articles.get(stock_id, [])[:limit]]
 
     def save_as_md_file(self, stock_id: str, articles: list[Article]) -> None:
@@ -382,6 +414,12 @@ class FakeNewsProvider:
 class FakeSocialMediaProvider:
     def __init__(self) -> None:
         self.articles: list[Article] = []
+        self.stock_posts: dict[str, list[Article]] = {}
+        self.searched: list[str] = []
+
+    async def fetch_stock_posts(self, stock_id: str, limit: int) -> list[Article]:
+        self.searched.append(stock_id)
+        return [replace(article) for article in self.stock_posts.get(stock_id, [])[:limit]]
 
     async def fetch_social_articles(self, limit: int) -> list[Article]:
         return [replace(article) for article in self.articles[:limit]]
@@ -586,6 +624,17 @@ class FakeTradingJournal:
         sources = {run_id: self.runs.get(run.followed_run_id, run) if run.followed_run_id else run for run_id, run in runs.items()}
         return [(order, sources[order.run_id]) for order in newest]
 
+    async def first_fill(self, workflow: Workflow, broker: ExecutionProvider, since: datetime | None) -> datetime | None:
+        filled = [
+            order.created_at
+            for order in self.orders.values()
+            if order.filled_quantity > 0
+            and self.on(broker, order.run_id)
+            and self.runs[order.run_id].workflow == workflow
+            and (since is None or order.created_at >= since)
+        ]
+        return min(filled, default=None)
+
     async def buy_orders(self, broker: ExecutionProvider, since: datetime) -> list[Order]:
         orders = [
             order
@@ -619,6 +668,22 @@ class FakeWatchlistRepository:
         return removed
 
 
+class FakeHoldingRepository:
+    """Holds one hand-entered holding per stock, like one owner's rows of the manual_holdings table."""
+
+    def __init__(self) -> None:
+        self.holdings: dict[str, Position] = {}
+
+    async def get_all(self) -> list[Position]:
+        return [replace(self.holdings[stock_id]) for stock_id in sorted(self.holdings)]
+
+    async def save(self, position: Position) -> None:
+        self.holdings[position.stock_id] = replace(position)
+
+    async def remove(self, stock_id: str) -> bool:
+        return self.holdings.pop(stock_id, None) is not None
+
+
 class FakeSentimentClassifier:
     """Labels every post with the label set for its stock and records which posts each stock sent."""
 
@@ -643,6 +708,9 @@ class RecordingExecutionProvider:
         self.cash = cash
         self.opening: AccountOpening | None = None
         self.positions: list[Position] = []
+        self.settlements: list[Settlement] = []
+        self.fills: list[BrokerFill] = []
+        self.sales: list[BrokerFill] = []
         self.placed: list[Order] = []
         self._cost_rule = cost_rule or TradingCostRule(
             fee_rate=0.001425, tax_rate=0.003, etf_tax_rate=0.001, min_fee=20, bond_etf_tax_exempt_until=date(2026, 12, 31)
@@ -665,6 +733,22 @@ class RecordingExecutionProvider:
 
     async def get_account(self) -> Account:
         return Account(cash=self.cash, positions=[replace(position) for position in self.positions], opening=self.opening)
+
+    async def open_positions(self) -> list[Position]:
+        return [replace(position) for position in self.positions]
+
+    async def statement(self, sales_from: date, today: date) -> BrokerageStatement:
+        """A real broker's own report of the account: the positions as held, and the fills and sales a test set."""
+        return BrokerageStatement(
+            read_at=datetime.now(UTC),
+            simulation=bool(self.current_link.simulation),
+            balance=self.cash,
+            settlements=list(self.settlements),
+            positions=await self.open_positions(),
+            fills=[fill for fill in self.fills if fill.filled_on == today],
+            sales=[sale for sale in self.sales if sales_from <= sale.filled_on <= today],
+            sales_from=sales_from,
+        )
 
     async def reset(self, initial_cash: float, now: datetime) -> Account:
         self.cash, self.positions, self.opening = initial_cash, [], AccountOpening(initial_cash=initial_cash, opened_at=now)
@@ -701,6 +785,166 @@ class FakeStrategySearchRepository:
     async def save(self, search: StrategySearch) -> str:
         self.searches.append(search)
         return f"search {len(self.searches)}"
+
+
+class FakeStockBriefRepository:
+    """Like the SQL repository: one brief per stock and day, a claim one caller takes, and a limit on a day's stocks."""
+
+    def __init__(self) -> None:
+        self.rows: dict[tuple[str, date], StockBrief] = {}
+
+    async def find(self, stock_id: str, day: date) -> StockBrief | None:
+        held = self.rows.get((stock_id, day))
+        return replace(held) if held is not None else None
+
+    async def latest_written(self, stock_id: str, before: date) -> StockBrief | None:
+        written = [
+            brief
+            for (held_id, day), brief in self.rows.items()
+            if held_id == stock_id and day < before and brief.status == BriefStatus.WRITTEN
+        ]
+        return max(written, key=lambda brief: brief.day, default=None)
+
+    async def claimed_stocks(self, day: date) -> int:
+        return sum(held_day == day for _, held_day in self.rows)
+
+    async def claim(self, brief: StockBrief, daily_stocks: int, stale_before: datetime) -> bool:
+        held = self.rows.get((brief.stock_id, brief.day))
+        abandoned = held is not None and held.status == BriefStatus.WRITING and held.claimed_at < stale_before
+        free = held is None and await self.claimed_stocks(brief.day) < daily_stocks
+
+        if not (free or abandoned or (held is not None and held.status == BriefStatus.FAILED)):
+            return False
+
+        self.rows[(brief.stock_id, brief.day)] = replace(brief)
+        return True
+
+    async def save(self, brief: StockBrief) -> None:
+        self.rows[(brief.stock_id, brief.day)] = replace(brief)
+
+    async def release(self, stock_id: str, day: date) -> None:
+        self.rows.pop((stock_id, day), None)
+
+
+class FakeTextEmbedder:
+    """
+    ITextEmbedder without a model: a text's vector counts its pairs of neighbouring characters in `SIZE` buckets, so
+    texts that share wording lie close. It keeps every text it embedded, so a test can see what was embedded again.
+    """
+
+    SIZE = 64
+
+    def __init__(self) -> None:
+        self.embedded: list[str] = []
+        self.failure: Exception | None = None
+
+    async def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        return self.embed_batch(texts)
+
+    def embed_batch(self, texts: Sequence[str]) -> list[list[float]]:
+        self.load()
+        self.embedded.extend(texts)
+        vectors = []
+
+        for text in texts:
+            counts = [0.0] * self.SIZE
+
+            for pair in itertools.pairwise(text):
+                counts[zlib.crc32("".join(pair).encode()) % self.SIZE] += 1
+
+            length = math.sqrt(sum(count * count for count in counts)) or 1.0
+            vectors.append([count / length for count in counts])
+
+        return vectors
+
+    def load(self) -> None:
+        if self.failure is not None:
+            raise self.failure
+
+
+class FakeArticleStore:
+    """Like the SQL store: one article per stock and key, replaced only when its title or text changed, within retention."""
+
+    def __init__(self, clock: IMarketClock, retention: timedelta, max_per_stock: int) -> None:
+        self.clock = clock
+        self.retention = retention
+        self.max_per_stock = max_per_stock
+        self.rows: dict[tuple[str, str], Article] = {}
+
+    async def save(self, articles: Sequence[Article]) -> int:
+        now = self.clock.now()
+        changed = 0
+
+        for article in articles:
+            held = self.rows.get((article.stock_id, article.key))
+
+            if article.published_at >= now - self.retention and (
+                held is None or (held.title, held.content) != (article.title, article.content)
+            ):
+                self.rows[(article.stock_id, article.key)] = replace(article, fetched_at=now)
+                changed += 1
+
+        kept = {place: article for place, article in self.rows.items() if article.published_at >= now - self.retention}
+        self.rows = {
+            (article.stock_id, article.key): article
+            for stock_id in {stock_id for stock_id, _ in kept}
+            for article in sorted(
+                (article for article in kept.values() if article.stock_id == stock_id),
+                key=lambda article: article.published_at,
+                reverse=True,
+            )[: self.max_per_stock if any(given.stock_id == stock_id for given in articles) else None]
+        }
+        return changed
+
+    async def latest(self, stock_id: str, limit: int) -> list[Article]:
+        held = [article for (held_id, _), article in self.rows.items() if held_id == stock_id]
+        return [replace(article) for article in sorted(held, key=lambda article: article.published_at, reverse=True)[:limit]]
+
+    async def find(self, stock_id: str, keys: Collection[str]) -> list[Article]:
+        return [replace(article) for (held_id, key), article in self.rows.items() if held_id == stock_id and key in keys]
+
+    async def stock_ids(self) -> list[str]:
+        return sorted({stock_id for stock_id, _ in self.rows})
+
+
+class FakeArticleIndex:
+    """Like the Chroma index: a vector per stock and key with its day and its text, embedded only when the text is new."""
+
+    def __init__(self, embedder: FakeTextEmbedder, text_length: int = 300) -> None:
+        self.embedder = embedder
+        self.text_length = text_length
+        self.entries: dict[tuple[str, str], tuple[str, date, list[float]]] = {}
+
+    async def sync(self, stock_id: str, articles: Sequence[Article]) -> int:
+        wanted = {article.key: (self.embedded_text(article), article.published_at.date()) for article in articles}
+        missing = [key for key, described in wanted.items() if self.entries.get((stock_id, key), ("", None, []))[:2] != described]
+        vectors = await self.embedder.embed([wanted[key][0] for key in missing]) if missing else []
+        self.entries = {place: entry for place, entry in self.entries.items() if place[0] != stock_id or place[1] in wanted}
+        self.entries.update({(stock_id, key): (*wanted[key], vector) for key, vector in zip(missing, vectors, strict=True)})
+        return len(missing)
+
+    async def search(self, stock_id: str, query: str, first: date | None, last: date | None, limit: int) -> list[str]:
+        asked = (await self.embedder.embed([query]))[0]
+        within = {
+            key: sum(left * right for left, right in zip(asked, vector, strict=True))
+            for (held_id, key), (_, day, vector) in self.entries.items()
+            if held_id == stock_id and (first is None or day >= first) and (last is None or day < last)
+        }
+        return sorted(within, key=lambda key: within[key], reverse=True)[:limit]
+
+    def embedded_text(self, article: Article) -> str:
+        text = article.content[: self.text_length]
+        return article.title if not text or text == article.title else f"{article.title}\n{text}"
+
+
+class FakeUsersStocks:
+    """The stocks some user holds or watches, as a test sets them."""
+
+    def __init__(self) -> None:
+        self.stock_ids: set[str] = set()
+
+    async def held_or_watched(self) -> set[str]:
+        return set(self.stock_ids)
 
 
 class FakeTechnicalSettingsRepository:
@@ -740,11 +984,13 @@ class FakeUserStore:
 
     def __init__(self) -> None:
         self.by_id: dict[UserId, User] = {}
-        self.passwords: dict[UserId, str] = {}
+        self.passwords: dict[UserId, str | None] = {}
         self.sessions: dict[SessionToken, UserSession] = {}
+        self.session_numbers = itertools.count(1)
+        """An ended session's token never names a later one."""
 
-    def add(self, user: User, password: str) -> None:
-        self.by_id[user.user_id] = replace(user)
+    def add(self, user: User, password: str | None) -> None:
+        self.by_id[user.user_id] = replace(user, has_password=password is not None)
         self.passwords[user.user_id] = password
 
     def named(self, identifier: str) -> User | None:
@@ -759,7 +1005,7 @@ class FakeUserStore:
     async def user_count(self) -> int:
         return len(self.by_id)
 
-    async def create(self, user: User, password: SecretStr) -> None:
+    async def create(self, user: User, password: SecretStr | None) -> None:
         if user.user_id in self.by_id:
             raise AlreadySetUpError(f"User {user.user_id} exists.")
 
@@ -767,7 +1013,7 @@ class FakeUserStore:
             if any(getattr(other, taken).casefold() == getattr(user, taken).casefold() for other in self.by_id.values()):
                 raise UserExistsError(taken)
 
-        self.add(user, password.get_secret_value())
+        self.add(user, password.get_secret_value() if password is not None else None)
 
     async def verify_password(self, identifier: str, password: SecretStr) -> User | None:
         user = self.named(identifier)
@@ -780,7 +1026,10 @@ class FakeUserStore:
 
     async def open_session(self, user_id: UserId, now: datetime, expires_at: datetime) -> UserSession:
         session = UserSession(
-            token=SessionToken(f"session-{len(self.sessions) + 1}-{user_id}"), user_id=user_id, created_at=now, expires_at=expires_at
+            token=SessionToken(f"session-{next(self.session_numbers)}-{user_id}"),
+            user_id=user_id,
+            created_at=now,
+            expires_at=expires_at,
         )
         self.sessions[session.token] = session
         return session
@@ -806,12 +1055,13 @@ class FakeUserStore:
         if not any(other.role == Role.ADMINISTRATOR and other.status == UserStatus.ACTIVE for other in after.values()):
             raise LastAdministratorError("At least one active administrator must remain. Nothing was saved.")
 
-        self.by_id[user.user_id] = replace(user, ai_model=self.by_id[user.user_id].ai_model)
+        kept = self.passwords[user.user_id] if user.has_password else None
+        new_password = password.get_secret_value() if password is not None else kept
+        changed = password is not None or new_password != self.passwords[user.user_id]
+        self.by_id[user.user_id] = replace(user, ai_model=self.by_id[user.user_id].ai_model, has_password=new_password is not None)
+        self.passwords[user.user_id] = new_password
 
-        if password is not None:
-            self.passwords[user.user_id] = password.get_secret_value()
-
-        if user.status != UserStatus.ACTIVE or password is not None:
+        if user.status != UserStatus.ACTIVE or changed:
             self.sessions = {token: session for token, session in self.sessions.items() if session.user_id != user.user_id}
 
     async def save_ai_model(self, user_id: UserId, ai_model: AiProvider | None, now: datetime) -> None:

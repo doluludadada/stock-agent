@@ -1,10 +1,11 @@
 from fastapi import APIRouter
 from fastapi.exceptions import RequestValidationError
 
+from a_domain.types.enums import Feature
 from d_presentation.web.schemas import StockIdsRequest, WatchlistAdditionResponse, WatchlistEntryResponse, WatchlistRemovalResponse
-from d_presentation.web.session import PrivateAccess, UserPipeline
+from d_presentation.web.session import PrivateAccess, UserPipeline, shows
 
-router = APIRouter(prefix="/watchlist", tags=["Watchlist"], dependencies=[PrivateAccess])
+router = APIRouter(prefix="/watchlist", tags=["Watchlist"], dependencies=[PrivateAccess, shows(Feature.WATCHLIST)])
 
 
 @router.get("")

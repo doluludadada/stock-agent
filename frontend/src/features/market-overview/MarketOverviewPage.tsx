@@ -1,6 +1,6 @@
 import type { UseQueryResult } from '@tanstack/react-query'
 import { LineChart, SearchX } from 'lucide-react'
-import { useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { useLocale, useTranslation } from '@/i18n'
 import {
@@ -35,12 +35,7 @@ import { Skeleton } from '@/shared/ui/skeleton'
 import { Stat } from '@/shared/ui/stat'
 import { StateBlock } from '@/shared/ui/state-block'
 import { StockPicker } from '@/shared/ui/stock-picker'
-import { breadthMood, DEFAULT_INDEX, heatLevel, industryEnds, listedChange, rankIndustries, type HeatLevel, type IndustryBreadth, type TrendTarget } from './model'
-
-interface MarketOverviewPageProps {
-  /** The user's strategies, from the strategies feature. */
-  strategy: ReactNode
-}
+import { breadthMood, DEFAULT_INDEX, MOOD_TONE, heatLevel, industryEnds, listedChange, rankIndustries, type HeatLevel, type IndustryBreadth, type TrendTarget } from './model'
 
 /** Below 1280 px the most traded list opens with this many rows; from 1280 px, beside the heat map, it shows all. */
 const MOST_TRADED_SHOWN = 5
@@ -49,12 +44,11 @@ const INDUSTRY_ENDS_SHOWN = 3
 
 /**
  * Two stacks from 1280 px, whose heights end together: the trend over the industries' heat map, and the session's
- * breadth, the most traded stocks and the strategy in use beside them. Narrower, the stacks dissolve into one grid in
- * reading order: the trend and the breadth across, the industries beside the most traded stocks from 768 px, then the
- * strategy. The panels that move out of DOM order hold no control, so the keyboard order still matches the screen.
- * The research target is part of the address (`/?target=2330`); without one, the trend is the TAIEX.
+ * breadth and the most traded stocks beside them. Narrower, the stacks dissolve into one grid in reading order: the
+ * trend and the breadth across, then the industries beside the most traded stocks from 768 px. The panels that move out of DOM order hold no control, so the keyboard order still matches the screen.
+ * The research target is part of the address (`/market?target=2330`); without one, the trend is the TAIEX.
  */
-export function MarketOverviewPage({ strategy }: MarketOverviewPageProps) {
+export function MarketOverviewPage() {
   const { t } = useTranslation('overview')
   const format = useFormat()
   const [params, setParams] = useSearchParams()
@@ -67,7 +61,7 @@ export function MarketOverviewPage({ strategy }: MarketOverviewPageProps) {
   const history: UseQueryResult<IndexHistory | StockHistory> = target.kind === 'index' ? indexHistory : stockHistory
   const session = mostTraded.data?.[0]?.today?.ts ?? breadth.data?.session_close ?? history.data?.bars.at(-1)?.ts
   return (
-    <div className="space-y-5 lg:space-y-6">
+    <div className="page-stack">
       <PageHeader title={t('title')} description={session && t('session', { date: format.date(session, 'long') })} />
       <ArchiveWarmUp />
       <div className="grid gap-4 md:grid-cols-2 lg:gap-5 xl:grid-cols-[minmax(0,1fr)_26rem] xl:items-start">
@@ -78,7 +72,6 @@ export function MarketOverviewPage({ strategy }: MarketOverviewPageProps) {
         <div className="contents xl:flex xl:min-w-0 xl:flex-col xl:gap-5">
           <BreadthPanel breadth={breadth} />
           <MostTradedPanel mostTraded={mostTraded} />
-          <div className="order-5 min-w-0 md:col-span-2">{strategy}</div>
         </div>
       </div>
     </div>
@@ -141,8 +134,6 @@ function TrendPanel({ target, history, onTarget }: { target: TrendTarget; histor
     </Panel>
   )
 }
-
-const MOOD_TONE = { broadUp: 'text-up', leaningUp: 'text-up', mixed: 'text-foreground', leaningDown: 'text-down', broadDown: 'text-down' } as const
 
 /** How broad the session's move was: one phrase for it, the split as a bar, and the counts. */
 function BreadthPanel({ breadth }: { breadth: UseQueryResult<MarketBreadth> }) {

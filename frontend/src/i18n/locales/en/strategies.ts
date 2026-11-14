@@ -1,5 +1,4 @@
 const strategies = {
-  summarySignIn: 'Sign in to see the strategy you use',
   signIn: 'Sign in to keep and use your own strategies',
   untitled: 'Untitled strategy',
   copyName: '{{name}} copy',
@@ -43,16 +42,6 @@ const strategies = {
     indicators: 'Indicator settings',
     requiredBars: 'Completed daily bars needed',
     baseScore: 'Base score',
-  },
-  panel: {
-    title: 'Strategy in use',
-    openLibrary: 'Library',
-    none: 'No strategy is in use.',
-    others: 'My strategies',
-    noOthers: 'None of your own yet.',
-    ruleCount: '{{count}} rules',
-    showAllRules: 'Show all {{count}} rules',
-    showFewerRules: 'Show fewer rules',
   },
   toast: {
     activated: '{{name}} is now in use',

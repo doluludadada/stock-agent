@@ -37,11 +37,11 @@ def test_an_email_without_the_shape_of_one_is_refused(email: str) -> None:
         TypeAdapter(EmailAddress).validate_python(email)
 
 
-def test_a_password_needs_12_to_256_characters_and_never_shows_in_a_repr() -> None:
+def test_a_password_needs_8_to_256_characters_and_never_shows_in_a_repr() -> None:
     adapter = TypeAdapter(NewPassword)
 
     with pytest.raises(ValidationError):
-        adapter.validate_python("x" * 11)
+        adapter.validate_python("x" * 7)
 
     with pytest.raises(ValidationError):
         adapter.validate_python("x" * 257)

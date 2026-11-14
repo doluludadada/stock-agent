@@ -23,10 +23,10 @@ class ExchangeDailyReports(IDailyHistorySource):
     The exchanges' own reports of each date on their sites (sources.exchange.daily_reports), measured on 2026-11-07:
     TWSE's MI_INDEX and TPEX's closing quotes list every security of one session, and per month TWSE's MI_5MINS_HIST and
     TPEX's index report give the index's prices, and TWSE's FMTQIK and TPEX's trading index report the market's volume
-    and the index's change. TWSE's TWT49U (sources.exchange.ex_right_references) lists the ex-right and ex-dividend
-    references of a range of dates, whose ROC dates mark the year, the month and the day with a character each. A date
-    without a session answers no rows: TWSE says so in `stat`, TPEX serves an empty table. An answer of another date
-    than the one asked counts as none.
+    and the index's change. TWSE's TWT49U and TPEX's exDailyQ (sources.exchange.ex_right_references) list the ex-right
+    and ex-dividend references of a range of dates, in ROC dates; TWSE's mark the year, the month and the day with a
+    character each. A date without a session, or a range without an ex-day, answers no rows: TWSE says so in `stat`,
+    TPEX serves an empty table. An answer of another date than the one asked counts as none.
 
     TWSE refuses an address for minutes after more than about 3 requests in 5 seconds. So a request to one site waits
     until market_data.history_request_interval_seconds after the request to it before, whichever runtime made that one:
@@ -84,23 +84,23 @@ class ExchangeDailyReports(IDailyHistorySource):
         return sorted(bars, key=lambda bar: bar.ts)
 
     @override
-    async def ex_right_references(self, first: date, last: date) -> dict[tuple[str, date], float]:
-        feed = self._ex_right_feed
-        answer = await self.get(MarketType.TWSE, feed.url.format(first=first, last=last))
+    async def ex_right_references(self, market: MarketType, first: date, last: date) -> dict[tuple[str, date], float]:
+        report = self._ex_right_feed.reports[market]
+        answer = await self.get(market, report.url.format(first=first, last=last))
 
-        if not answer.get("data"):
+        if not answer.get("data") and not answer.get("tables"):
             return {}
 
         references: dict[tuple[str, date], float] = {}
 
-        for row in self.rows(answer, [feed.date, feed.stock_id, feed.reference]):
-            session = self.session_date("/".join(re.findall(r"\d+", row[feed.date])))
-            price = self._listing.parse_number(row[feed.reference])
+        for row in self.rows(answer, [report.date, report.stock_id, report.reference]):
+            session = self.session_date("/".join(re.findall(r"\d+", row[report.date])))
+            price = self._listing.parse_number(row[report.reference])
 
-            if session is not None and price is not None and price > 0 and len(row[feed.stock_id]) == STOCK_CODE_LENGTH:
-                references[(row[feed.stock_id], session)] = price
+            if session is not None and price is not None and price > 0 and len(row[report.stock_id]) == STOCK_CODE_LENGTH:
+                references[(row[report.stock_id], session)] = price
 
-        self._logger.info(f"TWSE ex-right references from {first} to {last}: {len(references)}")
+        self._logger.info(f"{market.value.upper()} ex-right references from {first} to {last}: {len(references)}")
         return references
 
     @override

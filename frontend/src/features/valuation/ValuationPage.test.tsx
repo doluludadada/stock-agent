@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { I18nextProvider } from 'react-i18next'
 import { MemoryRouter } from 'react-router'
@@ -71,6 +71,21 @@ describe('the undervalued scan', () => {
     vi.unstubAllGlobals()
   })
 
+  it('keeps what was typed in one tab after a look at the other', async () => {
+    vi.stubGlobal('fetch', backend().fetch)
+    session.signIn(TEST_USER)
+    const user = userEvent.setup()
+    renderPage()
+
+    const pe = within(await screen.findByRole('tabpanel')).getByLabelText('Target P/E')
+    await user.clear(pe)
+    await user.type(pe, '31')
+    await user.click(screen.getByRole('tab', { name: 'Undervalued scan' }))
+    await user.click(screen.getByRole('tab', { name: 'Specific stocks' }))
+
+    expect(within(screen.getByRole('tabpanel')).getByLabelText('Target P/E')).toHaveValue('31')
+  })
+
   it('asks the AI about the P/E the scan used, even after the field was edited', async () => {
     const server = backend()
     vi.stubGlobal('fetch', server.fetch)
@@ -81,7 +96,7 @@ describe('the undervalued scan', () => {
     await user.click(screen.getByRole('tab', { name: 'Undervalued scan' }))
     await user.click(screen.getByRole('button', { name: 'Scan' }))
     await screen.findByRole('link', { name: /TSMC/ })
-    const pe = screen.getByLabelText('Target P/E')
+    const pe = within(screen.getByRole('tabpanel')).getByLabelText('Target P/E')
     await user.clear(pe)
     await user.type(pe, '25')
     await user.click(screen.getByRole('button', { name: 'Explain with AI' }))

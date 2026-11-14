@@ -1,51 +1,45 @@
 # syntax=docker/dockerfile:1
-FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim AS builder
+# The Web API and the project's commands. compose.yml builds and runs it. It publishes no port and keeps its files in
+# /state.
 
-# Configure uv:
-ENV UV_COMPILE_BYTECODE=1
-ENV UV_LINK_MODE=copy
-
+FROM python:3.14-slim-trixie AS builder
+COPY --from=ghcr.io/astral-sh/uv:0.12.13 /uv /usr/local/bin/uv
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
 WORKDIR /app
-
-# Install dependencies
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev
 
-# Copy the rest of the application
-COPY . .
+FROM python:3.14-slim-trixie
 
-# Install the project itself
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+# pg_dump and pg_restore of the major version of the postgres service in compose.yml, for the database commands
+# (docs/database-migrations.md). Debian's own client is older, so this one comes from the PostgreSQL project's repository.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates postgresql-common \
+    && /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y \
+    && apt-get install -y --no-install-recommends postgresql-client-18 \
+    && rm -rf /var/lib/apt/lists/*
 
-# ==========================================
-# Final Runtime Image
-# ==========================================
-FROM python:3.13-slim-bookworm
-
-# Copy the virtual environment from the builder stage
 COPY --from=builder /app/.venv /app/.venv
+COPY src /app/src
+COPY main.py /app/main.py
 
-# Add virtual environment to PATH
-ENV PATH="/app/.venv/bin:$PATH"
-ENV PYTHONPATH="/app/src"
-
-WORKDIR /app
-
-# Copy application code
-COPY src ./src
-COPY config ./config
-COPY main.py .
-COPY pyproject.toml . 
-
-
-# Create a non-root user for security
-RUN useradd -m appuser && chown -R appuser:appuser /app
-USER appuser
-
-# Expose the port defined in your Justfile
+# STOCK_AGENT_ROOT is the project root: the app reads config/ from it and saves everything under it (get_project_root).
+# The working directory is the same folder, because Chroma and Shioaji's log resolve their paths against it. HOME is
+# writable for whichever user compose.yml runs the container as. ONNX Runtime, which Chroma and the article store's
+# embedding model import, and the Hugging Face client that fetches that model once into /state/embedding_models, each
+# upload usage telemetry unless told not to before they are imported; the site reports nothing about itself.
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONPATH=/app/src \
+    PYTHONUNBUFFERED=1 \
+    STOCK_AGENT_ROOT=/state \
+    HOME=/tmp \
+    ORT_DISABLE_TELEMETRY=1 \
+    HF_HUB_DISABLE_TELEMETRY=1 \
+    HOST=0.0.0.0
+WORKDIR /state
+USER 1000:1000
 EXPOSE 8800
 
-# Run using the uvicorn CLI directly for better signal handling in Docker
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8800"]
+# main.py starts uvicorn with one worker.
+CMD ["python", "/app/main.py"]

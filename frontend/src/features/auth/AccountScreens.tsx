@@ -11,6 +11,7 @@ import { Skeleton } from '@/shared/ui/skeleton'
 import { StateBlock } from '@/shared/ui/state-block'
 import { useAuthStatus, useRegister, useSetUp, useSignIn } from './api'
 import { AuthFrame, FormAlert, NewAccountForm } from './AuthForm'
+import { GoogleSignIn } from './GoogleSignIn'
 
 const linkClass = 'inline-flex min-h-11 items-center font-medium text-brand underline-offset-4 hover:underline md:min-h-0'
 
@@ -20,6 +21,7 @@ export function SetupScreen({ onDone }: { onDone: () => void }) {
   const setUp = useSetUp()
   return (
     <AuthFrame eyebrow={t('setup.eyebrow')} title={t('setup.title')} lead={t('setup.lead')} footer={t('setup.note')}>
+      <GoogleSignIn lead={t('google.setupLead')} />
       <NewAccountForm
         withSetupCode
         submitLabel={t('setup.submit')}
@@ -74,6 +76,7 @@ export function SignInScreen({ registerHref, onDone }: { registerHref: string; o
         )
       }
     >
+      <GoogleSignIn />
       <form onSubmit={submit} className="grid gap-4">
         {ended && !problem && <p className="rounded-lg bg-gold-soft px-3 py-2.5 text-sm text-gold">{t('signIn.ended')}</p>}
         <Field label={t('field.identifier')}>

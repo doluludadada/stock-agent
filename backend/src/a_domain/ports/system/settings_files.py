@@ -5,7 +5,7 @@ from typing import Annotated, Protocol, override
 from pydantic import Field, JsonValue
 from pydantic.dataclasses import dataclass
 
-from a_domain.types.enums import Audience, SettingKind, SettingsAction, SettingsFile, SystemEnvironment
+from a_domain.types.enums import Audience, SettingGroup, SettingKind, SettingsAction, SettingsFile, SettingUnit, SystemEnvironment
 from a_domain.types.ids import UserId
 
 type Revision = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
@@ -107,19 +107,34 @@ class SettingsEdit:
 class SettingField:
     """
     One setting as the administrator's settings form shows it: its dotted settings path, such as ai.temperature, or an
-    AI prompt's, such as ai.system_prompt; how the form shows it; the value the file sets, as JSON, else its default,
-    else null; its options and bounds from the settings classes; and whether it applies only at a restart.
+    AI prompt's, such as ai.system_prompt; the control it gets and the group it shows under; the value the file sets,
+    as JSON, else its default, else null; and what the control offers, all from the settings classes. A value the file
+    sets that is none of the options or steps still shows, and stays until the administrator picks another.
     """
 
     path: Annotated[str, Field(min_length=1)]
     kind: SettingKind
+    group: SettingGroup
     value: JsonValue
     options: tuple[str, ...] = ()
+    """What a CHOICE picks one of and CHOICES any of."""
+
+    steps: tuple[float, ...] = ()
+    """The numbers STEPS picks from, rising."""
+
     minimum: float | None = None
+    """The least number RANGE reaches, itself allowed. None where the settings name no lower bound."""
+
     maximum: float | None = None
-    exclusive_minimum: float | None = None
-    exclusive_maximum: float | None = None
+    step: float | None = None
+    """How far one move of RANGE goes."""
+
+    unit: SettingUnit | None = None
+    nullable: bool = False
+    """The setting may be unset (null), which the form offers beside the values."""
+
     restart_only: bool = False
+    """The setting applies only at a restart, so the form shows it and a save refuses to change it."""
 
 
 @dataclass(frozen=True)
@@ -158,6 +173,10 @@ class ISettingsFiles(Protocol):
 
     async def record(self, entry: SettingsAuditEntry) -> None:
         """Appends the audit entry, owner-only. It holds setting paths and revisions, never a value."""
+        ...
+
+    def built_in_strategy_ids(self) -> list[str]:
+        """The ids of the built-in strategies config/strategies/ holds, sorted: one <id>.json each."""
         ...
 
     def check(

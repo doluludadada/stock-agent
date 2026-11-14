@@ -8,10 +8,14 @@ run and its FOLLOW decision save afterwards, the Yahoo bars are gone and the nex
 failure after both parts leaves the database exactly as version 4 left it. From 5 to 6 (one strategy for the whole
 site): every owner keeps their strategies, the active one and the revision, and only the separate Buzz choice goes.
 From 6 to 7 (each run chooses its broker): every run keeps its record and its broker, and only the order mode goes.
+From 7 to 8 (no record of the ranking's decisions): ranking_records goes with its rows where the database holds it,
+and a database that never held it changes only its stamp. From 8 to 9 (the ranking followed into the mock account):
+no row changes, and a ranking follow's run, decision and filled order save afterwards.
 """
 
 import json
-from datetime import UTC, datetime
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -25,8 +29,19 @@ from trading_stack import MovableClock, SilentLogger
 
 import c_infrastructure.database.models.schema_version_dto as schema_version
 from a_domain.model.system.stats import SystemStats
+from a_domain.model.trading.order import Order
 from a_domain.model.trading.signal import TradeSignal
-from a_domain.types.enums import AiProvider, DatabaseBackend, ExecutionProvider, Role, SignalSource, TradeAction, Workflow
+from a_domain.types.enums import (
+    AiProvider,
+    DatabaseBackend,
+    ExecutionProvider,
+    OrderType,
+    Role,
+    SignalSource,
+    TimeInForce,
+    TradeAction,
+    Workflow,
+)
 from a_domain.types.ids import RunId, UserId
 from c_infrastructure.database.db_connector import DatabaseCommandError, DatabaseConnector
 from c_infrastructure.database.models.schema_version_dto import SCHEMA_VERSION
@@ -382,6 +397,8 @@ async def test_a_version_3_database_gains_the_ai_model_and_keeps_every_user_on_t
         "4 -> 5 add_follows_and_drop_yahoo_history",
         "5 -> 6 drop_buzz_strategy",
         "6 -> 7 drop_order_mode",
+        "7 -> 8 drop_ranking_records",
+        "8 -> 9 add_ranking_follow",
     ]
     assert after["schema_version"][1] == [(str(SCHEMA_VERSION),)]
     assert {table: len(rows) for table, (_, rows) in after.items() if table in before.keys() - YAHOO_HISTORY} == {
@@ -488,6 +505,8 @@ async def test_a_version_4_database_keeps_every_run_following_nothing_and_then_s
         "4 -> 5 add_follows_and_drop_yahoo_history",
         "5 -> 6 drop_buzz_strategy",
         "6 -> 7 drop_order_mode",
+        "7 -> 8 drop_ranking_records",
+        "8 -> 9 add_ranking_follow",
     ]
     assert kept is not None and (kept.workflow, kept.followed_run_id, kept.orders_filled) == (Workflow.FULL_CYCLE, None, 1)
     assert saved is not None and (saved.workflow, saved.followed_run_id) == (Workflow.FOLLOW, RUN)
@@ -514,6 +533,8 @@ async def test_a_version_4_database_loses_its_yahoo_bars_and_the_next_start_make
         "4 -> 5 add_follows_and_drop_yahoo_history",
         "5 -> 6 drop_buzz_strategy",
         "6 -> 7 drop_order_mode",
+        "7 -> 8 drop_ranking_records",
+        "8 -> 9 add_ranking_follow",
     ]
     assert after["ohlcv_data"] == (["change", "close", "high", "low", "open", "stock_id", "ts", "volume"], [])
     assert {"ohlcv_fetches", "ohlcv_windows"}.isdisjoint(after)
@@ -592,7 +613,12 @@ async def test_a_version_5_database_keeps_every_strategy_and_the_active_one_and_
         await connector.close()
 
     after = await database_snapshot(backend, tmp_path)
-    assert list(migration.before.pending) == ["5 -> 6 drop_buzz_strategy", "6 -> 7 drop_order_mode"]
+    assert list(migration.before.pending) == [
+        "5 -> 6 drop_buzz_strategy",
+        "6 -> 7 drop_order_mode",
+        "7 -> 8 drop_ranking_records",
+        "8 -> 9 add_ranking_follow",
+    ]
     assert after["technical_settings"] == (["active_strategy_id", "owner_id", "revision"], [("trend", LEGACY_OWNER_ID, "4")])
     assert {table: after[table] for table in TECHNICAL_CHILD_TABLES} == {table: before[table] for table in TECHNICAL_CHILD_TABLES}
     assert (settings.active_strategy_id, [strategy.strategy_id for strategy in settings.strategies], settings.revision) == (
@@ -658,7 +684,7 @@ async def test_a_version_6_database_keeps_every_run_on_its_broker_and_drops_only
     columns, rows = before["workflow_runs"]
     mode = columns.index("order_mode")
     unchanged = before.keys() - {"workflow_runs", "schema_version"}
-    assert list(migration.before.pending) == ["6 -> 7 drop_order_mode"]
+    assert list(migration.before.pending) == ["6 -> 7 drop_order_mode", "7 -> 8 drop_ranking_records", "8 -> 9 add_ranking_follow"]
     assert after["workflow_runs"] == ([*columns[:mode], *columns[mode + 1 :]], sorted(row[:mode] + row[mode + 1 :] for row in rows))
     assert [run.execution_provider if run else None for run in kept] == [
         ExecutionProvider.MOCK,
@@ -668,3 +694,96 @@ async def test_a_version_6_database_keeps_every_run_on_its_broker_and_drops_only
     assert {table: after[table] for table in unchanged} == {table: before[table] for table in unchanged}
     assert types_before - types_after == ({"ordermode"} if backend == DatabaseBackend.POSTGRESQL else set())
     assert after["schema_version"][1] == [(str(SCHEMA_VERSION),)]
+
+
+RANKING_RECORDS = {DatabaseBackend.SQLITE: "timestamp_proof BLOB", DatabaseBackend.POSTGRESQL: "timestamp_proof BYTEA"}
+"""The one column of ranking_records whose type differs per backend, as version 7's startup created the table."""
+
+
+async def version_7_database(backend: DatabaseBackend, folder: Path, *, recorded: bool) -> DatabaseConnector:
+    """
+    A database as version 7 left it: version 6's with its runs, upgraded by that version's own step, and, when
+    `recorded`, the ranking_records table version 7's startup created, holding one decision.
+    """
+    connector = await version_6_database(backend, folder)
+    engine = raw_engine(backend, folder)
+
+    async with engine.begin() as connection:
+        await schema_version.drop_order_mode(connection)
+        await connection.execute(text("UPDATE schema_version SET version = 7"))
+
+        if recorded:
+            await connection.execute(
+                text(
+                    "CREATE TABLE ranking_records (sequence INTEGER NOT NULL, decided_on DATE NOT NULL, content TEXT NOT NULL, "
+                    f"previous_hash VARCHAR(64), record_hash VARCHAR(64) NOT NULL, {RANKING_RECORDS[backend]}, "
+                    "PRIMARY KEY (sequence), UNIQUE (decided_on), UNIQUE (record_hash))"
+                )
+            )
+            await connection.execute(
+                text("INSERT INTO ranking_records (sequence, decided_on, content, record_hash) VALUES (1, :decided_on, '{}', :hash)"),
+                {"decided_on": AT.date(), "hash": "0" * 64},
+            )
+
+    await engine.dispose()
+    return connector
+
+
+def ranking_follow() -> tuple[SystemStats, TradeSignal, Order]:
+    """A follow of the ranking with its one decision and that decision's filled order, as a ranking follow saves them."""
+    at = AT.replace(tzinfo=UTC)
+    run = SystemStats(workflow=Workflow.RANKING_FOLLOW, execution_provider=ExecutionProvider.MOCK, start_time=at)
+    decision = replace(follow_of(run.run_id)[1], source=SignalSource.RANKING, score=0)
+    order = Order(
+        run_id=run.run_id,
+        decision_id=decision.decision_id,
+        stock_id=decision.stock_id,
+        action=decision.action,
+        order_type=OrderType.LIMIT,
+        quantity=decision.quantity,
+        limit_price=decision.price_at_signal,
+        time_in_force=TimeInForce.IOC,
+        created_at=at,
+        updated_at=at,
+    )
+    order.submit(now=at)
+    order.fill(decision.quantity, decision.price_at_signal, 143, 0, now=at)
+
+    return run, decision, order
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+@pytest.mark.parametrize("recorded", [True, False], ids=["with a recorded decision", "never recorded"])
+async def test_a_version_7_database_loses_only_the_rankings_record_starts_and_then_saves_a_ranking_follow(
+    backend: DatabaseBackend, recorded: bool, tmp_path: Path
+) -> None:
+    connector = await version_7_database(backend, tmp_path, recorded=recorded)
+    before = await database_snapshot(backend, tmp_path)
+    run, decision, order = ranking_follow()
+
+    try:
+        migration = await connector.migrate()
+        await connector.init_db()
+        again = await connector.migrate()
+        after = await database_snapshot(backend, tmp_path)
+        journal = TradingJournal(connector.for_owner(LEGACY_OWNER_ID))
+        never = await journal.first_fill(Workflow.RANKING_FOLLOW, ExecutionProvider.MOCK, None)
+        await journal.save_run(run)
+        await journal.save_signals(run.run_id, [decision])
+        await journal.save_order(order)
+        saved, [saved_decision] = await journal.find_run(run.run_id), await journal.signals_of(run.run_id)
+        filled = [
+            await journal.first_fill(Workflow.RANKING_FOLLOW, ExecutionProvider.MOCK, since)
+            for since in (None, order.created_at, order.created_at + timedelta(seconds=1))
+        ]
+        other = await journal.first_fill(Workflow.FOLLOW, ExecutionProvider.MOCK, None)
+    finally:
+        await connector.close()
+
+    kept = before.keys() - {"ranking_records", "schema_version"}
+    assert ("ranking_records" in before, "ranking_records" in after) == (recorded, False)
+    assert list(migration.before.pending) == ["7 -> 8 drop_ranking_records", "8 -> 9 add_ranking_follow"] and not again.before.pending
+    assert {table: after[table] for table in kept} == {table: before[table] for table in kept}
+    assert after["schema_version"][1] == [(str(SCHEMA_VERSION),)]
+    assert saved is not None and (saved.workflow, saved_decision.source) == (Workflow.RANKING_FOLLOW, SignalSource.RANKING)
+    assert (never, filled, other) == (None, [order.created_at, order.created_at, None], None)

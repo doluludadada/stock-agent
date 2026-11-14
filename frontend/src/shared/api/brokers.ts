@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { useShows } from './features'
 import { apiRequest } from './http'
 import type { components } from './schema.gen'
 import { useIsSignedIn } from './session'
@@ -13,12 +14,15 @@ export type BrokerOffer =
   | { broker: 'mock' }
   | { broker: Exclude<Broker, 'mock'>; simulation: boolean; max_order_value: number; max_daily_buy_value: number }
 
-/** What a user is offered until the server has said more, and on every site without a broker login. */
-export const MOCK_ONLY: readonly BrokerOffer[] = [{ broker: 'mock' }]
+const MOCK_ONLY: readonly BrokerOffer[] = [{ broker: 'mock' }]
+const NONE: readonly BrokerOffer[] = []
 
 export const brokersKey = ['owner', 'brokers'] as const
 
-/** The chosen broker's offer while it is still offered, else the mock account: a choice never outlives the broker's login. */
+/**
+ * The chosen broker's offer while it is still offered, else the mock account: a choice never outlives the broker's
+ * login, and a real broker is never chosen for the user, even where the site shows no other.
+ */
 export function chosenOffer(offers: readonly BrokerOffer[], chosen: Broker): BrokerOffer {
   return offers.find((offer) => offer.broker === chosen) ?? { broker: 'mock' }
 }
@@ -43,4 +47,13 @@ export function useBrokers() {
     staleTime: 60_000,
     refetchOnWindowFocus: true,
   })
+}
+
+/**
+ * The brokers to offer now: the server's list, which leaves out a broker whose feature the site hides, and until it
+ * answers the mock account alone where the site shows that. Empty where the viewer may use no account.
+ */
+export function useBrokerOffers(): readonly BrokerOffer[] {
+  const mock = useShows('mock_account')
+  return useBrokers().data ?? (mock ? MOCK_ONLY : NONE)
 }

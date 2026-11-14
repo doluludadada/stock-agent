@@ -11,11 +11,11 @@ interface BrokerChoiceProps {
   onChange: (broker: Broker) => void
 }
 
-/** Which account a run orders on, offered only when the user may choose more than the mock account. */
+/** Which account a run orders on, shown unless the mock account is all there is: a real broker always shows its server and limits. */
 export function BrokerChoice({ offers, value, onChange }: BrokerChoiceProps) {
   const { t } = useTranslation('runs')
   const locale = useLocale()
-  if (offers.length < 2) return null
+  if (offers.every((offer) => offer.broker === 'mock')) return null
   const chosen = offers.find((offer) => offer.broker === value)
   return (
     <div className="grid gap-2">

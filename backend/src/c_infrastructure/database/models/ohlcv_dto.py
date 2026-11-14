@@ -1,8 +1,9 @@
+from collections.abc import Callable
 from datetime import date, datetime
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from pydantic import model_validator
-from sqlalchemy import BigInteger
+from sqlalchemy import BigInteger, Executable
 from sqlmodel import Field, SQLModel
 
 from c_infrastructure.database.utc_datetime import UtcDateTime
@@ -43,14 +44,47 @@ class OhlcvDTO(SQLModel, table=True):
 
 class ExRightReferenceDTO(SQLModel, table=True):
     """
-    TWSE's reference price of a stock on one of its ex-right or ex-dividend days, as its TWT49U report listed it: the
-    price the history cache's bar of that session compares its close to where the closing quotes give no change.
+    An exchange's reference price of a stock on one of its ex-right or ex-dividend days, as its report listed it (TWSE's
+    TWT49U, TPEX's exDailyQ): the price the history cache's bar of that session compares its close to where the closing
+    quotes give no change.
     """
 
     __tablename__: ClassVar[str] = "ex_right_references"
 
     stock_id: str = Field(primary_key=True)
     session_date: date = Field(primary_key=True, index=True)
-    """Indexed on its own: a sync asks for the earliest and the latest day the cache holds."""
+    """Indexed on its own: a read asks for the references of a range of days."""
 
     reference_price: float
+
+
+class ExRightReferenceSpanDTO(SQLModel, table=True):
+    """
+    The days the history cache read one exchange's ex-right references of, first to last without a gap, whether or not
+    any of them was an ex-day: what tells a range that holds no reference from one that was never read.
+    """
+
+    __tablename__: ClassVar[str] = "ex_right_reference_spans"
+
+    market: str = Field(primary_key=True)
+    first_date: date
+    last_date: date
+
+
+class ListedRevisionDTO(SQLModel, table=True):
+    """
+    How many saves have changed the history cache's stock bars or ex-right references, in the table's one row: what a
+    reader keeps with what it built from them, to know without adding up millions of bars whether the cache still holds
+    the same. Every process that saves raises it in the transaction of its save.
+    """
+
+    __tablename__: ClassVar[str] = "listed_history_revision"
+
+    row: int = Field(default=1, primary_key=True)
+    revision: int
+
+    @classmethod
+    def raised(cls, upsert: Callable[..., Any]) -> Executable:
+        """The statement that raises the revision by one, from the backend's upsert."""
+        statement = upsert(cls).values(revision=1)
+        return statement.on_conflict_do_update(index_elements=["row"], set_={"revision": statement.table.c.revision + 1})

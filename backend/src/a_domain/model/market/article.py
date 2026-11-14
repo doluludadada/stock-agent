@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Self
 from uuid import UUID, uuid4
 
@@ -42,6 +42,23 @@ class Article:
 
     sentiment_confidence: Fraction | None = None
     """How confident the sentiment classifier is of that stance. None until it is classified."""
+
+    @property
+    def key(self) -> str:
+        """
+        Its own stable identity among the articles about its stock: its source and its address, or, for a company's
+        material information, which the exchange serves without one, the time it was announced. The same item read
+        again has the same key, whatever `id` that reading gave it.
+        """
+        return f"{self.source.value}|{self.url or self.published_at.astimezone(UTC).isoformat()}"
+
+    @property
+    def open_text(self) -> str | None:
+        """
+        The text a stock page may show beside the title: an open-data item's own text, as its license allows. None for a
+        news site's article or a board's post, which the page names by its title and links to.
+        """
+        return self.content if self.source.is_open_data else None
 
     @model_validator(mode="after")
     def classified_with_a_confidence(self) -> Self:

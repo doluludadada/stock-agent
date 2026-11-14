@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiRequest, isApiError, strategyResultsKey, useIsSignedIn } from '@/shared/api'
+import { apiRequest, isSameSession, sentInSession, isApiError, strategyResultsKey, useIsSignedIn } from '@/shared/api'
 import type { StrategySettings } from '../model/types'
 import { settingsFromApi, settingsToApi, strategyFromApi } from './mapping'
 
@@ -38,7 +38,9 @@ export function useSaveStrategySettings() {
       settingsFromApi(
         await apiRequest('put', '/v1/technical-settings', { body: { confirm: true, settings: settingsToApi(settings) } }),
       ),
-    onSuccess: (saved) => {
+    onMutate: sentInSession,
+    onSuccess: (saved, _settings, sent) => {
+      if (!isSameSession(sent)) return
       client.setQueryData(strategyKeys.settings, saved)
       void client.resetQueries({ queryKey: strategyResultsKey })
     },

@@ -1,4 +1,5 @@
 import type { Schemas } from '@/shared/api'
+import { randomHex } from '@/shared/lib/random-id'
 import { DEFAULT_SCORING } from '../model/edit'
 import type {
   Condition,
@@ -166,6 +167,8 @@ export function ruleIndexOf(location: readonly (string | number)[], strategyInde
   return typeof index === 'number' ? index : null
 }
 
+const ID_DIGITS = 10
+
 export function newIds(): IdFactory {
-  return (prefix) => `${prefix}_${crypto.randomUUID().replaceAll('-', '').slice(0, 10)}`
+  return (prefix) => `${prefix}_${randomHex(ID_DIGITS)}`
 }

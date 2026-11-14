@@ -1,8 +1,9 @@
 """
 Writes the Web API's OpenAPI document to frontend/src/shared/api/openapi.json, the contract the frontend generates
 its types from (`bun run api:types`); the outputs of each indicator kind to indicator-outputs.json, which the formula
-designer's catalog reads; and the settings form's fields, with their options, to settings-fields.json, which the
-frontend's i18n test reads to require a label and a help for each field and a label for each option.
+designer's catalog reads; and the settings form's fields, each with its control, group, options and unit, to
+settings-fields.json, which the frontend's i18n test reads to require a label and a help for each field and a label for
+each option, group and unit.
 tests/test_openapi_snapshot.py fails while any of them is out of date.
 
     cd backend && PYTHONPATH=src uv run python tools/export_openapi.py
@@ -38,7 +39,10 @@ def outputs_text() -> str:
 
 def fields_text() -> str:
     """The form's fields in form order, from the settings classes alone: no settings file's value."""
-    fields = [{"path": field.path, "options": list(field.options)} for field in settings_fields({})]
+    fields = [
+        {"path": field.path, "kind": field.kind, "group": field.group, "options": list(field.options), "unit": field.unit}
+        for field in settings_fields({})
+    ]
     return json.dumps(fields, indent=2, ensure_ascii=False) + "\n"
 
 

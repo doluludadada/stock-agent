@@ -20,6 +20,7 @@ wheels/
 /scan.py
 /test/rsa.py
 /chroma_data
+/embedding_models
 /.idea
 /.agent
 /nul
@@ -34,6 +35,7 @@ wheels/
 /backend/.pytest_cache
 /stock_agent.db
 /backend/chroma_data
+/backend/embedding_models
 /news_archive
 # The strategy searches `just search-strategies` saves (strategy_search.folder)
 /strategy_searches/

@@ -88,6 +88,9 @@ and it works on a database that startup refuses.
 
 A path given to `just db-restore` is relative to the folder you run `just` from.
 
+A Docker Compose deployment has no `just`. [How to deploy the site](../frontend/docs/deployment.md) gives each command
+as a `docker compose` command that runs inside the backend container.
+
 ## Backups
 
 - `backups/` is at the project root, is created with mode 700, and is ignored by git. Each backup file has mode 600.
@@ -107,7 +110,8 @@ A path given to `just db-restore` is relative to the folder you run `just` from.
 - `pg_dump` and `pg_restore` must be on `PATH`, of the server's major version or newer. Without them, the commands say
   how to install them and change nothing. On macOS, run `brew install libpq` and add `$(brew --prefix libpq)/bin` to
   `PATH`. On Debian or Ubuntu, run `sudo apt install postgresql-client`. On Windows, install the Command Line Tools of
-  the PostgreSQL installer.
+  the PostgreSQL installer. The backend image of `compose.yml` holds both, of the major version of its `postgres`
+  service.
 - PostgreSQL runs DDL inside a transaction. SQLite does too, once the transaction has begun, which is why `upgrade()`
   writes the stamp first.
 - SQLModel stores an enum as a `VARCHAR` on SQLite and as a named `ENUM` type on PostgreSQL. A new enum member needs a

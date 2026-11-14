@@ -1,0 +1,41 @@
+# The site's reverse proxy in Docker (compose.yml): the web app's bundle from /srv, and /v1 forwarded to the backend.
+# Nothing else of the backend is reachable, so /docs, /redoc and /openapi.json are not. It speaks plain http on 8080:
+# `tailscale serve` on the host terminates TLS and forwards to it (frontend/docs/deployment.md).
+{
+	admin off
+	servers {
+		# The compose network's gateway: the address a request published on the host's loopback address arrives from,
+		# so the X-Forwarded-For and X-Forwarded-Proto of `tailscale serve` are read. Any other client's are overwritten.
+		trusted_proxies static 172.31.88.1
+	}
+}
+
+http://{$SITE_NAME:localhost}:8080 {
+	encode zstd gzip
+
+	request_body {
+		max_size 2MB
+	}
+
+	@https header X-Forwarded-Proto https
+	header @https Strict-Transport-Security "max-age=31536000"
+
+	handle /v1/* {
+		reverse_proxy backend:8800
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+
+		# The same headers as appSecurityHeaders in vite.config.ts.
+		header {
+			Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+			Referrer-Policy no-referrer
+			X-Content-Type-Options nosniff
+			X-Frame-Options DENY
+			Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		}
+	}
+}

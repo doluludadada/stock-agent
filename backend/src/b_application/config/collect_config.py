@@ -2,13 +2,19 @@ from datetime import timedelta
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from a_domain.rules.ai.stock_brief import BriefContextRule, BriefReplyRule, BriefSearchRule
 from a_domain.rules.collect.freshness import DataFreshnessRule, MissingSessionRule, RealtimeQuoteRule
+from a_domain.rules.collect.kept_article import KeptArticleRule
+from a_domain.rules.fundamentals.stock_analysis import ValuationStandingRule
+from a_domain.types.enums import BriefLanguage, EmbeddingPooling, SettingUnit
 
 
 class FolderConfig(BaseModel):
     news_archive_dir: str = "news_archive"
     buzz_archive_dir: str = "buzz_archive"
     ai_response_dir: str = "ai_responses"
+    embedding_model_dir: str = "embedding_models"
+    """Where the text embedding model's files are kept once fetched (stock_page.article_store.embedding)."""
 
 
 class CollectRulesConfig(BaseModel):
@@ -17,20 +23,212 @@ class CollectRulesConfig(BaseModel):
     spam_keywords: set[str]
     financial_keywords: set[str]
 
-    buzz_min_mentions: int = Field(ge=0)
-    buzz_min_engagement: int = Field(ge=0)
-    social_article_limit: int = Field(ge=1, le=1000)
+    buzz_min_mentions: int = Field(ge=0, le=10_000, json_schema_extra={"steps": [5, 10, 20, 50, 100]})
+    buzz_min_engagement: int = Field(ge=0, le=100_000, json_schema_extra={"steps": [20, 50, 100, 200, 500]})
+    social_article_limit: int = Field(ge=1, le=1000, json_schema_extra={"steps": [20, 50, 100, 200, 500]})
 
-    ptt_lookback_days: int = Field(ge=1, le=30)
+    ptt_lookback_days: int = Field(ge=1, le=30, json_schema_extra={"steps": [3, 7, 14, 30], "unit": SettingUnit.DAYS})
     ptt_tags: list[str]
+
+
+class StockBriefConfig(BaseModel):
+    """
+    The stock page's AI brief: what the company is and how the held facts of a recent window relate to the stock's move.
+    One is written per stock and Taipei calendar day for the whole site, when a signed-in viewer asks for it.
+    """
+
+    model_config = ConfigDict(use_attribute_docstrings=True)
+
+    daily_stocks: int = Field(default=30, ge=1, le=1000, json_schema_extra={"steps": [5, 10, 20, 30, 50, 100, 200, 500, 1000]})
+    """How many stocks may get a new brief per Taiwan calendar day, for all users together. Stored briefs stay readable past it."""
+
+    language: BriefLanguage = BriefLanguage.TRADITIONAL_CHINESE
+    """The language every brief is written in. A viewer who reads the site in another language sees it as written."""
+
+    window_sessions: int = Field(default=20, ge=5, le=120, json_schema_extra={"steps": [5, 10, 20, 40, 60, 120]})
+    """The latest sessions whose price move a brief describes, and from whose first day on it reads announcements and news."""
+
+    claim_minutes: int = Field(default=5, ge=1, le=120, json_schema_extra={"operator_only": True, "unit": SettingUnit.MINUTES})
+    """A brief still being written this long after a request claimed it was left behind by a stopped server, and may be asked again."""
+
+    revenue_months: int = Field(default=3, ge=1, le=24, json_schema_extra={"operator_only": True})
+    quarters: int = Field(default=2, ge=1, le=12, json_schema_extra={"operator_only": True})
+    articles: int = Field(default=12, ge=1, le=50, json_schema_extra={"operator_only": True})
+    """The most held months of revenue, quarters with an EPS, and announcements, news items and posts a brief's prompt holds."""
+
+    article_text_length: int = Field(default=200, ge=0, le=2000, json_schema_extra={"operator_only": True})
+    """The characters of an announcement's or an exchange news item's own text the prompt holds after its title."""
+
+    largest_moves: int = Field(default=3, ge=1, le=10, json_schema_extra={"operator_only": True})
+    """How many of the window's largest daily moves the prompt names, so that a dated fact can be set beside one."""
+
+    sentences: int = Field(default=4, ge=1, le=10, json_schema_extra={"operator_only": True})
+    sentence_length: int = Field(default=400, ge=50, le=2000, json_schema_extra={"operator_only": True})
+    """The most sentences each of a brief's two parts keeps, and the characters a sentence is cut at."""
+
+    link_pattern: str = Field(default=r"(?i)\(?(?:[a-z][a-z0-9+.-]*://|www\.)\S*", json_schema_extra={"operator_only": True})
+    """What is cut out of a sentence the AI wrote as a link (a regular expression): a brief shows only the held items' addresses."""
+
+    lead_days: int = Field(default=30, ge=1, le=365, json_schema_extra={"operator_only": True, "unit": SettingUnit.DAYS})
+    lead_articles: int = Field(default=3, ge=0, le=20, json_schema_extra={"operator_only": True})
+    """The days before the window a brief also searches, and the most kept articles of them its prompt holds."""
+
+    company_days: int = Field(default=730, ge=1, le=3650, json_schema_extra={"operator_only": True, "unit": SettingUnit.DAYS})
+    company_articles: int = Field(default=4, ge=0, le=20, json_schema_extra={"operator_only": True})
+    """The days back a brief searches for what the company makes and sells, and the most kept articles of them its prompt holds."""
+
+    def context_rule(self) -> BriefContextRule:
+        return BriefContextRule(
+            window_sessions=self.window_sessions,
+            revenue_months=self.revenue_months,
+            quarters=self.quarters,
+            articles=self.articles,
+            article_text_length=self.article_text_length,
+            largest_moves=self.largest_moves,
+        )
+
+    def search_rule(self, rise_query: str, fall_query: str, company_query: str) -> BriefSearchRule:
+        """What a brief searches the kept articles for; the queries are prompts.stock_brief_*_query."""
+        return BriefSearchRule(
+            window_sessions=self.window_sessions,
+            rise_query=rise_query,
+            fall_query=fall_query,
+            company_query=company_query,
+            articles=self.articles,
+            lead_days=self.lead_days,
+            lead_articles=self.lead_articles,
+            company_days=self.company_days,
+            company_articles=self.company_articles,
+        )
+
+    def reply_rule(self, advice_phrases: frozenset[str]) -> BriefReplyRule:
+        """The reply contract; `advice_phrases` are those of prompts.stock_brief_advice_phrases."""
+        return BriefReplyRule(
+            sentences=self.sentences,
+            sentence_length=self.sentence_length,
+            link_pattern=self.link_pattern,
+            advice_phrases=advice_phrases,
+        )
+
+
+class EmbeddingConfig(BaseModel):
+    """
+    The text embedding model the article store's vectors come from. It runs on the server itself with ONNX Runtime, so
+    no article leaves the server and no call is paid for. Its files are fetched once from the Hugging Face repository
+    into folder.embedding_model_dir, at the pinned revision. Another model, revision or file starts a collection of its
+    own, which fills again from the kept articles.
+    """
+
+    model_config = ConfigDict(use_attribute_docstrings=True)
+
+    repository: str = "Xenova/bge-small-zh-v1.5"
+    revision: str = "75c43b069aac4d136ba6bc1122f995fedcfd2781"
+    """The repository's commit the files are read at, so the model never changes under the vectors already kept."""
+
+    model_file: str = "onnx/model_quantized.onnx"
+    tokenizer_file: str = "tokenizer.json"
+    pooling: EmbeddingPooling = EmbeddingPooling.CLS
+    max_tokens: int = Field(default=512, ge=16, le=8192)
+    """The most tokens of a text the model reads: its own limit."""
+
+    batch_size: int = Field(default=1, ge=1, le=64)
+    threads: int = Field(default=2, ge=1, le=64)
+    """
+    The texts embedded in one run of the model and the CPU threads a run uses: both bound what embedding takes from the
+    server. On a CPU one text a run is as fast as four and needs a third of the memory, which grows with the batch.
+    """
+
+    @property
+    def identity(self) -> str:
+        """What the vectors depend on: vectors of another model, revision, file or pooling cannot be compared with these."""
+        return f"{self.repository}@{self.revision}/{self.model_file}/{self.pooling.value}/{self.max_tokens}"
+
+
+class ArticleStoreConfig(BaseModel):
+    """
+    The article store: what the site read about each stock, kept so that it accumulates, with a vector per article that
+    finds it by meaning. Articles enter it when a stock page asks for the stock's news and when the Web API's timer
+    keeps the stocks that matter current.
+    """
+
+    model_config = ConfigDict(use_attribute_docstrings=True)
+
+    retention_days: int = Field(
+        default=730, ge=30, le=3650, json_schema_extra={"steps": [90, 180, 365, 730, 1095, 1825, 3650], "unit": SettingUnit.DAYS}
+    )
+    """An article published longer ago than this is dropped from the store."""
+
+    max_per_stock: int = Field(default=300, ge=10, le=5000, json_schema_extra={"steps": [50, 100, 200, 300, 500, 1000, 2000, 5000]})
+    """The most articles the store keeps of one stock, the newest first."""
+
+    shown: int = Field(default=50, ge=1, le=500, json_schema_extra={"operator_only": True})
+    """The most kept articles a stock page lists, the newest first."""
+
+    text_length: int = Field(default=4000, ge=0, le=100_000, json_schema_extra={"operator_only": True})
+    """The characters of an article's text the store keeps."""
+
+    embedded_length: int = Field(default=300, ge=0, le=8000, json_schema_extra={"operator_only": True})
+    """The characters of an article's kept text its vector reads after its title. Embedding time grows with them."""
+
+    refresh_stocks: int = Field(default=200, ge=0, le=5000, json_schema_extra={"operator_only": True})
+    """
+    The most stocks whose news the Web API's timer fetches each time, of the stocks users hold or watch. 0 fetches
+    none, and stock pages alone fill the store.
+    """
+
+    refresh_pause_seconds: float = Field(
+        default=2, ge=0, le=600, json_schema_extra={"operator_only": True, "unit": SettingUnit.SECONDS}
+    )
+    """The least time between two stocks' fetches from the news sites and the board, whoever asks: a page or the timer."""
+
+    embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig, json_schema_extra={"operator_only": True})
+
+    def retention(self) -> timedelta:
+        return timedelta(days=self.retention_days)
+
+    def kept_rule(self, news_text: bool) -> KeptArticleRule:
+        """How an article is kept; `news_text` is Audience.news_articles of the site."""
+        return KeptArticleRule(news_text=news_text, text_length=self.text_length)
+
+
+class StockPageConfig(BaseModel):
+    """
+    The stock page's financial analysis and its related news. The analysis reads held data only; the news of a site
+    that may read the news sites and the board is fetched when a page asks and then held.
+    """
+
+    model_config = ConfigDict(use_attribute_docstrings=True)
+
+    news_freshness_minutes: int = Field(
+        default=30, ge=1, le=1440, json_schema_extra={"steps": [5, 15, 30, 60, 180, 720, 1440], "unit": SettingUnit.MINUTES}
+    )
+    """How long a stock's fetched news and posts are served again before the news sites and the board are asked anew."""
+
+    news_held_stocks: int = Field(default=300, ge=1, le=5000, json_schema_extra={"steps": [50, 100, 300, 500, 1000, 2000, 5000]})
+    """The stocks whose fetched news and posts stay in memory, the most recently asked first."""
+
+    valuation_min_sessions: int = Field(default=60, ge=2, le=2500, json_schema_extra={"steps": [20, 60, 120, 250, 500, 1250]})
+    """The sessions of a valuation ratio the page needs before it compares the latest with their median."""
+
+    eps_quarters: int = Field(default=12, ge=1, le=40, json_schema_extra={"steps": [4, 8, 12, 16, 20, 40]})
+    """How many of the latest quarters the page reads the EPS of from the MOPS pages a personal site holds."""
+
+    brief: StockBriefConfig = Field(default_factory=StockBriefConfig)
+    article_store: ArticleStoreConfig = Field(default_factory=ArticleStoreConfig)
+
+    def freshness(self) -> timedelta:
+        return timedelta(minutes=self.news_freshness_minutes)
+
+    def valuation_rule(self) -> ValuationStandingRule:
+        return ValuationStandingRule(min_sessions=self.valuation_min_sessions)
 
 
 class QualityFiltersConfig(BaseModel):
     """Minimum text quality requirements."""
 
-    min_chars_stock: int = Field(default=100, ge=0)
-    min_chars_news: int = Field(default=200, ge=0)
-    min_chars_gossip: int = Field(default=50, ge=0)
+    min_chars_stock: int = Field(default=100, ge=0, le=10_000, json_schema_extra={"steps": [0, 50, 100, 200, 500]})
+    min_chars_news: int = Field(default=200, ge=0, le=10_000, json_schema_extra={"steps": [0, 50, 100, 200, 500]})
+    min_chars_gossip: int = Field(default=50, ge=0, le=10_000, json_schema_extra={"steps": [0, 50, 100, 200, 500]})
 
 
 class FreshnessConfig(BaseModel):
@@ -45,12 +243,14 @@ class FreshnessConfig(BaseModel):
 
     model_config = ConfigDict(use_attribute_docstrings=True)
 
-    realtime_max_lag_minutes: int = Field(default=15, gt=0)
-    history_max_lag_days: int = Field(default=10, gt=0)
-    missing_session_listed_stocks: int = Field(default=10, gt=0)
+    realtime_max_lag_minutes: int = Field(
+        default=15, gt=0, json_schema_extra={"steps": [1, 5, 10, 15, 30], "unit": SettingUnit.MINUTES}
+    )
+    history_max_lag_days: int = Field(default=10, gt=0, json_schema_extra={"steps": [5, 7, 10, 14], "unit": SettingUnit.DAYS})
+    missing_session_listed_stocks: int = Field(default=10, gt=0, json_schema_extra={"steps": [5, 10, 20, 50]})
     """The most stock ids the run error for histories without the last settled session names."""
 
-    daily_close_max_missed_sessions: int = Field(default=1, ge=0)
+    daily_close_max_missed_sessions: int = Field(default=1, ge=0, json_schema_extra={"steps": [0, 1, 2, 3]})
     """Weekday sessions that may close after an official close's session before that close is stale."""
 
     def realtime_rule(self) -> DataFreshnessRule:

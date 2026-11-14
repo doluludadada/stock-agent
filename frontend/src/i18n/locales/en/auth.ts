@@ -2,9 +2,9 @@ const auth = {
   intro: {
     title: 'Taiwan stock research in one place',
     points: {
-      market: "Each session's index trend, breadth and industry moves after the close",
-      watchlist: 'Your watchlist, with every close and trend at a glance',
-      account: 'A mock account to test a strategy without real money',
+      ranking: 'A monthly ranking by revenue acceleration, with every decision recorded when it was made',
+      holdings: 'What you hold as one portfolio, each stock with its ranking score',
+      market: "Each session's index, breadth and industry moves after the close",
     },
   },
   field: {
@@ -19,23 +19,41 @@ const auth = {
   hint: {
     setupCode: 'The server printed this one-time code on its console when it started; it works only while no account exists.',
     username: '3 to 32 letters, digits, dots, underscores or hyphens, starting with a letter or digit',
-    password: 'At least 12 characters',
+    password: 'At least 8 characters',
   },
   problem: {
     required: 'Fill in this field.',
     usernameFormat: 'Use 3 to 32 letters, digits, dots, underscores or hyphens, starting with a letter or digit.',
     emailFormat: 'That email address does not look right.',
-    passwordShort: 'A password needs at least 12 characters.',
+    passwordShort: 'A password needs at least 8 characters.',
     passwordLong: 'A password can have at most 256 characters.',
     mismatch: 'The two passwords differ.',
-    taken: { username: 'Someone already uses this username.', email: 'This email already has an account.' },
     wrongCode: 'That setup code is wrong. Compare it with the one on the server console.',
   },
   alert: {
     failed: 'The server did not answer. Try again.',
     closed: 'Registration is closed. Ask the site administrator for an account.',
     alreadySetUp: 'This site already has an administrator. Sign in instead.',
+    taken: 'This username or email already has an account. Sign in, or choose another.',
     rateLimited: 'Too many attempts. Try again in {{minutes}} minutes.',
+  },
+  google: {
+    signIn: 'Sign in with Google',
+    or: 'or',
+    setupLead: 'An email the site lists as an administrator can create the administrator by signing in with Google, without the setup code.',
+    refused: {
+      not_offered: 'This site does not offer sign-in with Google.',
+      flow_missing: 'The sign-in with Google took too long, or it started at another address of this site. Try again from this page.',
+      state_mismatch: 'The answer from Google did not match the sign-in this browser started. Try again.',
+      cancelled: 'The sign-in with Google was cancelled.',
+      provider_failed: 'Google did not complete the sign-in. Try again in a moment.',
+      token_refused: 'The answer from Google could not be accepted. Try again.',
+      email_unverified: 'Google has not verified the email of that account, so it cannot sign in here.',
+      not_allowed: 'That Google account is not allowed on this site, and no account was created. Ask the site administrator.',
+      deactivated: 'The account of that email is deactivated. Ask an administrator.',
+      throttled: 'Too many sign-in attempts from this address. Try again later.',
+      failed: 'The sign-in with Google did not go through. Try again.',
+    },
   },
   showPassword: 'Show password',
   hidePassword: 'Hide password',
@@ -70,6 +88,7 @@ const auth = {
     users: 'Users',
     settings: 'System settings',
     signOut: 'Sign out',
+    signOutFailed: 'Signing out did not reach the server. You are still signed in. Try again.',
   },
   settings: {
     title: 'My settings',
@@ -98,7 +117,6 @@ const auth = {
   },
   role: { administrator: 'Administrator', user: 'User' },
   users: {
-    eyebrow: 'Administration',
     title: 'Users',
     description: 'Who can use this site, and who manages it.',
     summary: '{{count}} accounts · {{admins}} administrators · {{deactivated}} deactivated',

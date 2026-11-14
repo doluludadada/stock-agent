@@ -1,18 +1,22 @@
-from datetime import datetime
 from typing import override
 
 from a_domain.model.market.article import Article
 from a_domain.ports.market.news_provider import INewsProvider
 from a_domain.ports.market.news_source import INewsSource
 from a_domain.ports.system.logging_provider import ILoggingProvider
+from a_domain.ports.system.market_clock import IMarketClock
 from b_application.config.app_config import AppConfig
 
 
 class NewsProvider(INewsProvider):
-    """Asks each news site in turn until it has enough articles. A site that fails is skipped."""
+    """
+    Asks each news site in turn until it has enough articles. A site that fails is skipped. The audit file is dated
+    and its articles are timed by the market clock, in Taipei whatever zone the server runs in.
+    """
 
-    def __init__(self, sources: tuple[INewsSource, ...], config: AppConfig, logger: ILoggingProvider):
+    def __init__(self, sources: tuple[INewsSource, ...], config: AppConfig, logger: ILoggingProvider, market_clock: IMarketClock):
         self._sources = sources
+        self._market_clock = market_clock
         self._config = config
         self._logger = logger
 
@@ -43,7 +47,7 @@ class NewsProvider(INewsProvider):
         if not articles:
             return
 
-        now = datetime.now()
+        now = self._market_clock.now()
         archive_dir = self._config.project_root / self._config.folder.news_archive_dir / now.strftime("%Y-%m-%d")
         archive_dir.mkdir(parents=True, exist_ok=True)
         file_path = archive_dir / f"{stock_id}_{now.strftime('%H%M%S')}.md"
@@ -58,7 +62,9 @@ class NewsProvider(INewsProvider):
                 for index, article in enumerate(articles, 1):
                     file.write(f"## [{index}] {article.title}\n")
                     file.write(f"- **Source:** {article.source.value}\n")
-                    file.write(f"- **Published:** {article.published_at.strftime('%Y-%m-%d %H:%M')}\n")
+                    file.write(
+                        f"- **Published:** {self._market_clock.to_market_datetime(article.published_at).strftime('%Y-%m-%d %H:%M')}\n"
+                    )
                     file.write(f"- **URL:** [Link]({article.url})\n\n")
                     file.write(f"**Content Snippet:**\n> {article.content}\n\n")
                     file.write("---\n\n")

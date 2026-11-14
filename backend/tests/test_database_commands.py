@@ -210,7 +210,7 @@ async def test_migrate_backs_up_then_upgrades_version_1_keeping_every_row(
     assert (
         f"Migrated from version 1 to {SCHEMA_VERSION}:\n  1 -> 2 record_run_failures\n  2 -> 3 give_rows_their_owner\n"
         "  3 -> 4 add_user_ai_model\n  4 -> 5 add_follows_and_drop_yahoo_history\n  5 -> 6 drop_buzz_strategy\n"
-        "  6 -> 7 drop_order_mode"
+        "  6 -> 7 drop_order_mode\n  7 -> 8 drop_ranking_records\n  8 -> 9 add_ranking_follow"
     ) in printed
     assert after["schema_version"][1] == [(str(SCHEMA_VERSION),)]
     kept = before.keys() - YAHOO_HISTORY

@@ -14,13 +14,13 @@ class ICachedPriceProvider(IOhlcvProvider, Protocol):
     refusal of every quote.
 
     The reports serve every listed stock's daily bar of one session per exchange and request, with its official change
-    from the session's reference price, each exchange's own index per month, and TWSE's ex-right references of a range
-    of dates. The cache holds settled sessions only: the index sessions it lacks first, then the ex-right references
-    after the latest it holds, then the stocks of every index session it holds no stock bar of, newest first. A
+    from the session's reference price, each exchange's own index per month, and each exchange's ex-right references of
+    a range of dates. The cache holds settled sessions only: the index sessions it lacks first, then the ex-right
+    references of the days it never read, then the stocks of every index session it holds no stock bar of, newest first. A
     session whose bars hold no change at all, as Shioaji's daily quotes saved them before, is asked again when the Web
     API's timer syncs, and the report gives each bar its change. A bar that still holds none, where the exchange
     compared its close to no reference, reads the open-data archive's official change of its stock and session where the
-    archive holds one. A read adjusts each stock's bars for the corporate actions those changes and TWSE's ex-right
+    archive holds one. A read adjusts each stock's bars for the corporate actions those changes and the ex-right
     references show (HistoryAdjustmentRule), against the index sessions that hold the stocks, and warns how many of its
     sessions hold a bar with neither, which no factor crosses. The exchanges are asked the same question at most once per
     market_data.history_retry_hours, answered or failed, and nothing within it after any request failed, so a session
@@ -54,8 +54,9 @@ class ICachedPriceProvider(IOhlcvProvider, Protocol):
 
     async def sync_references(self, first: date, last: date) -> None:
         """
-        Fetches TWSE's ex-right references of the ranges reference_gaps names, a range at a time, each saved as it comes.
-        A request that fails ends it, and like any failure stops every request to the exchanges for the retry interval.
+        Fetches each exchange's ex-right references of the ranges reference_gaps names, a range at a time, each saved
+        with the days it covers as it comes. A request that fails ends it, and like any failure stops every request to
+        the exchanges for the retry interval; the ranges not read stay gaps, which the next sync asks for.
         """
         ...
 
@@ -63,11 +64,23 @@ class ICachedPriceProvider(IOhlcvProvider, Protocol):
         """Saves each ex-right reference by stock id and day, replacing what the cache holds of the same stock and day."""
         ...
 
-    async def reference_gaps(self, first: date, last: date) -> list[tuple[date, date]]:
+    async def save_reference_span(self, market: MarketType, first: date, last: date) -> None:
+        """Widens the days the cache read the exchange's ex-right references of to hold first to last."""
+        ...
+
+    async def reference_gaps(self, market: MarketType, first: date, last: date) -> list[tuple[date, date]]:
         """
-        The ranges from first to last whose ex-right references sync_references asks TWSE for: after the latest day the
-        cache holds one of, and before the earliest when that is more than market_data.history_start_slack_days after
-        first, each cut at the boundaries of sources.exchange.ex_right_references.months_per_request calendar months.
+        The ranges from first to last whose ex-right references the cache never read from the exchange, in the order
+        sync_references asks for them (reference_blocks): those before the days it read newest first, then those after
+        them oldest first, so the days read stay one span whichever request fails. A range read and found without an
+        ex-day is no gap.
+        """
+        ...
+
+    def reference_blocks(self, first: date, last: date) -> list[tuple[date, date]]:
+        """
+        first to last cut at the boundaries of sources.exchange.ex_right_references.months_per_request calendar
+        months, oldest first.
         """
         ...
 

@@ -12,15 +12,18 @@ from typing import Any, cast
 
 import httpx
 import pytest
+from sqlalchemy import text
 from support.databases import BACKENDS, empty_database
 from support.fakes import FakeDailyCloseArchive, FakeMarketClock, RecordingLogger
 from support.settings import shipped_config
+from test_daily_close_archive import refusing
 from trading_stack import SilentLogger
 
 from a_domain.model.fundamentals.monthly_revenue import MonthlyRevenue
 from a_domain.ports.market.daily_close_archive import OpenDataDownload
 from a_domain.rules.fundamentals.filing import RevenueMonthsRule
 from a_domain.types.enums import DatabaseBackend, MarketType
+from a_domain.types.errors import ArchiveSaveRefused
 from b_application.config.market_data_config import MarketDataConfig, MarketHoursConfig
 from b_application.use_cases.collect.revenue_history_backfill import RevenueHistoryBackfill
 from c_infrastructure.database.repositories.daily_close_archive import SqlDailyCloseArchive
@@ -203,6 +206,46 @@ async def test_a_month_the_archive_holds_from_the_openapi_before_its_deadline_is
     assert await backfill(served, archive, RecordingLogger()).execute(date(2025, 1, 1)) == (1, 1)
     assert served.asked == [(TWSE, 2025, 1)]
     assert archive.monthly_revenues[("2330", 2025, 1)].revenue == 120.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", BACKENDS)
+async def test_a_month_the_archive_could_not_save_fails_the_backfill_and_is_read_again_once_it_can(
+    backend: DatabaseBackend, tmp_path: Path
+) -> None:
+    db = await empty_database(backend, tmp_path)
+    await db.init_db()
+    archive = SqlDailyCloseArchive(db, TaiwanMarketClock(MarketHoursConfig()), CONFIG.sources.exchange, 30, SilentLogger())
+    filed = {
+        (TWSE, 2025, 1): [revenue("2330", TWSE, 2025, 1, date(2025, 2, 12))],
+        (TPEX, 2025, 1): [revenue("6488", TPEX, 2025, 1, date(2025, 2, 12))],
+    }
+    served = ServedMonths(filed)
+    monthly = RevenueHistoryBackfill(cast(Any, served), archive, FakeMarketClock(NOW), CONFIG, SilentLogger())
+
+    try:
+        async with db.get_session() as session:
+            for statement in refusing("monthly_revenue_archive", backend):
+                await session.execute(text(statement))
+
+            await session.commit()
+
+        with pytest.raises(ArchiveSaveRefused, match="monthly_revenue_archive"):
+            await monthly.execute(date(2025, 1, 1))
+
+        async with db.get_session() as session:
+            await session.execute(
+                text(f"DROP TRIGGER refuse_rows{'' if backend == DatabaseBackend.SQLITE else ' ON monthly_revenue_archive'}")
+            )
+            await session.commit()
+
+        served.asked.clear()
+
+        assert await monthly.execute(date(2025, 1, 1)) == (2, 2)
+        assert served.asked == [(TWSE, 2025, 1), (TPEX, 2025, 1)]
+        assert sorted(await archive.revenue_history(date(2025, 1, 1), date(2025, 1, 31))) == [("2330", 2025, 1), ("6488", 2025, 1)]
+    finally:
+        await db.close()
 
 
 @pytest.mark.asyncio

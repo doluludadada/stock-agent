@@ -123,7 +123,7 @@ class RankingBook:
     """What RankingBacktestRule keeps from session to session."""
 
     weights: Floats
-    """Each stock's share of the portfolio, in the rows of the history's bars."""
+    """Each stock's share of the portfolio, in the rows of the history's bars. What they leave of 1 is cash."""
 
     rankings: list[Ranking]
     curve: dict[date, float]
@@ -133,28 +133,30 @@ class RankingBook:
 
 
 @dataclass(frozen=True)
-class RankingBacktestRule:
+class RankingPortfolioRule:
     """
-    Replays the monthly ranking over a period on weights, as the research that found it did: at each decision session's
-    close it ranks (MonthlyRankingRule), and at the next session's open it sells what it no longer holds and holds the
-    ranking's stocks in equal weights until the next decision. A stock that does not trade that session, or opens on a
-    bar of one price (a locked limit) without being held, is not bought, and the others share its weight; a held stock
-    that does not trade is not sold and keeps its weight. Every trade pays fee_rate of what it moves, and every sale
-    tax_rate too, out of the portfolio. Between decisions the weights drift with each stock's total return. A decision
-    whose ranking is empty holds cash until the next one. The benchmark is held over the same sessions by its total
-    return. A period without a decision session raises BacktestPeriodUnavailable.
+    Holds given rankings over past sessions on weights, as the research that found the ranking did: at the open of the
+    session after each ranking's decision it sells what it no longer holds and holds the ranking's stocks in equal
+    weights until the next one. A stock that does not trade that session, or opens on a bar of one price (a locked
+    limit) without being held, is not bought, and the others share its weight; a held stock that does not trade is not
+    sold and keeps its weight. Every trade pays fee_rate of what it moves, and every sale tax_rate too, out of the
+    portfolio. Between rankings the weights drift with each stock's total return. What the weights leave of the
+    portfolio is cash, which earns nothing: an empty ranking holds cash until the next one, and so does a ranking none
+    of whose stocks can be bought, beside the holdings it could not sell. A held stock that never trades again keeps
+    its weight at its last close: the history cannot tell a buyout from a failure. The benchmark is held over the same
+    sessions by its total return. `rankings` holds each ranking by its decision session; one of a day the history holds
+    no session of is left out, and with none left it raises BacktestPeriodUnavailable.
     """
 
-    decision_rule: DecisionSessionsRule
-    ranking_rule: MonthlyRankingRule
     fee_rate: NonNegativeFloat
     tax_rate: NonNegativeFloat
     benchmark_id: NonEmptyText
     sessions_per_year: PositiveFloat
 
-    def apply(self, history: RankingHistory, names: Mapping[str, str | None], first: date, last: date) -> RankingBacktest:
+    def apply(self, history: RankingHistory, rankings: Mapping[date, Ranking], first: date, last: date) -> RankingBacktest:
         sessions = history.bars.sessions
-        decisions = {column: month for column, month in self.decision_rule.apply(sessions) if first <= sessions[column] <= last}
+        columns = {session: column for column, session in enumerate(sessions)}
+        decisions = {columns[decided_on]: ranking for decided_on, ranking in rankings.items() if decided_on in columns}
 
         if not decisions:
             raise BacktestPeriodUnavailable(
@@ -163,9 +165,8 @@ class RankingBacktestRule:
             )
 
         start, end = min(decisions), bisect_right(sessions, last) - 1
-        ranking = self.ranking_rule.apply(history, start, decisions[start], names)
-        book = RankingBook(weights=np.zeros(len(history.bars.stock_ids)), rankings=[ranking], curve={sessions[start]: 1.0})
-        self._replay(book, history, names, decisions, range(start + 1, end + 1))
+        book = RankingBook(weights=np.zeros(len(history.bars.stock_ids)), rankings=[decisions[start]], curve={sessions[start]: 1.0})
+        self._replay(book, history, decisions, range(start + 1, end + 1))
 
         return RankingBacktest(
             first=first,
@@ -181,9 +182,7 @@ class RankingBacktestRule:
             costs=book.costs,
         )
 
-    def _replay(
-        self, book: RankingBook, history: RankingHistory, names: Mapping[str, str | None], decisions: dict[int, date], columns: range
-    ) -> None:
+    def _replay(self, book: RankingBook, history: RankingHistory, decisions: Mapping[int, Ranking], columns: range) -> None:
         sessions, traded = history.bars.sessions, ~np.isnan(history.bars.close)
         intraday = np.where(traded, history.bars.close / history.bars.open - 1, 0.0)
 
@@ -196,17 +195,17 @@ class RankingBacktestRule:
             book.curve[sessions[column]] = book.equity
 
             if column in decisions:
-                book.rankings.append(self.ranking_rule.apply(history, column, decisions[column], names))
+                book.rankings.append(decisions[column])
 
     def _hold(self, book: RankingBook, returns: Floats) -> None:
-        book.equity *= 1 + float(book.weights @ returns)
-        book.weights = normalized(book.weights * (1 + returns))
+        growth = 1 + float(book.weights @ returns)
+        book.equity *= growth
+        book.weights = book.weights * (1 + returns) / growth
 
     def _rebalance(self, book: RankingBook, history: RankingHistory, traded: Flags, intraday: Floats, column: int) -> list[str]:
         """Trades at the session's open to the ranking's equal weights, then holds through its close; the stocks held."""
-        overnight = (1 + history.returns[:, column]) / (1 + intraday) - 1
-        book.equity *= 1 + float(book.weights @ overnight)
-        drift = normalized(book.weights * (1 + overnight))
+        self._hold(book, (1 + history.returns[:, column]) / (1 + intraday) - 1)
+        drift = book.weights
         rows = [history.bars.stock_ids.index(stock.stock_id) for stock in book.rankings[-1].stocks]
         target = np.zeros(len(drift))
         target[rows] = 1 / len(rows) if rows else 0.0
@@ -240,7 +239,24 @@ class RankingBacktestRule:
         return {session: float(value / level[0]) for session, value in zip(history.bars.sessions[start : end + 1], level, strict=True)}
 
 
-def normalized(weights: Floats) -> Floats:
-    """The weights as shares of their sum, or as they are when they sum to nothing."""
-    total = weights.sum()
-    return weights / total if total > 0 else weights
+@dataclass(frozen=True)
+class RankingBacktestRule:
+    """
+    Replays the monthly ranking over a period: it ranks at the close of each decision session from `first` to `last`
+    (DecisionSessionsRule, MonthlyRankingRule) and holds those rankings to `last` (RankingPortfolioRule). A period
+    without a decision session raises BacktestPeriodUnavailable.
+    """
+
+    decision_rule: DecisionSessionsRule
+    ranking_rule: MonthlyRankingRule
+    portfolio_rule: RankingPortfolioRule
+
+    def apply(self, history: RankingHistory, names: Mapping[str, str | None], first: date, last: date) -> RankingBacktest:
+        sessions = history.bars.sessions
+        rankings = {
+            sessions[column]: self.ranking_rule.apply(history, column, month, names)
+            for column, month in self.decision_rule.apply(sessions)
+            if first <= sessions[column] <= last
+        }
+
+        return self.portfolio_rule.apply(history, rankings, first, last)

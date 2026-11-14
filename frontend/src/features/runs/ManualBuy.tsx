@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { useLocale, useTranslation } from '@/i18n'
-import { chosenOffer, MOCK_ONLY, useBrokers, type Broker } from '@/shared/api'
+import { chosenOffer, useBrokerOffers, type Broker } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
 import { formatNumber } from '@/shared/lib/format'
 import { Button } from '@/shared/ui/button'
@@ -28,7 +28,7 @@ export function ManualBuy({ runId, stockId, name }: ManualBuyProps) {
   const navigate = useNavigate()
   const buy = useManualBuy(runId)
   const refusal = useStartRefusal()
-  const offers = useBrokers().data ?? MOCK_ONLY
+  const offers = useBrokerOffers()
   const [open, setOpen] = useState(false)
   const [chosen, setChosen] = useState<Broker>('mock')
   const [shares, setShares] = useState('')
@@ -56,6 +56,8 @@ export function ManualBuy({ runId, stockId, name }: ManualBuyProps) {
     )
   }
 
+  // A BUY needs an account to order on; the site may show this viewer none.
+  if (offers.length === 0) return null
   return (
     <>
       <Button type="button" variant="outline" size="sm" aria-label={t('buy.label', { stock })} onClick={ask} disabled={buy.isPending}>

@@ -140,7 +140,12 @@ def test_ptt_post_engagement_counts_every_push_boo_and_arrow() -> None:
       <div class="push"><span class="push-tag">→ </span><span>u4</span></div>
     </div>
     """
-    ptt = PttProvider(config=shipped_config(), logger=SilentLogger(), stock_provider=FakeStockList())
+    ptt = PttProvider(
+        config=shipped_config(),
+        logger=SilentLogger(),
+        stock_provider=FakeStockList(),
+        market_clock=TaiwanMarketClock(MarketHoursConfig()),
+    )
     listing = PostListing(title="[標的] 2330 台積電 多", url="https://www.ptt.cc/bbs/Stock/M.1.html", posted_on=date(2026, 10, 30))
 
     article = ptt.parse_article(html, listing, stock_ids={"2330"})
@@ -184,7 +189,9 @@ async def test_ptt_pages_back_through_the_search_until_a_post_is_older_than_the_
     shipped = shipped_config()
     collect_rules = shipped.collect_rules.model_copy(update={"ptt_tags": ["[標的]"], "ptt_lookback_days": 14})
     config = shipped.model_copy(update={"collect_rules": collect_rules})
-    ptt = PttProvider(config=config, logger=SilentLogger(), stock_provider=FakeStockList())
+    ptt = PttProvider(
+        config=config, logger=SilentLogger(), stock_provider=FakeStockList(), market_clock=TaiwanMarketClock(MarketHoursConfig())
+    )
 
     articles = await ptt.fetch_social_articles(limit=10)
 
@@ -193,7 +200,12 @@ async def test_ptt_pages_back_through_the_search_until_a_post_is_older_than_the_
 
 
 def test_a_ptt_article_is_cut_to_3000_characters() -> None:
-    ptt = PttProvider(config=shipped_config(), logger=SilentLogger(), stock_provider=FakeStockList())
+    ptt = PttProvider(
+        config=shipped_config(),
+        logger=SilentLogger(),
+        stock_provider=FakeStockList(),
+        market_clock=TaiwanMarketClock(MarketHoursConfig()),
+    )
     listing = PostListing(title="[標的] 2330 台積電 多", url="https://www.ptt.cc/bbs/Stock/M.1.html", posted_on=date(2026, 10, 30))
 
     article = ptt.parse_article(f'<div id="main-content">股票代碼：2330\n{"長" * 4000}</div>', listing, stock_ids={"2330"})
@@ -226,7 +238,12 @@ class EndlessPttBoard:
 @pytest.mark.asyncio
 async def test_ptt_reads_at_most_30_search_pages_for_one_tag(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(httpx, "AsyncClient", EndlessPttBoard)
-    ptt = PttProvider(config=shipped_config(), logger=SilentLogger(), stock_provider=FakeStockList())
+    ptt = PttProvider(
+        config=shipped_config(),
+        logger=SilentLogger(),
+        stock_provider=FakeStockList(),
+        market_clock=TaiwanMarketClock(MarketHoursConfig()),
+    )
 
     articles = await ptt.fetch_tag_articles("[閒聊]", {"2330"}, datetime.now().date() - timedelta(days=14), limit=10)
 
@@ -235,7 +252,12 @@ async def test_ptt_reads_at_most_30_search_pages_for_one_tag(monkeypatch: pytest
 
 
 def test_the_buzz_archive_quotes_the_first_500_characters_of_each_post(tmp_path: Path) -> None:
-    ptt = PttProvider(config=shipped_config(tmp_path), logger=SilentLogger(), stock_provider=FakeStockList())
+    ptt = PttProvider(
+        config=shipped_config(tmp_path),
+        logger=SilentLogger(),
+        stock_provider=FakeStockList(),
+        market_clock=TaiwanMarketClock(MarketHoursConfig()),
+    )
     post = replace(make_post("2330"), content="a" * 500 + "b" * 100)
 
     ptt.save_social_media_data([post])
@@ -250,6 +272,11 @@ def test_the_buzz_archive_quotes_the_first_500_characters_of_each_post(tmp_path:
     [("[標的] 2330 台積電 多", "2330"), ("[新聞] 台積電 2330A", "2330"), ("[標的] 123 多", None), ("[閒聊] 台積電", None)],
 )
 def test_a_post_whose_body_names_no_stock_takes_its_stock_id_from_the_title(title: str, stock_id: str | None) -> None:
-    ptt = PttProvider(config=shipped_config(), logger=SilentLogger(), stock_provider=FakeStockList())
+    ptt = PttProvider(
+        config=shipped_config(),
+        logger=SilentLogger(),
+        stock_provider=FakeStockList(),
+        market_clock=TaiwanMarketClock(MarketHoursConfig()),
+    )
 
     assert ptt.extract_stock_id("A post with no ticker line.", title) == stock_id

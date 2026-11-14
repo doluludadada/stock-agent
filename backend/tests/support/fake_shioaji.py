@@ -19,7 +19,7 @@ from shioaji.constant import Action, ChangeType, Exchange, Status, StockOrderCon
 from shioaji.contracts import Contract, Stock
 from shioaji.data import Snapshot
 from shioaji.order import Deal, Order, OrderStatus, Trade
-from shioaji.position import AccountBalance, SettlementV1, StockPosition
+from shioaji.position import AccountBalance, SettlementV1, StockPosition, StockProfitLoss
 
 DONE = {Status.Filled, Status.Cancelled, Status.Failed, Status.Inactive}
 
@@ -64,6 +64,22 @@ def position(code: str, shares: int, price: float, direction: Action = Action.Bu
         collateral=0,
         short_sale_margin=0,
         interest=0,
+    )
+
+
+def sale(code: str, shares: int, price: float, pnl: float, day: str) -> StockProfitLoss:
+    """A sale the broker settled on `day` (YYYY-MM-DD), with the profit or loss the broker says it realized."""
+    return StockProfitLoss(
+        id=0,
+        code=code,
+        quantity=shares,
+        pnl=pnl,
+        date=day,
+        dseq="A0001",
+        price=price,
+        pr_ratio=0.0,
+        cond=StockOrderCond.Cash,
+        seqno="1",
     )
 
 
@@ -134,6 +150,8 @@ class FakeShioaji:
     settlement_amounts: tuple[float, float, float] = (0.0, 0.0, 0.0)
     """Settlement amounts due on T, T+1 and T+2; negative is a payment."""
     holdings: list[StockPosition] = field(default_factory=list)
+    profit_losses: list[StockProfitLoss] = field(default_factory=list)
+    """The sales the broker settled, each with its date: list_profit_loss answers those within the dates asked."""
     Contracts: FakeContracts = field(default_factory=lambda: FakeContracts(FakeStocks({"2330": stock("2330")})))
 
     scripts: dict[StockOrderLot, list[Report]] = field(default_factory=dict)
@@ -163,6 +181,7 @@ class FakeShioaji:
     placed: list[Trade] = field(default_factory=list)
     cancelled: list[Trade] = field(default_factory=list)
     position_units: list[Unit] = field(default_factory=list)
+    profit_loss_requests: list[tuple[str, str, Unit]] = field(default_factory=list)
     _queued: dict[str, list[Report]] = field(default_factory=dict)
 
     def login(
@@ -264,6 +283,13 @@ class FakeShioaji:
         self.position_units.append(unit)
         lots = unit == Unit.Common
         return [row.model_copy(update={"quantity": row.quantity // 1000}) if lots else row.model_copy() for row in self.holdings]
+
+    def list_profit_loss(
+        self, account: Account = None, begin_date: str = "", end_date: str = "", unit: Unit = Unit.Common, timeout: int = 5000, cb=None
+    ) -> list[StockProfitLoss]:
+        self._fail_if_told("list_profit_loss")
+        self.profit_loss_requests.append((begin_date, end_date, unit))
+        return [row.model_copy() for row in self.profit_losses if begin_date <= row.date <= end_date]
 
     def account_balance(self, timeout: int = 5000, cb=None) -> AccountBalance:
         self._fail_if_told("account_balance")

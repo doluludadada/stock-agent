@@ -3,13 +3,14 @@ A backtest through the Pipeline and the Web API over fake ports: it replays the 
 daily history, saves the result for that user alone, and touches no account, journal, watchlist, AI or broker.
 """
 
+import asyncio
 from dataclasses import replace
 from datetime import date, datetime, timedelta
 from typing import Any
 
 import pytest
 from support.harness import ADMINISTRATOR_PASSWORD, HISTORY_LAST_SESSION, MEMBER, MEMBER_PASSWORD, CliHarness, build_harness
-from support.web import app_of, client_at, serve, sign_in, write
+from support.web import app_of, client_at, hold_stock_list, serve, sign_in, write
 
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.trading.account import Account
@@ -21,6 +22,7 @@ from b_application.config.market_data_config import MarketHoursConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.repositories.backtest_repository import SqlBacktestRepository
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
+from d_presentation.web.backtest_replays import BacktestReplays
 
 pytestmark = pytest.mark.asyncio
 
@@ -351,3 +353,49 @@ async def test_a_saved_backtest_is_its_users_alone_to_read_and_delete() -> None:
 
     assert others == [[], 404, 404]
     assert (kept, deleted, gone.status_code, gone.json()["code"]) == (200, 204, 404, "not_found")
+
+
+async def test_a_backtest_waits_its_turn_while_the_server_replays_its_cap() -> None:
+    replays, replaying = BacktestReplays(), []
+
+    async def replay(user: str, done: asyncio.Event) -> None:
+        async with replays.turn(UserId(user), 1, 1):
+            replaying.append(user)
+            await done.wait()
+
+    first_done, second_done = asyncio.Event(), asyncio.Event()
+    first, second = asyncio.create_task(replay("alice", first_done)), asyncio.create_task(replay("bob", second_done))
+    await asyncio.sleep(0.01)
+    while_the_first_replays = list(replaying)
+    first_done.set()
+    await first
+    await asyncio.sleep(0.01)
+    second_done.set()
+    await second
+
+    assert (while_the_first_replays, replaying) == (["alice"], ["alice", "bob"])
+
+
+async def test_a_users_backtests_past_their_limit_are_refused_and_the_ones_in_flight_all_answer() -> None:
+    harness = market()
+    harness.users.add(MEMBER, MEMBER_PASSWORD)
+    harness.config.accounts.max_concurrent_backtests, harness.config.accounts.max_backtests_per_user = 1, 2
+    release = hold_stock_list(harness)
+    ranking = "/v1/rankings/backtest?first=2026-03-01&last=2026-03-17"
+
+    async with app_of(harness) as app, client_at(app) as administrator, client_at(app) as member:
+        await sign_in(administrator, "owner", ADMINISTRATOR_PASSWORD)
+        await sign_in(member, "member", MEMBER_PASSWORD)
+        asked = [write(member, "POST", "/v1/backtests", body()), write(member, "POST", "/v1/backtests", body())]
+        in_flight = [asyncio.create_task(request) for request in [*asked, write(administrator, "POST", "/v1/backtests", body())]]
+        await asyncio.sleep(0.05)
+
+        async with asyncio.timeout(10):
+            refused = [await write(member, "POST", "/v1/backtests", body()), await member.get(ranking)]
+
+        release.set()
+        answered = [response.status_code for response in await asyncio.gather(*in_flight)]
+        later = await write(member, "POST", "/v1/backtests", body())
+
+    assert [(response.status_code, response.json()["code"]) for response in refused] == [(429, "too_many_backtests")] * 2
+    assert (answered, later.status_code) == ([200, 200, 200], 200)

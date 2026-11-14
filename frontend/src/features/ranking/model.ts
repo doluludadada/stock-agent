@@ -3,6 +3,7 @@ import type { Schemas } from '@/shared/api'
 export type Ranking = Schemas['Ranking']
 export type RankedStock = Schemas['RankedStock']
 export type RankingBacktest = Schemas['RankingBacktest']
+export type RankingFollow = Schemas['RankingFollowResponse']
 
 /** A span of calendar days as the backtest takes it, both ends included. */
 export interface Period {

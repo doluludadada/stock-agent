@@ -1,11 +1,11 @@
 from string import Formatter
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BaseModel, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from a_domain.ports.system.settings_files import SettingsProblem
-from a_domain.types.enums import AiProvider
+from a_domain.types.enums import AiProvider, SettingGroup, SettingUnit
 
 
 def placeholders(required: set[str], optional: set[str] | None = None) -> AfterValidator:
@@ -60,11 +60,16 @@ class AiConfig(BaseSettings):
     nvidia_api_key: str | None = Field(default=None, validation_alias="NVIDIA_API_KEY")
     anthropic_api_key: str | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
 
-    connection_timeout: int = Field(description="Timeout for AI model connections")
-    temperature: float = Field(ge=0, le=2)
+    connection_timeout: int = Field(
+        description="Timeout for AI model connections",
+        gt=0,
+        le=600,
+        json_schema_extra={"steps": [10, 30, 60, 120, 300], "unit": SettingUnit.SECONDS},
+    )
+    temperature: float = Field(ge=0, le=2, json_schema_extra={"step": 0.1})
     """How freely the model words its reply: 0 always picks the likeliest words. Claude refuses this setting."""
 
-    max_output_tokens: int = Field(gt=0)
+    max_output_tokens: int = Field(gt=0, le=128_000, json_schema_extra={"steps": [1000, 2000, 4000, 8000, 16000, 32000, 64000]})
     """The most tokens a Claude reply may use, its thinking included. The other providers use their own default."""
 
     @property
@@ -118,13 +123,21 @@ class AiConfig(BaseSettings):
 
     system_prompt: str | None = None
     rag_injection_prompt: Annotated[str | None, placeholders({"search_results"})] = None
-    article_content_length: int = Field(ge=100)
+    article_content_length: int = Field(ge=100, le=20_000, json_schema_extra={"steps": [200, 500, 1000, 2000, 5000]})
 
 
 class BehaviorConfig(BaseModel):
-    """System behaviour and toggles. The web and X search filters default to none; the rest comes from config/appsetting.yaml."""
+    """
+    System behaviour and toggles. The web search filters default to none; the rest comes from config/appsetting.yaml.
+    `retired` names the settings this section once had and no longer reads: a settings file that still sets one starts,
+    and the start names it (settings_notices).
+    """
 
-    log_level: Literal["TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"] | int
+    model_config = ConfigDict(json_schema_extra={"retired": ["x_search_allowed_handles", "x_search_excluded_handles"]})
+
+    log_level: Literal["TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"] | int = Field(
+        json_schema_extra={"group": SettingGroup.ADVANCED}
+    )
     """A loguru level name or number: the logger refuses any other at startup."""
     enable_web_search: bool
     enable_x_search: bool
@@ -135,8 +148,6 @@ class BehaviorConfig(BaseModel):
 
     web_search_allowed_domains: set[str] | None = None
     web_search_excluded_domains: set[str] | None = None
-    x_search_allowed_handles: set[str] | None = None
-    x_search_excluded_handles: set[str] | None = None
 
 
 class TavilyConfig(BaseSettings):
@@ -145,8 +156,12 @@ class TavilyConfig(BaseSettings):
     model_config = SettingsConfigDict(env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore")
 
     api_key: str | None = Field(default=None, validation_alias="TAVILY_API_KEY")
-    search_depth: str = "basic"
-    connection_timeout: int = Field(default=30, gt=0)
+    search_depth: Literal["basic", "advanced"] = "basic"
+    """How deep a Tavily search goes: its API takes these two."""
+
+    connection_timeout: int = Field(
+        default=30, gt=0, le=600, json_schema_extra={"steps": [10, 30, 60, 120], "unit": SettingUnit.SECONDS}
+    )
 
 
 class PromptsConfig(BaseModel):
@@ -161,16 +176,42 @@ class PromptsConfig(BaseModel):
     """The domain's numbers, rules and data warnings must reach the AI, which only explains them."""
 
     social_sentiment: Annotated[str, placeholders({"stock_id", "posts_text"})] = ""
+    stock_brief: Annotated[
+        str, placeholders({"facts", "language", "window", "price_change", "sentences"}, {"stock_id", "stock_name"})
+    ] = ""
+    """The held facts, the window and the reply's language must reach the AI, which only describes them. Empty, no brief is written."""
+
+    stock_brief_advice_phrases: str = ""
+    """
+    One word or phrase per line. A sentence the AI wrote for a stock brief that holds one of them, compared without
+    case, is dropped: a brief describes and never advises. It is no prompt: the site applies it to the AI's reply.
+    """
+
+    stock_brief_rise_query: str = ""
+    stock_brief_fall_query: str = ""
+    """
+    What a stock brief looks for, by meaning, among the stock's kept articles of its window and of the days before it:
+    one for a window the close rose over, one for a window it fell over, in the articles' language. They are no
+    prompts: no AI reads them. Empty, a brief reads the window's newest articles instead.
+    """
+
+    stock_brief_company_query: str = ""
+    """What a stock brief looks for among the stock's kept articles to say what the company makes and sells. Empty, none."""
+
+    def advice_phrases(self) -> frozenset[str]:
+        return frozenset(line.strip() for line in self.stock_brief_advice_phrases.splitlines() if line.strip())
 
 
 class SentimentConfig(BaseModel):
     """How the Buzz report tallies social sentiment. Report only: sentiment never changes signals or orders."""
 
-    min_confidence: float = Field(default=0.5, ge=0, le=1)
+    min_confidence: float = Field(default=0.5, ge=0, le=1, json_schema_extra={"step": 0.05, "unit": SettingUnit.PERCENT})
     """A post classified with less confidence than this counts as unclear."""
 
-    min_opinions: int = Field(default=2, ge=1)
+    min_opinions: int = Field(default=2, ge=1, le=100, json_schema_extra={"steps": [1, 2, 3, 5, 10]})
     """With fewer bullish, bearish or neutral posts than this, the stock's consensus is unclear."""
 
-    consensus_share: float = Field(default=0.6, gt=0.5, le=1)
+    consensus_share: float = Field(
+        default=0.6, gt=0.5, le=1, json_schema_extra={"steps": [0.55, 0.6, 0.67, 0.75, 0.9], "unit": SettingUnit.PERCENT}
+    )
     """The share of the opinions one stance needs to be the consensus. Above one half, so only one stance can reach it."""

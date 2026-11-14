@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import math
 import sys
 from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine
@@ -14,10 +15,13 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from a_domain.types.enums import ErrorCode
 from a_domain.types.errors import (
+    AiAllowanceSpentError,
     AiModelNotOffered,
     AlreadySetUpError,
     BacktestPeriodUnavailable,
+    BriefLimitReached,
     BrokerUnavailable,
+    GoogleConfirmationRequired,
     LastAdministratorError,
     ListingUnavailableError,
     MopsUnavailable,
@@ -40,10 +44,13 @@ from a_domain.types.errors import (
 from b_application.config.settings_loader import InvalidSettingsError
 from d_presentation.dependencies import Runtime
 from d_presentation.live_runtime import RuntimeSwitch, collect_daily_data, watch_settings
+from d_presentation.web.backtest_replays import BacktestReplays, TooManyBacktests
 from d_presentation.web.routers.api_v1 import router as api_v1_router
 from d_presentation.web.session import (
+    FLOW_PATH,
     AdministratorsOnly,
     AppRequestRequired,
+    FeatureHidden,
     NotFound,
     NothingToFollow,
     OutsideFollowWindow,
@@ -57,7 +64,9 @@ DESCRIPTION = """
 Runs the stock-agent workflows and reads what they recorded, on the same runtime as the CLI.
 
 Users. Anyone may register (`POST /v1/auth/register`) while registration is open, and signs in with a username or an
-email (`POST /v1/auth/sign-in`), which sets the HttpOnly session cookie `stock_agent_session`. Public: sign-in,
+email (`POST /v1/auth/sign-in`), which sets the HttpOnly session cookie `stock_agent_session`. A site with a Google
+client also signs in with Google: the browser goes to `GET /v1/auth/google/start`, and Google sends it back to `GET
+/v1/auth/google/callback`, which sets the same cookie and sends the browser to the app. Public: sign-in,
 registration, the first-time setup, the built-in strategies and market data (`/v1/market`). Signed in: every other
 read and write, each on the user's own runs, decisions, orders, watchlist, mock account and saved technical settings.
 Administrator: the users (`/v1/admin/users`) and the settings form (`/v1/admin/settings`). 401 means sign in: the
@@ -73,7 +82,8 @@ in dev and test and on the real account in prod, each BUY within trading.max_ord
 trading.max_daily_buy_value (`GET /v1/account/brokers` names them). A follow (`POST /v1/runs/{run_id}/follow`) places a
 finished Full Cycle's open decisions in the user's mock account only, priced again: at a fresh realtime quote in
 continuous trading, or on a site without realtime quotes at the last session's official close while no session
-trades. No endpoint cancels or modifies an order.
+trades. A ranking follow (`POST /v1/rankings/follow`) brings that mock account to the monthly ranking's latest decision,
+priced the same way, on the mock account only. No endpoint cancels or modifies an order.
 
 Open data. A public site (`audience: public`) uses only the TWSE and TPEX OpenAPI data the server archives: daily
 history and the index trend come from that archive, it has no realtime quote, so Buzz and Intraday answer 403
@@ -84,7 +94,16 @@ reads the archived material information, the TWSE news naming the stock and its 
 of them is decided on its technical score alone, and every valuation endpoint answers 403 `mops_unavailable`. `GET
 /v1/market/audience` answers the site's audience and what it allows, so the web app offers only that. `GET
 /v1/market/archive-status` says how many sessions the archive holds and how many the built-in strategies need, `GET
-/v1/market/stocks/{stock_id}/financials` answers a stock's archived quarters and monthly revenue, and `GET
+/v1/market/stocks/{stock_id}/financials` answers a stock's archived quarters and monthly revenue, `GET
+/v1/market/stocks/{stock_id}/analysis` reads them, the held EPS filings and the archived valuation ratios into a
+financial analysis by fixed rules with no AI call, `GET /v1/market/stocks/{stock_id}/news` answers what the site's
+article store keeps of the stock, its announcements and exchange news and, on a personal site, its news articles and
+board posts by title and address, `GET
+/v1/market/stocks/{stock_id}/ranking` answers its score, its place in the monthly ranking as a percentile with its two
+factors, or why the ranking leaves it out, `GET /v1/market/stocks/{stock_id}/brief` answers the AI brief the site holds
+of the stock (what the company is, and how the held facts of a recent window relate to its move, each sentence citing
+held items), one per stock and Taipei calendar day for every viewer, with no AI call, `POST` on the same address makes
+a signed-in user's one paid AI call for today's brief when none is held, and `GET
 /v1/market/attribution` names the open data's providers, datasets and license, which a page showing it must credit.
 
 Backtests. `POST /v1/backtests` replays the user's active technical strategy over past sessions the site already
@@ -95,7 +114,14 @@ backtest asks no AI, touches no account, watchlist or run record, and never orde
 Rankings. `GET /v1/rankings/latest` answers the monthly stock ranking by revenue acceleration and nearness to the high at
 the latest decision session the site's daily history holds, and `GET /v1/rankings/backtest?first=&last=` replays it over
 a period against the ranking.benchmark_id held over the same sessions. Both read only the held history and the archived
-monthly revenue, which `just backfill-history` brings back; they ask no AI, touch no account and never order.
+monthly revenue, which `just backfill-history` brings back; they ask no AI, touch no account and never order. `GET
+/v1/rankings/follow` answers the user's mock account against that ranking, and its return since it first followed it
+against the benchmark; `POST /v1/rankings/follow` brings the mock account to the ranking, as a run that orders on the
+mock account only.
+
+The server replays `accounts.max_concurrent_backtests` strategy backtests and ranking backtests at once, and one more
+waits its turn. A user's request past `accounts.max_backtests_per_user` replaying or waiting answers 429
+`too_many_backtests`.
 
 Workflows run in the background, one at a time per user and a few at a time per server: a start answers 202 with the
 run id, and GET /v1/runs/{run_id} reports the run's state and its record; another user's run id answers 404. Run the
@@ -146,6 +172,7 @@ ERROR_ANSWERS: dict[type[Exception], tuple[int, ErrorCode]] = {
     RegistrationClosed: (status.HTTP_403_FORBIDDEN, ErrorCode.REGISTRATION_CLOSED),
     SetupCodeRefused: (status.HTTP_403_FORBIDDEN, ErrorCode.SETUP_CODE_REFUSED),
     AdministratorsOnly: (status.HTTP_403_FORBIDDEN, ErrorCode.ADMINISTRATORS_ONLY),
+    FeatureHidden: (status.HTTP_403_FORBIDDEN, ErrorCode.FEATURE_HIDDEN),
     RealBrokerRefused: (status.HTTP_403_FORBIDDEN, ErrorCode.REAL_BROKER_REFUSED),
     BrokerUnavailable: (status.HTTP_403_FORBIDDEN, ErrorCode.BROKER_UNAVAILABLE),
     RealtimeQuotesUnavailable: (status.HTTP_403_FORBIDDEN, ErrorCode.REALTIME_QUOTES_UNAVAILABLE),
@@ -153,6 +180,7 @@ ERROR_ANSWERS: dict[type[Exception], tuple[int, ErrorCode]] = {
     SettingsFileRefused: (status.HTTP_403_FORBIDDEN, ErrorCode.SETTINGS_FILE_REFUSED),
     PasswordRequired: (status.HTTP_403_FORBIDDEN, ErrorCode.PASSWORD_REQUIRED),
     PasswordRefused: (status.HTTP_403_FORBIDDEN, ErrorCode.PASSWORD_REFUSED),
+    GoogleConfirmationRequired: (status.HTTP_403_FORBIDDEN, ErrorCode.GOOGLE_CONFIRMATION_REQUIRED),
     NotFound: (status.HTTP_404_NOT_FOUND, ErrorCode.NOT_FOUND),
     SettingsFileMissing: (status.HTTP_404_NOT_FOUND, ErrorCode.SETTINGS_FILE_MISSING),
     AlreadySetUpError: (status.HTTP_409_CONFLICT, ErrorCode.ALREADY_SET_UP),
@@ -170,6 +198,9 @@ ERROR_ANSWERS: dict[type[Exception], tuple[int, ErrorCode]] = {
     RankingUnavailable: (status.HTTP_422_UNPROCESSABLE_CONTENT, ErrorCode.RANKING_UNAVAILABLE),
     SignInThrottled: (status.HTTP_429_TOO_MANY_REQUESTS, ErrorCode.SIGN_IN_THROTTLED),
     TooManyRuns: (status.HTTP_429_TOO_MANY_REQUESTS, ErrorCode.TOO_MANY_RUNS),
+    TooManyBacktests: (status.HTTP_429_TOO_MANY_REQUESTS, ErrorCode.TOO_MANY_BACKTESTS),
+    AiAllowanceSpentError: (status.HTTP_429_TOO_MANY_REQUESTS, ErrorCode.AI_ALLOWANCE_SPENT),
+    BriefLimitReached: (status.HTTP_429_TOO_MANY_REQUESTS, ErrorCode.BRIEF_LIMIT_REACHED),
     ListingUnavailableError: (status.HTTP_503_SERVICE_UNAVAILABLE, ErrorCode.LISTING_UNAVAILABLE),
 }
 """
@@ -180,6 +211,17 @@ names its code here, once. 401 is the only answer that signs the web app out; 40
 
 
 type ErrorAnswer = Callable[[Request, Any], Coroutine[Any, Any, Response]]
+
+
+def hide_google_query(record: logging.LogRecord) -> bool:
+    """
+    uvicorn's access log writes each request's whole address, and Google's code and state arrive in the callback's
+    query. A request to a Google endpoint is logged by its path alone, so no log line holds either.
+    """
+    if isinstance(record.args, tuple) and len(record.args) == 5 and str(record.args[2]).startswith(FLOW_PATH):
+        record.args = (*record.args[:2], str(record.args[2]).split("?")[0], *record.args[3:])
+
+    return True
 
 
 async def answer_refusal(request: Request, error: Exception) -> JSONResponse:
@@ -226,6 +268,26 @@ async def offer_first_time_setup(app: FastAPI, runtime: Runtime) -> None:
         )
 
 
+async def open_app_state(app: FastAPI, switch: RuntimeSwitch) -> WorkflowRuns:
+    """
+    What the requests read from app.state, set before the first one: the runtimes, the backtests in flight, the
+    background runs and the first-time setup's code. An environment that serves the API docs (SystemEnvironment.api_docs)
+    gets /docs, /redoc and /openapi.json here, which answer anyone outside the /v1 host check; the app is built without.
+    """
+    app.state.runtime_switch = switch
+    app.state.backtest_replays = BacktestReplays()
+
+    with switch.hold() as opened:
+        app.state.workflow_runs = workflow_runs = WorkflowRuns(opened.runtime.logger)
+        await offer_first_time_setup(app, opened.runtime)
+
+        if opened.runtime.config.environment.api_docs:
+            app.openapi_url = "/openapi.json"
+            app.setup()
+
+    return workflow_runs
+
+
 def error_handlers() -> dict[int | type[Exception], ErrorAnswer]:
     """Every error answer the app gives, each with its code: the refusals of ERROR_ANSWERS and FastAPI's own errors."""
     handlers: dict[int | type[Exception], ErrorAnswer] = dict.fromkeys(ERROR_ANSWERS, answer_refusal)
@@ -234,22 +296,18 @@ def error_handlers() -> dict[int | type[Exception], ErrorAnswer]:
 
 def create_app(open_switch: Callable[[], AbstractAsyncContextManager[RuntimeSwitch]]) -> FastAPI:
     """
-    The FastAPI app. Its lifespan opens the process's runtimes through the startup checks the CLI runs, offers the
-    first-time setup while no user exists, watches the settings files and collects the daily data on a timer: the
-    open-data archive, and the exchanges' daily history on a personal site. At shutdown it stops the watch and
-    the timer and waits until both have ended, so a collection never outlives the runtime it holds, cancels every
-    running workflow while its runtime is open, so its record ends as aborted, then closes every runtime.
+    The FastAPI app. Its lifespan opens the process's runtimes through the startup checks the CLI runs, sets what the
+    requests read from app.state, watches the settings files and collects the daily data on a timer: the open-data
+    archive, the exchanges' daily history on a personal site, and the news of the stocks that matter into the article
+    store. At shutdown it stops the watch and the timer and waits
+    until both have ended, so a collection never outlives the runtime it holds, cancels every running workflow while its
+    runtime is open, so its record ends as aborted, then closes every runtime.
     """
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         async with open_switch() as switch:
-            app.state.runtime_switch = switch
-
-            with switch.hold() as opened:
-                app.state.workflow_runs = workflow_runs = WorkflowRuns(opened.runtime.logger)
-                await offer_first_time_setup(app, opened.runtime)
-
+            workflow_runs = await open_app_state(app, switch)
             watcher = asyncio.get_running_loop().create_task(watch_settings(switch))
             archiver = asyncio.get_running_loop().create_task(collect_daily_data(switch))
 
@@ -263,8 +321,14 @@ def create_app(open_switch: Callable[[], AbstractAsyncContextManager[RuntimeSwit
                 await workflow_runs.stop()
 
     app = FastAPI(
-        title="TW-Stock-Alpha-Agent", description=DESCRIPTION, version="0.2.0", lifespan=lifespan, exception_handlers=error_handlers()
+        title="TW-Stock-Alpha-Agent",
+        description=DESCRIPTION,
+        version="0.2.0",
+        lifespan=lifespan,
+        exception_handlers=error_handlers(),
+        openapi_url=None,
     )
     app.include_router(api_v1_router)
     app.middleware("http")(add_security_headers)
+    logging.getLogger("uvicorn.access").addFilter(hide_google_query)
     return app

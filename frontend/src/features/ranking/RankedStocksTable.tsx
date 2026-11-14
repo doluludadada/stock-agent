@@ -11,6 +11,8 @@ export type StockMark = 'entered' | 'notBought'
 export interface RankedRow {
   stock: RankedStock
   mark?: StockMark
+  /** The row's own classes, such as hiding it on a narrow screen. */
+  className?: string
 }
 
 const MARK_TONE: Record<StockMark, string> = { entered: 'border-primary/40 text-primary', notBought: 'border-gold/50 text-gold' }
@@ -72,5 +74,5 @@ export function RankedStocksTable({ rows, label, id }: { rows: readonly RankedRo
     { key: 'score', header: t('table.score'), numeric: true, from: 'lg', cell: ({ stock }) => formatNumber(locale, stock.score, 2) },
   ]
 
-  return <DataTable id={id} rows={rows} columns={columns} rowKey={(row) => row.stock.stock_id} label={label} />
+  return <DataTable id={id} rows={rows} columns={columns} rowKey={(row) => row.stock.stock_id} rowClassName={(row) => row.className} label={label} />
 }

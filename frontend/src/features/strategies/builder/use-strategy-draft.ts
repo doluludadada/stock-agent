@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { useBlocker } from 'react-router'
 import { isApiError, type FieldProblem } from '@/shared/api'
+import { useKeptDraft } from '@/shared/lib/kept-draft'
 import { newIds, ruleIndexOf } from '../api/mapping'
 import { useSaveStrategySettings, useStrategySettings } from '../api/queries'
 import { applyEdit, copyStrategy, createBlankStrategy, pruneEditorIndicators, type StrategyEdit } from '../model/edit'
@@ -68,10 +69,11 @@ function refusedProblems(problems: readonly FieldProblem[], strategyIndex: numbe
  * their revision. A 409 keeps the draft: the settings are refetched, then `conflict` turns on, so saving again puts
  * the same draft into the newer settings, keeping every other change the other save made.
  */
-export function useStrategyDraft(initial: Strategy) {
+export function useStrategyDraft(initial: Strategy, name: string) {
   const settings = useStrategySettings()
   const mutation = useSaveStrategySettings()
-  const [state, dispatch] = useReducer(reducer, initial, (strategy) => ({ draft: strategy, baseline: JSON.stringify(strategy) }))
+  const keptDraft = useKeptDraft<Strategy>(`strategy:${name}`)
+  const [state, dispatch] = useReducer(reducer, initial, (strategy) => ({ draft: keptDraft.restored ?? strategy, baseline: JSON.stringify(strategy) }))
   const [attempted, setAttempted] = useState(false)
   const [conflict, setConflict] = useState(false)
   const [lastSaved, setLastSaved] = useState(initial)
@@ -82,16 +84,19 @@ export function useStrategyDraft(initial: Strategy) {
   useEffect(() => {
     dirtyRef.current = dirty
     latestDraft.current = state.draft
-  }, [dirty, state.draft])
+    keptDraft.track(dirty ? state.draft : null)
+  }, [dirty, state.draft, keptDraft])
 
-  const issues = useMemo(() => validateStrategy(state.draft), [state.draft])
+  // What a save sends: the draft without the indicators no condition reads, which no field shows either.
+  const sent = useMemo(() => pruneEditorIndicators(state.draft, kept), [state.draft, kept])
+  const issues = useMemo(() => validateStrategy(sent), [sent])
   const edit = useCallback((change: StrategyEdit) => dispatch({ type: 'edit', edit: change }), [])
 
   const save = useCallback(async (): Promise<SaveOutcome> => {
     setAttempted(true)
     if (errorsOf(issues).length > 0) return { ok: false, reason: 'invalid' }
     if (!settings.data) return { ok: false, reason: 'notLoaded' }
-    const strategy = pruneEditorIndicators(state.draft, kept)
+    const strategy = sent
     const next = withStrategy(settings.data, strategy)
     if (isRefusal(next)) return { ok: false, reason: 'full' }
     try {
@@ -113,7 +118,7 @@ export function useStrategyDraft(initial: Strategy) {
       }
       return { ok: false, reason: 'failed', error }
     }
-  }, [issues, kept, mutation, settings, state.draft])
+  }, [issues, sent, mutation, settings, state.draft])
 
   /** True when the server's copy of this strategy changed since this draft last read or saved it. */
   const serverChanged = useMemo(() => {
@@ -128,7 +133,7 @@ export function useStrategyDraft(initial: Strategy) {
     return () => window.removeEventListener('beforeunload', onBeforeUnload)
   }, [dirty])
 
-  const blocker = useBlocker(({ currentLocation, nextLocation }) => dirtyRef.current && currentLocation.pathname !== nextLocation.pathname)
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => dirtyRef.current && (currentLocation.pathname !== nextLocation.pathname || currentLocation.search !== nextLocation.search))
 
   return {
     draft: state.draft,

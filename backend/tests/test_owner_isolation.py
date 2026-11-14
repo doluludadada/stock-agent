@@ -271,6 +271,42 @@ async def remove(owners: Owners) -> None:
     assert [found.stock_id for found in await owners.alice.watchlist_repository.get_active()] == ["2330"]
 
 
+# ------------------------------------------------- the hand-entered holdings ------------------------------------------------ #
+
+
+def holding(stock_id: str, quantity: int = 1000) -> Position:
+    return Position(stock_id=stock_id, quantity=quantity, average_cost=100.0, opened_at=AT)
+
+
+async def get_all_holdings(owners: Owners) -> None:
+    await owners.alice.holding_repository.save(holding("2330"))
+    await owners.alice.holding_repository.save(holding("0050", 37))
+
+    assert await owners.bob.holding_repository.get_all() == []
+    assert [(found.stock_id, found.quantity) for found in await owners.alice.holding_repository.get_all()] == [
+        ("0050", 37),
+        ("2330", 1000),
+    ]
+
+
+async def save_holding(owners: Owners) -> None:
+    await owners.alice.holding_repository.save(holding("2330"))
+    await owners.bob.holding_repository.save(holding("2330", 5))
+    await owners.bob.holding_repository.save(holding("2330", 7))
+
+    assert [(found.quantity, found.opened_at) for found in await owners.alice.holding_repository.get_all()] == [(1000, AT)]
+    assert [found.quantity for found in await owners.bob.holding_repository.get_all()] == [7]
+
+
+async def remove_holding(owners: Owners) -> None:
+    await owners.alice.holding_repository.save(holding("2330"))
+
+    assert await owners.bob.holding_repository.remove("2330") is False
+    assert [found.stock_id for found in await owners.alice.holding_repository.get_all()] == ["2330"]
+    assert await owners.alice.holding_repository.remove("2330") is True
+    assert await owners.alice.holding_repository.get_all() == []
+
+
 # ------------------------------------------------------ the backtests ------------------------------------------------------ #
 
 
@@ -528,6 +564,18 @@ async def trades(owners: Owners) -> None:
     ]
 
 
+async def first_fill(owners: Owners) -> None:
+    recorded = await alice_records_a_run(owners)
+    workflow = run_stats().workflow
+    filled = replace(recorded.order)
+    filled.submit(now=AT)
+    filled.fill(filled.quantity, 100.0, 142, 0, now=AT)
+    await owners.alice.journal.save_order(filled)
+
+    assert await owners.bob.journal.first_fill(workflow, ExecutionProvider.MOCK, None) is None
+    assert await owners.alice.journal.first_fill(workflow, ExecutionProvider.MOCK, None) == filled.created_at
+
+
 async def buy_orders(owners: Owners) -> None:
     recorded = await alice_records_a_run(owners)
 
@@ -552,6 +600,7 @@ CASES: dict[str, dict[str, Case]] = {
         "orders_of": orders_of,
         "follows_of": follows_of,
         "trades": trades,
+        "first_fill": first_fill,
         "buy_orders": buy_orders,
     },
     "watchlist_repository": {"get_active": get_active, "save": save, "remove": remove},
@@ -574,6 +623,7 @@ CASES: dict[str, dict[str, Case]] = {
     "ai_provider": {"generate_reply": generate_reply, "save_response": save_response},
     "sentiment_classifier": {"classify": classify},
     "backtest_repository": {"save": save_backtest, "saved": saved_backtests, "get": get_backtest, "delete": delete_backtest},
+    "holding_repository": {"get_all": get_all_holdings, "save": save_holding, "remove": remove_holding},
 }
 """Every field of OwnedPorts, the ports dependencies.py builds per owner, and a two-owner case for each method of its adapter."""
 

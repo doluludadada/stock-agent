@@ -31,6 +31,13 @@ version 2, and the first-time setup gives it to the first administrator, so that
 """
 
 
+NO_PASSWORD = "!"
+"""
+The password hash of an account that signs in with Google only. It is no argon2 encoding, so no password verifies
+against it, and the user store never hands it to the hasher.
+"""
+
+
 def load_accounts_key(config: AppConfig, logger: ILoggingProvider) -> SecretStr:
     """
     The accounts key, before the database is opened: ACCOUNTS_KEY when the environment or .env sets it, for Docker or
@@ -116,7 +123,10 @@ class UserDTO(SQLModel, table=True):
     email_sealed: bytes = Field(sa_type=LargeBinary)
     email_index: bytes = Field(sa_type=LargeBinary, unique=True)
     password_hash: str
-    """argon2id in its encoded form: the parameters, the salt and the hash together."""
+    """
+    argon2id in its encoded form: the parameters, the salt and the hash together. An account without a password
+    (User.has_password False) holds NO_PASSWORD instead.
+    """
     role: Role
     status: UserStatus
     created_at: datetime = Field(sa_type=UtcDateTime)
@@ -153,6 +163,7 @@ class UserDTO(SQLModel, table=True):
             status=self.status,
             created_at=self.created_at,
             ai_model=self.ai_model,
+            has_password=self.password_hash != NO_PASSWORD,
         )
 
 

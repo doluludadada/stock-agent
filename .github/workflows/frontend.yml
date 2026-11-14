@@ -21,6 +21,10 @@ jobs:
               with:
                   bun-version: 1.4.2
             - run: bun install --frozen-lockfile
+            # Fails on a known vulnerability in any locked package. Both ignores are packages that only shadcn, the
+            # component generator, uses, and its ranges allow no fixed release: deepmerge (GHSA-gcqx-w48m-w2h4) and
+            # minimatch (GHSA-g3hv-75wg-m249). The build takes only shadcn's stylesheet, so neither reaches the bundle.
+            - run: bun audit --ignore=GHSA-gcqx-w48m-w2h4 --ignore=GHSA-g3hv-75wg-m249
             - run: bun run lint
             - run: bun run typecheck
             - run: bun run test

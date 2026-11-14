@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated, Protocol
 
 from pydantic import Field, FiniteFloat
@@ -148,7 +148,14 @@ class IDailyCloseArchive(IOhlcvProvider, INewsProvider, Protocol):
         company's year-to-date EPS under its quarter, each stock's valuation ratios under their session, each financial
         report under its company, quarter and statement, each monthly revenue under its company and month, and each
         TWSE news item under its address. What the archive holds under the same key is replaced, so saving the same
-        data again changes nothing.
+        data again changes nothing. ArchiveSaveRefused when the database refused some of it, once the rest is saved.
+        """
+        ...
+
+    async def archived_articles(self, since: datetime) -> list[Article]:
+        """
+        Everything fetch_news could ever serve of what was published from `since` on: every archived announcement, and
+        every archived TWSE news item once for each stock whose code its title names. In no order.
         """
         ...
 
@@ -189,6 +196,10 @@ class IDailyCloseArchive(IOhlcvProvider, INewsProvider, Protocol):
         by the columns sources.exchange.financial_reports.summary names for their industry format, and its revenue of
         every month the archive holds; both oldest first.
         """
+        ...
+
+    async def valuation_history(self, stock_id: str) -> list[ValuationRatios]:
+        """The stock's valuation ratios of every session the archive holds them of, oldest first."""
         ...
 
     async def official_changes(self, stock_ids: list[str], first: date, last: date) -> dict[tuple[str, date], float]:

@@ -30,9 +30,14 @@ def screen(monkeypatch: pytest.MonkeyPatch) -> io.StringIO:
 
 @pytest.fixture
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A copy of config/, with a placeholder key for the active AI provider, which every reload needs."""
+    """
+    A copy of config/, with a placeholder key for the active AI provider, which every reload needs, and ordering on
+    SinoPac turned on, which the shipped file keeps off: these tests reload while the CLI offers SinoPac.
+    """
     shutil.copytree(REPOSITORY_CONFIG, tmp_path / "config")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "placeholder")
+    edit(tmp_path, 'sinopac_ordering: "off"', "sinopac_ordering: administrators")
+    assert "sinopac_ordering: administrators" in (tmp_path / "config" / "appsetting.yaml").read_text(encoding="utf-8")
     return tmp_path
 
 

@@ -5,16 +5,9 @@ from sqlmodel import col
 from a_domain.model.chat.message import Message
 from a_domain.ports.ai.ai_provider import IAiProvider
 from a_domain.ports.system.market_clock import IMarketClock
+from a_domain.types.errors import AiAllowanceSpentError
 from c_infrastructure.database.db_connector import UPSERT, DatabaseConnector
 from c_infrastructure.database.models.ai_call_dto import AiCallDTO, AiCallTotalDTO
-
-
-class AiAllowanceSpentError(RuntimeError):
-    """
-    Today's paid AI calls are spent, the user's or every user's together. Every AI caller already treats a failed call
-    as a missing AI result: AiAnalyser records a run error and the stock gets no AI score, so no automatic BUY;
-    ValuationExplainer returns the sections without AI text; SentimentAnalyser records an error. So it needs no handler.
-    """
 
 
 class DailyCappedAiProvider(IAiProvider):

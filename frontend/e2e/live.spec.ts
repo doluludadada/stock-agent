@@ -26,8 +26,11 @@ async function copyBalanced(page: Page, name: string): Promise<string> {
 
 test('a built-in strategy copied in the designer saves on the server with all of its rules and reloads', async ({ page, consoleErrors }) => {
   void consoleErrors
+  const site = (await apiGet(page, '/v1/auth/status')) as { features: { strategy_library: 'off' | 'administrators' | 'everyone' } }
   await page.goto('/strategies')
-  await expect(page.getByText('登入後保存並使用你自己的策略')).toBeVisible()
+  // A visitor is invited to sign in only where the site shows the library to everyone; kept for administrators, the address answers like one that does not exist.
+  if (site.features.strategy_library === 'everyone') await expect(page.getByText('登入後保存並使用你自己的策略')).toBeVisible()
+  else await expect(page.getByRole('heading', { name: '找不到這個頁面', level: 1 })).toBeVisible()
   await signIn(page)
   await page.reload()
   await expect(page.getByRole('radiogroup', { name: '使用中的策略' }).getByRole('radio'), 'one choice per built-in').toHaveText(['平衡型'])
@@ -82,8 +85,9 @@ test('the overview charts the TAIEX as the default index, lists the most traded 
     market: { advancers: number; decliners: number; unchanged: number }
     industries: Record<string, unknown>
   }
-  await page.goto('/')
+  await page.goto('/market')
   await expect(page.getByRole('heading', { name: '市場總覽', level: 1 })).toBeVisible()
+  await expect(page).toHaveTitle('市場總覽 · Stock Agent')
 
   const level = new Intl.NumberFormat('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(history.bars.at(-1)!.close)
   const trend = page.getByRole('region', { name: /加權指數/ })
@@ -110,27 +114,95 @@ test('the overview charts the TAIEX as the default index, lists the most traded 
   await expect(heatMap.getByRole('listitem'), 'every industry on the wide heat map').toHaveCount(industries)
   await page.screenshot({ path: `${SHOTS}/live-overview.png`, fullPage: true })
 
+})
+
+test('the home page reads the market, the ranking, the holdings and the watchlist, each card leading to its page; a navigation names the tab and moves the focus to the content', async ({ page, consoleErrors }) => {
+  void consoleErrors
   await signIn(page)
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: '今日', level: 1 })).toBeVisible()
+  await expect(page).toHaveTitle('今日 · Stock Agent')
+  const main = page.getByRole('main')
+  const cards = { 加權指數: ['市場總覽', '/market'], 這個月的排名: ['全部 20 檔、實際紀錄與回測', '/ranking'], 我的持股: ['全部持股', '/holdings'], 觀察清單: ['完整清單', '/watchlist'] }
+  for (const [card, [link, to]] of Object.entries(cards)) await expect(main.getByRole('region', { name: card }).getByRole('link', { name: link! }), card).toHaveAttribute('href', to!)
+  await expect(main.getByRole('link', { name: '登入', exact: true }), 'a signed-in reader is asked nothing').toHaveCount(0)
+  // The first ranking after a server start reads the whole history.
+  await expect(main.getByRole('table', { name: '這個月的排名' }).getByRole('row')).toHaveCount(11, { timeout: 180_000 })
+  await page.screenshot({ path: `${SHOTS}/live-home.png`, fullPage: true })
+
+  const nav = page.getByRole('navigation', { name: '主要導覽' })
+  await expect(nav.getByRole('link').first()).toHaveText('今日')
+  await expect(nav.getByRole('link', { name: '今日' })).toHaveAttribute('aria-current', 'page')
+  await expect(nav.getByRole('button', { name: '其他工具' })).toHaveAttribute('aria-expanded', 'false')
+  await nav.getByRole('link', { name: '我的持股' }).click()
+  await expect(page.getByRole('heading', { name: '我的持股', level: 1 })).toBeVisible()
+  await expect(page).toHaveTitle('我的持股 · Stock Agent')
+  await expect(page.locator('#main')).toBeFocused()
+
+  await page.goto('/no-such-page')
+  await page.getByRole('link', { name: '回到首頁' }).click()
+  await expect(page.getByRole('heading', { name: '今日', level: 1 })).toBeVisible()
+})
+
+test('a visitor’s home page shows the market and one invitation to sign in, not one per private card', async ({ page, consoleErrors }) => {
+  void consoleErrors
+  await page.goto('/')
+  const main = page.getByRole('main')
+  await expect(main.getByRole('region', { name: '加權指數' })).toBeVisible()
+  await expect(main.getByRole('link', { name: '登入', exact: true })).toHaveCount(1)
+  await expect(main.getByText('你的帳號會保存')).toBeVisible()
+  for (const card of ['這個月的排名', '我的持股', '觀察清單']) await expect(main.getByRole('region', { name: card }), card).toHaveCount(0)
+  await page.screenshot({ path: `${SHOTS}/live-home-visitor.png`, fullPage: true })
+})
+
+test('the ranking shows this month’s 20 stocks, a five-year backtest kept in the address, and a past decision, each simulated figure named as one', async ({ page, consoleErrors }) => {
+  void consoleErrors
+  await signIn(page)
+  await page.goto('/ranking')
+  await expect(page.getByRole('heading', { name: '月營收排名', level: 1 })).toBeVisible()
+  // The first answer after a server start reads the whole history, which can take a minute.
+  const latest = page.getByRole('table', { name: '這個月的排名' })
+  await expect(latest).toBeVisible({ timeout: 180_000 })
+  await expect(latest.getByRole('row'), 'the header and 20 stocks').toHaveCount(21)
+  const served = (await apiGet(page, '/v1/rankings/latest')) as { stocks: { stock_id: string }[] }
+  await expect(latest.getByRole('row').nth(1), 'the first row is the server’s first stock').toContainText(served.stocks[0]!.stock_id)
+
+  await page.getByRole('button', { name: '近 5 年' }).click()
+  await expect(page).toHaveURL(/[?&]period=5Y(&|$)/)
+  await expect(page.getByRole('button', { name: '近 5 年' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByTestId('headline')).toBeVisible({ timeout: 180_000 })
+  await expect(page.getByRole('heading', { name: /^回測（模擬）/ })).toBeVisible()
   await page.reload()
-  await expect(page.getByText(/需要 \d+ 根/)).toBeVisible()
-  await page.evaluate(() => window.scrollTo(0, 0))
-  await page.screenshot({ path: `${SHOTS}/live-overview-signed-in.png`, fullPage: true })
+  await expect(page.getByRole('button', { name: '近 5 年' }), 'the period survives a reload').toHaveAttribute('aria-pressed', 'true', { timeout: 180_000 })
+
+  const months = page.getByRole('region', { name: '回測：過去每一次決策' })
+  await expect(months.getByText(/^模擬：/), 'the past decisions say they are simulated').toBeVisible()
+  await expect(page.getByRole('main').getByText('僅供研究參考，不構成投資建議。').first()).toBeVisible()
+  await page.screenshot({ path: `${SHOTS}/live-ranking.png`, fullPage: true })
+
+  await months.getByRole('link', { name: /^查看 .+ 的排名$/ }).nth(1).click()
+  await expect(page).toHaveURL(/[?&]month=\d{4}-\d{2}-\d{2}/)
+  await expect(page).toHaveURL(/[?&]period=5Y(&|$)/)
+  const decision = page.getByRole('dialog', { name: /.+ 的排名$/ })
+  await expect(decision.getByRole('table').getByRole('row'), 'the header and that decision’s 20 stocks').toHaveCount(21, { timeout: 60_000 })
+  await page.reload()
+  await expect(page.getByRole('dialog', { name: /.+ 的排名$/ }), 'the open decision survives a reload').toBeVisible({ timeout: 180_000 })
 })
 
 test('the research target can be changed through the listing search, kept in the address, and set back', async ({ page, consoleErrors }) => {
   void consoleErrors
-  await page.goto('/')
+  await page.goto('/market')
   await page.getByRole('button', { name: '更換' }).click()
   await page.getByRole('combobox').fill('2330')
   await page.getByRole('option', { name: /2330/ }).first().click({ timeout: 120_000 })
-  await expect(page).toHaveURL(/\?target=2330$/)
+  await expect(page).toHaveURL(/\/market\?target=2330$/)
   const trend = page.getByRole('region', { name: /2330/ })
   await expect(trend.getByRole('heading', { level: 2 })).toContainText('台積電', { timeout: 60_000 })
   await expect(trend.getByRole('heading', { level: 2 })).not.toContainText('預設')
   await page.reload()
   await expect(page.getByRole('region', { name: /2330/ }).getByRole('heading', { level: 2 })).toContainText('台積電', { timeout: 60_000 })
   await page.getByRole('link', { name: '改回加權指數' }).click()
-  await expect(page).toHaveURL(/\/$/)
+  await expect(page).toHaveURL(/\/market$/)
   await expect(page.getByRole('region', { name: /加權指數/ }).getByRole('heading', { level: 2 })).toContainText('指數 · 預設')
 })
 
@@ -145,9 +217,10 @@ test('after switching the strategy in use, the stock page evaluates with the new
     await expect(choice).toHaveAttribute('aria-checked', 'true')
   }
   const activateOwn = async (name: string) => {
-    const row = page.getByRole('listitem', { name })
+    // An instance the suite ran on before holds a copy of this name from each run; any one of them will do.
+    const row = page.getByRole('listitem', { name }).first()
     await row.getByRole('button', { name: '使用', exact: true }).click()
-    await expect(row.getByText('使用中')).toBeVisible()
+    await expect(row.getByText('使用中', { exact: true })).toBeVisible()
   }
   const evaluatedWith = async (name: string) => {
     await page.getByRole('button', { name: '搜尋股票' }).click()
@@ -167,7 +240,7 @@ test('after switching the strategy in use, the stock page evaluates with the new
 test('a card whose request fails says so and loads on retry, and going offline is announced', async ({ page }) => {
   let failing = true
   await page.route('**/v1/market/most-traded', (route) => (failing ? route.fulfill({ status: 503, json: { detail: 'The exchange listing is unavailable.' } }) : route.continue()))
-  await page.goto('/')
+  await page.goto('/market')
   const most = page.getByRole('region', { name: '成交熱絡' })
   await expect(most.getByText('無法載入成交排行')).toBeVisible({ timeout: 30_000 })
   await expect(most.getByText('行情資料暫時無法取得，請稍後再試。')).toBeVisible()
@@ -202,9 +275,13 @@ test('search finds a listed stock, its page shows real bars and the backend eval
 
   await page.getByRole('link', { name: '觀察清單' }).first().click()
   await page.getByRole('button', { name: '編輯' }).click()
-  await page.getByRole('button', { name: /把 .* 從手動觀察清單移除/ }).first().click()
-  await expect(page.getByText('觀察清單是空的')).toBeVisible()
-  await expect.poll(manual).toEqual([])
+  // The site may hold other watched stocks: only this one leaves.
+  const others = (await manual()).filter((stock) => stock !== '2330')
+  const row = page.getByRole('row', { name: /2330/ })
+  await row.getByRole('button', { name: /^把 .+ 從手動觀察清單移除$/ }).click()
+  await expect(row).toHaveCount(0)
+  await expect.poll(manual).toEqual(others)
+  if (others.length === 0) await expect(page.getByText('觀察清單是空的')).toBeVisible()
 })
 
 test('a specific-stock run starts after confirming its AI cost, ends, and keeps its report', async ({ page, consoleErrors }) => {
@@ -241,7 +318,7 @@ const VIEWPORTS = [
   { name: 'desktop', width: 1440, height: 900 },
   { name: 'mobile', width: 390, height: 844 },
 ]
-const PAGES = ['/', '/runs', '/strategies', '/strategies/new', '/valuation', '/watchlist', '/account', '/admin/settings', '/stocks/2330']
+const PAGES = ['/', '/market', '/ranking', '/holdings', '/watchlist', '/account/sinopac', '/settings', '/runs', '/account', '/valuation', '/strategies', '/backtest', '/strategies/new', '/admin/users', '/admin/settings', '/stocks/2330']
 
 for (const viewport of VIEWPORTS) {
   test(`${viewport.name}: every page fits without horizontal overflow, in both themes`, async ({ page, consoleErrors }) => {
@@ -264,7 +341,8 @@ test('English, light theme, keyboard skip link and focus', async ({ page, consol
   await page.goto('/')
   await page.getByRole('button', { name: '語言' }).click()
   await page.getByRole('menuitem', { name: 'English' }).click()
-  await expect(page.getByRole('heading', { name: 'Market overview', level: 1 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Today', level: 1 })).toBeVisible()
+  await expect(page).toHaveTitle('Today · Stock Agent')
   await page.getByRole('button', { name: 'Theme' }).click()
   await page.getByRole('menuitem', { name: 'Light' }).click()
   await expect(page.locator('html')).not.toHaveClass(/dark/)
@@ -272,7 +350,7 @@ test('English, light theme, keyboard skip link and focus', async ({ page, consol
   await expect(page.locator('html')).toHaveAttribute('lang', 'en')
   await page.waitForLoadState('networkidle')
   await page.waitForTimeout(1000)
-  await page.screenshot({ path: `${SHOTS}/light-en-overview.png`, fullPage: true })
+  await page.screenshot({ path: `${SHOTS}/light-en-home.png`, fullPage: true })
 
   await page.keyboard.press('Tab')
   await expect(page.getByRole('link', { name: 'Skip to content' })).toBeFocused()

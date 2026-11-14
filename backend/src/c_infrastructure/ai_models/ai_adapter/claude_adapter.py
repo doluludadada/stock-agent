@@ -45,6 +45,9 @@ class ClaudeAdapter(BaseAIAdapter):
                 reply = await stream.get_final_message()
 
             content = "".join(block.text for block in reply.content if block.type == "text")
+            self._logger.debug(
+                f"[Claude] {self._model_name}: {reply.usage.input_tokens} input, {reply.usage.output_tokens} output tokens."
+            )
 
             if reply.stop_reason == "refusal":
                 self._logger.error(f"Claude declined the request (request {reply._request_id}).")

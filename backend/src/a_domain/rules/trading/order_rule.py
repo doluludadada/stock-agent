@@ -13,6 +13,7 @@ from a_domain.rules.collect.freshness import DataFreshnessRule
 from a_domain.rules.trading.tick import LimitPriceRule
 from a_domain.types.enums import (
     ExecutionProvider,
+    FeatureVisibility,
     OrderPricing,
     OrderType,
     Permission,
@@ -139,21 +140,71 @@ class BuyLimitRule:
 
 
 @dataclass(frozen=True)
+class RealBrokerOrdererRule:
+    """
+    Why `user` may not order on the real `broker`, or None. The site's own switch comes first: `ordering` is whom the
+    site lets order on the broker now, the visibility of the broker's ordering feature (features.*) as the site holds
+    it at this send, not as the run's settings held it at its start, and an order of anyone else is refused, of
+    everyone while it is off, whatever the environment and the user's role. Then the user, as saved now, must be active
+    with USE_REAL_BROKER.
+    """
+
+    def apply(self, broker: ExecutionProvider, user: User | None, ordering: FeatureVisibility) -> tuple[RejectReason, str] | None:
+        if not ordering.shown_to(user.permissions if user is not None else frozenset()):
+            return RejectReason.ORDERING_OFF, f"this site has ordering on {broker.value} off: features.{broker.ordering_feature.value}"
+
+        if user is None or user.status != UserStatus.ACTIVE or Permission.USE_REAL_BROKER not in user.permissions:
+            return RejectReason.REAL_BROKER_REFUSED, f"only an active administrator orders on {broker.value}"
+
+        return None
+
+
+@dataclass(frozen=True)
+class BrokerLoginRule:
+    """
+    Why a real broker's login may not take an order now, or None: it must be up, and on the server the environment
+    trades on (`simulation`: Shioaji's simulation server in dev and test, the real account in prod).
+    """
+
+    simulation: bool
+
+    def apply(self, link: BrokerLink) -> tuple[RejectReason, str] | None:
+        if not link.up:
+            return RejectReason.BROKER_LOGIN_DOWN, f"the {link.broker.value} login is down"
+
+        if link.simulation != self.simulation:
+            server = "simulation" if self.simulation else "production"
+            return (
+                RejectReason.BROKER_SERVER_MISMATCH,
+                f"the {link.broker.value} login is not on the {server} server this environment trades on",
+            )
+
+        return None
+
+
+@dataclass(frozen=True)
 class BrokerAccessRule:
     """
     Why an order may not go to the broker it would reach now, or None, checked right before the send: it must be the
-    broker its run chose when it started, one the site's audience and order pricing offer (`brokers`), and for a real
-    broker (ExecutionProvider.real) the user, as saved now, must be active with USE_REAL_BROKER, the broker's login must
-    be up, and on the server the environment trades on (`simulation`: Shioaji's simulation server in dev and test, the
-    real account in prod). A real broker's BUY is then held to its limits (BuyLimitRule).
+    broker its run chose when it started, and one the site's audience and order pricing offer (`brokers`). For a real
+    broker (ExecutionProvider.real) three rules then decide, in this order: who may order on it at all
+    (RealBrokerOrdererRule: the site's ordering switch as it is now, `ordering`, then the user as saved now), its login
+    (BrokerLoginRule), and a BUY's limits (BuyLimitRule).
     """
 
     brokers: frozenset[ExecutionProvider]
-    simulation: bool
+    orderer_rule: RealBrokerOrdererRule
+    login_rule: BrokerLoginRule
     limit_rule: BuyLimitRule
 
     def apply(
-        self, order: Order, run_broker: ExecutionProvider, link: BrokerLink, user: User | None, earlier_buys: Sequence[Order]
+        self,
+        order: Order,
+        run_broker: ExecutionProvider,
+        link: BrokerLink,
+        user: User | None,
+        ordering: FeatureVisibility,
+        earlier_buys: Sequence[Order],
     ) -> tuple[RejectReason, str] | None:
         broker = link.broker
 
@@ -166,18 +217,8 @@ class BrokerAccessRule:
         if not broker.real:
             return None
 
-        if user is None or user.status != UserStatus.ACTIVE or Permission.USE_REAL_BROKER not in user.permissions:
-            return RejectReason.REAL_BROKER_REFUSED, f"only an active administrator orders on {broker.value}"
-
-        if not link.up:
-            return RejectReason.BROKER_LOGIN_DOWN, f"the {broker.value} login is down"
-
-        if link.simulation != self.simulation:
-            server = "simulation" if self.simulation else "production"
-            return (
-                RejectReason.BROKER_SERVER_MISMATCH,
-                f"the {broker.value} login is not on the {server} server this environment trades on",
-            )
+        if (refusal := self.orderer_rule.apply(broker, user, ordering) or self.login_rule.apply(link)) is not None:
+            return refusal
 
         return self.limit_rule.apply(order, earlier_buys)
 

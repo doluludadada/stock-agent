@@ -35,7 +35,9 @@ Each rule makes one decision in `apply`:
 | `tick.py`       | `TickSizeRule`            | The exchange tick of a price                                                               |
 |                 | `LimitPriceRule`          | An order's limit price: the decided price as a tick, up for a BUY and down for a SELL      |
 | `order_rule.py` | `OrderGateRule`           | Why an order may not be sent now: continuous trading, quote age                            |
-|                 | `BrokerAccessRule`        | Why an order may not reach its broker now: the run's choice, a real broker's user, login, server |
+|                 | `RealBrokerOrdererRule`   | Why a user may not order on a real broker: the site's ordering switch as it is at the send, then the user |
+|                 | `BrokerLoginRule`         | Why a real broker's login may not take an order now: down, or on another server than the environment's |
+|                 | `BrokerAccessRule`        | Why an order may not reach its broker now: the run's choice, a real broker's orderer, login, limits |
 |                 | `BuyLimitRule`            | Why a real broker's BUY may not be sent: its value and the day's BUYs above the limits     |
 |                 | `OrderRule`               | The order for a decision: LIMIT IOC at its limit price, or REJECTED with the gate's reason |
 | `execution.py`  | `OrderAcceptanceRule`     | Why any broker refuses an order unsent: not LIMIT, ROD, or more than the account covers    |
@@ -46,6 +48,8 @@ Each rule makes one decision in `apply`:
 |                 | `EquityRule`              | The equity a run sizes its BUYs on: cash plus positions at the run's latest prices         |
 |                 | `SnapshotValueRule`       | A snapshot's account marked at a day's closes                                              |
 |                 | `FillSnapshotRule`        | The account right after a fill: the filled stock at its fill price, others at the latest   |
+| `holdings.py`   | `LastCloseRule`           | A stock's last close in the held daily history and its session                             |
+|                 | `PortfolioAnalysisRule`   | The holdings of every source as one portfolio: values, weights, concentration, scores      |
 |                 | `EquityCurveRule`         | The account at the end of each trading day since the first snapshot                        |
 |                 | `AccountAsOfRule`         | The account at the end of a day                                                            |
 |                 | `LatestMarkRule`          | Each stock's latest price: its realtime quote, else its last daily close                   |

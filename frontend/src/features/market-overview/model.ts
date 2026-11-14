@@ -73,3 +73,6 @@ export function listedChange(today: Schemas['Ohlcv'] | null | undefined): { valu
   const reference = today.close - today.change
   return { value: today.change, ratio: reference === 0 ? 0 : today.change / reference }
 }
+
+/** The color a breadth mood reads in: a market color only where the session leaned one way. */
+export const MOOD_TONE = { broadUp: 'text-up', leaningUp: 'text-up', mixed: 'text-foreground', leaningDown: 'text-down', broadDown: 'text-down' } as const

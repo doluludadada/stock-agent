@@ -1,8 +1,9 @@
 """
 `just ranking`: the monthly stock ranking at the latest decision session the held daily history holds
 (Pipeline.load_ranking). `just ranking-backtest 2017-07-01 2026-11-11`: the ranking replayed over a period against its
-benchmark (Pipeline.run_ranking_backtest), with `--holdings` every decision's stocks too. Both read only the held history
-and the archived monthly revenue (`just backfill-history`), start without a broker login, order nothing and ask no AI.
+benchmark (Pipeline.run_ranking_backtest), with `--holdings` every decision's stocks too. Both read only the held
+history and the archived monthly revenue (`just backfill-history`), start without a broker login, order nothing and
+ask no AI.
 """
 
 import argparse

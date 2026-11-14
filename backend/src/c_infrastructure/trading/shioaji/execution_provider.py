@@ -1,7 +1,8 @@
 import asyncio
 import math
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime
+from dataclasses import replace
+from datetime import UTC, date, datetime
 from typing import override
 
 import c_infrastructure.trading.shioaji.sdk_reporting  # noqa: F401
@@ -13,9 +14,9 @@ from shioaji.constant import Action, OrderType as BrokerTimeInForce, Status, Sto
 from shioaji.contracts import Stock as StockContract
 from shioaji.data import Snapshot
 from shioaji.order import Order as BrokerOrder, StockOrder, Trade
-from shioaji.position import SettlementV1, StockPosition
+from shioaji.position import SettlementV1, StockPosition, StockProfitLoss
 
-from a_domain.model.trading.account import Account, Position
+from a_domain.model.trading.account import Account, BrokerageStatement, BrokerFill, Mark, Position, Settlement
 from a_domain.model.trading.order import ExchangeOrder, Order
 from a_domain.ports.market.broker_quote_provider import IBrokerQuoteProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
@@ -33,6 +34,7 @@ BROKER_LOT: Mapping[LotKind, StockOrderLot] = {LotKind.BOARD_LOT: StockOrderLot.
 """A board-lot order's quantity counts lots, an intraday odd-lot order's counts shares."""
 
 BROKER_ACTION: Mapping[TradeAction, Action] = {TradeAction.BUY: Action.Buy, TradeAction.SELL: Action.Sell}
+TRADE_ACTION: Mapping[Action, TradeAction] = {action: trade_action for trade_action, action in BROKER_ACTION.items()}
 
 BROKER_TIME_IN_FORCE: Mapping[TimeInForce, BrokerTimeInForce] = {
     TimeInForce.IOC: BrokerTimeInForce.IOC,
@@ -172,13 +174,53 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
             raise RuntimeError("Shioaji has no stock account: ShioajiQuoteProvider.connect() logs in first")
 
         cash = await self.cash(stock_account)
-        rows = await self.request(self._client.list_positions, stock_account, unit=Unit.Share)
+        positions = [replace(position, mark=None) for position in await self.open_positions()]
+
+        return Account(account_id=stock_account.account_id, cash=cash, positions=positions)
+
+    @override
+    def stock_account(self) -> StockAccount:
+        stock_account = self._client.stock_account
+
+        if stock_account is None:
+            raise RuntimeError("Shioaji has no stock account: ShioajiQuoteProvider.connect() logs in first")
+
+        return stock_account
+
+    @override
+    async def statement(self, sales_from: date, today: date) -> BrokerageStatement:
+        stock_account = self.stock_account()
+        balance = await self.request(self._client.account_balance)
+
+        if balance.errmsg:
+            raise RuntimeError("Shioaji answered the account balance with an error message")
+
+        settlements = await self.request(self._client.settlements, stock_account)
+
+        return BrokerageStatement(
+            read_at=datetime.now(UTC),
+            simulation=self._client.simulation,
+            balance=balance.acc_balance,
+            settlements=[
+                Settlement(settles_on=settlement.date, amount=settlement.amount)
+                for settlement in settlements
+                if isinstance(settlement, SettlementV1)
+            ],
+            positions=await self.open_positions(),
+            fills=await self.fills(today),
+            sales=await self.sales(sales_from, today),
+            sales_from=sales_from,
+        )
+
+    @override
+    async def open_positions(self) -> list[Position]:
+        rows = await self.request(self._client.list_positions, self.stock_account(), unit=Unit.Share)
         stock_rows = [row for row in rows if isinstance(row, StockPosition)]
 
         if len(stock_rows) < len(rows):
             raise RuntimeError("Shioaji listed a futures position for the stock account")
 
-        positions = []
+        positions, now = [], datetime.now(UTC)
 
         for row in stock_rows:
             if row.quantity <= 0 or row.price <= 0 or row.direction != Action.Buy or row.cond != StockOrderCond.Cash:
@@ -188,9 +230,49 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
                 )
                 continue
 
-            positions.append(Position(stock_id=row.code, quantity=row.quantity, average_cost=row.price))
+            mark = Mark(price=row.last_price, at=now, unrealized_pnl=row.pnl) if row.last_price > 0 else None
+            positions.append(Position(stock_id=row.code, quantity=row.quantity, average_cost=row.price, mark=mark))
 
-        return Account(account_id=stock_account.account_id, cash=cash, positions=positions)
+        return positions
+
+    @override
+    async def fills(self, today: date) -> list[BrokerFill]:
+        stock_account = self.stock_account()
+        await self.request(self._client.update_status, account=stock_account)
+        trades = await self.request(self._client.list_trades)
+
+        return [
+            BrokerFill(
+                stock_id=trade.contract.code,
+                action=TRADE_ACTION[trade.order.action],
+                quantity=deal.quantity * self._shares_per_unit[trade.order.order_lot],
+                price=deal.price,
+                filled_on=today,
+            )
+            for trade in trades
+            if trade.order.account == stock_account and isinstance(trade.order, StockOrder)
+            for deal in trade.status.deals or []
+            if deal.quantity > 0 and deal.price > 0
+        ]
+
+    @override
+    async def sales(self, first: date, last: date) -> list[BrokerFill]:
+        rows = await self.request(
+            self._client.list_profit_loss, self.stock_account(), first.isoformat(), last.isoformat(), unit=Unit.Share
+        )
+
+        return [
+            BrokerFill(
+                stock_id=row.code,
+                action=TradeAction.SELL,
+                quantity=row.quantity,
+                price=row.price,
+                filled_on=date.fromisoformat(row.date),
+                realized_pnl=row.pnl,
+            )
+            for row in rows
+            if isinstance(row, StockProfitLoss) and row.quantity > 0 and row.price > 0
+        ]
 
     @override
     async def place_order(self, order: Order) -> Order:

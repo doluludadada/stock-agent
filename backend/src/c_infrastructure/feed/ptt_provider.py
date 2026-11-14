@@ -1,6 +1,6 @@
 import re
 from collections.abc import Mapping
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import override
 
 import httpx
@@ -11,6 +11,7 @@ from a_domain.model.market.post_listing import PostListing
 from a_domain.ports.market.social_media_provider import ISocialMediaProvider
 from a_domain.ports.market.stock_provider import IStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
+from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.types.enums import ContentType, InformationSource
 from b_application.config.app_config import AppConfig
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
@@ -19,11 +20,15 @@ from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 class PttProvider(ISocialMediaProvider):
     """
     PTT Stock board scraper. Searches /bbs/Stock/search?q=<tag> and pages back until the date cutoff
-    is reached or enough articles are collected.
+    is reached or enough articles are collected. The board dates a post by its Taipei month and day, so every day here
+    is the market clock's, whatever zone the server runs in.
     """
 
-    def __init__(self, config: AppConfig, logger: ILoggingProvider, stock_provider: IStockProvider) -> None:
+    def __init__(
+        self, config: AppConfig, logger: ILoggingProvider, stock_provider: IStockProvider, market_clock: IMarketClock
+    ) -> None:
         self._config = config
+        self._market_clock = market_clock
         self._ptt = config.sources.ptt
         self._logger = logger
         self._stock_provider = stock_provider
@@ -43,7 +48,7 @@ class PttProvider(ISocialMediaProvider):
             self._logger.debug("Loading TWSE/TPEX universe...")
             self._stock_ids = {stock.stock_id for stock in await self._stock_provider.get_all()}
 
-        since = datetime.now().date() - timedelta(days=self._config.collect_rules.ptt_lookback_days)
+        since = self._market_clock.today() - timedelta(days=self._config.collect_rules.ptt_lookback_days)
         articles: list[Article] = []
 
         for tag in self._config.collect_rules.ptt_tags:
@@ -58,11 +63,29 @@ class PttProvider(ISocialMediaProvider):
         return result
 
     @override
+    async def fetch_stock_posts(self, stock_id: str, limit: int) -> list[Article]:
+        page = await self.fetch_page(self._search_url, {"q": stock_id})
+        now = self._market_clock.now()
+
+        return [
+            Article(
+                stock_id=stock_id,
+                source=InformationSource.PTT_STOCK,
+                title=listing.title,
+                content="",
+                url=listing.url,
+                published_at=datetime.combine(listing.posted_on, datetime.min.time(), tzinfo=TAIWAN_TIMEZONE),
+                fetched_at=now,
+            )
+            for listing in self.parse_listings(page or "")[:limit]
+        ]
+
+    @override
     def save_social_media_data(self, articles: list[Article]) -> None:
         if not articles:
             return
 
-        current_time = datetime.now()
+        current_time = self._market_clock.now()
         archive_directory = self._config.project_root / self._config.folder.buzz_archive_dir / current_time.strftime("%Y-%m-%d")
         archive_directory.mkdir(parents=True, exist_ok=True)
         archive_path = archive_directory / f"ptt_buzz_{current_time.strftime('%H%M%S')}.md"
@@ -126,7 +149,7 @@ class PttProvider(ISocialMediaProvider):
 
     @override
     def parse_listings(self, page: str) -> list[PostListing]:
-        today = datetime.now().date()
+        today = self._market_clock.today()
         listings: list[PostListing] = []
 
         for row in BeautifulSoup(page, "html.parser").select("div.r-ent"):
@@ -208,7 +231,7 @@ class PttProvider(ISocialMediaProvider):
             url=listing.url,
             content_type=ContentType.ANALYSIS,
             published_at=datetime.combine(listing.posted_on, datetime.min.time(), tzinfo=TAIWAN_TIMEZONE),
-            fetched_at=datetime.now(UTC),
+            fetched_at=self._market_clock.now(),
             engagement=push_count + boo_count + arrow_count,
             raw_metadata={"push": push_count, "boo": boo_count, "arrow": arrow_count},
         )

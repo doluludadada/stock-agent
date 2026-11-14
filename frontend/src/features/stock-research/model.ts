@@ -1,6 +1,78 @@
 import type { DailyBar } from '@/shared/api'
 import { CHART_RANGES, sessionDate } from '@/shared/lib/chart-range'
-import type { StockFinancials, StockTechnical } from './api'
+import type { StockAnalysis, StockFinancials, StockNews, StockTechnical } from './api'
+
+export type RevenueMonth = StockAnalysis['revenue']['months'][number]
+export type QuarterResult = StockAnalysis['earnings']['quarters'][number]
+export type Reading = StockAnalysis['readings'][number]
+export type NewsItem = StockNews['items'][number]
+
+/**
+ * How a reading sounds: a rise or a fall takes its direction's icon, a short history is a caution, a missing figure
+ * is plain absence, and a valuation against its median takes no side. The sentence comes from the dictionary by kind.
+ */
+export const READING_TONE = {
+  revenue_accelerating: 'up',
+  revenue_growing: 'up',
+  eps_up: 'up',
+  revenue_slowing: 'down',
+  revenue_shrinking: 'down',
+  eps_down: 'down',
+  revenue_history_short: 'short',
+  eps_history_short: 'short',
+  valuation_history_short: 'short',
+  no_revenue: 'none',
+  no_eps: 'none',
+  no_valuation: 'none',
+  no_pe: 'none',
+  pe_above_median: 'plain',
+  pe_below_median: 'plain',
+  pe_at_median: 'plain',
+} as const satisfies Record<Reading['kind'], 'up' | 'down' | 'short' | 'none' | 'plain'>
+
+export type ReadingTone = (typeof READING_TONE)[Reading['kind']]
+
+/** Three years of months show a trend and its seasons; the chart draws the latest of them, oldest first. */
+export const CHART_MONTHS = 36
+
+export function chartMonths(months: readonly RevenueMonth[]): RevenueMonth[] {
+  return months.slice(-CHART_MONTHS)
+}
+
+/** The sources the backend can name, each with how its time reads: a board's post and TWSE's news carry a day only. */
+export const NEWS_SOURCES = {
+  twse_mops: { dayOnly: false },
+  twse_news: { dayOnly: true },
+  news_media: { dayOnly: false },
+  ptt_stock: { dayOnly: true },
+  ptt_gossiping: { dayOnly: true },
+  reunion: { dayOnly: false },
+} as const satisfies Record<NewsItem['source'], { dayOnly: boolean }>
+
+/**
+ * A third party's address is a link only when it is plain http or https: anything else (`javascript:`, `data:`, a
+ * relative path) gets no link.
+ */
+export function outboundUrl(url: string | null): string | null {
+  if (!url) return null
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.href : null
+  } catch {
+    return null
+  }
+}
+
+/** An open-data item's text, unless it only repeats the title, as TWSE's own news does. */
+export function newsText(item: NewsItem): string | null {
+  const text = item.open_text?.trim()
+  return text && text !== item.title.trim() ? text : null
+}
+
+/** The quarters that hold a figure worth a row, newest first. */
+export function shownQuarters(quarters: readonly QuarterResult[]): QuarterResult[] {
+  return quarters.filter((quarter) => quarter.eps_year_to_date !== null || quarter.gross_margin !== null || quarter.net_margin !== null).reverse()
+}
 
 type TechnicalReport = NonNullable<StockTechnical['report']>
 

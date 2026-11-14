@@ -49,9 +49,8 @@ export function UsersPage() {
   const users = useUsers()
   const list = users.data ?? []
   return (
-    <div className="space-y-5">
+    <div className="page-stack">
       <PageHeader
-        eyebrow={t('users.eyebrow')}
         title={t('users.title')}
         description={
           users.data
@@ -60,7 +59,7 @@ export function UsersPage() {
         }
       />
       <RequireSignIn needs="manage_users" layout="page" reason={t('users.signIn')}>
-        <div className="grid items-start gap-4 lg:gap-5 xl:grid-cols-12">
+        <div className="card-grid xl:grid-cols-12">
           <div className="min-w-0 xl:col-span-8">
             {users.isPending ? (
               <Skeleton className="h-72 rounded-2xl" />
@@ -132,7 +131,7 @@ function UserList({ users }: { users: User[] }) {
               <span className={cn('truncate', user.status === 'deactivated' && 'text-muted-foreground')}>{user.username}</span>
               {user.user_id === actorId && <span className="rounded-full border px-1.5 text-xs font-normal text-muted-foreground">{t('users.you')}</span>}
             </p>
-            <p className="truncate text-xs text-muted-foreground">{user.email}</p>
+            <p className="text-xs break-all text-muted-foreground">{user.email}</p>
             <p className="mt-1.5 flex flex-wrap items-center gap-2 md:hidden">
               <RoleBadge kind={user.role} />
               <Status user={user} />

@@ -13,6 +13,7 @@ from support.harness import (
     MEMBER_PASSWORD,
     build_harness,
     falling_history,
+    harness_config,
     harness_settings,
     open_harness_switch,
     rising_history,
@@ -44,12 +45,16 @@ ORDERING_WRITES = [
     ("POST", "/v1/runs/intraday", {}),
     ("POST", f"/v1/runs/{FOLLOWED_RUN}/manual-buy", {"stock_id": "2330", "quantity": 100}),
     ("POST", f"/v1/runs/{FOLLOWED_RUN}/follow", {}),
+    ("POST", "/v1/rankings/follow", {}),
 ]
 """
 The only writes that can lead to an order: Buzz, Intraday and a manual BUY, on the broker their `broker` query names,
-and a follow, on the mock account only.
+and a follow of a run or of the monthly ranking, on the mock account only.
 """
-VALUATION_WRITES = [("POST", "/v1/valuation/explanation", {"stock_id": "2330", "target_pe": 15})]
+VALUATION_WRITES = [
+    ("POST", "/v1/valuation/explanation", {"stock_id": "2330", "target_pe": 15}),
+    ("POST", "/v1/market/stocks/2330/brief", {}),
+]
 """Read-only, but each request is one paid AI call, so it is confirmed like a write."""
 
 WRITES = [
@@ -57,6 +62,8 @@ WRITES = [
     ("POST", "/v1/runs/specific-stocks", {"stock_ids": ["2330"]}),
     ("POST", "/v1/watchlist/manual", {"stock_ids": ["2330"]}),
     ("POST", "/v1/watchlist/manual/remove", {"stock_ids": ["2330"]}),
+    ("POST", "/v1/holdings/manual", {"stock_id": "2330", "quantity": 1000, "average_cost": 100}),
+    ("POST", "/v1/holdings/manual/remove", {"stock_id": "2330"}),
     ("PUT", "/v1/technical-settings", {"settings": settings_document()}),
 ]
 SAVED_BACKTEST = "00000000-0000-0000-0000-000000000002"
@@ -545,6 +552,16 @@ async def test_an_unknown_host_is_refused_before_any_route() -> None:
     assert (response.status_code, response.json()["detail"]) == (400, "Unknown host.")
 
 
+@pytest.mark.parametrize(("environment", "answer"), [(SystemEnvironment.DEV, 200), (SystemEnvironment.TEST, 404)])
+async def test_the_api_docs_are_served_on_a_developers_machine_only(environment: SystemEnvironment, answer: int) -> None:
+    harness = build_harness(config=harness_config().model_copy(update={"environment": environment}))
+
+    async with serve(harness, authorized=False) as client:
+        answers = [(await client.get(path)).status_code for path in ("/docs", "/redoc", "/openapi.json")]
+
+    assert answers == [answer] * 3
+
+
 async def test_api_answers_are_private_unframable_and_unsniffable() -> None:
     async with serve(build_harness()) as client:
         headers = (await client.get("/v1/technical-settings")).headers
@@ -566,7 +583,12 @@ async def test_the_api_writes_only_runs_watchlist_settings_and_settings_files_an
     writes = {(method, path) for method, path in every_write if not path.startswith("/v1/auth")}
 
     assert writes == {
-        (method, path.replace(FOLLOWED_RUN, "{run_id}").replace(SAVED_BACKTEST, "{backtest_id}"))
+        (
+            method,
+            path.replace(FOLLOWED_RUN, "{run_id}")
+            .replace(SAVED_BACKTEST, "{backtest_id}")
+            .replace("stocks/2330", "stocks/{stock_id}"),
+        )
         for method, path, _ in WRITES + RESET_WRITES + BACKTEST_WRITES + ORDERING_WRITES + VALUATION_WRITES
     }
     assert every_write - writes == {("POST", f"/v1/auth/{step}") for step in ("setup", "register", "sign-in", "sign-out")} | {
@@ -586,7 +608,7 @@ async def test_no_request_but_buzz_and_intraday_reaches_the_broker() -> None:
     async with serve(harness) as client:
         for method, path, body in WRITES:
             response = await write(client, method, path, body)
-            assert response.status_code in {200, 202}, (path, response.text)
+            assert response.status_code in {200, 202, 204}, (path, response.text)
 
             if response.status_code == 202:
                 await ended(client, response.json()["run_id"])

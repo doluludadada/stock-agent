@@ -270,6 +270,33 @@ async def drop_order_mode(connection: AsyncConnection) -> None:
         await connection.execute(text(statement))
 
 
+async def drop_ranking_records(connection: AsyncConnection) -> None:
+    """
+    Version 7 to 8: the site keeps no record of the ranking's decisions, so ranking_records, which version 7's startup
+    created, is dropped with its rows. A database that never held it changes only its stamp.
+    """
+    await connection.execute(text("DROP TABLE IF EXISTS ranking_records"))
+
+
+RANKING_FOLLOW_STEP = {
+    "sqlite": (),
+    "postgresql": ("ALTER TYPE workflow ADD VALUE 'RANKING_FOLLOW' AFTER 'FOLLOW'", "ALTER TYPE signalsource ADD VALUE 'RANKING'"),
+}
+"""
+add_ranking_follow's statements per database backend. On SQLite an enum is a VARCHAR as long as its longest name, which
+neither member lengthens, so only PostgreSQL's named ENUM types change.
+"""
+
+
+async def add_ranking_follow(connection: AsyncConnection) -> None:
+    """
+    Version 8 to 9: a run may follow the monthly ranking into the mock account, so the workflow enum gains
+    RANKING_FOLLOW and the signal source enum RANKING. No table or column changes, and no row.
+    """
+    for statement in RANKING_FOLLOW_STEP[connection.dialect.name]:
+        await connection.execute(text(statement))
+
+
 type UpgradeStep = Callable[[AsyncConnection], Awaitable[None]]
 
 UPGRADES: tuple[UpgradeStep, ...] = (
@@ -279,6 +306,8 @@ UPGRADES: tuple[UpgradeStep, ...] = (
     add_follows_and_drop_yahoo_history,
     drop_buzz_strategy,
     drop_order_mode,
+    drop_ranking_records,
+    add_ranking_follow,
 )
 """
 The steps that upgrade an older database in place, oldest first: UPGRADES[n - 1] turns version n into version n + 1. A

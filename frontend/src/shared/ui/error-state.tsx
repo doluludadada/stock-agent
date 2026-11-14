@@ -1,20 +1,20 @@
 import { CloudOff } from 'lucide-react'
 import { useTranslation } from '@/i18n'
-import { isApiError } from '@/shared/api'
+import { useErrorReason } from '@/shared/lib/error-reason'
 import { Button } from './button'
 import { StateBlock } from './state-block'
 
-/** A failed request, said in the user's terms: what went wrong by kind, with the server's own reason when it gave one. */
-export function ErrorState({ error, title, onRetry, className }: { error: unknown; title: string; onRetry?: () => void; className?: string }) {
+/** A failed request, said in the reader's language: what went wrong by the refusal's code, else by its kind. */
+export function ErrorState({ error, title, onRetry, framed, className }: { error: unknown; title: string; onRetry?: () => void; framed?: boolean; className?: string }) {
   const { t } = useTranslation()
-  const kind = isApiError(error) ? error.kind : 'server'
-  const detail = isApiError(error) && (kind === 'forbidden' || kind === 'invalid' || kind === 'notFound') ? error.message : ''
+  const reason = useErrorReason()
   return (
     <StateBlock
       icon={CloudOff}
       tone="danger"
       title={title}
-      description={[t(`errors.${kind}`), detail].filter(Boolean).join(' ')}
+      description={reason(error)}
+      framed={framed}
       className={className}
       action={
         onRetry && (

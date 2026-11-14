@@ -2,6 +2,7 @@ import { ArrowDown, ArrowLeft, CircleMinus, CirclePlus, CircleX, SearchX } from 
 import { useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { useLocale, useTranslation } from '@/i18n'
+import { usePageTitle } from '@/shared/lib/page-title'
 import { isApiError, useIsSignedIn, useStockHistory, type StockHistory } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
 import { HISTORY_BARS, summarize } from '@/shared/lib/chart-range'
@@ -22,8 +23,13 @@ import { ShowMore } from '@/shared/ui/show-more'
 import { Skeleton } from '@/shared/ui/skeleton'
 import { Stat } from '@/shared/ui/stat'
 import { StateBlock } from '@/shared/ui/state-block'
+import { AnalysisPanel } from './AnalysisPanel'
 import { useStockTechnical, type StockTechnical } from './api'
+import { SECTION_ANCHORS } from './brief'
+import { BriefPanel } from './BriefPanel'
 import { FinancialsPanel } from './FinancialsPanel'
+import { NewsPanel } from './NewsPanel'
+import { StockSummary } from './StockSummary'
 import { dayQuote, latestReadings, priceOverlays, reportChecks, yearRange, type Check } from './model'
 
 const OVERLAY_COLORS = ['--chart-ma-fast', '--chart-ma-slow'] as const
@@ -52,7 +58,7 @@ export function StockResearchPage({ code, actions, strategyName, ruleSentences, 
         icon={SearchX}
         title={t('notFound.title', { code })}
         description={t('notFound.description')}
-        className="rounded-2xl border bg-card py-12"
+        framed
         action={
           <Button asChild variant="outline">
             <Link to={paths.market}>{t('back')}</Link>
@@ -62,7 +68,7 @@ export function StockResearchPage({ code, actions, strategyName, ruleSentences, 
     )
   }
   if (history.isPending) return <Skeleton className="h-[32rem] rounded-2xl" />
-  if (history.isError) return <ErrorState error={history.error} title={t('loadFailed')} onRetry={() => void history.refetch()} className="rounded-2xl border bg-card py-12" />
+  if (history.isError) return <ErrorState error={history.error} title={t('loadFailed')} onRetry={() => void history.refetch()} framed />
   if (history.data.bars.length === 0) return <WithoutBars history={history.data} actions={actions} />
   return <Research history={history.data} actions={actions} strategyName={strategyName} ruleSentences={ruleSentences} ruleName={ruleName} />
 }
@@ -71,10 +77,11 @@ export function StockResearchPage({ code, actions, strategyName, ruleSentences, 
 function WithoutBars({ history, actions }: { history: StockHistory; actions: StockResearchPageProps['actions'] }) {
   const { t } = useTranslation('research')
   return (
-    <div className="space-y-5 lg:space-y-6">
+    <div className="page-stack">
       <StockHeader history={history} actions={actions} />
       <p className="text-sm text-muted-foreground">{t('noBars')}</p>
-      <FinancialsPanel stockId={history.stock.stock_id} />
+      <StockSummary stockId={history.stock.stock_id} />
+      <StockReading stockId={history.stock.stock_id} />
     </div>
   )
 }
@@ -84,6 +91,7 @@ function StockHeader({ history, actions }: { history: StockHistory; actions: Sto
   const format = useFormat()
   const summary = useMemo(() => summarize(history.bars, '1M'), [history.bars])
   const name = history.stock.name ?? history.stock.stock_id
+  usePageTitle(history.stock.name ? `${history.stock.name} ${history.stock.stock_id}` : history.stock.stock_id)
   return (
     <header className="space-y-3">
       <Link to={paths.market} className="-ml-1 inline-flex min-h-11 items-center gap-1.5 rounded-md px-1 text-sm text-muted-foreground hover:text-foreground md:min-h-8">
@@ -132,13 +140,19 @@ function Research({ history, actions, strategyName, ruleSentences, ruleName }: O
   const name = history.stock.name ?? history.stock.stock_id
 
   return (
-    <div className="space-y-5 lg:space-y-6">
+    <div className="page-stack">
       <StockHeader history={history} actions={actions} />
 
-      <div className="grid items-start gap-4 lg:gap-5 xl:grid-cols-12">
-        <Panel className="xl:col-span-8" title={t('chart.title')} description={t('chart.question')}>
-          <PriceTrend bars={history.bars} name={name} kind="price" overlays={overlays} quote={false} />
-        </Panel>
+      <StockSummary stockId={history.stock.stock_id} />
+
+      <BriefPanel stockId={history.stock.stock_id} />
+
+      <div className="card-grid xl:grid-cols-12">
+        <div id={SECTION_ANCHORS.price} className="xl:col-span-8">
+          <Panel title={t('chart.title')} description={t('chart.question')}>
+            <PriceTrend bars={history.bars} name={name} kind="price" overlays={overlays} quote={false} />
+          </Panel>
+        </div>
         <div className="grid content-start items-start gap-4 md:grid-cols-2 lg:gap-5 xl:col-span-4 xl:grid-cols-1">
           <DayPanel history={history} />
           <YearPanel history={history} />
@@ -150,10 +164,32 @@ function Research({ history, actions, strategyName, ruleSentences, ruleName }: O
         </div>
       </div>
 
-      <FinancialsPanel stockId={history.stock.stock_id} />
+      <StockReading stockId={history.stock.stock_id} />
 
       {signedIn && technical.data && <EvaluationDetails technical={technical.data} ruleSentences={ruleSentences} ruleName={ruleName} />}
     </div>
+  )
+}
+
+/**
+ * What the site holds about the company itself, which needs no run and no session: the financial analysis first, the
+ * news beside it from 1280 px, then the statements the analysis read.
+ */
+function StockReading({ stockId }: { stockId: string }) {
+  return (
+    <>
+      <div className="card-grid xl:grid-cols-12">
+        <div className="min-w-0 xl:col-span-8">
+          <AnalysisPanel stockId={stockId} />
+        </div>
+        <div id={SECTION_ANCHORS.news} className="min-w-0 xl:col-span-4">
+          <NewsPanel stockId={stockId} />
+        </div>
+      </div>
+      <div id={SECTION_ANCHORS.earnings}>
+        <FinancialsPanel stockId={stockId} />
+      </div>
+    </>
   )
 }
 
@@ -270,7 +306,7 @@ function EvaluationDetails({ technical, ruleSentences, ruleName }: { technical: 
   if (!technical.report) return null
   const checks = reportChecks(technical.report)
   return (
-    <div id="evaluation-details" className="scroll-mt-20 space-y-4 lg:space-y-5">
+    <div id="evaluation-details" className="card-stack scroll-mt-20">
       <Panel title={t('evaluation.detailsTitle')} description={t('evaluation.detailsQuestion')}>
         <div className="grid gap-x-8 gap-y-6 @2xl:grid-cols-2 @5xl:grid-cols-3">
           <CheckList icon={CircleX} tone="text-destructive" title={t('evaluation.hard')} checks={checks.hard} sentences={sentences} ruleName={name} />

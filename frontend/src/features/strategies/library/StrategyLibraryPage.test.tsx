@@ -91,6 +91,7 @@ describe('the strategy library', { timeout: 20_000 }, () => {
     expect(within(row).queryByRole('button', { name: 'Use' })).not.toBeInTheDocument()
     expect(within(row).getByRole('link', { name: 'Edit' })).toHaveAttribute('href', '/strategies/stg_mine/edit')
     expect(within(row).getByRole('link', { name: 'Copy Mine' })).toHaveAttribute('href', '/strategies/new?from=stg_mine')
-    expect(within(row).getByRole('button', { name: /^Delete Mine: / })).toBeDisabled()
+    expect(within(row).getByRole('button', { name: 'Delete Mine' })).toBeDisabled()
+    expect(within(row).getByRole('button', { name: 'Delete Mine' })).toHaveAccessibleDescription('The strategy in use cannot be deleted. Use another one first.')
   })
 })

@@ -1,15 +1,20 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { groupOf, sectionOf } from '@/features/admin-settings/form'
+import { headingOf, sectionOf } from '@/features/admin-settings/form'
 import { BUILT_IN_IDS, builtInJson } from '@/features/strategies/model/built-ins.test-support'
+import { EMPTY_DRAFT } from '@/features/holdings/model'
 import { CAVEATS, PRESET_KEYS } from '@/features/ranking/model'
-import { QUARTER_FIGURES } from '@/features/stock-research/model'
+import { NEWS_SOURCES, QUARTER_FIGURES, READING_TONE } from '@/features/stock-research/model'
 import { COMPARATORS, INDICATOR_CATALOG, INDICATOR_KINDS, RULE_EFFECTS } from '@/features/strategies/model/catalog'
 import openapi from '@/shared/api/openapi.json'
 import settingsFields from '@/shared/api/settings-fields.json'
 import zhRuleNames from './locales/zh-TW/rule-names'
-import { resources } from './resources'
+import { adminResources } from './admin-resources'
+import { resources as shared } from './resources'
+
+/** Every namespace: the ones every page downloads and the settings form's, which loads with its page. */
+const resources = { en: { ...shared.en, ...adminResources.en }, 'zh-TW': { ...shared['zh-TW'], ...adminResources['zh-TW'] } }
 
 type Tree = { [key: string]: string | Tree }
 
@@ -88,13 +93,18 @@ describe('translations', () => {
       ['valuation', 'epsUnavailable', ['not_loaded', 'not_reported', 'incomplete_history', 'source_failed']],
       ['valuation', 'peNotApplicable', ['eps_unavailable', 'eps_zero', 'eps_negative', 'invalid_price']],
       ['admin', 'form.section', [...new Set(SETTING_PATHS.map(sectionOf))]],
-      ['admin', 'form.group', [...new Set(SETTING_PATHS.flatMap((path) => groupOf(path) ?? []))]],
+      ['admin', 'form.heading', [...new Set(SETTING_PATHS.flatMap((path) => headingOf(path) ?? []))]],
+      ['admin', 'form.group', [...new Set([...settingsFields.map((field) => field.group), ...(openapi.components.schemas.SettingGroup.enum as string[])])].flatMap((group) => [`${group}.title`, `${group}.description`])],
+      ['admin', 'form.unit', openapi.components.schemas.SettingUnit.enum as string[]],
       ['admin', 'form.field', SETTING_PATHS],
       ['admin', 'form.help', SETTING_PATHS],
       ['admin', 'form.option', [...new Set(settingsFields.flatMap((field) => field.options))]],
       ['common', 'broker.name', openapi.components.schemas.ExecutionProvider.enum as string[]],
-      ['account', 'provider', openapi.components.schemas.ExecutionProvider.enum as string[]],
       ['account', 'page', (openapi.components.schemas.ExecutionProvider.enum as string[]).flatMap((broker) => [`${broker}.title`, `${broker}.description`])],
+      ['account', 'brokerage.server', ['simulation', 'live']],
+      ['holdings', 'source', openapi.components.schemas.HoldingSource.enum as string[]],
+      ['holdings', 'form.problem', Object.keys(EMPTY_DRAFT)],
+      ['holdings', 'form.refusal', ['unlisted', 'listingUnavailable', 'failed']],
       ['common', 'errors', ['unauthorized', 'forbidden', 'notFound', 'conflict', 'invalid', 'rateLimited', 'unavailable', 'network', 'server']],
       ['auth', 'role', openapi.components.schemas.Role.enum as string[]],
       ['auth', 'settings.provider', openapi.components.schemas.AiProvider.enum as string[]],
@@ -103,9 +113,9 @@ describe('translations', () => {
       ['auth', 'users.done', ['makeAdmin', 'makeUser', 'deactivate', 'reactivate', 'password']],
       ['auth', 'users.confirm', ['makeAdmin.title', 'makeUser.title', 'deactivate.title', 'reactivate.title']],
       ['auth', 'users.filter', ['all', 'administrator', 'user', 'deactivated']],
-      ['auth', 'problem', ['required', 'usernameFormat', 'emailFormat', 'passwordShort', 'passwordLong', 'mismatch', 'wrongCode', 'taken.username', 'taken.email']],
-      ['auth', 'alert', ['failed', 'closed', 'alreadySetUp', 'rateLimited']],
-      ['common', 'nav', ['overview', 'valuation', 'watchlist', 'account', 'settings', 'runs', 'strategies', 'backtest', 'ranking', 'builder', 'users', 'admin']],
+      ['auth', 'problem', ['required', 'usernameFormat', 'emailFormat', 'passwordShort', 'passwordLong', 'mismatch', 'wrongCode']],
+      ['auth', 'alert', ['failed', 'closed', 'alreadySetUp', 'taken', 'rateLimited']],
+      ['common', 'nav', ['home', 'overview', 'valuation', 'watchlist', 'holdings', 'account', 'brokerage', 'settings', 'runs', 'strategies', 'backtest', 'ranking', 'builder', 'users', 'admin']],
       ['backtest', 'verdict.result', ['up', 'down', 'flat']],
       ['backtest', 'verdict.index', ['ahead', 'behind', 'level', 'none']],
       ['backtest', 'exit', ['stopLoss', 'score', 'open', 'other']],
@@ -119,11 +129,22 @@ describe('translations', () => {
       ['ranking', 'record.headline', ['ahead', 'behind', 'level', 'alone', 'short']],
       ['ranking', 'curve.reading', ['log', 'linear']],
       ['ranking', 'caveats', CAVEATS.flatMap((caveat) => [`${caveat}.title`, `${caveat}.detail`])],
-      ['common', 'nav.section', ['research', 'mine', 'technical', 'admin']],
-      ['common', 'nav.note', ['technical']],
-      ['common', 'nav.tab', ['ranking', 'market', 'search', 'watchlist', 'account', 'more']],
+      ['common', 'nav.section', ['today', 'research', 'mine', 'tools', 'admin']],
+      ['common', 'nav.note', ['tools']],
+      ['common', 'nav.tab', ['home', 'ranking', 'search', 'holdings', 'more']],
+      ['common', 'auth.prompt.what', ['ranking', 'holdings', 'watchlist']],
+      ['auth', 'intro.points', ['ranking', 'holdings', 'market']],
       ['overview', 'index', openapi.components.schemas.MarketIndex.enum as string[]],
       ['research', 'financials.figure', QUARTER_FIGURES.map((figure) => figure.key)],
+      ['research', 'analysis.reading.kind', Object.keys(READING_TONE).flatMap((kind) => [`${kind}_one`, `${kind}_other`])],
+      ['research', 'analysis.valuation.ratio', ['pe', 'pb', 'yield']],
+      ['common', 'score.exclusion', openapi.components.schemas.RankingExclusion.enum as string[]],
+      ['research', 'news.source', Object.keys(NEWS_SOURCES)],
+      ['research', 'news.question', ['articles', 'openData']],
+      ['research', 'news.none', ['articles', 'openData']],
+      ['research', 'brief.kind', openapi.components.schemas.BriefSourceKind.enum as string[]],
+      ['research', 'brief.writtenIn', openapi.components.schemas.BriefLanguage.enum as string[]],
+      ['research', 'brief.part', ['company', 'movement']],
     ]
     for (const [namespace, family, values] of families) {
       for (const value of values) expect(lookup(namespace, `${family}.${value}`), `${namespace}:${family}.${value}`).toBeTypeOf('string')

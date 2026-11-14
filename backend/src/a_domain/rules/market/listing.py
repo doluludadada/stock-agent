@@ -58,8 +58,8 @@ class HistoryAdjustmentRule:
     Every action whose reference the exchange gives this way is adjusted, whatever its kind: the ratio alone cannot tell
     a cash dividend from a stock dividend or a split. Where the exchange compared the close to no reference (no change,
     or a change of 0 on a close unlike the one before, as TWSE writes X0.00 on an ex-dividend, ex-rights or
-    capital-reduction day), the reference is the one `references` holds of the bar's stamp, TWSE's ex-right reference of
-    that day. There is no factor rather than a wrong one where there is none, so such a day stays as listed, across a
+    capital-reduction day), the reference is the one `references` holds of the bar's stamp, its exchange's ex-right
+    reference of that day. There is no factor rather than a wrong one where there is none, so such a day stays as listed, across a
     session the archive missed, and, on an exchange whose change after a session the stock did not trade is from a moved
     reference (MarketType.changes_from_a_moved_reference), across such a session. `index` is the exchange index's close
     of each session the archive holds the market's closes of; an index close whose own change does not lead back to the

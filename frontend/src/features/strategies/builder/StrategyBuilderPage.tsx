@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { useTranslation } from '@/i18n'
+import { usePageTitle } from '@/shared/lib/page-title'
 import { paths } from '@/shared/config/paths'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
@@ -72,13 +73,14 @@ function BuilderSource({ mode }: StrategyBuilderPageProps) {
       />
     )
   }
-  return <Builder initial={source.strategy} isNew={source.isNew} />
+  return <Builder initial={source.strategy} isNew={source.isNew} name={mode.type === 'blank' ? mode.type : `${mode.type}:${mode.type === 'copy' ? mode.source : ''}:${mode.id}`} />
 }
 
-function Builder({ initial, isNew }: { initial: Strategy; isNew: boolean }) {
+/** `name` tells this draft from the other drafts the user may have open: the strategy edited, or the source of a copy. */
+function Builder({ initial, isNew, name }: { initial: Strategy; isNew: boolean; name: string }) {
   const { t } = useTranslation('builder')
   const navigate = useNavigate()
-  const { draft, edit, issues, attempted, dirty, save, saving, conflict, serverChanged, revision, blocker } = useStrategyDraft(initial)
+  const { draft, edit, issues, attempted, dirty, save, saving, conflict, serverChanged, revision, blocker } = useStrategyDraft(initial, name)
   const [refused, setRefused] = useState<{ rule: number | null; message: string }[]>([])
   const [expanded, setExpanded] = useState<Set<NodeId>>(() => {
     const first = initial.rules[0]?.condition.conditions[0]
@@ -126,7 +128,7 @@ function Builder({ initial, isNew }: { initial: Strategy; isNew: boolean }) {
       case 'invalid':
         toast.error(t('save.invalid', { count: errorCount }))
         requestAnimationFrame(() => {
-          const first = document.querySelector<HTMLElement>('[aria-invalid="true"], [data-invalid="true"]')
+          const first = document.querySelector<HTMLElement>('[aria-invalid="true"]')
           first?.focus()
           first?.scrollIntoView({ block: 'center', behavior: 'smooth' })
         })
@@ -272,9 +274,11 @@ function StrategyHeading({ strategy, edit, issue }: { strategy: Strategy; edit: 
   const [scoringOpen, setScoringOpen] = useState(false)
   const nameIssue = issue('name')
   const keys: (keyof Scoring)[] = ['baseScore', 'blockFailurePenalty', 'failureScoreReduction', 'passScoreIncrease']
+  const title = strategy.name.trim() || t('untitled')
+  usePageTitle(title)
   return (
     <header className="space-y-2">
-      <h1 className="sr-only">{strategy.name.trim() || t('untitled')}</h1>
+      <h1 className="sr-only">{title}</h1>
       <Label htmlFor="strategy-name" className="sr-only">
         {t('name.label')}
       </Label>
@@ -285,7 +289,7 @@ function StrategyHeading({ strategy, edit, issue }: { strategy: Strategy; edit: 
         placeholder={t('untitled')}
         aria-invalid={nameIssue ? true : undefined}
         aria-describedby={nameIssue ? 'strategy-name-error' : undefined}
-        className="display h-auto border-transparent bg-transparent px-2 py-1 -ml-2 shadow-none hover:border-input focus-visible:border-ring md:h-auto md:text-[length:inherit]"
+        className="display h-auto min-h-11 border-transparent bg-transparent px-2 py-1 -ml-2 shadow-none hover:border-input focus-visible:border-ring md:h-auto md:text-[length:inherit]"
       />
       <FieldError id="strategy-name-error" issue={nameIssue} />
       <TechnicalStrategyNote />

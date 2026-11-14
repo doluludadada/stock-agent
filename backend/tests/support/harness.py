@@ -30,6 +30,8 @@ from a_domain.types.enums import (
     AiAnalysisFocus,
     ComparisonOperator,
     ExecutionProvider,
+    Feature,
+    FeatureVisibility,
     IndicatorKind,
     InformationSource,
     Role,
@@ -40,6 +42,7 @@ from a_domain.types.enums import (
 from a_domain.types.ids import UserId
 from a_domain.types.values import FiscalQuarter
 from b_application.config.ai_config import PromptsConfig
+from b_application.config.api_config import FeaturesConfig
 from b_application.config.app_config import AppConfig
 from b_application.config.chat_config import NotificationConfig
 from b_application.config.market_data_config import MarketHoursConfig
@@ -61,20 +64,26 @@ from support.fakes import (
     PROMPT_TEMPLATES,
     VALUATION_PROMPT_TEMPLATE,
     FakeAiProvider,
+    FakeArticleIndex,
+    FakeArticleStore,
     FakeBacktestRepository,
     FakeConversationRepository,
     FakeDailyCloseArchive,
     FakeFundamentalsProvider,
+    FakeHoldingRepository,
     FakeKnowledgeRepository,
     FakeMarketClock,
     FakeNewsProvider,
     FakeOhlcvProvider,
     FakeSentimentClassifier,
     FakeSocialMediaProvider,
+    FakeStockBriefRepository,
     FakeStockProvider,
     FakeStrategySearchRepository,
     FakeTechnicalSettingsRepository,
+    FakeTextEmbedder,
     FakeTradingJournal,
+    FakeUsersStocks,
     FakeUserStore,
     FakeWatchlistRepository,
     RecordingChatPlatform,
@@ -124,9 +133,18 @@ def harness_settings() -> TechnicalSettings:
 
 
 def harness_config() -> AppConfig:
-    return shipped_config(Path(__file__).resolve().parents[3]).model_copy(
+    """
+    The shipped settings on a developer's machine, with registration open and every feature shown to every user: the
+    shipped settings keep registration closed and show a user only the research pages, and these tests are about what
+    a user's own data and runs do. tests/test_feature_visibility.py covers the shipped visibility.
+    """
+    shipped = shipped_config(Path(__file__).resolve().parents[3])
+
+    return shipped.model_copy(
         update={
             "environment": SystemEnvironment.DEV,
+            "accounts": shipped.accounts.model_copy(update={"registration_open": True}),
+            "features": FeaturesConfig.model_validate({feature.value: FeatureVisibility.EVERYONE for feature in Feature}),
             "prompts": PromptsConfig(
                 analysis_report_fundamental=PROMPT_TEMPLATES[AiAnalysisFocus.FUNDAMENTAL],
                 analysis_report_momentum=PROMPT_TEMPLATES[AiAnalysisFocus.MOMENTUM],
@@ -165,6 +183,11 @@ class CliHarness:
     clock: FakeMarketClock
     stocks: FakeStockProvider
     archive: FakeDailyCloseArchive
+    briefs: FakeStockBriefRepository
+    articles: FakeArticleStore
+    article_index: FakeArticleIndex
+    embedder: FakeTextEmbedder
+    users_stocks: FakeUsersStocks
     fundamentals: FakeFundamentalsProvider
     prices: FakeOhlcvProvider
     news: FakeNewsProvider
@@ -181,6 +204,9 @@ class CliHarness:
 
     real_broker: RecordingExecutionProvider
     """SinoPac on the site's login, offered to the runtime only with build_harness(sinopac=True)."""
+
+    holdings: FakeHoldingRepository
+    """The administrator's hand-entered holdings."""
 
     technical_settings: FakeTechnicalSettingsRepository
     logger: RecordingLogger
@@ -400,7 +426,14 @@ def build_harness(
     real_broker = RecordingExecutionProvider(link=sinopac_link)
 
     backtests = FakeBacktestRepository()
+    holdings = FakeHoldingRepository()
     searches = FakeStrategySearchRepository()
+    briefs = FakeStockBriefRepository()
+    store_settings = config.stock_page.article_store
+    articles = FakeArticleStore(clock, store_settings.retention(), store_settings.max_per_stock)
+    embedder = FakeTextEmbedder()
+    article_index = FakeArticleIndex(embedder, store_settings.embedded_length)
+    users_stocks = FakeUsersStocks()
     users = FakeUserStore()
     users.add(ADMINISTRATOR, ADMINISTRATOR_PASSWORD)
     owners: dict[UserId, OwnedPorts] = {}
@@ -410,7 +443,7 @@ def build_harness(
             return OwnedPorts(*(cast(Any, SignedOut(cast(type, field.type))) for field in fields(OwnedPorts)))
 
         if user.user_id == ADMINISTRATOR.user_id:
-            return OwnedPorts(journal, watchlist, technical_settings, knowledge, broker, ai, sentiment, backtests)
+            return OwnedPorts(journal, watchlist, technical_settings, knowledge, broker, ai, sentiment, backtests, holdings)
 
         return owners.setdefault(
             user.user_id,
@@ -423,6 +456,7 @@ def build_harness(
                 ai,
                 sentiment,
                 FakeBacktestRepository(),
+                FakeHoldingRepository(),
             ),
         )
 
@@ -433,6 +467,10 @@ def build_harness(
         bar_matrix_provider=DailyBarMatrixProvider(stocks, prices, archive, clock, config.ranking.history_rule(), logger),
         candidate_backtester=ProcessPoolCandidateBacktester(config, clock, 0),
         strategy_search_repository=searches,
+        stock_brief_repository=briefs,
+        article_store=articles,
+        article_index=article_index,
+        users_stocks=users_stocks,
         broker_market_data=login,
         shioaji=ShioajiConnection(client=FakeShioaji(), up=True) if login else None,
         daily_close_archive=archive,
@@ -449,11 +487,19 @@ def build_harness(
         real_broker=real_broker if sinopac else None,
         owned_ports=owned_ports,
     )
+    runtime = compose_runtime(config, logger, clock, dependencies)
+    runtime.become_current()
+
     return CliHarness(
         config=config,
         clock=clock,
         stocks=stocks,
         archive=archive,
+        briefs=briefs,
+        articles=articles,
+        article_index=article_index,
+        embedder=embedder,
+        users_stocks=users_stocks,
         fundamentals=fundamentals,
         prices=prices,
         news=news,
@@ -467,11 +513,12 @@ def build_harness(
         watchlist=watchlist,
         broker=broker,
         real_broker=real_broker,
+        holdings=holdings,
         technical_settings=technical_settings,
         logger=logger,
         users=users,
         dependencies=dependencies,
-        runtime=compose_runtime(config, logger, clock, dependencies),
+        runtime=runtime,
         owners=owners,
         settings_root=settings_root,
     )

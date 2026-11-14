@@ -60,7 +60,7 @@ test('on open data the market overview says how far the archive has come until i
   void consoleErrors
   const site = (await apiGet(page, '/v1/market/audience')) as Audience
   const archive = (await apiGet(page, '/v1/market/archive-status')) as { sessions: number; needed: number }
-  await page.goto('/')
+  await page.goto('/market')
   await expect(page.getByRole('heading', { level: 1, name: '市場總覽' })).toBeVisible()
   const warmUp = page.getByRole('region', { name: '開放資料存檔' })
   if (site.open_data_only && archive.sessions < archive.needed) await expect(warmUp).toContainText(`資料累積中 ${archive.sessions}/${archive.needed}`)
@@ -74,7 +74,7 @@ test('the stock page shows the stock’s archived quarters and latest monthly re
   const stockId = process.env.E2E_FINANCIALS_STOCK ?? '2330'
   const financials = (await apiGet(page, `/v1/market/stocks/${stockId}/financials`)) as Financials
   await page.goto(`/stocks/${stockId}`)
-  await expect(page.getByRole('main').getByText('僅供研究參考，不構成投資建議。')).toBeVisible()
+  await expect(page.getByRole('main').getByText('僅供研究參考，不構成投資建議。').first()).toBeVisible()
   const panel = page.getByRole('region', { name: '財務數據' })
   const latest = financials.quarters.at(-1)
   if (latest) {

@@ -3,7 +3,6 @@ const formula = {
   fieldLabel: { open: 'Open price', high: 'High price', low: 'Low price', close: 'Close price', volume: 'Volume' },
   marketAt: { today: "today's {{field}}", yesterday: "yesterday's {{field}}", ago: '{{field}} {{count}} trading days ago' },
   indicatorAt: { yesterday: "yesterday's {{name}}", ago: '{{name}}, {{count}} trading days ago' },
-  day: { today: 'Today', yesterday: 'Yesterday', ago: '{{count}} trading days ago' },
   latestPrice: 'the latest price',
   indicator: {
     sma: 'SMA {{period}}',

@@ -1,7 +1,7 @@
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime
-from typing import ClassVar, Self
+from typing import Any, ClassVar, Self
 
 from sqlalchemy import JSON, BigInteger, Column
 from sqlmodel import Field, SQLModel
@@ -17,6 +17,14 @@ from a_domain.types.enums import ContentType, IndustryFormat, InformationSource,
 from a_domain.types.values import FiscalQuarter
 from b_application.config.sources_config import FinancialSummaryFields
 from c_infrastructure.database.utc_datetime import UtcDateTime
+
+
+def replacing(upsert: Callable[..., Any], table: type[SQLModel]) -> Any:
+    """The backend's upsert of one of the archive's tables: a row it already holds keeps its key and takes every other column."""
+    statement = upsert(table)
+    keys = [column.name for column in statement.table.primary_key]
+    replaced = {column.name: statement.excluded[column.name] for column in statement.table.columns if column.name not in keys}
+    return statement.on_conflict_do_update(index_elements=keys, set_=replaced)
 
 
 class DailyCloseDTO(SQLModel, table=True):
@@ -155,6 +163,15 @@ class ValuationRatiosDTO(SQLModel, table=True):
             pe_ratio=ratios.pe_ratio,
             dividend_yield=ratios.dividend_yield,
             pb_ratio=ratios.pb_ratio,
+        )
+
+    def to_domain(self) -> ValuationRatios:
+        return ValuationRatios(
+            stock_id=self.stock_id,
+            session_date=self.session_date,
+            pe_ratio=self.pe_ratio,
+            dividend_yield=self.dividend_yield,
+            pb_ratio=self.pb_ratio,
         )
 
 

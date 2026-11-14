@@ -35,7 +35,7 @@ type Username = Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$
 type EmailAddress = Annotated[str, Field(max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")]
 """The shape only. No mail is ever sent, so nothing proves the address is the user's."""
 
-type NewPassword = Annotated[SecretStr, Field(min_length=12, max_length=256)]
+type NewPassword = Annotated[SecretStr, Field(min_length=8, max_length=256)]
 """A password a user chooses. SecretStr keeps it out of every repr and log line."""
 
 

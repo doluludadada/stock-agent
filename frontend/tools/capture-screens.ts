@@ -1,5 +1,5 @@
 /**
- * Screenshots of every page against a running app and backend, at 375, 768, 1024 and 1440 px in both themes, and an
+ * Screenshots of every page against a running app and backend, at 360, 768 and 1440 px in both themes, and an
  * audit of each: horizontal page scroll, controls under 44 px on a phone, text cut off, and page errors.
  *
  *   bun tools/capture-screens.ts <out-dir> [--url http://127.0.0.1:4173] [--user name --password pw]
@@ -48,7 +48,7 @@ interface Finding {
   errors: string[]
 }
 
-const HEIGHTS: Record<number, number> = { 375: 812, 768: 1024, 1024: 768, 1440: 900 }
+const HEIGHTS: Record<number, number> = { 360: 780, 375: 812, 768: 1024, 1024: 768, 1440: 900 }
 
 function parseOptions(argv: string[]): Options {
   const out = argv[0]
@@ -66,7 +66,7 @@ function parseOptions(argv: string[]): Options {
     member: flag('member'),
     memberPassword: flag('member-password'),
     only: list('only') ? new Set(list('only')) : null,
-    widths: (list('widths') ?? ['375', '768', '1024', '1440']).map(Number),
+    widths: (list('widths') ?? ['360', '768', '1440']).map(Number),
     themes: (list('themes') ?? ['light', 'dark']) as Theme[],
   }
 }
@@ -81,21 +81,31 @@ function shots(runId: string | null, needsSetup: boolean): Shot[] {
   return [
     { name: 'sign-in', path: '/sign-in?next=%2Fwatchlist', session: 'signedOut' },
     { name: 'register', path: '/register', session: 'signedOut' },
-    { name: 'runs-signed-out', path: '/', session: 'signedOut' },
-    { name: 'overview-signed-out', path: '/market', session: 'signedOut' },
+    { name: 'home-signed-out', path: '/', session: 'signedOut' },
+    { name: 'market-signed-out', path: '/market', session: 'signedOut' },
+    { name: 'ranking-signed-out', path: '/ranking', session: 'signedOut' },
+    { name: 'stock-2330-signed-out', path: '/stocks/2330', session: 'signedOut' },
     { name: 'watchlist-signed-out', path: '/watchlist', session: 'signedOut' },
-    { name: 'overview', path: '/market', session: 'admin' },
+    { name: 'holdings-signed-out', path: '/holdings', session: 'signedOut' },
+    { name: 'home', path: '/', session: 'admin' },
+    { name: 'market', path: '/market', session: 'admin' },
+    { name: 'ranking', path: '/ranking', session: 'admin' },
+    { name: 'ranking-5y', path: '/ranking?period=5Y', session: 'admin' },
     { name: 'stock-2330', path: '/stocks/2330', session: 'admin' },
     { name: 'watchlist', path: '/watchlist', session: 'admin' },
+    { name: 'holdings', path: '/holdings', session: 'admin' },
     { name: 'account', path: '/account', session: 'admin' },
-    { name: 'my-settings', path: '/settings', session: 'admin' },
-    { name: 'strategies', path: '/strategies', session: 'admin' },
-    { name: 'builder', path: '/strategies/new?builtin=balanced', session: 'admin' },
-    { name: 'runs', path: '/', session: 'admin' },
+    { name: 'account-sinopac', path: '/account/sinopac', session: 'admin' },
+    { name: 'settings', path: '/settings', session: 'admin' },
+    { name: 'runs', path: '/runs', session: 'admin' },
     ...(runId ? [{ name: 'run-detail', path: `/runs/${runId}`, session: 'admin' as const }] : []),
     { name: 'valuation', path: '/valuation', session: 'admin' },
-    { name: 'users', path: '/admin/users', session: 'admin' },
+    { name: 'strategies', path: '/strategies', session: 'admin' },
+    { name: 'strategies-new', path: '/strategies/new?builtin=balanced', session: 'admin' },
+    { name: 'backtest', path: '/backtest', session: 'admin' },
+    { name: 'admin-users', path: '/admin/users', session: 'admin' },
     { name: 'admin-settings', path: '/admin/settings', session: 'admin' },
+    { name: 'attribution', path: '/attribution', session: 'admin' },
     { name: 'user-menu', path: '/', session: 'admin', prepare: openAccountMenu, viewportOnly: true },
     {
       name: 'more-sheet',
@@ -108,8 +118,16 @@ function shots(runId: string | null, needsSetup: boolean): Shot[] {
         await page.getByRole('dialog').waitFor()
       },
     },
-    { name: 'users-as-member', path: '/admin/users', session: 'member' },
     { name: 'not-found', path: '/no-such-page', session: 'admin' },
+    { name: 'home-as-user', path: '/', session: 'member' },
+    { name: 'market-as-user', path: '/market', session: 'member' },
+    { name: 'ranking-as-user', path: '/ranking', session: 'member' },
+    { name: 'stock-2330-as-user', path: '/stocks/2330', session: 'member' },
+    { name: 'watchlist-as-user', path: '/watchlist', session: 'member' },
+    { name: 'holdings-as-user', path: '/holdings', session: 'member' },
+    { name: 'settings-as-user', path: '/settings', session: 'member' },
+    { name: 'admin-users-as-user', path: '/admin/users', session: 'member' },
+    { name: 'runs-as-user', path: '/runs', session: 'member' },
   ]
 }
 

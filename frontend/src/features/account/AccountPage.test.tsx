@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { I18nextProvider } from 'react-i18next'
 import { MemoryRouter } from 'react-router'
@@ -27,11 +27,6 @@ const HISTORY: History = {
   profit: 12_000,
 }
 const EMPTY: History = { ...HISTORY, current: { cash: 2_000_000, market_value: 0, unrealized_pnl: 0, equity: 2_000_000, positions: [] }, profit: 0 }
-const SINOPAC_HISTORY: History = { ...HISTORY, execution_provider: 'shioaji', current: { ...value, cash: 405_000, equity: 505_000 }, opening: null, profit: null }
-
-const MOCK = { broker: 'mock', simulation: null, max_order_value: null, max_daily_buy_value: null }
-const SINOPAC = { broker: 'shioaji', simulation: true, max_order_value: 100_000, max_daily_buy_value: 300_000 }
-
 const LISTING: Record<string, string> = { '2330': '台積電', '2317': '鴻海' }
 
 function trade(id: string, overrides: Partial<Trade['order']>, run: Trade['run']): Trade {
@@ -64,8 +59,11 @@ function trade(id: string, overrides: Partial<Trade['order']>, run: Trade['run']
 const fullCycle = { run_id: FULL_CYCLE, workflow: 'full_cycle', start_time: '2026-11-05T13:00:00Z' } as const
 const intraday = { run_id: INTRADAY, workflow: 'intraday', start_time: '2026-11-06T02:00:00Z' } as const
 
-/** The account endpoints and the listing, as the backend answers them; trades page by `limit` and `offset`. */
-function serve(history: History, trades: Trade[], brokers: unknown[] = [MOCK]) {
+/**
+ * The account endpoints and the listing, as the backend answers them; trades page by `limit` and `offset`. `pastDay`
+ * answers a lookup of the account as of a day, null for a server error.
+ */
+function serve(history: History, trades: Trade[], pastDay?: (day: string) => History | null | Promise<History | null>) {
   const asked: string[] = []
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
   vi.stubGlobal(
@@ -77,8 +75,12 @@ function serve(history: History, trades: Trade[], brokers: unknown[] = [MOCK]) {
         const code = searchParams.get('query') ?? ''
         return json(LISTING[code] ? [{ stock_id: code, name: LISTING[code], market: 'twse', today: null }] : [])
       }
-      if (pathname === '/v1/account/brokers') return json(brokers)
-      if (pathname === '/v1/account/history') return json(searchParams.get('broker') === 'shioaji' ? SINOPAC_HISTORY : history)
+      const day = searchParams.get('as_of')
+      if (pathname === '/v1/account/history' && day && pastDay) {
+        const answer = await pastDay(day)
+        return answer ? json(answer) : json({ detail: 'boom' }, 500)
+      }
+      if (pathname === '/v1/account/history') return json(history)
       if (pathname === '/v1/account/trades') {
         const offset = Number(searchParams.get('offset'))
         return json(trades.slice(offset, offset + Number(searchParams.get('limit'))))
@@ -179,28 +181,59 @@ describe('the mock account', () => {
     expect(screen.queryByRole('table', { name: 'Trades' })).not.toBeInTheDocument()
   })
 
-  it('offers no other account while only the mock account is offered', async () => {
-    serve(HISTORY, [])
+  it('while a past day loads, says nothing of the day asked before, then shows the day asked', async () => {
+    let release = () => {}
+    const held = new Promise<void>((resolve) => (release = resolve))
+    serve(HISTORY, [], async (day) => {
+      if (day === '2026-11-04') await held
+      return { ...HISTORY, as_of: { last_fill_at: `${day}T02:05:00Z`, value: { ...value, equity: day === '2026-11-05' ? 955_000 : 1_000_500 } } }
+    })
+    const user = userEvent.setup()
     open()
 
-    expect(await screen.findByText('1,012,000')).toBeVisible()
-    expect(screen.queryByRole('radiogroup', { name: 'Account' })).not.toBeInTheDocument()
+    const card = within(await screen.findByRole('region', { name: 'Account as of a day' }))
+    fireEvent.change(card.getByLabelText('Account as of a day'), { target: { value: '2026-11-05' } })
+    await user.click(card.getByRole('button', { name: 'Show' }))
+    expect(await card.findByText('955,000')).toBeVisible()
+
+    fireEvent.change(card.getByLabelText('Account as of a day'), { target: { value: '2026-11-04' } })
+    await user.click(card.getByRole('button', { name: 'Show' }))
+    expect(card.queryByText('955,000')).not.toBeInTheDocument()
+    expect(card.queryByText(/^As of /)).not.toBeInTheDocument()
+    expect(card.getByRole('button', { name: 'Show' })).toBeDisabled()
+    expect(screen.getByText('1,012,000')).toBeVisible()
+
+    release()
+    expect(await card.findByText('1,000,500')).toBeVisible()
+    expect(card.getByRole('button', { name: 'Show' })).toBeEnabled()
   })
 
-  it('switches to the SinoPac account, asking its own history and trades, with no starting capital and no total P&L', async () => {
-    const asked = serve(HISTORY, [], [MOCK, SINOPAC])
+  it('keeps the account on screen when a past day fails to load, with the failure and its retry in that card', async () => {
+    let failing = true
+    serve(HISTORY, [], (day) => (failing ? null : { ...HISTORY, as_of: { last_fill_at: `${day}T02:05:00Z`, value: { ...value, equity: 955_000 } } }))
     const user = userEvent.setup()
+    open()
+
+    const card = within(await screen.findByRole('region', { name: 'Account as of a day' }))
+    fireEvent.change(card.getByLabelText('Account as of a day'), { target: { value: '2026-11-05' } })
+    await user.click(card.getByRole('button', { name: 'Show' }))
+
+    expect(await card.findByText('The account could not be loaded.')).toBeVisible()
+    expect(screen.getByText('1,012,000')).toBeVisible()
+    expect(screen.getByText(/no quote, at average cost/)).toBeVisible()
+
+    failing = false
+    await user.click(card.getByRole('button', { name: 'Try again' }))
+    expect(await card.findByText('955,000')).toBeVisible()
+  })
+
+  it('is the mock account alone: it asks for no other account and offers no switch to one', async () => {
+    const asked = serve(HISTORY, [])
     open()
 
     expect(await screen.findByText('1,012,000')).toBeVisible()
     expect(screen.getByRole('heading', { name: 'Mock account', level: 1 })).toBeVisible()
-    await user.click(await screen.findByRole('radio', { name: 'SinoPac · simulation' }))
-
-    expect(await screen.findByText('505,000')).toBeVisible()
-    expect(screen.getByRole('heading', { name: 'SinoPac account', level: 1 })).toBeVisible()
-    expect(screen.queryByText('Total P&L')).not.toBeInTheDocument()
-    expect(screen.queryByText('Starting capital')).not.toBeInTheDocument()
-    expect(screen.getByText(/^SinoPac’s simulation server\./)).toBeVisible()
-    expect(asked.filter((url) => url.includes('broker=shioaji')).sort()).toEqual(['/v1/account/history?broker=shioaji', '/v1/account/trades?limit=21&offset=0&broker=shioaji'])
+    expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument()
+    expect(asked.filter((url) => url.startsWith('/v1/account/')).sort()).toEqual(['/v1/account/history?broker=mock', '/v1/account/trades?limit=21&offset=0&broker=mock'])
   })
 })

@@ -3,7 +3,7 @@ from typing import Self
 
 from pydantic import BaseModel, Field, NonNegativeInt, model_validator
 
-from a_domain.types.enums import FinancialStatement, IndustryFormat, MarketType
+from a_domain.types.enums import FinancialStatement, IndustryFormat, MarketType, SettingUnit
 
 
 class TwseIndexFields(BaseModel):
@@ -217,17 +217,22 @@ class DailyReportFeed(BaseModel):
     """Whether the volume report counts board lots (market.board_lot_shares shares each) instead of shares."""
 
 
-class ExRightReferenceFeed(BaseModel):
+class ExRightReferenceReport(BaseModel):
     """
-    TWSE's ex-right and ex-dividend results of a range of dates on its site: where they are, a template of the first and
-    the last date; the fields of a row's ROC date, which marks its year, month and day with a character each, its stock
-    code and its reference price; and how many calendar months one request asks for.
+    One exchange's ex-right and ex-dividend results of a range of dates on its site: where they are, a template of the
+    first and the last date, and the fields of a row's ROC date, its stock code and its reference price.
     """
 
     url: str
     date: str
     stock_id: str
     reference: str
+
+
+class ExRightReferenceFeed(BaseModel):
+    """Each exchange's ex-right and ex-dividend results, and how many calendar months one request asks for."""
+
+    reports: dict[MarketType, ExRightReferenceReport]
     months_per_request: int = Field(ge=1, le=12)
 
 
@@ -237,7 +242,7 @@ class ExchangeSources(BaseModel):
     company profiles with each company's industry, and the reports it serves only for their latest day, month or
     quarter: the material information, the EPS statistics, the valuation ratios, the balance sheets and income
     statements, the monthly revenue and TWSE's own news. Apart from them, each exchange's own reports of any date on
-    its site (`daily_reports`) and TWSE's ex-right references (`ex_right_references`), which an open-data site never
+    its site (`daily_reports`) and their ex-right references (`ex_right_references`), which an open-data site never
     reads (Audience.open_data_only).
     """
 
@@ -250,7 +255,7 @@ class ExchangeSources(BaseModel):
     industry_names: dict[str, str]
     """The exchanges' industry codes, which both company profiles use, and the industry name of each."""
 
-    industry_max_age_hours: float
+    industry_max_age_hours: float = Field(gt=0, le=168, json_schema_extra={"steps": [1, 6, 12, 24, 48], "unit": SettingUnit.HOURS})
     """A market's company profiles are downloaded again once they are this old."""
 
     material_information: dict[MarketType, MaterialInformationFeed]
@@ -271,6 +276,7 @@ class ExchangeSources(BaseModel):
             "valuation_ratios": self.valuation_ratios,
             "monthly_revenue": self.monthly_revenue,
             "daily_reports": self.daily_reports,
+            "ex_right_references.reports": self.ex_right_references.reports,
         }
 
         for name, feed in feeds.items():
@@ -305,17 +311,19 @@ class MopsSources(BaseModel):
     revenue_deadline_day: int = Field(ge=1, le=28)
     """Companies file a month's revenue by this day of the month after it."""
 
-    request_interval_seconds: float
+    request_interval_seconds: float = Field(ge=0, le=60, json_schema_extra={"steps": [0.5, 1, 2, 5, 10], "unit": SettingUnit.SECONDS})
     """A cold load sends ten requests to a shared public service, so they go one at a time, this far apart."""
 
-    timeout_seconds: float
-    provisional_page_max_age_hours: float
+    timeout_seconds: float = Field(gt=0, le=600, json_schema_extra={"steps": [15, 30, 60, 120], "unit": SettingUnit.SECONDS})
+    provisional_page_max_age_hours: float = Field(
+        gt=0, le=168, json_schema_extra={"steps": [1, 3, 6, 12, 24], "unit": SettingUnit.HOURS}
+    )
     """A page that is not final yet is downloaded again once it is this old."""
 
     filing_deadlines: dict[int, tuple[int, int]]
     """Each quarter's latest statutory filing deadline across company types, as (month, day)."""
 
-    filing_grace_days: NonNegativeInt
+    filing_grace_days: NonNegativeInt = Field(le=90, json_schema_extra={"steps": [0, 3, 7, 14, 30], "unit": SettingUnit.DAYS})
     """A quarter's filings are final this many days after its deadline, since a deadline on a holiday moves."""
 
     @model_validator(mode="after")
@@ -348,14 +356,14 @@ class PttSources(BaseModel):
 
     posting_reminder_marker: str
     previous_page_label: str
-    timeout_seconds: float
-    max_pages: int
+    timeout_seconds: float = Field(gt=0, le=600, json_schema_extra={"steps": [5, 10, 15, 30, 60], "unit": SettingUnit.SECONDS})
+    max_pages: int = Field(gt=0, le=1000, json_schema_extra={"steps": [5, 10, 30, 50, 100]})
     """The most search pages read for one tag."""
 
-    max_body_length: int
+    max_body_length: int = Field(gt=0, le=100_000, json_schema_extra={"steps": [1000, 3000, 5000, 10000]})
     """An article's text, its reactions line included, is cut to this many characters."""
 
-    archive_excerpt_length: int
+    archive_excerpt_length: int = Field(gt=0, le=100_000, json_schema_extra={"steps": [200, 500, 1000, 2000]})
     """How many characters of each article the buzz archive quotes."""
 
     user_agent: str
@@ -370,12 +378,12 @@ class NewsSources(BaseModel):
     cnyes_article_url: str
     yahoo_base_url: str
     yahoo_quote_url: str
-    cnyes_timeout_seconds: float
-    yahoo_timeout_seconds: float
-    yahoo_min_headline_length: int
+    cnyes_timeout_seconds: float = Field(gt=0, le=600, json_schema_extra={"steps": [5, 10, 15, 30, 60], "unit": SettingUnit.SECONDS})
+    yahoo_timeout_seconds: float = Field(gt=0, le=600, json_schema_extra={"steps": [5, 10, 15, 30, 60], "unit": SettingUnit.SECONDS})
+    yahoo_min_headline_length: int = Field(ge=0, le=1000, json_schema_extra={"steps": [3, 5, 10, 20]})
     """A Yahoo news link whose headline is shorter than this is not an article."""
 
-    yahoo_short_paragraph_length: int
+    yahoo_short_paragraph_length: int = Field(ge=0, le=1000, json_schema_extra={"steps": [10, 20, 50, 100]})
     """Without a caas-body, an article's text is its paragraphs longer than this many characters."""
 
     cnyes_user_agent: str
@@ -396,9 +404,9 @@ class LineSources(BaseModel):
 
     push_url: str
     multicast_url: str
-    multicast_timeout_seconds: float
+    multicast_timeout_seconds: float = Field(json_schema_extra={"steps": [5, 10, 30, 60], "unit": SettingUnit.SECONDS})
     sentence_endings: str
-    max_message_length: int
+    max_message_length: int = Field(json_schema_extra={"steps": [400, 1000, 2000, 5000]})
 
 
 class AttributedProvider(BaseModel):

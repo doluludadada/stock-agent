@@ -1,31 +1,94 @@
+# The whole site on one server: `docker compose up -d --build` from the repository root. frontend/docs/deployment.md
+# has the steps. Compose reads STATE_DIR, DB_USER, DB_PASSWORD, DB_NAME, PROXY_BIND, PROXY_PORT, SITE_NAME, APP_UID and
+# APP_GID from .env. Only the proxy publishes a port.
+
 services:
-  backend:
-    container_name: stock-agent-backend
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-
-    # Map host port 8800 to container port 8800
-    ports:
-      - "8800:8800"
-
-    # Environment variables (loads from .env file automatically)
-    env_file:
-      - .env
-
-    # Hot-swapping configuration and persistence
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: ${DB_USER:?Set DB_USER in .env}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      POSTGRES_DB: ${DB_NAME:?Set DB_NAME in .env}
+    # For a server with 7 GB that also replays backtests in the backend: a small buffer pool, and sorts that stay small
+    # however many connections run them. The backend opens at most 15 connections per set of settings.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=1GB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=128MB
+      - -c
+      - max_connections=50
+    shm_size: 256mb
     volumes:
-      # Mount config so you can change AI models without rebuilding (Hot-Swappable target)
-      - ./config:/app/config
-      # Persist ChromaDB data
-      - ./chroma_data:/app/chroma_data
-
-    # Restart policy
+      # The image keeps its data in /var/lib/postgresql/18/docker.
+      - ${STATE_DIR:?Set STATE_DIR in .env to the folder that keeps everything the site saves}/postgres:/var/lib/postgresql
+    networks:
+      site:
+        ipv4_address: 172.31.88.4
     restart: unless-stopped
-
-    # Healthcheck to ensure the service is up
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8800/docs"]
-      interval: 30s
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  backend:
+    build: ./backend
+    # The user that owns STATE_DIR on the host, so the app can write its files there.
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      # uvicorn reads the visitor's address and scheme only from the proxy and from the gateway, which is the address
+      # the proxy names for a request that `tailscale serve` forwarded.
+      FORWARDED_ALLOW_IPS: 172.31.88.1,172.31.88.2
+      # Whatever .env sets: no usage telemetry from ONNX Runtime or the Hugging Face client (backend/Dockerfile).
+      ORT_DISABLE_TELEMETRY: "1"
+      HF_HUB_DISABLE_TELEMETRY: "1"
+    volumes:
+      # The project root of the app: config/, which the settings editor writes, secrets/, backups/, .settings-admin/,
+      # chroma_data/ and the archives.
+      - ${STATE_DIR:?Set STATE_DIR in .env to the folder that keeps everything the site saves}:/state
+    networks:
+      site:
+        ipv4_address: 172.31.88.3
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8800/v1/auth/status', timeout=5)"]
+      interval: 10s
       timeout: 10s
       retries: 3
+      start_period: 120s
+
+  proxy:
+    build: ./frontend
+    environment:
+      SITE_NAME: ${SITE_NAME:-localhost}
+    ports:
+      - "${PROXY_BIND:-127.0.0.1}:${PROXY_PORT:-8080}:8080"
+    networks:
+      site:
+        ipv4_address: 172.31.88.2
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  site:
+    ipam:
+      config:
+        # Fixed, so the backend can name the proxy and the gateway, and frontend/Caddyfile the gateway.
+        - subnet: 172.31.88.0/29
+          gateway: 172.31.88.1

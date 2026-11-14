@@ -35,6 +35,9 @@
   --tabbar-height: 3.75rem;
   --content-max: 92rem;
   --touch-target: 2.75rem;
+  /* Rhythm. Between the header and the blocks of a page, and between the cards of a grid. */
+  --space-page: 1.25rem;
+  --space-grid: 1rem;
 
   /* Chart heights grow with the viewport; the charts read them through CSS, not props. */
   --chart-price-height: 12.5rem;
@@ -43,6 +46,8 @@
 
 @media (min-width: 64rem) {
   :root {
+    --space-page: 1.5rem;
+    --space-grid: 1.25rem;
     --chart-price-height: 18rem;
     --chart-volume-height: 4.5rem;
   }

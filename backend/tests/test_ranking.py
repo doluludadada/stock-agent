@@ -247,7 +247,7 @@ async def test_the_listed_fingerprint_changes_with_every_bar_or_reference_saved_
         assert seen[-1] not in seen[:-1], (saved, references)
 
     assert set(spans) == {(SESSIONS[0], SESSIONS[-1])}
-    assert await fingerprint_after({"2330": [held[0]], "^twse": bars([20000] * 5)}, {("2330", SESSIONS[2]): 101.5}) == seen[-1]
+    assert await fingerprint_after({"^twse": bars([20000] * 5), "2330": []}, {}) == seen[-1]
 
 
 async def test_the_ranking_history_is_never_older_than_the_bars_the_references_and_the_revenue_the_database_holds(

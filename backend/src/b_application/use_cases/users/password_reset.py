@@ -23,6 +23,7 @@ class PasswordReset:
         if user is None:
             return None
 
+        user.has_password = True
         await self._user_store.save(user, self._market_clock.now(), password)
         self._logger.info(f"Password reset: {user.user_id}.")
 

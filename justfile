@@ -46,7 +46,7 @@ search-strategies *options:
     cd backend; $env:PYTHONPATH="src"; uv run python -m d_presentation.cli.strategy_search {{options}}
 
 # Brings the history a stock ranking reads back to a first day on a personal site, for example `just backfill-history
-# 2017-01-01`: every market's monthly revenue from MOPS, each exchange's daily history and TWSE's ex-right references.
+# 2017-01-01`: every market's monthly revenue from MOPS, each exchange's daily history and ex-right references.
 # What it fetched is saved as it comes, so after a failure or a timeout run it again: it fetches only what is missing,
 # and ends with exit code 2 while anything is. It orders nothing and asks no AI.
 [unix]
@@ -56,6 +56,18 @@ backfill-history first:
 [windows]
 backfill-history first:
     cd backend; $env:PYTHONPATH="src"; uv run python -m d_presentation.cli.backfill_history {{first}}
+
+# Keeps the announcements and TWSE news the open-data archive holds in the article store, then brings the vectors of
+# every stock the store keeps up to date. The first run fetches the text embedding model's files (23 MB) into
+# embedding_models/. Run again it adds nothing, and after chroma_data/ was lost it computes every vector again from
+# the kept articles. It reaches no news site, orders nothing and asks no AI.
+[unix]
+backfill-articles:
+    cd backend && PYTHONPATH=src uv run python -m d_presentation.cli.article_store
+
+[windows]
+backfill-articles:
+    cd backend; $env:PYTHONPATH="src"; uv run python -m d_presentation.cli.article_store
 
 # The monthly stock ranking by revenue acceleration and nearness to the high at the latest decision session the held
 # history holds. It reads only the held daily history and monthly revenue, orders nothing and asks no AI.
@@ -130,12 +142,6 @@ run-bn:
 [windows]
 run-bn:
     cd backend; $env:PYTHONPATH="src"; uv run python main.py
-
-build-docker:
-    docker build -t chat-friend .
-
-run-docker:
-    docker run -p 8000:8000 --env-file .env chat-friend
 
 [windows]
 cli:

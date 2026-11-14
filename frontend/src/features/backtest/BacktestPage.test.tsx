@@ -315,6 +315,37 @@ describe('the backtest page', () => {
     expect(screen.getByRole('button', { name: 'Run backtest' })).toBeEnabled()
   })
 
+  it('says a run failed on the page opened after it failed, when the page that started it was left meanwhile', async () => {
+    let answer: (response: Response) => void = () => undefined
+    serve({ run: () => new Promise<Response>((resolve) => (answer = resolve)) })
+    const user = userEvent.setup()
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const page = () =>
+      render(
+        <I18nextProvider i18n={initI18n('en')}>
+          <QueryClientProvider client={client}>
+            <MemoryRouter initialEntries={['/backtest']}>
+              <BacktestPage />
+            </MemoryRouter>
+          </QueryClientProvider>
+        </I18nextProvider>,
+      )
+
+    const first = page()
+    await user.click(await screen.findByRole('button', { name: 'Run backtest' }))
+    expect(await screen.findByRole('button', { name: 'Backtesting…' })).toBeDisabled()
+    first.unmount()
+    answer(json({ detail: 'boom' }, 500))
+    await waitFor(() => expect(client.isMutating()).toBe(0))
+
+    page()
+    expect(await screen.findByRole('alert')).toHaveTextContent('The backtest did not run. The server could not finish this request.')
+    expect(screen.getByRole('button', { name: 'Run backtest' })).toBeEnabled()
+
+    await user.click(screen.getByRole('button', { name: 'Last 3 months' }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
   it('says the daily history is too short when the options name no period', async () => {
     serve({ options: { ...OPTIONS, inputs: null } })
     open()

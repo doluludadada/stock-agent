@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,6 +29,16 @@ interface ConfirmDialogProps {
 
 /** A question that needs an explicit yes before something costly or irreversible happens. */
 export function ConfirmDialog({ open, onOpenChange, title, description, children, cancel, confirm, onConfirm, confirmDisabled = false, onCancel, destructive = false }: ConfirmDialogProps) {
+  // The dialog takes a moment to close, and a second press in that moment must not confirm twice.
+  const answered = useRef(false)
+  useEffect(() => {
+    if (open) answered.current = false
+  }, [open])
+  const confirmOnce = () => {
+    if (answered.current) return
+    answered.current = true
+    onConfirm()
+  }
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
@@ -39,7 +49,7 @@ export function ConfirmDialog({ open, onOpenChange, title, description, children
         {children}
         <AlertDialogFooter>
           <AlertDialogCancel onClick={onCancel}>{cancel}</AlertDialogCancel>
-          <AlertDialogAction variant={destructive ? 'destructive' : 'default'} disabled={confirmDisabled} onClick={onConfirm}>
+          <AlertDialogAction variant={destructive ? 'destructive' : 'default'} disabled={confirmDisabled} onClick={confirmOnce}>
             {confirm}
           </AlertDialogAction>
         </AlertDialogFooter>

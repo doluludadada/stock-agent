@@ -14,11 +14,13 @@ interface SegmentedProps<T extends string> {
   onChange: (value: T) => void
   options: readonly SegmentedOption<T>[]
   label: string
+  /** The ids of the texts that describe the choice, such as a form field's help. */
+  describedBy?: string
   className?: string
 }
 
 /** One choice out of a few: chart ranges, list filters, the theme. Arrow keys move between the options. */
-export function Segmented<T extends string>({ value, onChange, options, label, className }: SegmentedProps<T>) {
+export function Segmented<T extends string>({ value, onChange, options, label, describedBy, className }: SegmentedProps<T>) {
   return (
     <ToggleGroup.Root
       type="single"
@@ -26,6 +28,7 @@ export function Segmented<T extends string>({ value, onChange, options, label, c
       value={value}
       onValueChange={(next) => next && onChange(next as T)}
       aria-label={label}
+      aria-describedby={describedBy}
       className={cn('inline-flex h-12 w-full max-w-full items-stretch gap-0.5 overflow-x-auto rounded-lg bg-muted p-0.5 md:h-8 md:w-fit', className)}
     >
       {options.map((option) => (

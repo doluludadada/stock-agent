@@ -361,3 +361,35 @@ def test_a_personal_site_may_search_the_web_and_x(tmp_path: Path, monkeypatch: p
     )
 
     assert (config.audience, config.behavior.enable_web_search, config.behavior.enable_x_search) == (Audience.PERSONAL, True, True)
+
+
+def prod_settings(registration_open: str) -> str:
+    """The shipped settings in prod on PostgreSQL, with accounts.registration_open as given."""
+    text = SHIPPED[SettingsFile.APPSETTING].replace("environment: dev", "environment: prod", 1)
+    text = text.replace("\n  backend: sqlite", "\n  backend: postgresql", 1)
+    return text.replace("registration_open: false", f"registration_open: {registration_open}", 1)
+
+
+def test_registration_ships_closed_and_prod_refuses_to_start_with_it_open_naming_the_remedy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "placeholder")
+    project, text = project_with_shipped_settings(tmp_path), prod_settings("true")
+    open_in_dev = SHIPPED[SettingsFile.APPSETTING].replace("registration_open: false", "registration_open: true", 1)
+    shipped, dev = startup_settings(project), startup_settings(project, {SettingsFile.APPSETTING: open_in_dev})
+
+    for name in ("DB_USER", "DB_PASSWORD", "DB_HOST", "DB_NAME"):
+        monkeypatch.setenv(name, "placeholder")
+    monkeypatch.setenv("ACCOUNTS_KEY", "A" * 43)
+
+    with pytest.raises(InvalidSettingsError) as refused:
+        startup_settings(project, {SettingsFile.APPSETTING: text})
+
+    [problem] = refused.value.problems
+    assert (problem.path, problem.line) == ("accounts.registration_open", at(text, "registration_open: true")[0])
+    assert problem.message == (
+        "environment prod refuses to start while accounts.registration_open is true: its Shioaji login is the real "
+        "account. Set accounts.registration_open to false in config/appsetting.yaml"
+    )
+    assert (shipped.accounts.registration_open, dev.accounts.registration_open) == (False, True)
+    assert not startup_settings(project, {SettingsFile.APPSETTING: prod_settings("false")}).accounts.registration_open

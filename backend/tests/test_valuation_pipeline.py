@@ -152,7 +152,7 @@ async def test_loss_making_stock_never_asks_the_ai_for_a_fair_price() -> None:
 @pytest.mark.asyncio
 async def test_failed_ai_call_still_yields_every_report_item() -> None:
     harness = market_harness()
-    harness.ai.failures["2330"] = TimeoutError("AI provider timed out")
+    harness.ai.failures["2330"] = TimeoutError("401 from the provider: key sk-live-7781 refused")
     market = await harness.pipeline.load_market_valuation()
 
     explained = await harness.pipeline.explain_valuation(appraise(harness, market, "2330", 25))
@@ -160,6 +160,7 @@ async def test_failed_ai_call_still_yields_every_report_item() -> None:
     sections = {section.title: section.lines for section in explained}
     assert len(sections) == 11
     assert any("AI explanation unavailable" in line for line in sections["Insufficient data warnings"])
+    assert not any("sk-live-7781" in line or "401" in line for lines in sections.values() for line in lines)
 
 
 @pytest.mark.asyncio

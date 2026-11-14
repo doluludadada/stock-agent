@@ -13,7 +13,7 @@ interface StatProps {
 export function Stat({ label, children, size = 'md', className }: StatProps) {
   return (
     <div className={cn('min-w-0', className)}>
-      <dt className="truncate text-xs text-muted-foreground">{label}</dt>
+      <dt className="text-xs text-pretty text-muted-foreground">{label}</dt>
       <dd className={cn('tabular mt-0.5 font-medium', size === 'lg' ? 'text-figure-sm font-semibold' : 'text-sm')}>{children}</dd>
     </div>
   )

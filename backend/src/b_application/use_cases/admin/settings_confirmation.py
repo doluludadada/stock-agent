@@ -4,9 +4,10 @@ from a_domain.model.system.user import User
 from a_domain.ports.system.attempt_log import AttemptKey, IAttemptLog
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
+from a_domain.ports.system.settings_confirmations import ISettingsConfirmations
 from a_domain.ports.system.user_store import IUserStore
 from a_domain.types.enums import AttemptLimit
-from a_domain.types.errors import PasswordRefused, PasswordRequired, SignInThrottled
+from a_domain.types.errors import GoogleConfirmationRequired, PasswordRefused, PasswordRequired, SignInThrottled
 from b_application.config.app_config import AppConfig
 
 
@@ -15,23 +16,42 @@ class SettingsConfirmation:
     The administrator confirms a save of the settings by their own password inside its attempt limit, so a stolen
     session alone changes no setting. Each try is counted before the password is checked, per administrator and client
     address under its own limit, so tries made at once cannot pass the limit together, a stolen session cannot guess
-    faster than the sign-in allows, and guessing here never locks the sign-in out.
+    faster than the sign-in allows, and guessing here never locks the sign-in out. An administrator without a password
+    confirms by a fresh Google authentication made for this one save instead (SettingsReauthentication), which is used
+    up here whether the save then succeeds or not.
     """
 
     def __init__(
-        self, user_store: IUserStore, attempt_log: IAttemptLog, market_clock: IMarketClock, config: AppConfig, logger: ILoggingProvider
+        self,
+        user_store: IUserStore,
+        attempt_log: IAttemptLog,
+        confirmations: ISettingsConfirmations,
+        market_clock: IMarketClock,
+        config: AppConfig,
+        logger: ILoggingProvider,
     ) -> None:
         self._user_store = user_store
+        self._confirmations = confirmations
         self._attempt_log = attempt_log
         self._market_clock = market_clock
         self._limit = config.accounts.settings_password_limit()
         self._logger = logger
 
-    async def execute(self, administrator: User, password: SecretStr | None, client: str) -> None:
+    async def execute(self, administrator: User, password: SecretStr | None, google_confirmation: str | None, client: str) -> None:
+        now = self._market_clock.now()
+
+        if password is None and not administrator.has_password:
+            if google_confirmation is None or not await self._confirmations.redeem(administrator.user_id, google_confirmation, now):
+                raise GoogleConfirmationRequired(
+                    "Confirm the save with a fresh Google sign-in. An account without a password has no other way: "
+                    "`just reset-password` on the server sets one. Nothing was saved."
+                )
+
+            return
+
         if password is None:
             raise PasswordRequired("Re-enter your password to save the settings. Nothing was saved.")
 
-        now = self._market_clock.now()
         key = AttemptKey(limit=AttemptLimit.SETTINGS_PASSWORD, client=client, name=administrator.username)
 
         if retry_at := await self._attempt_log.admit(now, {key: self._limit}):

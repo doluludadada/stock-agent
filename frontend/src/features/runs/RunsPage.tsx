@@ -4,7 +4,7 @@ import { Link, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { useLocale, useTranslation } from '@/i18n'
 import { paths } from '@/shared/config/paths'
-import { allows, chosenOffer, MOCK_ONLY, useAudience, useBrokers, useSession, type Audience, type Broker, type Capability } from '@/shared/api'
+import { allows, chosenOffer, useAudience, useBrokerOffers, useSession, useShown, type Broker, type Capability, type Feature } from '@/shared/api'
 import { formatDateTime } from '@/shared/lib/format'
 import { isAcceptedList, parseStockIds } from '@/shared/lib/stock-ids'
 import { ArchiveWarmUp } from '@/shared/ui/archive-warm-up'
@@ -27,34 +27,35 @@ import { BrokerChoice } from './BrokerChoice'
 import { RunStateBadge } from './RunStateBadge'
 import { useStartRefusal } from './refusal'
 
-/** Every analysis a run can be; one that needs a capability is offered only where the site's audience allows it. */
-const KINDS: { kind: RunKind; icon: typeof Play; orders: boolean; requires?: Capability }[] = [
-  { kind: 'full-cycle', icon: Radar, orders: false },
-  { kind: 'specific-stocks', icon: ScanSearch, orders: false },
-  { kind: 'buzz-scan', icon: Megaphone, orders: true, requires: 'realtime_quotes' },
-  { kind: 'intraday', icon: Activity, orders: true, requires: 'realtime_quotes' },
+/**
+ * Every analysis a run can be. Each is offered only to a viewer the site shows its feature to, and one that needs a
+ * capability only where the site's audience allows it.
+ */
+const KINDS: { kind: RunKind; icon: typeof Play; orders: boolean; feature: Feature; requires?: Capability }[] = [
+  { kind: 'full-cycle', icon: Radar, orders: false, feature: 'full_cycle' },
+  { kind: 'specific-stocks', icon: ScanSearch, orders: false, feature: 'specific_stock' },
+  { kind: 'buzz-scan', icon: Megaphone, orders: true, feature: 'buzz', requires: 'realtime_quotes' },
+  { kind: 'intraday', icon: Activity, orders: true, feature: 'intraday', requires: 'realtime_quotes' },
 ]
 
 type Kind = (typeof KINDS)[number]
-
-function offeredKinds(audience: Audience): Kind[] {
-  return KINDS.filter((item) => !item.requires || allows(audience, item.requires))
-}
 
 /** The home page: start a run, read the latest result and the history; a visitor reads what the analyses do. */
 export function RunsPage() {
   const { t } = useTranslation('runs')
   const current = useSession()
   const audience = useAudience()
-  const kinds = audience.data ? offeredKinds(audience.data) : null
+  const shown = useShown()
+  const offered = audience.data
+  const kinds = offered && !shown.pending ? KINDS.filter((item) => shown.shows(item.feature) && (!item.requires || allows(offered, item.requires))) : null
   return (
-    <div className="space-y-5 lg:space-y-6">
-      <PageHeader eyebrow={t('common:nav.section.technical')} title={t('title')} description={t('description')} note={<TechnicalStrategyNote />} />
-      {(current.status === 'checking' || audience.isPending) && <Skeleton className="h-40 rounded-2xl" />}
+    <div className="page-stack">
+      <PageHeader title={t('title')} description={t('description')} note={<TechnicalStrategyNote />} />
+      {(shown.pending || audience.isPending) && <Skeleton className="h-40 rounded-2xl" />}
       {audience.isError && <ErrorState error={audience.error} title={t('common:audience.failed')} onRetry={() => void audience.refetch()} className="rounded-2xl border bg-card" />}
       {kinds && current.status === 'signedOut' && <Intro ended={current.ended} kinds={kinds} />}
       {kinds && current.status === 'signedIn' && (
-        <div className="space-y-4 lg:space-y-5">
+        <div className="card-stack">
           <ArchiveWarmUp />
           <StartPanel kinds={kinds} />
           <LatestResult />
@@ -68,7 +69,8 @@ export function RunsPage() {
 /** The question over the analyses: how many there are on this site, and that one of yours runs at a time. */
 function useStartQuestion(kinds: readonly Kind[]): string {
   const { t } = useTranslation('runs')
-  return t(kinds.length === KINDS.length ? 'startQuestion' : 'startQuestionWithoutRealtime')
+  if (kinds.length === KINDS.length) return t('startQuestion')
+  return t(kinds.length === 2 && kinds.every((item) => !item.requires) ? 'startQuestionWithoutRealtime' : 'startQuestionSome')
 }
 
 function Intro({ ended, kinds }: { ended: boolean; kinds: readonly Kind[] }) {
@@ -113,13 +115,16 @@ function Intro({ ended, kinds }: { ended: boolean; kinds: readonly Kind[] }) {
   )
 }
 
-function StartPanel({ kinds }: { kinds: readonly Kind[] }) {
+function StartPanel({ kinds: shownKinds }: { kinds: readonly Kind[] }) {
   const { t } = useTranslation('runs')
-  const question = useStartQuestion(kinds)
   const navigate = useNavigate()
   const start = useStartRun()
   const refusal = useStartRefusal()
-  const offers = useBrokers().data ?? MOCK_ONLY
+  const offers = useBrokerOffers()
+  // A workflow that orders needs an account to order on; the site may show this viewer none.
+  const kinds = shownKinds.filter((item) => !item.orders || offers.length > 0)
+  const real = offers.some((offer) => offer.broker !== 'mock')
+  const question = useStartQuestion(kinds)
   const [confirming, setConfirming] = useState<RunKind | null>(null)
   const [chosen, setChosen] = useState<Broker>('mock')
   const broker = chosenOffer(offers, chosen).broker
@@ -166,7 +171,7 @@ function StartPanel({ kinds }: { kinds: readonly Kind[] }) {
                 {orders ? (
                   <Badge variant="outline" className="gap-1 border-gold/40 font-normal text-gold">
                     <ShieldAlert aria-hidden className="size-3" />
-                    {offers.length > 1 ? t('placesOrders') : t('mockOrders')}
+                    {real ? t('placesOrders') : t('mockOrders')}
                   </Badge>
                 ) : (
                   <Badge variant="outline" className="font-normal">
@@ -209,7 +214,7 @@ function StartPanel({ kinds }: { kinds: readonly Kind[] }) {
         description={
           <>
             {confirming && t(`kind.${confirming}.cost`)} {confirming === 'specific-stocks' && t('confirm.stocks', { ids: stocks.ids.join(', ') })}{' '}
-            {confirmingOrders && offers.length < 2 && t('confirm.mock')}
+            {confirmingOrders && !real && t('confirm.mock')}
           </>
         }
         cancel={t('confirm.cancel')}
@@ -222,9 +227,9 @@ function StartPanel({ kinds }: { kinds: readonly Kind[] }) {
   )
 }
 
-/** The newest analysis that ended, if any; a running run has no decisions yet, and a follow only copies another's. */
+/** The newest analysis that ended, if any; a running run has no decisions yet, and a follow analyses nothing. */
 function LatestResult() {
-  const latest = useRunsPage(0).data?.runs.find((run) => run.state !== 'running' && run.summary?.workflow !== 'follow')
+  const latest = useRunsPage(0).data?.runs.find((run) => run.state !== 'running' && run.summary?.workflow !== 'follow' && run.summary?.workflow !== 'ranking_follow')
   return latest ? <LatestRun run={latest} /> : null
 }
 

@@ -1,21 +1,29 @@
 [
   {
     "path": "environment",
+    "kind": "choice",
+    "group": "site_access",
     "options": [
       "dev",
       "test",
       "prod"
-    ]
+    ],
+    "unit": null
   },
   {
     "path": "audience",
+    "kind": "choice",
+    "group": "site_access",
     "options": [
       "personal",
       "public"
-    ]
+    ],
+    "unit": null
   },
   {
     "path": "ai.active_model",
+    "kind": "choice",
+    "group": "ai",
     "options": [
       "openai",
       "grok",
@@ -23,14 +31,20 @@
       "groq",
       "nvidia",
       "claude"
-    ]
+    ],
+    "unit": null
   },
   {
     "path": "ai.available_models",
-    "options": []
+    "kind": "structure",
+    "group": "advanced",
+    "options": [],
+    "unit": null
   },
   {
     "path": "ai.user_selectable",
+    "kind": "choices",
+    "group": "ai",
     "options": [
       "openai",
       "grok",
@@ -38,989 +52,990 @@
       "groq",
       "nvidia",
       "claude"
-    ]
+    ],
+    "unit": null
   },
   {
     "path": "ai.connection_timeout",
-    "options": []
+    "kind": "steps",
+    "group": "ai",
+    "options": [],
+    "unit": "seconds"
   },
   {
     "path": "ai.temperature",
-    "options": []
+    "kind": "range",
+    "group": "ai",
+    "options": [],
+    "unit": null
   },
   {
     "path": "ai.max_output_tokens",
-    "options": []
+    "kind": "steps",
+    "group": "ai",
+    "options": [],
+    "unit": null
   },
   {
     "path": "ai.system_prompt",
-    "options": []
+    "kind": "text",
+    "group": "advanced",
+    "options": [],
+    "unit": null
   },
   {
     "path": "ai.rag_injection_prompt",
-    "options": []
+    "kind": "text",
+    "group": "advanced",
+    "options": [],
+    "unit": null
   },
   {
     "path": "ai.article_content_length",
-    "options": []
-  },
-  {
-    "path": "api.allowed_hosts",
-    "options": []
-  },
-  {
-    "path": "api.settings_file_max_bytes",
-    "options": []
-  },
-  {
-    "path": "api.settings_backups_kept",
-    "options": []
-  },
-  {
-    "path": "api.settings_build_timeout_seconds",
-    "options": []
-  },
-  {
-    "path": "api.settings_poll_seconds",
-    "options": []
+    "kind": "steps",
+    "group": "ai",
+    "options": [],
+    "unit": null
   },
   {
     "path": "api.valuation_cache_minutes",
-    "options": []
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": "minutes"
   },
   {
     "path": "api.archive_interval_hours",
-    "options": []
-  },
-  {
-    "path": "behavior.log_level",
-    "options": [
-      "TRACE",
-      "DEBUG",
-      "INFO",
-      "SUCCESS",
-      "WARNING",
-      "ERROR",
-      "CRITICAL"
-    ]
-  },
-  {
-    "path": "behavior.enable_web_search",
-    "options": []
-  },
-  {
-    "path": "behavior.enable_x_search",
-    "options": []
-  },
-  {
-    "path": "behavior.enable_inline_citations",
-    "options": []
-  },
-  {
-    "path": "behavior.web_search_max_results",
-    "options": []
-  },
-  {
-    "path": "behavior.web_search_triggers",
-    "options": []
-  },
-  {
-    "path": "behavior.web_search_allowed_domains",
-    "options": []
-  },
-  {
-    "path": "behavior.web_search_excluded_domains",
-    "options": []
-  },
-  {
-    "path": "behavior.x_search_allowed_handles",
-    "options": []
-  },
-  {
-    "path": "behavior.x_search_excluded_handles",
-    "options": []
-  },
-  {
-    "path": "db.backend",
-    "options": [
-      "sqlite",
-      "postgresql"
-    ]
-  },
-  {
-    "path": "db.chroma_persist_path",
-    "options": []
-  },
-  {
-    "path": "chat.reset_commands",
-    "options": []
-  },
-  {
-    "path": "chat.reset_reply",
-    "options": []
-  },
-  {
-    "path": "folder.news_archive_dir",
-    "options": []
-  },
-  {
-    "path": "folder.buzz_archive_dir",
-    "options": []
-  },
-  {
-    "path": "folder.ai_response_dir",
-    "options": []
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": "hours"
   },
   {
     "path": "tavily.search_depth",
-    "options": []
+    "kind": "choice",
+    "group": "ai",
+    "options": [
+      "basic",
+      "advanced"
+    ],
+    "unit": null
   },
   {
     "path": "tavily.connection_timeout",
-    "options": []
+    "kind": "steps",
+    "group": "ai",
+    "options": [],
+    "unit": "seconds"
   },
   {
     "path": "analysis.technical_weight",
-    "options": []
+    "kind": "range",
+    "group": "trading_limits",
+    "options": [],
+    "unit": "percent"
   },
   {
     "path": "analysis.ai_weight",
-    "options": []
+    "kind": "range",
+    "group": "trading_limits",
+    "options": [],
+    "unit": "percent"
   },
   {
     "path": "analysis.min_combined_score_buy",
-    "options": []
+    "kind": "range",
+    "group": "trading_limits",
+    "options": [],
+    "unit": null
   },
   {
     "path": "analysis.max_combined_score_sell",
-    "options": []
+    "kind": "range",
+    "group": "trading_limits",
+    "options": [],
+    "unit": null
   },
   {
     "path": "analysis.risk_per_trade_pct",
-    "options": []
+    "kind": "steps",
+    "group": "trading_limits",
+    "options": [],
+    "unit": "percent"
   },
   {
     "path": "analysis.stop_loss_pct",
-    "options": []
+    "kind": "steps",
+    "group": "trading_limits",
+    "options": [],
+    "unit": "percent"
   },
   {
     "path": "analysis.lot_size",
-    "options": []
+    "kind": "steps",
+    "group": "trading_limits",
+    "options": [],
+    "unit": null
   },
   {
     "path": "analysis.reason_item_limit",
-    "options": []
+    "kind": "steps",
+    "group": "trading_limits",
+    "options": [],
+    "unit": null
   },
   {
     "path": "analysis.article_fetch_limit",
-    "options": []
+    "kind": "steps",
+    "group": "trading_limits",
+    "options": [],
+    "unit": null
   },
   {
     "path": "analysis.material_information_days",
-    "options": []
+    "kind": "steps",
+    "group": "trading_limits",
+    "options": [],
+    "unit": "days"
   },
   {
     "path": "analysis.lookback_days",
-    "options": []
+    "kind": "steps",
+    "group": "trading_limits",
+    "options": [],
+    "unit": "days"
   },
   {
     "path": "analysis.history_calendar_days_per_bar",
-    "options": []
+    "kind": "steps",
+    "group": "trading_limits",
+    "options": [],
+    "unit": "days"
   },
   {
     "path": "technical.built_in_strategies",
-    "options": []
+    "kind": "choices",
+    "group": "trading_limits",
+    "options": [],
+    "unit": null
   },
   {
     "path": "technical.initial_strategy_id",
-    "options": []
-  },
-  {
-    "path": "strategy_search.workers",
-    "options": []
-  },
-  {
-    "path": "strategy_search.population",
-    "options": []
-  },
-  {
-    "path": "strategy_search.generations",
-    "options": []
-  },
-  {
-    "path": "strategy_search.train_share",
-    "options": []
-  },
-  {
-    "path": "strategy_search.validation_share",
-    "options": []
-  },
-  {
-    "path": "strategy_search.finalists",
-    "options": []
-  },
-  {
-    "path": "strategy_search.winners",
-    "options": []
-  },
-  {
-    "path": "strategy_search.luck_sample",
-    "options": []
-  },
-  {
-    "path": "strategy_search.min_trades_per_100_sessions",
-    "options": []
-  },
-  {
-    "path": "strategy_search.drawdown_penalty",
-    "options": []
-  },
-  {
-    "path": "strategy_search.tournament",
-    "options": []
-  },
-  {
-    "path": "strategy_search.max_mutations",
-    "options": []
-  },
-  {
-    "path": "strategy_search.attempts_per_child",
-    "options": []
-  },
-  {
-    "path": "strategy_search.period_step",
-    "options": []
-  },
-  {
-    "path": "strategy_search.constant_step",
-    "options": []
-  },
-  {
-    "path": "strategy_search.score_step",
-    "options": []
-  },
-  {
-    "path": "strategy_search.max_required_bars",
-    "options": []
-  },
-  {
-    "path": "strategy_search.max_rules",
-    "options": []
-  },
-  {
-    "path": "strategy_search.periods",
-    "options": []
-  },
-  {
-    "path": "strategy_search.levels",
-    "options": []
-  },
-  {
-    "path": "strategy_search.folder",
-    "options": []
+    "kind": "choice",
+    "group": "trading_limits",
+    "options": [],
+    "unit": null
   },
   {
     "path": "ranking.decision_day",
-    "options": []
+    "kind": "range",
+    "group": "ranking",
+    "options": [],
+    "unit": null
   },
   {
     "path": "ranking.top",
-    "options": []
+    "kind": "steps",
+    "group": "ranking",
+    "options": [],
+    "unit": null
   },
   {
     "path": "ranking.min_close",
-    "options": []
+    "kind": "steps",
+    "group": "ranking",
+    "options": [],
+    "unit": "twd"
   },
   {
     "path": "ranking.min_traded_value",
-    "options": []
+    "kind": "steps",
+    "group": "ranking",
+    "options": [],
+    "unit": "twd"
   },
   {
     "path": "ranking.traded_value_sessions",
-    "options": []
+    "kind": "steps",
+    "group": "ranking",
+    "options": [],
+    "unit": null
   },
   {
     "path": "ranking.high_sessions",
-    "options": []
+    "kind": "steps",
+    "group": "ranking",
+    "options": [],
+    "unit": null
   },
   {
     "path": "ranking.revenue_short_months",
-    "options": []
+    "kind": "steps",
+    "group": "ranking",
+    "options": [],
+    "unit": null
   },
   {
     "path": "ranking.revenue_long_months",
-    "options": []
+    "kind": "steps",
+    "group": "ranking",
+    "options": [],
+    "unit": null
   },
   {
     "path": "ranking.daily_limit",
-    "options": []
+    "kind": "steps",
+    "group": "ranking",
+    "options": [],
+    "unit": "percent"
   },
   {
     "path": "ranking.benchmark_id",
-    "options": []
+    "kind": "choice",
+    "group": "ranking",
+    "options": [
+      "0050",
+      "006208"
+    ],
+    "unit": null
   },
   {
     "path": "ranking.sessions_per_year",
-    "options": []
+    "kind": "steps",
+    "group": "ranking",
+    "options": [],
+    "unit": null
   },
   {
     "path": "notifications.enabled",
-    "options": []
+    "kind": "switch",
+    "group": "trading_limits",
+    "options": [],
+    "unit": null
   },
   {
     "path": "notifications.recipients",
-    "options": []
+    "kind": "lines",
+    "group": "advanced",
+    "options": [],
+    "unit": null
   },
   {
     "path": "prompts.analysis_report_fundamental",
-    "options": []
+    "kind": "text",
+    "group": "advanced",
+    "options": [],
+    "unit": null
   },
   {
     "path": "prompts.analysis_report_momentum",
-    "options": []
+    "kind": "text",
+    "group": "advanced",
+    "options": [],
+    "unit": null
   },
   {
     "path": "prompts.valuation_explanation",
-    "options": []
+    "kind": "text",
+    "group": "advanced",
+    "options": [],
+    "unit": null
   },
   {
     "path": "prompts.social_sentiment",
-    "options": []
+    "kind": "text",
+    "group": "advanced",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "prompts.stock_brief",
+    "kind": "text",
+    "group": "advanced",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "prompts.stock_brief_advice_phrases",
+    "kind": "text",
+    "group": "advanced",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "prompts.stock_brief_rise_query",
+    "kind": "text",
+    "group": "advanced",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "prompts.stock_brief_fall_query",
+    "kind": "text",
+    "group": "advanced",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "prompts.stock_brief_company_query",
+    "kind": "text",
+    "group": "advanced",
+    "options": [],
+    "unit": null
   },
   {
     "path": "sentiment.min_confidence",
-    "options": []
+    "kind": "range",
+    "group": "data_history",
+    "options": [],
+    "unit": "percent"
   },
   {
     "path": "sentiment.min_opinions",
-    "options": []
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": null
   },
   {
     "path": "sentiment.consensus_share",
-    "options": []
-  },
-  {
-    "path": "collect_rules.spam_keywords",
-    "options": []
-  },
-  {
-    "path": "collect_rules.financial_keywords",
-    "options": []
-  },
-  {
-    "path": "collect_rules.buzz_min_mentions",
-    "options": []
-  },
-  {
-    "path": "collect_rules.buzz_min_engagement",
-    "options": []
-  },
-  {
-    "path": "collect_rules.social_article_limit",
-    "options": []
-  },
-  {
-    "path": "collect_rules.ptt_lookback_days",
-    "options": []
-  },
-  {
-    "path": "collect_rules.ptt_tags",
-    "options": []
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": "percent"
   },
   {
     "path": "quality.min_chars_stock",
-    "options": []
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": null
   },
   {
     "path": "quality.min_chars_news",
-    "options": []
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": null
   },
   {
     "path": "quality.min_chars_gossip",
-    "options": []
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "stock_page.news_freshness_minutes",
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": "minutes"
+  },
+  {
+    "path": "stock_page.news_held_stocks",
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "stock_page.valuation_min_sessions",
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "stock_page.eps_quarters",
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "stock_page.brief.daily_stocks",
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "stock_page.brief.language",
+    "kind": "choice",
+    "group": "data_history",
+    "options": [
+      "zh-TW",
+      "en"
+    ],
+    "unit": null
+  },
+  {
+    "path": "stock_page.brief.window_sessions",
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "stock_page.article_store.retention_days",
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": "days"
+  },
+  {
+    "path": "stock_page.article_store.max_per_stock",
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": null
   },
   {
     "path": "market.fee_rate",
-    "options": []
+    "kind": "steps",
+    "group": "trading_limits",
+    "options": [],
+    "unit": "percent"
   },
   {
     "path": "market.tax_rate",
-    "options": []
+    "kind": "steps",
+    "group": "trading_limits",
+    "options": [],
+    "unit": "percent"
   },
   {
     "path": "market.etf_tax_rate",
-    "options": []
+    "kind": "steps",
+    "group": "trading_limits",
+    "options": [],
+    "unit": "percent"
   },
   {
     "path": "market.bond_etf_tax_exempt_until",
-    "options": []
+    "kind": "date",
+    "group": "trading_limits",
+    "options": [],
+    "unit": null
   },
   {
     "path": "market.min_fee",
-    "options": []
+    "kind": "steps",
+    "group": "trading_limits",
+    "options": [],
+    "unit": "twd"
   },
   {
     "path": "market.board_lot_shares",
-    "options": []
-  },
-  {
-    "path": "market.stock_ticks",
-    "options": []
-  },
-  {
-    "path": "market.etf_ticks",
-    "options": []
-  },
-  {
-    "path": "market.tick_float_tolerance",
-    "options": []
+    "kind": "steps",
+    "group": "trading_limits",
+    "options": [],
+    "unit": null
   },
   {
     "path": "freshness.realtime_max_lag_minutes",
-    "options": []
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": "minutes"
   },
   {
     "path": "freshness.history_max_lag_days",
-    "options": []
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": "days"
   },
   {
     "path": "freshness.missing_session_listed_stocks",
-    "options": []
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": null
   },
   {
     "path": "freshness.daily_close_max_missed_sessions",
-    "options": []
-  },
-  {
-    "path": "market_hours.opening_auction_start",
-    "options": []
-  },
-  {
-    "path": "market_hours.continuous_start",
-    "options": []
-  },
-  {
-    "path": "market_hours.closing_auction_start",
-    "options": []
-  },
-  {
-    "path": "market_hours.close",
-    "options": []
-  },
-  {
-    "path": "market_hours.settled",
-    "options": []
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": null
   },
   {
     "path": "market_data.quote_batch_size",
-    "options": []
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": null
   },
   {
     "path": "market_data.quote_request_interval_seconds",
-    "options": []
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": "seconds"
   },
   {
     "path": "market_data.quote_timeout_seconds",
-    "options": []
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": "seconds"
   },
   {
     "path": "market_data.history_request_interval_seconds",
-    "options": []
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": "seconds"
   },
   {
     "path": "market_data.history_timeout_seconds",
-    "options": []
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": "seconds"
   },
   {
     "path": "market_data.history_backfill_bars",
-    "options": []
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": null
   },
   {
     "path": "market_data.history_retry_hours",
-    "options": []
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": "hours"
   },
   {
     "path": "market_data.history_start_slack_days",
-    "options": []
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": "days"
   },
   {
     "path": "market_data.listing_cache_hours",
-    "options": []
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": "hours"
   },
   {
     "path": "market_data.listing_timeout_seconds",
-    "options": []
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": "seconds"
   },
   {
     "path": "market_data.search_result_limit",
-    "options": []
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": null
   },
   {
     "path": "market_data.most_traded_count",
-    "options": []
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": null
   },
   {
     "path": "trading.max_order_value",
-    "options": []
+    "kind": "steps",
+    "group": "trading_limits",
+    "options": [],
+    "unit": "twd"
   },
   {
     "path": "trading.max_daily_buy_value",
-    "options": []
+    "kind": "steps",
+    "group": "trading_limits",
+    "options": [],
+    "unit": "twd"
   },
   {
     "path": "mock_trading.initial_cash",
-    "options": []
+    "kind": "steps",
+    "group": "trading_limits",
+    "options": [],
+    "unit": "twd"
   },
   {
     "path": "mock_trading.max_fill_quantity",
-    "options": []
+    "kind": "steps",
+    "group": "trading_limits",
+    "options": [],
+    "unit": null
   },
   {
     "path": "shioaji.poll_interval_seconds",
-    "options": []
+    "kind": "steps",
+    "group": "trading_limits",
+    "options": [],
+    "unit": "seconds"
   },
   {
     "path": "shioaji.max_polls",
-    "options": []
+    "kind": "steps",
+    "group": "trading_limits",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "holdings.concentration_positions",
+    "kind": "steps",
+    "group": "trading_limits",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "holdings.realized_days",
+    "kind": "steps",
+    "group": "trading_limits",
+    "options": [],
+    "unit": "days"
   },
   {
     "path": "watchlist.automatic_expiry_sessions",
-    "options": []
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": null
   },
   {
     "path": "valuation.scenario_spread",
-    "options": []
+    "kind": "steps",
+    "group": "ai",
+    "options": [],
+    "unit": "percent"
   },
   {
     "path": "valuation.max_scan_explanations",
-    "options": []
-  },
-  {
-    "path": "valuation.not_investment_advice",
-    "options": []
-  },
-  {
-    "path": "valuation.low_pe_caveat",
-    "options": []
-  },
-  {
-    "path": "valuation.ai_not_provided",
-    "options": []
-  },
-  {
-    "path": "valuation.undervaluation_formula",
-    "options": []
-  },
-  {
-    "path": "valuation.no_fair_price_prompt_rule",
-    "options": []
-  },
-  {
-    "path": "valuation.keep_scenarios_prompt_rule",
-    "options": []
-  },
-  {
-    "path": "valuation.low_pe_prompt_rule",
-    "options": []
+    "kind": "range",
+    "group": "ai",
+    "options": [],
+    "unit": null
   },
   {
     "path": "accounts.daily_ai_calls",
-    "options": []
+    "kind": "steps",
+    "group": "site_access",
+    "options": [],
+    "unit": null
   },
   {
     "path": "accounts.daily_ai_calls_total",
-    "options": []
+    "kind": "steps",
+    "group": "site_access",
+    "options": [],
+    "unit": null
   },
   {
     "path": "accounts.registration_open",
-    "options": []
+    "kind": "switch",
+    "group": "site_access",
+    "options": [],
+    "unit": null
   },
   {
     "path": "accounts.sign_in_failures_per_name",
-    "options": []
+    "kind": "steps",
+    "group": "site_access",
+    "options": [],
+    "unit": null
   },
   {
     "path": "accounts.sign_in_failures_per_client",
-    "options": []
+    "kind": "steps",
+    "group": "site_access",
+    "options": [],
+    "unit": null
   },
   {
     "path": "accounts.sign_in_window_minutes",
-    "options": []
+    "kind": "steps",
+    "group": "site_access",
+    "options": [],
+    "unit": null
   },
   {
     "path": "accounts.registrations_per_client",
-    "options": []
+    "kind": "steps",
+    "group": "site_access",
+    "options": [],
+    "unit": null
   },
   {
     "path": "accounts.registration_window_minutes",
-    "options": []
+    "kind": "steps",
+    "group": "site_access",
+    "options": [],
+    "unit": null
   },
   {
     "path": "accounts.settings_password_failures",
-    "options": []
+    "kind": "steps",
+    "group": "site_access",
+    "options": [],
+    "unit": null
   },
   {
     "path": "accounts.session_days",
-    "options": []
+    "kind": "range",
+    "group": "site_access",
+    "options": [],
+    "unit": null
   },
   {
     "path": "accounts.max_concurrent_runs",
-    "options": []
+    "kind": "range",
+    "group": "site_access",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "accounts.max_concurrent_backtests",
+    "kind": "range",
+    "group": "site_access",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "accounts.max_backtests_per_user",
+    "kind": "range",
+    "group": "site_access",
+    "options": [],
+    "unit": null
   },
   {
     "path": "accounts.saved_backtests",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.twse_daily_quotes_url",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.tpex_daily_quotes_url",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.twse_index_url",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.twse_index_fields.index",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.twse_index_fields.date",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.twse_index_fields.close",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.twse_index_fields.sign",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.twse_index_fields.change",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.twse_index_fields.taiex",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.tpex_index_url",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.company_profiles",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.industry_names",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.industry_max_age_hours",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.material_information",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.quarter_eps",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.valuation_ratios",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.financial_reports.urls",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.financial_reports.served_date",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.financial_reports.year",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.financial_reports.quarter",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.financial_reports.stock_id",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.financial_reports.company_name",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.financial_reports.summary",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.monthly_revenue",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.exchange_news.url",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.exchange_news.title",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.exchange_news.link",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.exchange_news.date",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.exchange_news.stock_code_pattern",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.daily_reports",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.ex_right_references.url",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.ex_right_references.date",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.ex_right_references.stock_id",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.ex_right_references.reference",
-    "options": []
-  },
-  {
-    "path": "sources.exchange.ex_right_references.months_per_request",
-    "options": []
-  },
-  {
-    "path": "sources.attribution.providers",
-    "options": []
-  },
-  {
-    "path": "sources.attribution.notice",
-    "options": []
-  },
-  {
-    "path": "sources.attribution.license",
-    "options": []
-  },
-  {
-    "path": "sources.attribution.license_url",
-    "options": []
-  },
-  {
-    "path": "sources.mops.eps_url",
-    "options": []
-  },
-  {
-    "path": "sources.mops.eps_form_fields",
-    "options": []
-  },
-  {
-    "path": "sources.mops.twse_market_code",
-    "options": []
-  },
-  {
-    "path": "sources.mops.tpex_market_code",
-    "options": []
-  },
-  {
-    "path": "sources.mops.company_id_header",
-    "options": []
-  },
-  {
-    "path": "sources.mops.eps_header_prefix",
-    "options": []
-  },
-  {
-    "path": "sources.mops.no_data_marker",
-    "options": []
-  },
-  {
-    "path": "sources.mops.monthly_revenue_url",
-    "options": []
-  },
-  {
-    "path": "sources.mops.revenue_deadline_day",
-    "options": []
-  },
-  {
-    "path": "sources.mops.request_interval_seconds",
-    "options": []
-  },
-  {
-    "path": "sources.mops.timeout_seconds",
-    "options": []
-  },
-  {
-    "path": "sources.mops.provisional_page_max_age_hours",
-    "options": []
-  },
-  {
-    "path": "sources.mops.filing_deadlines",
-    "options": []
-  },
-  {
-    "path": "sources.mops.filing_grace_days",
-    "options": []
-  },
-  {
-    "path": "sources.ptt.base_url",
-    "options": []
-  },
-  {
-    "path": "sources.ptt.search_path",
-    "options": []
-  },
-  {
-    "path": "sources.ptt.push_tag",
-    "options": []
-  },
-  {
-    "path": "sources.ptt.boo_tag",
-    "options": []
-  },
-  {
-    "path": "sources.ptt.arrow_tag",
-    "options": []
-  },
-  {
-    "path": "sources.ptt.ticker_label_pattern",
-    "options": []
-  },
-  {
-    "path": "sources.ptt.ticker_parenthesized_pattern",
-    "options": []
-  },
-  {
-    "path": "sources.ptt.title_ticker_pattern",
-    "options": []
-  },
-  {
-    "path": "sources.ptt.posting_reminder_marker",
-    "options": []
-  },
-  {
-    "path": "sources.ptt.previous_page_label",
-    "options": []
-  },
-  {
-    "path": "sources.ptt.timeout_seconds",
-    "options": []
-  },
-  {
-    "path": "sources.ptt.max_pages",
-    "options": []
-  },
-  {
-    "path": "sources.ptt.max_body_length",
-    "options": []
-  },
-  {
-    "path": "sources.ptt.archive_excerpt_length",
-    "options": []
-  },
-  {
-    "path": "sources.ptt.user_agent",
-    "options": []
-  },
-  {
-    "path": "sources.ptt.cookie",
-    "options": []
-  },
-  {
-    "path": "sources.news.cnyes_api_url",
-    "options": []
-  },
-  {
-    "path": "sources.news.cnyes_article_url",
-    "options": []
-  },
-  {
-    "path": "sources.news.yahoo_base_url",
-    "options": []
-  },
-  {
-    "path": "sources.news.yahoo_quote_url",
-    "options": []
-  },
-  {
-    "path": "sources.news.cnyes_timeout_seconds",
-    "options": []
-  },
-  {
-    "path": "sources.news.yahoo_timeout_seconds",
-    "options": []
-  },
-  {
-    "path": "sources.news.yahoo_min_headline_length",
-    "options": []
-  },
-  {
-    "path": "sources.news.yahoo_short_paragraph_length",
-    "options": []
-  },
-  {
-    "path": "sources.news.cnyes_user_agent",
-    "options": []
-  },
-  {
-    "path": "sources.news.yahoo_user_agent",
-    "options": []
-  },
-  {
-    "path": "sources.ai.grok_base_url",
-    "options": []
-  },
-  {
-    "path": "sources.ai.groq_base_url",
-    "options": []
-  },
-  {
-    "path": "sources.ai.nvidia_base_url",
-    "options": []
-  },
-  {
-    "path": "sources.ai.tavily_search_url",
-    "options": []
-  },
-  {
-    "path": "sources.line.push_url",
-    "options": []
-  },
-  {
-    "path": "sources.line.multicast_url",
-    "options": []
-  },
-  {
-    "path": "sources.line.multicast_timeout_seconds",
-    "options": []
-  },
-  {
-    "path": "sources.line.sentence_endings",
-    "options": []
-  },
-  {
-    "path": "sources.line.max_message_length",
-    "options": []
+    "kind": "steps",
+    "group": "site_access",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "accounts.google_administrator_emails",
+    "kind": "lines",
+    "group": "advanced",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "accounts.google_allowed_emails",
+    "kind": "lines",
+    "group": "advanced",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "accounts.google_timeout_seconds",
+    "kind": "steps",
+    "group": "site_access",
+    "options": [],
+    "unit": "seconds"
+  },
+  {
+    "path": "accounts.google_flow_minutes",
+    "kind": "steps",
+    "group": "site_access",
+    "options": [],
+    "unit": "minutes"
+  },
+  {
+    "path": "accounts.google_fresh_authentication_seconds",
+    "kind": "steps",
+    "group": "site_access",
+    "options": [],
+    "unit": "seconds"
+  },
+  {
+    "path": "accounts.google_clock_skew_seconds",
+    "kind": "steps",
+    "group": "site_access",
+    "options": [],
+    "unit": "seconds"
+  },
+  {
+    "path": "features.market_overview",
+    "kind": "choice",
+    "group": "features",
+    "options": [
+      "off",
+      "administrators",
+      "everyone"
+    ],
+    "unit": null
+  },
+  {
+    "path": "features.ranking",
+    "kind": "choice",
+    "group": "features",
+    "options": [
+      "off",
+      "administrators",
+      "everyone"
+    ],
+    "unit": null
+  },
+  {
+    "path": "features.stock_pages",
+    "kind": "choice",
+    "group": "features",
+    "options": [
+      "off",
+      "administrators",
+      "everyone"
+    ],
+    "unit": null
+  },
+  {
+    "path": "features.watchlist",
+    "kind": "choice",
+    "group": "features",
+    "options": [
+      "off",
+      "administrators",
+      "everyone"
+    ],
+    "unit": null
+  },
+  {
+    "path": "features.valuation",
+    "kind": "choice",
+    "group": "features",
+    "options": [
+      "off",
+      "administrators",
+      "everyone"
+    ],
+    "unit": null
+  },
+  {
+    "path": "features.full_cycle",
+    "kind": "choice",
+    "group": "features",
+    "options": [
+      "off",
+      "administrators",
+      "everyone"
+    ],
+    "unit": null
+  },
+  {
+    "path": "features.specific_stock",
+    "kind": "choice",
+    "group": "features",
+    "options": [
+      "off",
+      "administrators",
+      "everyone"
+    ],
+    "unit": null
+  },
+  {
+    "path": "features.buzz",
+    "kind": "choice",
+    "group": "features",
+    "options": [
+      "off",
+      "administrators",
+      "everyone"
+    ],
+    "unit": null
+  },
+  {
+    "path": "features.intraday",
+    "kind": "choice",
+    "group": "features",
+    "options": [
+      "off",
+      "administrators",
+      "everyone"
+    ],
+    "unit": null
+  },
+  {
+    "path": "features.strategy_library",
+    "kind": "choice",
+    "group": "features",
+    "options": [
+      "off",
+      "administrators",
+      "everyone"
+    ],
+    "unit": null
+  },
+  {
+    "path": "features.strategy_designer",
+    "kind": "choice",
+    "group": "features",
+    "options": [
+      "off",
+      "administrators",
+      "everyone"
+    ],
+    "unit": null
+  },
+  {
+    "path": "features.strategy_backtest",
+    "kind": "choice",
+    "group": "features",
+    "options": [
+      "off",
+      "administrators",
+      "everyone"
+    ],
+    "unit": null
+  },
+  {
+    "path": "features.mock_account",
+    "kind": "choice",
+    "group": "features",
+    "options": [
+      "off",
+      "administrators",
+      "everyone"
+    ],
+    "unit": null
+  },
+  {
+    "path": "features.sinopac_account",
+    "kind": "choice",
+    "group": "features",
+    "options": [
+      "off",
+      "administrators",
+      "everyone"
+    ],
+    "unit": null
+  },
+  {
+    "path": "features.sinopac_ordering",
+    "kind": "choice",
+    "group": "features",
+    "options": [
+      "off",
+      "administrators",
+      "everyone"
+    ],
+    "unit": null
+  },
+  {
+    "path": "features.holdings",
+    "kind": "choice",
+    "group": "features",
+    "options": [
+      "off",
+      "administrators",
+      "everyone"
+    ],
+    "unit": null
   }
 ]

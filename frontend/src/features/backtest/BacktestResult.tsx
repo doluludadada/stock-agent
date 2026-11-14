@@ -33,7 +33,7 @@ interface BacktestResultProps {
 /** One backtest, answer first: the verdict and its figures, both curves on one chart, how to read it, then every trade. */
 export function BacktestResult({ backtest, onReuse, onTryBuyScore }: BacktestResultProps) {
   return (
-    <div className="space-y-4 lg:space-y-5">
+    <div className="card-stack">
       <VerdictPanel backtest={backtest} onReuse={onReuse} onTryBuyScore={onTryBuyScore} />
       <CurvePanel backtest={backtest} />
       <ReadingNotes />

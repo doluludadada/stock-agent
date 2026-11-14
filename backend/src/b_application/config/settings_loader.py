@@ -6,6 +6,7 @@ and checks the new texts through the same functions, so a saved file is one the 
 
 import hashlib
 import json
+import os
 import sys
 from base64 import urlsafe_b64decode
 from collections.abc import Iterator, Mapping, Sequence
@@ -15,6 +16,7 @@ from functools import cache
 from pathlib import Path
 from types import UnionType
 from typing import Any, Union, get_args, get_origin, override
+from urllib.parse import urlsplit
 
 import yaml
 from pydantic import BaseModel, JsonValue, SecretStr, TypeAdapter, ValidationError
@@ -22,14 +24,21 @@ from pydantic.json_schema import GenerateJsonSchema
 from pydantic_core import ErrorDetails, core_schema, to_jsonable_python
 
 from a_domain.ports.system.settings_files import SettingChange, SettingField, SettingsEdit, SettingsProblem
-from a_domain.types.enums import Audience, InstructionKey, SettingKind, SettingsFile, SystemEnvironment
+from a_domain.types.enums import Audience, InstructionKey, SettingGroup, SettingKind, SettingsFile, SystemEnvironment
 from a_domain.types.errors import SettingsEditError
 from a_domain.types.values import FormulaId
 from b_application.config.app_config import AppConfig
 
 
 def get_project_root() -> Path:
-    """The nearest folder above this file that holds the justfile or .git: config/, .env and stock_agent.db live there."""
+    """
+    The folder config/, .env, stock_agent.db, secrets/ and everything else the app saves live in: STOCK_AGENT_ROOT when
+    the environment sets it, as the Docker image does to keep them outside the container; else the nearest folder above
+    this file that holds the justfile or .git.
+    """
+    if root := os.environ.get("STOCK_AGENT_ROOT"):
+        return Path(root)
+
     for parent in Path(__file__).resolve().parents:
         if (parent / "justfile").exists() or (parent / ".git").exists():
             return parent
@@ -65,15 +74,16 @@ def settings_texts(project_root: Path, candidates: Mapping[SettingsFile, str] | 
 
 
 def inject_prompt_settings(settings: dict[str, Any], instructions: dict[str, Any]) -> None:
-    """Copies the AI prompts of config/instructions.yaml into the settings each InstructionKey names."""
-    if not instructions:
-        return
-
+    """
+    Copies the AI prompts config/instructions.yaml sets into the settings each InstructionKey names. A prompt the file
+    does not set, as a deployment's older copy does for every prompt added since, stays empty, which is unset: what it
+    feeds is off, and the start names it (settings_notices).
+    """
     for key in InstructionKey:
         section, name = key.settings_path.split(".")
 
-        if isinstance(target := settings.setdefault(section, {}), dict):
-            target[name] = instructions.get(key.value)
+        if key.value in instructions and isinstance(target := settings.setdefault(section, {}), dict):
+            target[name] = instructions[key.value]
 
 
 def inject_built_in_strategies(settings: dict[str, Any], strategies_folder: Path, texts: Mapping[SettingsFile, str]) -> None:
@@ -226,10 +236,92 @@ def unread_settings(node: Mapping[Any, Any], model: type[BaseModel], prefix: str
             yield path, "comes from the environment or .env, never from a settings file"
         elif path in prompts:
             yield path, f"is the prompt {prompts[path]} of instructions.yaml"
+        elif key in retired_keys(model):
+            continue
         elif key not in fields or fields[key].exclude:
             yield path, "names no setting"
         elif isinstance(value, Mapping) and (section := section_model(fields[key].annotation)) is not None:
             yield from unread_settings(value, section, f"{path}.")
+
+
+def retired_keys(model: type[BaseModel]) -> tuple[str, ...]:
+    """
+    The settings a section once had and no longer reads, which its class names in `retired` of its json_schema_extra.
+    A file that still sets one starts: the key is skipped, and settings_notices names it.
+    """
+    extra = model.model_config.get("json_schema_extra")
+    retired = extra.get("retired") if isinstance(extra, dict) else None
+    return tuple(str(key) for key in retired) if isinstance(retired, list) else ()
+
+
+def retired_settings(node: Mapping[Any, Any], model: type[BaseModel], prefix: str) -> Iterator[str]:
+    """The path of each retired setting one section of a settings file still sets; sections are followed into their models."""
+    for key, value in node.items():
+        if key in retired_keys(model):
+            yield f"{prefix}{key}"
+        elif (
+            isinstance(value, Mapping) and key in model.model_fields and (section := section_model(model.model_fields[key].annotation))
+        ):
+            yield from retired_settings(value, section, f"{prefix}{key}.")
+
+
+def settings_notices(project_root: Path) -> list[str]:
+    """
+    What a start says about config/appsetting.yaml and config/instructions.yaml as they are on disk without refusing
+    them, one line each: the retired settings appsetting.yaml still sets, which the app ignores, the settings it does
+    not set, as a deployment's older copy of the file does for every setting added since, and the prompts
+    instructions.yaml does not set. A setting with no default, such as an address, names what the site goes without
+    until the file sets it (`without` in its json_schema_extra); every other one runs on its default. Names only,
+    never a value.
+    """
+    file = SettingsFile.APPSETTING
+    document = parsed_document(file, settings_text(project_root, file))
+    retired = list(retired_settings(document, AppConfig, ""))
+    in_file = [
+        keys for field in settings_fields({}, with_operator_only=True) for place, keys in [setting_place(field.path)] if place is file
+    ]
+    unset = [".".join(keys) for keys in in_file if keys[-1] not in (section_of(document, keys) or {})]
+    schema = settings_schema()
+    without = dict(settings_without(schema, schema, ""))
+    notices = []
+
+    if retired:
+        notices.append(f"{file.file_name} still sets {', '.join(retired)}: the app no longer reads them. Remove them from the file.")
+
+    for lack in dict.fromkeys(without[path] for path in unset if path in without):
+        missing = ", ".join(path for path in unset if without.get(path) == lack)
+        notices.append(f"{file.file_name} does not set {missing}: {lack} until it does. The shipped {file.file_name} has them.")
+
+    if defaulted := [path for path in unset if path not in without]:
+        notices.append(f"{file.file_name} does not set {', '.join(defaulted)}: each runs on its default.")
+
+    return notices + unset_prompts_notice(project_root)
+
+
+def unset_prompts_notice(project_root: Path) -> list[str]:
+    """One line that names the prompts config/instructions.yaml as it is on disk does not set, or none."""
+    file = SettingsFile.INSTRUCTIONS
+    document = parsed_document(file, settings_text(project_root, file))
+    unset = [key.value for key in InstructionKey if key.value not in document]
+
+    if not unset:
+        return []
+
+    return [
+        f"{file.file_name} does not set {', '.join(unset)}: what each feeds is off until it does. "
+        f"The shipped {file.file_name} has them."
+    ]
+
+
+def settings_without(schema: Mapping[str, Any], section: Mapping[str, Any], prefix: str) -> Iterator[tuple[str, str]]:
+    """(path, what the site goes without) for each setting whose class names it in `without`; sections are followed."""
+    for name, node in section.get("properties", {}).items():
+        resolved = schema_node(schema, node, None)
+
+        if "properties" in resolved:
+            yield from settings_without(schema, resolved, f"{prefix}{name}.")
+        elif "without" in resolved:
+            yield f"{prefix}{name}", str(resolved["without"])
 
 
 def section_model(annotation: Any) -> type[BaseModel] | None:
@@ -331,42 +423,83 @@ def settings_schema() -> dict[str, Any]:
     return AppConfig.model_json_schema(schema_generator=SettingsFileSchema)
 
 
-def settings_fields(documents: Mapping[SettingsFile, Mapping[str, Any]]) -> list[SettingField]:
+def settings_fields(
+    documents: Mapping[SettingsFile, Mapping[str, Any]], strategy_ids: Sequence[str] = (), with_operator_only: bool = False
+) -> list[SettingField]:
     """
     The administrator's settings form: every setting of appsetting.yaml and every AI prompt of instructions.yaml, in
     the order of the settings classes, depth first, each with the value `documents` (the files as parsed_document reads
     them) set, else its default. The fields come from settings_schema(), so a setting a class adds appears without a
-    list kept by hand, and no setting the environment owns or the loader sets is one. A section is followed into its
-    settings; a section with none (line) gives no field.
+    list kept by hand, with the control its type and its bounds give it, and no setting the environment owns or the
+    loader sets is one. A section is followed into its settings; a section with none (line) gives no field.
+    `strategy_ids` are the built-in strategies config/strategies/ holds, which the settings that name one choose from.
+    The form leaves out the settings a class marks `operator_only`, so it neither shows one nor accepts a change to
+    one; `with_operator_only` gives every setting of the files, those too.
     """
-    schema = settings_schema()
-    return list(section_fields(schema, schema, "", documents))
+    schema = settings_schema() if with_operator_only else form_schema()
+    return list(section_fields(schema, schema, "", SettingGroup.ADVANCED, documents, strategy_ids))
+
+
+@cache
+def form_schema() -> dict[str, Any]:
+    """settings_schema() as the settings form reads it: without the settings and the sections a class marks `operator_only`."""
+    return without_operator_only(settings_schema())
+
+
+def without_operator_only(node: dict[str, Any]) -> dict[str, Any]:
+    """A schema node without the nodes below it that are marked `operator_only`, at any depth."""
+    kept = {key: value for key, value in node.items() if not (isinstance(value, dict) and value.get("operator_only"))}
+    return {key: without_operator_only(value) if isinstance(value, dict) else value for key, value in kept.items()}
 
 
 def section_fields(
-    schema: Mapping[str, Any], section: Mapping[str, Any], prefix: str, documents: Mapping[SettingsFile, Mapping[str, Any]]
+    schema: Mapping[str, Any],
+    section: Mapping[str, Any],
+    prefix: str,
+    group: SettingGroup,
+    documents: Mapping[SettingsFile, Mapping[str, Any]],
+    strategy_ids: Sequence[str],
 ) -> Iterator[SettingField]:
+    """
+    The fields of one section. A setting shows under the group its class names (`group` in its json_schema_extra), else
+    its section's, and a typed one always under ADVANCED.
+    """
     for name, node in section.get("properties", {}).items():
         path = f"{prefix}{name}"
         value = setting_value(documents, path, node)
         resolved = schema_node(schema, node, value)
+        own_group = SettingGroup(resolved.get("group", group))
 
         if "properties" in resolved:
-            yield from section_fields(schema, resolved, f"{path}.", documents)
+            yield from section_fields(schema, resolved, f"{path}.", own_group, documents, strategy_ids)
             continue
 
-        options = resolved.get("enum") or schema_node(schema, resolved.get("items", {}), None).get("enum", ())
+        kind = setting_kind(schema, resolved, value)
         yield SettingField(
             path=path,
-            kind=setting_kind(schema, resolved, value),
+            kind=kind,
+            group=SettingGroup.ADVANCED if kind.typed else own_group,
             value=value,
-            options=tuple(str(option) for option in options),
-            minimum=resolved.get("minimum"),
-            maximum=resolved.get("maximum"),
-            exclusive_minimum=resolved.get("exclusiveMinimum"),
-            exclusive_maximum=resolved.get("exclusiveMaximum"),
+            unit=resolved.get("unit"),
+            nullable=any(branch.get("type") == "null" for branch in node.get("anyOf", ())),
             restart_only=resolved.get("restart_only", False),
+            **control_offer(schema, resolved, kind, strategy_ids),
         )
+
+
+def control_offer(
+    schema: Mapping[str, Any], node: Mapping[str, Any], kind: SettingKind, strategy_ids: Sequence[str]
+) -> dict[str, Any]:
+    """What a setting's control offers, as SettingField names it: a choice's options, the steps, or a range's bounds and step."""
+    match kind:
+        case SettingKind.CHOICE | SettingKind.CHOICES:
+            return {"options": setting_options(schema, node, strategy_ids)}
+        case SettingKind.STEPS:
+            return {"steps": number_steps(node)}
+        case SettingKind.RANGE:
+            return dict(zip(("minimum", "maximum", "step"), number_range(node), strict=True))
+        case _:
+            return {}
 
 
 def setting_value(documents: Mapping[SettingsFile, Mapping[str, Any]], path: str, node: Mapping[str, Any]) -> JsonValue:
@@ -412,32 +545,38 @@ def has_json_type(value: object, node: Mapping[str, Any]) -> bool:
 
 
 def setting_kind(schema: Mapping[str, Any], node: Mapping[str, Any], value: JsonValue) -> SettingKind:
-    """How the form shows a setting `node` reads: an enum is a CHOICE, and a map a STRUCTURE."""
-    if "enum" in node:
+    """
+    The control a setting `node` reads gets. An enum, the options its class offers (`options`) and a built-in strategy
+    (`strategy`) are a CHOICE; a number is STEPS where its class names the values that make sense (`steps`), else a
+    RANGE over its bounds; a map is a STRUCTURE.
+    """
+    if node.get("type") == "array":
+        return list_kind(schema_node(schema, node.get("items", {}), None), node, value)
+
+    if "enum" in node or "options" in node or node.get("strategy"):
         return SettingKind.CHOICE
 
-    match node.get("type"):
-        case "array":
-            return list_kind(schema_node(schema, node.get("items", {}), None), value)
-        case "boolean":
+    match node.get("type"), node.get("format"):
+        case "boolean", _:
             return SettingKind.SWITCH
-        case "integer":
-            return SettingKind.INTEGER
-        case "number":
-            return SettingKind.NUMBER
-        case "string":
+        case "integer" | "number", _:
+            return SettingKind.STEPS if number_steps(node) else SettingKind.RANGE
+        case "string", "date":
+            return SettingKind.DATE
+        case "string", "time":
+            return SettingKind.TIME
+        case "string", _:
             return SettingKind.TEXT
         case _:
             return SettingKind.STRUCTURE
 
 
-def list_kind(items: Mapping[str, Any], value: JsonValue) -> SettingKind:
+def list_kind(items: Mapping[str, Any], node: Mapping[str, Any], value: JsonValue) -> SettingKind:
     """
-    A list's: CHOICES of an enum's members; LINES of scalars, or of the texts or numbers the file writes where the
-    settings read objects (technical.built_in_strategies names strategy ids the loader reads into strategies); any
-    other list is a STRUCTURE.
+    A list's: CHOICES of an enum's members, of the options its class offers or of the built-in strategies; LINES of
+    scalars, or of the texts or numbers the file writes where the settings read objects; any other list is a STRUCTURE.
     """
-    if "enum" in items:
+    if "enum" in items or "options" in node or node.get("strategy"):
         return SettingKind.CHOICES
 
     if items.get("type") in ("string", "integer", "number", "boolean"):
@@ -445,6 +584,46 @@ def list_kind(items: Mapping[str, Any], value: JsonValue) -> SettingKind:
 
     written_as_scalars = isinstance(value, list) and bool(value) and all(isinstance(item, str | int | float) for item in value)
     return SettingKind.LINES if written_as_scalars else SettingKind.STRUCTURE
+
+
+def setting_options(schema: Mapping[str, Any], node: Mapping[str, Any], strategy_ids: Sequence[str]) -> tuple[str, ...]:
+    """What a CHOICE or CHOICES offers: the built-in strategies, the options its class offers, or its enum's members."""
+    if node.get("strategy"):
+        return tuple(strategy_ids)
+
+    options = node.get("options") or node.get("enum") or schema_node(schema, node.get("items", {}), None).get("enum", ())
+    return tuple(str(option) for option in options)
+
+
+def number_steps(node: Mapping[str, Any]) -> tuple[float, ...]:
+    """
+    The values STEPS offers: the ones the setting's class names (`steps`); else, for a whole number whose bounds lie
+    more than 100 apart, 1, 2, 3, 5, 10, 15, 20, 30, 50 and so on between them, with the bounds themselves, so a
+    setting a class adds with only its bounds is still chosen, never typed. None for any other number: it is a RANGE.
+    """
+    if isinstance(curated := node.get("steps"), list):
+        return tuple(curated)
+
+    minimum, maximum, _ = number_range(node)
+
+    if node.get("type") != "integer" or minimum is None or maximum is None or maximum - minimum <= 100:
+        return ()
+
+    rounds = (digit * 10**power for power in range(len(str(int(maximum)))) for digit in (1, 1.5, 2, 3, 5))
+    return tuple(sorted({minimum, maximum, *(float(value) for value in rounds if minimum < value < maximum and value == int(value))}))
+
+
+def number_range(node: Mapping[str, Any]) -> tuple[float | None, float | None, float]:
+    """
+    A RANGE's least and most, each itself allowed, and its step: the step its class names (`step`), else 1 for a whole
+    number, else a hundredth of the way between its bounds. A bound the schema excludes moves one step in.
+    """
+    low, high = node.get("minimum", node.get("exclusiveMinimum")), node.get("maximum", node.get("exclusiveMaximum"))
+    whole = node.get("type") == "integer"
+    step = node.get("step") or (1 if whole or low is None or high is None else (high - low) / 100)
+    minimum = low + step if low is not None and "exclusiveMinimum" in node else low
+    maximum = high - step if high is not None and "exclusiveMaximum" in node else high
+    return minimum, maximum, step
 
 
 def with_changes(texts: Mapping[SettingsFile, str], changes: Sequence[SettingChange]) -> list[SettingsEdit]:
@@ -724,8 +903,10 @@ def startup_settings(
     The settings a start, a reload or a Web save opens the app on, through every check startup runs before it opens
     anything: the load (each file parsed, every key the app would not read refused, every value validated), the trading
     setup, the environment and the audience the process started in (`environment` and `audience`, None at its first
-    start), the accounts key, the AI's web and X search on an audience without news articles, and every offered AI
-    provider's model id and key. Raises one InvalidSettingsError with every refusal located once, never a value.
+    start), the accounts key, open registration beside the real account, sign-in with Google half set up or at an
+    address that is not safe, the AI's web and X search on an audience
+    without news articles, and every offered AI provider's model id and key. Raises one InvalidSettingsError with every
+    refusal located once, never a value.
     """
     texts = settings_texts(project_root, candidates)
     config = load_settings(project_root, texts)
@@ -734,6 +915,8 @@ def startup_settings(
         validate_trading_environment(config)
         validate_started_setup_unchanged(config, environment or config.environment, audience or config.audience)
         validate_accounts_environment(config)
+        validate_registration(config)
+        validate_google_sign_in(config)
     except (TradingSetupError, AccountsSetupError) as error:
         raise InvalidSettingsError([locate(texts, error.path, str(error))]) from None
 
@@ -879,3 +1062,74 @@ def validate_accounts_environment(config: AppConfig) -> SecretStr | None:
         )
 
     return None if config.accounts.key is None else validate_accounts_key(config.accounts.key, "ACCOUNTS_KEY")
+
+
+def validate_registration(config: AppConfig) -> None:
+    """
+    Refuses open registration where the Shioaji login is the real account (prod): a stranger could register on the
+    installation that holds the production credentials.
+    """
+    if config.accounts.registration_open and not config.environment.shioaji_simulation:
+        raise AccountsSetupError(
+            f"environment {config.environment.value} refuses to start while accounts.registration_open is true: its "
+            "Shioaji login is the real account. Set accounts.registration_open to false in config/appsetting.yaml",
+            "accounts.registration_open",
+        )
+
+
+def is_safe_address(address: str) -> bool:
+    """https anywhere, or http on this machine alone: the only addresses a session, a code or the client secret may travel to."""
+    parts = urlsplit(address)
+    return parts.scheme == "https" or parts.hostname in ("localhost", "127.0.0.1")
+
+
+def validate_google_sign_in(config: AppConfig) -> None:
+    """
+    Sign-in with Google is whole or absent: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and accounts.public_origin all set, or
+    none. Set up, the public origin is https (http on localhost only) at a host the API answers, and Google's endpoints
+    are https too, since the app trusts the ID token on the strength of that connection. A file that sets the three
+    and lacks one of Google's addresses, as a deployment's older copy does, is not refused: the site offers no sign-in
+    with Google (AccountsConfig.google_sign_in), and the start says so (settings_notices).
+    """
+    accounts = config.accounts
+    parts = {
+        "GOOGLE_CLIENT_ID in the environment or .env": accounts.google_client_id,
+        "GOOGLE_CLIENT_SECRET in the environment or .env": accounts.google_client_secret,
+        "accounts.public_origin in config/appsetting.yaml": accounts.public_origin,
+    }
+
+    if not any(parts.values()):
+        return
+
+    if missing := [name for name, value in parts.items() if not value]:
+        raise AccountsSetupError(
+            f"sign-in with Google is half set up. Set {' and '.join(missing)} too, or clear the "
+            f"{len(parts) - len(missing)} of the three that are set to run without it",
+            "accounts.public_origin",
+        )
+
+    if accounts.google_sign_in:
+        validate_google_addresses(config)
+
+
+def validate_google_addresses(config: AppConfig) -> None:
+    """The public origin is https at a host the API answers, and Google's endpoints are https; localhost alone may be http."""
+    accounts = config.accounts
+
+    if not is_safe_address(accounts.public_origin):
+        raise AccountsSetupError(
+            "must be an https address, such as the https address of the server's Tailscale name: the session cookie and "
+            "Google's code travel to it. Only localhost and 127.0.0.1 may be http",
+            "accounts.public_origin",
+        )
+
+    if (host := urlsplit(accounts.public_origin).hostname) not in config.api.allowed_hosts:
+        raise AccountsSetupError(
+            f"names the host {host}, which api.allowed_hosts leaves out, so the API would refuse the return from Google. "
+            f"Add {host} to api.allowed_hosts",
+            "accounts.public_origin",
+        )
+
+    for path in ("google_authorization_endpoint", "google_token_endpoint", "google_issuer"):
+        if not is_safe_address(getattr(accounts, path)):
+            raise AccountsSetupError("must be an https address; only localhost and 127.0.0.1 may be http", f"accounts.{path}")

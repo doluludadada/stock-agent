@@ -58,4 +58,9 @@ describe('feature boundaries', () => {
     })
     expect(findViolations(root).map((violation) => violation.rule).sort()).toEqual(['empty-handler', 'placeholder-link', 'raw-color'])
   })
+
+  it('rejects crypto.randomUUID, which a page reached over plain http at a host name does not have', () => {
+    const root = project({ 'features/a/ids.ts': 'export const id = () => crypto.randomUUID()\n' })
+    expect(findViolations(root).map((violation) => violation.rule)).toEqual(['secure-context-only'])
+  })
 })

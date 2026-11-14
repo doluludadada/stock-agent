@@ -1,18 +1,20 @@
 import { ChevronDown, Ellipsis, Search, WifiOff } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router'
 import { UserMenu } from '@/features/auth'
 import { useTranslation } from '@/i18n'
-import { useAudience, useSession } from '@/shared/api'
+import { useShows } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
 import { useOnline } from '@/shared/lib/use-online'
 import { cn } from '@/shared/lib/utils'
+import { PageSectionProvider } from '@/shared/ui/page-header'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/shared/ui/sheet'
 import { BrandMark } from './BrandMark'
-import { holdsCurrent, isCurrent, navSections, showsItems, TAB_PAGES, type NavItem, type NavSection } from './navigation'
+import { holdsCurrent, isCurrent, showsItems, TAB_PAGES, type NavItem, type NavSection } from './navigation'
 import { PreferenceControls, PreferenceMenu } from './PreferenceMenu'
 import { SiteFooter } from './SiteFooter'
 import { SearchField, SearchPalette } from './StockSearch'
+import { useNavSections } from './use-nav-sections'
 import { useOpenedSections } from './use-opened-sections'
 
 /**
@@ -23,15 +25,23 @@ export function AppShell() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const location = useLocation()
-  const current = useSession()
   const [searching, setSearching] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
-  const audience = useAudience()
-  const sections = navSections(current.status === 'signedIn' ? current.user.permissions : [], audience.data)
+  const sections = useNavSections()
+  // The search opens stock pages, so a site that hides them has no search.
+  const searchable = useShows('stock_pages')
+  const tabs = Object.entries(TAB_PAGES).filter(([, page]) => sections.some((section) => section.items.includes(page))) as [TabName, NavItem][]
   const folds = useOpenedSections()
+  const section = sections.find((item) => holdsCurrent(item, location.pathname))
 
+  const main = useRef<HTMLElement>(null)
+  const arrivedAt = useRef(location.pathname)
   useEffect(() => {
     window.scrollTo({ top: 0 })
+    // After a navigation the page's content takes the focus, so a keyboard or a screen reader starts at the new page
+    // and not at the link that led to it. The first page leaves the focus where the browser put it.
+    if (arrivedAt.current !== location.pathname) main.current?.focus({ preventScroll: true })
+    arrivedAt.current = location.pathname
   }, [location.pathname])
 
   return (
@@ -60,28 +70,31 @@ export function AppShell() {
           <div className="md:hidden">
             <BrandMark />
           </div>
-          <SearchField onOpen={() => setSearching(true)} className="hidden md:flex" />
+          {searchable && <SearchField onOpen={() => setSearching(true)} className="hidden md:flex" />}
           <div className="ml-auto flex items-center gap-1">
             <PreferenceMenu />
-            <UserMenu onSignedOut={() => navigate(paths.market)} />
+            <UserMenu onSignedOut={() => navigate(paths.home)} />
           </div>
         </header>
 
-        <main id="main" tabIndex={-1} className="mx-auto w-full max-w-(--content-max) flex-1 px-4 pt-5 pb-8 outline-none md:px-6 md:pb-10 lg:px-8 lg:pt-7">
+        <main id="main" ref={main} tabIndex={-1} className="mx-auto w-full max-w-(--content-max) flex-1 px-4 pt-5 pb-8 outline-none md:px-6 md:pb-10 lg:px-8 lg:pt-7">
           <OfflineNotice />
-          <Outlet />
+          <PageSectionProvider value={section && section.key !== 'today' ? t(`nav.section.${section.key}`) : null}>
+            <Outlet />
+          </PageSectionProvider>
         </main>
         <SiteFooter className="mx-auto w-full max-w-(--content-max) px-4 pb-[calc(var(--tabbar-height)+env(safe-area-inset-bottom)+1.5rem)] md:px-6 md:pb-8 lg:px-8" />
       </div>
 
-      <TabBar onSearch={() => setSearching(true)} onMore={() => setMoreOpen(true)} moreActive={!Object.values(TAB_PAGES).some((item) => isCurrent(item, location.pathname))} />
+      <TabBar tabs={tabs} onSearch={searchable ? () => setSearching(true) : null} onMore={() => setMoreOpen(true)} moreActive={!tabs.some(([, item]) => isCurrent(item, location.pathname))} />
       <MoreSheet open={moreOpen} onOpenChange={setMoreOpen} sections={sections} folds={folds} />
-      <SearchPalette open={searching} onOpenChange={setSearching} sections={sections} />
+      {searchable && <SearchPalette open={searching} onOpenChange={setSearching} sections={sections} />}
     </div>
   )
 }
 
 type Folds = ReturnType<typeof useOpenedSections>
+type TabName = keyof typeof TAB_PAGES
 
 /**
  * A folded section's name as the button that opens it. While the reader is on one of its pages the section stays open
@@ -115,7 +128,7 @@ function SideNav({ sections, folds }: { sections: NavSection[]; folds: Folds }) 
       {sections.map((section, index) => (
         <div key={section.key} className="space-y-1">
           {index > 0 && <div aria-hidden className="mx-3 mb-2 border-t lg:hidden" />}
-          {section.folded ? (
+          {section.key === 'today' ? null : section.folded ? (
             <FoldButton
               section={section}
               folds={folds}
@@ -152,17 +165,21 @@ function SideNav({ sections, folds }: { sections: NavSection[]; folds: Folds }) 
   )
 }
 
+const BEFORE_SEARCH: readonly TabName[] = ['home', 'ranking']
 const tabClass = 'flex min-h-11 flex-1 flex-col items-center justify-center gap-0.5 text-[0.6875rem] font-medium transition-colors'
 
-/** The phone's bottom bar: the ranking, the market, search, the watchlist, the account and everything else. */
-function TabBar({ onSearch, onMore, moreActive }: { onSearch: () => void; onMore: () => void; moreActive: boolean }) {
+/**
+ * The phone's bottom bar: the home page, the ranking, search, the holdings and everything else. A page or the search
+ * the site hides from this viewer leaves the bar.
+ */
+function TabBar({ tabs, onSearch, onMore, moreActive }: { tabs: readonly [TabName, NavItem][]; onSearch: (() => void) | null; onMore: () => void; moreActive: boolean }) {
   const { t } = useTranslation()
   const location = useLocation()
-  const tab = (name: keyof typeof TAB_PAGES, item: NavItem) => {
+  const tab = ([name, item]: [TabName, NavItem]) => {
     const active = isCurrent(item, location.pathname)
     return (
-      <Link to={item.to} aria-current={active ? 'page' : undefined} className={cn(tabClass, active ? 'text-brand' : 'text-muted-foreground')}>
-        <item.icon aria-hidden className={cn('size-5', active && name === 'watchlist' && 'fill-current')} />
+      <Link key={name} to={item.to} aria-current={active ? 'page' : undefined} className={cn(tabClass, active ? 'text-brand' : 'text-muted-foreground')}>
+        <item.icon aria-hidden className="size-5" />
         {t(`nav.tab.${name}`)}
       </Link>
     )
@@ -173,16 +190,16 @@ function TabBar({ onSearch, onMore, moreActive }: { onSearch: () => void; onMore
       className="fixed inset-x-0 bottom-0 z-30 flex border-t bg-background/92 px-1 pb-[env(safe-area-inset-bottom)] shadow-bar backdrop-blur-md md:hidden"
     >
       <div className="flex h-(--tabbar-height) w-full items-stretch">
-        {tab('ranking', TAB_PAGES.ranking)}
-        {tab('market', TAB_PAGES.market)}
-        <button type="button" onClick={onSearch} className={cn(tabClass, 'text-muted-foreground')}>
-          <span className="grid size-9 place-items-center rounded-full bg-brand text-primary-foreground shadow-card">
-            <Search aria-hidden className="size-4.5" />
-          </span>
-          <span className="sr-only">{t('nav.tab.search')}</span>
-        </button>
-        {tab('watchlist', TAB_PAGES.watchlist)}
-        {tab('account', TAB_PAGES.account)}
+        {tabs.filter(([name]) => BEFORE_SEARCH.includes(name)).map(tab)}
+        {onSearch && (
+          <button type="button" onClick={onSearch} className={cn(tabClass, 'text-muted-foreground')}>
+            <span className="grid size-9 place-items-center rounded-full bg-brand text-primary-foreground shadow-card">
+              <Search aria-hidden className="size-4.5" />
+            </span>
+            <span className="sr-only">{t('nav.tab.search')}</span>
+          </button>
+        )}
+        {tabs.filter(([name]) => !BEFORE_SEARCH.includes(name)).map(tab)}
         <button type="button" onClick={onMore} aria-haspopup="dialog" className={cn(tabClass, moreActive ? 'text-brand' : 'text-muted-foreground')}>
           <Ellipsis aria-hidden className="size-5" />
           {t('nav.tab.more')}
@@ -206,7 +223,7 @@ function MoreSheet({ open, onOpenChange, sections, folds }: { open: boolean; onO
         <nav aria-label={t('nav.label')} className="space-y-5 px-4">
           {sections.map((section) => (
             <div key={section.key}>
-              {section.folded ? (
+              {section.key === 'today' ? null : section.folded ? (
                 <FoldButton section={section} folds={folds} controls={`more-${section.key}`} className="-mx-2 mb-2 flex min-h-11 w-[calc(100%+1rem)] items-center justify-between px-2" />
               ) : (
                 <p className="eyebrow mb-2">{t(`nav.section.${section.key}`)}</p>

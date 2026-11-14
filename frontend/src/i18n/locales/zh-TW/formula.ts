@@ -6,7 +6,6 @@ const formula: DictionaryShape<typeof en> = {
   fieldLabel: { open: '開盤價', high: '最高價', low: '最低價', close: '收盤價', volume: '成交量' },
   marketAt: { today: '今日{{field}}', yesterday: '昨日{{field}}', ago: '{{count}} 個交易日前{{field}}' },
   indicatorAt: { yesterday: '昨日 {{name}}', ago: '{{count}} 個交易日前 {{name}}' },
-  day: { today: '今日', yesterday: '昨日', ago: '{{count}} 個交易日前' },
   latestPrice: '最新價',
   indicator: {
     sma: 'SMA {{period}} 日',

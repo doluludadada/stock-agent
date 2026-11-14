@@ -396,8 +396,22 @@
         "type": "object"
       },
       "AuthStatusResponse": {
-        "description": "What the web app shows first: the first-time setup, or sign-in with or without registration.",
+        "description": "What the web app shows first: the first-time setup, or sign-in with or without registration and Google.",
         "properties": {
+          "features": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/FeatureVisibility"
+            },
+            "propertyNames": {
+              "$ref": "#/components/schemas/Feature"
+            },
+            "title": "Features",
+            "type": "object"
+          },
+          "google_sign_in": {
+            "title": "Google Sign In",
+            "type": "boolean"
+          },
           "needs_first_administrator": {
             "title": "Needs First Administrator",
             "type": "boolean"
@@ -409,7 +423,9 @@
         },
         "required": [
           "needs_first_administrator",
-          "registration_open"
+          "registration_open",
+          "google_sign_in",
+          "features"
         ],
         "title": "AuthStatusResponse",
         "type": "object"
@@ -931,6 +947,152 @@
         "title": "Breadth",
         "type": "object"
       },
+      "BriefLanguage": {
+        "description": "The language the site's AI briefs are written in. Its value is the web app's locale code.",
+        "enum": [
+          "zh-TW",
+          "en"
+        ],
+        "title": "BriefLanguage",
+        "type": "string"
+      },
+      "BriefSentence": {
+        "description": "One sentence of a brief and the held items it rests on. A sentence that cites none is never kept.",
+        "properties": {
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Sources",
+            "type": "array"
+          },
+          "text": {
+            "$ref": "#/components/schemas/NonEmptyText"
+          }
+        },
+        "required": [
+          "text",
+          "sources"
+        ],
+        "title": "BriefSentence",
+        "type": "object"
+      },
+      "BriefSource": {
+        "description": "One held item a brief was written from, which the brief's sentences cite by its key.",
+        "properties": {
+          "dated": {
+            "format": "date",
+            "title": "Dated",
+            "type": "string"
+          },
+          "key": {
+            "$ref": "#/components/schemas/NonEmptyText"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/BriefSourceKind"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "key",
+          "kind",
+          "dated"
+        ],
+        "title": "BriefSource",
+        "type": "object"
+      },
+      "BriefSourceKind": {
+        "description": "What kind of held item a brief's sentence cites, so the stock page can name it and link to where it shows it.",
+        "enum": [
+          "company",
+          "price",
+          "revenue",
+          "earnings",
+          "ranking",
+          "announcement",
+          "exchange_news",
+          "news",
+          "post"
+        ],
+        "title": "BriefSourceKind",
+        "type": "string"
+      },
+      "BriefStatus": {
+        "description": "Where a stock's AI brief of one day stands. One brief exists per stock and Taipei calendar day, for the whole site.",
+        "enum": [
+          "writing",
+          "written",
+          "failed"
+        ],
+        "title": "BriefStatus",
+        "type": "string"
+      },
+      "BrokerFill": {
+        "description": "One execution as a real broker reports it, in shares: a deal of today, or a past sale with the profit or loss the\nbroker says it realized, its own fees and tax included.",
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/TradeAction"
+          },
+          "filled_on": {
+            "format": "date",
+            "title": "Filled On",
+            "type": "string"
+          },
+          "price": {
+            "$ref": "#/components/schemas/PositiveFiniteFloat"
+          },
+          "quantity": {
+            "exclusiveMinimum": 0.0,
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "realized_pnl": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realized Pnl"
+          },
+          "stock_id": {
+            "$ref": "#/components/schemas/NonEmptyText"
+          }
+        },
+        "required": [
+          "stock_id",
+          "action",
+          "quantity",
+          "price",
+          "filled_on"
+        ],
+        "title": "BrokerFill",
+        "type": "object"
+      },
       "BrokerResponse": {
         "description": "A broker the signed-in user may choose for a run now, as a run's confirmation names it: the mock account always,\nSinoPac for an administrator while the site's login is up.",
         "properties": {
@@ -978,6 +1140,114 @@
           "max_daily_buy_value"
         ],
         "title": "BrokerResponse",
+        "type": "object"
+      },
+      "BrokerageAccountResponse": {
+        "description": "The SinoPac account page: which server the site's login is on, whether it is up, and the account while it is.",
+        "properties": {
+          "login_up": {
+            "title": "Login Up",
+            "type": "boolean"
+          },
+          "ordering": {
+            "title": "Ordering",
+            "type": "boolean"
+          },
+          "simulation": {
+            "title": "Simulation",
+            "type": "boolean"
+          },
+          "statement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BrokerageStatementResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "simulation",
+          "login_up",
+          "ordering",
+          "statement"
+        ],
+        "title": "BrokerageAccountResponse",
+        "type": "object"
+      },
+      "BrokerageStatementResponse": {
+        "description": "A real broker's account as the broker reports it (BrokerageStatement): every figure is the broker's own.",
+        "properties": {
+          "balance": {
+            "title": "Balance",
+            "type": "number"
+          },
+          "fills": {
+            "items": {
+              "$ref": "#/components/schemas/BrokerFill"
+            },
+            "title": "Fills",
+            "type": "array"
+          },
+          "market_value": {
+            "title": "Market Value",
+            "type": "number"
+          },
+          "positions": {
+            "items": {
+              "$ref": "#/components/schemas/HeldPositionResponse"
+            },
+            "title": "Positions",
+            "type": "array"
+          },
+          "read_at": {
+            "format": "date-time",
+            "title": "Read At",
+            "type": "string"
+          },
+          "realized_pnl": {
+            "title": "Realized Pnl",
+            "type": "number"
+          },
+          "sales": {
+            "items": {
+              "$ref": "#/components/schemas/BrokerFill"
+            },
+            "title": "Sales",
+            "type": "array"
+          },
+          "sales_from": {
+            "format": "date",
+            "title": "Sales From",
+            "type": "string"
+          },
+          "settlements": {
+            "items": {
+              "$ref": "#/components/schemas/Settlement"
+            },
+            "title": "Settlements",
+            "type": "array"
+          },
+          "unrealized_pnl": {
+            "title": "Unrealized Pnl",
+            "type": "number"
+          }
+        },
+        "required": [
+          "read_at",
+          "balance",
+          "settlements",
+          "positions",
+          "fills",
+          "sales",
+          "sales_from",
+          "market_value",
+          "unrealized_pnl",
+          "realized_pnl"
+        ],
+        "title": "BrokerageStatementResponse",
         "type": "object"
       },
       "Comparison-Input": {
@@ -1144,6 +1414,10 @@
         "title": "ConditionGroup",
         "type": "object"
       },
+      "ConfirmationId": {
+        "pattern": "^[A-Za-z0-9_-]{16,64}$",
+        "type": "string"
+      },
       "Confirmed": {
         "description": "Every write repeats the caller's confirmation in its body, so a stray or replayed request without it changes nothing.",
         "properties": {
@@ -1194,6 +1468,48 @@
             "$ref": "#/components/schemas/IndicatorValue"
           }
         ]
+      },
+      "EarningsTrend": {
+        "description": "A company's held quarters, oldest first, and how long the latest direction of its EPS has lasted.",
+        "properties": {
+          "eps_growing_quarters": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eps Growing Quarters"
+          },
+          "filed_eps_fetched_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filed Eps Fetched At"
+          },
+          "quarters": {
+            "items": {
+              "$ref": "#/components/schemas/QuarterResult"
+            },
+            "title": "Quarters",
+            "type": "array"
+          }
+        },
+        "required": [
+          "quarters",
+          "eps_growing_quarters",
+          "filed_eps_fetched_at"
+        ],
+        "title": "EarningsTrend",
+        "type": "object"
       },
       "EliminationReason": {
         "enum": [
@@ -1316,12 +1632,14 @@
           "unknown_host",
           "app_request_required",
           "administrators_only",
+          "feature_hidden",
           "real_broker_refused",
           "broker_unavailable",
           "realtime_quotes_unavailable",
           "mops_unavailable",
           "password_required",
           "password_refused",
+          "google_confirmation_required",
           "settings_file_refused",
           "settings_file_missing",
           "settings_conflict",
@@ -1335,6 +1653,9 @@
           "outside_follow_window",
           "backtest_period_unavailable",
           "ranking_unavailable",
+          "too_many_backtests",
+          "ai_allowance_spent",
+          "brief_limit_reached",
           "listing_unavailable",
           "not_found",
           "invalid_request",
@@ -1421,6 +1742,39 @@
         "title": "FairPriceRangeResponse",
         "type": "object"
       },
+      "Feature": {
+        "description": "A part of the product the site shows or hides. Its value names its setting under `features` in\nconfig/appsetting.yaml, which holds its FeatureVisibility. The Web API's routes name the feature they belong to\n(shows() in d_presentation/web/session.py), and the web app's navigation and pages name the same members, so the\nthree never disagree about what a feature covers.",
+        "enum": [
+          "market_overview",
+          "ranking",
+          "stock_pages",
+          "watchlist",
+          "valuation",
+          "full_cycle",
+          "specific_stock",
+          "buzz",
+          "intraday",
+          "strategy_library",
+          "strategy_designer",
+          "strategy_backtest",
+          "mock_account",
+          "sinopac_account",
+          "sinopac_ordering",
+          "holdings"
+        ],
+        "title": "Feature",
+        "type": "string"
+      },
+      "FeatureVisibility": {
+        "description": "Who the site shows a feature to. The Web API refuses the feature's routes to everyone else.",
+        "enum": [
+          "off",
+          "administrators",
+          "everyone"
+        ],
+        "title": "FeatureVisibility",
+        "type": "string"
+      },
       "FiscalQuarter": {
         "description": "A calendar-year fiscal quarter in Gregorian years. The MOPS adapter converts ROC years.",
         "properties": {
@@ -1460,7 +1814,7 @@
         "type": "object"
       },
       "FollowRefusal": {
-        "description": "Why a run's decisions cannot be followed into the user's mock account now. The Web API answers each as its code.",
+        "description": "Why a run's decisions, or the monthly ranking, cannot be followed into the user's mock account now. The Web API\nanswers each as its code.",
         "enum": [
           "nothing_to_follow",
           "outside_follow_window"
@@ -1505,6 +1859,66 @@
         "title": "FollowResponse",
         "type": "object"
       },
+      "FollowReturn": {
+        "description": "What a mock account made since it first followed the ranking, against the benchmark over the same sessions.",
+        "properties": {
+          "account_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The account's equity at the close of `until` over its equity at the close before `since`, less 1: its fees and tax\nare in it. The equity before is the cash the account opened with when it had filled no order by then.",
+            "title": "Account Return"
+          },
+          "benchmark_id": {
+            "$ref": "#/components/schemas/NonEmptyText"
+          },
+          "benchmark_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The benchmark's total return over the same sessions. None while the history holds no bar of it there.",
+            "title": "Benchmark Return"
+          },
+          "since": {
+            "description": "The trading day of its first ranking follow that filled an order since the account opened.",
+            "format": "date",
+            "title": "Since",
+            "type": "string"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The last session both returns count to. None until the history holds a session from `since` on.",
+            "title": "Until"
+          }
+        },
+        "required": [
+          "since",
+          "until",
+          "account_return",
+          "benchmark_id",
+          "benchmark_return"
+        ],
+        "title": "FollowReturn",
+        "type": "object"
+      },
       "FormulaId": {
         "pattern": "^[a-z][a-z0-9_]{0,39}$",
         "type": "string"
@@ -1533,6 +1947,365 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HeldPositionResponse": {
+        "description": "A position of a holdings page: what is held, its cost, and the gain or loss at its mark.",
+        "properties": {
+          "average_cost": {
+            "title": "Average Cost",
+            "type": "number"
+          },
+          "cost_basis": {
+            "title": "Cost Basis",
+            "type": "number"
+          },
+          "mark_price": {
+            "title": "Mark Price",
+            "type": "number"
+          },
+          "marked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marked At"
+          },
+          "market_value": {
+            "title": "Market Value",
+            "type": "number"
+          },
+          "opened_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opened At"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "stock_id": {
+            "title": "Stock Id",
+            "type": "string"
+          },
+          "unrealized_pnl": {
+            "title": "Unrealized Pnl",
+            "type": "number"
+          },
+          "unrealized_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unrealized Return"
+          }
+        },
+        "required": [
+          "stock_id",
+          "quantity",
+          "average_cost",
+          "mark_price",
+          "marked_at",
+          "market_value",
+          "unrealized_pnl",
+          "cost_basis",
+          "unrealized_return",
+          "opened_at"
+        ],
+        "title": "HeldPositionResponse",
+        "type": "object"
+      },
+      "HoldingRemovalRequest": {
+        "properties": {
+          "confirm": {
+            "const": true,
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "stock_id": {
+            "maxLength": 10,
+            "minLength": 1,
+            "pattern": "^[0-9A-Za-z]+$",
+            "title": "Stock Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "confirm",
+          "stock_id"
+        ],
+        "title": "HoldingRemovalRequest",
+        "type": "object"
+      },
+      "HoldingRequest": {
+        "description": "A holding the user enters by hand: shares of a listed stock at their average cost, with the day bought if known.",
+        "properties": {
+          "average_cost": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1000000.0,
+            "title": "Average Cost",
+            "type": "number"
+          },
+          "confirm": {
+            "const": true,
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "opened_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opened On"
+          },
+          "quantity": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1000000000.0,
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "stock_id": {
+            "maxLength": 10,
+            "minLength": 1,
+            "pattern": "^[0-9A-Za-z]+$",
+            "title": "Stock Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "confirm",
+          "stock_id",
+          "quantity",
+          "average_cost"
+        ],
+        "title": "HoldingRequest",
+        "type": "object"
+      },
+      "HoldingResponse": {
+        "description": "One holding of the My holdings page (AnalysedHolding). It is data to read: nothing here says to buy or sell.",
+        "properties": {
+          "accelerating_months": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accelerating Months"
+          },
+          "position": {
+            "$ref": "#/components/schemas/HeldPositionResponse"
+          },
+          "revenue": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RevenueMonth"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "$ref": "#/components/schemas/HoldingSource"
+          },
+          "standing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StockRankingResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stock_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stock Name"
+          },
+          "weight": {
+            "title": "Weight",
+            "type": "number"
+          }
+        },
+        "required": [
+          "source",
+          "stock_name",
+          "position",
+          "weight",
+          "standing",
+          "revenue",
+          "accelerating_months"
+        ],
+        "title": "HoldingResponse",
+        "type": "object"
+      },
+      "HoldingSource": {
+        "description": "Where a holding of the My holdings page comes from. A holding is counted under its one source.",
+        "enum": [
+          "brokerage",
+          "mock",
+          "manual"
+        ],
+        "title": "HoldingSource",
+        "type": "string"
+      },
+      "HoldingsResponse": {
+        "description": "The My holdings page (PortfolioAnalysis): the holdings of each source read, each counted once under its source, and\nthe portfolio they make at the last closes the site holds. The score ranks two measured factors and forecasts\nnothing. The score figures are None where the site does not show the viewer the ranking.",
+        "properties": {
+          "asked": {
+            "items": {
+              "$ref": "#/components/schemas/HoldingSource"
+            },
+            "title": "Asked",
+            "type": "array"
+          },
+          "concentration": {
+            "title": "Concentration",
+            "type": "number"
+          },
+          "concentration_positions": {
+            "title": "Concentration Positions",
+            "type": "integer"
+          },
+          "cost": {
+            "title": "Cost",
+            "type": "number"
+          },
+          "highest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HoldingResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "holdings": {
+            "items": {
+              "$ref": "#/components/schemas/HoldingResponse"
+            },
+            "title": "Holdings",
+            "type": "array"
+          },
+          "lowest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HoldingResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "market_value": {
+            "title": "Market Value",
+            "type": "number"
+          },
+          "scored_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scored Share"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/HoldingSource"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "top_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top Share"
+          },
+          "unrealized_pnl": {
+            "title": "Unrealized Pnl",
+            "type": "number"
+          },
+          "unrealized_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unrealized Return"
+          },
+          "weighted_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weighted Score"
+          }
+        },
+        "required": [
+          "asked",
+          "sources",
+          "holdings",
+          "market_value",
+          "cost",
+          "unrealized_pnl",
+          "unrealized_return",
+          "concentration_positions",
+          "concentration",
+          "top_share",
+          "scored_share",
+          "weighted_score",
+          "lowest",
+          "highest"
+        ],
+        "title": "HoldingsResponse",
         "type": "object"
       },
       "IndexHistoryResponse": {
@@ -2091,7 +2864,7 @@
       "NewPassword": {
         "format": "password",
         "maxLength": 256,
-        "minLength": 12,
+        "minLength": 8,
         "type": "string",
         "writeOnly": true
       },
@@ -2502,6 +3275,7 @@
           "use_real_broker",
           "notify_recipients",
           "uncapped_ai",
+          "see_administrator_features",
           "uncapped_runs"
         ],
         "title": "Permission",
@@ -2703,6 +3477,103 @@
         "title": "QuarterFinancials",
         "type": "object"
       },
+      "QuarterResult": {
+        "description": "One held quarter of a company's results as the stock page reads it. The EPS figures are in TWD; the margins and the\ndebt ratio are ratios of the statements' figures of the year to the quarter's end, None where the company's industry\nformat reports no such figure or the archive holds no statement of the quarter.",
+        "properties": {
+          "debt_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Debt Ratio"
+          },
+          "eps_year_over_year": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eps Year Over Year"
+          },
+          "eps_year_to_date": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eps Year To Date"
+          },
+          "gross_margin": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gross Margin"
+          },
+          "net_margin": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Net Margin"
+          },
+          "operating_margin": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operating Margin"
+          },
+          "quarter": {
+            "$ref": "#/components/schemas/FiscalQuarter"
+          },
+          "quarter_eps": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quarter Eps"
+          }
+        },
+        "required": [
+          "quarter",
+          "eps_year_to_date",
+          "quarter_eps",
+          "eps_year_over_year",
+          "gross_margin",
+          "operating_margin",
+          "net_margin",
+          "debt_ratio"
+        ],
+        "title": "QuarterResult",
+        "type": "object"
+      },
       "RankedStock": {
         "description": "One stock of a ranking: its two factors, the rank of each among the universe's stocks that have it, and its score.",
         "properties": {
@@ -2714,7 +3585,7 @@
             "description": "Each factor's place among the universe's stocks that have it, from 0 for the lowest to 1 for the highest."
           },
           "nearness_to_high": {
-            "description": "The total-return level at the decision's close over its highest of the last high_sessions sessions: 1 at a high.",
+            "description": "The total-return level at the decision's close over its highest of the last high_sessions sessions: 1 at a high. A\nstock listed after the first of those sessions has none.",
             "title": "Nearness To High",
             "type": "number"
           },
@@ -2979,6 +3850,197 @@
         "title": "RankingBacktest",
         "type": "object"
       },
+      "RankingExclusion": {
+        "description": "Why the monthly ranking gives a stock no score at a decision session, the first that applies.",
+        "enum": [
+          "no_history",
+          "not_a_stock",
+          "not_traded",
+          "price_under_floor",
+          "illiquid",
+          "no_revenue_history",
+          "short_price_history"
+        ],
+        "title": "RankingExclusion",
+        "type": "string"
+      },
+      "RankingFollowResponse": {
+        "description": "The user's mock account against the ranking's latest decision, and what following the ranking did so far.",
+        "properties": {
+          "holdings": {
+            "$ref": "#/components/schemas/RankingHoldings"
+          },
+          "performance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FollowReturn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "refusal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FollowRefusal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "holdings",
+          "refusal",
+          "running",
+          "performance"
+        ],
+        "title": "RankingFollowResponse",
+        "type": "object"
+      },
+      "RankingHoldings": {
+        "description": "A mock account against the monthly ranking's latest decision. A ranking follow sells `left` and buys `lacking`.",
+        "properties": {
+          "decided_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The decision session of the ranking. None before any ranking was read.",
+            "title": "Decided On"
+          },
+          "held": {
+            "description": "The ranking's stocks the account holds, best first.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Held",
+            "type": "array"
+          },
+          "lacking": {
+            "description": "The ranking's stocks the account does not hold, best first.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Lacking",
+            "type": "array"
+          },
+          "left": {
+            "description": "The stocks the account holds that the ranking does not, in stock id order.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Left",
+            "type": "array"
+          }
+        },
+        "required": [
+          "held",
+          "lacking",
+          "left",
+          "decided_on"
+        ],
+        "title": "RankingHoldings",
+        "type": "object"
+      },
+      "RatioStanding": {
+        "description": "One valuation ratio at the latest held session against the stock's own held history.",
+        "properties": {
+          "latest": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest"
+          },
+          "median": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median"
+          },
+          "sessions": {
+            "minimum": 0.0,
+            "title": "Sessions",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "latest",
+          "median",
+          "sessions"
+        ],
+        "title": "RatioStanding",
+        "type": "object"
+      },
+      "Reading": {
+        "description": "One sentence of the reading: what it says, and the months, quarters or sessions it counts where it counts any.",
+        "properties": {
+          "count": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Count"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ReadingKind"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "Reading",
+        "type": "object"
+      },
+      "ReadingKind": {
+        "description": "One sentence of a stock page's reading of its held figures, which the web app says in the reader's language. A\nreading with a count names how many months, quarters or sessions it holds for.",
+        "enum": [
+          "revenue_accelerating",
+          "revenue_slowing",
+          "revenue_growing",
+          "revenue_shrinking",
+          "revenue_history_short",
+          "no_revenue",
+          "eps_up",
+          "eps_down",
+          "eps_history_short",
+          "no_eps",
+          "pe_above_median",
+          "pe_below_median",
+          "pe_at_median",
+          "no_pe",
+          "valuation_history_short",
+          "no_valuation"
+        ],
+        "title": "ReadingKind",
+        "type": "string"
+      },
       "RegistrationRequest": {
         "properties": {
           "email": {
@@ -3036,6 +4098,120 @@
           "initial_cash"
         ],
         "title": "ResetRequest",
+        "type": "object"
+      },
+      "RevenueMonth": {
+        "description": "One held month of a company's revenue as the stock page reads it. Revenue is in thousands of TWD; changes are ratios.",
+        "properties": {
+          "acceleration": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acceleration"
+          },
+          "month": {
+            "title": "Month",
+            "type": "integer"
+          },
+          "revenue": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revenue"
+          },
+          "served_date": {
+            "format": "date",
+            "title": "Served Date",
+            "type": "string"
+          },
+          "year": {
+            "title": "Year",
+            "type": "integer"
+          },
+          "year_over_year": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year Over Year"
+          }
+        },
+        "required": [
+          "year",
+          "month",
+          "revenue",
+          "year_over_year",
+          "acceleration",
+          "served_date"
+        ],
+        "title": "RevenueMonth",
+        "type": "object"
+      },
+      "RevenueTrend": {
+        "description": "A company's held months of revenue, oldest first, and how long the latest direction has lasted.",
+        "properties": {
+          "accelerating_months": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accelerating Months"
+          },
+          "growing_months": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Growing Months"
+          },
+          "long_months": {
+            "exclusiveMinimum": 0.0,
+            "title": "Long Months",
+            "type": "integer"
+          },
+          "months": {
+            "items": {
+              "$ref": "#/components/schemas/RevenueMonth"
+            },
+            "title": "Months",
+            "type": "array"
+          },
+          "short_months": {
+            "exclusiveMinimum": 0.0,
+            "title": "Short Months",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "months",
+          "short_months",
+          "long_months",
+          "accelerating_months",
+          "growing_months"
+        ],
+        "title": "RevenueTrend",
         "type": "object"
       },
       "Role": {
@@ -3366,29 +4542,10 @@
         "type": "object"
       },
       "SettingField": {
-        "description": "One setting as the administrator's settings form shows it: its dotted settings path, such as ai.temperature, or an\nAI prompt's, such as ai.system_prompt; how the form shows it; the value the file sets, as JSON, else its default,\nelse null; its options and bounds from the settings classes; and whether it applies only at a restart.",
+        "description": "One setting as the administrator's settings form shows it: its dotted settings path, such as ai.temperature, or an\nAI prompt's, such as ai.system_prompt; the control it gets and the group it shows under; the value the file sets,\nas JSON, else its default, else null; and what the control offers, all from the settings classes. A value the file\nsets that is none of the options or steps still shows, and stays until the administrator picks another.",
         "properties": {
-          "exclusive_maximum": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Exclusive Maximum"
-          },
-          "exclusive_minimum": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Exclusive Minimum"
+          "group": {
+            "$ref": "#/components/schemas/SettingGroup"
           },
           "kind": {
             "$ref": "#/components/schemas/SettingKind"
@@ -3415,6 +4572,11 @@
             ],
             "title": "Minimum"
           },
+          "nullable": {
+            "default": false,
+            "title": "Nullable",
+            "type": "boolean"
+          },
           "options": {
             "default": [],
             "items": {
@@ -3433,6 +4595,35 @@
             "title": "Restart Only",
             "type": "boolean"
           },
+          "step": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step"
+          },
+          "steps": {
+            "default": [],
+            "items": {
+              "type": "number"
+            },
+            "title": "Steps",
+            "type": "array"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SettingUnit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "value": {
             "$ref": "#/components/schemas/JsonValue"
           }
@@ -3440,24 +4631,55 @@
         "required": [
           "path",
           "kind",
+          "group",
           "value"
         ],
         "title": "SettingField",
         "type": "object"
       },
+      "SettingGroup": {
+        "description": "What an administrator comes to the settings form to do. Each setting shows under one, in this order.",
+        "enum": [
+          "site_access",
+          "features",
+          "ranking",
+          "data_history",
+          "ai",
+          "trading_limits",
+          "advanced"
+        ],
+        "title": "SettingGroup",
+        "type": "string"
+      },
       "SettingKind": {
-        "description": "How the administrator's settings form shows a setting and takes its new value.",
+        "description": "The control the administrator's settings form gives a setting. All but the last three are chosen, never typed.",
         "enum": [
           "switch",
           "choice",
           "choices",
-          "integer",
-          "number",
+          "steps",
+          "range",
+          "date",
+          "time",
           "text",
           "lines",
           "structure"
         ],
         "title": "SettingKind",
+        "type": "string"
+      },
+      "SettingUnit": {
+        "description": "What a setting's number counts, so the form words a value as 2%, 15 minutes or NT$100,000.",
+        "enum": [
+          "percent",
+          "seconds",
+          "minutes",
+          "hours",
+          "days",
+          "twd",
+          "bytes"
+        ],
+        "title": "SettingUnit",
         "type": "string"
       },
       "SettingsFile": {
@@ -3572,6 +4794,16 @@
             "title": "Confirm",
             "type": "boolean"
           },
+          "google_confirmation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConfirmationId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "password": {
             "anyOf": [
               {
@@ -3592,6 +4824,26 @@
           "changes"
         ],
         "title": "SettingsSaveRequest",
+        "type": "object"
+      },
+      "Settlement": {
+        "description": "Cash a real broker settles for the account on one day: negative to pay for purchases, positive to receive from sales.",
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "number"
+          },
+          "settles_on": {
+            "format": "date",
+            "title": "Settles On",
+            "type": "string"
+          }
+        },
+        "required": [
+          "settles_on",
+          "amount"
+        ],
+        "title": "Settlement",
         "type": "object"
       },
       "SetupRequest": {
@@ -3770,7 +5022,8 @@
           "combined",
           "stop_loss",
           "manual",
-          "follow"
+          "follow",
+          "ranking"
         ],
         "title": "SignalSource",
         "type": "string"
@@ -3796,6 +5049,181 @@
           "d_period"
         ],
         "title": "StochasticIndicator",
+        "type": "object"
+      },
+      "StockAnalysis": {
+        "description": "A stock page's financial analysis: the three trends read from held data alone, and their reading in sentences.",
+        "properties": {
+          "earnings": {
+            "$ref": "#/components/schemas/EarningsTrend"
+          },
+          "readings": {
+            "items": {
+              "$ref": "#/components/schemas/Reading"
+            },
+            "title": "Readings",
+            "type": "array"
+          },
+          "revenue": {
+            "$ref": "#/components/schemas/RevenueTrend"
+          },
+          "valuation": {
+            "$ref": "#/components/schemas/ValuationStanding"
+          }
+        },
+        "required": [
+          "revenue",
+          "earnings",
+          "valuation",
+          "readings"
+        ],
+        "title": "StockAnalysis",
+        "type": "object"
+      },
+      "StockBrief": {
+        "description": "The AI's short description of one stock on one Taipei calendar day, shared by every viewer of the site: what the\ncompany is, and how the held facts of a recent window of sessions relate to the stock's move over it. It describes\nand never advises. One exists per stock and day; its status says whether the AI is still asked.",
+        "properties": {
+          "claimed_at": {
+            "format": "date-time",
+            "title": "Claimed At",
+            "type": "string"
+          },
+          "company": {
+            "items": {
+              "$ref": "#/components/schemas/BriefSentence"
+            },
+            "title": "Company",
+            "type": "array"
+          },
+          "day": {
+            "format": "date",
+            "title": "Day",
+            "type": "string"
+          },
+          "language": {
+            "$ref": "#/components/schemas/BriefLanguage"
+          },
+          "model": {
+            "$ref": "#/components/schemas/NonEmptyText"
+          },
+          "movement": {
+            "items": {
+              "$ref": "#/components/schemas/BriefSentence"
+            },
+            "title": "Movement",
+            "type": "array"
+          },
+          "price_change": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Change"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/BriefSource"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BriefStatus"
+          },
+          "stock_id": {
+            "$ref": "#/components/schemas/NonEmptyText"
+          },
+          "window_first": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window First"
+          },
+          "window_last": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Last"
+          },
+          "written_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Written At"
+          }
+        },
+        "required": [
+          "stock_id",
+          "day",
+          "status",
+          "language",
+          "model",
+          "claimed_at"
+        ],
+        "title": "StockBrief",
+        "type": "object"
+      },
+      "StockBriefResponse": {
+        "description": "A stock's AI brief as the site holds it. One is written per stock and Taipei calendar day for every viewer, when a\nsigned-in viewer asks. Every sentence is the AI's wording of held facts and names the held items it rests on; it\ndescribes and gives no advice.",
+        "properties": {
+          "previous": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StockBrief"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stock_id": {
+            "title": "Stock Id",
+            "type": "string"
+          },
+          "stocks_left": {
+            "title": "Stocks Left",
+            "type": "integer"
+          },
+          "today": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StockBrief"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "stock_id",
+          "today",
+          "previous",
+          "stocks_left"
+        ],
+        "title": "StockBriefResponse",
         "type": "object"
       },
       "StockFinancialsResponse": {
@@ -3883,6 +5311,188 @@
           "stock_ids"
         ],
         "title": "StockIdsRequest",
+        "type": "object"
+      },
+      "StockNewsItemResponse": {
+        "description": "One thing said about a stock (Article), as its page may show it: a news site's article and a board's post by title\nand address only, since their text is theirs; an open-data item with its text.",
+        "properties": {
+          "clause": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clause"
+          },
+          "fact_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fact Date"
+          },
+          "open_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Open Text"
+          },
+          "published_at": {
+            "format": "date-time",
+            "title": "Published At",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/InformationSource"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "source",
+          "title",
+          "url",
+          "published_at",
+          "open_text",
+          "clause",
+          "fact_date"
+        ],
+        "title": "StockNewsItemResponse",
+        "type": "object"
+      },
+      "StockNewsResponse": {
+        "description": "What is said about a stock, newest first, as the site's article store keeps it: its material information and the\nTWSE news naming it, and on a site that may read them the news sites' articles and the board's posts.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/StockNewsItemResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "stock_id": {
+            "title": "Stock Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stock_id",
+          "items"
+        ],
+        "title": "StockNewsResponse",
+        "type": "object"
+      },
+      "StockRankingResponse": {
+        "description": "A stock's standing in the monthly ranking (RankingStanding), with whether the ranking holds it.",
+        "properties": {
+          "decided_on": {
+            "format": "date",
+            "title": "Decided On",
+            "type": "string"
+          },
+          "exclusion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RankingExclusion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "in_top": {
+            "title": "In Top",
+            "type": "boolean"
+          },
+          "place": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Place"
+          },
+          "revenue_month": {
+            "format": "date",
+            "title": "Revenue Month",
+            "type": "string"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "scored": {
+            "title": "Scored",
+            "type": "integer"
+          },
+          "stock": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RankedStock"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "top": {
+            "title": "Top",
+            "type": "integer"
+          },
+          "universe": {
+            "title": "Universe",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "decided_on",
+          "revenue_month",
+          "universe",
+          "scored",
+          "top",
+          "place",
+          "score",
+          "stock",
+          "exclusion",
+          "in_top"
+        ],
+        "title": "StockRankingResponse",
         "type": "object"
       },
       "StockReportResponse": {
@@ -4453,6 +6063,11 @@
           "email": {
             "$ref": "#/components/schemas/EmailAddress"
           },
+          "has_password": {
+            "default": true,
+            "title": "Has Password",
+            "type": "boolean"
+          },
           "permissions": {
             "description": "What the user's role allows beyond their own data: the web app shows the administration pages from it.",
             "items": {
@@ -4740,6 +6355,65 @@
         "title": "ValuationScanResponse",
         "type": "object"
       },
+      "ValuationStanding": {
+        "description": "A stock's P/E, P/B and dividend yield (percent) at the latest session the archive holds, each against its own held history.",
+        "properties": {
+          "dividend_yield": {
+            "$ref": "#/components/schemas/RatioStanding"
+          },
+          "first_session": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Session"
+          },
+          "min_sessions": {
+            "exclusiveMinimum": 0.0,
+            "title": "Min Sessions",
+            "type": "integer"
+          },
+          "pb_ratio": {
+            "$ref": "#/components/schemas/RatioStanding"
+          },
+          "pe_ratio": {
+            "$ref": "#/components/schemas/RatioStanding"
+          },
+          "session_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Date"
+          },
+          "sessions": {
+            "minimum": 0.0,
+            "title": "Sessions",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "session_date",
+          "first_session",
+          "sessions",
+          "min_sessions",
+          "pe_ratio",
+          "pb_ratio",
+          "dividend_yield"
+        ],
+        "title": "ValuationStanding",
+        "type": "object"
+      },
       "ValuedStockResponse": {
         "properties": {
           "industry": {
@@ -4900,6 +6574,7 @@
           "specific_stocks",
           "manual_buy",
           "follow",
+          "ranking_follow",
           "valuation",
           "research"
         ],
@@ -4917,15 +6592,42 @@
     }
   },
   "info": {
-    "description": "\nRuns the stock-agent workflows and reads what they recorded, on the same runtime as the CLI.\n\nUsers. Anyone may register (`POST /v1/auth/register`) while registration is open, and signs in with a username or an\nemail (`POST /v1/auth/sign-in`), which sets the HttpOnly session cookie `stock_agent_session`. Public: sign-in,\nregistration, the first-time setup, the built-in strategies and market data (`/v1/market`). Signed in: every other\nread and write, each on the user's own runs, decisions, orders, watchlist, mock account and saved technical settings.\nAdministrator: the users (`/v1/admin/users`) and the settings form (`/v1/admin/settings`). 401 means sign in: the\nsession is missing, expired or ended. 403 means signed in but not allowed, and never ends the session. Every write\nsends the header `X-Requested-With: stock-agent`, and every write but sign-in, sign-out, registration and setup\nrepeats `\"confirm\": true` in its body.\n\nOrders. Full Cycle, specific-stock analysis, valuation and market data never order. Buzz, Intraday and a manual BUY\nof a stock a specific-stock run reported (`POST /v1/runs/{run_id}/manual-buy`) send orders through the same gates and\ntrading journal as the CLI, on the broker their `broker` query names for the whole run: the user's mock account by\ndefault, or SinoPac (`shioaji`) for an administrator while the site's Shioaji login is up, on its simulation server\nin dev and test and on the real account in prod, each BUY within trading.max_order_value and the day's within\ntrading.max_daily_buy_value (`GET /v1/account/brokers` names them). A follow (`POST /v1/runs/{run_id}/follow`) places a\nfinished Full Cycle's open decisions in the user's mock account only, priced again: at a fresh realtime quote in\ncontinuous trading, or on a site without realtime quotes at the last session's official close while no session\ntrades. No endpoint cancels or modifies an order.\n\nOpen data. A public site (`audience: public`) uses only the TWSE and TPEX OpenAPI data the server archives: daily\nhistory and the index trend come from that archive, it has no realtime quote, so Buzz and Intraday answer 403\n`realtime_quotes_unavailable`, and it trades on the mock broker only. A personal site reads its daily history and\nindex trend from the exchanges' own daily reports; without a Shioaji login it has no realtime quote either, so it\nanswers Buzz and Intraday the same way. A public site reads no news site and no MOPS: the AI step\nreads the archived material information, the TWSE news naming the stock and its archived financials, a stock with none\nof them is decided on its technical score alone, and every valuation endpoint answers 403 `mops_unavailable`. `GET\n/v1/market/audience` answers the site's audience and what it allows, so the web app offers only that. `GET\n/v1/market/archive-status` says how many sessions the archive holds and how many the built-in strategies need, `GET\n/v1/market/stocks/{stock_id}/financials` answers a stock's archived quarters and monthly revenue, and `GET\n/v1/market/attribution` names the open data's providers, datasets and license, which a page showing it must credit.\n\nBacktests. `POST /v1/backtests` replays the user's active technical strategy over past sessions the site already\nholds, with the live trading rules on the technical score alone, and saves the result for the user (`GET\n/v1/backtests`, `GET /v1/backtests/{backtest_id}`). `GET /v1/backtests/options` names the period it may cover. A\nbacktest asks no AI, touches no account, watchlist or run record, and never orders.\n\nRankings. `GET /v1/rankings/latest` answers the monthly stock ranking by revenue acceleration and nearness to the high at\nthe latest decision session the site's daily history holds, and `GET /v1/rankings/backtest?first=&last=` replays it over\na period against the ranking.benchmark_id held over the same sessions. Both read only the held history and the archived\nmonthly revenue, which `just backfill-history` brings back; they ask no AI, touch no account and never order.\n\nWorkflows run in the background, one at a time per user and a few at a time per server: a start answers 202 with the\nrun id, and GET /v1/runs/{run_id} reports the run's state and its record; another user's run id answers 404. Run the\nserver with one worker process.\n",
+    "description": "\nRuns the stock-agent workflows and reads what they recorded, on the same runtime as the CLI.\n\nUsers. Anyone may register (`POST /v1/auth/register`) while registration is open, and signs in with a username or an\nemail (`POST /v1/auth/sign-in`), which sets the HttpOnly session cookie `stock_agent_session`. A site with a Google\nclient also signs in with Google: the browser goes to `GET /v1/auth/google/start`, and Google sends it back to `GET\n/v1/auth/google/callback`, which sets the same cookie and sends the browser to the app. Public: sign-in,\nregistration, the first-time setup, the built-in strategies and market data (`/v1/market`). Signed in: every other\nread and write, each on the user's own runs, decisions, orders, watchlist, mock account and saved technical settings.\nAdministrator: the users (`/v1/admin/users`) and the settings form (`/v1/admin/settings`). 401 means sign in: the\nsession is missing, expired or ended. 403 means signed in but not allowed, and never ends the session. Every write\nsends the header `X-Requested-With: stock-agent`, and every write but sign-in, sign-out, registration and setup\nrepeats `\"confirm\": true` in its body.\n\nOrders. Full Cycle, specific-stock analysis, valuation and market data never order. Buzz, Intraday and a manual BUY\nof a stock a specific-stock run reported (`POST /v1/runs/{run_id}/manual-buy`) send orders through the same gates and\ntrading journal as the CLI, on the broker their `broker` query names for the whole run: the user's mock account by\ndefault, or SinoPac (`shioaji`) for an administrator while the site's Shioaji login is up, on its simulation server\nin dev and test and on the real account in prod, each BUY within trading.max_order_value and the day's within\ntrading.max_daily_buy_value (`GET /v1/account/brokers` names them). A follow (`POST /v1/runs/{run_id}/follow`) places a\nfinished Full Cycle's open decisions in the user's mock account only, priced again: at a fresh realtime quote in\ncontinuous trading, or on a site without realtime quotes at the last session's official close while no session\ntrades. A ranking follow (`POST /v1/rankings/follow`) brings that mock account to the monthly ranking's latest decision,\npriced the same way, on the mock account only. No endpoint cancels or modifies an order.\n\nOpen data. A public site (`audience: public`) uses only the TWSE and TPEX OpenAPI data the server archives: daily\nhistory and the index trend come from that archive, it has no realtime quote, so Buzz and Intraday answer 403\n`realtime_quotes_unavailable`, and it trades on the mock broker only. A personal site reads its daily history and\nindex trend from the exchanges' own daily reports; without a Shioaji login it has no realtime quote either, so it\nanswers Buzz and Intraday the same way. A public site reads no news site and no MOPS: the AI step\nreads the archived material information, the TWSE news naming the stock and its archived financials, a stock with none\nof them is decided on its technical score alone, and every valuation endpoint answers 403 `mops_unavailable`. `GET\n/v1/market/audience` answers the site's audience and what it allows, so the web app offers only that. `GET\n/v1/market/archive-status` says how many sessions the archive holds and how many the built-in strategies need, `GET\n/v1/market/stocks/{stock_id}/financials` answers a stock's archived quarters and monthly revenue, `GET\n/v1/market/stocks/{stock_id}/analysis` reads them, the held EPS filings and the archived valuation ratios into a\nfinancial analysis by fixed rules with no AI call, `GET /v1/market/stocks/{stock_id}/news` answers what the site's\narticle store keeps of the stock, its announcements and exchange news and, on a personal site, its news articles and\nboard posts by title and address, `GET\n/v1/market/stocks/{stock_id}/ranking` answers its score, its place in the monthly ranking as a percentile with its two\nfactors, or why the ranking leaves it out, `GET /v1/market/stocks/{stock_id}/brief` answers the AI brief the site holds\nof the stock (what the company is, and how the held facts of a recent window relate to its move, each sentence citing\nheld items), one per stock and Taipei calendar day for every viewer, with no AI call, `POST` on the same address makes\na signed-in user's one paid AI call for today's brief when none is held, and `GET\n/v1/market/attribution` names the open data's providers, datasets and license, which a page showing it must credit.\n\nBacktests. `POST /v1/backtests` replays the user's active technical strategy over past sessions the site already\nholds, with the live trading rules on the technical score alone, and saves the result for the user (`GET\n/v1/backtests`, `GET /v1/backtests/{backtest_id}`). `GET /v1/backtests/options` names the period it may cover. A\nbacktest asks no AI, touches no account, watchlist or run record, and never orders.\n\nRankings. `GET /v1/rankings/latest` answers the monthly stock ranking by revenue acceleration and nearness to the high at\nthe latest decision session the site's daily history holds, and `GET /v1/rankings/backtest?first=&last=` replays it over\na period against the ranking.benchmark_id held over the same sessions. Both read only the held history and the archived\nmonthly revenue, which `just backfill-history` brings back; they ask no AI, touch no account and never order. `GET\n/v1/rankings/follow` answers the user's mock account against that ranking, and its return since it first followed it\nagainst the benchmark; `POST /v1/rankings/follow` brings the mock account to the ranking, as a run that orders on the\nmock account only.\n\nThe server replays `accounts.max_concurrent_backtests` strategy backtests and ranking backtests at once, and one more\nwaits its turn. A user's request past `accounts.max_backtests_per_user` replaying or waiting answers 429\n`too_many_backtests`.\n\nWorkflows run in the background, one at a time per user and a few at a time per server: a start answers 202 with the\nrun id, and GET /v1/runs/{run_id} reports the run's state and its record; another user's run id answers 404. Run the\nserver with one worker process.\n",
     "title": "TW-Stock-Alpha-Agent",
     "version": "0.2.0"
   },
   "openapi": "3.1.0",
   "paths": {
+    "/v1/account/brokerage": {
+      "get": {
+        "description": "The SinoPac account as the broker reports it now, for an administrator the site shows features.sinopac_account:\nthe bank balance, the settlements due, the positions with the broker's last prices and its own unrealized PnL,\ntoday's deals and the sales of the last holdings.realized_days days with the PnL the broker says each realized.\n`simulation` says which server this environment logs in to, `login_up` whether the login is up (`statement` is None\nwhile it is down), and `ordering` whether the site lets the user order there (features.sinopac_ordering, off by\ndefault). It only reads: it sends no order, whatever `ordering` says, and it answers no account number.",
+        "operationId": "get_brokerage_account_v1_account_brokerage_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrokerageAccountResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Get Brokerage Account",
+        "tags": [
+          "Account"
+        ]
+      }
+    },
     "/v1/account/brokers": {
       "get": {
-        "description": "The brokers the user may choose for Buzz, Intraday or a manual BUY now, the mock account first, each with what a\nrun's confirmation names: a real broker's server and its BUY limits.",
+        "description": "The brokers the site lets the user order on (features.*) and the user may choose for Buzz, Intraday or a manual\nBUY now, the mock account first, each with what a run's confirmation names: a real broker's server and its BUY\nlimits. SinoPac is listed only while features.sinopac_ordering shows the user ordering there: it is off by default.",
         "operationId": "get_brokers_v1_account_brokers_get",
         "responses": {
           "200": {
@@ -5248,7 +6950,7 @@
                 }
               }
             },
-            "description": "A save without the password (password_required), or with a wrong one (password_refused)."
+            "description": "A save without the password (password_required), or with a wrong one (password_refused); by an administrator without a password, a save without a fresh Google authentication made for it (google_confirmation_required)."
           },
           "409": {
             "content": {
@@ -5392,6 +7094,112 @@
         "summary": "Change User",
         "tags": [
           "Administration"
+        ]
+      }
+    },
+    "/v1/auth/google/callback": {
+      "get": {
+        "description": "Where Google sends the browser back: <accounts.public_origin>/v1/auth/google/callback, the one redirect URI of the\nOAuth client. A sign-in sets the session cookie and redirects to the app. A settings confirmation grants the save\nit was started for and redirects to the settings form with ?google=confirmed. A refusal redirects to the app with\n?google= and the reason; nothing is created and no session starts. Either way the flow cookie is cleared.",
+        "operationId": "return_from_google_v1_auth_google_callback_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "password",
+                  "maxLength": 2048,
+                  "type": "string",
+                  "writeOnly": true
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Code"
+            }
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Return From Google",
+        "tags": [
+          "Sign-in"
+        ]
+      }
+    },
+    "/v1/auth/google/start": {
+      "get": {
+        "description": "The browser's way to Google, as a navigation, never a fetch: it sets the short-lived flow cookie and redirects to\nGoogle's sign-in. With `confirmation`, the id the web app made for one settings save, Google authenticates the\nadministrator again for that save. Where the site offers no sign-in with Google, or past the limit per address,\nit redirects back to the app with ?google= and the reason.",
+        "operationId": "start_google_sign_in_v1_auth_google_start_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "confirmation",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ConfirmationId"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Confirmation"
+            }
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Google Sign In",
+        "tags": [
+          "Sign-in"
         ]
       }
     },
@@ -5635,7 +7443,7 @@
     },
     "/v1/auth/status": {
       "get": {
-        "description": "What the web app shows first: the first-time setup while no user exists, then sign-in, with registration while it is open.",
+        "description": "What the web app shows first: the first-time setup while no user exists, then sign-in, with registration while it is\nopen; and whom the site shows each feature to, which the app reads with the user's permissions to show or hide a page.",
         "operationId": "get_sign_in_status_v1_auth_status_get",
         "responses": {
           "200": {
@@ -5686,7 +7494,7 @@
         ]
       },
       "post": {
-        "description": "Replays the user's active technical strategy over the period, day by day with the live trading rules, and answers\nthe backtest, saved for the user. A stock is decided on its technical score alone, as a run decides a stock the AI\nis not asked about; a decision made after one session's close fills at the next open. It asks no AI, touches no\naccount and never orders. The answer comes when the replay is done: seconds, longer for the first one after a start.",
+        "description": "Replays the user's active technical strategy over the period, day by day with the live trading rules, and answers\nthe backtest, saved for the user. A stock is decided on its technical score alone, as a run decides a stock the AI\nis not asked about; a decision made after one session's close fills at the next open. It asks no AI, touches no\naccount and never orders. The answer comes when the replay is done: seconds, longer for the first one after a start\nor while it waits for the server's other replays (accounts.max_concurrent_backtests).",
         "operationId": "run_backtest_v1_backtests_post",
         "requestBody": {
           "content": {
@@ -5718,6 +7526,16 @@
               }
             },
             "description": "invalid_request: a field of the body does not validate, and `detail` lists each one. backtest_period_unavailable: the period reaches outside the days the site's daily history can replay, or holds no session; `detail` says which days a backtest may cover."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "too_many_backtests: accounts.max_backtests_per_user of the user's strategy backtests and ranking backtests replay or wait already."
           }
         },
         "security": [
@@ -5879,6 +7697,161 @@
         ]
       }
     },
+    "/v1/holdings": {
+      "get": {
+        "description": "The user's holdings as one portfolio, from held data alone: the SinoPac account's positions as the broker lists\nthem now (where the site shows the user features.sinopac_account, the user is an administrator and the login is\nup), the mock account's (features.mock_account) and the holdings entered by hand. `sources` narrows them; a source\nthe site does not show the user is never read. Each holding stays under its source and counts once: the same stock\nat the broker and entered by hand is two holdings. Each is valued at its stock's last close the site holds, net of\nthe SELL fee and tax, and carries its standing in the monthly ranking as /v1/market/stocks/{id}/ranking answers it,\nor why the ranking leaves it out, and its latest month of revenue with the ranking's acceleration. The portfolio\nsays its concentration in the holdings.concentration_positions largest stocks, the share of its value the ranking\nholds now, and the value-weighted score over the scored holdings with their share. The score figures are None for a\nviewer the site does not show the ranking. It is analysis, not advice: nothing here says to buy or sell.",
+        "operationId": "get_holdings_v1_holdings_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "sources",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/components/schemas/HoldingSource"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sources"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HoldingsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "ranking_unavailable: the site's daily history holds no decision session yet. invalid_request: a bad source."
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Get Holdings",
+        "tags": [
+          "Holdings"
+        ]
+      }
+    },
+    "/v1/holdings/manual": {
+      "post": {
+        "description": "Keeps a holding the user enters by hand, replacing the user's earlier entry of the same stock: one entry per stock.\nIt is a note of shares held elsewhere: it orders nothing and touches no account. 422 for a stock the listing does\nnot hold; 503 while the listing is unavailable.",
+        "operationId": "enter_holding_v1_holdings_manual_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HoldingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeldPositionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Enter Holding",
+        "tags": [
+          "Holdings"
+        ]
+      }
+    },
+    "/v1/holdings/manual/remove": {
+      "post": {
+        "description": "Takes the user's hand-entered holding of the stock off the list. A holding of an account is never touched.",
+        "operationId": "remove_holding_v1_holdings_manual_remove_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HoldingRemovalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The user entered no holding of this stock."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Remove Holding",
+        "tags": [
+          "Holdings"
+        ]
+      }
+    },
     "/v1/market/archive-status": {
       "get": {
         "description": "How many sessions of TWSE and TPEX closes the server's open-data archive holds, and how many the built-in strategies\nneed. A public site's runs read their daily history from it, so they find no candidate until it holds enough. Public.",
@@ -5964,6 +7937,11 @@
             "description": "The exchange listing could not be loaded."
           }
         },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
         "summary": "Get Market Breadth",
         "tags": [
           "Market data"
@@ -6047,6 +8025,11 @@
             "description": "The exchange listing could not be loaded."
           }
         },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
         "summary": "Get Most Traded",
         "tags": [
           "Market data"
@@ -6164,6 +8147,170 @@
         ]
       }
     },
+    "/v1/market/stocks/{stock_id}/analysis": {
+      "get": {
+        "description": "One stock's financial analysis from the data the server holds, with no fetch and no AI call: each held month's\nrevenue with its change from a year before and the monthly ranking's acceleration (the mean of the latest\nranking.revenue_short_months months over that of the latest ranking.revenue_long_months), each held quarter's\nyear-to-date EPS, its own EPS, its change from a year before, its margins and debt ratio, and the latest session's\nP/E, P/B and dividend yield against each ratio's median over the sessions held. `readings` says what the figures\nsay by fixed rules, each a kind and a count the web app turns into a sentence. A figure whose history is too short\nis null, and its reading says how much is held instead. Changes, margins and the debt ratio are ratios; revenue is\nin thousands of TWD. A stock the server holds nothing of answers empty lists. Public.",
+        "operationId": "get_stock_analysis_v1_market_stocks__stock_id__analysis_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "stock_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9A-Za-z]{1,10}$",
+              "title": "Stock Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockAnalysis"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Get Stock Analysis",
+        "tags": [
+          "Market data"
+        ]
+      }
+    },
+    "/v1/market/stocks/{stock_id}/brief": {
+      "get": {
+        "description": "The AI brief the site holds of one stock, with no AI call: `today` is the brief of today in Taipei if a viewer\nasked for one (`status` writing, written or failed), `previous` the newest written brief of an earlier day, and\n`stocks_left` how many more stocks may get a new brief today. A written brief has two parts, `company` and\n`movement`, each a list of sentences with the keys of the `sources` it rests on: the held figures and the\nannouncements, news and posts the page shows, by kind, date, title and address. It names the model that wrote it,\nwhen, in which language, and the window of sessions with the close's change over it. Every text is the AI's or a\nthird party's: show it as text, never as markup. It describes and gives no advice. Public.",
+        "operationId": "get_stock_brief_v1_market_stocks__stock_id__brief_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "stock_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9A-Za-z]{1,10}$",
+              "title": "Stock Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockBriefResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Get Stock Brief",
+        "tags": [
+          "Market data"
+        ]
+      },
+      "post": {
+        "description": "Asks for the stock's AI brief of today in Taipei, then answers what GET answers. The site writes one brief per\nstock and day for every viewer: the first request claims it and makes one paid AI call on the user's allowance,\nwaiting for the reply; a request made meanwhile, or after it is written, calls nothing and answers what is held. A\nfailed brief may be asked again. 429 brief_limit_reached when the stock has none today and\nstock_page.brief.daily_stocks stocks have one; 429 ai_allowance_spent when the user's or the site's paid AI calls of\nthe day are spent. It reads held data only, records no run and never orders. Private: a visitor never causes a call.",
+        "operationId": "write_stock_brief_v1_market_stocks__stock_id__brief_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "stock_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9A-Za-z]{1,10}$",
+              "title": "Stock Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Confirmed"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockBriefResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Not a listed stock."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "description": "brief_limit_reached: today's new briefs are spent. ai_allowance_spent: today's paid AI calls are spent."
+          },
+          "503": {
+            "description": "The exchange listing could not be loaded."
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Write Stock Brief",
+        "tags": [
+          "Market data"
+        ]
+      }
+    },
     "/v1/market/stocks/{stock_id}/financials": {
       "get": {
         "description": "One stock's financials from the server's open-data archive: each archived quarter's revenue, gross profit,\noperating income, net income and EPS of the year to the quarter's end, its total assets, liabilities and equity at\nthe quarter's end and its book value per share, and each archived month's revenue with its changes. Amounts are in\nthousands of TWD, per-share figures in TWD and changes in percent; a figure the company's industry format does not\nreport is null. Both lists are empty for a stock the archive holds nothing of. Public.",
@@ -6202,7 +8349,109 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
         "summary": "Get Stock Financials",
+        "tags": [
+          "Market data"
+        ]
+      }
+    },
+    "/v1/market/stocks/{stock_id}/news": {
+      "get": {
+        "description": "What is said about one listed stock, newest first, from the site's article store, at most\nstock_page.article_store.shown: the material information its company announced and the TWSE news naming it, with\ntheir text; and on a site whose audience may read them (`news_articles` of /v1/market/audience) the news sites'\narticles and the stock board's posts, by title and address. A request first reads what there is to read now into\nthe store: the open-data archive's items of the last analysis.material_information_days, and the sites' and the\nboard's, which are fetched when a page asks and then held for stock_page.news_freshness_minutes, one fetch per\nstock at a time; a source that fails keeps what was held of it. So the list also holds what the sources no longer\nserve, for stock_page.article_store.retention_days. Every text is a third party's: show it as text, never as\nmarkup. Public.",
+        "operationId": "get_stock_news_v1_market_stocks__stock_id__news_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "stock_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9A-Za-z]{1,10}$",
+              "title": "Stock Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockNewsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Not a listed stock."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "description": "The exchange listing could not be loaded."
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Get Stock News",
+        "tags": [
+          "Market data"
+        ]
+      }
+    },
+    "/v1/market/stocks/{stock_id}/ranking": {
+      "get": {
+        "description": "One stock's score: where it stands in the monthly ranking at the latest decision session the site's daily history\nholds, from the same ranking /v1/rankings/latest answers, with no cut at ranking.top. `score` is its place among\nthe scored stocks as a percentile, 100 for the best combined rank; `stock` holds its two factors (revenue\nacceleration, nearness to the high) with each one's rank from 0 to 1; `in_top` says whether the ranking holds it. A\nstock the ranking leaves out has no score and `exclusion` says why: no held history, an ETF, no trade that session,\na close under ranking.min_close, too little traded value, a month of revenue not held, or a price history shorter\nthan the high needs. The score ranks two measured factors; it is no forecast. One stock's standing, not the\nranking's list: it needs no sign-in, and a viewer sees it only where the site shows them both the stock pages and\nthe ranking (403 feature_hidden otherwise).",
+        "operationId": "get_stock_ranking_v1_market_stocks__stock_id__ranking_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "stock_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9A-Za-z]{1,10}$",
+              "title": "Stock Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockRankingResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "ranking_unavailable: the site's daily history holds no decision session yet. invalid_request: a bad code."
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Get Stock Ranking",
         "tags": [
           "Market data"
         ]
@@ -6306,6 +8555,16 @@
               }
             },
             "description": "ranking_unavailable: the site's daily history holds no decision session yet; `detail` says what it holds. backtest_period_unavailable: the period holds no decision session the history holds; `detail` says which sessions it holds. invalid_request: a query parameter does not validate."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "too_many_backtests: accounts.max_backtests_per_user of the user's strategy backtests and ranking backtests replay or wait already."
           }
         },
         "security": [
@@ -6314,6 +8573,118 @@
           }
         ],
         "summary": "Get Ranking Backtest",
+        "tags": [
+          "Rankings"
+        ]
+      }
+    },
+    "/v1/rankings/follow": {
+      "get": {
+        "description": "The ranking in the user's mock account: which of the latest decision's stocks it holds and lacks, which of its\nholdings left the ranking, whether a follow may start now, and its return since it first followed the ranking\nagainst ranking.benchmark_id over the same sessions. It records nothing and never orders.",
+        "operationId": "get_ranking_follow_v1_rankings_follow_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RankingFollowResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "ranking_unavailable: the site's daily history holds no decision session yet; `detail` says what it holds. backtest_period_unavailable: the period holds no decision session the history holds; `detail` says which sessions it holds. invalid_request: a query parameter does not validate."
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Get Ranking Follow",
+        "tags": [
+          "Rankings"
+        ]
+      },
+      "post": {
+        "description": "Brings the user's mock account to the ranking's latest decision, as a run of its own: it sells each holding the\nranking left and buys each ranked stock the account lacks, at an equal weight of the account in whole lots of\nanalysis.lot_size, priced as this site prices an order now, through the same order gates and journal as every\norder. It orders on the mock account only. A second follow of a decision the account already holds answers\nnothing_to_follow.",
+        "operationId": "follow_ranking_v1_rankings_follow_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Confirmed"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunAccepted"
+                }
+              }
+            },
+            "description": "The run started; poll GET /v1/runs/{run_id}."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "feature_hidden: the site does not show the user the ranking and the mock account. realtime_quotes_unavailable: the site prices orders on realtime quotes and has no Shioaji login now."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "nothing_to_follow: the mock account holds the ranking already, or the ranking ranks no stock. outside_follow_window: the site places no order in the market's phase now. run_in_progress: another run of this user is still running."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "ranking_unavailable: the site's daily history holds no decision session yet; `detail` says what it holds. backtest_period_unavailable: the period holds no decision session the history holds; `detail` says which sessions it holds. invalid_request: a query parameter does not validate."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The server runs its most workflows at once; start yours later."
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Follow Ranking",
         "tags": [
           "Rankings"
         ]
@@ -6467,7 +8838,7 @@
                 }
               }
             },
-            "description": "realtime_quotes_unavailable: the site has no realtime quotes: it uses open data only (audience public), or it has no Shioaji login. real_broker_refused: a real `broker` asked by a user who is not an administrator. broker_unavailable: the real broker has no login up on this site now."
+            "description": "realtime_quotes_unavailable: the site has no realtime quotes: it uses open data only (audience public), or it has no Shioaji login. feature_hidden: the site does not let the user order on the `broker` (features.*; features.sinopac_ordering is off by default). real_broker_refused: a real `broker` asked by a user who is not an administrator. broker_unavailable: the real broker has no login up on this site now."
           },
           "409": {
             "content": {
@@ -6622,7 +8993,7 @@
                 }
               }
             },
-            "description": "realtime_quotes_unavailable: the site has no realtime quotes: it uses open data only (audience public), or it has no Shioaji login. real_broker_refused: a real `broker` asked by a user who is not an administrator. broker_unavailable: the real broker has no login up on this site now."
+            "description": "realtime_quotes_unavailable: the site has no realtime quotes: it uses open data only (audience public), or it has no Shioaji login. feature_hidden: the site does not let the user order on the `broker` (features.*; features.sinopac_ordering is off by default). real_broker_refused: a real `broker` asked by a user who is not an administrator. broker_unavailable: the real broker has no login up on this site now."
           },
           "409": {
             "content": {
@@ -6991,7 +9362,7 @@
                 }
               }
             },
-            "description": "realtime_quotes_unavailable: the site has no realtime quotes: it uses open data only (audience public), or it has no Shioaji login. real_broker_refused: a real `broker` asked by a user who is not an administrator. broker_unavailable: the real broker has no login up on this site now."
+            "description": "realtime_quotes_unavailable: the site has no realtime quotes: it uses open data only (audience public), or it has no Shioaji login. feature_hidden: the site does not let the user order on the `broker` (features.*; features.sinopac_ordering is off by default). real_broker_refused: a real `broker` asked by a user who is not an administrator. broker_unavailable: the real broker has no login up on this site now."
           },
           "404": {
             "content": {

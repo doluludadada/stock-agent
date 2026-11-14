@@ -4,6 +4,7 @@ import { Link } from 'react-router'
 import { toast } from 'sonner'
 import { useLocale, useTranslation } from '@/i18n'
 import { paths } from '@/shared/config/paths'
+import { useErrorReason } from '@/shared/lib/error-reason'
 import { formatDate, formatNumber, formatPrice, formatSignedPercent } from '@/shared/lib/format'
 import { isAcceptedList, parseStockIds } from '@/shared/lib/stock-ids'
 import { cn } from '@/shared/lib/utils'
@@ -24,28 +25,30 @@ import { DEFAULT_MIN_UNDERVALUATION_PERCENT, DEFAULT_TARGET_PE, parseMinUnderval
 
 export function ValuationPage() {
   const { t } = useTranslation('valuation')
+  const [tab, setTab] = useState('stocks')
   return (
-    <div className="space-y-5 lg:space-y-6">
+    <div className="page-stack">
       <div className="space-y-3">
-        <PageHeader eyebrow={t('common:nav.section.research')} title={t('title')} description={t('description')} />
+        <PageHeader title={t('title')} description={t('description')} />
         <p className="flex items-start gap-2 text-xs text-muted-foreground">
           <Info aria-hidden className="mt-px size-3.5 shrink-0 text-gold" />
           {t('notAdvice')}
         </p>
       </div>
       <RequireSignIn layout="page" reason={t('signIn')}>
-        <div className="grid items-start gap-4 lg:gap-5 xl:grid-cols-[minmax(0,1fr)_22rem]">
+        <div className="card-grid xl:grid-cols-[minmax(0,1fr)_22rem]">
           <MarketReference className="xl:col-start-2 xl:row-start-1" />
           <Panel className="xl:col-start-1 xl:row-span-2 xl:row-start-1" title={t('toolTitle')} description={t('toolQuestion')}>
-            <Tabs defaultValue="stocks" className="gap-4">
+            <Tabs value={tab} onValueChange={setTab} className="gap-4">
               <TabsList className="w-full md:w-fit">
                 <TabsTrigger value="stocks">{t('tab.stocks')}</TabsTrigger>
                 <TabsTrigger value="scan">{t('tab.scan')}</TabsTrigger>
               </TabsList>
-              <TabsContent value="stocks">
+              {/* Both stay mounted, so what was typed and found in one is still there after a look at the other. */}
+              <TabsContent value="stocks" forceMount hidden={tab !== 'stocks'}>
                 <SpecificStocks />
               </TabsContent>
-              <TabsContent value="scan">
+              <TabsContent value="scan" forceMount hidden={tab !== 'scan'}>
                 <Scan />
               </TabsContent>
             </Tabs>
@@ -296,10 +299,11 @@ function ExplainButton({ stockId, targetPe }: { stockId: string; targetPe: numbe
   const { t } = useTranslation('valuation')
   const { explanation, pending, ask } = useExplanation(stockId, targetPe)
   const [asking, setAsking] = useState(false)
+  const reason = useErrorReason()
 
   const run = () => {
     setAsking(false)
-    ask(undefined, { onError: (error) => toast.error(t('explainFailed', { reason: error.message })) })
+    ask(undefined, { onError: (error) => toast.error(t('explainFailed', { reason: reason(error) })) })
   }
 
   return (

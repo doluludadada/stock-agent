@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { useTranslation } from '@/i18n'
 import { useIsSignedIn } from '@/shared/api'
 import { cn } from '@/shared/lib/utils'
+import { useErrorReason } from '@/shared/lib/error-reason'
 import { Button } from '@/shared/ui/button'
 import { useAuthLinks } from '@/shared/ui/require-sign-in'
 import { isManuallyWatched, useWatchlistChange, useWatchlistEntries } from './api'
@@ -18,6 +19,7 @@ interface WatchButtonProps {
 /** Toggles the stock on the user's MANUAL watchlist on the server; signed out, it leads to sign-in and back. */
 export function WatchButton({ code, label, variant = 'full', className }: WatchButtonProps) {
   const { t } = useTranslation('watchlist')
+  const reason = useErrorReason()
   const signedIn = useIsSignedIn()
   const links = useAuthLinks()
   const location = useLocation()
@@ -42,7 +44,7 @@ export function WatchButton({ code, label, variant = 'full', className }: WatchB
       { action, stockIds: [code] },
       {
         onSuccess: () => toast.success(t(watched ? 'toast.removed' : 'toast.added', { name: label })),
-        onError: (error) => toast.error(t('toast.failed', { reason: error.message })),
+        onError: (error) => toast.error(t('toast.failed', { reason: reason(error) })),
       },
     )
   }

@@ -1,5 +1,5 @@
 import { skipToken, useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiRequest, strategyResultsKey, useIsSignedIn, type Schemas } from '@/shared/api'
+import { apiRequest, isSameSession, sentInSession, strategyResultsKey, useIsSignedIn, type Schemas } from '@/shared/api'
 
 export type ValuationReport = Schemas['ValuationReportResponse']
 export type ValuationScan = Schemas['ValuationScanResponse']
@@ -69,7 +69,10 @@ export function useExplanation(stockId: string, targetPe: number) {
   const mutation = useMutation({
     mutationKey: key,
     mutationFn: () => apiRequest('post', '/v1/valuation/explanation', { body: { confirm: true, stock_id: stockId, target_pe: targetPe } }),
-    onSuccess: (explanation) => client.setQueryData<Explanation>(key, explanation),
+    onMutate: sentInSession,
+    onSuccess: (explanation, _nothing, sent) => {
+      if (isSameSession(sent)) client.setQueryData<Explanation>(key, explanation)
+    },
   })
   return { explanation: stored.data, pending, ask: mutation.mutate }
 }

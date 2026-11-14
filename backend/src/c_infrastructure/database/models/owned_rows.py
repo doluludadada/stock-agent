@@ -3,13 +3,15 @@ Which tables hold a user's rows, and the guard that keeps a session to one owner
 
 An owned table is a table with an owner_id column. The rule is read from the tables, so a new owned table needs no
 list. DatabaseConnector installs the guard on every session it opens: owner_session() with the bound owner, and
-get_session() with none, which refuses every owned table.
+get_session() with none, which refuses every owned table. Beside it, what the connector installs on its engine so that
+no row's values leave the database in an error's text (hide_refused_values).
 """
 
 from collections.abc import Iterable
 from typing import Any
 
 from sqlalchemy import ClauseElement, Executable, Table, event
+from sqlalchemy.engine import ExceptionContext
 from sqlalchemy.orm import Mapper, ORMExecuteState, Session, with_loader_criteria
 from sqlalchemy.sql import visitors
 from sqlmodel.main import default_registry
@@ -51,6 +53,16 @@ def guard_session(session: Session) -> None:
     """
     event.listen(session, "do_orm_execute", scope_statement)
     event.listen(session, "before_flush", check_flush)
+
+
+def hide_refused_values(context: ExceptionContext) -> None:
+    """
+    Cuts what PostgreSQL adds to a refusal after its message from the error the engine is about to raise: its DETAIL
+    quotes the refused row or key, which may be a person's data, and the engine installs this beside hide_parameters.
+    """
+    for error in (context.original_exception, context.sqlalchemy_exception):
+        if error is not None and error.args:
+            error.args = (str(error.args[0]).partition("\nDETAIL:")[0], *error.args[1:])
 
 
 def scope_statement(state: ORMExecuteState) -> None:

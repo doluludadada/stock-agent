@@ -1,11 +1,11 @@
 import asyncio
 from collections.abc import Mapping
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from datetime import date, datetime, timedelta
 from typing import override
 
 import numpy as np
-from sqlalchemy import Numeric, cast, func
+from sqlalchemy import func
 from sqlmodel import col, select
 
 from a_domain.model.market.ohlcv import Ohlcv
@@ -22,7 +22,7 @@ from a_domain.rules.trading.ranking import ListedHistory, ex_right_matrix
 from a_domain.types.enums import MarketIndex, MarketType
 from b_application.config.market_data_config import MarketDataConfig
 from c_infrastructure.database.db_connector import UPSERT, DatabaseConnector
-from c_infrastructure.database.models.ohlcv_dto import ExRightReferenceDTO, OhlcvDTO
+from c_infrastructure.database.models.ohlcv_dto import ExRightReferenceDTO, ExRightReferenceSpanDTO, ListedRevisionDTO, OhlcvDTO
 
 
 class CachedPriceProvider(ICachedPriceProvider):
@@ -184,27 +184,31 @@ class CachedPriceProvider(ICachedPriceProvider):
     @override
     async def sync_references(self, first: date, last: date) -> None:
         async with self._sync_lock:
-            for start, end in await self.reference_gaps(first, last):
-                question = f"ex-right references from {start} to {end}"
+            for market in MarketType:
+                for start, end in await self.reference_gaps(market, first, last):
+                    question = f"ex-right references of {market.value} from {start} to {end}"
 
-                if not self.due(question, self._clock.now()):
-                    continue
+                    if not self.due(question, self._clock.now()):
+                        break
 
-                self._asked[question] = self._clock.now()
+                    self._asked[question] = self._clock.now()
 
-                try:
-                    references = await self._source.ex_right_references(start, end)
-                except Exception as error:
-                    self._failed_at = self._clock.now()
-                    self._logger.warning(f"TWSE's ex-right references from {start} failed ({type(error).__name__}: {error})")
-                    return
+                    try:
+                        references = await self._source.ex_right_references(market, start, end)
+                    except Exception as error:
+                        self._failed_at = self._clock.now()
+                        self._logger.warning(
+                            f"{market.value.upper()}'s ex-right references from {start} failed ({type(error).__name__}: {error})"
+                        )
+                        return
 
-                async with self._write_lock:
-                    await self.save_references(references)
+                    async with self._write_lock:
+                        await self.save_references(references)
+                        await self.save_reference_span(market, start, end)
 
     @override
     async def save_references(self, references: Mapping[tuple[str, date], float]) -> None:
-        """One upsert."""
+        """One upsert, which raises the revision."""
         rows = [{"stock_id": stock_id, "session_date": day, "reference_price": price} for (stock_id, day), price in references.items()]
 
         if not rows:
@@ -214,32 +218,41 @@ class CachedPriceProvider(ICachedPriceProvider):
             statement = UPSERT[session.get_bind().dialect.name](ExRightReferenceDTO)
             replaced = {"reference_price": statement.excluded["reference_price"]}
             await session.execute(statement.on_conflict_do_update(index_elements=["stock_id", "session_date"], set_=replaced), rows)
+            await session.execute(ListedRevisionDTO.raised(UPSERT[session.get_bind().dialect.name]))
             await session.commit()
 
     @override
-    async def reference_gaps(self, first: date, last: date) -> list[tuple[date, date]]:
-        span = select(func.min(col(ExRightReferenceDTO.session_date)), func.max(col(ExRightReferenceDTO.session_date)))
-
+    async def save_reference_span(self, market: MarketType, first: date, last: date) -> None:
         async with self._db.get_session() as session:
-            earliest, latest = (await session.execute(span)).one()
+            held = await session.get(ExRightReferenceSpanDTO, market.value)
+            span = held or ExRightReferenceSpanDTO(market=market.value, first_date=first, last_date=last)
+            span.first_date, span.last_date = min(span.first_date, first), max(span.last_date, last)
+            session.add(span)
+            await session.commit()
 
-        if earliest is None or latest is None:
-            gaps = [(first, last)]
-        else:
-            gaps = ([(first, earliest)] if first + self._start_slack < earliest else []) + ([(latest, last)] if latest < last else [])
+    @override
+    async def reference_gaps(self, market: MarketType, first: date, last: date) -> list[tuple[date, date]]:
+        async with self._db.get_session() as session:
+            span = await session.get(ExRightReferenceSpanDTO, market.value)
 
-        cuts: list[tuple[date, date]] = []
+        if span is None:
+            return self.reference_blocks(first, last)
 
-        for start, end in gaps:
-            while start <= end:
-                block_end = (
-                    start.year * 12 + start.month - 1
-                ) // self._reference_months * self._reference_months + self._reference_months
-                boundary = date(block_end // 12, block_end % 12 + 1, 1)
-                cuts.append((start, min(end, boundary - timedelta(days=1))))
-                start = boundary
+        day = timedelta(days=1)
+        return self.reference_blocks(first, span.first_date - day)[::-1] + self.reference_blocks(span.last_date + day, last)
 
-        return cuts
+    @override
+    def reference_blocks(self, first: date, last: date) -> list[tuple[date, date]]:
+        blocks: list[tuple[date, date]] = []
+
+        while first <= last:
+            month = first.year * 12 + first.month - 1
+            block_end = month // self._reference_months * self._reference_months + self._reference_months
+            boundary = date(block_end // 12, block_end % 12 + 1, 1)
+            blocks.append((first, min(last, boundary - timedelta(days=1))))
+            first = boundary
+
+        return blocks
 
     @override
     async def listed_history(self) -> ListedHistory | None:
@@ -259,7 +272,8 @@ class CachedPriceProvider(ICachedPriceProvider):
             stamps = sorted((await connection.execute(select(col(OhlcvDTO.ts)).distinct().where(stocks))).scalars())
             sessions = tuple(sorted({self._clock.to_trading_date(stamp) for stamp in stamps}))
             rows = {stock_id: row for row, stock_id in enumerate(stock_ids)}
-            columns = {stamp: sessions.index(self._clock.to_trading_date(stamp)) for stamp in stamps}
+            places = {session: column for column, session in enumerate(sessions)}
+            columns = {stamp: places[self._clock.to_trading_date(stamp)] for stamp in stamps}
             fields = [np.full((len(stock_ids) + 1, len(sessions)), np.nan) for _ in figures]
 
             for stamp, column in columns.items():
@@ -279,15 +293,8 @@ class CachedPriceProvider(ICachedPriceProvider):
 
     @override
     async def listed_fingerprint(self) -> tuple[object, ...]:
-        """Each sum adds exact numerics, so the order a database adds the bars in cannot move it."""
-        exact = Numeric(asdecimal=False)
-        figures = (OhlcvDTO.open, OhlcvDTO.high, OhlcvDTO.low, OhlcvDTO.close, OhlcvDTO.volume, OhlcvDTO.change)
-        sums = [func.sum(cast(col(figure), exact)) for figure in figures]
-        bars = select(func.count(), func.count(col(OhlcvDTO.change)), *sums).where(col(OhlcvDTO.stock_id).not_like("^%"))
-        references = select(func.count(), func.sum(cast(col(ExRightReferenceDTO.reference_price), exact)))
-
         async with self._db.get_session() as session:
-            return (*(await session.execute(bars)).one(), *(await session.execute(references)).one())
+            return ((await session.execute(select(col(ListedRevisionDTO.revision)))).scalar(),)
 
     @override
     async def ex_right_references(self, first: date, last: date) -> dict[str, dict[datetime, float]]:
@@ -360,30 +367,35 @@ class CachedPriceProvider(ICachedPriceProvider):
 
     @override
     async def stored_bars(self, stock_ids: list[str], first: date, last: date) -> dict[str, list[Ohlcv]]:
+        """Read as plain columns, one bar an object: the table's rows cost several times a bar's memory and time."""
+        figures = (OhlcvDTO.ts, OhlcvDTO.open, OhlcvDTO.high, OhlcvDTO.low, OhlcvDTO.close, OhlcvDTO.volume, OhlcvDTO.change)
         statement = (
-            select(OhlcvDTO)
+            select(col(OhlcvDTO.stock_id), *map(col, figures))
             .where(col(OhlcvDTO.stock_id).in_(stock_ids))
             .where(col(OhlcvDTO.ts).between(self._clock.session_close(first), self._clock.session_close(last)))
             .order_by(col(OhlcvDTO.stock_id), col(OhlcvDTO.ts))
         )
 
         async with self._db.get_session() as session:
-            rows = (await session.execute(statement)).scalars().all()
+            rows = (await session.execute(statement)).all()
 
         lacking = sorted({row.stock_id for row in rows if row.change is None})
         official = await self._archive.official_changes(lacking, first, last) if lacking else {}
         bars: dict[str, list[Ohlcv]] = {}
 
-        for row in rows:
-            bar = Ohlcv(**row.model_dump(exclude={"stock_id"}))
-            change = official.get((row.stock_id, self._clock.to_trading_date(bar.ts))) if bar.change is None else bar.change
-            bars.setdefault(row.stock_id, []).append(replace(bar, change=change))
+        for stock_id, ts, open_price, high, low, close, volume, change in rows:
+            if change is None:
+                change = official.get((stock_id, self._clock.to_trading_date(ts)))
+
+            bars.setdefault(stock_id, []).append(
+                Ohlcv(ts=ts, open=open_price, high=high, low=low, close=close, volume=volume, change=change)
+            )
 
         return bars
 
     @override
     async def save_bars(self, bars: Mapping[str, list[Ohlcv]]) -> None:
-        """One upsert. A bar saved without a change keeps the change the cache holds of it."""
+        """One upsert. A bar saved without a change keeps the change the cache holds of it. Stock bars raise the revision."""
         rows = [OhlcvDTO(stock_id=key, **asdict(bar)).model_dump() for key, key_bars in bars.items() for bar in key_bars]
 
         if not rows:
@@ -396,4 +408,8 @@ class CachedPriceProvider(ICachedPriceProvider):
             await session.execute(
                 statement.on_conflict_do_update(index_elements=["stock_id", "ts"], set_=prices | {"change": change}), rows
             )
+
+            if any(not key.startswith("^") for key, key_bars in bars.items() if key_bars):
+                await session.execute(ListedRevisionDTO.raised(UPSERT[session.get_bind().dialect.name]))
+
             await session.commit()

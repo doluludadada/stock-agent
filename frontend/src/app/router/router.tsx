@@ -1,10 +1,20 @@
+import type { ComponentType } from 'react'
 import type { RouteObject } from 'react-router'
 import { AppShell } from '../layouts/AppShell'
 import { AuthLayout } from '../layouts/AuthLayout'
-import { NotFoundRoute, RouteErrorBoundary } from './RouteFallbacks'
+import type { Page } from '../pages'
+import { NotFoundRoute, RequireFeature, RouteErrorBoundary } from './RouteFallbacks'
 import { AuthGate, RegisterRoute, SetupRoute, SignInRoute } from './routes/auth'
 
-/** Each route module composes its features and loads on first visit. */
+/**
+ * A page's route: its module loads on first visit, and it opens only for a viewer who sees one of the page's features
+ * (`PAGE_FEATURES`); anyone else gets the not-found page.
+ */
+function page(key: Page, at: { index: true } | { path: string }, load: () => Promise<ComponentType>): RouteObject {
+  return { element: <RequireFeature page={key} />, children: [{ ...at, lazy: () => load().then((Component) => ({ Component })) }] }
+}
+
+/** Each route module composes its features. */
 export const routes: RouteObject[] = [
   {
     element: <AuthGate />,
@@ -26,23 +36,25 @@ export const routes: RouteObject[] = [
           {
             errorElement: <RouteErrorBoundary />,
             children: [
-              { index: true, lazy: () => import('./routes/overview').then((m) => ({ Component: m.OverviewRoute })) },
-              { path: 'market', lazy: () => import('./routes/overview').then((m) => ({ Component: m.MarketRedirect })) },
-              { path: 'runs', lazy: () => import('./routes/runs').then((m) => ({ Component: m.RunsRoute })) },
-              { path: 'strategies', lazy: () => import('./routes/strategies').then((m) => ({ Component: m.StrategyLibraryRoute })) },
-              { path: 'strategies/new', lazy: () => import('./routes/strategies').then((m) => ({ Component: m.NewStrategyRoute })) },
-              { path: 'strategies/:id/edit', lazy: () => import('./routes/strategies').then((m) => ({ Component: m.EditStrategyRoute })) },
-              { path: 'backtest', lazy: () => import('./routes/backtest').then((m) => ({ Component: m.BacktestRoute })) },
-              { path: 'ranking', lazy: () => import('./routes/ranking').then((m) => ({ Component: m.RankingRoute })) },
-              { path: 'runs/:runId', lazy: () => import('./routes/runs').then((m) => ({ Component: m.RunRoute })) },
-              { path: 'valuation', lazy: () => import('./routes/valuation').then((m) => ({ Component: m.ValuationRoute })) },
-              { path: 'watchlist', lazy: () => import('./routes/watchlist').then((m) => ({ Component: m.WatchlistRoute })) },
-              { path: 'account', lazy: () => import('./routes/account').then((m) => ({ Component: m.AccountRoute })) },
-              { path: 'settings', lazy: () => import('./routes/settings').then((m) => ({ Component: m.MySettingsRoute })) },
-              { path: 'admin/settings', lazy: () => import('./routes/admin').then((m) => ({ Component: m.AdminSettingsRoute })) },
-              { path: 'admin/users', lazy: () => import('./routes/users').then((m) => ({ Component: m.UsersRoute })) },
-              { path: 'stocks/:code', lazy: () => import('./routes/stock').then((m) => ({ Component: m.StockRoute })) },
-              { path: 'attribution', lazy: () => import('./routes/attribution').then((m) => ({ Component: m.AttributionRoute })) },
+              page('home', { index: true }, () => import('./routes/home').then((m) => m.HomeRoute)),
+              page('overview', { path: 'market' }, () => import('./routes/overview').then((m) => m.OverviewRoute)),
+              page('runs', { path: 'runs' }, () => import('./routes/runs').then((m) => m.RunsRoute)),
+              page('strategies', { path: 'strategies' }, () => import('./routes/strategies').then((m) => m.StrategyLibraryRoute)),
+              page('builder', { path: 'strategies/new' }, () => import('./routes/strategies').then((m) => m.NewStrategyRoute)),
+              page('builder', { path: 'strategies/:id/edit' }, () => import('./routes/strategies').then((m) => m.EditStrategyRoute)),
+              page('backtest', { path: 'backtest' }, () => import('./routes/backtest').then((m) => m.BacktestRoute)),
+              page('ranking', { path: 'ranking' }, () => import('./routes/ranking').then((m) => m.RankingRoute)),
+              page('run', { path: 'runs/:runId' }, () => import('./routes/runs').then((m) => m.RunRoute)),
+              page('valuation', { path: 'valuation' }, () => import('./routes/valuation').then((m) => m.ValuationRoute)),
+              page('watchlist', { path: 'watchlist' }, () => import('./routes/watchlist').then((m) => m.WatchlistRoute)),
+              page('holdings', { path: 'holdings' }, () => import('./routes/holdings').then((m) => m.HoldingsRoute)),
+              page('account', { path: 'account' }, () => import('./routes/account').then((m) => m.AccountRoute)),
+              page('brokerage', { path: 'account/sinopac' }, () => import('./routes/account').then((m) => m.BrokerageAccountRoute)),
+              page('settings', { path: 'settings' }, () => import('./routes/settings').then((m) => m.MySettingsRoute)),
+              page('admin', { path: 'admin/settings' }, () => import('./routes/admin').then((m) => m.AdminSettingsRoute)),
+              page('users', { path: 'admin/users' }, () => import('./routes/users').then((m) => m.UsersRoute)),
+              page('stock', { path: 'stocks/:code' }, () => import('./routes/stock').then((m) => m.StockRoute)),
+              page('attribution', { path: 'attribution' }, () => import('./routes/attribution').then((m) => m.AttributionRoute)),
               { path: '*', element: <NotFoundRoute /> },
             ],
           },

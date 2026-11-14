@@ -1,4 +1,4 @@
-import { Activity, Layers, LogIn, ShieldCheck, Star, UserRound, Wallet } from 'lucide-react'
+import { Briefcase, ListOrdered, LogIn, ShieldCheck, Star, UserRound } from 'lucide-react'
 import { createContext, useContext, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router'
 import { useTranslation } from '@/i18n'
@@ -58,11 +58,16 @@ interface RequireSignInProps {
 }
 
 const ACCOUNT_HOLDS = [
+  { key: 'ranking', icon: ListOrdered },
+  { key: 'holdings', icon: Briefcase },
   { key: 'watchlist', icon: Star },
-  { key: 'account', icon: Wallet },
-  { key: 'runs', icon: Activity },
-  { key: 'strategies', icon: Layers },
 ] as const
+
+/** Said to a signed-in user without the permission, and where the server answers `administrators_only`. */
+export function AdministratorsOnly({ layout = 'card', className }: Pick<RequireSignInProps, 'layout' | 'className'>) {
+  const { t } = useTranslation()
+  return <StateBlock icon={ShieldCheck} title={t('auth.adminOnly.title')} description={t('auth.adminOnly.description')} className={cn(layout === 'page' && 'rounded-2xl border bg-card py-12', className)} />
+}
 
 /**
  * Shows `children` to a signed-in user (with the permission, when one is named); otherwise says what signing in
@@ -73,9 +78,7 @@ export function RequireSignIn({ needs, reason, layout = 'card', children, classN
   const current = useSession()
   if (current.status === 'signedIn' && (!needs || hasPermission(current, needs))) return children
   if (current.status === 'checking') return <Skeleton className={cn('h-40 rounded-2xl', className)} />
-  if (current.status === 'signedIn') {
-    return <StateBlock icon={ShieldCheck} title={t('auth.adminOnly.title')} description={t('auth.adminOnly.description')} className={cn(layout === 'page' && 'rounded-2xl border bg-card py-12', className)} />
-  }
+  if (current.status === 'signedIn') return <AdministratorsOnly layout={layout} className={className} />
   const prompt = (
     <StateBlock
       icon={UserRound}

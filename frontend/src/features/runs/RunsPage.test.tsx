@@ -7,6 +7,7 @@ import { Toaster } from 'sonner'
 import { initI18n } from '@/i18n'
 import { session } from '@/shared/api'
 import { PERSONAL_SITE } from '@/test/audiences'
+import { OPEN_SITE } from '@/test/features'
 import { TEST_USER } from '@/test/users'
 import { RunsPage } from './RunsPage'
 
@@ -17,6 +18,7 @@ async function startRefused(status: number, refusal: { detail: string; code: str
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/v1/auth/status') return json(OPEN_SITE)
       if (url === '/v1/market/audience') return json(PERSONAL_SITE)
       if (url.startsWith('/v1/runs?')) return json([])
       if (url === '/v1/runs/full-cycle' && init?.method === 'POST') return json(refusal, status)
@@ -62,6 +64,7 @@ function serveBuzz(brokers: unknown[], answer: { status: number; body: unknown }
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/v1/auth/status') return json(OPEN_SITE)
       if (url === '/v1/market/audience') return json(PERSONAL_SITE)
       if (url === '/v1/account/brokers') return json(brokers)
       if (url.startsWith('/v1/runs?')) return json([])
@@ -151,6 +154,29 @@ describe('the account a Buzz run orders on', { timeout: 20_000 }, () => {
     await user.click(within(dialog).getByRole('button', { name: 'Start the run' }))
     expect(await screen.findByText('The broker has no login on this site now. Start on the mock account, or try again later.')).toBeVisible()
   })
+
+  it('leaves SinoPac for the user to pick where the site hides the mock account, then names its server, and never says the orders are mock ones', async () => {
+    const starts = serveBuzz([SINOPAC])
+    const user = userEvent.setup()
+
+    expect(await within(await buzzCard()).findByText('Places orders')).toBeVisible()
+    const dialog = await openBuzz(user)
+    expect(within(dialog).getByRole('radio', { name: 'SinoPac' })).toHaveAttribute('aria-checked', 'false')
+    expect(within(dialog).queryByText(/Orders go to your mock account\./)).not.toBeInTheDocument()
+    await user.click(within(dialog).getByRole('radio', { name: 'SinoPac' }))
+    expect(within(dialog).getByText('SinoPac: simulation, no real money')).toBeVisible()
+
+    await user.click(within(dialog).getByRole('button', { name: 'Start the run' }))
+    await waitFor(() => expect(starts).toEqual(['/v1/runs/buzz-scan?broker=shioaji']))
+  })
+
+  it('offers no workflow that orders where the site shows the user no account to order on', async () => {
+    serveBuzz([])
+
+    await screen.findAllByRole('button', { name: 'Start' })
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Start' }), 'Full Cycle and specific stocks').toHaveLength(2))
+    expect(screen.queryByRole('heading', { name: /Social Buzz/ })).not.toBeInTheDocument()
+  })
 })
 
 const ENDED = '22222222-2222-4222-8222-222222222222'
@@ -178,6 +204,7 @@ function renderRuns(runs: unknown[], decisions: Record<string, unknown[]> = {}) 
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string) => {
+      if (url === '/v1/auth/status') return json(OPEN_SITE)
       if (url === '/v1/market/audience') return json(PERSONAL_SITE)
       if (url.startsWith('/v1/runs?')) return json(runs)
       const runId = url.match(/^\/v1\/runs\/([^/]+)\/signals$/)?.[1]

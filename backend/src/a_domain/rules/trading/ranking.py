@@ -20,7 +20,7 @@ class ListedHistory:
     """
     Every stock's daily bars as its exchange listed them, delisted stocks too, one row per stock and one column per
     session: a past close is the price it traded at, never adjusted by a later action. With each bar's change from the
-    session's reference price, and the ex-right reference TWSE listed for its session; NaN where a bar has none.
+    session's reference price, and the ex-right reference its exchange listed for its session; NaN where a bar has none.
     """
 
     bars: DailyBarMatrix
@@ -92,7 +92,7 @@ class RankingHistoryRule:
     """
     The ranking's history from the listed one and the revenue the archive holds. A bar's total return is its change
     over the price the exchange compared its close to (close - change) where it gives a change, else its close over
-    TWSE's ex-right reference of the day, less 1; without either, its move from the stock's close before, but 0 when that
+    its exchange's ex-right reference of the day, less 1; without either, its move from the stock's close before, but 0 when that
     move is beyond `daily_limit`, which no trade can make, so it is an action the exchange named no reference of.
     """
 
@@ -170,7 +170,10 @@ class RankedStock:
     """The mean revenue of the latest short months over the mean of the latest long months, up to the month read."""
 
     nearness_to_high: FiniteFloat
-    """The total-return level at the decision's close over its highest of the last high_sessions sessions: 1 at a high."""
+    """
+    The total-return level at the decision's close over its highest of the last high_sessions sessions: 1 at a high. A
+    stock listed after the first of those sessions has none.
+    """
 
     acceleration_rank: Fraction
     nearness_rank: Fraction
@@ -205,7 +208,8 @@ class MonthlyRankingRule:
     `min_close` or more, and traded `min_traded_value` a session on average over the last `traded_value_sessions`
     sessions, a session without a trade counting 0. Each of its stocks has a revenue acceleration, the mean revenue of
     the latest `short_months` over that of the latest `long_months` up to the month read, none if any of them is
-    missing, and a nearness to its high, its total-return level over the highest of the last `high_sessions` sessions.
+    missing, and a nearness to its high, its total-return level over the highest of the last `high_sessions` sessions,
+    none while its first bar is later than the first of them: a few sessions since a listing hold no such high.
     Each factor is ranked among the stocks that have it (`ranks`), the score is the sum of the two ranks, and the `top`
     best scores are the ranking. Prices are as listed, so a past close is the price it traded at.
     """
@@ -228,7 +232,7 @@ class MonthlyRankingRule:
     def apply(self, history: RankingHistory, column: int, revenue_month: date, names: Mapping[str, str | None]) -> Ranking:
         universe = self._universe(history.bars, column)
         acceleration = np.where(universe, self._acceleration(history, revenue_month), np.nan)
-        nearness = np.where(universe, self._nearness(history.level, column), np.nan)
+        nearness = np.where(universe, self._nearness(history, column), np.nan)
         acceleration_rank, nearness_rank = ranks(acceleration), ranks(nearness)
         score = acceleration_rank + nearness_rank
         scored = np.flatnonzero(~np.isnan(score))
@@ -280,11 +284,14 @@ class MonthlyRankingRule:
 
         return np.where(np.isfinite(acceleration), acceleration, np.nan)
 
-    def _nearness(self, level: Floats, column: int) -> Floats:
-        if column + 1 < self.high_sessions:
-            return np.full(level.shape[0], np.nan)
+    def _nearness(self, history: RankingHistory, column: int) -> Floats:
+        first = column + 1 - self.high_sessions
 
-        return level[:, column] / level[:, column + 1 - self.high_sessions : column + 1].max(axis=1)
+        if first < 0:
+            return np.full(len(history.bars.stock_ids), np.nan)
+
+        listed = ~np.isnan(history.bars.close[:, : first + 1]).all(axis=1)
+        return np.where(listed, history.level[:, column] / history.level[:, first : column + 1].max(axis=1), np.nan)
 
 
 def ranks(values: Floats) -> Floats:

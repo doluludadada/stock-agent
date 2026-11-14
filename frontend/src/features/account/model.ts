@@ -68,8 +68,10 @@ export function totalReturn(history: AccountHistory): TotalReturn | null {
   return { profit: history.profit, ratio: initial_cash ? history.profit / initial_cash : 0, since: opened_at }
 }
 
-/** A starting capital typed by the user: a finite amount above zero, or null. */
-export function parseStartingCapital(text: string): number | null {
-  const amount = Number(text)
-  return text.trim() !== '' && Number.isFinite(amount) && amount > 0 ? amount : null
+/** The starting capitals a reset offers, in NT$. The server takes any finite amount above zero. */
+export const STARTING_CAPITALS: readonly number[] = [100_000, 500_000, 1_000_000, 3_000_000, 10_000_000]
+
+/** The amounts to choose from, smallest first: the offered ones, and the account's own when it is none of them. */
+export function startingCapitalChoices(current: number): number[] {
+  return [...new Set([...STARTING_CAPITALS, current])].sort((a, b) => a - b)
 }

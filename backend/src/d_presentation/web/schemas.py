@@ -14,18 +14,21 @@ from uuid import UUID
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, PositiveInt, SecretStr, StringConstraints
 
+from a_domain.model.analysis.stock_brief import StockBrief
 from a_domain.model.analysis.technical_report import TechnicalReport
 from a_domain.model.fundamentals.eps import EpsUnavailable
 from a_domain.model.fundamentals.monthly_revenue import MonthlyRevenue
 from a_domain.model.fundamentals.quarter_financials import QuarterFinancials
 from a_domain.model.market.ohlcv import Ohlcv
-from a_domain.model.trading.account import AccountOpening
+from a_domain.model.trading.account import AccountOpening, BrokerFill, Settlement
 from a_domain.model.trading.backtest import BacktestInputs, BacktestTrade
 from a_domain.model.trading.order import Order
 from a_domain.model.valuation.scan import ScanCriteria
 from a_domain.model.valuation.valuation import PeMedian, ReportSection
 from a_domain.ports.system.settings_files import SettingChange, SettingsProblem
+from a_domain.rules.fundamentals.stock_analysis import RevenueMonth
 from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
+from a_domain.rules.trading.ranking import RankedStock
 from a_domain.types.enums import (
     AiProvider,
     Audience,
@@ -34,13 +37,17 @@ from a_domain.types.enums import (
     EpsKind,
     ErrorCode,
     ExecutionProvider,
+    Feature,
+    FeatureVisibility,
     FollowRefusal,
+    HoldingSource,
     IndicatorOutput,
     InformationSource,
     MarketIndex,
     MarketType,
     OrderPricing,
     PeNotApplicableReason,
+    RankingExclusion,
     Role,
     ScanStep,
     ScenarioName,
@@ -296,6 +303,16 @@ class PositionValueResponse(Response):
     unrealized_pnl: float
 
 
+class HeldPositionResponse(PositionValueResponse):
+    """A position of a holdings page: what is held, its cost, and the gain or loss at its mark."""
+
+    cost_basis: float
+    unrealized_return: float | None
+    """The unrealized PnL over the cost: 0.1 is 10% up. None without a price."""
+
+    opened_at: datetime | None
+
+
 class AccountValueResponse(Response):
     cash: float
     market_value: float
@@ -439,6 +456,98 @@ class BrokerResponse(BaseModel):
     """A real broker's most NT$ of BUYs per Taiwan calendar day (trading.max_daily_buy_value). None on the mock account."""
 
 
+class BrokerageStatementResponse(Response):
+    """A real broker's account as the broker reports it (BrokerageStatement): every figure is the broker's own."""
+
+    read_at: datetime
+    balance: float
+    settlements: list[Settlement]
+    positions: list[HeldPositionResponse]
+    fills: list[BrokerFill]
+    sales: list[BrokerFill]
+    sales_from: date
+    market_value: float
+    unrealized_pnl: float
+    realized_pnl: float
+
+
+class BrokerageAccountResponse(BaseModel):
+    """The SinoPac account page: which server the site's login is on, whether it is up, and the account while it is."""
+
+    simulation: bool
+    """The server this environment logs in to: SinoPac's simulation server (dev and test) or, false, the real account (prod)."""
+
+    login_up: bool
+    ordering: bool
+    """Whether the site lets the user order on SinoPac now (features.sinopac_ordering). False: no order of theirs reaches it."""
+
+    statement: BrokerageStatementResponse | None
+    """None while the login is down."""
+
+
+# ---------------------------------------------------------------------------- #
+#                                   Holdings                                   #
+# ---------------------------------------------------------------------------- #
+
+
+class HoldingRequest(Confirmed):
+    """A holding the user enters by hand: shares of a listed stock at their average cost, with the day bought if known."""
+
+    stock_id: StockId
+    quantity: Annotated[int, Field(gt=0, le=1_000_000_000)]
+    """Shares, an odd lot included."""
+
+    average_cost: Annotated[float, Field(gt=0, le=1_000_000, allow_inf_nan=False)]
+    """NT$ per share, the fees paid included if the user counts them."""
+
+    opened_on: date | None = None
+
+
+class HoldingRemovalRequest(Confirmed):
+    stock_id: StockId
+
+
+class HoldingResponse(Response):
+    """One holding of the My holdings page (AnalysedHolding). It is data to read: nothing here says to buy or sell."""
+
+    source: HoldingSource
+    stock_name: str | None
+    position: HeldPositionResponse
+    weight: float
+    standing: StockRankingResponse | None
+    """None where the site does not show the viewer the ranking."""
+
+    revenue: RevenueMonth | None
+    accelerating_months: int | None
+
+
+class HoldingsResponse(Response):
+    """
+    The My holdings page (PortfolioAnalysis): the holdings of each source read, each counted once under its source, and
+    the portfolio they make at the last closes the site holds. The score ranks two measured factors and forecasts
+    nothing. The score figures are None where the site does not show the viewer the ranking.
+    """
+
+    asked: list[HoldingSource]
+    """The sources the request asked for among those the site shows the user."""
+
+    sources: list[HoldingSource]
+    """The sources read. One asked for and absent here could not be read now: SinoPac's login is down."""
+
+    holdings: list[HoldingResponse]
+    market_value: float
+    cost: float
+    unrealized_pnl: float
+    unrealized_return: float | None
+    concentration_positions: int
+    concentration: float
+    top_share: float | None
+    scored_share: float | None
+    weighted_score: float | None
+    lowest: HoldingResponse | None
+    highest: HoldingResponse | None
+
+
 # ---------------------------------------------------------------------------- #
 #                                  Market data                                 #
 # ---------------------------------------------------------------------------- #
@@ -522,6 +631,73 @@ class StockFinancialsResponse(BaseModel):
 
     monthly_revenues: list[MonthlyRevenue]
     """Each archived month's revenue, oldest first."""
+
+
+class StockNewsItemResponse(Response):
+    """
+    One thing said about a stock (Article), as its page may show it: a news site's article and a board's post by title
+    and address only, since their text is theirs; an open-data item with its text.
+    """
+
+    source: InformationSource
+    title: str
+    url: str | None
+    """Where to read it. None for a company's material information, which the exchange serves without an address."""
+
+    published_at: datetime
+    """A board's post and TWSE's own news are dated by their day only: the post at 00:00 Taipei, the news at its session's close."""
+
+    open_text: str | None
+    """An open-data item's own text; None for a news site's article and a board's post."""
+
+    clause: str | None
+    fact_date: date | None
+
+
+class StockNewsResponse(BaseModel):
+    """
+    What is said about a stock, newest first, as the site's article store keeps it: its material information and the
+    TWSE news naming it, and on a site that may read them the news sites' articles and the board's posts.
+    """
+
+    stock_id: str
+    items: list[StockNewsItemResponse]
+
+
+class StockBriefResponse(BaseModel):
+    """
+    A stock's AI brief as the site holds it. One is written per stock and Taipei calendar day for every viewer, when a
+    signed-in viewer asks. Every sentence is the AI's wording of held facts and names the held items it rests on; it
+    describes and gives no advice.
+    """
+
+    stock_id: str
+    today: StockBrief | None
+    """The brief of today in Taipei: being written, written or failed. None when no viewer asked for one today."""
+
+    previous: StockBrief | None
+    """The newest written brief of an earlier day, which the page shows while today's is not written."""
+
+    stocks_left: int
+    """How many more stocks may get a new brief today (stock_page.brief.daily_stocks)."""
+
+
+class StockRankingResponse(Response):
+    """A stock's standing in the monthly ranking (RankingStanding), with whether the ranking holds it."""
+
+    decided_on: date
+    revenue_month: date
+    universe: int
+    scored: int
+    top: int
+    place: int | None
+    score: float | None
+    """The place as a percentile from 0 to 100, 100 for the best combined rank. It ranks two measured factors and forecasts nothing."""
+
+    stock: RankedStock | None
+    exclusion: RankingExclusion | None
+    in_top: bool
+    """Whether the place is within the ranking's `top`."""
 
 
 class StockTechnicalResponse(BaseModel):
@@ -655,6 +831,10 @@ class ValuationExplanationResponse(BaseModel):
 # ---------------------------------------------------------------------------- #
 
 
+type ConfirmationId = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{16,64}$")]
+"""What the web app names one settings save by when it confirms it by Google: random, made anew for each save."""
+
+
 class SettingsSaveRequest(Confirmed):
     changes: Annotated[list[SettingChange], Field(max_length=300)]
     """
@@ -664,6 +844,13 @@ class SettingsSaveRequest(Confirmed):
 
     password: Annotated[SecretStr, Field(max_length=256)] | None = None
     """The administrator's own password, which every save needs: without it, 403. Never logged or echoed."""
+
+    google_confirmation: ConfirmationId | None = None
+    """
+    For an administrator without a password (`has_password` false): the id the web app made for this save and sent to
+    GET /v1/auth/google/start?confirmation=, once the fresh Google authentication it started came back. It confirms one
+    save. Without it, or with one used or expired, 403 `google_confirmation_required`.
+    """
 
 
 class ErrorResponse(BaseModel):
@@ -680,10 +867,14 @@ class ProblemsResponse(ErrorResponse):
 
 
 class AuthStatusResponse(BaseModel):
-    """What the web app shows first: the first-time setup, or sign-in with or without registration."""
+    """What the web app shows first: the first-time setup, or sign-in with or without registration and Google."""
 
     needs_first_administrator: bool
     registration_open: bool
+    google_sign_in: bool
+    """The site offers sign-in with Google: a link to GET /v1/auth/google/start, on the setup screen too."""
+    features: dict[Feature, FeatureVisibility]
+    """Whom the site shows each feature to. The Web API refuses a hidden feature's routes whatever a page shows."""
 
 
 class RegistrationRequest(BaseModel):

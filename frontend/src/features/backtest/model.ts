@@ -67,7 +67,7 @@ export function returnCurve(backtest: Pick<Backtest, 'equity_curve' | 'benchmark
 export type ExitReason = 'stopLoss' | 'score' | 'open' | 'other'
 
 /** Only the stop-loss and the score sell in a backtest; the contract's other sources are a run's. */
-const EXIT_REASON: Record<Schemas['SignalSource'], ExitReason> = { stop_loss: 'stopLoss', combined: 'score', manual: 'other', follow: 'other' }
+const EXIT_REASON: Record<Schemas['SignalSource'], ExitReason> = { stop_loss: 'stopLoss', combined: 'score', manual: 'other', follow: 'other', ranking: 'other' }
 
 export interface TradeRow {
   key: string

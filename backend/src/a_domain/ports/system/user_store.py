@@ -22,9 +22,10 @@ class IUserStore(Protocol):
 
     async def user_count(self) -> int: ...
 
-    async def create(self, user: User, password: SecretStr) -> None:
+    async def create(self, user: User, password: SecretStr | None) -> None:
         """
-        Saves a new user. Raises UserExistsError naming the taken field, and AlreadySetUpError when user.user_id exists:
+        Saves a new user. Without a password (user.has_password is False) the stored hash is a value no password
+        verifies against. Raises UserExistsError naming the taken field, and AlreadySetUpError when user.user_id exists:
         two first-time setups at once both name the first administrator's id, and the primary key lets one win.
         """
         ...
@@ -61,7 +62,8 @@ class IUserStore(Protocol):
     async def save(self, user: User, now: datetime, password: SecretStr | None = None) -> None:
         """
         Writes the role and the status, and the new password when one is given, in one transaction, changed at `now`.
-        A user who is no longer active, or who gets a new password, loses every session in the same transaction.
+        A user saved with has_password False and no new password loses the password they had. A user who is no longer
+        active, or who gets or loses a password, loses every session in the same transaction.
         Raises LastAdministratorError, writing nothing, when the save would leave no active administrator: the active
         administrators are locked first, so two administrators demoting each other at once cannot both succeed.
         """

@@ -4,11 +4,13 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Query, status
 
 from a_domain.model.trading.account import AccountOpening
-from a_domain.types.enums import ExecutionProvider
+from a_domain.types.enums import ExecutionProvider, Feature
 from d_presentation.web.schemas import (
     AccountAsOfResponse,
     AccountHistoryResponse,
     AccountValueResponse,
+    BrokerageAccountResponse,
+    BrokerageStatementResponse,
     BrokerResponse,
     ErrorResponse,
     ResetRequest,
@@ -16,12 +18,16 @@ from d_presentation.web.schemas import (
     TradeResponse,
 )
 from d_presentation.web.session import (
+    AccountShown,
     BrokerPipeline,
     CurrentUser,
     PrivateAccess,
+    RealBrokerHolder,
     RuntimeDependency,
     UserPipeline,
     WorkflowRunsDependency,
+    shown_features,
+    shows,
 )
 from d_presentation.web.workflow_runs import RunInProgress
 
@@ -42,8 +48,9 @@ BROKER_READ: dict[int | str, dict[str, Any]] = {
 @router.get("/brokers")
 async def get_brokers(runtime: RuntimeDependency, user: CurrentUser) -> list[BrokerResponse]:
     """
-    The brokers the user may choose for Buzz, Intraday or a manual BUY now, the mock account first, each with what a
-    run's confirmation names: a real broker's server and its BUY limits.
+    The brokers the site lets the user order on (features.*) and the user may choose for Buzz, Intraday or a manual
+    BUY now, the mock account first, each with what a run's confirmation names: a real broker's server and its BUY
+    limits. SinoPac is listed only while features.sinopac_ordering shows the user ordering there: it is off by default.
     """
     config = runtime.config
     return [
@@ -54,10 +61,32 @@ async def get_brokers(runtime: RuntimeDependency, user: CurrentUser) -> list[Bro
             max_daily_buy_value=config.trading.max_daily_buy_value if broker.real else None,
         )
         for broker in runtime.brokers_for(user)
+        if broker.ordering_feature in shown_features(runtime, user)
     ]
 
 
-@router.get("/history", responses=BROKER_READ)
+@router.get("/brokerage", dependencies=[shows(Feature.SINOPAC_ACCOUNT), RealBrokerHolder])
+async def get_brokerage_account(runtime: RuntimeDependency, user: CurrentUser, pipeline: UserPipeline) -> BrokerageAccountResponse:
+    """
+    The SinoPac account as the broker reports it now, for an administrator the site shows features.sinopac_account:
+    the bank balance, the settlements due, the positions with the broker's last prices and its own unrealized PnL,
+    today's deals and the sales of the last holdings.realized_days days with the PnL the broker says each realized.
+    `simulation` says which server this environment logs in to, `login_up` whether the login is up (`statement` is None
+    while it is down), and `ordering` whether the site lets the user order there (features.sinopac_ordering, off by
+    default). It only reads: it sends no order, whatever `ordering` says, and it answers no account number.
+    """
+    link = runtime.real_broker.link() if runtime.real_broker is not None else None
+    statement = await pipeline.load_brokerage_statement()
+
+    return BrokerageAccountResponse(
+        simulation=runtime.config.environment.shioaji_simulation,
+        login_up=link is not None and link.up,
+        ordering=ExecutionProvider.SHIOAJI.ordering_feature in shown_features(runtime, user),
+        statement=None if statement is None else BrokerageStatementResponse.model_validate(statement),
+    )
+
+
+@router.get("/history", responses=BROKER_READ, dependencies=[AccountShown])
 async def get_account_history(
     pipeline: BrokerPipeline, broker: ExecutionProvider = ExecutionProvider.MOCK, as_of: date | None = None
 ) -> AccountHistoryResponse:
@@ -81,7 +110,7 @@ async def get_account_history(
     )
 
 
-@router.get("/trades", responses=BROKER_READ)
+@router.get("/trades", responses=BROKER_READ, dependencies=[AccountShown])
 async def get_trades(
     pipeline: BrokerPipeline, limit: Annotated[int, Query(ge=1, le=100)] = 20, offset: Annotated[int, Query(ge=0, le=10_000)] = 0
 ) -> list[TradeResponse]:
@@ -99,7 +128,7 @@ RESET: dict[int | str, dict[str, Any]] = {
 }
 
 
-@router.post("/reset", responses=RESET)
+@router.post("/reset", responses=RESET, dependencies=[shows(Feature.MOCK_ACCOUNT)])
 async def reset_mock_account(
     body: ResetRequest, pipeline: UserPipeline, user: CurrentUser, runs: WorkflowRunsDependency
 ) -> AccountOpening:

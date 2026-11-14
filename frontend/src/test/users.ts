@@ -9,6 +9,7 @@ export const TEST_USER: User = {
   status: 'active',
   permissions: [],
   created_at: '2026-11-04T01:00:00Z',
+  has_password: true,
 }
 
 /** The first administrator, with the permissions the server lists for the role. */
@@ -20,4 +21,5 @@ export const TEST_ADMIN: User = {
   status: 'active',
   permissions: ['manage_users', 'edit_system_settings', 'use_cli', 'notify_recipients', 'uncapped_ai'],
   created_at: '2026-11-04T00:00:00Z',
+  has_password: true,
 }

@@ -1,3 +1,4 @@
+from a_domain.ports.market.article_store import IArticleStore
 from a_domain.ports.market.broker_quote_provider import IBrokerQuoteProvider
 from a_domain.ports.market.cached_price_provider import ICachedPriceProvider
 from a_domain.ports.market.daily_bar_matrix_provider import IDailyBarMatrixProvider
@@ -17,6 +18,7 @@ from a_domain.ports.market.news_provider import INewsProvider
 from a_domain.ports.market.news_source import INewsSource
 from a_domain.ports.market.price_provider import IOhlcvProvider, IPriceHistoryProvider, IRealtimeQuoteProvider
 from a_domain.ports.market.social_media_provider import ISocialMediaProvider
+from a_domain.ports.market.stock_feed import IStockFeed
 from a_domain.ports.market.stock_provider import IStockProvider
 from a_domain.ports.market.taiwan_stock_provider import ITaiwanStockProvider
 
@@ -24,6 +26,7 @@ __all__ = [
     "ArchivedMonth",
     "ArchivedQuarter",
     "ArchivedSession",
+    "IArticleStore",
     "IBrokerQuoteProvider",
     "ICachedPriceProvider",
     "ExchangeNews",
@@ -38,6 +41,7 @@ __all__ = [
     "IPriceHistoryProvider",
     "IRealtimeQuoteProvider",
     "ISocialMediaProvider",
+    "IStockFeed",
     "IStockProvider",
     "ITaiwanStockProvider",
     "OpenDataDownload",

@@ -17,7 +17,8 @@ router = APIRouter(prefix="/admin", tags=["Administration"], dependencies=[Priva
 """
 Administrators only (403 otherwise, signed in still). The settings form: every setting of config/appsetting.yaml and
 every AI prompt of config/instructions.yaml as a field, from the settings classes; no secret of .env is one. A save
-writes its changes into the files in place, is checked as the app starts, needs the administrator's password again,
+writes its changes into the files in place, is checked as the app starts, needs the administrator's password again
+(or, for an administrator without a password, a fresh Google authentication made for that save),
 opens the app on the new files before it writes anything, then writes them atomically with a backup and an audit entry
 and runs on them at once.
 """
@@ -31,7 +32,8 @@ READ_ANSWERS: dict[int | str, dict] = {
 SAVE_ANSWERS: dict[int | str, dict] = {
     status.HTTP_403_FORBIDDEN: {
         "model": ErrorResponse,
-        "description": "A save without the password (password_required), or with a wrong one (password_refused).",
+        "description": "A save without the password (password_required), or with a wrong one (password_refused); by an "
+        "administrator without a password, a save without a fresh Google authentication made for it (google_confirmation_required).",
     },
     status.HTTP_409_CONFLICT: {
         "model": ErrorResponse,
@@ -77,5 +79,13 @@ async def save_settings(
     is skipped, and changes that change nothing write nothing. Runs that started earlier finish on the settings they
     started with. The answer is the form after the save.
     """
-    await switch.save(opened, user, body.changes, password=body.password, client=client_of(request), host=host_of(request))
+    await switch.save(
+        opened,
+        user,
+        body.changes,
+        password=body.password,
+        google_confirmation=body.google_confirmation,
+        client=client_of(request),
+        host=host_of(request),
+    )
     return await pipeline.load_settings_form()

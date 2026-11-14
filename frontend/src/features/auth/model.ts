@@ -10,11 +10,11 @@ export type UserStatus = Schemas['UserStatus']
  */
 export const USERNAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$/
 export const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
-export const PASSWORD_MIN_LENGTH = 12
+export const PASSWORD_MIN_LENGTH = 8
 export const PASSWORD_MAX_LENGTH = 256
 
 export type AccountField = 'setupCode' | 'username' | 'email' | 'password' | 'confirm'
-export type AccountProblem = 'required' | 'usernameFormat' | 'emailFormat' | 'passwordShort' | 'passwordLong' | 'mismatch' | 'taken' | 'wrongCode'
+export type AccountProblem = 'required' | 'usernameFormat' | 'emailFormat' | 'passwordShort' | 'passwordLong' | 'mismatch' | 'wrongCode'
 export type AccountProblems = Partial<Record<AccountField, AccountProblem>>
 
 export interface AccountForm {

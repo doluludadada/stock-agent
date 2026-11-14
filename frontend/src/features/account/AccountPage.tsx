@@ -1,8 +1,8 @@
-import { ArrowRight, CopyCheck, FlaskConical, Landmark, LineChart, ReceiptText, Wallet } from 'lucide-react'
+import { ArrowRight, CopyCheck, FlaskConical, LineChart, Wallet } from 'lucide-react'
 import { lazy, Suspense, useMemo, useState, type FormEvent } from 'react'
 import { Link } from 'react-router'
 import { useLocale, useTranslation } from '@/i18n'
-import { chosenOffer, MOCK_ONLY, useBrokers, useListedNames, type Broker, type BrokerOffer } from '@/shared/api'
+import { useListedNames } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
 import { directionOf } from '@/shared/lib/direction'
 import { formatCompact, formatDateTime, formatMonthDayTime, formatNumber, useFormat } from '@/shared/lib/format'
@@ -15,60 +15,40 @@ import { Input } from '@/shared/ui/input'
 import { PageHeader } from '@/shared/ui/page-header'
 import { Panel } from '@/shared/ui/panel'
 import { RequireSignIn } from '@/shared/ui/require-sign-in'
-import { Segmented } from '@/shared/ui/segmented'
-import { Skeleton } from '@/shared/ui/skeleton'
+import { PageSkeleton, Skeleton } from '@/shared/ui/skeleton'
 import { StackedBar } from '@/shared/ui/stacked-bar'
 import { Stat } from '@/shared/ui/stat'
 import { StateBlock } from '@/shared/ui/state-block'
-import { useAccountHistory, useTrades, type AccountHistory, type Trade } from './api'
+import { useAccountHistory, useTrades, type AccountHistory } from './api'
+import { TradesPanel } from './Trades'
 import { equityPoints, holdings, moveBetween, totalReturn, unrealizedRatio, type AccountValue, type EquityPoint, type Holding } from './model'
 
 const ValueChart = lazy(() => import('@/shared/ui/value-chart').then((module) => ({ default: module.ValueChart })))
 
 const percent = (locale: string, ratio: number) => `${formatNumber(locale, ratio * 100, 1)}%`
 
-/**
- * The mock account, and a switch to a real broker's account where the user may order there. Each account mounts
- * afresh, so the page never shows one account's figures under the other's title while they load.
- */
+/** The mock account: play money a finished run's decisions are followed into. A real broker's account has its own page. */
 export function AccountPage() {
   const { t } = useTranslation('account')
-  const offers = useBrokers().data ?? MOCK_ONLY
-  const [chosen, setChosen] = useState<Broker>('mock')
-  const offer = chosenOffer(offers, chosen)
   return (
-    <div className="space-y-5 lg:space-y-6">
-      <PageHeader
-        eyebrow={t('common:nav.section.mine')}
-        title={t(`page.${offer.broker}.title`)}
-        description={t(`page.${offer.broker}.description`)}
-        actions={offers.length > 1 && <AccountSwitch offers={offers} value={offer.broker} onChange={setChosen} />}
-      />
+    <div className="page-stack">
+      <PageHeader title={t('page.mock.title')} description={t('page.mock.description')} />
       <RequireSignIn layout="page" reason={t('signIn')}>
-        <Account key={offer.broker} offer={offer} />
+        <Account />
       </RequireSignIn>
     </div>
   )
 }
 
-function AccountSwitch({ offers, value, onChange }: { offers: readonly BrokerOffer[]; value: Broker; onChange: (broker: Broker) => void }) {
-  const { t } = useTranslation('account')
-  const label = (offer: BrokerOffer) =>
-    offer.broker === 'mock' ? t('common:broker.name.mock') : `${t(`common:broker.name.${offer.broker}`)} · ${t(offer.simulation ? 'view.server.simulation' : 'view.server.live')}`
-  return <Segmented label={t('view.label')} value={value} onChange={onChange} options={offers.map((offer) => ({ value: offer.broker, label: label(offer) }))} />
-}
-
 /**
  * The account as one desk: the equity leads; the equity curve beside the allocation from 1280 px; the positions and
- * the trades across; the past-day lookup beside what this account is. Narrower, the same order in one column. A mock
- * account with no position and no trade says how to fill it instead of listing nothing. A real broker's account has
- * no opening, so it shows no starting capital and no total P&L.
+ * the trades across; the past-day lookup beside what this account is. Narrower, the same order in one column. An
+ * account with no position and no trade says how to fill it instead of listing nothing.
  */
-function Account({ offer }: { offer: BrokerOffer }) {
+function Account() {
   const { t } = useTranslation('account')
-  const [asOf, setAsOf] = useState<string | null>(null)
-  const history = useAccountHistory(offer.broker, asOf)
-  const trades = useTrades(offer.broker)
+  const history = useAccountHistory(null)
+  const trades = useTrades('mock')
   const positions = history.data?.current.positions
   const tradeRows = useMemo(() => trades.data?.pages.flatMap((page) => page.trades), [trades.data])
   const codes = useMemo(
@@ -76,20 +56,22 @@ function Account({ offer }: { offer: BrokerOffer }) {
     [positions, tradeRows],
   )
   const names = useListedNames(codes)
-  if (history.isPending) return <Skeleton className="h-96 rounded-2xl" />
-  if (history.isError) return <ErrorState error={history.error} title={t('loadFailed')} onRetry={() => void history.refetch()} className="rounded-2xl border bg-card py-12" />
+  if (history.isPending) return <PageSkeleton />
+  if (history.isError) return <ErrorState error={history.error} title={t('loadFailed')} onRetry={() => void history.refetch()} framed />
   const { data } = history
-  const empty = data.opening !== null && data.current.positions.length === 0 && tradeRows?.length === 0
+  const empty = data.current.positions.length === 0 && tradeRows?.length === 0
   return (
-    <div className="grid items-start gap-4 md:grid-cols-2 lg:gap-5 xl:grid-cols-[minmax(0,1fr)_24rem]">
+    <div className="card-grid md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_24rem]">
       <Summary history={data} className="md:col-span-2" />
       {empty && <GetStarted className="md:col-span-2" />}
       <EquityPanel history={data} className="md:col-span-2 xl:col-span-1" />
       <AllocationPanel value={data.current} names={names} className="md:col-span-2 xl:col-span-1" />
       <Positions value={data.current} liveStockIds={data.live_stock_ids} names={names} className="md:col-span-2" />
-      {!empty && <TradesPanel trades={trades} rows={tradeRows} names={names} className="md:col-span-2" />}
-      <AsOfPanel history={data} asOf={asOf} onAsOf={setAsOf} busy={history.isFetching} />
-      <AboutPanel offer={offer} />
+      {!empty && (
+        <TradesPanel trades={trades} rows={tradeRows} names={names} title={t('trades.title')} description={t('trades.question')} none={t('trades.none')} className="md:col-span-2" />
+      )}
+      <AsOfPanel />
+      <AboutPanel />
     </div>
   )
 }
@@ -181,7 +163,7 @@ function EquityPanel({ history, className }: { history: AccountHistory; classNam
       aside={first && last && <span className="tabular">{format.monthDay(first.date)} – {format.monthDay(last.date)}</span>}
     >
       {!first || !last ? (
-        <StateBlock icon={LineChart} title={t('noCurve')} description={history.execution_provider === 'mock' ? t('noCurveHint') : undefined} />
+        <StateBlock icon={LineChart} title={t('noCurve')} description={t('noCurveHint')} />
       ) : (
         <div className="space-y-4">
           <Suspense fallback={<Skeleton className="h-(--chart-price-height) rounded-xl" />}>
@@ -359,96 +341,20 @@ function GetStarted({ className }: { className?: string }) {
   )
 }
 
-interface TradesPanelProps {
-  trades: ReturnType<typeof useTrades>
-  rows: Trade[] | undefined
-  names: ReadonlyMap<string, string>
-  className?: string
-}
-
-function TradesPanel({ trades, rows, names, className }: TradesPanelProps) {
-  const { t } = useTranslation('account')
-  const more = trades.hasNextPage && (
-    <Button type="button" variant="ghost" size="sm" className="w-full text-muted-foreground" disabled={trades.isFetchingNextPage} onClick={() => void trades.fetchNextPage()}>
-      {t('trades.more')}
-    </Button>
-  )
-  return (
-    <Panel className={className} title={t('trades.title')} description={t('trades.question')} footer={more || undefined} flush>
-      {trades.isPending && <Skeleton className="m-4 h-32 rounded-lg" />}
-      {trades.isError && <ErrorState error={trades.error} title={t('trades.loadFailed')} onRetry={() => void trades.refetch()} />}
-      {rows && (rows.length === 0 ? <StateBlock icon={ReceiptText} title={t('trades.none')} /> : <TradesTable rows={rows} names={names} />)}
-    </Panel>
-  )
-}
-
-/** Each fill with the run whose decision it carried out; one that came through a follow says so. */
-function TradesTable({ rows, names }: { rows: Trade[]; names: ReadonlyMap<string, string> }) {
-  const { t } = useTranslation('account')
-  const locale = useLocale()
-  const format = useFormat()
-  const side = (trade: Trade) => t(`runs:action.${trade.order.action}`)
-  const price = (trade: Trade) => (trade.order.average_filled_price === null ? '—' : format.price(trade.order.average_filled_price))
-  const columns: Column<Trade>[] = [
-    { key: 'time', header: t('trades.column.time'), from: 'md', className: 'tabular whitespace-nowrap text-muted-foreground', cell: ({ order }) => formatMonthDayTime(locale, order.created_at) },
-    {
-      key: 'stock',
-      header: t('column.stock'),
-      className: 'w-full max-w-0',
-      cell: (trade) => (
-        <Link to={paths.stock(trade.order.stock_id)} className="flex min-h-11 min-w-0 flex-col justify-center hover:text-brand focus-visible:text-brand md:min-h-0">
-          <span className="flex min-w-0 items-baseline gap-2">
-            <span className="truncate font-medium">{names.get(trade.order.stock_id) ?? trade.order.stock_id}</span>
-            <span className="shrink-0 font-mono text-xs text-muted-foreground">{trade.order.stock_id}</span>
-          </span>
-          <span className="tabular truncate text-xs text-muted-foreground md:hidden">
-            {t('trades.line', { side: side(trade), shares: formatNumber(locale, trade.order.filled_quantity), price: price(trade), time: formatMonthDayTime(locale, trade.order.created_at) })}
-          </span>
-        </Link>
-      ),
-    },
-    { key: 'side', header: t('trades.column.side'), from: 'md', className: 'whitespace-nowrap', cell: side },
-    { key: 'shares', header: t('trades.column.shares'), numeric: true, from: 'md', cell: ({ order }) => formatNumber(locale, order.filled_quantity) },
-    { key: 'price', header: t('trades.column.price'), numeric: true, from: 'md', cell: price },
-    { key: 'costs', header: t('trades.column.costs'), numeric: true, from: 'lg', cell: ({ order }) => formatNumber(locale, order.fee + order.tax) },
-    {
-      key: 'realized',
-      header: t('trades.column.realized'),
-      numeric: true,
-      from: 'sm',
-      cell: ({ order }) => (order.realized_pnl === null ? '—' : <ChangeValue value={order.realized_pnl} format="absolute" fractionDigits={0} />),
-    },
-    { key: 'source', header: t('trades.column.source'), cell: (trade) => <SourceRun trade={trade} /> },
-  ]
-  return <DataTable rows={rows} columns={columns} rowKey={(trade) => trade.order.id} label={t('trades.title')} />
-}
-
-/** The run whose decision the trade carried out: for a follow's order, the run it followed. */
-function SourceRun({ trade }: { trade: Trade }) {
-  const { t } = useTranslation('account')
-  const locale = useLocale()
-  const followed = trade.order.run_id !== trade.run.run_id
-  return (
-    <span className="flex flex-col items-start sm:flex-row sm:items-center sm:gap-2">
-      <Link to={paths.run(trade.run.run_id)} className="inline-flex min-h-11 items-center whitespace-nowrap hover:text-brand focus-visible:text-brand md:min-h-0">
-        {t('trades.source', { workflow: t(`runs:workflow.${trade.run.workflow}`), time: formatMonthDayTime(locale, trade.run.start_time) })}
-      </Link>
-      {followed && (
-        <Badge variant="outline" className="font-normal">
-          {t('trades.followed')}
-        </Badge>
-      )}
-    </span>
-  )
-}
-
-function AsOfPanel({ history, asOf, onAsOf, busy }: { history: AccountHistory; asOf: string | null; onAsOf: (date: string | null) => void; busy: boolean }) {
+/**
+ * The account on a past day, asked on its own: while it loads the card says so and never shows another day's answer,
+ * and a failure stays inside the card, under the account as it is now.
+ */
+function AsOfPanel() {
   const { t } = useTranslation('account')
   const locale = useLocale()
   const [draft, setDraft] = useState('')
+  const [asOf, setAsOf] = useState<string | null>(null)
+  const lookup = useAccountHistory(asOf, asOf !== null)
+  const busy = asOf !== null && lookup.isFetching
   const submit = (event: FormEvent) => {
     event.preventDefault()
-    onAsOf(/^\d{4}-\d{2}-\d{2}$/.test(draft) ? draft : null)
+    setAsOf(/^\d{4}-\d{2}-\d{2}$/.test(draft) ? draft : null)
   }
   return (
     <Panel title={t('asOfLabel')} description={t('asOfQuestion')}>
@@ -461,15 +367,19 @@ function AsOfPanel({ history, asOf, onAsOf, busy }: { history: AccountHistory; a
       <div className="mt-4">
         {!asOf ? (
           <p className="text-sm text-muted-foreground">{t('asOfHint')}</p>
-        ) : history.as_of ? (
+        ) : lookup.isPending ? (
+          <Skeleton className="h-16 rounded-lg" />
+        ) : lookup.isError ? (
+          <ErrorState error={lookup.error} title={t('loadFailed')} onRetry={() => void lookup.refetch()} />
+        ) : lookup.data.as_of ? (
           <div className="space-y-3">
-            <p className="tabular text-xs text-muted-foreground">{t('asOfTitle', { time: formatDateTime(locale, history.as_of.last_fill_at) })}</p>
+            <p className="tabular text-xs text-muted-foreground">{t('asOfTitle', { time: formatDateTime(locale, lookup.data.as_of.last_fill_at) })}</p>
             <dl className="grid grid-cols-2 gap-4 @xl:grid-cols-4">
-              <Stat label={t('value.equity')}>{formatNumber(locale, history.as_of.value.equity)}</Stat>
-              <Stat label={t('value.cash')}>{formatNumber(locale, history.as_of.value.cash)}</Stat>
-              <Stat label={t('value.marketValue')}>{formatNumber(locale, history.as_of.value.market_value)}</Stat>
+              <Stat label={t('value.equity')}>{formatNumber(locale, lookup.data.as_of.value.equity)}</Stat>
+              <Stat label={t('value.cash')}>{formatNumber(locale, lookup.data.as_of.value.cash)}</Stat>
+              <Stat label={t('value.marketValue')}>{formatNumber(locale, lookup.data.as_of.value.market_value)}</Stat>
               <Stat label={t('value.unrealized')}>
-                <ChangeValue value={history.as_of.value.unrealized_pnl} format="absolute" fractionDigits={0} />
+                <ChangeValue value={lookup.data.as_of.value.unrealized_pnl} format="absolute" fractionDigits={0} />
               </Stat>
             </dl>
           </div>
@@ -481,24 +391,21 @@ function AsOfPanel({ history, asOf, onAsOf, busy }: { history: AccountHistory; a
   )
 }
 
-/** Which broker keeps the account and, for a real one, on which server and with what money, said once. */
-function AboutPanel({ offer }: { offer: BrokerOffer }) {
+/** Which broker keeps the account, and that its money is not real, said once. */
+function AboutPanel() {
   const { t } = useTranslation('account')
-  const Icon = offer.broker === 'mock' ? FlaskConical : Landmark
   return (
     <Panel title={t('about.title')}>
       <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-6 gap-y-3 text-sm">
         <dt className="text-muted-foreground">{t('about.broker')}</dt>
         <dd>
           <Badge variant="outline" className="gap-1 border-gold/40 font-normal text-gold">
-            <Icon aria-hidden className="size-3" />
-            {t(`provider.${offer.broker}`)}
+            <FlaskConical aria-hidden className="size-3" />
+            {t('provider.mock')}
           </Badge>
         </dd>
       </dl>
-      <p className="mt-4 border-t pt-4 text-sm text-pretty text-muted-foreground">
-        {t(offer.broker === 'mock' ? 'notice.mock' : offer.simulation ? 'notice.simulation' : 'notice.live')}
-      </p>
+      <p className="mt-4 border-t pt-4 text-sm text-pretty text-muted-foreground">{t('notice.mock')}</p>
     </Panel>
   )
 }

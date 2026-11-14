@@ -2,6 +2,8 @@ import asyncio
 from collections.abc import AsyncGenerator, Callable, Mapping
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
+from datetime import timedelta
+from hashlib import sha256
 from typing import TYPE_CHECKING, Any
 
 import chromadb
@@ -10,11 +12,14 @@ from pydantic import SecretStr
 
 from a_domain.model.system.user import User
 from a_domain.ports.ai.ai_provider import IAiProvider
+from a_domain.ports.ai.article_index import IArticleIndex
 from a_domain.ports.ai.knowledge_repository import IKnowledgeRepository
 from a_domain.ports.ai.sentiment_classifier import ISentimentClassifier
+from a_domain.ports.ai.stock_brief_repository import IStockBriefRepository
 from a_domain.ports.analysis.technical_settings_repository import ITechnicalSettingsRepository
 from a_domain.ports.chat.conversation_repository import IConversationRepository
 from a_domain.ports.chat.platform_provider import IPlatformProvider
+from a_domain.ports.market.article_store import IArticleStore
 from a_domain.ports.market.broker_quote_provider import IBrokerQuoteProvider
 from a_domain.ports.market.cached_price_provider import ICachedPriceProvider
 from a_domain.ports.market.daily_bar_matrix_provider import IDailyBarMatrixProvider
@@ -24,20 +29,27 @@ from a_domain.ports.market.news_provider import INewsProvider
 from a_domain.ports.market.news_source import INewsSource
 from a_domain.ports.market.price_provider import IOhlcvProvider
 from a_domain.ports.market.social_media_provider import ISocialMediaProvider
+from a_domain.ports.market.stock_feed import IStockFeed
 from a_domain.ports.system.attempt_log import IAttemptLog
+from a_domain.ports.system.identity_provider import IIdentityProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.notification_provider import INotificationProvider
+from a_domain.ports.system.ordering_switch import IOrderingSwitch
+from a_domain.ports.system.settings_confirmations import ISettingsConfirmations
 from a_domain.ports.system.settings_files import ISettingsFiles
 from a_domain.ports.system.user_store import IUserStore
 from a_domain.ports.trading.backtest_repository import IBacktestRepository
 from a_domain.ports.trading.candidate_backtester import ICandidateBacktester
-from a_domain.ports.trading.execution_provider import IExecutionProvider, ISimulatedExecutionProvider
+from a_domain.ports.trading.execution_provider import IBrokerExecutionProvider, IExecutionProvider, ISimulatedExecutionProvider
+from a_domain.ports.trading.holding_repository import IHoldingRepository
 from a_domain.ports.trading.strategy_search_repository import IStrategySearchRepository
 from a_domain.ports.trading.trading_journal import ITradingJournal
+from a_domain.ports.trading.users_stocks import IUsersStocks
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
 from a_domain.types.enums import AiProvider, ExecutionProvider, MarketType, Permission
 from a_domain.types.errors import BrokerUnavailable, RealBrokerRefused
 from a_domain.types.ids import UserId
+from b_application.config.api_config import FeaturesConfig
 from b_application.config.app_config import AppConfig
 from b_application.config.settings_loader import (
     AccountsSetupError,
@@ -52,6 +64,7 @@ from b_application.use_cases.admin.editor_access import EditorAccess
 from b_application.use_cases.admin.settings_confirmation import SettingsConfirmation
 from b_application.use_cases.admin.settings_editor import SettingsEditor
 from b_application.use_cases.admin.settings_reader import SettingsReader
+from b_application.use_cases.admin.settings_reauthentication import SettingsReauthentication
 from b_application.use_cases.admin.settings_save import SettingsSave
 from b_application.use_cases.backtest.backtest_lookup import BacktestLookup
 from b_application.use_cases.backtest.backtest_options import BacktestOptions
@@ -68,10 +81,13 @@ from b_application.use_cases.backtest.strategy_search_save import StrategySearch
 from b_application.use_cases.chat.chat_reply import ChatReply
 from b_application.use_cases.chat.dispatcher import Dispatcher
 from b_application.use_cases.collect.archive_warm_up import ArchiveWarmUp
+from b_application.use_cases.collect.article_refresh_stocks import ArticleRefreshStocks
+from b_application.use_cases.collect.article_store_backfill import ArticleStoreBackfill
 from b_application.use_cases.collect.buzz_scanner import BuzzScanner
 from b_application.use_cases.collect.daily_close_archiver import DailyCloseArchiver
 from b_application.use_cases.collect.daily_history_backfill import DailyHistoryBackfill
 from b_application.use_cases.collect.daily_history_refresh import DailyHistoryRefresh
+from b_application.use_cases.collect.eps_history_backfill import EpsHistoryBackfill
 from b_application.use_cases.collect.financials_lookup import FinancialsLookup
 from b_application.use_cases.collect.fundamentals_feed import FundamentalsFeed
 from b_application.use_cases.collect.index_history_loader import IndexHistoryLoader
@@ -84,17 +100,25 @@ from b_application.use_cases.collect.news_feed import NewsFeed
 from b_application.use_cases.collect.official_change_feed import OfficialChangeFeed
 from b_application.use_cases.collect.realtime_quote_feed import RealtimeQuoteFeed
 from b_application.use_cases.collect.revenue_history_backfill import RevenueHistoryBackfill
+from b_application.use_cases.collect.stock_analysis_lookup import StockAnalysisLookup
+from b_application.use_cases.collect.stock_brief_lookup import StockBriefLookup
 from b_application.use_cases.collect.stock_lookup import StockLookup
+from b_application.use_cases.collect.stock_news_lookup import StockNewsLookup
 from b_application.use_cases.collect.stock_search import StockSearch
 from b_application.use_cases.process.ai_analyser import AiAnalyser
+from b_application.use_cases.process.article_indexer import ArticleIndexer
 from b_application.use_cases.process.indicator_readings import IndicatorReadings
 from b_application.use_cases.process.sentiment_analyser import SentimentAnalyser
+from b_application.use_cases.process.stock_brief_claim import StockBriefClaim
+from b_application.use_cases.process.stock_brief_context import StockBriefContext
+from b_application.use_cases.process.stock_brief_writer import StockBriefWriter
 from b_application.use_cases.process.strategy_loader import StrategyLoader
 from b_application.use_cases.process.technical_filter import TechnicalFilter
 from b_application.use_cases.process.technical_settings_editor import TechnicalSettingsEditor
 from b_application.use_cases.ranking.latest_ranking import LatestRanking
 from b_application.use_cases.ranking.ranking_history_loader import RankingHistoryLoader
 from b_application.use_cases.ranking.ranking_replay import RankingReplay
+from b_application.use_cases.ranking.ranking_standing import StockRankingStanding
 from b_application.use_cases.ship.decision_memory import DecisionMemory
 from b_application.use_cases.ship.recent_runs import RecentRuns
 from b_application.use_cases.ship.reporting import Reporting
@@ -106,19 +130,30 @@ from b_application.use_cases.trade.account_history import AccountHistory
 from b_application.use_cases.trade.account_loader import AccountLoader
 from b_application.use_cases.trade.account_risk_check import AccountRiskCheck
 from b_application.use_cases.trade.active_watchlist import ActiveWatchlist
+from b_application.use_cases.trade.brokerage_statement import BrokerageStatementReader
 from b_application.use_cases.trade.follow_candidates import FollowCandidates
 from b_application.use_cases.trade.follow_signals import FollowSignals
+from b_application.use_cases.trade.held_positions import HeldPositions
+from b_application.use_cases.trade.holding_entry import HoldingEntry
+from b_application.use_cases.trade.holding_removal import HoldingRemoval
+from b_application.use_cases.trade.holdings_analysis import HoldingsAnalysis
 from b_application.use_cases.trade.manual_signal import ManualSignal
 from b_application.use_cases.trade.mock_account_reset import MockAccountReset
 from b_application.use_cases.trade.order_execution import OrderExecution
 from b_application.use_cases.trade.order_outcome import OrderOutcome
 from b_application.use_cases.trade.order_preparation import OrderPreparation
+from b_application.use_cases.trade.ranking_follow_candidates import RankingFollowCandidates
+from b_application.use_cases.trade.ranking_follow_return import RankingFollowReturn
+from b_application.use_cases.trade.ranking_follow_signals import RankingFollowSignals
 from b_application.use_cases.trade.trade_history import TradeHistory
 from b_application.use_cases.trade.unwatch_stocks import UnwatchStocks
 from b_application.use_cases.trade.watch_stocks import WatchStocks
 from b_application.use_cases.users.ai_model_choice import AiModelChoice
 from b_application.use_cases.users.ai_model_lookup import AiModelLookup
 from b_application.use_cases.users.first_administrator_setup import FirstAdministratorSetup
+from b_application.use_cases.users.google_account import GoogleAccount
+from b_application.use_cases.users.google_identity_check import GoogleIdentityCheck
+from b_application.use_cases.users.google_sign_in_start import GoogleSignInStart
 from b_application.use_cases.users.password_reset import PasswordReset
 from b_application.use_cases.users.session_start import SessionStart
 from b_application.use_cases.users.session_user import SessionUser
@@ -139,23 +174,31 @@ from c_infrastructure.ai_models.ai_adapter.gemini_adapter import GeminiAIAdapter
 from c_infrastructure.ai_models.ai_adapter.grok_adapter import GrokAdapter
 from c_infrastructure.ai_models.ai_adapter.openai_adapter import OpenAIAdapter
 from c_infrastructure.ai_models.ai_adapter.web_search_adapter import WebSearchAiAdapter
+from c_infrastructure.ai_models.onnx_text_embedder import OnnxTextEmbedder
 from c_infrastructure.ai_models.sentiment_classifier import AiSentimentClassifier
+from c_infrastructure.database.chroma.article_index import ChromaArticleIndex
 from c_infrastructure.database.chroma.conversation_repository import ChromaConversationRepository
 from c_infrastructure.database.chroma.knowledge_repository import ChromaKnowledgeRepository
 from c_infrastructure.database.chroma.schema import ChromaCollection
 from c_infrastructure.database.db_connector import DatabaseConnector, OutdatedDatabaseError
 from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID, load_accounts_key
+from c_infrastructure.database.repositories.article_store import SqlArticleStore
 from c_infrastructure.database.repositories.backtest_repository import SqlBacktestRepository
 from c_infrastructure.database.repositories.daily_close_archive import SqlDailyCloseArchive
+from c_infrastructure.database.repositories.holding_repository import HoldingRepository
 from c_infrastructure.database.repositories.sentiment_repository import SentimentRepository
+from c_infrastructure.database.repositories.stock_brief_repository import SqlStockBriefRepository
 from c_infrastructure.database.repositories.trading_journal import TradingJournal
 from c_infrastructure.database.repositories.user_store import AccountsKeyError, SqlUserStore
+from c_infrastructure.database.repositories.users_stocks import SqlUsersStocks
 from c_infrastructure.database.repositories.watchlist_repository import WatchlistRepository
 from c_infrastructure.feed.news.cnyes_news_provider import CnyesNewsProvider
 from c_infrastructure.feed.news.yahoo_tw_news_provider import YahooTwNewsProvider
 from c_infrastructure.feed.news_provider import NewsProvider
 from c_infrastructure.feed.ptt_provider import PttProvider
+from c_infrastructure.feed.stock_feed import HeldStockFeed
 from c_infrastructure.feed.tavily_provider import TavilySearchAdapter
+from c_infrastructure.identity.google_identity_provider import GoogleIdentityProvider
 from c_infrastructure.market.cached_price_provider import CachedPriceProvider
 from c_infrastructure.market.daily_bar_matrix_provider import DailyBarMatrixProvider
 from c_infrastructure.market.exchange_daily_reports import ExchangeDailyReports
@@ -167,6 +210,8 @@ from c_infrastructure.system.attempt_log import MemoryAttemptLog
 from c_infrastructure.system.chat_styler_service import ChatStylerService
 from c_infrastructure.system.logger_service import LoggerService
 from c_infrastructure.system.market_clock import TaiwanMarketClock
+from c_infrastructure.system.ordering_switch import MemoryOrderingSwitch
+from c_infrastructure.system.settings_confirmations import MemorySettingsConfirmations
 from c_infrastructure.system.settings_files import SettingsFiles
 from c_infrastructure.technical.candidate_backtester import ProcessPoolCandidateBacktester
 from c_infrastructure.technical.sql_technical_settings_repository import SqlTechnicalSettingsRepository
@@ -178,6 +223,10 @@ if TYPE_CHECKING:
     from shioaji import Shioaji
 
     from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection
+
+
+type RealBroker = IBrokerExecutionProvider[Any, Any, Any]
+"""A real broker whatever its SDK's types: the wiring names none of them."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,12 +255,12 @@ class Runtime:
     """Whether the runtime's realtime quotes are the broker's: its Shioaji login was up when it opened."""
     shioaji: ShioajiConnection | None
     """The process's Shioaji login of the site's key pair, up or not; None where the site makes none (ProviderDependencies)."""
-    real_broker: IExecutionProvider | None
+    real_broker: RealBroker | None
     """SinoPac on the site's login, where the audience offers it and its account check passed (connect_shioaji); else None."""
 
     def brokers_for(self, user: User) -> list[ExecutionProvider]:
         """What the CLI and the Web offer `user` for a run now (offered_brokers); pipeline_for refuses any other."""
-        return offered_brokers(self.real_broker, user)
+        return offered_brokers(self.real_broker, user, self.config.features)
 
     @property
     def realtime_quotes(self) -> bool:
@@ -227,9 +276,16 @@ class Runtime:
         """Whether the site's Shioaji login failed or went down, which the Web API's timer opens a runtime to make again."""
         return self.shioaji is not None and not self.shioaji.up
 
+    ordering_switch: IOrderingSwitch
+    """The process's own (ProcessState): whom the site lets order on each broker now, which every runtime's orders ask."""
+
     def become_current(self) -> None:
-        """What the process takes from the settings of the runtime that serves new work: the log level of its one logger."""
+        """
+        What the process takes from the settings of the runtime that serves new work: the log level of its one logger,
+        and whom the site lets order on each broker, which the orders of a run on an earlier runtime are held to as well.
+        """
         self.logger.set_level(self.config.behavior.log_level)
+        self.ordering_switch.publish(self.config.features.ordering())
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,7 +293,7 @@ class ProcessState:
     """
     What one process keeps whichever settings it runs on, handed to every runtime it opens: the logger (loguru is
     process-wide; the current runtime sets its level), the recent sign-in attempts, so no settings change resets the
-    attempt limits, and the write lock of the shared caches.
+    attempt limits, the settings confirmations by Google, and the write lock of the shared caches.
     """
 
     logger: ILoggingProvider
@@ -254,6 +310,13 @@ class ProcessState:
     The Shioaji connection of each login the process made: its client, logged in once and again only after the login
     failed or went down, every earlier client, never logged out, and the one request pacer of the login. Every later
     runtime reuses it; shioaji 1.3.1 segfaults at the next garbage collection after a logout.
+    """
+    settings_confirmations: ISettingsConfirmations = field(default_factory=MemorySettingsConfirmations)
+    """The fresh Google authentications granted for a settings save, which a reload of the settings must not forget."""
+    ordering_switch: IOrderingSwitch = field(default_factory=MemoryOrderingSwitch)
+    """
+    Whom the site lets order on each broker now, published by the runtime that becomes current. Every runtime's orders
+    ask it at the send, so a run that started before ordering was turned off sends no order after it.
     """
 
 
@@ -277,6 +340,8 @@ class OwnedPorts:
     """
     sentiment_classifier: ISentimentClassifier
     backtest_repository: IBacktestRepository
+    holding_repository: IHoldingRepository
+    """The holdings the user entered by hand."""
 
 
 @dataclass(slots=True)
@@ -300,6 +365,14 @@ class ProviderDependencies:
     does; its processes start at the first search and stay for the next.
     """
     strategy_search_repository: IStrategySearchRepository
+    stock_brief_repository: IStockBriefRepository
+    """The site's AI briefs of stocks, one per stock and Taipei calendar day, shared by every user."""
+    article_store: IArticleStore
+    """What the site read about each stock, kept in the database and shared by every user."""
+    article_index: IArticleIndex
+    """The article store's vectors, in a Chroma collection of their own, computed by the runtime's own embedding model."""
+    users_stocks: IUsersStocks
+    """The stocks any user holds or watches, as stock ids alone: the timer keeps their articles current."""
     broker_market_data: bool
     """Whether the site's realtime quotes are its broker login's market data. Without it, no quote is served."""
     shioaji: ShioajiConnection | None
@@ -315,7 +388,7 @@ class ProviderDependencies:
     """The news sites, or the open-data archive's material information for an audience without news articles (public)."""
 
     social_media_provider: ISocialMediaProvider | None
-    """PTT, or None for an audience without realtime quotes (public), which runs no Buzz, PTT's only reader."""
+    """PTT, which Buzz and the stock pages read, or None for an audience without realtime quotes (public), which runs no Buzz."""
     ai_provider: IAiProvider
     """The installation's own provider, on ai.active_model, uncounted. Only LINE chat uses it; LINE chat stays as it is."""
     conversation_repository: IConversationRepository
@@ -324,13 +397,19 @@ class ProviderDependencies:
     settings_files: ISettingsFiles
     user_store: IUserStore
     attempt_log: IAttemptLog
-    real_broker: IExecutionProvider | None
+    real_broker: RealBroker | None
     """
     SinoPac, on the login connect_shioaji made, where the audience offers it and its account check passed; None
     elsewhere. Only the Pipeline of a run an administrator started on it holds it.
     """
     owned_ports: Callable[[User | None], OwnedPorts]
     """A user, or None signed out -> the adapters that hold that user's data. The order-gate check passes fakes."""
+    identity_provider: IIdentityProvider | None = None
+    """Google, on the client of the environment's GOOGLE_CLIENT_ID; None while the site offers no sign-in with Google."""
+    settings_confirmations: ISettingsConfirmations = field(default_factory=MemorySettingsConfirmations)
+    """The process's own (ProcessState), so the runtime a settings save opens still holds the grant that confirms it."""
+    ordering_switch: IOrderingSwitch = field(default_factory=MemoryOrderingSwitch)
+    """The process's own (ProcessState), so a run on a runtime a reload replaced orders by the switch the site holds now."""
 
 
 def create_ai_provider(config: AppConfig, logger: ILoggingProvider, provider: AiProvider) -> IAiProvider:
@@ -395,7 +474,7 @@ def site_login(config: AppConfig) -> ShioajiLogin | None:
 
 async def connect_shioaji(
     config: AppConfig, process: ProcessState, market_clock: TaiwanMarketClock
-) -> tuple[IBrokerQuoteProvider[Any] | None, IExecutionProvider | None]:
+) -> tuple[IBrokerQuoteProvider[Any] | None, RealBroker | None]:
     """
     The market data and the SinoPac broker of a runtime on the process's Shioaji login. Both read the client of the
     environment's key pair, simulation in dev and test, production in prod, which the process logs in once and every
@@ -449,7 +528,7 @@ async def connect_shioaji(
 
 async def connect_sinopac(
     config: AppConfig, connection: ShioajiConnection, quotes: IBrokerQuoteProvider[Any], login: ShioajiLogin, logger: ILoggingProvider
-) -> IExecutionProvider | None:
+) -> RealBroker | None:
     """SinoPac's broker on the login the quotes hold, where the audience offers it and its account check passes, else None."""
     from c_infrastructure.trading.shioaji.execution_provider import ShioajiExecutionProvider
 
@@ -465,11 +544,13 @@ async def connect_sinopac(
         logger.warning(f"SinoPac {server} orders unavailable: {error}. Runs order on the mock account only")
         return None
 
-    logger.info(f"SinoPac {server} offered for the runs an administrator starts on it")
+    logger.info(f"SinoPac {server} connected: an administrator reads its account, and orders on it only as features.* allows")
     return broker
 
 
-def create_news_provider(config: AppConfig, logger: ILoggingProvider, archive: IDailyCloseArchive) -> INewsProvider:
+def create_news_provider(
+    config: AppConfig, logger: ILoggingProvider, archive: IDailyCloseArchive, market_clock: TaiwanMarketClock
+) -> INewsProvider:
     """
     The open-data archive's material information alone for an audience without news articles, which never builds a
     news site's adapter; otherwise the news sites in the order they are asked: cnyes first, then Yahoo for what cnyes
@@ -482,7 +563,29 @@ def create_news_provider(config: AppConfig, logger: ILoggingProvider, archive: I
         CnyesNewsProvider(config.sources.news, logger),
         YahooTwNewsProvider(config.sources.news, logger),
     )
-    return NewsProvider(sources, config, logger)
+    return NewsProvider(sources, config, logger, market_clock)
+
+
+def create_stock_feed(
+    config: AppConfig, logger: ILoggingProvider, market_clock: TaiwanMarketClock, dependencies: ProviderDependencies
+) -> IStockFeed | None:
+    """
+    The stock pages' held news and posts over the runtime's news sites and board, or None for an audience without news
+    articles, whose stock pages read the open-data archive alone. It lives with the runtime, so every user's page and
+    the signed-out pages share what was fetched, and a settings change starts it anew.
+    """
+    if not config.audience.news_articles:
+        return None
+
+    return HeldStockFeed(
+        news=dependencies.news_provider,
+        board=dependencies.social_media_provider,
+        market_clock=market_clock,
+        freshness=config.stock_page.freshness(),
+        held_stocks=config.stock_page.news_held_stocks,
+        pause=timedelta(seconds=config.stock_page.article_store.refresh_pause_seconds),
+        logger=logger,
+    )
 
 
 def create_fundamentals_provider(
@@ -511,6 +614,22 @@ def create_platform_provider(config: AppConfig, logger: ILoggingProvider) -> IPl
         return None
 
     return LinePlatformAdapter(config=config, logger=logger)
+
+
+def create_identity_provider(config: AppConfig) -> IIdentityProvider | None:
+    """Google as startup_settings checked it: whole, at safe addresses, or not offered at all."""
+    accounts = config.accounts
+
+    if not accounts.google_sign_in or accounts.google_client_id is None or accounts.google_client_secret is None:
+        return None
+
+    return GoogleIdentityProvider(
+        client_id=accounts.google_client_id,
+        client_secret=accounts.google_client_secret,
+        authorization_endpoint=accounts.google_authorization_endpoint,
+        token_endpoint=accounts.google_token_endpoint,
+        timeout_seconds=accounts.google_timeout_seconds,
+    )
 
 
 def create_notification_provider(config: AppConfig, logger: ILoggingProvider) -> INotificationProvider | None:
@@ -566,7 +685,7 @@ async def build_provider_dependencies(
     market_clock: TaiwanMarketClock,
     accounts_key: SecretStr,
     quotes: IBrokerQuoteProvider[Any] | None,
-    real_broker: IExecutionProvider | None,
+    real_broker: RealBroker | None,
 ) -> ProviderDependencies:
     logger = process.logger
     stock_provider = TaiwanStockProvider(
@@ -591,13 +710,29 @@ async def build_provider_dependencies(
         ),
         candidate_backtester=ProcessPoolCandidateBacktester(config, market_clock, config.strategy_search.workers),
         strategy_search_repository=FileStrategySearchRepository(config.project_root / config.strategy_search.folder),
+        stock_brief_repository=SqlStockBriefRepository(db),
+        article_store=SqlArticleStore(
+            db, market_clock, config.stock_page.article_store.retention(), config.stock_page.article_store.max_per_stock
+        ),
+        article_index=ChromaArticleIndex(
+            chroma_client,
+            article_collection(config),
+            OnnxTextEmbedder(
+                config.stock_page.article_store.embedding, config.project_root / config.folder.embedding_model_dir, logger
+            ),
+            market_clock,
+            config.stock_page.article_store.embedded_length,
+        ),
+        users_stocks=SqlUsersStocks(db, market_clock),
         broker_market_data=quotes is not None,
         shioaji=process.shioaji_connections.get(login) if login is not None else None,
         daily_close_archive=archive,
         fundamentals_provider=create_fundamentals_provider(config, db, process, market_clock, stock_provider),
-        news_provider=create_news_provider(config, logger, archive),
+        news_provider=create_news_provider(config, logger, archive, market_clock),
         social_media_provider=(
-            PttProvider(config=config, logger=logger, stock_provider=stock_provider) if config.audience.realtime_quotes else None
+            PttProvider(config=config, logger=logger, stock_provider=stock_provider, market_clock=market_clock)
+            if config.audience.realtime_quotes
+            else None
         ),
         ai_provider=ai_providers[config.ai.active_model],
         conversation_repository=ChromaConversationRepository(chroma_client, logger),
@@ -612,6 +747,9 @@ async def build_provider_dependencies(
         user_store=SqlUserStore(db, accounts_key, logger),
         attempt_log=process.attempt_log,
         real_broker=real_broker,
+        identity_provider=create_identity_provider(config),
+        settings_confirmations=process.settings_confirmations,
+        ordering_switch=process.ordering_switch,
         owned_ports=create_owned_ports(config, db, chroma_client, ai_providers, market_clock, logger, process.cache_writes),
     )
 
@@ -647,9 +785,22 @@ def create_owned_ports(
             ai_provider=counted,
             sentiment_classifier=AiSentimentClassifier(counted, sentiment_repository, config, logger),
             backtest_repository=SqlBacktestRepository(owners_db),
+            holding_repository=HoldingRepository(owners_db),
         )
 
     return owned_ports
+
+
+def article_collection(config: AppConfig) -> str:
+    """
+    The Chroma collection of the article index: stock_articles with a fingerprint of what its vectors depend on, the
+    embedding model and how much of an article it reads. Vectors of two models cannot be compared, so a change of
+    either starts an empty collection, which fills again from the kept articles; the old one stays until it is deleted.
+    """
+    store = config.stock_page.article_store
+    fingerprint = sha256(f"{store.embedding.identity}/{store.embedded_length}".encode()).hexdigest()[:12]
+
+    return f"{ChromaCollection.STOCK_ARTICLES}-{fingerprint}"
 
 
 def knowledge_collection(owner_id: UserId | None) -> str | None:
@@ -666,14 +817,23 @@ def knowledge_collection(owner_id: UserId | None) -> str | None:
     return f"{ChromaCollection.MARKET_KNOWLEDGE}-{owner_id}"
 
 
-def offered_brokers(real_broker: IExecutionProvider | None, user: User | None) -> list[ExecutionProvider]:
+def real_broker_holder(user: User | None) -> bool:
+    """Whether `user` may hold the site's real broker, to read its account or to order on it: USE_REAL_BROKER."""
+    return user is not None and Permission.USE_REAL_BROKER in user.permissions
+
+
+def offered_brokers(real_broker: RealBroker | None, user: User | None, features: FeaturesConfig) -> list[ExecutionProvider]:
     """
     The brokers `user` may choose for a run now, the mock account first: the site's real broker too for a user with
-    USE_REAL_BROKER while its login is up. The order gates check both again at each order.
+    USE_REAL_BROKER while its login is up and features.* lets the user order on it. The order gates check all three
+    again at each order.
     """
     link = real_broker.link() if real_broker is not None else None
 
-    if link is None or not link.up or user is None or Permission.USE_REAL_BROKER not in user.permissions:
+    if link is None or not link.up or user is None or not real_broker_holder(user):
+        return [ExecutionProvider.MOCK]
+
+    if not features.visibility(link.broker.ordering_feature).shown_to(user.permissions):
         return [ExecutionProvider.MOCK]
 
     return [ExecutionProvider.MOCK, link.broker]
@@ -683,17 +843,20 @@ def broker_for(
     dependencies: ProviderDependencies, owned: OwnedPorts, user: User | None, broker: ExecutionProvider
 ) -> IExecutionProvider:
     """
-    The broker the run chose: the user's own mock account, or the real broker while offered_brokers offers it, so no
-    other user's Pipeline ever holds it. A signed-out pipeline holds the mock account of nobody, which refuses every
-    call.
+    The broker the run chose or the account page reads: the user's own mock account, or the real broker for a user
+    with USE_REAL_BROKER while its login is up, so no other user's Pipeline ever holds it. Holding it grants no order:
+    the order gates decide at each send, the site's ordering switch first. A signed-out pipeline holds the mock account
+    of nobody, which refuses every call.
     """
     if not broker.real:
         return owned.mock_broker
 
-    if user is None or Permission.USE_REAL_BROKER not in user.permissions:
+    if not real_broker_holder(user):
         raise RealBrokerRefused(f"Only an administrator orders on {broker.label} or reads its account.")
 
-    if dependencies.real_broker is None or broker not in offered_brokers(dependencies.real_broker, user):
+    link = dependencies.real_broker.link() if dependencies.real_broker is not None else None
+
+    if dependencies.real_broker is None or link is None or not link.up or link.broker != broker:
         raise BrokerUnavailable(f"{broker.label} has no login up on this site now. Runs order on the mock account.")
 
     return dependencies.real_broker
@@ -706,14 +869,15 @@ def build_pipeline(
     dependencies: ProviderDependencies,
     user: User | None,
     chosen: ExecutionProvider,
+    stock_feed: IStockFeed | None,
 ) -> Pipeline:
     """
     Every use case once, over the shared ports and the user's own ports, or nobody's for None, on the broker the run
     chose (`chosen`). The trading and the valuation operations share the collect and process steps. The order path's
-    wiring is the same for every user and broker: the ordering steps hold `chosen`'s broker and the mock_* steps the
-    user's mock account. The permissions decide whether the user may hold a real broker, the AI limit (in owned_ports)
-    and whether run reports reach the LINE recipients. The run records name the AI model owned_ports gave the user and
-    the broker chosen.
+    wiring is the same for every user and broker: the ordering steps hold `chosen`'s broker, and the mock_* steps and
+    the ranking follow's hold the user's mock account. The permissions decide whether the user may hold a real broker,
+    the AI limit (in owned_ports) and whether run reports reach the LINE recipients. The run records name the AI model
+    owned_ports gave the user and the broker chosen.
     """
     owned = dependencies.owned_ports(user)
     notifications = (
@@ -722,8 +886,11 @@ def build_pipeline(
     stocks, prices = dependencies.stock_provider, dependencies.price_provider
     history_archive = dependencies.daily_close_archive if config.audience.open_data_only else None
     journal, broker, users = owned.journal, broker_for(dependencies, owned, user, chosen), dependencies.user_store
+    ordering = dependencies.ordering_switch
+    brokerage = dependencies.real_broker if real_broker_holder(user) else None
     user_id = user.user_id if user is not None else None
     chat_styler = ChatStylerService(config.sources.line.sentence_endings, config.sources.line.max_message_length)
+    ai_model = config.ai.offered_models[config.ai.model_for(user.ai_model if user is not None else None)]
 
     return Pipeline(
         strategy_loader=StrategyLoader(owned.technical_settings_repository, config, logger),
@@ -750,6 +917,22 @@ def build_pipeline(
         ),
         archive_warm_up=ArchiveWarmUp(dependencies.daily_close_archive, config),
         financials_lookup=FinancialsLookup(dependencies.daily_close_archive),
+        eps_history_backfill=EpsHistoryBackfill(dependencies.fundamentals_provider, market_clock, logger),
+        stock_analysis_lookup=StockAnalysisLookup(
+            dependencies.daily_close_archive, dependencies.fundamentals_provider, market_clock, config
+        ),
+        stock_news_lookup=StockNewsLookup(dependencies.daily_close_archive, stock_feed, dependencies.article_store, stocks, config),
+        article_indexer=ArticleIndexer(dependencies.article_store, dependencies.article_index, config, logger),
+        article_refresh_stocks=ArticleRefreshStocks(dependencies.users_stocks, config, logger),
+        article_store_backfill=ArticleStoreBackfill(
+            dependencies.daily_close_archive, dependencies.article_store, stocks, market_clock, config, logger
+        ),
+        stock_brief_lookup=StockBriefLookup(dependencies.stock_brief_repository, market_clock, config),
+        stock_brief_context=StockBriefContext(
+            stocks, prices, dependencies.article_store, dependencies.article_index, market_clock, config, logger
+        ),
+        stock_brief_claim=StockBriefClaim(dependencies.stock_brief_repository, market_clock, config, ai_model),
+        stock_brief_writer=StockBriefWriter(dependencies.stock_brief_repository, owned.ai_provider, market_clock, config, logger),
         realtime_quote_feed=RealtimeQuoteFeed(prices, market_clock, config, logger),
         technical_filter=TechnicalFilter(logger),
         indicator_readings=IndicatorReadings(),
@@ -764,17 +947,26 @@ def build_pipeline(
         signals=Signals(journal, market_clock, config, logger),
         manual_signal=ManualSignal(journal, market_clock, config, logger),
         decision_memory=DecisionMemory(owned.knowledge_repository, logger),
-        order_preparation=OrderPreparation(journal, broker, users, user_id, market_clock, config, logger),
+        order_preparation=OrderPreparation(journal, broker, users, ordering, user_id, market_clock, config, logger),
         order_execution=OrderExecution(broker, journal, market_clock, logger),
         order_outcome=OrderOutcome(broker, journal, market_clock, logger),
         mock_account_loader=AccountLoader(owned.mock_broker, stocks, logger),
-        mock_order_preparation=OrderPreparation(journal, owned.mock_broker, users, user_id, market_clock, config, logger),
+        mock_order_preparation=OrderPreparation(journal, owned.mock_broker, users, ordering, user_id, market_clock, config, logger),
         mock_order_execution=OrderExecution(owned.mock_broker, journal, market_clock, logger),
         mock_order_outcome=OrderOutcome(owned.mock_broker, journal, market_clock, logger),
         follow_candidates=FollowCandidates(journal, owned.mock_broker, market_clock, config),
         follow_signals=FollowSignals(journal, market_clock, logger),
+        ranking_follow_candidates=RankingFollowCandidates(owned.mock_broker, market_clock, config),
+        ranking_follow_signals=RankingFollowSignals(journal, market_clock, config, logger),
+        ranking_follow_return=RankingFollowReturn(journal, owned.mock_broker, market_clock, config),
+        mock_account_history=AccountHistory(owned.mock_broker, journal, stocks, prices, market_clock, config, logger),
         trade_history=TradeHistory(broker, journal),
         mock_account_reset=MockAccountReset(owned.mock_broker, market_clock),
+        brokerage_statement=BrokerageStatementReader(brokerage, market_clock, config),
+        held_positions=HeldPositions(owned.holding_repository, owned.mock_broker, brokerage, logger),
+        holdings_analysis=HoldingsAnalysis(stocks, dependencies.daily_close_archive, market_clock, config, logger),
+        holding_entry=HoldingEntry(owned.holding_repository, market_clock),
+        holding_removal=HoldingRemoval(owned.holding_repository),
         reporting=Reporting(notifications, config, logger),
         run_reports=RunReports(journal, logger),
         recent_runs=RecentRuns(journal),
@@ -795,6 +987,7 @@ def build_pipeline(
         strategy_search_save=StrategySearchSave(dependencies.strategy_search_repository),
         ranking_history_loader=RankingHistoryLoader(dependencies.bar_matrix_provider, logger),
         latest_ranking=LatestRanking(stocks, config),
+        ranking_standing=StockRankingStanding(config),
         ranking_replay=RankingReplay(stocks, config, logger),
         fundamentals_feed=FundamentalsFeed(dependencies.fundamentals_provider, stocks, market_clock, logger),
         market_valuation_loader=MarketValuationLoader(stocks, market_clock, config),
@@ -807,12 +1000,22 @@ def build_pipeline(
         dispatcher=Dispatcher(dependencies.platform_provider, logger),
         settings_reader=SettingsReader(dependencies.settings_files),
         settings_editor=SettingsEditor(dependencies.settings_files, config),
-        settings_confirmation=SettingsConfirmation(dependencies.user_store, dependencies.attempt_log, market_clock, config, logger),
+        settings_confirmation=SettingsConfirmation(
+            dependencies.user_store, dependencies.attempt_log, dependencies.settings_confirmations, market_clock, config, logger
+        ),
+        settings_reauthentication=SettingsReauthentication(
+            dependencies.user_store, dependencies.settings_confirmations, market_clock, config, logger
+        ),
         settings_save=SettingsSave(dependencies.settings_files, market_clock, logger),
-        editor_access=EditorAccess(dependencies.user_store),
+        editor_access=EditorAccess(dependencies.user_store, config),
         sign_in_options=SignInOptions(dependencies.user_store, config),
         first_administrator_setup=FirstAdministratorSetup(dependencies.user_store, market_clock, LEGACY_OWNER_ID, logger),
         sign_in_attempt=SignInAttempt(dependencies.user_store, dependencies.attempt_log, market_clock, config, logger),
+        google_sign_in_start=GoogleSignInStart(dependencies.identity_provider, dependencies.attempt_log, market_clock, config),
+        google_identity_check=GoogleIdentityCheck(
+            dependencies.identity_provider, dependencies.attempt_log, market_clock, config, logger
+        ),
+        google_account=GoogleAccount(dependencies.user_store, market_clock, config, LEGACY_OWNER_ID, logger),
         user_lookup=UserLookup(dependencies.user_store),
         password_reset=PasswordReset(dependencies.user_store, market_clock, logger),
         user_registration=UserRegistration(dependencies.user_store, dependencies.attempt_log, market_clock, config, logger),
@@ -829,9 +1032,10 @@ def build_pipeline(
 def compose_runtime(
     config: AppConfig, logger: ILoggingProvider, market_clock: TaiwanMarketClock, dependencies: ProviderDependencies
 ) -> Runtime:
-    signed_out = build_pipeline(config, logger, market_clock, dependencies, None, ExecutionProvider.MOCK)
+    stock_feed = create_stock_feed(config, logger, market_clock, dependencies)
+    signed_out = build_pipeline(config, logger, market_clock, dependencies, None, ExecutionProvider.MOCK, stock_feed)
     return Runtime(
-        pipeline_for=lambda user, broker: build_pipeline(config, logger, market_clock, dependencies, user, broker),
+        pipeline_for=lambda user, broker: build_pipeline(config, logger, market_clock, dependencies, user, broker, stock_feed),
         signed_out=signed_out,
         market_valuation_cache=MarketValuationCache(signed_out.load_market_valuation, config.api.valuation_cache_minutes * 60),
         config=config,
@@ -839,6 +1043,7 @@ def compose_runtime(
         broker_market_data=dependencies.broker_market_data,
         shioaji=dependencies.shioaji,
         real_broker=dependencies.real_broker,
+        ordering_switch=dependencies.ordering_switch,
     )
 
 

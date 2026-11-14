@@ -16,6 +16,7 @@ export function problemMessage(problem: SettingsProblem, t: Wording): string {
 /** Why a save did not happen, in the terms the page answers each one. */
 export type SaveRefusal =
   | { kind: 'wrongPassword' }
+  | { kind: 'googleRequired' }
   | { kind: 'throttled'; retryAfter: number | null }
   | { kind: 'conflict' }
   | { kind: 'refused'; problems: SettingsProblem[]; detail: string }
@@ -27,6 +28,8 @@ export function refusalOf(error: unknown): SaveRefusal {
   switch (error.code) {
     case 'password_refused':
       return { kind: 'wrongPassword' }
+    case 'google_confirmation_required':
+      return { kind: 'googleRequired' }
     case 'sign_in_throttled':
       return { kind: 'throttled', retryAfter: error.retryAfter }
     case 'settings_conflict':

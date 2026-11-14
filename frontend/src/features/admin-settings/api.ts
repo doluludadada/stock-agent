@@ -17,8 +17,8 @@ export function useSettingsForm() {
 export function useSaveSettings() {
   const client = useQueryClient()
   return useMutation({
-    mutationFn: ({ changes, password }: { changes: SettingChange[]; password: string }) =>
-      apiRequest('put', '/v1/admin/settings', { body: { confirm: true, changes, password } }),
+    mutationFn: ({ changes, ...confirmation }: { changes: SettingChange[] } & ({ password: string } | { google_confirmation: string })) =>
+      apiRequest('put', '/v1/admin/settings', { body: { confirm: true, changes, ...confirmation } }),
     onSuccess: (fields) => client.setQueryData(FORM_KEY, fields),
   })
 }

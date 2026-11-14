@@ -148,10 +148,22 @@ PRESENTATION_SETTINGS = {
         {"environment.shioaji_simulation", "trading.max_order_value", "trading.max_daily_buy_value"}
     ),
     # The Web's request gates: the host names it answers, and the audience's realtime quotes and MOPS, which decide which
-    # runs and valuations a browser may start. A run starts under the cap of background runs of the runtime it starts on.
+    # runs and valuations a browser may start. A run starts under the cap of background runs of the runtime it starts on,
+    # and a backtest takes its turn under the caps of replays. Whom the site shows each feature to gates the feature's
+    # routes here, in front of the Pipeline, and tells the web app what to hide.
     "d_presentation/web/session.py": frozenset(
-        {"api.allowed_hosts", "audience.realtime_quotes", "audience.mops", "accounts.max_concurrent_runs"}
+        {
+            "features",
+            "api.allowed_hosts",
+            "audience.realtime_quotes",
+            "audience.mops",
+            "accounts.max_concurrent_runs",
+            "accounts.max_concurrent_backtests",
+            "accounts.max_backtests_per_user",
+        }
     ),
+    # The app serves the API docs only where the environment it started in allows them.
+    "d_presentation/web/app.py": frozenset({"environment.api_docs"}),
     # The open data's attribution, which the license requires next to whatever a page shows from it, and the audience,
     # whose capabilities tell the web app what to offer.
     "d_presentation/web/routers/market.py": frozenset({"sources.attribution", "audience"}),

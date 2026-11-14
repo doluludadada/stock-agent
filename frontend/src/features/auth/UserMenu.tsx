@@ -1,5 +1,6 @@
 import { ChevronDown, LogIn, LogOut, Settings2, SlidersHorizontal, UsersRound } from 'lucide-react'
 import { Link, useLocation } from 'react-router'
+import { toast } from 'sonner'
 import { useTranslation } from '@/i18n'
 import { hasPermission, useSession } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
@@ -105,7 +106,7 @@ export function UserMenu({ onSignedOut }: { onSignedOut: () => void }) {
           </DropdownMenuItem>
         )}
         <DropdownMenuSeparator />
-        <DropdownMenuItem disabled={signOut.isPending} onSelect={() => signOut.mutate(undefined, { onSuccess: onSignedOut })}>
+        <DropdownMenuItem disabled={signOut.isPending} onSelect={() => signOut.mutate(undefined, { onSuccess: onSignedOut, onError: () => toast.error(t('menu.signOutFailed')) })}>
           <LogOut aria-hidden />
           {t('menu.signOut')}
         </DropdownMenuItem>

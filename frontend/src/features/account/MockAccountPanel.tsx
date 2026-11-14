@@ -1,21 +1,21 @@
-import { useState, type FormEvent } from 'react'
+import { useId, useState, type FormEvent } from 'react'
 import { useLocale, useTranslation } from '@/i18n'
 import { isApiError } from '@/shared/api'
 import { formatDateTime, formatNumber } from '@/shared/lib/format'
 import { Button } from '@/shared/ui/button'
 import { ConfirmDialog } from '@/shared/ui/confirm-dialog'
 import { ErrorState } from '@/shared/ui/error-state'
-import { Field } from '@/shared/ui/field'
-import { Input } from '@/shared/ui/input'
+import { Label } from '@/shared/ui/label'
 import { Panel } from '@/shared/ui/panel'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
 import { Stat } from '@/shared/ui/stat'
 import { useAccountHistory, useResetAccount, type AccountOpening } from './api'
-import { parseStartingCapital } from './model'
+import { STARTING_CAPITALS, startingCapitalChoices } from './model'
 
 /** My settings' mock account: its starting capital and a reset that opens it again. */
 export function MockAccountPanel() {
   const { t } = useTranslation('account')
-  const history = useAccountHistory('mock', null)
+  const history = useAccountHistory(null)
   if (history.isError) {
     return (
       <Panel title={t('reset.title')}>
@@ -36,17 +36,17 @@ function ResetForm({ opening }: { opening: AccountOpening }) {
   const { t } = useTranslation('account')
   const locale = useLocale()
   const reset = useResetAccount()
-  const [draft, setDraft] = useState(String(opening.initial_cash))
+  const id = useId()
+  const [amount, setAmount] = useState(opening.initial_cash)
   const [confirming, setConfirming] = useState(false)
-  const amount = parseStartingCapital(draft)
 
   const submit = (event: FormEvent) => {
     event.preventDefault()
-    if (amount !== null) setConfirming(true)
+    setConfirming(true)
   }
   const confirm = () => {
     setConfirming(false)
-    if (amount !== null) reset.mutate(amount)
+    reset.mutate(amount)
   }
   const status = (): string => {
     if (reset.isPending) return t('reset.resetting')
@@ -63,10 +63,25 @@ function ResetForm({ opening }: { opening: AccountOpening }) {
         <Stat label={t('reset.opened')}>{formatDateTime(locale, opening.opened_at)}</Stat>
       </dl>
       <form onSubmit={submit} className="grid gap-3 @md:max-w-xs">
-        <Field label={t('reset.label')} hint={t('reset.hint')} error={draft.trim() !== '' && amount === null ? t('reset.invalid') : null}>
-          <Input type="number" inputMode="decimal" min={1} step="any" value={draft} onChange={(event) => setDraft(event.target.value)} className="tabular" />
-        </Field>
-        <Button type="submit" variant="destructive" className="justify-self-start" disabled={amount === null || reset.isPending}>
+        <div className="grid gap-1.5">
+          <Label htmlFor={id}>{t('reset.label')}</Label>
+          <Select value={String(amount)} onValueChange={(value) => setAmount(Number(value))}>
+            <SelectTrigger id={id} aria-describedby={`${id}-hint`} className="tabular w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {startingCapitalChoices(opening.initial_cash).map((choice) => (
+                <SelectItem key={choice} value={String(choice)} className="tabular">
+                  {t(STARTING_CAPITALS.includes(choice) ? 'reset.amount' : 'reset.current', { amount: formatNumber(locale, choice) })}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p id={`${id}-hint`} className="text-xs text-muted-foreground">
+            {t('reset.hint')}
+          </p>
+        </div>
+        <Button type="submit" variant="destructive" className="justify-self-start" disabled={reset.isPending}>
           {t('reset.button')}
         </Button>
       </form>
@@ -84,7 +99,7 @@ function ResetForm({ opening }: { opening: AccountOpening }) {
         onConfirm={confirm}
       >
         <div className="grid gap-3 text-sm">
-          <ConsequenceList title={t('reset.confirm.goes')} items={[t('reset.confirm.positions'), t('reset.confirm.cash', { cash: formatNumber(locale, amount ?? 0) }), t('reset.confirm.history')]} />
+          <ConsequenceList title={t('reset.confirm.goes')} items={[t('reset.confirm.positions'), t('reset.confirm.cash', { cash: formatNumber(locale, amount) }), t('reset.confirm.history')]} />
           <ConsequenceList title={t('reset.confirm.stays')} items={[t('reset.confirm.runs'), t('reset.confirm.follow')]} />
         </div>
       </ConfirmDialog>

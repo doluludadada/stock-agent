@@ -1,19 +1,9 @@
-# Git
-.git
-.gitignore
-
-# Python / UV
+.venv
 __pycache__
 *.py[cod]
-*$py.class
-.venv
-
-# Data & Config
-chroma_data/
-chroma_db/
-.env
-.env.*
-
-# IDEs
-.vscode
-.idea
+.pytest_cache
+.ruff_cache
+chroma_data
+embedding_models
+tests
+tools

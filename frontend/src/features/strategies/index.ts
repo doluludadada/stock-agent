@@ -1,5 +1,4 @@
 export { StrategyLibraryPage } from './library/StrategyLibraryPage'
-export { StrategySummaryPanel } from './library/StrategyPanels'
 export { StrategyBuilderPage } from './builder/StrategyBuilderPage'
 export type { BuilderMode } from './builder/use-strategy-draft'
 export { useStrategySettings } from './api/queries'

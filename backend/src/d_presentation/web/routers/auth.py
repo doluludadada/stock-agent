@@ -1,40 +1,65 @@
-from fastapi import APIRouter, Request, Response, status
+from typing import Annotated
+
+from fastapi import APIRouter, Query, Request, Response, status
+from fastapi.responses import RedirectResponse
+from pydantic import SecretStr
 
 from a_domain.model.system.user import User
+from a_domain.types.enums import GoogleRefusal
+from a_domain.types.errors import AlreadySetUpError, GoogleSignInRefused, SignInThrottled, UserExistsError
 from a_domain.types.ids import SessionToken
 from d_presentation.web.schemas import (
     AiModelRequest,
     AiModelResponse,
     AuthStatusResponse,
+    ConfirmationId,
     RegistrationRequest,
     SetupRequest,
     SignInRequest,
 )
 from d_presentation.web.session import (
+    APP_HOME,
+    APP_SETTINGS,
+    APP_SIGN_IN,
+    CONFIRMED,
+    THROTTLED,
     CurrentUser,
     PrivateAccess,
+    RuntimeDependency,
     SessionCookie,
     SignedOutPipeline,
     UserPipeline,
+    back_to_app,
     check_setup_code,
     clear_session_cookie,
     client_of,
+    feature_visibilities,
+    flow_of,
+    set_flow_cookie,
     set_session_cookie,
 )
 
 router = APIRouter(prefix="/auth", tags=["Sign-in"])
 """
-Public, but for /me and its AI model: the first-time setup, registration, sign-in and sign-out. Every write needs
-X-Requested-With.
+Public, but for /me and its AI model: the first-time setup, registration, sign-in, sign-in with Google and sign-out.
+Every write needs X-Requested-With. The two Google endpoints are GETs the browser navigates to, and answer redirects.
 """
 
 
 @router.get("/status")
-async def get_sign_in_status(pipeline: SignedOutPipeline) -> AuthStatusResponse:
-    """What the web app shows first: the first-time setup while no user exists, then sign-in, with registration while it is open."""
+async def get_sign_in_status(pipeline: SignedOutPipeline, runtime: RuntimeDependency) -> AuthStatusResponse:
+    """
+    What the web app shows first: the first-time setup while no user exists, then sign-in, with registration while it is
+    open; and whom the site shows each feature to, which the app reads with the user's permissions to show or hide a page.
+    """
     options = await pipeline.load_sign_in_options()
 
-    return AuthStatusResponse(needs_first_administrator=options.needs_first_administrator, registration_open=options.registration_open)
+    return AuthStatusResponse(
+        needs_first_administrator=options.needs_first_administrator,
+        registration_open=options.registration_open,
+        google_sign_in=options.google_sign_in,
+        features=feature_visibilities(runtime),
+    )
 
 
 @router.post("/setup", status_code=status.HTTP_201_CREATED)
@@ -62,6 +87,65 @@ async def sign_in(body: SignInRequest, request: Request, response: Response, pip
     set_session_cookie(request, response, session)
 
     return user
+
+
+@router.get("/google/start", status_code=status.HTTP_303_SEE_OTHER, response_class=RedirectResponse)
+async def start_google_sign_in(
+    request: Request, pipeline: SignedOutPipeline, confirmation: ConfirmationId | None = None
+) -> RedirectResponse:
+    """
+    The browser's way to Google, as a navigation, never a fetch: it sets the short-lived flow cookie and redirects to
+    Google's sign-in. With `confirmation`, the id the web app made for one settings save, Google authenticates the
+    administrator again for that save. Where the site offers no sign-in with Google, or past the limit per address,
+    it redirects back to the app with ?google= and the reason.
+    """
+    try:
+        flow, address = await pipeline.start_google_sign_in(confirmation, client_of(request))
+    except GoogleSignInRefused as error:
+        return back_to_app(request, APP_SETTINGS if confirmation else APP_SIGN_IN, error.refusal)
+    except SignInThrottled:
+        return back_to_app(request, APP_SETTINGS if confirmation else APP_SIGN_IN, THROTTLED)
+
+    response = RedirectResponse(address, status_code=status.HTTP_303_SEE_OTHER)
+    set_flow_cookie(request, response, flow)
+
+    return response
+
+
+@router.get("/google/callback", status_code=status.HTTP_303_SEE_OTHER, response_class=RedirectResponse)
+async def return_from_google(
+    request: Request,
+    pipeline: SignedOutPipeline,
+    state: Annotated[str | None, Query(max_length=256)] = None,
+    code: Annotated[SecretStr | None, Query(max_length=2048)] = None,
+) -> RedirectResponse:
+    """
+    Where Google sends the browser back: <accounts.public_origin>/v1/auth/google/callback, the one redirect URI of the
+    OAuth client. A sign-in sets the session cookie and redirects to the app. A settings confirmation grants the save
+    it was started for and redirects to the settings form with ?google=confirmed. A refusal redirects to the app with
+    ?google= and the reason; nothing is created and no session starts. Either way the flow cookie is cleared.
+    """
+    flow, client = flow_of(request), client_of(request)
+    confirmation = flow.confirmation if flow is not None else None
+    page = APP_SETTINGS if confirmation else APP_SIGN_IN
+
+    try:
+        if flow is not None and confirmation is not None:
+            await pipeline.confirm_settings_with_google(flow, confirmation, state, code, client)
+            return back_to_app(request, APP_SETTINGS, CONFIRMED)
+
+        _, session = await pipeline.sign_in_with_google(flow, state, code, client)
+    except GoogleSignInRefused as error:
+        return back_to_app(request, page, error.refusal)
+    except SignInThrottled:
+        return back_to_app(request, page, THROTTLED)
+    except UserExistsError, AlreadySetUpError:
+        return back_to_app(request, page, GoogleRefusal.PROVIDER_FAILED)
+
+    response = back_to_app(request, APP_HOME)
+    set_session_cookie(request, response, session)
+
+    return response
 
 
 @router.post("/sign-out", status_code=status.HTTP_204_NO_CONTENT)

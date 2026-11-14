@@ -3,7 +3,7 @@ import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { useAccountHistory } from '@/features/account/api'
-import { runKeys, useFollowRun, useRun } from '@/features/runs/api'
+import { runKeys, useFollowRun, useRun, useRunsPage } from '@/features/runs/api'
 import { useWatchlistEntries } from '@/features/watchlist/api'
 import { session } from '@/shared/api'
 import { TEST_USER } from '@/test/users'
@@ -20,7 +20,9 @@ function fakeBackend() {
       server.running = false
       return json({ run_id: '22222222-2222-4222-8222-222222222222' })
     }
-    if (url === `/v1/runs/${RUN}`) return json({ run_id: RUN, state: server.running ? 'running' : 'finished', error: null, summary: null, reports: [] })
+    const run = { run_id: RUN, state: server.running ? 'running' : 'finished', error: null, summary: null, reports: [] }
+    if (url === `/v1/runs/${RUN}`) return json(run)
+    if (url.startsWith('/v1/runs?')) return json([run])
     if (url.startsWith('/v1/account/history')) {
       const value = { cash: server.running ? 1000 : 400, market_value: 0, unrealized_pnl: 0, equity: 1000, positions: [] }
       return json({ current: value, live_stock_ids: [], equity_curve: {}, as_of: null, execution_provider: 'mock' })
@@ -32,7 +34,7 @@ function fakeBackend() {
 }
 
 function Holdings() {
-  const account = useAccountHistory('mock', null)
+  const account = useAccountHistory(null)
   const watchlist = useWatchlistEntries()
   return <p>{account.data && watchlist.data ? `cash ${account.data.current.cash}, watching ${watchlist.data.length}` : 'loading'}</p>
 }
@@ -49,6 +51,11 @@ function FollowButton() {
 function RunState() {
   const run = useRun(RUN)
   return <p>{run.data?.state ?? 'loading'}</p>
+}
+
+function RunsList() {
+  const page = useRunsPage(0)
+  return <p>{page.data ? `runs: ${page.data.runs.map((run) => run.state).join(', ')}` : 'loading'}</p>
 }
 
 describe('a run that ends', () => {
@@ -73,6 +80,27 @@ describe('a run that ends', () => {
     backend.server.running = false
     await act(() => client.refetchQueries({ queryKey: runKeys.run(RUN) }))
     expect(await screen.findByText('finished')).toBeInTheDocument()
+
+    render(<Holdings />, { wrapper })
+    expect(await screen.findByText('cash 400, watching 1')).toBeInTheDocument()
+  })
+
+  it('makes them load again when only the list of runs was open to see it end', async () => {
+    const backend = fakeBackend()
+    vi.stubGlobal('fetch', backend.fetch)
+    session.signIn(TEST_USER)
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 60_000 } } })
+    const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
+
+    const before = render(<Holdings />, { wrapper })
+    expect(await screen.findByText('cash 1000, watching 0')).toBeInTheDocument()
+    before.unmount()
+
+    render(<RunsList />, { wrapper })
+    expect(await screen.findByText('runs: running')).toBeInTheDocument()
+    backend.server.running = false
+    await act(() => client.refetchQueries({ queryKey: runKeys.page(0) }))
+    expect(await screen.findByText('runs: finished')).toBeInTheDocument()
 
     render(<Holdings />, { wrapper })
     expect(await screen.findByText('cash 400, watching 1')).toBeInTheDocument()

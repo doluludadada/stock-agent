@@ -289,6 +289,34 @@
     ],
     "unique": []
   },
+  "ex_right_reference_spans": {
+    "columns": {
+      "first_date": {
+        "class": "Date",
+        "nullable": false,
+        "postgresql": "DATE",
+        "sqlite": "DATE"
+      },
+      "last_date": {
+        "class": "Date",
+        "nullable": false,
+        "postgresql": "DATE",
+        "sqlite": "DATE"
+      },
+      "market": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR",
+        "sqlite": "VARCHAR"
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "primary_key": [
+      "market"
+    ],
+    "unique": []
+  },
   "ex_right_references": {
     "columns": {
       "reference_price": {
@@ -447,6 +475,69 @@
     "primary_key": [
       "market",
       "session_date"
+    ],
+    "unique": []
+  },
+  "listed_history_revision": {
+    "columns": {
+      "revision": {
+        "class": "Integer",
+        "nullable": false,
+        "postgresql": "INTEGER",
+        "sqlite": "INTEGER"
+      },
+      "row": {
+        "class": "Integer",
+        "nullable": false,
+        "postgresql": "INTEGER",
+        "sqlite": "INTEGER"
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "primary_key": [
+      "row"
+    ],
+    "unique": []
+  },
+  "manual_holdings": {
+    "columns": {
+      "average_cost": {
+        "class": "Float",
+        "nullable": false,
+        "postgresql": "FLOAT",
+        "sqlite": "FLOAT"
+      },
+      "opened_at": {
+        "class": "UtcDateTime",
+        "nullable": true,
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
+        "sqlite": "DATETIME"
+      },
+      "owner_id": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR",
+        "sqlite": "VARCHAR"
+      },
+      "quantity": {
+        "class": "Integer",
+        "nullable": false,
+        "postgresql": "INTEGER",
+        "sqlite": "INTEGER"
+      },
+      "stock_id": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR",
+        "sqlite": "VARCHAR"
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "primary_key": [
+      "owner_id",
+      "stock_id"
     ],
     "unique": []
   },
@@ -1005,6 +1096,59 @@
     ],
     "unique": []
   },
+  "ranking_records": {
+    "columns": {
+      "content": {
+        "class": "Text",
+        "nullable": false,
+        "postgresql": "TEXT",
+        "sqlite": "TEXT"
+      },
+      "decided_on": {
+        "class": "Date",
+        "nullable": false,
+        "postgresql": "DATE",
+        "sqlite": "DATE"
+      },
+      "previous_hash": {
+        "class": "AutoString",
+        "nullable": true,
+        "postgresql": "VARCHAR(64)",
+        "sqlite": "VARCHAR(64)"
+      },
+      "record_hash": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR(64)",
+        "sqlite": "VARCHAR(64)"
+      },
+      "sequence": {
+        "class": "Integer",
+        "nullable": false,
+        "postgresql": "INTEGER",
+        "sqlite": "INTEGER"
+      },
+      "timestamp_proof": {
+        "class": "LargeBinary",
+        "nullable": true,
+        "postgresql": "BYTEA",
+        "sqlite": "BLOB"
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "primary_key": [
+      "sequence"
+    ],
+    "unique": [
+      [
+        "decided_on"
+      ],
+      [
+        "record_hash"
+      ]
+    ]
+  },
   "run_stock_reports": {
     "columns": {
       "owner_id": {
@@ -1059,6 +1203,95 @@
     "indexes": [],
     "primary_key": [
       "version"
+    ],
+    "unique": []
+  },
+  "stock_briefs": {
+    "columns": {
+      "claimed_at": {
+        "class": "UtcDateTime",
+        "nullable": false,
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
+        "sqlite": "DATETIME"
+      },
+      "company": {
+        "class": "Text",
+        "nullable": false,
+        "postgresql": "TEXT",
+        "sqlite": "TEXT"
+      },
+      "day": {
+        "class": "Date",
+        "nullable": false,
+        "postgresql": "DATE",
+        "sqlite": "DATE"
+      },
+      "language": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR",
+        "sqlite": "VARCHAR"
+      },
+      "model": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR",
+        "sqlite": "VARCHAR"
+      },
+      "movement": {
+        "class": "Text",
+        "nullable": false,
+        "postgresql": "TEXT",
+        "sqlite": "TEXT"
+      },
+      "price_change": {
+        "class": "Float",
+        "nullable": true,
+        "postgresql": "FLOAT",
+        "sqlite": "FLOAT"
+      },
+      "sources": {
+        "class": "Text",
+        "nullable": false,
+        "postgresql": "TEXT",
+        "sqlite": "TEXT"
+      },
+      "status": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR",
+        "sqlite": "VARCHAR"
+      },
+      "stock_id": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR",
+        "sqlite": "VARCHAR"
+      },
+      "window_first": {
+        "class": "Date",
+        "nullable": true,
+        "postgresql": "DATE",
+        "sqlite": "DATE"
+      },
+      "window_last": {
+        "class": "Date",
+        "nullable": true,
+        "postgresql": "DATE",
+        "sqlite": "DATE"
+      },
+      "written_at": {
+        "class": "UtcDateTime",
+        "nullable": true,
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
+        "sqlite": "DATETIME"
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "primary_key": [
+      "stock_id",
+      "day"
     ],
     "unique": []
   },

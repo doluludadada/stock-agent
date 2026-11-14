@@ -51,7 +51,7 @@ export function RankingRecord({ choice, today, onChoose, query }: RankingRecordP
   /** The period before stays on screen, dimmed, while the one chosen is computed. */
   const replacing = query.isPlaceholderData
   return (
-    <div className="min-w-0 space-y-4 lg:space-y-5">
+    <div className="card-stack">
       <Panel title={backtest ? t('record.title', { benchmark: backtest.benchmark_id }) : t('record.titlePending')} description={t('record.question')}>
         <div className="space-y-4">
           <PeriodChooser key={JSON.stringify(choice)} choice={choice} today={today} shown={backtest && !replacing ? spanOf(backtest) : null} onChoose={onChoose} />
@@ -68,7 +68,7 @@ export function RankingRecord({ choice, today, onChoose, query }: RankingRecordP
         </div>
       </Panel>
       {backtest && (
-        <div className={cn('space-y-4 lg:space-y-5', replacing && 'opacity-50')} aria-busy={replacing}>
+        <div className={cn('card-stack', replacing && 'opacity-50')} aria-busy={replacing}>
           <CurvePanel key={`${backtest.first}:${backtest.last}`} backtest={backtest} />
           <YearsPanel backtest={backtest} />
         </div>
@@ -237,7 +237,7 @@ function Verdict({ backtest }: { backtest: RankingBacktest }) {
         {idle > 0 && <li>{t('record.idle', { count: idle })}</li>}
         <li>
           {t('record.caveat')}{' '}
-          <a href="#ranking-caveats" className="text-brand underline-offset-4 hover:underline">
+          <a href="#ranking-caveats" className="tap text-brand underline-offset-4 hover:underline">
             {t('record.caveatLink')}
           </a>
         </li>

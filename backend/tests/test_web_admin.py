@@ -108,13 +108,16 @@ async def test_the_form_lists_every_setting_with_the_value_on_disk_and_never_a_s
     fields = {field["path"]: field for field in answer.json()}
     assert fields["ai.temperature"] == {
         "path": "ai.temperature",
-        "kind": "number",
+        "kind": "range",
+        "group": "ai",
         "value": 0.7,
         "options": [],
+        "steps": [],
         "minimum": 0.0,
         "maximum": 2.0,
-        "exclusive_minimum": None,
-        "exclusive_maximum": None,
+        "step": 0.1,
+        "unit": None,
+        "nullable": False,
         "restart_only": False,
     }
     assert (fields["ai.available_models"]["kind"], fields["ai.available_models"]["value"]["claude"]) == (
@@ -123,7 +126,7 @@ async def test_the_form_lists_every_setting_with_the_value_on_disk_and_never_a_s
     )
     assert (fields["environment"]["value"], fields["environment"]["restart_only"]) == ("dev", True)
     assert fields["ai.system_prompt"]["kind"] == "text" and fields["ai.system_prompt"]["value"].startswith("You are an expert")
-    assert fields["api.settings_poll_seconds"]["value"] == 2 and "\napi:" not in text_of(project)
+    assert fields["api.valuation_cache_minutes"]["value"] == 15 and "\napi:" not in text_of(project)
     assert "test-key" not in answer.text and "A" * 43 not in answer.text and "api_key" not in answer.text
 
 
@@ -220,14 +223,8 @@ async def test_every_save_needs_the_password_in_the_same_request_and_a_wrong_one
 
 @pytest.mark.parametrize(
     ("path", "value"),
-    [
-        ("sources.ai.nvidia_base_url", "https://attacker.example/v1"),
-        ("sources.line.push_url", "https://attacker.example/push"),
-        ("market.board_lot_shares", 1),
-        ("accounts.settings_password_failures", 1000),
-        ("trading.max_daily_buy_value", 30_000_000),
-    ],
-    ids=["ai-base-url", "line-push-url", "board-lot", "password-limit", "daily-buy-limit"],
+    [("market.board_lot_shares", 1), ("accounts.settings_password_failures", 1000), ("trading.max_daily_buy_value", 30_000_000)],
+    ids=["board-lot", "password-limit", "daily-buy-limit"],
 )
 async def test_a_stolen_session_alone_changes_no_setting(project: Path, path: str, value: Any) -> None:
     original = text_of(project)
@@ -298,7 +295,7 @@ async def test_a_change_to_the_value_a_field_shows_answers_the_form_and_writes_n
     async with app_of(admin_harness(project)) as app, client_at(app) as client:
         assert (await sign_in(client, ADMINISTRATOR.username, ADMINISTRATOR_PASSWORD)).status_code == 200
         running = app.state.runtime_switch.running
-        response = await save(client, ("ai.temperature", 0.7), ("api.settings_poll_seconds", 2))
+        response = await save(client, ("ai.temperature", 0.7), ("api.valuation_cache_minutes", 15))
 
     assert values_of(response)["ai.temperature"] == 0.7 and app.state.runtime_switch.running == running
     assert text_of(project) == original and not (project / ".settings-admin").exists()
@@ -348,21 +345,27 @@ async def test_wrong_passwords_have_their_own_limit_and_never_lock_the_sign_in(p
 
 @pytest.mark.parametrize(
     ("path", "value"),
-    [("api.allowed_hosts", ["admin.example"]), ("api.settings_file_max_bytes", 1000)],
-    ids=["host-left-out", "files-too-large"],
+    [
+        ("api.allowed_hosts", ["admin.example"]),
+        ("sources.ai.nvidia_base_url", "https://attacker.example/v1"),
+        ("db.backend", "postgresql"),
+        ("market.stock_ticks", {"0": "1"}),
+    ],
+    ids=["hosts", "ai-base-url", "database", "ticks"],
 )
-async def test_a_save_that_would_lock_the_administrator_out_of_the_editor_is_refused_at_that_setting(
+async def test_a_setting_only_an_operator_changes_is_not_on_the_form_and_a_save_that_names_it_writes_nothing(
     project: Path, path: str, value: Any
 ) -> None:
     original = text_of(project)
 
     async with serve(admin_harness(project)) as client:
-        response = await save(client, (path, value))
-        after = await client.get(SETTINGS)
+        response = await save(client, ("ai.temperature", 0.6), (path, value))
+        form = await client.get(SETTINGS)
 
-    [problem] = response.json()["problems"]
-    assert (response.status_code, problem["path"]) == (422, path)
-    assert text_of(project) == original and after.status_code == 200
+    assert (response.status_code, response.json()["code"]) == (422, "settings_edit_refused")
+    assert response.json()["detail"].startswith(f"{path} ") and "attacker" not in response.text
+    assert text_of(project) == original and not (project / ".settings-admin").exists()
+    assert path not in values_of(form) and values_of(form)["ai.temperature"] == 0.7
 
 
 async def test_a_prompt_too_large_for_the_editor_is_refused_not_failed(project: Path) -> None:
@@ -490,7 +493,7 @@ async def test_a_save_of_the_run_cap_applies_to_the_next_run_started(project: Pa
     async with app_of(harness) as app, client_at(app) as administrator, client_at(app, "127.0.0.2") as member:
         assert (await sign_in(administrator, ADMINISTRATOR.username, ADMINISTRATOR_PASSWORD)).status_code == 200
         assert (await sign_in(member, MEMBER.username, MEMBER_PASSWORD)).status_code == 200
-        saved = await save(administrator, ("accounts.max_concurrent_runs", 1))
+        saved = await save(administrator, ("accounts.max_concurrent_runs", 1), ("features.full_cycle", "everyone"))
         running = await administrator.post("/v1/runs/full-cycle", json={"confirm": True})
         refused = await member.post("/v1/runs/full-cycle", json={"confirm": True})
         release.set()
@@ -499,13 +502,14 @@ async def test_a_save_of_the_run_cap_applies_to_the_next_run_started(project: Pa
     assert (values_of(saved)["accounts.max_concurrent_runs"], running.status_code, refused.status_code) == (1, 202, 429)
 
 
-async def test_a_save_of_the_log_level_applies_at_once(project: Path) -> None:
+async def test_a_log_level_changed_in_the_file_applies_at_the_reload(project: Path) -> None:
     harness = admin_harness(project)
 
-    async with serve(harness) as client:
-        saved = await save(client, ("behavior.log_level", "WARNING"))
+    async with app_of(harness) as app:
+        write_by_hand(project, "log_level: DEBUG", "log_level: WARNING")
+        await app.state.runtime_switch.reload()
 
-    assert (values_of(saved)["behavior.log_level"], harness.logger.level) == ("WARNING", "WARNING")
+    assert harness.logger.level == "WARNING"
 
 
 async def test_a_save_whose_audit_entry_cannot_be_written_changes_neither_the_file_nor_the_running_app(project: Path) -> None:
@@ -590,7 +594,6 @@ async def test_a_database_that_cannot_be_reached_refuses_the_save_writes_nothing
     real_project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     app = create_app(lambda: open_runtime_switch(real_project))
-    text = text_of(real_project)
 
     async with app.router.lifespan_context(app), client_at(app) as client:
         await set_up_and_sign_in(app, client)
@@ -602,7 +605,9 @@ async def test_a_database_that_cannot_be_reached_refuses_the_save_writes_nothing
             "DB_NAME": "absent",
         }.items():
             monkeypatch.setenv(name, value)
-        response = await save(client, ("db.backend", "postgresql"))
+        write_by_hand(real_project, "backend: sqlite", "backend: postgresql")
+        text = text_of(real_project)
+        response = await save(client, ("ai.temperature", 0.6))
         after = await client.get("/v1/auth/me")
 
     [problem] = response.json()["problems"]
@@ -617,7 +622,6 @@ async def test_a_database_with_no_account_of_the_saving_administrator_is_refused
 ) -> None:
     app = create_app(lambda: open_runtime_switch(real_project))
     await empty_database(DatabaseBackend.POSTGRESQL, real_project)
-    text = text_of(real_project)
 
     async with app.router.lifespan_context(app), client_at(app) as client:
         await set_up_and_sign_in(app, client)
@@ -625,7 +629,9 @@ async def test_a_database_with_no_account_of_the_saving_administrator_is_refused
         credentials = {"DB_USER": url.username, "DB_PASSWORD": url.password or "trial", "DB_HOST": url.host, "DB_NAME": url.database}
         for name, value in {**credentials, "DB_PORT": str(url.port or 5432)}.items():
             monkeypatch.setenv(name, str(value))
-        response = await save(client, ("db.backend", "postgresql"))
+        write_by_hand(real_project, "backend: sqlite", "backend: postgresql")
+        text = text_of(real_project)
+        response = await save(client, ("ai.temperature", 0.6))
 
     assert response.status_code == 422 and text_of(real_project) == text
     assert "no active administrator account of yours" in response.json()["problems"][0]["message"]

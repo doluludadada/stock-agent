@@ -1,4 +1,6 @@
+import { ArrowRight } from 'lucide-react'
 import { useId, type ReactNode } from 'react'
+import { Link } from 'react-router'
 import { cn } from '@/shared/lib/utils'
 
 interface PanelProps {
@@ -15,6 +17,16 @@ interface PanelProps {
   /** Tables and lists run edge to edge; everything else gets the body padding. */
   flush?: boolean
   className?: string
+}
+
+/** A card's way to the page that holds the whole of what it shows, for the right side of its title row. */
+export function PanelLink({ to, children }: { to: string; children: ReactNode }) {
+  return (
+    <Link to={to} className="tap -my-3 gap-1 rounded-md text-sm font-medium text-brand underline-offset-4 hover:underline md:my-0">
+      {children}
+      <ArrowRight aria-hidden className="size-3.5 shrink-0" />
+    </Link>
+  )
 }
 
 /**

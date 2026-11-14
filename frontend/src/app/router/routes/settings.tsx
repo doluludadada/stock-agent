@@ -1,6 +1,8 @@
 import { MockAccountPanel } from '@/features/account'
 import { MySettingsPage } from '@/features/auth'
+import { useShows } from '@/shared/api'
 
 export function MySettingsRoute() {
-  return <MySettingsPage mockAccount={<MockAccountPanel />} />
+  const mock = useShows('mock_account')
+  return <MySettingsPage mockAccount={mock ? <MockAccountPanel /> : undefined} />
 }

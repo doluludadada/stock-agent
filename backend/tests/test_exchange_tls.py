@@ -83,7 +83,12 @@ async def test_exchange_clients_keep_certificate_verification_on(clients: list[d
 async def test_news_and_ptt_clients_keep_certificate_verification_on(clients: list[dict[str, Any]], tmp_path: Path) -> None:
     CnyesNewsProvider(SOURCES.news, SilentLogger())
     YahooTwNewsProvider(SOURCES.news, SilentLogger())
-    PttProvider(config=shipped_config(tmp_path), logger=SilentLogger(), stock_provider=StockDirectory())
+    PttProvider(
+        config=shipped_config(tmp_path),
+        logger=SilentLogger(),
+        stock_provider=StockDirectory(),
+        market_clock=TaiwanMarketClock(MarketHoursConfig()),
+    )
 
     assert len(clients) == 3
     assert [client.get("verify", True) for client in clients] == [True] * 3
@@ -93,7 +98,9 @@ async def test_news_and_ptt_clients_send_the_headers_their_settings_name(clients
     config = shipped_config(tmp_path)
     CnyesNewsProvider(SOURCES.news, SilentLogger())
     YahooTwNewsProvider(SOURCES.news, SilentLogger())
-    PttProvider(config=config, logger=SilentLogger(), stock_provider=StockDirectory())
+    PttProvider(
+        config=config, logger=SilentLogger(), stock_provider=StockDirectory(), market_clock=TaiwanMarketClock(MarketHoursConfig())
+    )
 
     assert [client["headers"] for client in clients] == [
         {"Accept": "application/json", "User-Agent": SOURCES.news.cnyes_user_agent},

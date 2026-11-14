@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { I18nextProvider } from 'react-i18next'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import { builtInJson } from '@/features/strategies/model/built-ins.test-support'
@@ -8,17 +8,19 @@ import { session } from '@/shared/api'
 import { ThemeProvider } from '@/shared/lib/theme'
 import { TooltipProvider } from '@/shared/ui/tooltip'
 import { PERSONAL_SITE, PUBLIC_SITE } from '@/test/audiences'
-import { TEST_USER } from '@/test/users'
+import { OPEN_SITE, siteShowing } from '@/test/features'
+import { TEST_ADMIN, TEST_USER } from '@/test/users'
 import { routes } from './router/router'
 
 const BALANCED = builtInJson('balanced')
+const ADMINISTRATOR = { ...TEST_ADMIN, permissions: [...TEST_ADMIN.permissions, 'see_administrator_features' as const] }
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 
 /** The whole app at `path`, for a signed-in user with no run yet or for a visitor, on the owner's site or a public one. */
-function renderApp(path: string, viewer: 'user' | 'visitor', site = PERSONAL_SITE) {
+function renderApp(path: string, viewer: 'user' | 'visitor' | 'administrator', site = PERSONAL_SITE, status = OPEN_SITE) {
   const fetch = vi.fn(async (url: string) => {
-    if (url === '/v1/auth/status') return json({ needs_first_administrator: false, registration_open: true })
-    if (url === '/v1/auth/me') return viewer === 'user' ? json(TEST_USER) : json({ detail: 'Sign in first.', code: 'unauthorized' }, 401)
+    if (url === '/v1/auth/status') return json(status)
+    if (url === '/v1/auth/me') return viewer === 'visitor' ? json({ detail: 'Sign in first.', code: 'unauthorized' }, 401) : json(viewer === 'user' ? TEST_USER : ADMINISTRATOR)
     if (url === '/v1/market/audience') return json(site)
     if (url === '/v1/market/archive-status') return json({ sessions: 3, needed: 61 })
     if (url.startsWith('/v1/runs?')) return json([])
@@ -27,8 +29,8 @@ function renderApp(path: string, viewer: 'user' | 'visitor', site = PERSONAL_SIT
     return json({ detail: 'Not Found', code: 'not_found' }, 404)
   })
   vi.stubGlobal('fetch', fetch)
-  if (viewer === 'user') session.signIn(TEST_USER)
-  else session.signOut()
+  if (viewer === 'visitor') session.signOut()
+  else session.signIn(viewer === 'user' ? TEST_USER : ADMINISTRATOR)
   const router = createMemoryRouter(routes, { initialEntries: [path] })
   const view = render(
     <I18nextProvider i18n={initI18n('en')}>
@@ -45,6 +47,15 @@ function renderApp(path: string, viewer: 'user' | 'visitor', site = PERSONAL_SIT
 }
 
 const texts = (elements: HTMLElement[]) => elements.map((element) => element.textContent)
+const asked = (fetch: ReturnType<typeof renderApp>['fetch'], prefix: string) => fetch.mock.calls.map(([url]) => url).filter((url) => url.startsWith(prefix))
+
+const TOOLS = ['Analysis runs', 'Mock account', 'Valuation', 'Strategy library', 'Backtest', 'Formula designer']
+const CARDS = ['TAIEX', "This month's ranking", 'My holdings', 'Watchlist']
+/** The home page's cards by their titles, in reading order. */
+const cards = () =>
+  within(screen.getByRole('main'))
+    .getAllByRole('region')
+    .map((card) => within(card).getByRole('heading', { level: 2 }).textContent)
 
 describe('the home page', { timeout: 20_000 }, () => {
   beforeEach(() => {
@@ -58,36 +69,83 @@ describe('the home page', { timeout: 20_000 }, () => {
     window.localStorage.clear()
   })
 
-  it('is the market overview, after the ranking in the navigation and in the phone’s tab bar', async () => {
+  it('is Today, first in the navigation and in the phone’s tab bar, with a card for each feature that leads to its page', async () => {
     renderApp('/', 'user')
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Market overview' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: 'Today' })).toBeInTheDocument()
+    const main = screen.getByRole('main')
+    await waitFor(() => expect(cards()).toEqual(CARDS))
+    const ways = { TAIEX: ['Market overview', '/market'], "This month's ranking": ['All 20 and the backtest', '/ranking'], 'My holdings': ['Every holding', '/holdings'], Watchlist: ['The whole list', '/watchlist'] }
+    for (const [card, [name, to]] of Object.entries(ways)) expect(within(within(main).getByRole('region', { name: card })).getByRole('link', { name })).toHaveAttribute('href', to)
+    expect(within(main).queryByRole('link', { name: 'Sign in' }), 'a signed-in reader is asked nothing').not.toBeInTheDocument()
+
     const nav = screen.getByRole('navigation', { name: 'Main navigation' })
-    expect(texts(within(nav).getAllByText(/^(Research|Mine|Technical strategies)$/))).toEqual(['Research', 'Mine', 'Technical strategies'])
-    expect(texts(within(nav).getAllByRole('link'))).toEqual(['Revenue ranking', 'Market overview', 'Valuation', 'Watchlist', 'Mock account', 'My settings'])
+    expect(texts(within(nav).getAllByText(/^(Today|Research|Mine|Other tools)$/)), 'the home page stands alone, under no heading').toEqual(['Today', 'Research', 'Mine', 'Other tools'])
+    expect(texts(within(nav).getAllByRole('link'))).toEqual(['Today', 'Revenue ranking', 'Market overview', 'My holdings', 'Watchlist', 'My settings'])
+    expect(within(nav).getByRole('link', { name: 'Today' })).toHaveAttribute('aria-current', 'page')
     const tabs = screen.getByRole('navigation', { name: 'Main pages' })
-    expect(texts(within(tabs).getAllByRole('link'))).toEqual(['Ranking', 'Market', 'Watchlist', 'Account'])
-    expect(within(tabs).getByRole('link', { name: 'Market' })).toHaveAttribute('aria-current', 'page')
+    expect(texts(within(tabs).getAllByRole('link'))).toEqual(['Today', 'Ranking', 'Holdings'])
+    expect(within(tabs).getByRole('link', { name: 'Today' })).toHaveAttribute('aria-current', 'page')
   })
 
-  it('keeps the technical-strategy pages in a section that opens on a click and stays as the reader left it', async () => {
+  it('shows a visitor the public card and one invitation to sign in, in place of the cards that need an account', async () => {
+    const { fetch } = renderApp('/', 'visitor')
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Today' })).toBeInTheDocument()
+    const main = screen.getByRole('main')
+    expect(await within(main).findByRole('region', { name: 'TAIEX' })).toBeInTheDocument()
+    expect(cards()).toEqual(['TAIEX'])
+    expect(within(main).getAllByRole('link', { name: 'Sign in' }), 'one invitation, not one per private card').toHaveLength(1)
+    expect(within(main).getByRole('link', { name: 'Sign in' }), 'signing in comes back home').toHaveAttribute('href', '/sign-in')
+    expect(within(main).getAllByText(/^Sign in to /)).toHaveLength(1)
+    const holds = within(within(main).getByText('Your account keeps').parentElement!).getAllByRole('listitem')
+    expect(holds).toHaveLength(3)
+    for (const [index, name] of ['Revenue ranking', 'My holdings', 'Watchlist'].entries()) expect(within(holds[index]!).getByText(name)).toBeInTheDocument()
+    for (const owned of ['/v1/ranking', '/v1/holdings', '/v1/watchlist']) expect(asked(fetch, owned), owned).toEqual([])
+  })
+
+  it.each([
+    ['/', 'Today'],
+    ['/ranking', 'Monthly revenue ranking'],
+    ['/market', 'Market overview'],
+    ['/holdings', 'My holdings'],
+  ])('names the browser tab on %s after the page', async (path, title) => {
+    renderApp(path, 'user')
+
+    expect(await screen.findByRole('heading', { level: 1, name: title })).toBeInTheDocument()
+    expect(document.title).toBe(`${title} · Stock Agent`)
+  })
+
+  it('moves the focus to the page’s content after a navigation, and leaves it alone on the first page', async () => {
+    renderApp('/', 'user')
+    const nav = await screen.findByRole('navigation', { name: 'Main navigation' })
+    expect(await screen.findByRole('heading', { level: 1, name: 'Today' })).toBeInTheDocument()
+    expect(document.activeElement).not.toBe(screen.getByRole('main'))
+
+    fireEvent.click(within(nav).getByRole('link', { name: 'Market overview' }))
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Market overview' })).toBeInTheDocument()
+    expect(document.activeElement).toBe(screen.getByRole('main'))
+  })
+
+  it('keeps the other tools in a section that opens on a click and stays as the reader left it', async () => {
     const first = renderApp('/', 'user')
     const nav = await screen.findByRole('navigation', { name: 'Main navigation' })
-    const section = within(nav).getByRole('button', { name: 'Technical strategies' })
+    const section = within(nav).getByRole('button', { name: 'Other tools' })
     expect(section).toHaveAttribute('aria-expanded', 'false')
-    expect(within(nav).queryByText(/did not profit/)).not.toBeInTheDocument()
+    expect(within(nav).queryByText('Supporting analysis tools.')).not.toBeInTheDocument()
 
     fireEvent.click(section)
 
     expect(section).toHaveAttribute('aria-expanded', 'true')
-    expect(within(nav).getByText('Did not profit in a backtest. Every page is kept.')).toBeInTheDocument()
-    expect(texts(within(nav).getAllByRole('link')).slice(6)).toEqual(['Analysis runs', 'Strategy library', 'Backtest', 'Formula designer'])
+    expect(within(nav).getByText('Supporting analysis tools.')).toBeInTheDocument()
+    expect(texts(within(nav).getAllByRole('link')).slice(6)).toEqual(TOOLS)
 
     first.unmount()
     renderApp('/', 'user')
     const again = await screen.findByRole('navigation', { name: 'Main navigation' })
-    expect(within(again).getByRole('button', { name: 'Technical strategies' }), 'the browser remembers').toHaveAttribute('aria-expanded', 'true')
-    fireEvent.click(within(again).getByRole('button', { name: 'Technical strategies' }))
+    expect(within(again).getByRole('button', { name: 'Other tools' }), 'the browser remembers').toHaveAttribute('aria-expanded', 'true')
+    fireEvent.click(within(again).getByRole('button', { name: 'Other tools' }))
     expect(within(again).queryByRole('link', { name: 'Backtest' })).not.toBeInTheDocument()
   })
 
@@ -101,7 +159,7 @@ describe('the home page', { timeout: 20_000 }, () => {
     renderApp('/', 'user')
     const nav = await screen.findByRole('navigation', { name: 'Main navigation' })
 
-    fireEvent.click(within(nav).getByRole('button', { name: 'Technical strategies' }))
+    fireEvent.click(within(nav).getByRole('button', { name: 'Other tools' }))
 
     expect(within(nav).getByRole('link', { name: 'Strategy library' })).toBeInTheDocument()
   })
@@ -112,20 +170,31 @@ describe('the home page', { timeout: 20_000 }, () => {
       renderApp(path, 'user')
 
       const nav = await screen.findByRole('navigation', { name: 'Main navigation' })
-      const section = within(nav).getByRole('button', { name: 'Technical strategies' })
+      const section = within(nav).getByRole('button', { name: 'Other tools' })
       expect(section).toHaveAttribute('aria-expanded', 'true')
       expect(section, 'it cannot close over the page the reader is on').toBeDisabled()
       expect(within(nav).getAllByRole('link', { current: 'page' })).toHaveLength(1)
-      const note = await within(screen.getByRole('main')).findByText(/The built-in technical strategies did not profit in a backtest/)
+      const note = await within(screen.getByRole('main')).findByText(/The technical strategies are supporting analysis tools/)
       expect(within(note).getByRole('link', { name: 'Open the ranking' })).toHaveAttribute('href', '/ranking')
     },
   )
 
-  it('takes an old link to the market overview home, with the research target it named', async () => {
-    const { router } = renderApp('/market?target=2330', 'user')
+  it.each(['/account', '/valuation'])('shows the section open on %s too, the tools that moved in beside the technical strategies', async (path) => {
+    renderApp(path, 'user')
+
+    const nav = await screen.findByRole('navigation', { name: 'Main navigation' })
+    expect(await within(nav).findByRole('button', { name: 'Other tools' })).toBeDisabled()
+    await waitFor(() => expect(texts(within(nav).getAllByRole('link', { current: 'page' }))).toEqual([path === '/account' ? 'Mock account' : 'Valuation']))
+  })
+
+  it('opens the market overview at its own address, with the research target a link named', async () => {
+    const { router, fetch } = renderApp('/market?target=2330', 'user')
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Market overview' })).toBeInTheDocument()
-    expect([router.state.location.pathname, router.state.location.search]).toEqual(['/', '?target=2330'])
+    expect([router.state.location.pathname, router.state.location.search]).toEqual(['/market', '?target=2330'])
+    expect(within(screen.getByRole('navigation', { name: 'Main navigation' })).getByRole('link', { name: 'Market overview' })).toHaveAttribute('aria-current', 'page')
+    expect(within(screen.getByRole('navigation', { name: 'Main pages' })).queryByRole('link', { current: 'page' }), 'the overview is in the sheet of all pages').not.toBeInTheDocument()
+    expect(asked(fetch, '/v1/technical-settings'), 'the overview carries no strategy card').toEqual([])
   })
 
   it('keeps the analysis runs at their own address, which the tab bar reaches through its more button', async () => {
@@ -140,15 +209,15 @@ describe('the home page', { timeout: 20_000 }, () => {
     expect(within(sheet).getByRole('link', { name: 'Analysis runs' })).toHaveAttribute('aria-current', 'page')
   })
 
-  it('folds the technical-strategy pages in the phone’s sheet of all pages too, one tap from each', async () => {
+  it('folds the other tools in the phone’s sheet of all pages too, one tap from each', async () => {
     renderApp('/', 'user')
     fireEvent.click(within(await screen.findByRole('navigation', { name: 'Main pages' })).getByRole('button', { name: 'More' }))
     const sheet = await screen.findByRole('dialog', { name: 'All pages' })
-    expect(texts(within(sheet).getAllByRole('link'))).toEqual(['Revenue ranking', 'Market overview', 'Valuation', 'Watchlist', 'Mock account', 'My settings'])
+    expect(texts(within(sheet).getAllByRole('link')), 'the watchlist and the market, which the tab bar leaves out').toEqual(['Today', 'Revenue ranking', 'Market overview', 'My holdings', 'Watchlist', 'My settings'])
 
-    fireEvent.click(within(sheet).getByRole('button', { name: 'Technical strategies' }))
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Other tools' }))
 
-    expect(texts(within(sheet).getAllByRole('link')).slice(6)).toEqual(['Analysis runs', 'Strategy library', 'Backtest', 'Formula designer'])
+    expect(texts(within(sheet).getAllByRole('link')).slice(6)).toEqual(TOOLS)
   })
 
   it('marks the analysis runs in the sidebar on a run’s own page', async () => {
@@ -168,7 +237,7 @@ describe('the home page', { timeout: 20_000 }, () => {
     for (const kind of ['Full Cycle', 'Specific stocks', 'Social Buzz', 'Intraday']) expect(within(main).getByText(kind)).toBeInTheDocument()
     expect(within(main).getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/sign-in?next=%2Fruns')
     expect(within(main).getByRole('link', { name: 'Create account' })).toHaveAttribute('href', '/register')
-    expect(within(main).getByRole('link', { name: 'Market overview' })).toHaveAttribute('href', '/')
+    expect(within(main).getByRole('link', { name: 'Market overview' })).toHaveAttribute('href', '/market')
     expect(within(main).queryByRole('button', { name: 'Start' })).not.toBeInTheDocument()
   })
 
@@ -189,7 +258,7 @@ describe('the home page', { timeout: 20_000 }, () => {
     expect(within(main).getByText('Two workflows; one of yours runs at a time')).toBeInTheDocument()
     expect((await within(main).findByRole('region', { name: 'Open-data archive' })).textContent).toContain('Data accumulating 3/61')
     const nav = screen.getByRole('navigation', { name: 'Main navigation' })
-    expect(texts(within(nav).getAllByRole('link'))).toEqual(['Revenue ranking', 'Market overview', 'Watchlist', 'Mock account', 'My settings', 'Analysis runs', 'Strategy library', 'Backtest', 'Formula designer'])
+    expect(texts(within(nav).getAllByRole('link'))).toEqual(['Today', 'Revenue ranking', 'Market overview', 'My holdings', 'Watchlist', 'My settings', ...TOOLS.filter((tool) => tool !== 'Valuation')])
   })
 
   it('says why a public site has no valuation when a link opens it, and asks the server for none', async () => {
@@ -197,12 +266,72 @@ describe('the home page', { timeout: 20_000 }, () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: 'This site offers no valuation' })).toBeInTheDocument()
     expect(screen.getByText(/no MOPS income statements/)).toBeInTheDocument()
-    expect(fetch.mock.calls.map(([url]) => url).filter((url) => url.startsWith('/v1/valuation'))).toEqual([])
+    expect(asked(fetch, '/v1/valuation')).toEqual([])
   })
 
   it('opens the valuation on the owner’s site', async () => {
     renderApp('/valuation', 'user')
 
     expect(await screen.findByRole('heading', { level: 1, name: 'P/E valuation' })).toBeInTheDocument()
+  })
+
+  it('hides a page the administrator turned off from the navigation, the tab bar and its own address', async () => {
+    const { fetch } = renderApp('/watchlist', 'user', PERSONAL_SITE, siteShowing({ watchlist: 'off', ranking: 'administrators' }))
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'This page does not exist' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Back to the home page' })).toHaveAttribute('href', '/')
+    const nav = screen.getByRole('navigation', { name: 'Main navigation' })
+    expect(texts(within(nav).getAllByRole('link'))).toEqual(['Today', 'Market overview', 'My holdings', 'My settings'])
+    expect(texts(within(screen.getByRole('navigation', { name: 'Main pages' })).getAllByRole('link'))).toEqual(['Today', 'Holdings'])
+    expect(asked(fetch, '/v1/watchlist')).toEqual([])
+  })
+
+  it('shows a feature kept for administrators to an administrator, and to nobody else', async () => {
+    const status = siteShowing({ ranking: 'administrators' })
+    const first = renderApp('/', 'administrator', PERSONAL_SITE, status)
+    expect(await within(await screen.findByRole('navigation', { name: 'Main navigation' })).findByRole('link', { name: 'Revenue ranking' })).toBeInTheDocument()
+    expect(await within(screen.getByRole('main')).findByRole('region', { name: "This month's ranking" })).toBeInTheDocument()
+    first.unmount()
+
+    renderApp('/ranking', 'visitor', PERSONAL_SITE, status)
+    expect(await screen.findByRole('heading', { level: 1, name: 'This page does not exist' })).toBeInTheDocument()
+  })
+
+  it('keeps the home page whatever the site hides, without the card of a hidden feature or a request for it', async () => {
+    const { router, fetch } = renderApp('/', 'user', PERSONAL_SITE, siteShowing({ market_overview: 'off', ranking: 'off' }))
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Today' })).toBeInTheDocument()
+    await waitFor(() => expect(cards()).toEqual(['My holdings', 'Watchlist']))
+    expect(router.state.location.pathname).toBe('/')
+    for (const hidden of ['/v1/market/indexes', '/v1/market/breadth', '/v1/ranking']) expect(asked(fetch, hidden), hidden).toEqual([])
+    expect(asked(fetch, '/v1/holdings'), 'a card that shows does ask').not.toEqual([])
+  })
+
+  it('has no market overview at its address on a site that hides it, and the home page stays', async () => {
+    renderApp('/market', 'user', PERSONAL_SITE, siteShowing({ market_overview: 'off' }))
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'This page does not exist' })).toBeInTheDocument()
+    expect(texts(within(screen.getByRole('navigation', { name: 'Main navigation' })).getAllByRole('link')).slice(0, 2)).toEqual(['Today', 'Revenue ranking'])
+  })
+
+  it('has no stock search and no stock page on a site that hides stock pages', async () => {
+    renderApp('/stocks/2330', 'user', PERSONAL_SITE, siteShowing({ stock_pages: 'off' }))
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'This page does not exist' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Search stocks' })).not.toBeInTheDocument()
+    expect(texts(within(screen.getByRole('navigation', { name: 'Main pages' })).getAllByRole('button'))).toEqual(['More'])
+  })
+
+  it('offers only the analyses the site shows, and no runs page once all four are off', async () => {
+    const first = renderApp('/runs', 'user', PERSONAL_SITE, siteShowing({ buzz: 'off', full_cycle: 'off' }))
+    expect(await screen.findAllByRole('button', { name: 'Start' })).toHaveLength(2)
+    const main = screen.getByRole('main')
+    for (const kind of ['Social Buzz', 'Full Cycle']) expect(within(main).queryByText(kind)).not.toBeInTheDocument()
+    for (const kind of ['Specific stocks', 'Intraday']) expect(within(main).getByText(kind)).toBeInTheDocument()
+    expect(within(main).getByText('One of yours runs at a time')).toBeInTheDocument()
+    first.unmount()
+
+    renderApp('/runs', 'user', PERSONAL_SITE, siteShowing({ buzz: 'off', full_cycle: 'off', specific_stock: 'off', intraday: 'off' }))
+    expect(await screen.findByRole('heading', { level: 1, name: 'This page does not exist' })).toBeInTheDocument()
   })
 })

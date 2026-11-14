@@ -3,8 +3,9 @@ from typing import Any
 from fastapi import APIRouter, status
 
 from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
+from a_domain.types.enums import Feature
 from d_presentation.web.schemas import TechnicalSettingsRequest
-from d_presentation.web.session import PrivateAccess, RuntimeDependency, UserPipeline
+from d_presentation.web.session import PrivateAccess, RuntimeDependency, UserPipeline, shows
 
 router = APIRouter(prefix="/technical-settings", tags=["Technical settings"])
 
@@ -21,7 +22,7 @@ async def get_technical_settings(pipeline: UserPipeline) -> TechnicalSettings:
     return await pipeline.load_technical_settings()
 
 
-@router.put("", responses=CONFLICT, dependencies=[PrivateAccess])
+@router.put("", responses=CONFLICT, dependencies=[PrivateAccess, shows(Feature.STRATEGY_LIBRARY, Feature.STRATEGY_DESIGNER)])
 async def save_technical_settings(body: TechnicalSettingsRequest, pipeline: UserPipeline) -> TechnicalSettings:
     """
     Replaces the owner's settings as a whole, for the next workflow. Invalid settings save nothing and answer 422 with

@@ -20,7 +20,7 @@ from a_domain.rules.trading.ranking import (
     RankingHistoryRule,
     ranks,
 )
-from a_domain.rules.trading.ranking_backtest import RankingBacktestRule
+from a_domain.rules.trading.ranking_backtest import RankingBacktestRule, RankingPortfolioRule
 from a_domain.types.enums import MarketType
 from a_domain.types.errors import BacktestPeriodUnavailable
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
@@ -123,11 +123,12 @@ RULE = MonthlyRankingRule(
 )
 
 
-def ranked_market() -> RankingHistory:
+def ranked_market(listed_late: str | None = None) -> RankingHistory:
     """
     Four stocks and an ETF over three sessions, ranked at the last: 2330 at its high with revenue doubling, 2317 below
     its high with flat revenue, 1101 at its high with revenue halving, 2603 at its high without the revenue of the month
-    before, 0050 an ETF at its high and 9910 trading too little to be in the universe.
+    before, 0050 an ETF at its high and 9910 trading too little to be in the universe. `listed_late` has no bar of the
+    first session.
     """
     closes = {
         "2330": [100, 105, 110],
@@ -141,6 +142,7 @@ def ranked_market() -> RankingHistory:
         stock_id: [bar(D[day], close, volume=10 if stock_id == "9910" else 1_000_000) for day, close in enumerate(prices)]
         for stock_id, prices in closes.items()
     }
+    bars |= {stock_id: listed[1:] for stock_id, listed in bars.items() if stock_id == listed_late}
     revenues = [
         *(revenue(stock_id, 2026, 1, 100.0) for stock_id in ("2330", "2317", "1101", "0050", "9910")),
         revenue("2330", 2026, 2, 200.0),
@@ -164,6 +166,13 @@ def test_the_ranking_ranks_its_universe_by_revenue_acceleration_and_nearness_to_
     assert (ranking.stocks[1].acceleration_rank, ranking.stocks[1].nearness_rank) == (0.0, pytest.approx(2 / 3))
 
 
+def test_a_stock_listed_after_the_first_session_of_the_high_window_has_no_nearness_and_is_not_ranked() -> None:
+    ranking = RULE.apply(ranked_market(listed_late="2330"), 2, date(2026, 2, 1), {})
+
+    assert (ranking.universe, ranking.scored) == (4, 2)
+    assert [stock.stock_id for stock in ranking.stocks] == ["1101", "2317"]
+
+
 def test_a_history_too_short_for_a_factor_ranks_nothing() -> None:
     assert RULE.apply(ranked_market(), 1, date(2026, 2, 1), {}).stocks == []
     assert RULE.apply(ranked_market(), 2, date(2025, 12, 1), {}).scored == 0
@@ -174,10 +183,7 @@ REPLAY_RULE = RankingBacktestRule(
     ranking_rule=MonthlyRankingRule(
         top=2, min_close=0, min_traded_value=0, traded_value_sessions=1, high_sessions=1, short_months=1, long_months=2
     ),
-    fee_rate=0.001,
-    tax_rate=0.003,
-    benchmark_id="0050",
-    sessions_per_year=245,
+    portfolio_rule=RankingPortfolioRule(fee_rate=0.001, tax_rate=0.003, benchmark_id="0050", sessions_per_year=245),
 )
 M = [date(2026, 3, 3), date(2026, 3, 4), date(2026, 3, 5), date(2026, 4, 3), date(2026, 4, 6), date(2026, 4, 7)]
 
@@ -225,6 +231,37 @@ def test_a_stock_that_opens_locked_without_being_held_is_not_bought_and_one_that
     assert backtest.holdings[M[4]] == ["2330", "2317"]
     unlocked = REPLAY_RULE.apply(replay_market(), {}, M[0], M[-1])
     assert unlocked.holdings[M[4]] == ["1101", "2330", "2317"]
+
+
+def stuck_market(last_close: float = 80.0) -> RankingHistory:
+    """
+    March's ranking is 2330 and 2317, April's 1101 and 1216. On April 6, when April's is bought, neither of its stocks
+    trades, and nor does 2330, so 2317 is sold and 2330 is left beside cash. 2330 trades again on April 7 at `last_close`.
+    """
+    flat = {stock_id: [bar(day, 100.0) for day in M] for stock_id in ("2317", "0050")}
+    absent = {stock_id: [bar(day, 100.0) for day in M if day != M[4]] for stock_id in ("2330", "1101", "1216")}
+    absent["2330"][-1] = bar(M[5], last_close, change=last_close - 100.0)
+    revenues = [
+        *(revenue(stock_id, 2026, 1, 100.0) for stock_id in ("2330", "2317", "1101", "1216")),
+        *(
+            revenue(stock_id, 2026, 2, amount)
+            for stock_id, amount in (("2330", 300.0), ("2317", 200.0), ("1101", 100.0), ("1216", 100.0))
+        ),
+        *(
+            revenue(stock_id, 2026, 3, amount)
+            for stock_id, amount in (("2330", 100.0), ("2317", 100.0), ("1101", 300.0), ("1216", 250.0))
+        ),
+    ]
+    return history_of(flat | absent, revenues)
+
+
+def test_what_a_sale_frees_stays_cash_while_nothing_can_be_bought_so_a_stuck_holding_moves_only_its_own_share() -> None:
+    backtest = REPLAY_RULE.apply(stuck_market(), {}, M[0], M[-1])
+
+    assert backtest.holdings == {M[1]: ["2330", "2317"], M[4]: ["2330"]}
+    half_sold = (1 - 0.001) * (1 - 0.5 * 0.004)
+    assert backtest.equity_curve[M[4]] == pytest.approx(half_sold)
+    assert backtest.equity_curve[M[5]] == pytest.approx(half_sold * (1 - 0.5 * 0.2))
 
 
 def test_a_period_without_a_decision_session_is_refused_with_what_the_history_holds() -> None:

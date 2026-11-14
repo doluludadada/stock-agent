@@ -2,7 +2,7 @@ import { ArrowRight } from 'lucide-react'
 import { useId, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { useTranslation } from '@/i18n'
-import { isApiError } from '@/shared/api'
+import { isApiError, useShows } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
 import { Button } from '@/shared/ui/button'
 import { ErrorState } from '@/shared/ui/error-state'
@@ -22,21 +22,24 @@ interface MySettingsPageProps {
 /** The signed-in user's own settings: the AI model of their runs, their mock account, and where their active strategy is chosen. */
 export function MySettingsPage({ mockAccount }: MySettingsPageProps) {
   const { t } = useTranslation('auth')
+  const library = useShows('strategy_library')
   return (
-    <div className="space-y-5 lg:space-y-6">
-      <PageHeader eyebrow={t('common:nav.section.mine')} title={t('settings.title')} description={t('settings.description')} />
+    <div className="page-stack">
+      <PageHeader title={t('settings.title')} description={t('settings.description')} />
       <RequireSignIn layout="page" reason={t('settings.signIn')}>
-        <div className="grid max-w-3xl gap-4 lg:gap-5">
+        <div className="card-grid max-w-3xl">
           <AiModelPanel />
           {mockAccount}
-          <Panel title={t('settings.strategy.title')} description={t('settings.strategy.description')}>
-            <Button asChild variant="outline" size="sm">
-              <Link to={paths.strategies}>
-                {t('settings.strategy.link')}
-                <ArrowRight aria-hidden />
-              </Link>
-            </Button>
-          </Panel>
+          {library && (
+            <Panel title={t('settings.strategy.title')} description={t('settings.strategy.description')}>
+              <Button asChild variant="outline" size="sm">
+                <Link to={paths.strategies}>
+                  {t('settings.strategy.link')}
+                  <ArrowRight aria-hidden />
+                </Link>
+              </Button>
+            </Panel>
+          )}
         </div>
       </RequireSignIn>
     </div>

@@ -3,6 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, status
 
+from a_domain.types.enums import Feature
 from a_domain.types.ids import BacktestId
 from d_presentation.web.schemas import (
     BacktestOptionsResponse,
@@ -12,9 +13,9 @@ from d_presentation.web.schemas import (
     Confirmed,
     ErrorResponse,
 )
-from d_presentation.web.session import NotFound, PrivateAccess, UserPipeline
+from d_presentation.web.session import BacktestTurn, NotFound, PrivateAccess, UserPipeline, shows
 
-router = APIRouter(prefix="/backtests", tags=["Backtests"], dependencies=[PrivateAccess])
+router = APIRouter(prefix="/backtests", tags=["Backtests"], dependencies=[PrivateAccess, shows(Feature.STRATEGY_BACKTEST)])
 
 REFUSED: dict[int | str, dict[str, Any]] = {
     status.HTTP_422_UNPROCESSABLE_CONTENT: {
@@ -26,6 +27,17 @@ REFUSED: dict[int | str, dict[str, Any]] = {
         ),
     }
 }
+
+BUSY: dict[int | str, dict[str, Any]] = {
+    status.HTTP_429_TOO_MANY_REQUESTS: {
+        "model": ErrorResponse,
+        "description": (
+            "too_many_backtests: accounts.max_backtests_per_user of the user's strategy backtests and ranking backtests "
+            "replay or wait already."
+        ),
+    }
+}
+"""What a strategy backtest and a ranking backtest answer to a user with too many of either in flight."""
 
 UNKNOWN: dict[int | str, dict[str, Any]] = {
     status.HTTP_404_NOT_FOUND: {"model": ErrorResponse, "description": "The user has no saved backtest of that id."}
@@ -43,13 +55,14 @@ async def get_backtest_options(pipeline: UserPipeline) -> BacktestOptionsRespons
     return BacktestOptionsResponse(strategy_id=strategy.strategy_id, strategy_name=strategy.name, inputs=inputs)
 
 
-@router.post("", responses=REFUSED)
+@router.post("", responses=REFUSED | BUSY, dependencies=[BacktestTurn])
 async def run_backtest(body: BacktestRequest, pipeline: UserPipeline) -> BacktestResponse:
     """
     Replays the user's active technical strategy over the period, day by day with the live trading rules, and answers
     the backtest, saved for the user. A stock is decided on its technical score alone, as a run decides a stock the AI
     is not asked about; a decision made after one session's close fills at the next open. It asks no AI, touches no
-    account and never orders. The answer comes when the replay is done: seconds, longer for the first one after a start.
+    account and never orders. The answer comes when the replay is done: seconds, longer for the first one after a start
+    or while it waits for the server's other replays (accounts.max_concurrent_backtests).
     """
     return BacktestResponse.model_validate(await pipeline.run_backtest(body.inputs))
 

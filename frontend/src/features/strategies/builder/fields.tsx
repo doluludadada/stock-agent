@@ -43,6 +43,8 @@ interface NumberFieldProps {
   value: number
   onChange: (value: number) => void
   issue?: ValidationIssue
+  /** The id of the element that already says the issue, where the field sits beside another control that shares it. */
+  issueAt?: string
   suffix?: string
   step?: number
   min?: number
@@ -52,9 +54,9 @@ interface NumberFieldProps {
 }
 
 /** Keeps the typed text while editing, so "1." or an empty box is allowed until the value parses. */
-export function NumberField({ label, value, onChange, issue, suffix, step = 1, min, max, className, inputClassName }: NumberFieldProps) {
+export function NumberField({ label, value, onChange, issue, issueAt, suffix, step = 1, min, max, className, inputClassName }: NumberFieldProps) {
   const id = useId()
-  const errorId = `${id}-error`
+  const errorId = issueAt ?? `${id}-error`
   const [text, setText] = useState(Number.isFinite(value) ? String(value) : '')
   const [synced, setSynced] = useState(value)
   if (!Object.is(synced, value)) {
@@ -64,7 +66,7 @@ export function NumberField({ label, value, onChange, issue, suffix, step = 1, m
   }
 
   return (
-    <Field label={label} htmlFor={id} className={className} hint={<FieldError id={errorId} issue={issue} />}>
+    <Field label={label} htmlFor={id} className={className} hint={issueAt ? null : <FieldError id={errorId} issue={issue} />}>
       <div className="relative">
         <Input
           id={id}
@@ -131,6 +133,8 @@ export function DayField({ value, onChange, issue, hint }: { value: number; onCh
             label={t('operand.daysAgo')}
             value={value}
             onChange={onChange}
+            issue={issue}
+            issueAt={`${id}-error`}
             min={0}
             max={LIMITS.maxBarsAgo}
             className="w-24 [&>label]:sr-only"

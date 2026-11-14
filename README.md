@@ -201,7 +201,7 @@ table decides what each may use (`Audience` in `backend/src/a_domain/types/enums
 A public deployment never builds the Shioaji, cnyes, Yahoo news, PTT, MOPS or Tavily adapter: Shioaji's market data
 comes with the owner's own broker login, Yahoo's terms forbid automated collection, cnyes forbids reproduction without
 consent, MOPS's robots.txt disallows every path and TWSE's terms forbid the automated download of its site's reports,
-and PTT is read only by Buzz. Its AI step reads a stock's
+and PTT is read only by Buzz and by a personal site's stock pages. Its AI step reads a stock's
 archived material information and the TWSE news naming it; a stock with none of them and no archived financials is not
 sent to the AI, its run log says so, and its decision rests on its technical score alone. On every audience the AI
 prompt also carries the stock's archived financials: its latest two archived quarters and its latest month's revenue. Its strategies need 61 sessions of closes, so until the archive holds them every run
@@ -222,7 +222,9 @@ the sessions of its own window it lacks, older ones included. A session the cach
 Shioaji's daily quotes saved them before, is asked again once and takes the reports' changes. A read adjusts the bars
 before every corporate action whose reference the exchange gives in the change, such as a split (`HistoryAdjustmentRule`).
 On an ex-dividend or ex-rights day TWSE writes `X` and a change of 0.00 and TPEX writes `除息` or `除權息` with no number:
-neither compares the close to a reference, so the bar keeps no change and that day stays as listed. Without the
+neither compares the close to a reference, so the bar keeps no change, and a read takes that day's reference from the
+exchange's own ex-right results (`sources.exchange.ex_right_references`: TWSE's TWT49U, TPEX's exDailyQ), which a sync
+reads once for every day; a day with neither stays as listed. Without the
 environment's Shioaji key pair there is no realtime quote. The SDK's Sentry reporting (`LOG_SENTRY`) and its
 `shioaji.log` (`SJ_LOG_PATH`) are off unless the environment sets them. Schema version 5 (`just db-migrate`) drops the
 Yahoo bars the cache held before.
@@ -234,9 +236,42 @@ page, whose address then says why it is not offered. `GET /v1/market/attribution
 Data License v1 requires of every page that shows the open data: each provider, the datasets the site reads from it,
 the license's notice, and its name and address (`sources.attribution`).
 
+Which features a site shows is a setting of its own. Each one under `features` in `config/appsetting.yaml` is `off`,
+`administrators` or `everyone`: the shipped file shows every signed-in user the market overview, the monthly ranking,
+the stock pages, the watchlist and My holdings, and administrators alone the valuation, the analysis runs, the
+technical-strategy pages, the mock account and the SinoPac account. Ordering on SinoPac (`sinopac_ordering`) ships
+`off`. The Web API refuses a hidden feature's requests (403 `feature_hidden`), the web app hides its pages, and a change
+in the settings page applies at once. `docs/web-integration.md` lists what each gates.
+
+### Sign in with Google
+
+The site can sign users in with Google next to the password sign-in. It offers Google when `GOOGLE_CLIENT_ID` and
+`GOOGLE_CLIENT_SECRET` are set in `.env` and `accounts.public_origin` is set in `config/appsetting.yaml`. The public
+origin must be https, which Google also requires. `accounts.google_administrator_emails` lists the Google accounts
+that sign in as administrators, and `accounts.google_allowed_emails` the ones that sign in as users. Any other Google
+account signs in only while `accounts.registration_open` is true.
+
+[Set up sign-in with Google](docs/web-integration.md#set-up-sign-in-with-google) has the steps in the Google Cloud
+Console. An account that Google creates has no password. To use the CLI with it, run `just reset-password <username or
+email>`.
+
 ### Real broker (Shioaji)
 
-Every run that may order chooses its account when it starts: Buzz, Intraday and a manual BUY order on the user's mock
+Seeing the SinoPac account and ordering on it are two features. `features.sinopac_account` (administrators by default)
+shows an administrator the account as the broker reports it: the holdings, the bank balance and the settlements due, the
+unrealized and the realized profit and loss, today's deals and the past sales (`/account/sinopac` in the web app, `GET
+/v1/account/brokerage`). It only reads. `features.sinopac_ordering` is ordering, and it ships `off`: while it is off no
+order reaches SinoPac, whatever the environment and whoever the user is. The Web API refuses every order route with
+`broker=shioaji` (403 `feature_hidden`), the CLI does not offer SinoPac, and `RealBrokerOrdererRule`, which
+`BrokerAccessRule` asks right before each send, rejects the order as `ORDERING_OFF`. So the real account can be connected
+to look at it and to analyse its holdings while the site cannot place an order on it. Turning ordering off also
+stops a run already under way on SinoPac: every other setting of a run stays as it was at its start, but each order asks
+the ordering switch the site holds at the send, so the run's later orders are recorded REJECTED as `ORDERING_OFF`. The
+switch is the process's: a CLI option running in another process reads the saved setting at its next menu choice.
+Turning ordering on is a save in
+the settings page, which asks for the administrator's password or a fresh Google sign-in like every other save.
+
+With ordering on, every run that may order chooses its account when it starts: Buzz, Intraday and a manual BUY order on the user's mock
 account by default, or, for an administrator on a personal site whose Shioaji login is up, on SinoPac. The choice holds
 for the whole run (`workflow_runs.execution_provider`), and a follow orders on the mock account only. The Web asks it in
 each start's confirmation (`?broker=shioaji`), and the CLI asks `Order on` before menus 2 and 3 and before each manual
@@ -259,11 +294,18 @@ account. Shioaji allows 50 market-data queries per 10 seconds and 500 stocks per
 
 Each SinoPac order passes the order gates right before it is sent (`BrokerAccessRule` and `BuyLimitRule` in
 `backend/src/a_domain/rules/trading/order_rule.py`), or is recorded REJECTED with the reason: the run chose SinoPac, the
-user is still an active administrator, the site's audience offers it, its login is up, and on the server the environment
+site's audience offers it, `features.sinopac_ordering` lets the user order there, the user is still an active
+administrator, its login is up, and on the server the environment
 trades on. Each SinoPac BUY costs at most `trading.max_order_value` (NT$100,000) at its limit price, and the day's SinoPac
 BUYs at most `trading.max_daily_buy_value` (NT$300,000), counted from the trading journal, which holds every order before
-it is sent. A SELL is never held to them and sells only shares the account holds. The account page shows the SinoPac
-account next to the mock account (`GET /v1/account/history?broker=shioaji`).
+it is sent. A SELL is never held to them and sells only shares the account holds. The SinoPac account page lists the
+orders the site placed there (`GET /v1/account/trades?broker=shioaji`).
+
+My holdings (`/holdings`, `GET /v1/holdings`) reads what the user holds as one portfolio: the SinoPac account's
+positions, the mock account's, and the holdings the user enters by hand (`POST /v1/holdings/manual`, one per stock, kept
+per user in the table `manual_holdings`). Each holding stays under its source and counts once. Each is valued at the last
+close the site holds and carries the stock page's own score in the monthly ranking, or why it has none. It is analysis,
+not advice: it shows data and scores and never says to buy or sell.
 
 `dev` and `test` refuse to start while any of the five production variables is set in the environment or `.env`, so the
 production key lives only on the production machine; the refusal names the variables, never their values. Nothing
@@ -302,9 +344,9 @@ start of the CLI or the Web API creates `secrets/accounts.key` (32 random bytes,
 path, never the key. Back up `secrets/` with the database. The CLI and the Web API refuse a key other than the one the
 users were saved with. Losing it locks every account: a new key does not help, so restore the original
 `secrets/accounts.key` from the backup. The `ACCOUNTS_KEY` variable, from the environment or `.env`, overrides the
-file, for Docker or production; a blank value counts as unset. `environment: prod` requires the variable and never
-creates the file, because a production app folder, such as a Docker container's, may not survive a redeploy, and a key
-created there would lock every account at the next deploy.
+file; a blank value counts as unset. `environment: prod` requires the variable and never creates the file, because a
+production app folder may not survive a redeploy, and a key created there would lock every account at the next deploy.
+In Docker Compose the file lives in the state folder (`STATE_DIR`), which outlives the containers.
 
 `db.backend` in `config/appsetting.yaml` chooses the database, never the `DB_*` keys. `postgresql` needs `DB_USER`, `DB_PASSWORD`, `DB_HOST` and `DB_NAME`. `sqlite` keeps the local `stock_agent.db`, and refuses to start while all four are set.
 
@@ -333,14 +375,24 @@ just run-fn   # frontend dev server on http://127.0.0.1:5173, proxying /v1 to th
 Users sign in to the web app with a username or an email and a password. On the first start with no user, the
 backend prints a one-time setup code on its console: the first-time setup in the web app needs it, so the first
 visitor of a server reachable from elsewhere cannot make themselves its administrator (the CLI needs none). After
-that, anyone may register as a user while `accounts.registration_open` is on. `HOST` and `PORT` move the backend;
-serve another network only behind a TLS reverse proxy (see `docs/web-integration.md`).
+that, anyone may register as a user while `accounts.registration_open` is on. It ships off, and `environment: prod`
+refuses to start with it on. `HOST` and `PORT` move the backend; serve another network only behind a TLS reverse proxy
+(see `docs/web-integration.md`). The API docs (`/docs`, `/redoc`, `/openapi.json`) are served only in `environment: dev`.
 
-Run Docker:
+### Docker Compose
 
-```powershell
-docker compose up --build
+`compose.yml` runs the whole site on one server: PostgreSQL, the backend, and a Caddy proxy that serves the web app
+and forwards `/v1` to the backend. From the repository root, with `.env` and the state folder prepared:
+
+```bash
+docker compose up -d --build
+docker compose logs backend | grep "setup code"   # the one-time code for the first administrator
 ```
+
+Only the proxy publishes a port, on `127.0.0.1:8080` unless `PROXY_BIND` says otherwise. Everything the site saves,
+its settings included, lives in `STATE_DIR` on the host. [How to deploy the site](frontend/docs/deployment.md) has
+the first start, HTTPS in a tailnet with `tailscale serve`, the project's commands inside the container, the backup,
+and the update.
 
 ### Database migrations
 
@@ -364,12 +416,14 @@ Access: public (sign-in, registration, the first-time setup, the built-in strate
 | Method and path | Access | What it does |
 | --- | --- | --- |
 | `GET /v1/auth/status`, `POST /v1/auth/setup`, `/register`, `/sign-in`, `/sign-out` | public | Whether the first-time setup or registration is offered; set up the first administrator (with the console's setup code); register; sign in (sets the session cookie); sign out. |
-| `GET /v1/auth/me` | signed in | The signed-in user with their permissions. |
+| `GET /v1/auth/google/start`, `/v1/auth/google/callback` | public | Sign in with Google, on a site that has a Google client: the browser navigates to the start, and Google sends it back to the callback, which sets the session cookie. With `?confirmation=`, the start confirms one settings save of an administrator without a password. |
+| `GET /v1/auth/me` | signed in | The signed-in user with their permissions, and whether the account has a password. |
 | `GET`/`PUT /v1/auth/me/ai-model` | signed in | My settings: the AI models the site offers (`ai.active_model` and `ai.user_selectable`), its default and the one the user's runs use; choose one, or `null` for the site's default (422 for a model the site does not offer). |
 | `GET /v1/admin/users`, `PATCH /v1/admin/users/{id}` | administrator | The users; change a role, deactivate or reactivate, set a new password. The last active administrator stays (409). |
 | `POST /v1/runs/full-cycle`, `/v1/runs/specific-stocks` | signed in | Start menu 1 or menu 4's analysis (at most 20 stock ids) in the background: 202 with the run id, 409 while the user's own run runs. They never order. |
 | `POST /v1/runs/buzz-scan`, `/v1/runs/intraday` | signed in | Start menus 2 and 3 only while the execution provider is the mock broker (403 otherwise). Their orders go through the same gates and journal as the CLI's. |
 | `GET`/`POST /v1/runs/{id}/follow` | signed in | Follow a finished Full Cycle into the user's mock account, the only account a follow orders on: what is still open to follow and why a follow may not start now; start one in the background (202 with the follow's run id). Each open decision is priced again: at a fresh realtime quote in continuous trading (personal), or at the last session's official close while no session trades (public). A decision is followed once a follow order of it filled since the account opened; 409 `nothing_to_follow` or `outside_follow_window` records nothing. |
+| `GET`/`POST /v1/rankings/follow` | signed in | The monthly ranking in the user's mock account: what it holds and lacks of the latest decision and its return since it first followed against `ranking.benchmark_id`; bring the mock account to that decision in the background (202 with the run id), selling what left the ranking and buying what it lacks at an equal weight, on the mock account only. 409 `nothing_to_follow` once it holds the ranking. |
 | `GET /v1/account/trades?limit&offset`, `POST /v1/account/reset` | signed in | The trades since the mock account opened, each with the run it came from; reopen the mock account with a new starting capital (409 while the user's run runs). `?broker=shioaji` lists the SinoPac account's trades instead (an administrator's, while its login is up). |
 | `GET /v1/runs?limit&offset`, `/v1/runs/{id}`, `.../signals`, `.../orders` | signed in | Runs newest first, a run's state, record and saved stock reports, its decisions and orders. |
 | `GET /v1/watchlist`, `POST /v1/watchlist/manual`, `POST /v1/watchlist/manual/remove` | signed in | Active entries with names; add or remove MANUAL entries only. |
@@ -378,13 +432,18 @@ Access: public (sign-in, registration, the first-time setup, the built-in strate
 | `GET /v1/market/stocks?query`, `/v1/market/most-traded`, `/v1/market/stocks/{id}` | public | Listing search, the latest session's most traded stocks, a stock's cached daily bars. No realtime quote. |
 | `GET /v1/market/audience` | public | The site's audience (`personal` or `public`) and what it allows: `open_data_only`, `realtime_quotes`, `news_articles` and `mops`, from the `Audience` table. The web app shows only what the site can do by it. |
 | `GET /v1/market/attribution` | public | The open data's providers, datasets and license, which a page showing it must credit. |
+| `GET /v1/market/stocks/{id}/analysis` | public | The stock's financial analysis from held data, with no fetch and no AI call: each held month's revenue with its change from a year before and the ranking's acceleration, each held quarter's year-to-date EPS, its own EPS, its change from a year before, its margins and debt ratio, the latest P/E, P/B and dividend yield against each ratio's median over the sessions held, and `readings`, what the figures say by fixed rules. A figure whose history is too short is null and its reading says how much is held. On a personal site the EPS of quarters the archive lacks comes from the MOPS pages it holds, which `just backfill-history` brings back with the monthly revenue. |
+| `GET /v1/market/stocks/{id}/news` | public | What the site's article store keeps of a listed stock, newest first, at most `stock_page.article_store.shown` (50): its material information and the TWSE news naming it, with their text; on a personal site also the cnyes and Yahoo articles and the PTT Stock posts the board's search lists for its code, by title and address only. A request first reads what there is to read now into the store: the archive's items of the last `analysis.material_information_days`, and the sites' and the board's, fetched when a page asks, held for `stock_page.news_freshness_minutes` (30) and fetched once per stock at a time; a source that fails keeps what was held of it. The list therefore also holds what the sources no longer serve. 404 for a code that is not listed. |
+| `GET /v1/market/stocks/{id}/ranking` | public | The stock's score: its place among the scored stocks of the monthly ranking at its latest decision session, from the ranking `/v1/rankings/latest` answers with no cut at `ranking.top`, as a percentile from 0 to 100 (100 is the best combined rank), with its two factors, each one's rank, and whether it is in the top `ranking.top`. A stock the ranking leaves out has no score and `exclusion` says why (no history, an ETF, no trade that session, under the price floor, illiquid, a month of revenue not held, a history too short for the high). The score ranks two measured factors and forecasts nothing. 422 `ranking_unavailable` like `/v1/rankings/latest`. |
 | `GET /v1/market/stocks/{id}/financials` | public | The stock's archived quarters (revenue, gross profit, operating income, net income and EPS of the year to the quarter's end; total assets, liabilities and equity; book value per share) and monthly revenue, oldest first. |
 | `GET /v1/market/stocks/{id}/technical` | signed in | The active strategy's evaluation of the stock and each indicator at every bar it read. |
 | `GET /v1/valuation/market`, `/stocks`, `/scan`; `POST /v1/valuation/explanation` | signed in | Menus 5 and 6, read-only. Only the explanation calls the AI, once per confirmed request. A public site answers 403 `mops_unavailable`. |
 | `GET /v1/account/history?as_of=&broker=` | signed in | Menu 7 on the mock account, or with `broker=shioaji` on SinoPac (403 `real_broker_refused` for a user, `broker_unavailable` while its login is down). |
-| `GET /v1/account/brokers` | signed in | The accounts the user may choose for a run now, the mock account first, with SinoPac's server and BUY limits for the confirmation. |
+| `GET /v1/account/brokers` | signed in | The accounts the user may order on for a run now, the mock account first, with SinoPac's server and BUY limits for the confirmation. SinoPac only while `features.sinopac_ordering` shows the user ordering. |
+| `GET /v1/account/brokerage` | administrator | The SinoPac account as the broker reports it: which server, whether the login is up, whether the site may order there, and the balance, settlements, positions, today's deals and past sales. It never orders. |
+| `GET /v1/holdings?sources=`, `POST /v1/holdings/manual`, `POST /v1/holdings/manual/remove` | signed in | My holdings: the portfolio of the SinoPac account's, the mock account's and the hand-entered holdings, each under its source, with each stock's ranking score; enter or remove a hand-entered holding. |
 | `POST /v1/runs/{id}/manual-buy?broker=` | signed in | Buy `quantity` shares of a stock the finished specific-stock run reported, as a run of its own on the chosen account, priced on a fresh realtime quote through every order gate. |
-| `GET`, `PUT /v1/admin/settings` | administrator | Every setting of `appsetting.yaml` and the AI prompts of `instructions.yaml` as form fields, and a save of the changed ones with the password again. A save writes each change into its file in place, comments kept, opens the app on the new settings first, then writes them and runs on them at once; an edit on disk is loaded too. See [docs/web-integration.md](docs/web-integration.md#settings-files). |
+| `GET`, `PUT /v1/admin/settings` | administrator | Every setting of `appsetting.yaml` and the AI prompts of `instructions.yaml` as form fields, and a save of the changed ones with the password again, or with a fresh sign-in to Google for an administrator without a password. A save writes each change into its file in place, comments kept, opens the app on the new settings first, then writes them and runs on them at once; an edit on disk is loaded too. See [docs/web-integration.md](docs/web-integration.md#settings-files). |
 
 One workflow runs at a time per server process; a second start answers 409. Run the API with one worker.
 
@@ -394,9 +453,12 @@ One workflow runs at a time per server process; a second start answers 409. Run 
 
 Tables are created with `create_all`, which never changes an existing table. A new database also gets a `schema_version` row, the code's `SCHEMA_VERSION` (`backend/src/c_infrastructure/database/models/schema_version_dto.py`), which says how its rows are stored. Startup never upgrades a database. When the database's schema version is older than the code's, the app stops, changing nothing, and names `just db-migrate`, which backs the database up and then upgrades it in one transaction, keeping every row (see [Database migrations](#database-migrations)). The app also stops when the database is not new and its schema version is missing or one no upgrade reaches, or when an existing table's columns differ from the code. That message names each table to drop. A `stock_agent.db` made before the schema version existed is refused for every table, because several of its tables hold Taiwan wall-clock times that the current code reads as UTC. Delete that file, or drop the tables the message names; the next start recreates them empty. Cached prices and EPS refill themselves, while the mock account, watchlist and trading rows in a dropped table are lost. Such a file's `mock_positions` also hold average costs without the buy fee, and its unused `mock_orders` table can be dropped.
 
+The article store is `stored_articles`: what the site read about each stock, once per stock under the article's own key, its source with its address, or with the time it was announced for material information, which has none. A row holds the stock, the source, the title, the address, the time it was published and the text the site may hold: an announcement's and a TWSE news item's on every site, a news site's article's on a personal site only, where it finds the article by meaning and is never shown or sent to an AI, and never a PTT post's, which is kept by title and address. Articles enter when a stock page asks for the stock's news, when the Web API's timer reads the news of every stock a user holds or watches (at most `stock_page.article_store.refresh_stocks`, 200, one stock at a time, at least `stock_page.article_store.refresh_pause_seconds`, 2, apart), and with `just backfill-articles`, which copies what the open-data archive already holds. Saving the same article again changes nothing. An article published more than `stock_page.article_store.retention_days` (730) ago is dropped, and so is a stock's oldest beyond `stock_page.article_store.max_per_stock` (300). Each article has a vector in a Chroma collection of its own, computed on the server by `Xenova/bge-small-zh-v1.5` (ONNX, 23 MB, pinned by `stock_page.article_store.embedding.revision`) from its title and the first `stock_page.article_store.embedded_length` (300) characters of its text; no article is sent anywhere to be embedded, and an unchanged article is never embedded again. A stock's vectors are brought up to date by the timer, by the backfill and before its AI brief is written, never by a page view. The brief searches them by stock, days and meaning with the three queries of `config/instructions.yaml` (`stock_brief_rise_query`, `stock_brief_fall_query`, `stock_brief_company_query`): the window's articles, those of the `stock_page.brief.lead_days` (30) before it, and those that say what the company makes and sells over `stock_page.brief.company_days` (730). While the searches find nothing, the brief reads the window's newest articles as before. A deployment whose `instructions.yaml` predates the three queries runs without them until they are copied in.
+
 The open-data archive is `daily_close_archive` (each stock's official daily bar per session), `index_close_archive` (the TAIEX and the TPEx Index per session), `material_information_archive` (each company's material information announcement under the time it was announced, its subject, clause and text as served), `quarter_eps_archive` (each company's year-to-date basic EPS per quarter, as served), `valuation_ratio_archive` (each stock's P/E, dividend yield and P/B per session), `financial_report_archive` (each company's balance sheet and income statement per quarter, from the report of its industry format, every field as served in a JSON column), `monthly_revenue_archive` (each company's revenue per month with its changes, as served) and `exchange_news_archive` (TWSE's own news items, under their address). Its source is the TWSE and TPEX OpenAPI, which publish under the Open Government Data License v1 and serve only their latest session, day, month or quarter, so what is not saved while they serve it is lost. Every row is kept under the date or period its own payload row names. The Web API saves them at its start and then every `api.archive_interval_hours` (3); `just archive-closes` saves once and prints every date, quarter and month the archive holds; it opens only the database and the OpenAPI, so it needs no broker login, accounts key or AI key. A report that serves rows none of which can be read, as when an exchange renames a field, is logged as an error naming the report and how many rows it served; one that serves no rows is logged as information. The bars are kept as listed, and a stock's history is read adjusted for the corporate actions whose reference price the exchange gives in the bar's change, such as a split, across no session the archive missed and, on TPEX, across no session the stock did not trade, since TPEX then compares to a reference it moved; TWSE writes `X0.00` on an ex-dividend, ex-rights or capital-reduction day, so those days stay as listed. A quarter's figures are read from its archived statements by the columns `sources.exchange.financial_reports.summary` names for their industry format, so the reading can change while the rows stay as served; `GET /v1/market/stocks/{stock_id}/financials` answers them with the monthly revenue, public. Saving the same data again changes nothing. The bars of `ohlcv_data` never go into it. A public deployment reads its daily history and index trend from it alone (see Personal or public deployment); `GET /v1/market/archive-status` says how many sessions it holds and how many the built-in strategies need.
 - `backups/`: the database backups that `just db-backup`, `just db-migrate` and `just db-restore` write, owner-only and ignored by git.
-- `chroma_data/`: Chroma persistence.
+- `chroma_data/`: Chroma persistence: the chat history, each user's decisions, and the article store's vectors (`stock_articles-<fingerprint of the embedding model>`). The vectors hold no text and are computed again from `stored_articles` by `just backfill-articles`, so a backup of the database is enough for them.
+- `embedding_models/`: the text embedding model's files, fetched once from Hugging Face at the first embedding.
 - `news_archive/`: archived news payloads.
 - `buzz_archive/`: archived social buzz payloads.
 - `ai_responses/`: saved AI outputs.

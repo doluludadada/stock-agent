@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Query, status
 
 from a_domain.model.trading.order import Order
-from a_domain.types.enums import FollowRefusal
+from a_domain.types.enums import Feature, FollowRefusal
 from a_domain.types.ids import RunId
 from b_application.schemas.pipeline_status import PipelineStatus
 from d_presentation.web.schemas import (
@@ -23,13 +23,16 @@ from d_presentation.web.session import (
     CurrentUser,
     NotFound,
     NothingToFollow,
+    OrderingShown,
     OutsideFollowWindow,
     PrivateAccess,
     QuoteLogin,
     RealtimeQuotes,
     RunStarter,
+    ShowsRuns,
     UserPipeline,
     WorkflowRunsDependency,
+    shows,
 )
 
 router = APIRouter(prefix="/runs", tags=["Workflow runs"], dependencies=[PrivateAccess])
@@ -49,20 +52,21 @@ ORDERING: dict[int | str, dict[str, Any]] = {
         "model": ErrorResponse,
         "description": (
             "realtime_quotes_unavailable: the site has no realtime quotes: it uses open data only (audience public), or it "
-            "has no Shioaji login. real_broker_refused: a real `broker` asked by a user who is not an administrator. "
-            "broker_unavailable: the real broker has no login up on this site now."
+            "has no Shioaji login. feature_hidden: the site does not let the user order on the `broker` (features.*; "
+            "features.sinopac_ordering is off by default). real_broker_refused: a real `broker` asked by a user who is "
+            "not an administrator. broker_unavailable: the real broker has no login up on this site now."
         ),
     },
 }
 
 
-@router.post("/full-cycle", status_code=status.HTTP_202_ACCEPTED, responses=STARTED)
+@router.post("/full-cycle", status_code=status.HTTP_202_ACCEPTED, responses=STARTED, dependencies=[shows(Feature.FULL_CYCLE)])
 async def start_full_cycle(body: Confirmed, pipeline: UserPipeline, user: CurrentUser, start: RunStarter) -> RunAccepted:
     """Starts menu 1: the after-market full-universe analysis. One AI call per stock that passes the strategy. It never orders."""
     return RunAccepted(run_id=start(user, lambda run_id: pipeline.run_full_cycle(run_id=run_id)))
 
 
-@router.post("/specific-stocks", status_code=status.HTTP_202_ACCEPTED, responses=STARTED)
+@router.post("/specific-stocks", status_code=status.HTTP_202_ACCEPTED, responses=STARTED, dependencies=[shows(Feature.SPECIFIC_STOCK)])
 async def start_specific_stock_analysis(
     body: StockIdsRequest, pipeline: UserPipeline, user: CurrentUser, start: RunStarter
 ) -> RunAccepted:
@@ -71,7 +75,12 @@ async def start_specific_stock_analysis(
     return RunAccepted(run_id=start(user, lambda run_id: pipeline.analyse_specific_stocks(stock_ids, run_id=run_id)))
 
 
-@router.post("/buzz-scan", status_code=status.HTTP_202_ACCEPTED, dependencies=[RealtimeQuotes], responses=ORDERING)
+@router.post(
+    "/buzz-scan",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[shows(Feature.BUZZ), OrderingShown, RealtimeQuotes],
+    responses=ORDERING,
+)
 async def start_buzz_scan(body: Confirmed, pipeline: BrokerPipeline, user: CurrentUser, start: RunStarter) -> RunAccepted:
     """
     Starts menu 2, Social Buzz, on the `broker` the query names for the whole run, the mock account by default. Its
@@ -81,7 +90,12 @@ async def start_buzz_scan(body: Confirmed, pipeline: BrokerPipeline, user: Curre
     return RunAccepted(run_id=start(user, lambda run_id: pipeline.run_buzz_scan(run_id=run_id)))
 
 
-@router.post("/intraday", status_code=status.HTTP_202_ACCEPTED, dependencies=[RealtimeQuotes], responses=ORDERING)
+@router.post(
+    "/intraday",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[shows(Feature.INTRADAY), OrderingShown, RealtimeQuotes],
+    responses=ORDERING,
+)
 async def start_intraday(body: Confirmed, pipeline: BrokerPipeline, user: CurrentUser, start: RunStarter) -> RunAccepted:
     """Starts menu 3, Intraday, on the `broker` the query names for the whole run, the mock account by default."""
     return RunAccepted(run_id=start(user, lambda run_id: pipeline.run_intraday(run_id=run_id)))
@@ -93,7 +107,12 @@ MANUAL_BUY: dict[int | str, dict[str, Any]] = {
 }
 
 
-@router.post("/{run_id}/manual-buy", status_code=status.HTTP_202_ACCEPTED, dependencies=[RealtimeQuotes], responses=MANUAL_BUY)
+@router.post(
+    "/{run_id}/manual-buy",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[shows(Feature.SPECIFIC_STOCK), OrderingShown, RealtimeQuotes],
+    responses=MANUAL_BUY,
+)
 async def buy_manually(
     run_id: UUID, body: ManualBuyRequest, pipeline: BrokerPipeline, user: CurrentUser, runs: WorkflowRunsDependency, start: RunStarter
 ) -> RunAccepted:
@@ -147,7 +166,7 @@ def refuse_follow(status: PipelineStatus) -> None:
             return
 
 
-@router.get("/{run_id}/follow", responses=FOLLOW_READ)
+@router.get("/{run_id}/follow", responses=FOLLOW_READ, dependencies=[ShowsRuns])
 async def get_run_follow(run_id: UUID, pipeline: UserPipeline) -> FollowResponse:
     """What a follow of the run into the user's mock account may take now, and every follow of it so far. Records nothing."""
     status = await pipeline.load_follow(RunId(run_id))
@@ -162,7 +181,12 @@ async def get_run_follow(run_id: UUID, pipeline: UserPipeline) -> FollowResponse
     )
 
 
-@router.post("/{run_id}/follow", status_code=status.HTTP_202_ACCEPTED, dependencies=[QuoteLogin], responses=FOLLOWING)
+@router.post(
+    "/{run_id}/follow",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[ShowsRuns, shows(Feature.MOCK_ACCOUNT), QuoteLogin],
+    responses=FOLLOWING,
+)
 async def follow_run(run_id: UUID, body: Confirmed, pipeline: UserPipeline, user: CurrentUser, start: RunStarter) -> RunAccepted:
     """
     Follows the run's open decisions into the user's mock account, as a run of its own: each BUY with its shares, each
@@ -175,7 +199,7 @@ async def follow_run(run_id: UUID, body: Confirmed, pipeline: UserPipeline, user
     return RunAccepted(run_id=start(user, lambda follow_id: pipeline.follow_run(followed, run_id=follow_id)))
 
 
-@router.get("")
+@router.get("", dependencies=[ShowsRuns])
 async def list_runs(
     pipeline: UserPipeline,
     user: CurrentUser,
@@ -203,13 +227,13 @@ async def find_run(
     return response, recorded
 
 
-@router.get("/{run_id}")
+@router.get("/{run_id}", dependencies=[ShowsRuns])
 async def get_run(run_id: UUID, pipeline: UserPipeline, user: CurrentUser, runs: WorkflowRunsDependency) -> RunResponse:
     response, _ = await find_run(run_id, pipeline, user, runs)
     return response
 
 
-@router.get("/{run_id}/signals")
+@router.get("/{run_id}/signals", dependencies=[ShowsRuns])
 async def get_run_signals(
     run_id: UUID, pipeline: UserPipeline, user: CurrentUser, runs: WorkflowRunsDependency
 ) -> list[SignalResponse]:
@@ -218,7 +242,7 @@ async def get_run_signals(
     return [SignalResponse.model_validate(signal) for signal in (recorded.signals if recorded else [])]
 
 
-@router.get("/{run_id}/orders")
+@router.get("/{run_id}/orders", dependencies=[ShowsRuns])
 async def get_run_orders(run_id: UUID, pipeline: UserPipeline, user: CurrentUser, runs: WorkflowRunsDependency) -> list[Order]:
     """Every order the run sent or refused, with its status, reason, fee, tax and realized PnL."""
     _, recorded = await find_run(run_id, pipeline, user, runs)

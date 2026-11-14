@@ -1,5 +1,6 @@
 import { useMutation, useMutationState, useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiRequest, isApiError, strategyResultsKey, useIsSignedIn } from '@/shared/api'
+import { useCallback } from 'react'
+import { apiRequest, isSameSession, sentInSession, isApiError, strategyResultsKey, useIsSignedIn } from '@/shared/api'
 import type { BacktestInputs } from './model'
 
 export const backtestKeys = {
@@ -44,7 +45,9 @@ export function useRunBacktest() {
   return useMutation({
     mutationKey: RUN_KEY,
     mutationFn: (inputs: BacktestInputs) => apiRequest('post', '/v1/backtests', { body: { confirm: true, inputs } }),
-    onSuccess: (backtest) => {
+    onMutate: sentInSession,
+    onSuccess: (backtest, _inputs, sent) => {
+      if (!isSameSession(sent)) return
       client.setQueryData(backtestKeys.detail(backtest.backtest_id), backtest)
       void client.invalidateQueries({ queryKey: backtestKeys.list })
     },
@@ -52,6 +55,20 @@ export function useRunBacktest() {
       if (isApiError(error) && error.code === 'backtest_period_unavailable') void client.invalidateQueries({ queryKey: backtestKeys.options })
     },
   })
+}
+
+/**
+ * Why the last backtest failed, also on a page opened after it did: the run outlives the page that started it, so its
+ * error is read from the cache of mutations, not from that page's own state. `dismiss` forgets it.
+ */
+export function useRunFailure(): { error: Error | null; dismiss: () => void } {
+  const client = useQueryClient()
+  const last = useMutationState({ filters: { mutationKey: RUN_KEY }, select: (mutation) => mutation.state }).at(-1)
+  const dismiss = useCallback(() => {
+    const cache = client.getMutationCache()
+    cache.findAll({ mutationKey: RUN_KEY, status: 'error' }).forEach((mutation) => cache.remove(mutation))
+  }, [client])
+  return { error: last?.status === 'error' ? last.error : null, dismiss }
 }
 
 /** When the backtest still running was started, in epoch milliseconds; null when none runs. It outlives the page that started it. */

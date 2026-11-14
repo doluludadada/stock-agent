@@ -4,9 +4,11 @@ sessions that end, the administrator's users page, and every user's data kept ap
 """
 
 from dataclasses import replace
+from pathlib import Path
 
 import httpx
 import pytest
+import yaml
 from support.harness import (
     ADMINISTRATOR,
     ADMINISTRATOR_PASSWORD,
@@ -17,7 +19,8 @@ from support.harness import (
     harness_config,
     rising_history,
 )
-from support.web import app_of, client_at, ended, hold_stock_list, run_to_end, serve, sign_in, write
+from support.web import APP_REQUEST, app_of, client_at, ended, hold_stock_list, run_to_end, serve, sign_in, write
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from a_domain.types.ids import UserId
 from d_presentation.web.session import current_user
@@ -47,11 +50,11 @@ async def test_the_first_time_setup_needs_the_code_the_server_printed(capsys: py
         again = await client.post("/v1/auth/setup", json={**setup, "username": "other", "email": "o@example.com", "setup_code": code})
         after = (await client.get("/v1/auth/status")).json()
 
-    assert before == {"needs_first_administrator": True, "registration_open": False}
+    assert (before["needs_first_administrator"], before["registration_open"], before["google_sign_in"]) == (True, False, False)
     assert (refused.status_code, registration.status_code, created.status_code, again.status_code) == (403, 403, 201, 409)
     assert created.json()["role"] == "administrator" and created.json()["user_id"] == ADMINISTRATOR.user_id
     assert "manage_users" in created.json()["permissions"]
-    assert after == {"needs_first_administrator": False, "registration_open": True}
+    assert (after["needs_first_administrator"], after["registration_open"]) == (False, True)
 
 
 async def test_a_registered_user_signs_in_at_once_with_either_name_in_any_case() -> None:
@@ -146,6 +149,47 @@ async def test_a_session_cookie_is_http_only_strict_and_secure_only_over_https()
 
     assert all(part in over_http for part in ("httponly", "samesite=strict", "path=/v1")) and "secure" not in over_http
     assert "secure" in over_https
+
+
+COMPOSE = yaml.safe_load((Path(__file__).resolve().parents[2] / "compose.yml").read_text(encoding="utf-8"))
+PROXY = COMPOSE["services"]["proxy"]["networks"]["site"]["ipv4_address"]
+GATEWAY = COMPOSE["networks"]["site"]["ipam"]["config"][0]["gateway"]
+
+
+def through_uvicorn(app, peer: str, forwarded_for: str, scheme: str = "https") -> httpx.AsyncClient:
+    """
+    A client whose requests reach the app from `peer` with the headers a reverse proxy adds, through the middleware
+    uvicorn puts in front of the app, trusting what compose.yml gives it in FORWARDED_ALLOW_IPS.
+    """
+    trusted = COMPOSE["services"]["backend"]["environment"]["FORWARDED_ALLOW_IPS"]
+    transport = httpx.ASGITransport(app=ProxyHeadersMiddleware(app, trusted_hosts=trusted), client=(peer, 50_000))
+    forwarded = {"X-Forwarded-For": forwarded_for, "X-Forwarded-Proto": scheme}
+    return httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1", headers=APP_REQUEST | forwarded)
+
+
+async def test_behind_the_compose_proxy_the_limits_count_each_visitor_and_the_cookie_is_secure_over_https() -> None:
+    harness = build_harness()
+    limit = harness.config.accounts.sign_in_failures_per_client
+
+    async with (
+        app_of(harness) as app,
+        through_uvicorn(app, PROXY, f"100.64.0.9, {GATEWAY}") as attacker,
+        through_uvicorn(app, PROXY, f"100.64.0.1, {GATEWAY}") as owner,
+        through_uvicorn(app, PROXY, "192.168.1.7", scheme="http") as plain,
+        through_uvicorn(app, "192.168.1.50", "100.64.0.9") as not_the_proxy,
+    ):
+        for attempt in range(limit):
+            await sign_in(attacker, f"nobody{attempt}", "a wrong password")
+
+        throttled = await sign_in(attacker, "owner", ADMINISTRATOR_PASSWORD)
+        over_https = await sign_in(owner, "owner", ADMINISTRATOR_PASSWORD)
+        over_http = await sign_in(plain, "owner", ADMINISTRATOR_PASSWORD)
+        claimed = await sign_in(not_the_proxy, "owner", ADMINISTRATOR_PASSWORD)
+
+    assert (throttled.status_code, over_https.status_code, over_http.status_code) == (429, 200, 200)
+    assert "secure" in over_https.headers["set-cookie"].lower() and "secure" not in over_http.headers["set-cookie"].lower()
+    assert claimed.status_code == 200, "counted as itself, not as the throttled address it names"
+    assert "secure" not in claimed.headers["set-cookie"].lower(), "its claim of https is not read either"
 
 
 async def test_signing_out_ends_the_session_and_twice_is_fine() -> None:
@@ -295,6 +339,8 @@ PUBLIC_REQUESTS: dict[tuple[str, str], dict[str, object]] = {
     ("POST", "/v1/auth/register"): {"json": NEW_USER},
     ("POST", "/v1/auth/sign-in"): {"json": {"identifier": "owner", "password": ADMINISTRATOR_PASSWORD}},
     ("POST", "/v1/auth/sign-out"): {},
+    ("GET", "/v1/auth/google/start"): {},
+    ("GET", "/v1/auth/google/callback"): {"params": {"state": "a-state", "code": "a-code"}},
     ("GET", "/v1/market/stocks"): {"params": {"query": "2330"}},
     ("GET", "/v1/market/most-traded"): {},
     ("GET", "/v1/market/breadth"): {},
@@ -304,6 +350,10 @@ PUBLIC_REQUESTS: dict[tuple[str, str], dict[str, object]] = {
     ("GET", "/v1/market/attribution"): {},
     ("GET", "/v1/market/stocks/{stock_id}"): {"path": {"stock_id": "2330"}},
     ("GET", "/v1/market/stocks/{stock_id}/financials"): {"path": {"stock_id": "2330"}},
+    ("GET", "/v1/market/stocks/{stock_id}/analysis"): {"path": {"stock_id": "2330"}},
+    ("GET", "/v1/market/stocks/{stock_id}/news"): {"path": {"stock_id": "2330"}},
+    ("GET", "/v1/market/stocks/{stock_id}/brief"): {"path": {"stock_id": "2330"}},
+    ("GET", "/v1/market/stocks/{stock_id}/ranking"): {"path": {"stock_id": "2330"}},
     ("GET", "/v1/technical-settings/built-in-strategies"): {},
     ("POST", "/v1/webhook/line"): {"json": {"destination": "x", "events": []}},
 }

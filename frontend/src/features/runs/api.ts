@@ -32,13 +32,22 @@ export const runKeys = {
 
 const isLive = (run: Run | undefined) => run?.state === 'running'
 
+/** Reloads what a run may have changed (the account, the holdings, the watchlist) when a poll first sees it ended. */
+function reloadResultsOfEnded(client: QueryClient, before: readonly Run[], after: readonly Run[]) {
+  const live = new Set(before.filter(isLive).map((run) => run.run_id))
+  if (after.some((run) => live.has(run.run_id) && !isLive(run))) void client.invalidateQueries({ queryKey: runResultsKey })
+}
+
 /** One page of recorded runs, newest first; one extra row tells whether a next page exists. */
 export function useRunsPage(offset: number) {
   const signedIn = useIsSignedIn()
+  const client = useQueryClient()
   return useQuery({
     queryKey: runKeys.page(offset),
     queryFn: async ({ signal }) => {
+      const before = client.getQueryData<{ runs: Run[] }>(runKeys.page(offset))?.runs ?? []
       const runs = await apiRequest('get', '/v1/runs', { query: { limit: PAGE_SIZE + 1, offset }, signal })
+      reloadResultsOfEnded(client, before, runs)
       return { runs: runs.slice(0, PAGE_SIZE), hasNext: runs.length > PAGE_SIZE }
     },
     enabled: signedIn,
@@ -58,7 +67,7 @@ export function useRun(runId: string) {
     queryFn: async ({ signal }) => {
       const before = client.getQueryData<Run>(runKeys.run(runId))
       const run = await apiRequest('get', '/v1/runs/{run_id}', { params: { run_id: runId }, signal })
-      if (isLive(before) && !isLive(run)) void client.invalidateQueries({ queryKey: runResultsKey })
+      reloadResultsOfEnded(client, before ? [before] : [], [run])
       return run
     },
     enabled: signedIn,

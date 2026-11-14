@@ -5,6 +5,7 @@ from typing import override
 from a_domain.ports.ai.ai_provider import IAiProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from b_application.config.app_config import AppConfig
+from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 
 
 class BaseAIAdapter(IAiProvider, ABC):
@@ -21,7 +22,7 @@ class BaseAIAdapter(IAiProvider, ABC):
         try:
             stock_dir = self._config.project_root / self._config.folder.ai_response_dir / stock_id
             stock_dir.mkdir(parents=True, exist_ok=True)
-            file_path = stock_dir / f"report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+            file_path = stock_dir / f"report_{datetime.now(TAIWAN_TIMEZONE).strftime('%Y%m%d_%H%M%S')}.md"
 
             with open(file_path, "w", encoding="utf-8") as file:
                 file.write(content)

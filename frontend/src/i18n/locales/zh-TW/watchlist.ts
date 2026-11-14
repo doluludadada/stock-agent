@@ -2,6 +2,7 @@ import type en from '../en/watchlist'
 import type { DictionaryShape } from '../../types'
 
 const watchlist: DictionaryShape<typeof en> = {
+  today: { all: '完整清單' },
   signIn: '登入後查看你的觀察清單',
   title: '觀察清單',
   lead: '你關注的股票，每檔的收盤與近一個月走勢。',

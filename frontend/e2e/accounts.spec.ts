@@ -62,7 +62,7 @@ test('a fresh site opens on the first-time setup, refuses a wrong code and signs
   await admin.getByLabel('設定碼').fill(SETUP_CODE)
   await admin.getByRole('button', { name: '建立帳號並登入' }).click()
   await admin.waitForURL((url) => url.pathname === '/')
-  await expect(admin.getByRole('heading', { name: '市場總覽', level: 1 })).toBeVisible()
+  await expect(admin.getByRole('heading', { name: '今日', level: 1 })).toBeVisible()
   expect(sent.length, 'setup, setup again, sign-in').toBe(3)
   for (const request of sent) expect(request.headers()['x-requested-with'], `${request.method()} ${request.url()}`).toBe('stock-agent')
 
@@ -81,6 +81,7 @@ test('signing out asks a private page to sign in, a wrong password says so, and 
   await openAccountMenu(admin, ADMIN.username)
   await admin.getByRole('menuitem', { name: '登出' }).click()
   await expect(admin.getByRole('banner').getByRole('link', { name: '登入' })).toBeVisible()
+  await expect(admin, 'signing out leads home').toHaveURL((url) => url.pathname === '/')
   expect((await admin.request.get('/v1/auth/me')).status(), 'the server ended the session').toBe(401)
 
   await admin.goto('/watchlist')

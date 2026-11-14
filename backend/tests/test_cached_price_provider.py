@@ -3,6 +3,8 @@ from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 
 import pytest
+from sqlalchemy import insert
+from sqlalchemy.exc import IntegrityError
 from support.fake_daily_history import FakeDailyHistory, session_bar
 from support.fakes import RecordingLogger
 from support.settings import shipped_config
@@ -10,10 +12,12 @@ from trading_stack import MovableClock, SilentLogger
 
 from a_domain.model.market.stock import Stock
 from a_domain.ports.system.logging_provider import ILoggingProvider
+from a_domain.rules.trading.ranking import RankingHistoryRule
 from a_domain.types.enums import MarketIndex, MarketType
 from b_application.config.market_data_config import MarketDataConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.daily_close_archive_dto import DailyCloseDTO
+from c_infrastructure.database.models.ohlcv_dto import ExRightReferenceDTO
 from c_infrastructure.database.repositories.daily_close_archive import SqlDailyCloseArchive
 from c_infrastructure.market.cached_price_provider import CachedPriceProvider
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
@@ -248,17 +252,34 @@ async def test_a_dividend_twse_compared_to_no_reference_is_adjusted_by_its_ex_ri
 
     history = (await cache.fetch_history(STOCKS[:1], *clock.history_window(30)))["2330"]
 
-    assert reports.references_asked == [(date(2026, 10, 10), MONDAY)]
+    assert reports.references_asked == [(market, date(2026, 10, 10), MONDAY) for market in MarketType]
     assert [bar.close for bar in history[-2:]] == [98.0, 97.0]
     assert await cache.ex_right_references(date(2026, 1, 1), MONDAY) == {"2330": {at(MONDAY, 13, 30): 98.0}}
 
 
-async def test_a_later_sync_asks_twse_only_from_the_latest_reference_held_and_a_longer_window_also_before_the_earliest(
+async def test_a_tpex_dividend_counts_as_no_loss_in_the_rankings_total_return_once_its_reference_is_saved(
+    db: DatabaseConnector,
+) -> None:
+    clock = MovableClock(at(MONDAY, 16))
+    reports = reports_of(SESSIONS[:-1], {"6488": 100.0})
+    reports.sessions[MONDAY] = {"6488": session_bar(MONDAY, 97.0)}
+    reports.index = {MarketType.TWSE: SESSIONS, MarketType.TPEX: SESSIONS}
+    reports.tpex_references = {("6488", MONDAY): 98.0}
+    cache = cache_over(reports, db, clock)
+
+    history = (await cache.fetch_history(STOCKS[1:], *clock.history_window(30)))["6488"]
+    listed = await cache.listed_history()
+
+    assert listed is not None
+    assert [bar.close for bar in history[-2:]] == [98.0, 97.0]
+    assert RankingHistoryRule(daily_limit=0.105).apply(listed, {}).returns[0, -1] == pytest.approx(97.0 / 98.0 - 1)
+
+
+async def test_a_later_sync_asks_each_exchange_only_for_the_days_it_never_read_those_before_them_newest_first(
     db: DatabaseConnector,
 ) -> None:
     clock = MovableClock(at(MONDAY, 16))
     reports = reports_of(SESSIONS, {"2330": 100.0})
-    reports.references = {("2330", date(2026, 10, 20)): 99.0}
     cache = cache_over(reports, db, clock)
     await cache.sync_references(date(2026, 10, 10), date(2026, 10, 31))
     reports.references_asked.clear()
@@ -267,9 +288,49 @@ async def test_a_later_sync_asks_twse_only_from_the_latest_reference_held_and_a_
     await cache.sync_references(date(2026, 1, 2), MONDAY)
 
     assert reports.references_asked == [
-        (date(2026, 1, 2), date(2026, 3, 31)),
-        (date(2026, 4, 1), date(2026, 6, 30)),
-        (date(2026, 7, 1), date(2026, 9, 30)),
-        (date(2026, 10, 1), date(2026, 10, 20)),
-        (date(2026, 10, 20), MONDAY),
+        (market, *asked)
+        for market in MarketType
+        for asked in (
+            (date(2026, 10, 1), date(2026, 10, 9)),
+            (date(2026, 7, 1), date(2026, 9, 30)),
+            (date(2026, 4, 1), date(2026, 6, 30)),
+            (date(2026, 1, 2), date(2026, 3, 31)),
+            (date(2026, 11, 1), MONDAY),
+        )
     ]
+
+
+async def test_a_reference_request_that_fails_leaves_its_range_and_the_older_ones_to_the_next_sync(db: DatabaseConnector) -> None:
+    clock = MovableClock(at(MONDAY, 16))
+    reports = reports_of(SESSIONS, {"2330": 100.0})
+    reports.references = {("2330", date(2026, 2, 3)): 90.0}
+    cache = cache_over(reports, db, clock)
+    await cache.sync_references(date(2026, 10, 10), MONDAY)
+    reports.references_asked.clear()
+    reports.references_failing = {(MarketType.TWSE, date(2026, 4, 1)): ConnectionError("TWSE refuses the address")}
+
+    clock.current = at(MONDAY + timedelta(days=1), 16)
+    await cache.sync_references(date(2026, 1, 2), MONDAY)
+    unread = await cache.reference_gaps(MarketType.TWSE, date(2026, 1, 2), MONDAY)
+    reports.references_failing, reports.references_asked = {}, []
+    clock.current = at(MONDAY + timedelta(days=2), 16)
+    await cache.sync_references(date(2026, 1, 2), MONDAY)
+
+    assert unread == [(date(2026, 4, 1), date(2026, 6, 30)), (date(2026, 1, 2), date(2026, 3, 31))]
+    assert reports.references_asked == [
+        *((MarketType.TWSE, *gap) for gap in unread),
+        *((MarketType.TPEX, *gap) for gap in cache.reference_blocks(date(2026, 1, 2), date(2026, 10, 9))[::-1]),
+    ]
+    assert await cache.ex_right_references(date(2026, 1, 1), MONDAY) == {"2330": {at(date(2026, 2, 3), 13, 30): 90.0}}
+    assert [await cache.reference_gaps(market, date(2026, 1, 2), MONDAY) for market in MarketType] == [[], []]
+
+
+async def test_a_statement_the_database_refuses_raises_without_the_values_it_was_given(db: DatabaseConnector) -> None:
+    refused = insert(ExRightReferenceDTO).values(stock_id="A123456789", session_date=MONDAY, reference_price=None)
+
+    with pytest.raises(IntegrityError) as raised:
+        async with db.get_session() as session:
+            await session.execute(refused)
+
+    assert "ex_right_references" in str(raised.value)
+    assert "A123456789" not in str(raised.value)

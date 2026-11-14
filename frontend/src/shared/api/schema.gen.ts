@@ -4,6 +4,31 @@
  */
 
 export interface paths {
+    "/v1/account/brokerage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Brokerage Account
+         * @description The SinoPac account as the broker reports it now, for an administrator the site shows features.sinopac_account:
+         *     the bank balance, the settlements due, the positions with the broker's last prices and its own unrealized PnL,
+         *     today's deals and the sales of the last holdings.realized_days days with the PnL the broker says each realized.
+         *     `simulation` says which server this environment logs in to, `login_up` whether the login is up (`statement` is None
+         *     while it is down), and `ordering` whether the site lets the user order there (features.sinopac_ordering, off by
+         *     default). It only reads: it sends no order, whatever `ordering` says, and it answers no account number.
+         */
+        get: operations["get_brokerage_account_v1_account_brokerage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/account/brokers": {
         parameters: {
             query?: never;
@@ -13,8 +38,9 @@ export interface paths {
         };
         /**
          * Get Brokers
-         * @description The brokers the user may choose for Buzz, Intraday or a manual BUY now, the mock account first, each with what a
-         *     run's confirmation names: a real broker's server and its BUY limits.
+         * @description The brokers the site lets the user order on (features.*) and the user may choose for Buzz, Intraday or a manual
+         *     BUY now, the mock account first, each with what a run's confirmation names: a real broker's server and its BUY
+         *     limits. SinoPac is listed only while features.sinopac_ordering shows the user ordering there: it is off by default.
          */
         get: operations["get_brokers_v1_account_brokers_get"];
         put?: never;
@@ -162,6 +188,52 @@ export interface paths {
         patch: operations["change_user_v1_admin_users__user_id__patch"];
         trace?: never;
     };
+    "/v1/auth/google/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Return From Google
+         * @description Where Google sends the browser back: <accounts.public_origin>/v1/auth/google/callback, the one redirect URI of the
+         *     OAuth client. A sign-in sets the session cookie and redirects to the app. A settings confirmation grants the save
+         *     it was started for and redirects to the settings form with ?google=confirmed. A refusal redirects to the app with
+         *     ?google= and the reason; nothing is created and no session starts. Either way the flow cookie is cleared.
+         */
+        get: operations["return_from_google_v1_auth_google_callback_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/google/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Start Google Sign In
+         * @description The browser's way to Google, as a navigation, never a fetch: it sets the short-lived flow cookie and redirects to
+         *     Google's sign-in. With `confirmation`, the id the web app made for one settings save, Google authenticates the
+         *     administrator again for that save. Where the site offers no sign-in with Google, or past the limit per address,
+         *     it redirects back to the app with ?google= and the reason.
+         */
+        get: operations["start_google_sign_in_v1_auth_google_start_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/auth/me": {
         parameters: {
             query?: never;
@@ -298,7 +370,8 @@ export interface paths {
         };
         /**
          * Get Sign In Status
-         * @description What the web app shows first: the first-time setup while no user exists, then sign-in, with registration while it is open.
+         * @description What the web app shows first: the first-time setup while no user exists, then sign-in, with registration while it is
+         *     open; and whom the site shows each feature to, which the app reads with the user's permissions to show or hide a page.
          */
         get: operations["get_sign_in_status_v1_auth_status_get"];
         put?: never;
@@ -327,7 +400,8 @@ export interface paths {
          * @description Replays the user's active technical strategy over the period, day by day with the live trading rules, and answers
          *     the backtest, saved for the user. A stock is decided on its technical score alone, as a run decides a stock the AI
          *     is not asked about; a decision made after one session's close fills at the next open. It asks no AI, touches no
-         *     account and never orders. The answer comes when the replay is done: seconds, longer for the first one after a start.
+         *     account and never orders. The answer comes when the replay is done: seconds, longer for the first one after a start
+         *     or while it waits for the server's other replays (accounts.max_concurrent_backtests).
          */
         post: operations["run_backtest_v1_backtests_post"];
         delete?: never;
@@ -391,6 +465,77 @@ export interface paths {
          * @description Deletes one saved backtest of the user. Another user's id answers 404 and deletes nothing.
          */
         post: operations["delete_backtest_v1_backtests__backtest_id__delete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/holdings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Holdings
+         * @description The user's holdings as one portfolio, from held data alone: the SinoPac account's positions as the broker lists
+         *     them now (where the site shows the user features.sinopac_account, the user is an administrator and the login is
+         *     up), the mock account's (features.mock_account) and the holdings entered by hand. `sources` narrows them; a source
+         *     the site does not show the user is never read. Each holding stays under its source and counts once: the same stock
+         *     at the broker and entered by hand is two holdings. Each is valued at its stock's last close the site holds, net of
+         *     the SELL fee and tax, and carries its standing in the monthly ranking as /v1/market/stocks/{id}/ranking answers it,
+         *     or why the ranking leaves it out, and its latest month of revenue with the ranking's acceleration. The portfolio
+         *     says its concentration in the holdings.concentration_positions largest stocks, the share of its value the ranking
+         *     holds now, and the value-weighted score over the scored holdings with their share. The score figures are None for a
+         *     viewer the site does not show the ranking. It is analysis, not advice: nothing here says to buy or sell.
+         */
+        get: operations["get_holdings_v1_holdings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/holdings/manual": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enter Holding
+         * @description Keeps a holding the user enters by hand, replacing the user's earlier entry of the same stock: one entry per stock.
+         *     It is a note of shares held elsewhere: it orders nothing and touches no account. 422 for a stock the listing does
+         *     not hold; 503 while the listing is unavailable.
+         */
+        post: operations["enter_holding_v1_holdings_manual_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/holdings/manual/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove Holding
+         * @description Takes the user's hand-entered holding of the stock off the list. A holding of an account is never touched.
+         */
+        post: operations["remove_holding_v1_holdings_manual_remove_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -566,6 +711,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/market/stocks/{stock_id}/analysis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Stock Analysis
+         * @description One stock's financial analysis from the data the server holds, with no fetch and no AI call: each held month's
+         *     revenue with its change from a year before and the monthly ranking's acceleration (the mean of the latest
+         *     ranking.revenue_short_months months over that of the latest ranking.revenue_long_months), each held quarter's
+         *     year-to-date EPS, its own EPS, its change from a year before, its margins and debt ratio, and the latest session's
+         *     P/E, P/B and dividend yield against each ratio's median over the sessions held. `readings` says what the figures
+         *     say by fixed rules, each a kind and a count the web app turns into a sentence. A figure whose history is too short
+         *     is null, and its reading says how much is held instead. Changes, margins and the debt ratio are ratios; revenue is
+         *     in thousands of TWD. A stock the server holds nothing of answers empty lists. Public.
+         */
+        get: operations["get_stock_analysis_v1_market_stocks__stock_id__analysis_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/market/stocks/{stock_id}/brief": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Stock Brief
+         * @description The AI brief the site holds of one stock, with no AI call: `today` is the brief of today in Taipei if a viewer
+         *     asked for one (`status` writing, written or failed), `previous` the newest written brief of an earlier day, and
+         *     `stocks_left` how many more stocks may get a new brief today. A written brief has two parts, `company` and
+         *     `movement`, each a list of sentences with the keys of the `sources` it rests on: the held figures and the
+         *     announcements, news and posts the page shows, by kind, date, title and address. It names the model that wrote it,
+         *     when, in which language, and the window of sessions with the close's change over it. Every text is the AI's or a
+         *     third party's: show it as text, never as markup. It describes and gives no advice. Public.
+         */
+        get: operations["get_stock_brief_v1_market_stocks__stock_id__brief_get"];
+        put?: never;
+        /**
+         * Write Stock Brief
+         * @description Asks for the stock's AI brief of today in Taipei, then answers what GET answers. The site writes one brief per
+         *     stock and day for every viewer: the first request claims it and makes one paid AI call on the user's allowance,
+         *     waiting for the reply; a request made meanwhile, or after it is written, calls nothing and answers what is held. A
+         *     failed brief may be asked again. 429 brief_limit_reached when the stock has none today and
+         *     stock_page.brief.daily_stocks stocks have one; 429 ai_allowance_spent when the user's or the site's paid AI calls of
+         *     the day are spent. It reads held data only, records no run and never orders. Private: a visitor never causes a call.
+         */
+        post: operations["write_stock_brief_v1_market_stocks__stock_id__brief_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/market/stocks/{stock_id}/financials": {
         parameters: {
             query?: never;
@@ -582,6 +789,62 @@ export interface paths {
          *     report is null. Both lists are empty for a stock the archive holds nothing of. Public.
          */
         get: operations["get_stock_financials_v1_market_stocks__stock_id__financials_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/market/stocks/{stock_id}/news": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Stock News
+         * @description What is said about one listed stock, newest first, from the site's article store, at most
+         *     stock_page.article_store.shown: the material information its company announced and the TWSE news naming it, with
+         *     their text; and on a site whose audience may read them (`news_articles` of /v1/market/audience) the news sites'
+         *     articles and the stock board's posts, by title and address. A request first reads what there is to read now into
+         *     the store: the open-data archive's items of the last analysis.material_information_days, and the sites' and the
+         *     board's, which are fetched when a page asks and then held for stock_page.news_freshness_minutes, one fetch per
+         *     stock at a time; a source that fails keeps what was held of it. So the list also holds what the sources no longer
+         *     serve, for stock_page.article_store.retention_days. Every text is a third party's: show it as text, never as
+         *     markup. Public.
+         */
+        get: operations["get_stock_news_v1_market_stocks__stock_id__news_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/market/stocks/{stock_id}/ranking": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Stock Ranking
+         * @description One stock's score: where it stands in the monthly ranking at the latest decision session the site's daily history
+         *     holds, from the same ranking /v1/rankings/latest answers, with no cut at ranking.top. `score` is its place among
+         *     the scored stocks as a percentile, 100 for the best combined rank; `stock` holds its two factors (revenue
+         *     acceleration, nearness to the high) with each one's rank from 0 to 1; `in_top` says whether the ranking holds it. A
+         *     stock the ranking leaves out has no score and `exclusion` says why: no held history, an ETF, no trade that session,
+         *     a close under ranking.min_close, too little traded value, a month of revenue not held, or a price history shorter
+         *     than the high needs. The score ranks two measured factors; it is no forecast. One stock's standing, not the
+         *     ranking's list: it needs no sign-in, and a viewer sees it only where the site shows them both the stock pages and
+         *     the ranking (403 feature_hidden otherwise).
+         */
+        get: operations["get_stock_ranking_v1_market_stocks__stock_id__ranking_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -628,6 +891,36 @@ export interface paths {
         get: operations["get_ranking_backtest_v1_rankings_backtest_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/rankings/follow": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Ranking Follow
+         * @description The ranking in the user's mock account: which of the latest decision's stocks it holds and lacks, which of its
+         *     holdings left the ranking, whether a follow may start now, and its return since it first followed the ranking
+         *     against ranking.benchmark_id over the same sessions. It records nothing and never orders.
+         */
+        get: operations["get_ranking_follow_v1_rankings_follow_get"];
+        put?: never;
+        /**
+         * Follow Ranking
+         * @description Brings the user's mock account to the ranking's latest decision, as a run of its own: it sells each holding the
+         *     ranking left and buys each ranked stock the account lacks, at an equal weight of the account in whole lots of
+         *     analysis.lot_size, priced as this site prices an order now, through the same order gates and journal as every
+         *     order. It orders on the mock account only. A second follow of a decision the account already holds answers
+         *     nothing_to_follow.
+         */
+        post: operations["follow_ranking_v1_rankings_follow_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1251,9 +1544,15 @@ export interface components {
         };
         /**
          * AuthStatusResponse
-         * @description What the web app shows first: the first-time setup, or sign-in with or without registration.
+         * @description What the web app shows first: the first-time setup, or sign-in with or without registration and Google.
          */
         AuthStatusResponse: {
+            /** Features */
+            features: {
+                [key: string]: components["schemas"]["FeatureVisibility"];
+            };
+            /** Google Sign In */
+            google_sign_in: boolean;
             /** Needs First Administrator */
             needs_first_administrator: boolean;
             /** Registration Open */
@@ -1487,6 +1786,69 @@ export interface components {
             unchanged: number;
         };
         /**
+         * BriefLanguage
+         * @description The language the site's AI briefs are written in. Its value is the web app's locale code.
+         * @enum {string}
+         */
+        BriefLanguage: "zh-TW" | "en";
+        /**
+         * BriefSentence
+         * @description One sentence of a brief and the held items it rests on. A sentence that cites none is never kept.
+         */
+        BriefSentence: {
+            /** Sources */
+            sources: string[];
+            text: components["schemas"]["NonEmptyText"];
+        };
+        /**
+         * BriefSource
+         * @description One held item a brief was written from, which the brief's sentences cite by its key.
+         */
+        BriefSource: {
+            /**
+             * Dated
+             * Format: date
+             */
+            dated: string;
+            key: components["schemas"]["NonEmptyText"];
+            kind: components["schemas"]["BriefSourceKind"];
+            /** Title */
+            title?: string | null;
+            /** Url */
+            url?: string | null;
+        };
+        /**
+         * BriefSourceKind
+         * @description What kind of held item a brief's sentence cites, so the stock page can name it and link to where it shows it.
+         * @enum {string}
+         */
+        BriefSourceKind: "company" | "price" | "revenue" | "earnings" | "ranking" | "announcement" | "exchange_news" | "news" | "post";
+        /**
+         * BriefStatus
+         * @description Where a stock's AI brief of one day stands. One brief exists per stock and Taipei calendar day, for the whole site.
+         * @enum {string}
+         */
+        BriefStatus: "writing" | "written" | "failed";
+        /**
+         * BrokerFill
+         * @description One execution as a real broker reports it, in shares: a deal of today, or a past sale with the profit or loss the
+         *     broker says it realized, its own fees and tax included.
+         */
+        BrokerFill: {
+            action: components["schemas"]["TradeAction"];
+            /**
+             * Filled On
+             * Format: date
+             */
+            filled_on: string;
+            price: components["schemas"]["PositiveFiniteFloat"];
+            /** Quantity */
+            quantity: number;
+            /** Realized Pnl */
+            realized_pnl?: number | null;
+            stock_id: components["schemas"]["NonEmptyText"];
+        };
+        /**
          * BrokerResponse
          * @description A broker the signed-in user may choose for a run now, as a run's confirmation names it: the mock account always,
          *     SinoPac for an administrator while the site's login is up.
@@ -1499,6 +1861,51 @@ export interface components {
             max_order_value: number | null;
             /** Simulation */
             simulation: boolean | null;
+        };
+        /**
+         * BrokerageAccountResponse
+         * @description The SinoPac account page: which server the site's login is on, whether it is up, and the account while it is.
+         */
+        BrokerageAccountResponse: {
+            /** Login Up */
+            login_up: boolean;
+            /** Ordering */
+            ordering: boolean;
+            /** Simulation */
+            simulation: boolean;
+            statement: components["schemas"]["BrokerageStatementResponse"] | null;
+        };
+        /**
+         * BrokerageStatementResponse
+         * @description A real broker's account as the broker reports it (BrokerageStatement): every figure is the broker's own.
+         */
+        BrokerageStatementResponse: {
+            /** Balance */
+            balance: number;
+            /** Fills */
+            fills: components["schemas"]["BrokerFill"][];
+            /** Market Value */
+            market_value: number;
+            /** Positions */
+            positions: components["schemas"]["HeldPositionResponse"][];
+            /**
+             * Read At
+             * Format: date-time
+             */
+            read_at: string;
+            /** Realized Pnl */
+            realized_pnl: number;
+            /** Sales */
+            sales: components["schemas"]["BrokerFill"][];
+            /**
+             * Sales From
+             * Format: date
+             */
+            sales_from: string;
+            /** Settlements */
+            settlements: components["schemas"]["Settlement"][];
+            /** Unrealized Pnl */
+            unrealized_pnl: number;
         };
         /**
          * Comparison
@@ -1565,6 +1972,7 @@ export interface components {
              */
             type: "group";
         };
+        ConfirmationId: string;
         /**
          * Confirmed
          * @description Every write repeats the caller's confirmation in its body, so a stray or replayed request without it changes nothing.
@@ -1581,6 +1989,18 @@ export interface components {
         };
         "DataReference-Input": components["schemas"]["MarketValue"] | components["schemas"]["LatestPrice"] | components["schemas"]["IndicatorValue"];
         "DataReference-Output": components["schemas"]["MarketValue"] | components["schemas"]["LatestPrice"] | components["schemas"]["IndicatorValue"];
+        /**
+         * EarningsTrend
+         * @description A company's held quarters, oldest first, and how long the latest direction of its EPS has lasted.
+         */
+        EarningsTrend: {
+            /** Eps Growing Quarters */
+            eps_growing_quarters: number | null;
+            /** Filed Eps Fetched At */
+            filed_eps_fetched_at: string | null;
+            /** Quarters */
+            quarters: components["schemas"]["QuarterResult"][];
+        };
         /**
          * EliminationReason
          * @enum {string}
@@ -1635,7 +2055,7 @@ export interface components {
          *     refused file, a user who is not an administrator and an installation on a real broker.
          * @enum {string}
          */
-        ErrorCode: "sign_in_required" | "sign_in_refused" | "sign_in_throttled" | "registration_closed" | "setup_code_refused" | "already_set_up" | "user_exists" | "last_administrator" | "unknown_host" | "app_request_required" | "administrators_only" | "real_broker_refused" | "broker_unavailable" | "realtime_quotes_unavailable" | "mops_unavailable" | "password_required" | "password_refused" | "settings_file_refused" | "settings_file_missing" | "settings_conflict" | "settings_edit_refused" | "settings_refused" | "technical_settings_conflict" | "ai_model_not_offered" | "run_in_progress" | "too_many_runs" | "nothing_to_follow" | "outside_follow_window" | "backtest_period_unavailable" | "ranking_unavailable" | "listing_unavailable" | "not_found" | "invalid_request" | "body_too_large" | "request_refused";
+        ErrorCode: "sign_in_required" | "sign_in_refused" | "sign_in_throttled" | "registration_closed" | "setup_code_refused" | "already_set_up" | "user_exists" | "last_administrator" | "unknown_host" | "app_request_required" | "administrators_only" | "feature_hidden" | "real_broker_refused" | "broker_unavailable" | "realtime_quotes_unavailable" | "mops_unavailable" | "password_required" | "password_refused" | "google_confirmation_required" | "settings_file_refused" | "settings_file_missing" | "settings_conflict" | "settings_edit_refused" | "settings_refused" | "technical_settings_conflict" | "ai_model_not_offered" | "run_in_progress" | "too_many_runs" | "nothing_to_follow" | "outside_follow_window" | "backtest_period_unavailable" | "ranking_unavailable" | "too_many_backtests" | "ai_allowance_spent" | "brief_limit_reached" | "listing_unavailable" | "not_found" | "invalid_request" | "body_too_large" | "request_refused";
         /**
          * ErrorResponse
          * @description Every refusal: `detail` in words for a person, `code` for the client to switch on.
@@ -1674,6 +2094,21 @@ export interface components {
             optimistic: components["schemas"]["ScenarioResponse"];
         };
         /**
+         * Feature
+         * @description A part of the product the site shows or hides. Its value names its setting under `features` in
+         *     config/appsetting.yaml, which holds its FeatureVisibility. The Web API's routes name the feature they belong to
+         *     (shows() in d_presentation/web/session.py), and the web app's navigation and pages name the same members, so the
+         *     three never disagree about what a feature covers.
+         * @enum {string}
+         */
+        Feature: "market_overview" | "ranking" | "stock_pages" | "watchlist" | "valuation" | "full_cycle" | "specific_stock" | "buzz" | "intraday" | "strategy_library" | "strategy_designer" | "strategy_backtest" | "mock_account" | "sinopac_account" | "sinopac_ordering" | "holdings";
+        /**
+         * FeatureVisibility
+         * @description Who the site shows a feature to. The Web API refuses the feature's routes to everyone else.
+         * @enum {string}
+         */
+        FeatureVisibility: "off" | "administrators" | "everyone";
+        /**
          * FiscalQuarter
          * @description A calendar-year fiscal quarter in Gregorian years. The MOPS adapter converts ROC years.
          */
@@ -1693,7 +2128,8 @@ export interface components {
         };
         /**
          * FollowRefusal
-         * @description Why a run's decisions cannot be followed into the user's mock account now. The Web API answers each as its code.
+         * @description Why a run's decisions, or the monthly ranking, cannot be followed into the user's mock account now. The Web API
+         *     answers each as its code.
          * @enum {string}
          */
         FollowRefusal: "nothing_to_follow" | "outside_follow_window";
@@ -1708,6 +2144,35 @@ export interface components {
             open_decision_ids: string[];
             refusal: components["schemas"]["FollowRefusal"] | null;
         };
+        /**
+         * FollowReturn
+         * @description What a mock account made since it first followed the ranking, against the benchmark over the same sessions.
+         */
+        FollowReturn: {
+            /**
+             * Account Return
+             * @description The account's equity at the close of `until` over its equity at the close before `since`, less 1: its fees and tax
+             *     are in it. The equity before is the cash the account opened with when it had filled no order by then.
+             */
+            account_return: number | null;
+            benchmark_id: components["schemas"]["NonEmptyText"];
+            /**
+             * Benchmark Return
+             * @description The benchmark's total return over the same sessions. None while the history holds no bar of it there.
+             */
+            benchmark_return: number | null;
+            /**
+             * Since
+             * Format: date
+             * @description The trading day of its first ranking follow that filled an order since the account opened.
+             */
+            since: string;
+            /**
+             * Until
+             * @description The last session both returns count to. None until the history holds a session from `since` on.
+             */
+            until: string | null;
+        };
         FormulaId: string;
         Fraction: number;
         /**
@@ -1719,6 +2184,117 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * HeldPositionResponse
+         * @description A position of a holdings page: what is held, its cost, and the gain or loss at its mark.
+         */
+        HeldPositionResponse: {
+            /** Average Cost */
+            average_cost: number;
+            /** Cost Basis */
+            cost_basis: number;
+            /** Mark Price */
+            mark_price: number;
+            /** Marked At */
+            marked_at: string | null;
+            /** Market Value */
+            market_value: number;
+            /** Opened At */
+            opened_at: string | null;
+            /** Quantity */
+            quantity: number;
+            /** Stock Id */
+            stock_id: string;
+            /** Unrealized Pnl */
+            unrealized_pnl: number;
+            /** Unrealized Return */
+            unrealized_return: number | null;
+        };
+        /** HoldingRemovalRequest */
+        HoldingRemovalRequest: {
+            /**
+             * Confirm
+             * @constant
+             */
+            confirm: true;
+            /** Stock Id */
+            stock_id: string;
+        };
+        /**
+         * HoldingRequest
+         * @description A holding the user enters by hand: shares of a listed stock at their average cost, with the day bought if known.
+         */
+        HoldingRequest: {
+            /** Average Cost */
+            average_cost: number;
+            /**
+             * Confirm
+             * @constant
+             */
+            confirm: true;
+            /** Opened On */
+            opened_on?: string | null;
+            /** Quantity */
+            quantity: number;
+            /** Stock Id */
+            stock_id: string;
+        };
+        /**
+         * HoldingResponse
+         * @description One holding of the My holdings page (AnalysedHolding). It is data to read: nothing here says to buy or sell.
+         */
+        HoldingResponse: {
+            /** Accelerating Months */
+            accelerating_months: number | null;
+            position: components["schemas"]["HeldPositionResponse"];
+            revenue: components["schemas"]["RevenueMonth"] | null;
+            source: components["schemas"]["HoldingSource"];
+            standing: components["schemas"]["StockRankingResponse"] | null;
+            /** Stock Name */
+            stock_name: string | null;
+            /** Weight */
+            weight: number;
+        };
+        /**
+         * HoldingSource
+         * @description Where a holding of the My holdings page comes from. A holding is counted under its one source.
+         * @enum {string}
+         */
+        HoldingSource: "brokerage" | "mock" | "manual";
+        /**
+         * HoldingsResponse
+         * @description The My holdings page (PortfolioAnalysis): the holdings of each source read, each counted once under its source, and
+         *     the portfolio they make at the last closes the site holds. The score ranks two measured factors and forecasts
+         *     nothing. The score figures are None where the site does not show the viewer the ranking.
+         */
+        HoldingsResponse: {
+            /** Asked */
+            asked: components["schemas"]["HoldingSource"][];
+            /** Concentration */
+            concentration: number;
+            /** Concentration Positions */
+            concentration_positions: number;
+            /** Cost */
+            cost: number;
+            highest: components["schemas"]["HoldingResponse"] | null;
+            /** Holdings */
+            holdings: components["schemas"]["HoldingResponse"][];
+            lowest: components["schemas"]["HoldingResponse"] | null;
+            /** Market Value */
+            market_value: number;
+            /** Scored Share */
+            scored_share: number | null;
+            /** Sources */
+            sources: components["schemas"]["HoldingSource"][];
+            /** Top Share */
+            top_share: number | null;
+            /** Unrealized Pnl */
+            unrealized_pnl: number;
+            /** Unrealized Return */
+            unrealized_return: number | null;
+            /** Weighted Score */
+            weighted_score: number | null;
         };
         /** IndexHistoryResponse */
         IndexHistoryResponse: {
@@ -2112,7 +2688,7 @@ export interface components {
          *     it is checked, always against User.permissions.
          * @enum {string}
          */
-        Permission: "manage_users" | "edit_system_settings" | "use_cli" | "use_real_broker" | "notify_recipients" | "uncapped_ai" | "uncapped_runs";
+        Permission: "manage_users" | "edit_system_settings" | "use_cli" | "use_real_broker" | "notify_recipients" | "uncapped_ai" | "see_administrator_features" | "uncapped_runs";
         /** PositionValueResponse */
         PositionValueResponse: {
             /** Average Cost */
@@ -2172,6 +2748,29 @@ export interface components {
             total_liabilities?: number | null;
         };
         /**
+         * QuarterResult
+         * @description One held quarter of a company's results as the stock page reads it. The EPS figures are in TWD; the margins and the
+         *     debt ratio are ratios of the statements' figures of the year to the quarter's end, None where the company's industry
+         *     format reports no such figure or the archive holds no statement of the quarter.
+         */
+        QuarterResult: {
+            /** Debt Ratio */
+            debt_ratio: number | null;
+            /** Eps Year Over Year */
+            eps_year_over_year: number | null;
+            /** Eps Year To Date */
+            eps_year_to_date: number | null;
+            /** Gross Margin */
+            gross_margin: number | null;
+            /** Net Margin */
+            net_margin: number | null;
+            /** Operating Margin */
+            operating_margin: number | null;
+            quarter: components["schemas"]["FiscalQuarter"];
+            /** Quarter Eps */
+            quarter_eps: number | null;
+        };
+        /**
          * RankedStock
          * @description One stock of a ranking: its two factors, the rank of each among the universe's stocks that have it, and its score.
          */
@@ -2181,7 +2780,8 @@ export interface components {
             nearness_rank: components["schemas"]["Fraction"];
             /**
              * Nearness To High
-             * @description The total-return level at the decision's close over its highest of the last high_sessions sessions: 1 at a high.
+             * @description The total-return level at the decision's close over its highest of the last high_sessions sessions: 1 at a high. A
+             *     stock listed after the first of those sessions has none.
              */
             nearness_to_high: number;
             /**
@@ -2311,6 +2911,77 @@ export interface components {
                 [key: string]: number;
             };
         };
+        /**
+         * RankingExclusion
+         * @description Why the monthly ranking gives a stock no score at a decision session, the first that applies.
+         * @enum {string}
+         */
+        RankingExclusion: "no_history" | "not_a_stock" | "not_traded" | "price_under_floor" | "illiquid" | "no_revenue_history" | "short_price_history";
+        /**
+         * RankingFollowResponse
+         * @description The user's mock account against the ranking's latest decision, and what following the ranking did so far.
+         */
+        RankingFollowResponse: {
+            holdings: components["schemas"]["RankingHoldings"];
+            performance: components["schemas"]["FollowReturn"] | null;
+            refusal: components["schemas"]["FollowRefusal"] | null;
+            /** Running */
+            running: boolean;
+        };
+        /**
+         * RankingHoldings
+         * @description A mock account against the monthly ranking's latest decision. A ranking follow sells `left` and buys `lacking`.
+         */
+        RankingHoldings: {
+            /**
+             * Decided On
+             * @description The decision session of the ranking. None before any ranking was read.
+             */
+            decided_on: string | null;
+            /**
+             * Held
+             * @description The ranking's stocks the account holds, best first.
+             */
+            held: string[];
+            /**
+             * Lacking
+             * @description The ranking's stocks the account does not hold, best first.
+             */
+            lacking: string[];
+            /**
+             * Left
+             * @description The stocks the account holds that the ranking does not, in stock id order.
+             */
+            left: string[];
+        };
+        /**
+         * RatioStanding
+         * @description One valuation ratio at the latest held session against the stock's own held history.
+         */
+        RatioStanding: {
+            /** Latest */
+            latest: number | null;
+            /** Median */
+            median: number | null;
+            /** Sessions */
+            sessions: number;
+        };
+        /**
+         * Reading
+         * @description One sentence of the reading: what it says, and the months, quarters or sessions it counts where it counts any.
+         */
+        Reading: {
+            /** Count */
+            count?: number | null;
+            kind: components["schemas"]["ReadingKind"];
+        };
+        /**
+         * ReadingKind
+         * @description One sentence of a stock page's reading of its held figures, which the web app says in the reader's language. A
+         *     reading with a count names how many months, quarters or sessions it holds for.
+         * @enum {string}
+         */
+        ReadingKind: "revenue_accelerating" | "revenue_slowing" | "revenue_growing" | "revenue_shrinking" | "revenue_history_short" | "no_revenue" | "eps_up" | "eps_down" | "eps_history_short" | "no_eps" | "pe_above_median" | "pe_below_median" | "pe_at_median" | "no_pe" | "valuation_history_short" | "no_valuation";
         /** RegistrationRequest */
         RegistrationRequest: {
             email: components["schemas"]["EmailAddress"];
@@ -2332,6 +3003,43 @@ export interface components {
              */
             confirm: true;
             initial_cash: components["schemas"]["PositiveFiniteFloat"];
+        };
+        /**
+         * RevenueMonth
+         * @description One held month of a company's revenue as the stock page reads it. Revenue is in thousands of TWD; changes are ratios.
+         */
+        RevenueMonth: {
+            /** Acceleration */
+            acceleration: number | null;
+            /** Month */
+            month: number;
+            /** Revenue */
+            revenue: number | null;
+            /**
+             * Served Date
+             * Format: date
+             */
+            served_date: string;
+            /** Year */
+            year: number;
+            /** Year Over Year */
+            year_over_year: number | null;
+        };
+        /**
+         * RevenueTrend
+         * @description A company's held months of revenue, oldest first, and how long the latest direction has lasted.
+         */
+        RevenueTrend: {
+            /** Accelerating Months */
+            accelerating_months: number | null;
+            /** Growing Months */
+            growing_months: number | null;
+            /** Long Months */
+            long_months: number;
+            /** Months */
+            months: components["schemas"]["RevenueMonth"][];
+            /** Short Months */
+            short_months: number;
         };
         /**
          * Role
@@ -2469,19 +3177,22 @@ export interface components {
         /**
          * SettingField
          * @description One setting as the administrator's settings form shows it: its dotted settings path, such as ai.temperature, or an
-         *     AI prompt's, such as ai.system_prompt; how the form shows it; the value the file sets, as JSON, else its default,
-         *     else null; its options and bounds from the settings classes; and whether it applies only at a restart.
+         *     AI prompt's, such as ai.system_prompt; the control it gets and the group it shows under; the value the file sets,
+         *     as JSON, else its default, else null; and what the control offers, all from the settings classes. A value the file
+         *     sets that is none of the options or steps still shows, and stays until the administrator picks another.
          */
         SettingField: {
-            /** Exclusive Maximum */
-            exclusive_maximum?: number | null;
-            /** Exclusive Minimum */
-            exclusive_minimum?: number | null;
+            group: components["schemas"]["SettingGroup"];
             kind: components["schemas"]["SettingKind"];
             /** Maximum */
             maximum?: number | null;
             /** Minimum */
             minimum?: number | null;
+            /**
+             * Nullable
+             * @default false
+             */
+            nullable: boolean;
             /**
              * Options
              * @default []
@@ -2494,14 +3205,34 @@ export interface components {
              * @default false
              */
             restart_only: boolean;
+            /** Step */
+            step?: number | null;
+            /**
+             * Steps
+             * @default []
+             */
+            steps: number[];
+            unit?: components["schemas"]["SettingUnit"] | null;
             value: components["schemas"]["JsonValue"];
         };
         /**
-         * SettingKind
-         * @description How the administrator's settings form shows a setting and takes its new value.
+         * SettingGroup
+         * @description What an administrator comes to the settings form to do. Each setting shows under one, in this order.
          * @enum {string}
          */
-        SettingKind: "switch" | "choice" | "choices" | "integer" | "number" | "text" | "lines" | "structure";
+        SettingGroup: "site_access" | "features" | "ranking" | "data_history" | "ai" | "trading_limits" | "advanced";
+        /**
+         * SettingKind
+         * @description The control the administrator's settings form gives a setting. All but the last three are chosen, never typed.
+         * @enum {string}
+         */
+        SettingKind: "switch" | "choice" | "choices" | "steps" | "range" | "date" | "time" | "text" | "lines" | "structure";
+        /**
+         * SettingUnit
+         * @description What a setting's number counts, so the form words a value as 2%, 15 minutes or NT$100,000.
+         * @enum {string}
+         */
+        SettingUnit: "percent" | "seconds" | "minutes" | "hours" | "days" | "twd" | "bytes";
         /**
          * SettingsFile
          * @description A settings file in config/ the administrator may edit from the Web. Nothing else on disk can be named.
@@ -2540,8 +3271,22 @@ export interface components {
              * @constant
              */
             confirm: true;
+            google_confirmation?: components["schemas"]["ConfirmationId"] | null;
             /** Password */
             password?: string | null;
+        };
+        /**
+         * Settlement
+         * @description Cash a real broker settles for the account on one day: negative to pay for purchases, positive to receive from sales.
+         */
+        Settlement: {
+            /** Amount */
+            amount: number;
+            /**
+             * Settles On
+             * Format: date
+             */
+            settles_on: string;
         };
         /**
          * SetupRequest
@@ -2613,7 +3358,7 @@ export interface components {
          * @description Which decision path produced a signal.
          * @enum {string}
          */
-        SignalSource: "combined" | "stop_loss" | "manual" | "follow";
+        SignalSource: "combined" | "stop_loss" | "manual" | "follow" | "ranking";
         /** StochasticIndicator */
         StochasticIndicator: {
             d_period: components["schemas"]["IndicatorPeriod"];
@@ -2623,6 +3368,67 @@ export interface components {
              * @enum {string}
              */
             kind: "stochastic";
+        };
+        /**
+         * StockAnalysis
+         * @description A stock page's financial analysis: the three trends read from held data alone, and their reading in sentences.
+         */
+        StockAnalysis: {
+            earnings: components["schemas"]["EarningsTrend"];
+            /** Readings */
+            readings: components["schemas"]["Reading"][];
+            revenue: components["schemas"]["RevenueTrend"];
+            valuation: components["schemas"]["ValuationStanding"];
+        };
+        /**
+         * StockBrief
+         * @description The AI's short description of one stock on one Taipei calendar day, shared by every viewer of the site: what the
+         *     company is, and how the held facts of a recent window of sessions relate to the stock's move over it. It describes
+         *     and never advises. One exists per stock and day; its status says whether the AI is still asked.
+         */
+        StockBrief: {
+            /**
+             * Claimed At
+             * Format: date-time
+             */
+            claimed_at: string;
+            /** Company */
+            company?: components["schemas"]["BriefSentence"][];
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            language: components["schemas"]["BriefLanguage"];
+            model: components["schemas"]["NonEmptyText"];
+            /** Movement */
+            movement?: components["schemas"]["BriefSentence"][];
+            /** Price Change */
+            price_change?: number | null;
+            /** Sources */
+            sources?: components["schemas"]["BriefSource"][];
+            status: components["schemas"]["BriefStatus"];
+            stock_id: components["schemas"]["NonEmptyText"];
+            /** Window First */
+            window_first?: string | null;
+            /** Window Last */
+            window_last?: string | null;
+            /** Written At */
+            written_at?: string | null;
+        };
+        /**
+         * StockBriefResponse
+         * @description A stock's AI brief as the site holds it. One is written per stock and Taipei calendar day for every viewer, when a
+         *     signed-in viewer asks. Every sentence is the AI's wording of held facts and names the held items it rests on; it
+         *     describes and gives no advice.
+         */
+        StockBriefResponse: {
+            previous: components["schemas"]["StockBrief"] | null;
+            /** Stock Id */
+            stock_id: string;
+            /** Stocks Left */
+            stocks_left: number;
+            today: components["schemas"]["StockBrief"] | null;
         };
         /**
          * StockFinancialsResponse
@@ -2654,6 +3460,70 @@ export interface components {
              */
             confirm: true;
             stock_ids: components["schemas"]["StockIdList"];
+        };
+        /**
+         * StockNewsItemResponse
+         * @description One thing said about a stock (Article), as its page may show it: a news site's article and a board's post by title
+         *     and address only, since their text is theirs; an open-data item with its text.
+         */
+        StockNewsItemResponse: {
+            /** Clause */
+            clause: string | null;
+            /** Fact Date */
+            fact_date: string | null;
+            /** Open Text */
+            open_text: string | null;
+            /**
+             * Published At
+             * Format: date-time
+             */
+            published_at: string;
+            source: components["schemas"]["InformationSource"];
+            /** Title */
+            title: string;
+            /** Url */
+            url: string | null;
+        };
+        /**
+         * StockNewsResponse
+         * @description What is said about a stock, newest first, as the site's article store keeps it: its material information and the
+         *     TWSE news naming it, and on a site that may read them the news sites' articles and the board's posts.
+         */
+        StockNewsResponse: {
+            /** Items */
+            items: components["schemas"]["StockNewsItemResponse"][];
+            /** Stock Id */
+            stock_id: string;
+        };
+        /**
+         * StockRankingResponse
+         * @description A stock's standing in the monthly ranking (RankingStanding), with whether the ranking holds it.
+         */
+        StockRankingResponse: {
+            /**
+             * Decided On
+             * Format: date
+             */
+            decided_on: string;
+            exclusion: components["schemas"]["RankingExclusion"] | null;
+            /** In Top */
+            in_top: boolean;
+            /** Place */
+            place: number | null;
+            /**
+             * Revenue Month
+             * Format: date
+             */
+            revenue_month: string;
+            /** Score */
+            score: number | null;
+            /** Scored */
+            scored: number;
+            stock: components["schemas"]["RankedStock"] | null;
+            /** Top */
+            top: number;
+            /** Universe */
+            universe: number;
         };
         /**
          * StockReportResponse
@@ -2878,6 +3748,11 @@ export interface components {
             created_at: string;
             email: components["schemas"]["EmailAddress"];
             /**
+             * Has Password
+             * @default true
+             */
+            has_password: boolean;
+            /**
              * Permissions
              * @description What the user's role allows beyond their own data: the web app shows the administration pages from it.
              */
@@ -2967,6 +3842,23 @@ export interface components {
             /** Technical Strategy Id */
             technical_strategy_id: string | null;
         };
+        /**
+         * ValuationStanding
+         * @description A stock's P/E, P/B and dividend yield (percent) at the latest session the archive holds, each against its own held history.
+         */
+        ValuationStanding: {
+            dividend_yield: components["schemas"]["RatioStanding"];
+            /** First Session */
+            first_session: string | null;
+            /** Min Sessions */
+            min_sessions: number;
+            pb_ratio: components["schemas"]["RatioStanding"];
+            pe_ratio: components["schemas"]["RatioStanding"];
+            /** Session Date */
+            session_date: string | null;
+            /** Sessions */
+            sessions: number;
+        };
         /** ValuedStockResponse */
         ValuedStockResponse: {
             /** Industry */
@@ -3022,7 +3914,7 @@ export interface components {
          * @description The user-facing operation a run belongs to. Each run has one run id.
          * @enum {string}
          */
-        Workflow: "full_cycle" | "buzz_scan" | "intraday" | "specific_stocks" | "manual_buy" | "follow" | "valuation" | "research";
+        Workflow: "full_cycle" | "buzz_scan" | "intraday" | "specific_stocks" | "manual_buy" | "follow" | "ranking_follow" | "valuation" | "research";
     };
     responses: never;
     parameters: never;
@@ -3032,6 +3924,26 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    get_brokerage_account_v1_account_brokerage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrokerageAccountResponse"];
+                };
+            };
+        };
+    };
     get_brokers_v1_account_brokers_get: {
         parameters: {
             query?: never;
@@ -3228,7 +4140,7 @@ export interface operations {
                     "application/json": components["schemas"]["SettingField"][];
                 };
             };
-            /** @description A save without the password (password_required), or with a wrong one (password_refused). */
+            /** @description A save without the password (password_required), or with a wrong one (password_refused); by an administrator without a password, a save without a fresh Google authentication made for it (google_confirmation_required). */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -3319,6 +4231,65 @@ export interface operations {
             };
             /** @description No active administrator would remain; nothing saved. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    return_from_google_v1_auth_google_callback_get: {
+        parameters: {
+            query?: {
+                state?: string | null;
+                code?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            303: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_google_sign_in_v1_auth_google_start_get: {
+        parameters: {
+            query?: {
+                confirmation?: components["schemas"]["ConfirmationId"] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            303: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3594,6 +4565,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description too_many_backtests: accounts.max_backtests_per_user of the user's strategy backtests and ranking backtests replay or wait already. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     get_backtest_options_v1_backtests_options_get: {
@@ -3679,6 +4659,110 @@ export interface operations {
                 content?: never;
             };
             /** @description The user has no saved backtest of that id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_holdings_v1_holdings_get: {
+        parameters: {
+            query?: {
+                sources?: components["schemas"]["HoldingSource"][] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HoldingsResponse"];
+                };
+            };
+            /** @description ranking_unavailable: the site's daily history holds no decision session yet. invalid_request: a bad source. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    enter_holding_v1_holdings_manual_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HoldingRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HeldPositionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_holding_v1_holdings_manual_remove_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HoldingRemovalRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The user entered no holding of this stock. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -3923,6 +5007,124 @@ export interface operations {
             };
         };
     };
+    get_stock_analysis_v1_market_stocks__stock_id__analysis_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                stock_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StockAnalysis"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_stock_brief_v1_market_stocks__stock_id__brief_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                stock_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StockBriefResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    write_stock_brief_v1_market_stocks__stock_id__brief_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                stock_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Confirmed"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StockBriefResponse"];
+                };
+            };
+            /** @description Not a listed stock. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description brief_limit_reached: today's new briefs are spent. ai_allowance_spent: today's paid AI calls are spent. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The exchange listing could not be loaded. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     get_stock_financials_v1_market_stocks__stock_id__financials_get: {
         parameters: {
             query?: never;
@@ -3951,6 +5153,80 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    get_stock_news_v1_market_stocks__stock_id__news_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                stock_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StockNewsResponse"];
+                };
+            };
+            /** @description Not a listed stock. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The exchange listing could not be loaded. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_stock_ranking_v1_market_stocks__stock_id__ranking_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                stock_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StockRankingResponse"];
+                };
+            };
+            /** @description ranking_unavailable: the site's daily history holds no decision session yet. invalid_request: a bad code. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -4015,6 +5291,104 @@ export interface operations {
             };
             /** @description ranking_unavailable: the site's daily history holds no decision session yet; `detail` says what it holds. backtest_period_unavailable: the period holds no decision session the history holds; `detail` says which sessions it holds. invalid_request: a query parameter does not validate. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description too_many_backtests: accounts.max_backtests_per_user of the user's strategy backtests and ranking backtests replay or wait already. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_ranking_follow_v1_rankings_follow_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RankingFollowResponse"];
+                };
+            };
+            /** @description ranking_unavailable: the site's daily history holds no decision session yet; `detail` says what it holds. backtest_period_unavailable: the period holds no decision session the history holds; `detail` says which sessions it holds. invalid_request: a query parameter does not validate. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    follow_ranking_v1_rankings_follow_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Confirmed"];
+            };
+        };
+        responses: {
+            /** @description The run started; poll GET /v1/runs/{run_id}. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunAccepted"];
+                };
+            };
+            /** @description feature_hidden: the site does not show the user the ranking and the mock account. realtime_quotes_unavailable: the site prices orders on realtime quotes and has no Shioaji login now. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description nothing_to_follow: the mock account holds the ranking already, or the ranking ranks no stock. outside_follow_window: the site places no order in the market's phase now. run_in_progress: another run of this user is still running. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description ranking_unavailable: the site's daily history holds no decision session yet; `detail` says what it holds. backtest_period_unavailable: the period holds no decision session the history holds; `detail` says which sessions it holds. invalid_request: a query parameter does not validate. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The server runs its most workflows at once; start yours later. */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4109,7 +5483,7 @@ export interface operations {
                     "application/json": components["schemas"]["RunAccepted"];
                 };
             };
-            /** @description realtime_quotes_unavailable: the site has no realtime quotes: it uses open data only (audience public), or it has no Shioaji login. real_broker_refused: a real `broker` asked by a user who is not an administrator. broker_unavailable: the real broker has no login up on this site now. */
+            /** @description realtime_quotes_unavailable: the site has no realtime quotes: it uses open data only (audience public), or it has no Shioaji login. feature_hidden: the site does not let the user order on the `broker` (features.*; features.sinopac_ordering is off by default). real_broker_refused: a real `broker` asked by a user who is not an administrator. broker_unavailable: the real broker has no login up on this site now. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4222,7 +5596,7 @@ export interface operations {
                     "application/json": components["schemas"]["RunAccepted"];
                 };
             };
-            /** @description realtime_quotes_unavailable: the site has no realtime quotes: it uses open data only (audience public), or it has no Shioaji login. real_broker_refused: a real `broker` asked by a user who is not an administrator. broker_unavailable: the real broker has no login up on this site now. */
+            /** @description realtime_quotes_unavailable: the site has no realtime quotes: it uses open data only (audience public), or it has no Shioaji login. feature_hidden: the site does not let the user order on the `broker` (features.*; features.sinopac_ordering is off by default). real_broker_refused: a real `broker` asked by a user who is not an administrator. broker_unavailable: the real broker has no login up on this site now. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4479,7 +5853,7 @@ export interface operations {
                     "application/json": components["schemas"]["RunAccepted"];
                 };
             };
-            /** @description realtime_quotes_unavailable: the site has no realtime quotes: it uses open data only (audience public), or it has no Shioaji login. real_broker_refused: a real `broker` asked by a user who is not an administrator. broker_unavailable: the real broker has no login up on this site now. */
+            /** @description realtime_quotes_unavailable: the site has no realtime quotes: it uses open data only (audience public), or it has no Shioaji login. feature_hidden: the site does not let the user order on the `broker` (features.*; features.sinopac_ordering is off by default). real_broker_refused: a real `broker` asked by a user who is not an administrator. broker_unavailable: the real broker has no login up on this site now. */
             403: {
                 headers: {
                     [name: string]: unknown;

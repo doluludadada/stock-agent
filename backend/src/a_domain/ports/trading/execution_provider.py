@@ -1,8 +1,8 @@
 from collections.abc import Callable
-from datetime import datetime
+from datetime import date, datetime
 from typing import Protocol
 
-from a_domain.model.trading.account import Account, Position
+from a_domain.model.trading.account import Account, BrokerageStatement, BrokerFill, Position
 from a_domain.model.trading.order import ExchangeOrder, Order
 from a_domain.rules.trading.order_rule import BrokerLink
 from a_domain.types.enums import LotKind, RejectReason
@@ -75,6 +75,32 @@ class IBrokerExecutionProvider[BrokerAccount, Contract, Trade](IExecutionProvide
         Makes one request, `call` with its arguments in a worker thread. Its failure raises RuntimeError saying what the
         broker quote provider's failure_of says of the SDK's error, never the error's text.
         """
+        ...
+
+    def stock_account(self) -> BrokerAccount:
+        """The SDK's stock account of the login. Raises while the login gave none."""
+        ...
+
+    async def statement(self, sales_from: date, today: date) -> BrokerageStatement:
+        """
+        The account as the broker reports it now: the bank balance, the settlements due, the positions, today's deals
+        and the sales from `sales_from` to `today`. It sends no order and changes nothing at the broker.
+        """
+        ...
+
+    async def open_positions(self) -> list[Position]:
+        """
+        The long cash positions the broker lists, in shares at their cost, each marked with the broker's last price and
+        the unrealized PnL the broker computes; without a mark where the broker gives no last price.
+        """
+        ...
+
+    async def fills(self, today: date) -> list[BrokerFill]:
+        """Every deal of the account's exchange orders the broker lists for today, in shares."""
+        ...
+
+    async def sales(self, first: date, last: date) -> list[BrokerFill]:
+        """The account's sales the broker settled from `first` to `last`, each with the PnL the broker says it realized."""
         ...
 
     async def cash(self, broker_account: BrokerAccount) -> float:

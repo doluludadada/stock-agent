@@ -13,7 +13,8 @@ class RevenueHistoryBackfill:
     Reads every market's monthly revenue from the month `first` falls in to last month out of MOPS's summary of each
     month into the open-data archive, skipping the months the archive already holds as filed in full
     (RevenueMonthsRule). Each month is saved as it is read, so a rerun after a failure reads only what is still due. It
-    stops at the first month MOPS does not serve, and answers how many months it read of how many were due. `mops` is
+    stops at the first month MOPS does not serve, and answers how many months it read of how many were due; a month the
+    archive could not save ends it with ArchiveSaveRefused, counted nowhere. `mops` is
     None on a site that reads no MOPS (public), which reads nothing and answers None.
     """
 

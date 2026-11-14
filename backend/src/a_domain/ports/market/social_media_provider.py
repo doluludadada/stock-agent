@@ -13,6 +13,13 @@ class ISocialMediaProvider(Protocol):
         """Recent posts under each configured tag that name a listed stock, at most limit, once per post."""
         ...
 
+    async def fetch_stock_posts(self, stock_id: str, limit: int) -> list[Article]:
+        """
+        The newest posts the board's search lists for the stock's code, at most limit, from one search page: each post's
+        title, address and day, with no text, since no post's page is read. Empty when the board could not be read.
+        """
+        ...
+
     def save_social_media_data(self, articles: list[Article]) -> None:
         """Saves fetched social articles as a Markdown file."""
         ...
