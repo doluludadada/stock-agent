@@ -14,7 +14,7 @@ from typing import Self
 
 from pydantic import SecretStr
 
-from a_domain.model.system.user import User
+from a_domain.model.system.user import GoogleConfirmation, User
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.settings_files import SettingChange, SettingsEdit, SettingsProblem
 from a_domain.types.enums import ExecutionProvider, SettingsFile
@@ -195,15 +195,22 @@ class RuntimeSwitch:
         changes: Sequence[SettingChange],
         *,
         password: SecretStr | None,
-        google_confirmation: str | None = None,
+        google_confirmation: GoogleConfirmation | None = None,
         client: str,
         host: str,
     ) -> list[SettingsEdit]:
         """
-        The settings form's save, running at once or refused with nothing written and the app as it was. The request's
-        runtime must still be current: a page that read settings the server no longer runs is a conflict. The
-        administrator's Pipeline reviews the changes and confirms the password, or for an administrator without one the
-        fresh Google authentication `google_confirmation` names; changes that change no file end there.
+        The settings form's save, running at once or refused with the app as it was. The request's runtime must still
+        be current: a page that read settings the server no longer runs is a conflict. The administrator's Pipeline
+        reviews the changes and confirms the password, or for an administrator without one the fresh Google
+        authentication `google_confirmation` names, started from the session that saves; changes that change no file end
+        there.
+
+        A change that turns a broker's ordering off is reviewed and, once the administrator confirmed, written on its
+        own before the rest is even reviewed again. The settings files on disk are the ordering switch every order
+        asks (IOrderingSwitch), so ordering is off from that write on, in every process, whatever refuses the rest of
+        the save afterwards: another change the app would not start on, a start past the time limit, a lockout of the
+        editor. Everything else of a refused save stays unwritten.
         Work that started earlier finishes on the runtime it holds.
         """
         async with self.lock:
@@ -211,12 +218,18 @@ class RuntimeSwitch:
                 raise SettingsConflictError("The server reloaded its settings after this page read them; read them again")
 
             pipeline = opened.runtime.pipeline_for(administrator, ExecutionProvider.MOCK)
-            edits = await pipeline.review_settings_form(administrator, changes, host, password, google_confirmation, client)
+            actor = administrator.user_id
+            switching_off = await pipeline.review_settings_form([change for change in changes if change.turns_ordering_off], host)
+            edits = [] if switching_off else await pipeline.review_settings_form(changes, host)
+            await pipeline.confirm_settings_save(administrator, password, google_confirmation, client)
+            switched_off = [await pipeline.save_settings_file(edit, actor) for edit in switching_off]
 
-            if not edits:
+            if switched_off:
+                edits = await pipeline.review_settings_form(changes, host)
+            elif not edits:
                 return []
 
-            return await self.write_and_publish(pipeline, edits, administrator.user_id)
+            return await self.write_and_publish(pipeline, edits, actor) or switched_off
 
     async def write_and_publish(self, pipeline: Pipeline, edits: Sequence[SettingsEdit], actor: UserId) -> list[SettingsEdit]:
         """

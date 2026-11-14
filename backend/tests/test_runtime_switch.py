@@ -7,22 +7,24 @@ import asyncio
 import shutil
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.ext.asyncio import AsyncConnection
+from support.databases import execute
 from support.harness import ADMINISTRATOR, CliHarness, build_harness, rising_history, runtime_for
 from trading_stack import run_stats
 
+import c_infrastructure.database.models.schema_version_dto as schema_version
 from a_domain.model.trading.account import Position
 from a_domain.types.enums import Audience, ExecutionProvider, OrderStatus, RejectReason, SettingsFile
 from a_domain.types.ids import RunId
 from b_application.config.app_config import AppConfig
 from b_application.schemas.pipeline_status import PipelineStatus
 from c_infrastructure.database.models.schema_version_dto import SCHEMA_VERSION
-from d_presentation.dependencies import Runtime, load_settings
+from c_infrastructure.system.ordering_switch import SettingsFileOrderingSwitch
+from d_presentation.dependencies import Runtime, compose_runtime, load_settings
 from d_presentation.live_runtime import ReloadRefused, RuntimeSwitch, SettingsReloaded, open_runtime_switch
 from d_presentation.web.schemas import RunState
 from d_presentation.web.workflow_runs import RunInProgress, WorkflowRuns
@@ -287,7 +289,7 @@ async def test_a_runtime_that_fails_to_open_closes_what_it_opened_and_the_curren
 
 @pytest.fixture
 def real_project(project: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """The project copy started by the real opener: SQLite and Chroma inside it, placeholder keys, no .env."""
+    """The project copy started by the real opener: Chroma inside it, the session's database, placeholder keys, no .env."""
     monkeypatch.chdir(project)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "placeholder")
     monkeypatch.setenv("ACCOUNTS_KEY", "A" * 43)
@@ -307,14 +309,18 @@ async def test_the_real_opener_reloads_a_valid_edit_and_closes_the_runtime_it_re
     assert isinstance(reload, SettingsReloaded) and temperature == 0.2
 
 
-async def test_a_reload_onto_a_database_of_an_older_schema_is_refused_and_the_running_runtime_stays(real_project: Path) -> None:
+async def an_upgrade_step(connection: AsyncConnection) -> None:
+    """The step that makes the version before the code's one `just db-migrate` upgrades."""
+
+
+async def test_a_reload_onto_a_database_of_an_older_schema_is_refused_and_the_running_runtime_stays(
+    real_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(schema_version, "FIRST_SCHEMA_VERSION", SCHEMA_VERSION - 1)
+    monkeypatch.setattr(schema_version, "UPGRADES", (an_upgrade_step,))
+
     async with open_runtime_switch(real_project) as switch:
-        engine = create_async_engine(f"sqlite+aiosqlite:///{real_project / 'stock_agent.db'}")
-
-        async with engine.begin() as connection:
-            await connection.execute(text("UPDATE schema_version SET version = :older"), {"older": SCHEMA_VERSION - 1})
-
-        await engine.dispose()
+        await execute(f"UPDATE schema_version SET version = {SCHEMA_VERSION - 1}")
         edit(real_project, "temperature: 0.7", "temperature: 0.2")
         refused = await switch.reload()
 
@@ -324,3 +330,27 @@ async def test_a_reload_onto_a_database_of_an_older_schema_is_refused_and_the_ru
     assert refused is not None and temperature == 0.7
     [problem] = refused.problems
     assert f"The database is at schema version {SCHEMA_VERSION - 1}" in problem.message and "just db-migrate" in problem.message
+
+
+async def test_a_process_that_never_reloads_stops_ordering_once_the_settings_on_disk_turn_sinopac_ordering_off(project: Path) -> None:
+    """A CLI beside the Web API: its run keeps its own runtime, and another process's save reaches it through the files."""
+    edit(project, 'sinopac_ordering: "off"', "sinopac_ordering: administrators")
+    harness = build_harness(sinopac=True)
+    harness.list_stock("2317", rising_history(100.0), realtime_price=80.0)
+    harness.real_broker.positions = [Position(stock_id="2317", quantity=1000, average_cost=100.0)]
+    config = harness.config.model_copy(update={"features": load_settings(project).features})
+    dependencies = replace(harness.dependencies, ordering_switch=SettingsFileOrderingSwitch(project))
+    pipeline = compose_runtime(config, harness.logger, harness.clock, dependencies).pipeline_for(
+        harness.administrator, ExecutionProvider.SHIOAJI
+    )
+
+    while_on = await pipeline.run_intraday()
+    sent = list(harness.real_broker.placed)
+    edit(project, "sinopac_ordering: administrators", 'sinopac_ordering: "off"')
+    after_off = await pipeline.run_intraday()
+
+    assert [order.stock_id for order in sent] == ["2317"] and [order.status for order in while_on.orders] == [OrderStatus.FILLED]
+    assert harness.real_broker.placed == sent
+    assert [(order.status, order.reason) for order in after_off.orders] == [
+        (OrderStatus.REJECTED, f"{RejectReason.ORDERING_OFF.name}: this site has ordering on shioaji off: features.sinopac_ordering")
+    ]

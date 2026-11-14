@@ -1,5 +1,5 @@
 """
-The daily allowance of paid AI calls, through DailyCappedAiProvider over a real database of each backend: a user's
+The daily allowance of paid AI calls, through DailyCappedAiProvider over a real PostgreSQL database: a user's
 limit, the server's total, an administrator's calls (counted, never refused), and the next Taiwan day.
 """
 

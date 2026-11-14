@@ -1,14 +1,11 @@
 """
-The copies of the whole database that `just db-backup`, `db-migrate` and `db-restore` make and put back: SQLite's backup
-API on a file, and PostgreSQL's pg_dump and pg_restore. They copy every table as it is and never read a domain model.
+The copies of the whole database that `just db-backup`, `db-migrate` and `db-restore` make and put back with
+PostgreSQL's pg_dump and pg_restore. They copy every table as it is and never read a domain model.
 """
 
 import asyncio
 import os
 import shutil
-import sqlite3
-from contextlib import closing
-from pathlib import Path
 
 from b_application.config.app_config import DbConfig
 
@@ -19,24 +16,6 @@ class DatabaseCommandError(RuntimeError):
     an upgrade failed after its backup and rolled back. The message says what the database holds now. Only the database
     commands raise it, and they print it alone.
     """
-
-
-async def copy_sqlite(source: Path, destination: Path) -> None:
-    """
-    Copies one SQLite database into another through SQLite's backup API, page by page under its locks, so the copy is
-    consistent while another connection uses either file. The source is opened read-only.
-    """
-    if not source.is_file():
-        raise DatabaseCommandError(f"There is no SQLite database at {source}.")
-
-    def copy() -> None:
-        with (
-            closing(sqlite3.connect(f"{source.resolve().as_uri()}?mode=ro", uri=True)) as reader,
-            closing(sqlite3.connect(destination)) as writer,
-        ):
-            reader.backup(writer)
-
-    await asyncio.to_thread(copy)
 
 
 async def run_postgresql_client(program: str, db: DbConfig, *arguments: str) -> None:
@@ -59,7 +38,7 @@ async def run_postgresql_client(program: str, db: DbConfig, *arguments: str) -> 
         executable,
         *target,
         *arguments,
-        env={**os.environ, "PGPASSWORD": db.password or ""},
+        env={**os.environ, "PGPASSWORD": db.password},
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )

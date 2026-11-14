@@ -5,7 +5,17 @@ from typing import Annotated, Protocol, override
 from pydantic import Field, JsonValue
 from pydantic.dataclasses import dataclass
 
-from a_domain.types.enums import Audience, SettingGroup, SettingKind, SettingsAction, SettingsFile, SettingUnit, SystemEnvironment
+from a_domain.types.enums import (
+    Audience,
+    ExecutionProvider,
+    FeatureVisibility,
+    SettingGroup,
+    SettingKind,
+    SettingsAction,
+    SettingsFile,
+    SettingUnit,
+    SystemEnvironment,
+)
 from a_domain.types.ids import UserId
 
 type Revision = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
@@ -143,6 +153,12 @@ class SettingChange:
 
     path: Annotated[str, Field(min_length=1)]
     value: JsonValue
+
+    @property
+    def turns_ordering_off(self) -> bool:
+        """Whether it sets a broker's ordering feature to off: the change a save writes first, whatever becomes of the rest."""
+        ordering = {f"features.{broker.ordering_feature.value}" for broker in ExecutionProvider}
+        return self.path in ordering and self.value == FeatureVisibility.OFF.value
 
 
 class ISettingsFiles(Protocol):

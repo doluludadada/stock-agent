@@ -8,13 +8,13 @@ from shioaji.constant import Action, OrderType as BrokerTimeInForce, Status, Sto
 from shioaji.error import TimeoutError as ShioajiTimeoutError, TokenError
 from shioaji.position import AccountBalance
 from support.fake_shioaji import FakeShioaji, Report, position, sale
-from support.fakes import RecordingLogger
+from support.fakes import RecordingLogger, no_refusal
 from support.settings import environment_setup, shipped_config
 from trading_stack import SilentLogger
 
 from a_domain.model.trading.order import Order
 from a_domain.ports.trading.execution_provider import IExecutionProvider
-from a_domain.types.enums import OrderStatus, OrderType, SystemEnvironment, TimeInForce, TradeAction
+from a_domain.types.enums import OrderStatus, OrderType, RejectReason, SystemEnvironment, TimeInForce, TradeAction
 from a_domain.types.ids import new_decision_id, new_run_id
 from b_application.config.trading_config import ShioajiConfig, ShioajiLogin
 from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection, ShioajiQuoteProvider
@@ -117,7 +117,7 @@ async def test_a_whole_lot_buy_is_one_board_lot_limit_order_on_the_logged_in_acc
     client = FakeShioaji()
     placing = order(quantity=2000, price=101.5)
 
-    placed = await provider(client).place_order(placing)
+    placed = await provider(client).place_order(placing, no_refusal)
 
     [trade] = client.placed
     broker_order = trade.order
@@ -141,7 +141,7 @@ async def test_a_whole_lot_buy_is_one_board_lot_limit_order_on_the_logged_in_acc
 async def test_fewer_than_1000_shares_are_one_intraday_odd_lot_rod_order_in_shares() -> None:
     client = FakeShioaji(holdings=[position("2330", 500, 90.0)])
 
-    placed = await provider(client).place_order(order(TradeAction.SELL, quantity=500, price=99.0))
+    placed = await provider(client).place_order(order(TradeAction.SELL, quantity=500, price=99.0), no_refusal)
 
     assert sent(client) == [(StockOrderLot.IntradayOdd, 500, BrokerTimeInForce.ROD, 99.0)]
     assert client.placed[0].order.action == Action.Sell
@@ -154,7 +154,7 @@ async def test_a_mixed_quantity_is_split_into_a_board_lot_ioc_order_and_an_odd_l
     client = FakeShioaji()
     placing = order(quantity=2500, price=100.0)
 
-    placed = await provider(client).place_order(placing)
+    placed = await provider(client).place_order(placing, no_refusal)
 
     assert sent(client) == [
         (StockOrderLot.Common, 2, BrokerTimeInForce.IOC, 100.0),
@@ -168,7 +168,7 @@ async def test_a_mixed_quantity_is_split_into_a_board_lot_ioc_order_and_an_odd_l
 async def test_fok_is_sent_as_fok() -> None:
     client = FakeShioaji()
 
-    placed = await provider(client).place_order(order(time_in_force=TimeInForce.FOK))
+    placed = await provider(client).place_order(order(time_in_force=TimeInForce.FOK), no_refusal)
 
     assert (sent(client), placed.status) == ([(StockOrderLot.Common, 1, BrokerTimeInForce.FOK, 100.0)], OrderStatus.FILLED)
 
@@ -187,7 +187,7 @@ async def test_fok_is_sent_as_fok() -> None:
 async def test_an_order_the_adapter_cannot_send_faithfully_is_rejected_and_never_sent(placing: Order, reason: str) -> None:
     client = FakeShioaji()
 
-    placed = await provider(client).place_order(placing)
+    placed = await provider(client).place_order(placing, no_refusal)
 
     assert (placed.status, client.placed) == (OrderStatus.REJECTED, [])
     assert placed.reason is not None and placed.reason.startswith(reason)
@@ -196,7 +196,7 @@ async def test_an_order_the_adapter_cannot_send_faithfully_is_rejected_and_never
 async def test_a_buy_is_refused_when_cash_minus_settlement_payments_due_cannot_pay_it() -> None:
     client = FakeShioaji(settlement_amounts=(0.0, 50_000.0, -950_000.0))
 
-    placed = await provider(client).place_order(order(quantity=1000, price=100.0))
+    placed = await provider(client).place_order(order(quantity=1000, price=100.0), no_refusal)
 
     assert (placed.status, client.placed) == (OrderStatus.REJECTED, [])
     assert placed.reason == "INSUFFICIENT_CASH: needs 100,142 including fee, cash is 50,000"
@@ -205,7 +205,7 @@ async def test_a_buy_is_refused_when_cash_minus_settlement_payments_due_cannot_p
 async def test_selling_more_than_the_broker_holds_is_refused() -> None:
     client = FakeShioaji(holdings=[position("2330", 1000, 90.0)])
 
-    placed = await provider(client).place_order(order(TradeAction.SELL, quantity=2000))
+    placed = await provider(client).place_order(order(TradeAction.SELL, quantity=2000), no_refusal)
 
     assert (placed.status, client.placed) == (OrderStatus.REJECTED, [])
     assert placed.reason == "INSUFFICIENT_POSITION: holds 1000, selling 2000"
@@ -239,7 +239,7 @@ async def test_each_final_shioaji_status_ends_the_domain_order(
 ) -> None:
     client = FakeShioaji(scripts={StockOrderLot.Common: [Report(Status.Submitted), report]})
 
-    placed = await provider(client).place_order(order())
+    placed = await provider(client).place_order(order(), no_refusal)
 
     assert (placed.status, placed.filled_quantity, placed.reason, client.cancelled) == (status, filled, reason, [])
 
@@ -249,7 +249,7 @@ async def test_an_order_still_working_after_the_polls_is_cancelled(working: Stat
     deals = ((100.0, 1),) if working == Status.PartFilled else ()
     client = FakeShioaji(scripts={StockOrderLot.Common: [Report(working, deals)]})
 
-    placed = await provider(client).place_order(order(quantity=2000))
+    placed = await provider(client).place_order(order(quantity=2000), no_refusal)
 
     assert client.cancelled == client.placed
     assert (placed.status, placed.filled_quantity) == (OrderStatus.CANCELLED, 1000 if deals else 0)
@@ -261,7 +261,7 @@ async def test_a_partial_fill_is_recorded_before_the_ioc_remainder_is_cancelled(
         scripts={StockOrderLot.Common: [Report(Status.PartFilled, ((100.0, 1),)), Report(Status.Cancelled, ((100.0, 1),))]}
     )
 
-    placed = await provider(client).place_order(order(quantity=3000))
+    placed = await provider(client).place_order(order(quantity=3000), no_refusal)
 
     cost = COSTS.apply(TradeAction.BUY, "2330", 100.0, 1000, now=NOW)
     assert (placed.status, placed.filled_quantity, placed.fee, client.cancelled) == (OrderStatus.CANCELLED, 1000, cost.fee, [])
@@ -270,7 +270,7 @@ async def test_a_partial_fill_is_recorded_before_the_ioc_remainder_is_cancelled(
 async def test_an_order_still_working_after_the_cancel_fails_and_says_to_check_the_broker() -> None:
     client = FakeShioaji(scripts={StockOrderLot.Common: [Report(Status.PartFilled, ((100.0, 1),))]}, honours_cancel=False)
 
-    placed = await provider(client).place_order(order(quantity=2000))
+    placed = await provider(client).place_order(order(quantity=2000), no_refusal)
 
     assert (placed.status, placed.filled_quantity, client.cancelled) == (OrderStatus.FAILED, 1000, client.placed)
     assert placed.reason is not None and placed.reason.startswith("still working at the broker after a cancel request, check Shioaji")
@@ -279,7 +279,7 @@ async def test_an_order_still_working_after_the_cancel_fails_and_says_to_check_t
 async def test_filled_without_deals_for_the_whole_quantity_fails_instead_of_guessing() -> None:
     client = FakeShioaji(scripts={StockOrderLot.Common: [Report(Status.Filled, ((100.0, 1),))]})
 
-    placed = await provider(client).place_order(order(quantity=2000))
+    placed = await provider(client).place_order(order(quantity=2000), no_refusal)
 
     assert (placed.status, placed.filled_quantity) == (OrderStatus.FAILED, 1000)
 
@@ -287,7 +287,7 @@ async def test_filled_without_deals_for_the_whole_quantity_fails_instead_of_gues
 async def test_deals_at_several_prices_fill_at_their_volume_weighted_price() -> None:
     client = FakeShioaji(scripts={StockOrderLot.IntradayOdd: [Report(Status.Filled, ((10.05, 300), (10.05, 300), (10.0, 399)))]})
 
-    placed = await provider(client).place_order(order(quantity=999, price=10.05))
+    placed = await provider(client).place_order(order(quantity=999, price=10.05), no_refusal)
 
     assert (placed.status, placed.filled_quantity) == (OrderStatus.FILLED, 999)
     assert placed.average_filled_price == pytest.approx((10.05 * 600 + 10.0 * 399) / 999)
@@ -296,7 +296,7 @@ async def test_deals_at_several_prices_fill_at_their_volume_weighted_price() -> 
 async def test_deals_at_the_limit_price_fill_even_where_their_float_average_rounds_above_it() -> None:
     client = FakeShioaji(scripts={StockOrderLot.IntradayOdd: [Report(Status.Filled, ((10.8, 1), (10.8, 1), (10.8, 1)))]})
 
-    placed = await provider(client).place_order(order(quantity=3, price=10.8))
+    placed = await provider(client).place_order(order(quantity=3, price=10.8), no_refusal)
 
     assert (placed.status, placed.filled_quantity) == (OrderStatus.FILLED, 3)
     assert placed.average_filled_price == pytest.approx(10.8)
@@ -305,7 +305,7 @@ async def test_deals_at_the_limit_price_fill_even_where_their_float_average_roun
 async def test_when_the_odd_lot_part_is_refused_the_board_lot_fill_stands_and_the_order_is_cancelled() -> None:
     client = FakeShioaji(scripts={StockOrderLot.IntradayOdd: [Report(Status.Failed, msg="price out of range", status_code="88")]})
 
-    placed = await provider(client).place_order(order(quantity=1500))
+    placed = await provider(client).place_order(order(quantity=1500), no_refusal)
 
     assert (placed.status, placed.filled_quantity) == (OrderStatus.CANCELLED, 1000)
     assert placed.reason is not None and "IntradayOdd 500 shares ROD Failed, dealt 0 shares (status 88)" in placed.reason
@@ -314,7 +314,7 @@ async def test_when_the_odd_lot_part_is_refused_the_board_lot_fill_stands_and_th
 async def test_an_odd_lot_rod_part_still_working_after_the_polls_is_cancelled_and_the_order_says_so() -> None:
     client = FakeShioaji(scripts={StockOrderLot.IntradayOdd: [Report(Status.Submitted)]})
 
-    placed = await provider(client).place_order(order(quantity=1500))
+    placed = await provider(client).place_order(order(quantity=1500), no_refusal)
 
     [board_lot, odd_lot] = client.placed
     assert client.cancelled == [odd_lot]
@@ -330,7 +330,7 @@ async def test_an_odd_lot_rod_part_still_working_after_the_polls_is_cancelled_an
 async def test_an_odd_lot_rod_part_partly_dealt_before_its_cancel_records_what_it_dealt() -> None:
     client = FakeShioaji(scripts={StockOrderLot.IntradayOdd: [Report(Status.PartFilled, ((100.0, 200),))]})
 
-    placed = await provider(client).place_order(order(quantity=1500))
+    placed = await provider(client).place_order(order(quantity=1500), no_refusal)
 
     lots, odd = COSTS.apply(TradeAction.BUY, "2330", 100.0, 1000, now=NOW), COSTS.apply(TradeAction.BUY, "2330", 100.0, 200, now=NOW)
     assert (placed.status, placed.filled_quantity, placed.fee) == (OrderStatus.CANCELLED, 1200, lots.fee + odd.fee)
@@ -340,7 +340,7 @@ async def test_an_odd_lot_rod_part_partly_dealt_before_its_cancel_records_what_i
 async def test_an_odd_lot_rod_part_the_broker_keeps_working_after_the_cancel_fails_the_order() -> None:
     client = FakeShioaji(scripts={StockOrderLot.IntradayOdd: [Report(Status.Submitted)]}, honours_cancel=False)
 
-    placed = await provider(client).place_order(order(quantity=500))
+    placed = await provider(client).place_order(order(quantity=500), no_refusal)
 
     assert (placed.status, placed.filled_quantity, client.cancelled) == (OrderStatus.FAILED, 0, client.placed)
     assert placed.reason == (
@@ -351,7 +351,7 @@ async def test_an_odd_lot_rod_part_the_broker_keeps_working_after_the_cancel_fai
 async def test_when_every_part_is_refused_the_order_is_rejected_by_the_broker() -> None:
     client = FakeShioaji(scripts={lot: [Report(Status.Failed, msg="closing auction")] for lot in StockOrderLot})
 
-    placed = await provider(client).place_order(order(quantity=1500))
+    placed = await provider(client).place_order(order(quantity=1500), no_refusal)
 
     assert (placed.status, placed.filled_quantity, len(client.placed)) == (OrderStatus.REJECTED, 0, 2)
     assert placed.reason is not None and placed.reason.startswith("BROKER_REFUSED: Common 1 lots IOC Failed")
@@ -360,7 +360,7 @@ async def test_when_every_part_is_refused_the_order_is_rejected_by_the_broker() 
 async def test_a_timed_out_place_order_is_found_by_its_tag_and_settled() -> None:
     client = FakeShioaji(place_error=ShioajiTimeoutError("place_order", {}), place_error_after_accepting=True)
 
-    placed = await provider(client).place_order(order())
+    placed = await provider(client).place_order(order(), no_refusal)
 
     assert (placed.status, placed.filled_quantity) == (OrderStatus.FILLED, 1000)
 
@@ -368,7 +368,7 @@ async def test_a_timed_out_place_order_is_found_by_its_tag_and_settled() -> None
 async def test_an_unconfirmed_order_fails_and_says_it_may_have_reached_the_exchange() -> None:
     client = FakeShioaji(place_error=ShioajiTimeoutError("place_order", {}))
 
-    placed = await provider(client).place_order(order())
+    placed = await provider(client).place_order(order(), no_refusal)
 
     assert placed.status == OrderStatus.FAILED
     assert placed.reason is not None and "may have reached the exchange" in placed.reason
@@ -412,7 +412,7 @@ async def test_the_statement_is_the_account_as_the_broker_reports_it_and_sends_n
         profit_losses=[sale("2317", 1000, 58.0, -2_300.0, "2026-10-09"), sale("1101", 37, 35.0, 10.0, "2025-09-01")],
     )
     broker = provider(client)
-    await broker.place_order(order(quantity=1500))
+    await broker.place_order(order(quantity=1500), no_refusal)
     sent = list(client.placed)
 
     statement = await broker.statement(date(2026, 7, 21), date(2026, 10, 19))
@@ -438,6 +438,40 @@ async def test_the_statement_is_the_account_as_the_broker_reports_it_and_sends_n
     assert (statement.realized_pnl, client.profit_loss_requests) == (-2_300.0, [("2026-07-21", "2026-10-19", Unit.Share)])
     assert (client.placed, client.cancelled) == (sent, [])
     assert private_parts(repr(statement)) == []
+
+
+async def test_the_days_fills_count_shares_for_every_lot_the_holder_traded_elsewhere_and_leave_out_a_block_trade() -> None:
+    client = FakeShioaji()
+    broker = provider(client)
+    assert set(StockOrderLot) == {lot for lot, _ in ELSEWHERE}, "the SDK has a lot this test does not place"
+
+    for lot, quantity in ELSEWHERE:
+        client.place_order(
+            client.Contracts.Stocks["2330"],
+            shioaji.Order(
+                price=100.0,
+                quantity=quantity,
+                action=Action.Buy,
+                price_type=StockPriceType.LMT,
+                order_type=BrokerTimeInForce.ROD,
+                order_lot=lot,
+                account=client.stock_account,
+            ),
+        )
+
+    fills = await broker.fills(date(2026, 10, 19))
+
+    assert [fill.quantity for fill in fills] == [2000, 1000, 30, 7]
+
+
+ELSEWHERE = (
+    (StockOrderLot.Common, 2),
+    (StockOrderLot.Fixing, 1),
+    (StockOrderLot.Odd, 30),
+    (StockOrderLot.IntradayOdd, 7),
+    (StockOrderLot.BlockTrade, 500),
+)
+"""One order of each lot the SDK has, its quantity in that lot's units, as the account's holder places them in SinoPac's own app."""
 
 
 @pytest.mark.parametrize(
@@ -497,8 +531,8 @@ async def test_a_second_buy_is_refused_when_todays_first_fill_used_the_cash() ->
     client = FakeShioaji(balance=AccountBalance(acc_balance=150_000.0, date="2026-10-19", errmsg=""))
     broker = provider(client)
 
-    first = await broker.place_order(order(quantity=1000, price=100.0))
-    second = await broker.place_order(order(quantity=1000, price=100.0))
+    first = await broker.place_order(order(quantity=1000, price=100.0), no_refusal)
+    second = await broker.place_order(order(quantity=1000, price=100.0), no_refusal)
 
     assert (first.status, second.status, len(client.placed)) == (OrderStatus.FILLED, OrderStatus.REJECTED, 1)
     assert second.reason == "INSUFFICIENT_CASH: needs 100,142 including fee, cash is 49,858"
@@ -509,7 +543,7 @@ async def test_fills_and_cancels_are_read_back_from_the_trade_list_when_place_or
         scripts={StockOrderLot.Common: [Report(Status.Submitted), Report(Status.PartFilled, ((100.0, 1),))]}, updates_in_place=False
     )
 
-    placed = await provider(client).place_order(order(quantity=2000))
+    placed = await provider(client).place_order(order(quantity=2000), no_refusal)
 
     assert (placed.status, placed.filled_quantity, len(client.cancelled)) == (OrderStatus.CANCELLED, 1000, 1)
 
@@ -517,7 +551,7 @@ async def test_fills_and_cancels_are_read_back_from_the_trade_list_when_place_or
 async def test_an_order_whose_deals_lag_its_dealt_quantity_fails_instead_of_under_recording() -> None:
     client = FakeShioaji(scripts={StockOrderLot.Common: [Report(Status.Cancelled, ((100.0, 1),), deal_quantity=2)]})
 
-    placed = await provider(client).place_order(order(quantity=3000))
+    placed = await provider(client).place_order(order(quantity=3000), no_refusal)
 
     assert (placed.status, placed.filled_quantity) == (OrderStatus.FAILED, 1000)
     assert placed.reason is not None and placed.reason.startswith("unexplained broker result")
@@ -599,7 +633,7 @@ async def test_a_refused_account_read_raises_and_fails_the_order_saying_only_the
 
     with pytest.raises(Exception) as refused:
         await broker.get_account()
-    failed = await broker.place_order(order())
+    failed = await broker.place_order(order(), no_refusal)
 
     assert (failed.status, client.placed) == (OrderStatus.FAILED, [])
     assert says in str(refused.value) and failed.reason is not None and says in failed.reason
@@ -617,7 +651,7 @@ async def test_an_unconfirmed_order_whose_lookup_failed_says_only_the_error_type
     )
     logger = RecordingLogger()
 
-    failed = await (await broker_of(client, monkeypatch, logger, SystemEnvironment.TEST)).place_order(order())
+    failed = await (await broker_of(client, monkeypatch, logger, SystemEnvironment.TEST)).place_order(order(), no_refusal)
 
     assert failed.status == OrderStatus.FAILED
     assert failed.reason is not None and "(Shioaji answered TokenError, status 401). It may have reached the exchange" in failed.reason
@@ -633,7 +667,7 @@ async def test_refused_status_reads_and_cancel_are_logged_saying_only_the_error_
     client = FakeShioaji(refusals={"update_status": sdk_refusal(), "cancel_order": sdk_refusal()}, refuses_once_placed=True)
     logger = RecordingLogger()
 
-    failed = await (await broker_of(client, monkeypatch, logger, SystemEnvironment.TEST)).place_order(order())
+    failed = await (await broker_of(client, monkeypatch, logger, SystemEnvironment.TEST)).place_order(order(), no_refusal)
 
     assert failed.status == OrderStatus.FAILED
     assert [message for message in said(logger) if "failed:" in message] == [
@@ -648,10 +682,45 @@ async def test_a_refused_exchange_order_gives_the_brokers_status_code_instead_of
     client = FakeShioaji(scripts={StockOrderLot.Common: [Report(Status.Failed, msg=SERVER_WORDS, status_code="88")]})
     logger = RecordingLogger()
 
-    refused = await (await broker_of(client, monkeypatch, logger, SystemEnvironment.TEST)).place_order(order())
+    refused = await (await broker_of(client, monkeypatch, logger, SystemEnvironment.TEST)).place_order(order(), no_refusal)
 
     assert (refused.status, refused.reason) == (
         OrderStatus.REJECTED,
         "BROKER_REFUSED: Common 1 lots IOC Failed, dealt 0 shares (status 88)",
     )
     assert private_parts(refused.reason, *said(logger)) == []
+
+
+ORDERING_OFF = (RejectReason.ORDERING_OFF, "this site has ordering on shioaji off: features.sinopac_ordering")
+
+
+def refusing_from(send: int):
+    """The send-time question of a site whose ordering is turned off right before the exchange order numbered `send`."""
+    asked = 0
+
+    async def refusal_now() -> tuple[RejectReason, str] | None:
+        nonlocal asked
+        asked += 1
+        return ORDERING_OFF if asked >= send else None
+
+    return refusal_now
+
+
+async def test_ordering_turned_off_before_the_first_part_sends_nothing_and_the_order_is_rejected_with_it() -> None:
+    client = FakeShioaji()
+
+    placed = await provider(client).place_order(order(quantity=1500), refusing_from(1))
+
+    assert client.placed == []
+    assert (placed.status, placed.filled_quantity) == (OrderStatus.REJECTED, 0)
+    assert placed.reason == f"{RejectReason.ORDERING_OFF.name}: {ORDERING_OFF[1]}"
+
+
+async def test_ordering_turned_off_between_the_parts_stops_the_odd_lot_and_the_order_says_why() -> None:
+    client = FakeShioaji()
+
+    placed = await provider(client).place_order(order(quantity=1500), refusing_from(2))
+
+    assert [(trade.order.order_lot, trade.order.quantity) for trade in client.placed] == [(StockOrderLot.Common, 1)]
+    assert (placed.status, placed.filled_quantity) == (OrderStatus.CANCELLED, 1000)
+    assert placed.reason is not None and f"the rest was not sent: {ORDERING_OFF[1]}" in placed.reason

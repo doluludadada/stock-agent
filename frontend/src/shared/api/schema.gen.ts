@@ -222,8 +222,10 @@ export interface paths {
          * Start Google Sign In
          * @description The browser's way to Google, as a navigation, never a fetch: it sets the short-lived flow cookie and redirects to
          *     Google's sign-in. With `confirmation`, the id the web app made for one settings save, Google authenticates the
-         *     administrator again for that save. Where the site offers no sign-in with Google, or past the limit per address,
-         *     it redirects back to the app with ?google= and the reason.
+         *     administrator again for that save: the start needs the session of an administrator who may edit the settings, and
+         *     only that session's save is confirmed. Where the site offers no sign-in with Google, a confirmation comes without
+         *     that session (not_administrator), or past the limit per address, it redirects back to the app with ?google= and
+         *     the reason.
          */
         get: operations["start_google_sign_in_v1_auth_google_start_get"];
         put?: never;
@@ -814,7 +816,7 @@ export interface paths {
          *     board's, which are fetched when a page asks and then held for stock_page.news_freshness_minutes, one fetch per
          *     stock at a time; a source that fails keeps what was held of it. So the list also holds what the sources no longer
          *     serve, for stock_page.article_store.retention_days. Every text is a third party's: show it as text, never as
-         *     markup. Public.
+         *     markup. Private: a visitor never makes the site ask a news site or the board.
          */
         get: operations["get_stock_news_v1_market_stocks__stock_id__news_get"];
         put?: never;

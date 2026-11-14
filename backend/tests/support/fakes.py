@@ -52,8 +52,8 @@ from a_domain.ports.market.daily_close_archive import (
     ValuationRatios,
 )
 from a_domain.ports.system.market_clock import IMarketClock
+from a_domain.ports.trading.execution_provider import SendRefusal
 from a_domain.rules.fundamentals.trailing_eps import EpsFilings, QuarterEps
-from a_domain.rules.technical.search import StrategySearch
 from a_domain.rules.technical.strategy import TechnicalSettings
 from a_domain.rules.trading.cost import TradingCostRule
 from a_domain.rules.trading.order_rule import BrokerLink
@@ -63,6 +63,7 @@ from a_domain.types.enums import (
     AiProvider,
     BriefStatus,
     ExecutionProvider,
+    FeatureVisibility,
     FinancialStatement,
     MarketIndex,
     MarketType,
@@ -83,6 +84,7 @@ from a_domain.types.errors import (
 )
 from a_domain.types.ids import BacktestId, DecisionId, RunId, SessionToken, UserId
 from a_domain.types.values import FiscalQuarter, comparable_name
+from b_application.config.api_config import FeaturesConfig
 from b_application.config.market_data_config import MarketHoursConfig
 from c_infrastructure.database.models.trading_journal_dto import RunStockReportDTO
 from c_infrastructure.system.market_clock import TaiwanMarketClock
@@ -719,7 +721,11 @@ class RecordingExecutionProvider:
     def link(self) -> BrokerLink:
         return self.current_link
 
-    async def place_order(self, order: Order) -> Order:
+    async def place_order(self, order: Order, refusal_now: SendRefusal) -> Order:
+        if (refusal := await refusal_now()) is not None:
+            order.reject(*refusal, now=datetime.now(UTC))
+            return order
+
         self.placed.append(replace(order))
         assert order.limit_price is not None, "the app sends LIMIT orders only"
 
@@ -774,17 +780,6 @@ class FakeBacktestRepository:
         kept = [backtest for backtest in self.backtests if backtest.backtest_id != backtest_id]
         deleted, self.backtests = len(kept) < len(self.backtests), kept
         return deleted
-
-
-class FakeStrategySearchRepository:
-    """The searches saved, in order, each answered with its number."""
-
-    def __init__(self) -> None:
-        self.searches: list[StrategySearch] = []
-
-    async def save(self, search: StrategySearch) -> str:
-        self.searches.append(search)
-        return f"search {len(self.searches)}"
 
 
 class FakeStockBriefRepository:
@@ -1086,3 +1081,18 @@ class SignedOut:
             refuse()
 
         return refuse_later if inspect.iscoroutinefunction(getattr(self.port, name)) else refuse
+
+
+class FakeOrderingSwitch:
+    """The ordering switch of a site whose settings files hold `features`: what the real one reads from disk at each ask."""
+
+    def __init__(self, features: FeaturesConfig) -> None:
+        self.features = features
+
+    async def visibility(self, broker: ExecutionProvider) -> FeatureVisibility:
+        return self.features.ordering()[broker]
+
+
+async def no_refusal() -> None:
+    """The send-time question of a test that sends straight to a broker: nothing refuses the exchange order."""
+    return None

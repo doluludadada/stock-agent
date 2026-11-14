@@ -100,7 +100,9 @@ class PortfolioAnalysis:
 
     @property
     def unrealized_return(self) -> float | None:
-        return self.unrealized_pnl / self.cost if self.cost else None
+        """The unrealized PnL over the cost of the holdings it counts, those that have a last close. None when none has."""
+        cost = math.fsum(holding.position.cost_basis for holding in self.holdings if holding.position.unrealized_return is not None)
+        return self.unrealized_pnl / cost if cost else None
 
 
 @dataclass(frozen=True)

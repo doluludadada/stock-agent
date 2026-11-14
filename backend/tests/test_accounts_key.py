@@ -16,7 +16,6 @@ from pathlib import Path
 import pytest
 from pydantic import SecretStr
 from support.fakes import RecordingLogger
-from support.settings import PLACEHOLDER
 from trading_stack import SilentLogger
 
 from a_domain.ports.system.logging_provider import ILoggingProvider
@@ -37,10 +36,10 @@ def new_key() -> str:
 
 @pytest.fixture
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A project root with no key file and no .env, ACCOUNTS_KEY unset, SQLite and Chroma inside it."""
+    """A project root with no key file and no .env, ACCOUNTS_KEY unset, Chroma inside it."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ACCOUNTS_KEY", raising=False)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", PLACEHOLDER)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "placeholder")
     return tmp_path
 
 
@@ -150,9 +149,7 @@ def test_prod_refuses_to_start_without_the_variable_where_it_is_set_and_never_cr
     shutil.copytree(get_project_root() / "config", project / "config")
     appsetting = project / "config" / "appsetting.yaml"
     text = appsetting.read_text(encoding="utf-8").replace("environment: dev", "environment: prod", 1)
-    appsetting.write_text(text.replace("\n  backend: sqlite", "\n  backend: postgresql", 1), encoding="utf-8")
-    for name in ("DB_USER", "DB_PASSWORD", "DB_HOST", "DB_NAME"):
-        monkeypatch.setenv(name, PLACEHOLDER)
+    appsetting.write_text(text, encoding="utf-8")
 
     with pytest.raises(InvalidSettingsError) as refused:
         startup_settings(project)

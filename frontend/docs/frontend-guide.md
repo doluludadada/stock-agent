@@ -294,7 +294,7 @@ secret: the server refuses one written into them, and its form shows none.
 - The settings page is one form of choices, with no YAML. The server answers the settings an administrator changes
   from the web and the prompts of `instructions.yaml` as a field (`GET /v1/admin/settings`). A setting only an
   operator editing the file needs (`operator_only` in its settings class: addresses, column names, patterns, folders,
-  the exchange's hours and ticks, the strategy search's tuning) is no field, and a save that names one is refused.
+  the exchange's hours and ticks) is no field, and a save that names one is refused.
   Each field carries: its dotted path, its
   kind, its group, its value and what the control offers. The control comes from the kind alone, with no code per
   setting: a switch; a choice as a row of buttons (`Segmented`) up to four options and a list above; checkboxes; a

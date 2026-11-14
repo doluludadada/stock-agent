@@ -1,8 +1,7 @@
-"""Each owner's technical settings in the SQL tables, on a real SQLite file, read back the way another process would."""
+"""Each owner's technical settings in the SQL tables, on a real PostgreSQL database, read back the way another process would."""
 
 import asyncio
 import json
-import sqlite3
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from pathlib import Path
@@ -11,13 +10,13 @@ from typing import Any
 import pytest
 import pytest_asyncio
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import Update, insert, update
+from sqlalchemy import Update, insert, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import col
+from support.databases import open_database, raw_engine
 from support.formulas import LATEST_PRICE, Json, arithmetic, compare, group, indicator, market, rule
 from support.harness import harness_settings
 from support.settings import shipped_config
-from trading_stack import SilentLogger
 
 from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
 from a_domain.types.errors import TechnicalSettingsConflictError
@@ -48,11 +47,6 @@ INITIAL = TechnicalSettings(
 OTHER_INITIAL = harness_settings()
 
 
-def open_database(folder: Path) -> DatabaseConnector:
-    """A connector to the SQLite file in folder: a second one on the same folder is another process."""
-    return DatabaseConnector(config=shipped_config(folder), logger=SilentLogger())
-
-
 @pytest_asyncio.fixture
 async def db(tmp_path: Path) -> AsyncIterator[DatabaseConnector]:
     connector = open_database(tmp_path)
@@ -63,6 +57,7 @@ async def db(tmp_path: Path) -> AsyncIterator[DatabaseConnector]:
 
 @pytest_asyncio.fixture
 async def other_process(tmp_path: Path, db: DatabaseConnector) -> AsyncIterator[DatabaseConnector]:
+    """A second connector to the same database, with a pool of its own, as another process holds one."""
     connector = open_database(tmp_path)
     yield connector
     await connector.close()
@@ -79,9 +74,14 @@ def with_period(strategy: TechnicalStrategy, indicator_id: str, period: int) -> 
     )
 
 
-def count_rows(folder: Path, table: str, owner_id: str) -> int:
-    with sqlite3.connect(folder / "stock_agent.db") as connection:
-        return connection.execute(f"SELECT COUNT(*) FROM {table} WHERE owner_id = ?", (owner_id,)).fetchone()[0]
+async def count_rows(table: str, owner_id: str) -> int:
+    engine = raw_engine()
+
+    async with engine.connect() as connection:
+        rows = await connection.scalar(text(f"SELECT COUNT(*) FROM {table} WHERE owner_id = :owner_id"), {"owner_id": owner_id})
+
+    await engine.dispose()
+    return rows or 0
 
 
 # ------------------------------ Owner and revision ------------------------------ #
@@ -167,7 +167,7 @@ async def test_each_owner_has_independent_settings(db: DatabaseConnector) -> Non
 
 
 async def test_two_processes_loading_a_new_owner_at_once_save_the_initial_settings_once(
-    tmp_path: Path, db: DatabaseConnector, other_process: DatabaseConnector
+    db: DatabaseConnector, other_process: DatabaseConnector
 ) -> None:
     owners = [f"owner_{number}" for number in range(5)]
 
@@ -178,8 +178,8 @@ async def test_two_processes_loading_a_new_owner_at_once_save_the_initial_settin
     for owner, mine, theirs in zip(owners, loads[::2], loads[1::2], strict=True):
         assert mine == theirs, owner
         assert mine in (INITIAL, OTHER_INITIAL)
-        assert count_rows(tmp_path, "technical_settings", owner) == 1
-        assert count_rows(tmp_path, "technical_strategies", owner) == len(mine.strategies)
+        assert await count_rows("technical_settings", owner) == 1
+        assert await count_rows("technical_strategies", owner) == len(mine.strategies)
 
 
 # --------------------------------- Strategies --------------------------------- #

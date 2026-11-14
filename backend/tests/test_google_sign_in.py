@@ -550,10 +550,31 @@ async def test_another_google_account_or_another_administrator_confirms_nothing_
         by_another_administrator = await confirmed(client, google, second.email)
         refused = await save(client, google_confirmation=CONFIRMATION)
 
-    assert (outcome_of(by_a_user), outcome_of(by_a_stranger)) == (("/admin/settings", "not_administrator"),) * 2
-    assert outcome_of(by_another_administrator) == ("/admin/settings", "confirmed")
+    answers = (by_a_user, by_a_stranger, by_another_administrator)
+    assert [outcome_of(answer) for answer in answers] == [("/admin/settings", "not_administrator")] * 3
     assert refused.json()["code"] == "google_confirmation_required"
     assert "temperature: 0.3" not in (project / "config" / "appsetting.yaml").read_text(encoding="utf-8")
+
+
+async def test_a_confirmation_starts_from_an_administrators_session_and_confirms_that_sessions_save_alone(project: Path) -> None:
+    harness, google = google_only_administrator(project)
+    harness.users.add(MEMBER, MEMBER_PASSWORD)
+
+    async with app_of(harness) as app, client_at(app) as visitor, client_at(app) as member, client_at(app) as other:
+        await sign_in(member, MEMBER.username, MEMBER_PASSWORD)
+        refused = [await client.get(START, params={"confirmation": CONFIRMATION}) for client in (visitor, member)]
+
+        async with client_at(app) as administrator:
+            await signed_in_with_google(administrator, google, OWNER_EMAIL)
+            await signed_in_with_google(other, google, OWNER_EMAIL)
+            back = await confirmed(administrator, google)
+            from_another_session = await save(other, google_confirmation=CONFIRMATION)
+            saved = await save(administrator, google_confirmation=CONFIRMATION)
+
+    assert [outcome_of(answer) for answer in refused] == [("/admin/settings", "not_administrator")] * 2
+    assert outcome_of(back) == ("/admin/settings", "confirmed")
+    assert (from_another_session.status_code, from_another_session.json()["code"]) == (403, "google_confirmation_required")
+    assert saved.status_code == 200, saved.text
 
 
 async def test_an_administrator_with_a_password_still_confirms_by_the_password_alone(project: Path) -> None:

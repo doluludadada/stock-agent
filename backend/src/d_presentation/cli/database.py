@@ -6,7 +6,6 @@ that startup refuses. docs/database-migrations.md describes them.
 
 import argparse
 import asyncio
-import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -42,7 +41,7 @@ def rows_table(counts: dict[str, dict[str, int]]) -> Table:
 def print_state(state: DatabaseState) -> None:
     """Where the database is, its schema version against the code's, the pending steps, the rows, and what startup does."""
     stamps = ", ".join(str(stamp) for stamp in state.stamps) or "none"
-    say(f"Database:        {state.backend.value} {state.location}")
+    say(f"Database:        {state.location}")
     say(f"Schema version:  {stamps} (this code needs {state.required})")
 
     for step in state.pending:
@@ -96,7 +95,7 @@ async def restore(database: Database, backup_path: Path, confirmed: bool) -> int
     if not confirmed:
         state = await database.state()
         say(
-            f"`just db-restore` replaces the {state.backend.value} database at {state.location} with {backup_path}, after "
+            f"`just db-restore` replaces the database at {state.location} with {backup_path}, after "
             "backing the current database up. Run it again with --yes to go ahead. Nothing changed."
         )
         return 1
@@ -141,6 +140,5 @@ if __name__ == "__main__":
         exit_code = asyncio.run(run(command))
     except (*STARTUP_REFUSALS, DatabaseCommandError) as error:
         say(str(error), "red")
-    finally:
-        # The database's aiosqlite worker thread outlives close() and would hold the interpreter at exit.
-        os._exit(exit_code)
+
+    sys.exit(exit_code)

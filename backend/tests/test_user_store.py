@@ -1,5 +1,5 @@
 """
-SqlUserStore over a real database of each backend: what an operator and a user can observe of the stored credentials,
+SqlUserStore over a real PostgreSQL database: what an operator and a user can observe of the stored credentials,
 the sessions and the last-administrator guarantee.
 """
 
@@ -23,7 +23,7 @@ from support.settings import shipped_config
 from trading_stack import SilentLogger
 
 from a_domain.model.system.user import User
-from a_domain.types.enums import AiProvider, DatabaseBackend, Role, UserStatus
+from a_domain.types.enums import AiProvider, Role, UserStatus
 from a_domain.types.errors import AlreadySetUpError, LastAdministratorError, SignInRefused, SignInThrottled, UserExistsError
 from a_domain.types.ids import SessionToken, UserId
 from b_application.use_cases.users.sign_in_attempt import SignInAttempt
@@ -111,7 +111,7 @@ async def test_wrong_passwords_sent_at_once_are_refused_after_the_limit(store: S
 
 @pytest.mark.asyncio
 async def test_sign_ins_waiting_for_the_password_hash_hold_no_database_connection(
-    backend: DatabaseBackend, database: DatabaseConnector, store: SqlUserStore, monkeypatch: pytest.MonkeyPatch
+    database: DatabaseConnector, store: SqlUserStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """More sign-ins than the pool has connections wait on the hash at once, and another request still reads at once."""
     hashing, release = threading.Event(), threading.Event()
@@ -142,14 +142,14 @@ async def test_an_unknown_name_and_a_wrong_password_get_the_same_answer(store: S
 
 @pytest.mark.asyncio
 async def test_the_database_holds_no_username_email_or_password_in_the_clear(
-    backend: DatabaseBackend, database: DatabaseConnector, store: SqlUserStore, tmp_path: Path
+    database: DatabaseConnector, store: SqlUserStore, tmp_path: Path
 ) -> None:
     """
     Each text searched for is too long, or holds a character no encoded value has, for the rows' random bytes to spell
     it: a three-letter name such as bob shows up in a hash, an index or a sealed value about once in 200 runs.
     """
     await store.create(user("u-3", "carol-the-third", "carol@example.com"), PASSWORD)
-    engine = raw_engine(backend, tmp_path)
+    engine = raw_engine()
 
     async with engine.connect() as connection:
         rows = (await connection.execute(text("SELECT * FROM users"))).all()
@@ -162,9 +162,7 @@ async def test_the_database_holds_no_username_email_or_password_in_the_clear(
 
 
 @pytest.mark.asyncio
-async def test_a_sealed_email_moved_onto_another_user_does_not_open(
-    backend: DatabaseBackend, database: DatabaseConnector, store: SqlUserStore
-) -> None:
+async def test_a_sealed_email_moved_onto_another_user_does_not_open(database: DatabaseConnector, store: SqlUserStore) -> None:
     async with database.get_session() as session:
         alices = await session.get_one(UserDTO, "local")
         await session.execute(update(UserDTO).where(col(UserDTO.user_id) == "u-2").values(email_sealed=alices.email_sealed))
@@ -271,9 +269,7 @@ async def test_the_last_active_administrator_can_be_neither_demoted_nor_deactiva
 
 
 @pytest.mark.asyncio
-async def test_two_administrators_demoting_each_other_at_once_leave_one(
-    backend: DatabaseBackend, database: DatabaseConnector, store: SqlUserStore
-) -> None:
+async def test_two_administrators_demoting_each_other_at_once_leave_one(database: DatabaseConnector, store: SqlUserStore) -> None:
     bob = await store.find(UserId("u-2"))
     assert bob is not None
     bob.role = Role.ADMINISTRATOR
@@ -290,14 +286,12 @@ async def test_two_administrators_demoting_each_other_at_once_leave_one(
     refused = [result for result in results if isinstance(result, Exception)]
 
     assert len(refused) == 1
-    assert backend == DatabaseBackend.SQLITE or isinstance(refused[0], LastAdministratorError)
+    assert isinstance(refused[0], LastAdministratorError)
     assert [found.role for found in await store.users()].count(Role.ADMINISTRATOR) == 1
 
 
 @pytest.mark.asyncio
-async def test_a_hash_of_older_parameters_is_replaced_at_sign_in(
-    backend: DatabaseBackend, database: DatabaseConnector, store: SqlUserStore
-) -> None:
+async def test_a_hash_of_older_parameters_is_replaced_at_sign_in(database: DatabaseConnector, store: SqlUserStore) -> None:
     weak = PasswordHasher(time_cost=1, memory_cost=8192, parallelism=1).hash(PASSWORD.get_secret_value())
 
     async with database.get_session() as session:
@@ -311,9 +305,7 @@ async def test_a_hash_of_older_parameters_is_replaced_at_sign_in(
 
 
 @pytest.mark.asyncio
-async def test_startup_refuses_another_key_than_the_users_were_saved_with(
-    store: SqlUserStore, backend: DatabaseBackend, database: DatabaseConnector
-) -> None:
+async def test_startup_refuses_another_key_than_the_users_were_saved_with(store: SqlUserStore, database: DatabaseConnector) -> None:
     await store.check_key()
 
     with pytest.raises(AccountsKeyError, match="Restore the original secrets/accounts.key"):

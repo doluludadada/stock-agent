@@ -1,17 +1,16 @@
 import asyncio
 from datetime import datetime, timedelta
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from support.databases import open_database
 from support.settings import shipped_config
 
 from a_domain.rules.fundamentals.trailing_eps import QuarterEps
-from a_domain.types.enums import DatabaseBackend, MarketType
+from a_domain.types.enums import MarketType
 from a_domain.types.values import FiscalQuarter
 from b_application.config.market_data_config import MarketHoursConfig
-from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
 
@@ -57,11 +56,7 @@ class FakeMops:
 
 
 async def build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[MopsFundamentalsProvider, FakeMops, MovableClock]:
-    config = SimpleNamespace(
-        project_root=tmp_path,
-        db=SimpleNamespace(backend=DatabaseBackend.SQLITE, user=None, password=None, host=None, name=None, port=5432),
-    )
-    db = DatabaseConnector(config=cast(Any, config), logger=SilentLogger())
+    db = open_database(tmp_path)
     await db.init_db()
     clock = MovableClock()
     provider = MopsFundamentalsProvider(

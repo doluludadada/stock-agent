@@ -1,17 +1,20 @@
 """Fixtures any test module may ask for by name."""
 
 import importlib
+import os
 import time
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
 import pytest
 import pytest_asyncio
-from support.databases import BACKENDS, empty_database
+from support.databases import ENVIRONMENT, TestDatabase, open_database
 
-from a_domain.types.enums import DatabaseBackend
 from c_infrastructure.database.db_connector import DatabaseConnector
 from d_presentation.dependencies import import_shioaji
+
+os.environ.update(ENVIRONMENT)
+"""Before any test module reads the settings: every configuration a test builds names the session's own database."""
 
 import_shioaji()
 shioaji = importlib.import_module("shioaji")
@@ -41,16 +44,25 @@ def server_in_utc(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     time.tzset()
 
 
-@pytest.fixture(params=BACKENDS)
-def backend(request: pytest.FixtureRequest) -> DatabaseBackend:
-    """Each database backend: SQLite always, PostgreSQL when STOCK_AGENT_TEST_POSTGRES_URL is set."""
-    return request.param
+@pytest.fixture(scope="session")
+def test_database() -> Iterator[TestDatabase]:
+    """The session's own PostgreSQL database, created here and dropped when the session ends."""
+    session_database = TestDatabase()
+    session_database.create()
+    yield session_database
+    session_database.drop()
+
+
+@pytest.fixture(autouse=True)
+def empty_test_database(test_database: TestDatabase) -> None:
+    """Every test starts on an empty database: what the test before it created is dropped first."""
+    test_database.empty()
 
 
 @pytest_asyncio.fixture
-async def database(backend: DatabaseBackend, tmp_path: Path) -> AsyncIterator[DatabaseConnector]:
-    """An empty database of the backend with every table created, closed after the test."""
-    connector = await empty_database(backend, tmp_path)
+async def database(tmp_path: Path) -> AsyncIterator[DatabaseConnector]:
+    """The session's database with every table created, closed after the test."""
+    connector = open_database(tmp_path)
     await connector.init_db()
     yield connector
     await connector.close()

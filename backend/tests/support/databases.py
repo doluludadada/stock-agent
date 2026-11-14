@@ -1,128 +1,145 @@
 """
-A real database of each backend for tests of the SQL adapters: a SQLite file always, and PostgreSQL when
-STOCK_AGENT_TEST_POSTGRES_URL names a database the tests may empty (for example
-postgresql://shiou:trial@localhost:5432/stock_agent_accounts_trial). Every PostgreSQL test starts from an empty schema.
+The PostgreSQL database the tests run on. A test session owns one throwaway database, stock_agent_test_<process id>,
+which it creates on the server at 127.0.0.1:5432 as the role stock_agent_test and drops when it ends, and every test
+that opened it leaves it for the next one emptied. The role is the only setup (README.md, "Tests"): it may create
+databases and owns none but the sessions', so no test reaches a database of the app or of another project.
 """
 
+import asyncio
 import os
 from pathlib import Path
 
-import pytest
-from sqlalchemy import Connection, inspect, make_url, text
+import asyncpg
+from sqlalchemy import Connection, Engine, event, inspect, text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from trading_stack import SilentLogger
 
-from a_domain.types.enums import DatabaseBackend
-from b_application.config.app_config import AppConfig, DbConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
 from support.settings import shipped_config
 
-POSTGRES_URL = os.environ.get("STOCK_AGENT_TEST_POSTGRES_URL")
-SCHEMA_FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "schema"
+TEST_ROLE = "stock_agent_test"
+"""The role's name and its password, which a server that trusts loopback connections never asks for."""
 
-BACKENDS = [
-    pytest.param(DatabaseBackend.SQLITE, id="sqlite"),
-    pytest.param(
-        DatabaseBackend.POSTGRESQL,
-        id="postgresql",
-        marks=pytest.mark.skipif(POSTGRES_URL is None, reason="STOCK_AGENT_TEST_POSTGRES_URL is not set"),
-    ),
-]
+TEST_DATABASE_PREFIX = f"{TEST_ROLE}_"
+SERVER = {"host": "127.0.0.1", "port": 5432, "user": TEST_ROLE, "password": TEST_ROLE}
+ENVIRONMENT = {
+    "DB_USER": TEST_ROLE,
+    "DB_PASSWORD": TEST_ROLE,
+    "DB_HOST": SERVER["host"],
+    "DB_PORT": str(SERVER["port"]),
+    "DB_NAME": f"{TEST_DATABASE_PREFIX}{os.getpid()}",
+}
+"""The database settings every test's configuration reads: the session's own database."""
+
+SETUP = (
+    f"The tests need PostgreSQL at {SERVER['host']}:{SERVER['port']} and the role {TEST_ROLE}, which may create "
+    f"databases. Create it once: psql -d postgres -c \"CREATE ROLE {TEST_ROLE} LOGIN CREATEDB PASSWORD '{TEST_ROLE}'\""
+)
 
 
-def database_config(backend: DatabaseBackend, folder: Path) -> AppConfig:
-    """The shipped settings over a SQLite file in folder, or over the test PostgreSQL database."""
-    config = shipped_config(folder)
+class TestDatabase:
+    """The session's database, and whether a test has opened it since it was last emptied."""
 
-    if backend == DatabaseBackend.SQLITE:
-        return config
+    __test__ = False
 
-    assert POSTGRES_URL is not None
-    url = make_url(POSTGRES_URL)
-    credentials = {"DB_USER": url.username, "DB_PASSWORD": url.password or "trial", "DB_HOST": url.host, "DB_NAME": url.database}
-    db = DbConfig(
-        backend=DatabaseBackend.POSTGRESQL, chroma_persist_path=str(folder / "chroma"), DB_PORT=url.port or 5432, **credentials
+    def __init__(self) -> None:
+        self.name = ENVIRONMENT["DB_NAME"]
+        self.opened = False
+        event.listen(Engine, "connect", self.mark_opened)
+
+    def mark_opened(self, *_: object) -> None:
+        self.opened = True
+
+    def create(self) -> None:
+        """Creates the database, after dropping what a session that was killed left behind."""
+        try:
+            asyncio.run(self.recreate())
+        except (OSError, asyncpg.PostgresError) as error:
+            raise RuntimeError(f"{SETUP}\n{type(error).__name__}: {error}") from error
+
+    async def recreate(self) -> None:
+        server = await asyncpg.connect(database="postgres", **SERVER)
+
+        try:
+            for name in await server.fetch("SELECT datname FROM pg_database WHERE datname LIKE $1", f"{TEST_DATABASE_PREFIX}%"):
+                if name["datname"] == self.name or not process_runs(
+                    name["datname"].removeprefix(TEST_DATABASE_PREFIX).partition("_")[0]
+                ):
+                    await server.execute(f'DROP DATABASE "{name["datname"]}" WITH (FORCE)')
+
+            await server.execute(f'CREATE DATABASE "{self.name}"')
+        finally:
+            await server.close()
+
+    def empty(self) -> None:
+        """Leaves no table, type or row, and no connection a test left open, if a test opened the database."""
+        if self.opened:
+            asyncio.run(self.drop_everything())
+            self.opened = False
+
+    async def drop_everything(self) -> None:
+        database = await asyncpg.connect(database=self.name, **SERVER)
+
+        try:
+            await database.execute(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                "WHERE datname = current_database() AND pid <> pg_backend_pid() AND backend_type = 'client backend'"
+            )
+            await database.execute("DROP SCHEMA public CASCADE")
+            await database.execute("CREATE SCHEMA public")
+        finally:
+            await database.close()
+
+    def drop(self) -> None:
+        asyncio.run(self.drop_database())
+
+    async def drop_database(self) -> None:
+        server = await asyncpg.connect(database="postgres", **SERVER)
+
+        try:
+            await server.execute(f'DROP DATABASE IF EXISTS "{self.name}" WITH (FORCE)')
+        finally:
+            await server.close()
+
+
+def process_runs(process_id: str) -> bool:
+    """Whether the process that named a test database after itself still runs, so its databases are left alone."""
+    if not process_id.isdecimal():
+        return False
+
+    try:
+        os.kill(int(process_id), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+    return True
+
+
+def open_database(folder: Path) -> DatabaseConnector:
+    """A connector to the session's database, which starts every test empty, over the shipped settings rooted at folder."""
+    return DatabaseConnector(config=shipped_config(folder), logger=SilentLogger())
+
+
+def raw_engine() -> AsyncEngine:
+    """An engine on the session's database, for a test to build or read tables itself."""
+    return create_async_engine(
+        f"postgresql+asyncpg://{TEST_ROLE}:{TEST_ROLE}@{SERVER['host']}:{SERVER['port']}/{ENVIRONMENT['DB_NAME']}"
     )
-    return config.model_copy(update={"db": db})
 
 
-async def empty_database(backend: DatabaseBackend, folder: Path) -> DatabaseConnector:
-    """A connector to an empty database of the backend: a new SQLite file, or the test PostgreSQL database emptied."""
-    if backend == DatabaseBackend.POSTGRESQL:
-        assert POSTGRES_URL is not None
-        engine = create_async_engine(make_url(POSTGRES_URL).set(drivername="postgresql+asyncpg"))
-
-        async with engine.begin() as connection:
-            await connection.execute(text("DROP SCHEMA public CASCADE"))
-            await connection.execute(text("CREATE SCHEMA public"))
-
-        await engine.dispose()
-
-    return DatabaseConnector(config=database_config(backend, folder), logger=SilentLogger())
-
-
-def raw_engine(backend: DatabaseBackend, folder: Path) -> AsyncEngine:
-    """An engine on the same database a connector of database_config opens, for a test to build or read tables itself."""
-    if backend == DatabaseBackend.SQLITE:
-        return create_async_engine(f"sqlite+aiosqlite:///{folder / 'stock_agent.db'}")
-
-    assert POSTGRES_URL is not None
-    return create_async_engine(make_url(POSTGRES_URL).set(drivername="postgresql+asyncpg"))
-
-
-async def create_version_2_tables(backend: DatabaseBackend, folder: Path, stamp: int = 2) -> None:
-    """Every table as schema version 2 created it on the backend (fixtures/schema, written by that version's create_all)."""
-    statements = (SCHEMA_FIXTURES / f"version_2.{backend.value}.sql").read_text().split(";\n\n")
-    engine = raw_engine(backend, folder)
+async def execute(*statements: str) -> None:
+    engine = raw_engine()
 
     async with engine.begin() as connection:
         for statement in statements:
-            await connection.execute(text(statement.strip().removesuffix(";")))
-
-        await connection.execute(text("INSERT INTO schema_version (version) VALUES (:stamp)"), {"stamp": stamp})
+            await connection.execute(text(statement))
 
     await engine.dispose()
 
 
-async def create_version_tables(backend: DatabaseBackend, folder: Path, version: int) -> None:
-    """
-    Every table as schema version `version` (3 or later) created it on the backend, stamped `version`:
-    fixtures/schema/version_<version>.<backend>.sql, the statements that version's create_all ran.
-    """
-    statements = (SCHEMA_FIXTURES / f"version_{version}.{backend.value}.sql").read_text().split(";\n\n")
-    engine = raw_engine(backend, folder)
-
-    async with engine.begin() as connection:
-        for statement in statements:
-            await connection.execute(text(statement.strip().removesuffix(";")))
-
-        await connection.execute(text("INSERT INTO schema_version (version) VALUES (:version)"), {"version": version})
-
-    await engine.dispose()
-
-
-async def create_version_1_tables(backend: DatabaseBackend, folder: Path) -> None:
-    """
-    Every table as schema version 1 created it, stamped 1. On SQLite, the tables of a database the app wrote on
-    2026-11-04 (fixtures/schema/version_1.sqlite.sql, its schema only). No version 1 database on PostgreSQL was kept, so
-    there it is version 2's tables without workflow_runs.failure, the one column version 2 added.
-    """
-    if backend == DatabaseBackend.POSTGRESQL:
-        await create_version_2_tables(backend, folder, stamp=1)
-        statements = ["ALTER TABLE workflow_runs DROP COLUMN failure"]
-    else:
-        statements = [*(SCHEMA_FIXTURES / "version_1.sqlite.sql").read_text().split(";\n\n"), "INSERT INTO schema_version VALUES (1)"]
-
-    engine = raw_engine(backend, folder)
-
-    async with engine.begin() as connection:
-        for statement in statements:
-            await connection.execute(text(statement.strip().removesuffix(";")))
-
-    await engine.dispose()
-
-
-async def database_snapshot(backend: DatabaseBackend, folder: Path) -> dict[str, tuple[list[str], list[tuple[str, ...]]]]:
+async def database_snapshot() -> dict[str, tuple[list[str], list[tuple[str, ...]]]]:
     """Every table's columns and rows, as text, and so the stamp: what a command that changed nothing must leave as it was."""
 
     def snapshot_of(connection: Connection) -> dict[str, tuple[list[str], list[tuple[str, ...]]]]:
@@ -136,7 +153,7 @@ async def database_snapshot(backend: DatabaseBackend, folder: Path) -> dict[str,
 
         return dump
 
-    engine = raw_engine(backend, folder)
+    engine = raw_engine()
 
     async with engine.connect() as connection:
         dump = await connection.run_sync(snapshot_of)

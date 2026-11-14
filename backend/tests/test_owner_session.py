@@ -1,5 +1,5 @@
 """
-The owner guard on a real database of each backend: an owner session reads and changes only its owner's rows of an
+The owner guard on a real PostgreSQL database: an owner session reads and changes only its owner's rows of an
 owned table (a table with an owner_id column), get_session refuses owned tables, and an adapter built for no owner
 refuses before any SQL.
 """

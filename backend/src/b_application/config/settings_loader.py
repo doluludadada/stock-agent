@@ -955,18 +955,11 @@ def validate_trading_environment(config: AppConfig) -> None:
     Refuses a setup that could reach data or a credential the environment must not see, before any broker or database
     is contacted. What each environment allows is SystemEnvironment's table:
 
-    - dev and test refuse to start while a production Shioaji credential is set;
-    - prod refuses SQLite.
+    dev and test refuse to start while a production Shioaji credential is set.
     Which broker a run orders on is the run's own choice, and the order gates check at each order that a real broker's
     login is on the server the environment trades on.
     """
     environment = config.environment
-
-    if config.db.backend not in environment.databases:
-        allowed = " or ".join(sorted(backend.value for backend in environment.databases))
-        raise TradingSetupError(
-            f"environment {environment.value} needs db.backend {allowed}, not {config.db.backend.value}", "db.backend"
-        )
 
     if refused := [credential.value for credential in environment.refused_credentials if credential in config.shioaji.given()]:
         raise TradingSetupError(

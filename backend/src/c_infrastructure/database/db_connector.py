@@ -1,25 +1,23 @@
-from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
+from collections.abc import AsyncGenerator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from copy import copy
 from datetime import UTC, datetime
 from itertools import count
 from pathlib import Path
-from typing import Any, Self, override
+from typing import Self, override
 
 import sqlalchemy
 from sqlalchemy import event, func, select
-from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
 from a_domain.ports.system.database_connector import DatabaseMigration, DatabaseState, IDatabaseConnector
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from a_domain.types.enums import DatabaseBackend
 from a_domain.types.errors import SignInRequired
 from a_domain.types.ids import UserId
 from b_application.config.app_config import AppConfig
-from c_infrastructure.database.models.backups import DatabaseCommandError, copy_sqlite, run_postgresql_client
+from c_infrastructure.database.models.backups import DatabaseCommandError, run_postgresql_client
 from c_infrastructure.database.models.owned_rows import OWNER_COLUMN, guard_session, hide_refused_values
 from c_infrastructure.database.models.schema_version_dto import (
     SCHEMA_VERSION,
@@ -30,49 +28,34 @@ from c_infrastructure.database.models.schema_version_dto import (
     upgrade,
 )
 
-UPSERT: dict[str, Callable[..., Any]] = {"sqlite": sqlite.insert, "postgresql": postgresql.insert}
-"""
-Each backend's INSERT ... ON CONFLICT DO UPDATE, by dialect name: an upsert in one statement, so two writers of the same
-row at once never both insert it.
-"""
+BACKUP_HEADER = b"PGDMP"
+"""The first bytes of every file pg_dump writes in its custom format."""
 
 
 class DatabaseConnector(IDatabaseConnector[AsyncSession]):
     """
-    The explicitly selected local SQLite or service PostgreSQL database; credentials never select the backend. A
-    statement the database refuses raises with its text and without the values it was given (hide_parameters), and
-    without the row or the key PostgreSQL quotes after its message (hide_refused_values), so no saved value reaches a
-    log or a run's record through an error.
+    The PostgreSQL database the settings name. A statement the database refuses raises with its text and without the
+    values it was given (hide_parameters), without the row or the key PostgreSQL quotes after its message, and without
+    the value a data exception quotes in its message (hide_refused_values), so no value bound to a statement reaches a
+    log or a run's record through an error. A value written into a statement's own text still shows in it.
     """
 
     def __init__(self, config: AppConfig, logger: ILoggingProvider) -> None:
         self._logger = logger
         self._db = config.db
         self._backups = config.project_root / "backups"
-        self._sqlite_path: Path | None = None
         self._owner_id: UserId | None = None
-
-        if config.db.backend == DatabaseBackend.POSTGRESQL:
-            self._logger.info("Initialising PostgreSQL (asyncpg) connection...")
-            connection_url = URL.create(
-                drivername="postgresql+asyncpg",
-                username=config.db.user,
-                password=config.db.password,
-                host=config.db.host,
-                port=config.db.port,
-                database=config.db.name,
-            )
-            self._engine = create_async_engine(connection_url, echo=False, pool_pre_ping=True, hide_parameters=True)
-            event.listen(self._engine.sync_engine, "handle_error", hide_refused_values)
-        else:
-            self._logger.info("Initialising local SQLite (aiosqlite) connection...")
-            self._sqlite_path = config.project_root / "stock_agent.db"
-            self._engine = create_async_engine(f"sqlite+aiosqlite:///{self._sqlite_path}", echo=False, hide_parameters=True)
-            # SQLite ignores foreign keys unless each connection turns them on; PostgreSQL always checks them.
-            event.listen(
-                self._engine.sync_engine, "connect", lambda connection, _: connection.cursor().execute("PRAGMA foreign_keys=ON")
-            )
-
+        self._logger.info("Initialising PostgreSQL (asyncpg) connection...")
+        connection_url = URL.create(
+            drivername="postgresql+asyncpg",
+            username=config.db.user,
+            password=config.db.password,
+            host=config.db.host,
+            port=config.db.port,
+            database=config.db.name,
+        )
+        self._engine = create_async_engine(connection_url, echo=False, pool_pre_ping=True, hide_parameters=True)
+        event.listen(self._engine.sync_engine, "handle_error", hide_refused_values)
         self._session_factory = async_sessionmaker(bind=self._engine, class_=AsyncSession, expire_on_commit=False, autoflush=False)
 
     @override
@@ -131,7 +114,6 @@ class DatabaseConnector(IDatabaseConnector[AsyncSession]):
                 "first, then upgrades it in one transaction. `just db-status` shows the steps it runs."
             )
 
-        reset = f"delete {self._sqlite_path}, or " if self._sqlite_path else ""
         found = ", ".join(str(stamp) for stamp in stamps) or "none"
         version = (
             []
@@ -147,31 +129,25 @@ class DatabaseConnector(IDatabaseConnector[AsyncSession]):
                 "The database has tables from another version of stock-agent that startup cannot upgrade in place:",
                 *(f"  - {table}" for table in outdated),
                 *version,
-                f"Remedy: {reset}drop the tables named above. The next start recreates them empty.",
+                "Remedy: drop the tables named above. The next start recreates them empty.",
                 "Cached prices and EPS refill themselves; mock account, watchlist and trading rows in a dropped table are lost.",
             ]
         )
 
     @override
     async def state(self) -> DatabaseState:
-        live_columns: dict[str, frozenset[str]] = {}
-        stamps: list[int] = []
-        rows: dict[str, int] = {}
-
-        if self._sqlite_path is None or self._sqlite_path.exists():
-            async with self._engine.connect() as connection:
-                live_columns, stamps = await live_layout(connection)
-                rows = {
-                    name: (await connection.scalar(select(func.count()).select_from(sqlalchemy.table(name)))) or 0
-                    for name in sorted(live_columns)
-                }
+        async with self._engine.connect() as connection:
+            live_columns, stamps = await live_layout(connection)
+            rows = {
+                name: (await connection.scalar(select(func.count()).select_from(sqlalchemy.table(name)))) or 0
+                for name in sorted(live_columns)
+            }
 
         pending = tuple(pending_steps(stamps))
         outdated = self.outdated_tables(live_columns, stamps)
 
         return DatabaseState(
-            backend=self._db.backend,
-            location=str(self._sqlite_path or f"{self._db.user}@{self._db.host}:{self._db.port}/{self._db.name}"),
+            location=f"{self._db.user}@{self._db.host}:{self._db.port}/{self._db.name}",
             stamps=tuple(stamps),
             required=SCHEMA_VERSION,
             pending=pending,
@@ -186,16 +162,12 @@ class DatabaseConnector(IDatabaseConnector[AsyncSession]):
         self._backups.chmod(0o700)
         taken = f"{datetime.now(UTC):%Y%m%d-%H%M%S}"
         version = "-".join(str(stamp) for stamp in stamps) or "none"
-        stem, suffix = (self._db.name, "dump") if self._sqlite_path is None else ("stock_agent", "db")
-        names = (f"{stem}.{taken}{f'-{attempt}' if attempt > 1 else ''}.v{version}.{suffix}" for attempt in count(1))
+        names = (f"{self._db.name}.{taken}{f'-{attempt}' if attempt > 1 else ''}.v{version}.dump" for attempt in count(1))
         destination = next(path for path in (self._backups / name for name in names) if not path.exists())
         destination.touch(mode=0o600, exist_ok=False)
 
         try:
-            if self._sqlite_path is None:
-                await run_postgresql_client("pg_dump", self._db, "--format=custom", f"--file={destination}")
-            else:
-                await copy_sqlite(self._sqlite_path, destination)
+            await run_postgresql_client("pg_dump", self._db, "--format=custom", f"--file={destination}")
         except BaseException:
             destination.unlink(missing_ok=True)
             raise
@@ -232,23 +204,18 @@ class DatabaseConnector(IDatabaseConnector[AsyncSession]):
 
     @override
     async def restore(self, backup: Path) -> Path | None:
-        header = b"PGDMP" if self._sqlite_path is None else b"SQLite format 3\x00"
-
         if not backup.is_file():
             raise DatabaseCommandError(f"There is no file at {backup}. Nothing changed.")
 
         with backup.open("rb") as file:
-            if file.read(len(header)) != header:
-                raise DatabaseCommandError(f"{backup} is not a backup of a {self._db.backend.value} database. Nothing changed.")
+            if file.read(len(BACKUP_HEADER)) != BACKUP_HEADER:
+                raise DatabaseCommandError(f"{backup} is not a backup that pg_dump wrote. Nothing changed.")
 
         current = await self.backup() if (await self.state()).rows else None
 
-        if self._sqlite_path is None:
-            await run_postgresql_client(
-                "pg_restore", self._db, "--clean", "--if-exists", "--single-transaction", "--no-owner", str(backup)
-            )
-        else:
-            await copy_sqlite(backup, self._sqlite_path)
+        await run_postgresql_client(
+            "pg_restore", self._db, "--clean", "--if-exists", "--single-transaction", "--no-owner", str(backup)
+        )
 
         return current
 

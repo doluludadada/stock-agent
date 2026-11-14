@@ -51,6 +51,18 @@ class UserSession:
 
 
 @dataclass(frozen=True, kw_only=True)
+class GoogleConfirmation:
+    """
+    The fresh Google authentication that confirms one settings save of an administrator without a password: the id the
+    web app made for the save, and the administrator's session that started the authentication, the only session whose
+    save it confirms.
+    """
+
+    confirmation_id: str
+    session: SessionToken
+
+
+@dataclass(frozen=True, kw_only=True)
 class SignInFlow:
     """
     One sign-in a browser started at the identity provider: what the provider must send back (`state`), what its ID
@@ -63,5 +75,5 @@ class SignInFlow:
     code_verifier: str
     started_at: datetime
     expires_at: datetime
-    confirmation: str | None = None
-    """The settings save this flow confirms, by the id the web app made for it; None for a sign-in."""
+    confirmation: GoogleConfirmation | None = None
+    """The settings save this flow confirms, and for which session; None for a sign-in."""

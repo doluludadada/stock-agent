@@ -57,9 +57,8 @@ behavior:
     ]
 
 db:
-  # sqlite keeps everything in stock_agent.db at the project root. postgresql reads DB_USER, DB_PASSWORD, DB_HOST,
-  # DB_PORT and DB_NAME from .env, and refuses to start without them instead of falling back to SQLite.
-  backend: sqlite
+  # The PostgreSQL database is named by DB_USER, DB_PASSWORD, DB_HOST, DB_PORT and DB_NAME in .env: the app refuses to
+  # start without them.
   chroma_persist_path: "chroma_data"
 
 chat:
@@ -73,53 +72,6 @@ technical:
   built_in_strategies: [balanced]
   # An owner's first settings copy every built-in strategy and select this one for every workflow.
   initial_strategy_id: balanced
-
-strategy_search:
-  # A strategy search breeds technical strategies from a built-in one on the held daily history and judges them on
-  # sessions it never chose on: `just search-strategies`. It reads the history as a backtest does, never orders, asks
-  # no broker or AI, and changes no saved strategy or setting.
-  # Processes that backtest candidates at once, each with its own copy of the history; 0 backtests in the command's.
-  workers: 8
-  # New candidates per generation, bred from the fittest so far: the command's defaults.
-  population: 40
-  generations: 40
-  # The sessions from the first one a strategy of max_required_bars bars can be scored on, in time order: this share
-  # trains, the next share validates, and the rest is the holdout, read once for the report.
-  train_share: 0.5
-  validation_share: 0.25
-  # The best on train backtested on validation, where the winners are picked; the winners the report shows.
-  finalists: 10
-  winners: 3
-  # The luck baseline: the holdout returns of this many candidates tried that traded enough on train.
-  luck_sample: 100
-  # Fitness is the return less drawdown_penalty times the deepest drawdown, for a backtest with at least this many
-  # closed trades per 100 sessions; one with fewer ranks below every one with enough.
-  min_trades_per_100_sessions: 10
-  drawdown_penalty: 0.5
-  # A parent is the fittest on train of `tournament` drawn at random; a child is it changed by 1 to max_mutations
-  # mutations. A child that repeats a candidate tried before is drawn again, up to attempts_per_child times.
-  tournament: 3
-  max_mutations: 3
-  attempts_per_child: 20
-  # A period moves by up to period_step of itself, a constant by up to constant_step, a score by up to score_step.
-  period_step: 0.3
-  constant_step: 0.2
-  score_step: 5
-  # No candidate needs more daily bars or holds more rules than these.
-  max_required_bars: 100
-  max_rules: 30
-  # A new indicator's period, and the levels a generated condition compares a number of each scale with: a price or a
-  # volume with another one times a level, the others with a level or another number of their scale.
-  periods: [5, 10, 14, 20, 30, 60]
-  levels:
-    price: [0.95, 1.0, 1.05]
-    volume: [0.5, 1.0, 1.5, 2.0]
-    oscillator: [20, 30, 40, 50, 60, 70, 80]
-    momentum: [0]
-    fraction: [0, 0.2, 0.5, 0.8, 1]
-    volatility: [0.05, 0.1, 0.2, 0.3]
-  # Each search is saved in a folder of its own under this one, relative to the project root.
-  folder: strategy_searches
 
 ranking:
   # A monthly stock ranking by revenue acceleration and nearness to the high, which research on 2018 to 2026 found to beat
@@ -711,6 +663,7 @@ sources:
           date: "資料日期"
           stock_id: "股票代號"
           reference: "除權息參考價"
+          empty_stat: "很抱歉，沒有符合條件的資料!"
         tpex:
           url: "https://www.tpex.org.tw/www/zh-tw/bulletin/exDailyQ?startDate={first:%Y/%m/%d}&endDate={last:%Y/%m/%d}&response=json"
           date: "除權息日期"

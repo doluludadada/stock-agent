@@ -3,6 +3,7 @@ from datetime import UTC, timedelta
 
 import pytest
 from sqlmodel import col, select
+from support.fakes import FakeOrderingSwitch, FakeUserStore
 from support.harness import rising_history
 from trading_stack import MONDAY_10_00, SilentLogger, TradingStack, analysed_stock, bar, open_stack, run_stats
 
@@ -11,6 +12,8 @@ from a_domain.model.analysis.technical_report import TechnicalReport
 from a_domain.model.trading.account import Account, Position
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.watchlist import WatchlistEntry
+from a_domain.ports.trading.execution_provider import SendRefusal
+from a_domain.rules.trading.order_rule import BrokerLink
 from a_domain.types.enums import OrderStatus, RejectReason, SignalSource, TradeAction, WatchlistType, Workflow
 from b_application.use_cases.trade.order_execution import OrderExecution
 from c_infrastructure.database.models.trading_journal_dto import AccountSnapshotDTO, OrderDTO, TradeSignalDTO, WorkflowRunDTO
@@ -21,7 +24,7 @@ pytestmark = pytest.mark.asyncio
 
 
 def stored_utc(moment):
-    """The journal keeps every timestamp as UTC wall-clock time, because SQLite keeps no zone."""
+    """The journal keeps every timestamp as UTC wall-clock time, in a column without a time zone."""
     return moment.replace(tzinfo=UTC)
 
 
@@ -253,9 +256,12 @@ class CountingBroker:
         self.stack = stack
         self.asked: list[OrderStatus] = []
 
-    async def place_order(self, order: Order) -> Order:
+    def link(self) -> BrokerLink:
+        return self.stack.broker.link()
+
+    async def place_order(self, order: Order, refusal_now: SendRefusal) -> Order:
         self.asked.append(order.status)
-        return await self.stack.broker.place_order(order)
+        return await self.stack.broker.place_order(order, refusal_now)
 
     async def get_account(self):
         return await self.stack.broker.get_account()
@@ -268,7 +274,8 @@ class CountingBroker:
 async def test_order_execution_sends_only_a_pending_order(tmp_path, ending: str | None, asked: list, status: OrderStatus) -> None:
     stack = await open_stack(tmp_path)
     broker = CountingBroker(stack)
-    execution = OrderExecution(broker, stack.journal, stack.clock, SilentLogger())
+    switch = FakeOrderingSwitch(stack.config.features)
+    execution = OrderExecution(broker, stack.journal, FakeUserStore(), switch, None, stack.clock, stack.config, SilentLogger())
     stock = analysed_stock()
     stock.realtime_bar = stack.quotes.realtime["2330"]
     account = await stack.broker.get_account()
@@ -294,12 +301,12 @@ class BrokerThatChecksTheRecord:
         self.stack = stack
         self.recorded_before_sending: list[OrderStatus] = []
 
-    async def place_order(self, order: Order) -> Order:
+    async def place_order(self, order: Order, refusal_now: SendRefusal) -> Order:
         async with self.stack.db.for_owner(LEGACY_OWNER_ID).owner_session() as session:
             row = await session.get(OrderDTO, order.id)
             self.recorded_before_sending.append(row.status if row else None)
 
-        return await self.stack.broker.place_order(order)
+        return await self.stack.broker.place_order(order, refusal_now)
 
     async def get_account(self):
         return await self.stack.broker.get_account()
@@ -343,10 +350,10 @@ class SlowBroker:
         self.called = asyncio.Event()
         self.gate = asyncio.Event()
 
-    async def place_order(self, order: Order) -> Order:
+    async def place_order(self, order: Order, refusal_now: SendRefusal) -> Order:
         self.called.set()
         await self.gate.wait()
-        return await self.stack.broker.place_order(order)
+        return await self.stack.broker.place_order(order, refusal_now)
 
     async def get_account(self):
         return await self.stack.broker.get_account()

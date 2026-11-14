@@ -165,7 +165,7 @@ async def get_stock_analysis(stock_id: StockIdPath, pipeline: SignedOutPipeline)
     return await pipeline.load_stock_analysis(stock_id)
 
 
-@router.get("/stocks/{stock_id}/news", responses=NOT_LISTED | UNAVAILABLE, dependencies=[shows(Feature.STOCK_PAGES)])
+@router.get("/stocks/{stock_id}/news", responses=NOT_LISTED | UNAVAILABLE, dependencies=[PrivateAccess, shows(Feature.STOCK_PAGES)])
 async def get_stock_news(stock_id: StockIdPath, pipeline: SignedOutPipeline) -> StockNewsResponse:
     """
     What is said about one listed stock, newest first, from the site's article store, at most
@@ -176,7 +176,7 @@ async def get_stock_news(stock_id: StockIdPath, pipeline: SignedOutPipeline) -> 
     board's, which are fetched when a page asks and then held for stock_page.news_freshness_minutes, one fetch per
     stock at a time; a source that fails keeps what was held of it. So the list also holds what the sources no longer
     serve, for stock_page.article_store.retention_days. Every text is a third party's: show it as text, never as
-    markup. Public.
+    markup. Private: a visitor never makes the site ask a news site or the board.
     """
     articles = await pipeline.load_stock_news(stock_id)
 

@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import date, datetime
 from typing import Protocol
 
@@ -6,6 +6,9 @@ from a_domain.model.trading.account import Account, BrokerageStatement, BrokerFi
 from a_domain.model.trading.order import ExchangeOrder, Order
 from a_domain.rules.trading.order_rule import BrokerLink
 from a_domain.types.enums import LotKind, RejectReason
+
+type SendRefusal = Callable[[], Awaitable[tuple[RejectReason, str] | None]]
+"""Why an exchange order may not go out at this moment, or None: what a broker asks right before it sends each one."""
 
 
 class IExecutionProvider(Protocol):
@@ -28,7 +31,12 @@ class IExecutionProvider(Protocol):
         """Which broker this is and, for a real one, whether its login is up now and on which server. Read right before each send."""
         ...
 
-    async def place_order(self, order: Order) -> Order: ...
+    async def place_order(self, order: Order, refusal_now: SendRefusal) -> Order:
+        """
+        Sends `order`, asking `refusal_now` right before each exchange order it sends. A refusal sends nothing more: the
+        order is REJECTED with it when nothing went out, and otherwise ends with what the parts already sent did.
+        """
+        ...
 
     async def get_account(self) -> Account:
         """Cash and positions, read together."""
@@ -107,10 +115,13 @@ class IBrokerExecutionProvider[BrokerAccount, Contract, Trade](IExecutionProvide
         """The cash the account can still pay for a BUY with. Never more than the broker will settle."""
         ...
 
-    async def send(self, contract: Contract, order: Order, held: Position | None) -> list[ExchangeOrder]:
+    async def send(
+        self, contract: Contract, order: Order, held: Position | None, refusal_now: SendRefusal
+    ) -> tuple[list[ExchangeOrder], tuple[RejectReason, str] | None]:
         """
-        Sends the order as one exchange order per lot part, in turn, and records what each part dealt on it. Stops at
-        a part still working. Returns the report of every part it sent.
+        Sends the order as one exchange order per lot part, in turn, asking `refusal_now` right before each, and records
+        what each part dealt on it. Stops at a part still working and at a refusal. Returns the report of every part it
+        sent, and the refusal that stopped it before a part, if one did.
         """
         ...
 

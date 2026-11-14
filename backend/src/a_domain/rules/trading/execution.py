@@ -97,15 +97,17 @@ class BrokerOutcomeRule:
       what executed.
     - Nothing filled and every part refused: REJECTED as BROKER_REFUSED.
     - Anything else is CANCELLED with what filled: an IOC remainder, a FOK kill, or a refused part.
+    `unsent` says why the parts after those were never sent, when the site refused one right before its send.
     """
 
     broker: str
 
-    def apply(self, order: Order, parts: Sequence[ExchangeOrder], now: datetime) -> None:
+    def apply(self, order: Order, parts: Sequence[ExchangeOrder], now: datetime, unsent: str | None = None) -> None:
         if order.status == OrderStatus.FILLED:
             return
 
-        summary = "; ".join(part.description for part in parts)
+        rest = [f"the rest was not sent: {unsent}"] if unsent is not None else []
+        summary = "; ".join([*(part.description for part in parts), *rest])
 
         if any(part.status.is_open for part in parts):
             order.fail(f"still working at the broker after a cancel request, check {self.broker}: {summary}", now=now)

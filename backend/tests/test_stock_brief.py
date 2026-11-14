@@ -12,12 +12,11 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from support.databases import database_config
+from support.databases import open_database
 from support.harness import MARKET_OPEN, MEMBER, MEMBER_PASSWORD, CliHarness, build_harness, daily_history, harness_config
 from support.settings import APPSETTING
 from support.web import serve
 from test_ranking_rule import revenue
-from trading_stack import SilentLogger
 
 from a_domain.model.analysis.stock_brief import BriefSentence, StockBrief
 from a_domain.model.chat.message import Message
@@ -30,7 +29,6 @@ from a_domain.types.enums import (
     BriefSourceKind,
     BriefStatus,
     ContentType,
-    DatabaseBackend,
     Feature,
     FeatureVisibility,
     InformationSource,
@@ -261,7 +259,7 @@ async def test_claims_made_together_for_many_stocks_stop_at_the_daily_limit(data
 
 
 async def test_a_brief_outlives_the_server_and_only_a_failed_or_an_abandoned_one_is_taken_again(
-    database: DatabaseConnector, backend: DatabaseBackend, tmp_path: Path
+    database: DatabaseConnector, tmp_path: Path
 ) -> None:
     briefs = SqlStockBriefRepository(database)
     stale = MARKET_OPEN - timedelta(minutes=5)
@@ -276,7 +274,7 @@ async def test_a_brief_outlives_the_server_and_only_a_failed_or_an_abandoned_one
     assert await briefs.claim(writing("2454", claimed_at=MARKET_OPEN - timedelta(minutes=6)), 30, stale)
     assert await briefs.claim(writing("2303"), 30, stale)
 
-    restarted = DatabaseConnector(config=database_config(backend, tmp_path), logger=SilentLogger())
+    restarted = open_database(tmp_path)
     await restarted.init_db()
     after = SqlStockBriefRepository(restarted)
     held = await after.find("2330", TODAY)

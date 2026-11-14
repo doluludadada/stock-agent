@@ -1,6 +1,6 @@
 """
 Each port that holds a user's data, through the adapters the production factory create_owned_ports builds, over a real
-database of each backend and a real Chroma folder, for two owners. For every method of every such port, owner Bob
+PostgreSQL database and a real Chroma folder, for two owners. For every method of every such port, owner Bob
 calls it with what Alice saved and sees none of it, changes none of it, and Alice still reads her own (the control).
 The first test makes the case table complete: a port added to OwnedPorts, or a method added to one of its ports,
 without a case fails here, by name.
@@ -17,8 +17,8 @@ import chromadb
 import pytest
 import pytest_asyncio
 from sqlalchemy.exc import IntegrityError
-from support.databases import database_config
-from support.fakes import AiVendor
+from support.databases import shipped_config
+from support.fakes import AiVendor, no_refusal
 from support.harness import MARKET_OPEN, harness_settings
 from trading_stack import MovableClock, SilentLogger, analysed_stock, run_stats
 
@@ -32,7 +32,6 @@ from a_domain.model.trading.signal import TradeSignal
 from a_domain.model.trading.watchlist import WatchlistEntry
 from a_domain.rules.trading.order_rule import BrokerLink
 from a_domain.types.enums import (
-    DatabaseBackend,
     ExecutionProvider,
     InformationSource,
     OrderType,
@@ -64,9 +63,9 @@ class Owners:
     owned_ports: Callable[[User | None], OwnedPorts]
 
 
-def owners_config(backend: DatabaseBackend, folder: Path) -> AppConfig:
-    """The shipped settings over the backend, with the prompt the sentiment classifier needs and DAILY_CALLS per user."""
-    config = database_config(backend, folder)
+def owners_config(folder: Path) -> AppConfig:
+    """The shipped settings, with the prompt the sentiment classifier needs and DAILY_CALLS per user."""
+    config = shipped_config(folder)
     return config.model_copy(
         update={
             "prompts": PromptsConfig(social_sentiment="Stock {stock_id}\n{posts_text}"),
@@ -80,9 +79,9 @@ def user_named(user_id: str, role: Role = Role.USER) -> User:
 
 
 @pytest_asyncio.fixture
-async def owners(backend: DatabaseBackend, database: DatabaseConnector, tmp_path: Path) -> AsyncIterator[Owners]:
+async def owners(database: DatabaseConnector, tmp_path: Path) -> AsyncIterator[Owners]:
     vendor = AiVendor(reply=CLASSIFIED)
-    config = owners_config(backend, tmp_path)
+    config = owners_config(tmp_path)
     owned_ports = create_owned_ports(
         config,
         database,
@@ -413,7 +412,7 @@ async def describe_decision(owners: Owners) -> None:
 
 
 async def alice_buys(owners: Owners) -> Order:
-    return await owners.alice.mock_broker.place_order(order_of(run_stats().run_id, decision()))
+    return await owners.alice.mock_broker.place_order(order_of(run_stats().run_id, decision()), no_refusal)
 
 
 async def connect(owners: Owners) -> None:
@@ -443,7 +442,7 @@ async def place_order(owners: Owners) -> None:
     sale = replace(order_of(run_stats().run_id, decision()), action=TradeAction.SELL)
 
     assert filled.filled_quantity == 1000
-    assert (await owners.bob.mock_broker.place_order(sale)).filled_quantity == 0
+    assert (await owners.bob.mock_broker.place_order(sale, no_refusal)).filled_quantity == 0
     assert [position.quantity for position in (await owners.alice.mock_broker.get_account()).positions] == [1000]
 
 
@@ -634,7 +633,7 @@ def methods_of(adapter: object) -> set[str]:
 
 
 def test_every_owned_port_method_has_an_isolation_case(tmp_path: Path) -> None:
-    config = owners_config(DatabaseBackend.SQLITE, tmp_path)
+    config = owners_config(tmp_path)
     db = DatabaseConnector(config=config, logger=SilentLogger())
     vendors = {config.ai.active_model: AiVendor()}
     owned = create_owned_ports(config, db, chromadb.EphemeralClient(), vendors, MovableClock(AT), SilentLogger(), asyncio.Lock())(

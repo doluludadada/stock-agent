@@ -1,5 +1,5 @@
 """
-The monthly ranking followed into the user's mock account, on a real SQLite journal and mock book: a follow sells what
+The monthly ranking followed into the user's mock account, on a real PostgreSQL journal and mock book: a follow sells what
 left the ranking and buys what the account lacks at an equal weight, in whole lots, at the price the site orders at now,
 through the same order gates as a follow of a run. A ranked stock already held is left alone, so a second follow of the
 same decision orders nothing. The account's return since its first follow is read against the benchmark over the same

@@ -2,7 +2,7 @@
 # The Web API and the project's commands. compose.yml builds and runs it. It publishes no port and keeps its files in
 # /state.
 
-FROM python:3.14-slim-trixie AS builder
+FROM python:3.14.7-slim-trixie AS builder
 COPY --from=ghcr.io/astral-sh/uv:0.12.13 /uv /usr/local/bin/uv
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
 WORKDIR /app
@@ -10,7 +10,7 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev
 
-FROM python:3.14-slim-trixie
+FROM python:3.14.7-slim-trixie
 
 # pg_dump and pg_restore of the major version of the postgres service in compose.yml, for the database commands
 # (docs/database-migrations.md). Debian's own client is older, so this one comes from the PostgreSQL project's repository.

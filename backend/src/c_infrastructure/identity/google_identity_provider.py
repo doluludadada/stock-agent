@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 import httpx
 from pydantic import SecretStr
 
-from a_domain.model.system.user import SignInFlow
+from a_domain.model.system.user import GoogleConfirmation, SignInFlow
 from a_domain.ports.system.identity_provider import IIdentityProvider
 from a_domain.rules.system.google_sign_in import IdTokenClaims
 from a_domain.types.errors import IdentityProviderError
@@ -43,7 +43,9 @@ class GoogleIdentityProvider(IIdentityProvider):
         self._transport = transport
 
     @override
-    def start(self, redirect_uri: str, confirmation: str | None, now: datetime, expires_at: datetime) -> tuple[SignInFlow, str]:
+    def start(
+        self, redirect_uri: str, confirmation: GoogleConfirmation | None, now: datetime, expires_at: datetime
+    ) -> tuple[SignInFlow, str]:
         flow = SignInFlow(
             state=secrets.token_urlsafe(32),
             nonce=secrets.token_urlsafe(32),

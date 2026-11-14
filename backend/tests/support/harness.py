@@ -55,7 +55,6 @@ from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection
 from c_infrastructure.system.attempt_log import MemoryAttemptLog
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 from c_infrastructure.system.settings_files import SettingsFiles
-from c_infrastructure.technical.candidate_backtester import ProcessPoolCandidateBacktester
 from d_presentation.cli import interactive, terminal
 from d_presentation.dependencies import OwnedPorts, ProviderDependencies, Runtime, compose_runtime
 from d_presentation.live_runtime import RuntimeSwitch
@@ -75,11 +74,11 @@ from support.fakes import (
     FakeMarketClock,
     FakeNewsProvider,
     FakeOhlcvProvider,
+    FakeOrderingSwitch,
     FakeSentimentClassifier,
     FakeSocialMediaProvider,
     FakeStockBriefRepository,
     FakeStockProvider,
-    FakeStrategySearchRepository,
     FakeTechnicalSettingsRepository,
     FakeTextEmbedder,
     FakeTradingJournal,
@@ -427,7 +426,6 @@ def build_harness(
 
     backtests = FakeBacktestRepository()
     holdings = FakeHoldingRepository()
-    searches = FakeStrategySearchRepository()
     briefs = FakeStockBriefRepository()
     store_settings = config.stock_page.article_store
     articles = FakeArticleStore(clock, store_settings.retention(), store_settings.max_per_stock)
@@ -465,8 +463,6 @@ def build_harness(
         price_provider=prices,
         history_cache=None,
         bar_matrix_provider=DailyBarMatrixProvider(stocks, prices, archive, clock, config.ranking.history_rule(), logger),
-        candidate_backtester=ProcessPoolCandidateBacktester(config, clock, 0),
-        strategy_search_repository=searches,
         stock_brief_repository=briefs,
         article_store=articles,
         article_index=article_index,
@@ -485,6 +481,7 @@ def build_harness(
         user_store=users,
         attempt_log=MemoryAttemptLog(),
         real_broker=real_broker if sinopac else None,
+        ordering_switch=FakeOrderingSwitch(config.features),
         owned_ports=owned_ports,
     )
     runtime = compose_runtime(config, logger, clock, dependencies)
@@ -537,7 +534,12 @@ def signs_in_then(answer: str):
 
 
 def runtime_for(harness: CliHarness, config: AppConfig) -> Runtime:
-    """A runtime over the harness's fakes built from other settings, as a reload opens it, offering what the first offered."""
+    """
+    A runtime over the harness's fakes built from other settings, as a reload opens it, offering what the first offered.
+    A reload opens the settings files as they are on disk, so the site's ordering switch, which reads them, holds
+    these settings' ordering from here on, for the orders of every runtime of the harness.
+    """
+    harness.dependencies.ordering_switch.features = config.features
     return compose_runtime(config, harness.logger, harness.clock, harness.dependencies)
 
 

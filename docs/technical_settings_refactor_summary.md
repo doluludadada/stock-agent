@@ -35,8 +35,7 @@ YAML-text-in-SQL proposals below are historical context.
 
 - YAML remains the preset and persisted strategy-document format.
 
-- Local execution uses SQLite.
-  The deployed service uses a separate PostgreSQL database.
+- Local execution and the deployed service each use their own PostgreSQL database.
   Database selection is explicit.
 
 - Website and iOS share the service database through the API.
@@ -97,8 +96,7 @@ Do not delete the entire rules/technical/ directory.
 ### Persistence recommendation
 
 - Shipped presets and initial defaults: config/technical.yaml.
-- Local saved settings: SQLite.
-- Service saved settings: separate PostgreSQL.
+- Saved settings: PostgreSQL.
 - Saved document format: YAML text.
 - Editing/import/export: YAML.
 - Select the database backend explicitly.

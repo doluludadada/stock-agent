@@ -27,7 +27,7 @@ from c_infrastructure.market.twse_provider import ROC_YEAR_OFFSET
 
 class MopsFundamentalsProvider(IFundamentalsProvider):
     """
-    Cumulative EPS from the MOPS bulk income statements (one page per market and quarter), cached in SQLite, and the
+    Cumulative EPS from the MOPS bulk income statements (one page per market and quarter), cached in the database, and the
     monthly revenue summary of a past month (one CSV per market and month), read with the exchange listing's parser.
 
     A quarter's cached page is final, and never fetched again, once it was fetched after the quarter's last filing

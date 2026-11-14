@@ -20,7 +20,7 @@ from a_domain.model.trading.account import Account, BrokerageStatement, BrokerFi
 from a_domain.model.trading.order import ExchangeOrder, Order
 from a_domain.ports.market.broker_quote_provider import IBrokerQuoteProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from a_domain.ports.trading.execution_provider import IBrokerExecutionProvider
+from a_domain.ports.trading.execution_provider import IBrokerExecutionProvider, SendRefusal
 from a_domain.rules.trading.execution import BrokerOutcomeRule, FillRule, LotSplitRule, OrderAcceptanceRule
 from a_domain.rules.trading.order_rule import BrokerLink
 from a_domain.types.enums import ExecutionProvider, LotKind, OrderStatus, RejectReason, TimeInForce, TradeAction
@@ -121,7 +121,16 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
         self._lot_split_rule = LotSplitRule(board_lot_shares=config.market.board_lot_shares)
         self._outcome_rule = BrokerOutcomeRule(broker=BROKER)
         self._acceptance_rule = OrderAcceptanceRule(cost_rule=self._cost_rule)
-        self._shares_per_unit = {StockOrderLot.Common: config.market.board_lot_shares, StockOrderLot.IntradayOdd: 1}
+        # The shares in one unit of an order's quantity, by its lot. The app sends Common and IntradayOdd only (BROKER_LOT);
+        # the others are orders the account's holder placed elsewhere, read for the day's fills: after-hours fixed-price
+        # trading counts board lots, after-hours odd lots count shares. BlockTrade is left out on purpose: the SDK does
+        # not say whether a block trade's deals count lots or shares, so its fills are skipped with a warning, not guessed.
+        self._shares_per_unit = {
+            StockOrderLot.Common: config.market.board_lot_shares,
+            StockOrderLot.Fixing: config.market.board_lot_shares,
+            StockOrderLot.Odd: 1,
+            StockOrderLot.IntradayOdd: 1,
+        }
         self._poll_interval_seconds = config.shioaji.poll_interval_seconds
         self._max_polls = config.shioaji.max_polls
 
@@ -240,20 +249,31 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
         stock_account = self.stock_account()
         await self.request(self._client.update_status, account=stock_account)
         trades = await self.request(self._client.list_trades)
+        fills: list[BrokerFill] = []
 
-        return [
-            BrokerFill(
-                stock_id=trade.contract.code,
-                action=TRADE_ACTION[trade.order.action],
-                quantity=deal.quantity * self._shares_per_unit[trade.order.order_lot],
-                price=deal.price,
-                filled_on=today,
-            )
-            for trade in trades
-            if trade.order.account == stock_account and isinstance(trade.order, StockOrder)
-            for deal in trade.status.deals or []
-            if deal.quantity > 0 and deal.price > 0
-        ]
+        for trade in trades:
+            if trade.order.account != stock_account or not isinstance(trade.order, StockOrder):
+                continue
+
+            shares_per_unit = self._shares_per_unit.get(trade.order.order_lot)
+
+            if shares_per_unit is None:
+                self._logger.warning(f"Ignored the deals of a Shioaji {trade.order.order_lot.value} order: its unit is unknown.")
+                continue
+
+            fills += [
+                BrokerFill(
+                    stock_id=trade.contract.code,
+                    action=TRADE_ACTION[trade.order.action],
+                    quantity=deal.quantity * shares_per_unit,
+                    price=deal.price,
+                    filled_on=today,
+                )
+                for deal in trade.status.deals or []
+                if deal.quantity > 0 and deal.price > 0
+            ]
+
+        return fills
 
     @override
     async def sales(self, first: date, last: date) -> list[BrokerFill]:
@@ -275,23 +295,26 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
         ]
 
     @override
-    async def place_order(self, order: Order) -> Order:
+    async def place_order(self, order: Order, refusal_now: SendRefusal) -> Order:
         try:
             account = await self.get_account()
             contract = await self.request(lambda: self._client.Contracts.Stocks[order.stock_id])
+            parts: list[ExchangeOrder] = []
             refusal = (
                 self.refusal_for(order, account)
                 if isinstance(contract, StockContract)
                 else (RejectReason.BROKER_REFUSED, f"Shioaji has no stock contract {order.stock_id}")
             )
 
-            if refusal is not None:
+            if refusal is None and isinstance(contract, StockContract):
+                parts, refusal = await self.send(contract, order, account.position_for(order.stock_id), refusal_now)
+
+            if refusal is not None and not parts:
                 order.reject(*refusal, now=datetime.now(UTC))
                 self._logger.warning(f"Shioaji order not sent: {order.action} {order.stock_id}: {order.reason}")
                 return order
 
-            parts = await self.send(contract, order, account.position_for(order.stock_id))
-            self._outcome_rule.apply(order, parts, datetime.now(UTC))
+            self._outcome_rule.apply(order, parts, datetime.now(UTC), refusal[1] if refusal is not None else None)
 
         except Exception as error:
             if not order.status.is_open:
@@ -358,10 +381,15 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
         return max(balance.acc_balance + math.fsum(payments_due) - bought_today, 0)
 
     @override
-    async def send(self, contract: StockContract, order: Order, held: Position | None) -> list[ExchangeOrder]:
+    async def send(
+        self, contract: StockContract, order: Order, held: Position | None, refusal_now: SendRefusal
+    ) -> tuple[list[ExchangeOrder], tuple[RejectReason, str] | None]:
         parts: list[ExchangeOrder] = []
 
         for index, (lot, shares) in enumerate(self._lot_split_rule.apply(order.quantity)):
+            if (refusal := await refusal_now()) is not None:
+                return parts, refusal
+
             trade = await self.refresh(await self.place(contract, order, lot, shares, index))
 
             if self.exchange_order_of(trade).status.is_open:
@@ -381,7 +409,7 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
             if part.status.is_open:
                 break
 
-        return parts
+        return parts, None
 
     @override
     async def place(self, contract: StockContract, order: Order, lot: LotKind, shares: int, index: int) -> Trade:

@@ -31,7 +31,7 @@ from a_domain.types.enums import FinancialStatement, MarketIndex, MarketType
 from a_domain.types.errors import ArchiveSaveRefused, RealtimeQuotesUnavailable
 from a_domain.types.values import FiscalQuarter
 from b_application.config.sources_config import ExchangeSources
-from c_infrastructure.database.db_connector import UPSERT, DatabaseConnector
+from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.daily_close_archive_dto import (
     DailyCloseDTO,
     ExchangeNewsDTO,
@@ -98,7 +98,7 @@ class SqlDailyCloseArchive(IDailyCloseArchive):
             if saved := [dto.model_dump() for dto in dtos]:
                 try:
                     async with self._db.get_session() as session:
-                        await session.execute(replacing(UPSERT[session.get_bind().dialect.name], table), saved)
+                        await session.execute(replacing(table), saved)
                         await session.commit()
                 except DBAPIError as error:
                     self._logger.error(f"Could not save {table.__tablename__}; the other tables are saved on their own: {error.orig}")

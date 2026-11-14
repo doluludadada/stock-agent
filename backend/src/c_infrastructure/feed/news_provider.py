@@ -62,9 +62,8 @@ class NewsProvider(INewsProvider):
                 for index, article in enumerate(articles, 1):
                     file.write(f"## [{index}] {article.title}\n")
                     file.write(f"- **Source:** {article.source.value}\n")
-                    file.write(
-                        f"- **Published:** {self._market_clock.to_market_datetime(article.published_at).strftime('%Y-%m-%d %H:%M')}\n"
-                    )
+                    published = self._market_clock.to_market_datetime(article.published_at)
+                    file.write(f"- **Published:** {published:%Y-%m-%d %H:%M}\n" if article.publication_known else "")
                     file.write(f"- **URL:** [Link]({article.url})\n\n")
                     file.write(f"**Content Snippet:**\n> {article.content}\n\n")
                     file.write("---\n\n")

@@ -13,21 +13,20 @@ jobs:
         defaults:
             run:
                 working-directory: backend
+        # The tests create and drop their own database as this role (backend/tests/support/databases.py), as on a
+        # developer's machine, so they need no environment variable.
         services:
             postgres:
                 image: postgres:18
                 env:
-                    POSTGRES_USER: ciunit
-                    POSTGRES_PASSWORD: ciunit
-                    POSTGRES_DB: ciunit
+                    POSTGRES_USER: stock_agent_test
+                    POSTGRES_PASSWORD: stock_agent_test
                 ports: ["5432:5432"]
                 options: >-
-                    --health-cmd "pg_isready -U ciunit"
+                    --health-cmd "pg_isready -U stock_agent_test"
                     --health-interval 5s
                     --health-timeout 5s
                     --health-retries 10
-        env:
-            STOCK_AGENT_TEST_POSTGRES_URL: postgresql://ciunit:ciunit@localhost:5432/ciunit
         steps:
             - uses: actions/checkout@v7
             # setup-uv publishes no floating major tag, so this names the release.
@@ -38,6 +37,13 @@ jobs:
             - run: uv run ruff check
             # Exits 1 unless the count ends at TOTAL 0.
             - run: uv run python tools/architecture_check.py src --pyright
+            # pg_dump and pg_restore of the service's major version, which the database commands' tests run.
+            - name: PostgreSQL 18 client programs
+              run: |
+                  sudo apt-get install -y --no-install-recommends postgresql-common
+                  sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+                  sudo apt-get install -y --no-install-recommends postgresql-client-18
+                  echo /usr/lib/postgresql/18/bin >> "$GITHUB_PATH"
             - run: uv run pytest -q
             # Fails on a known vulnerability in any locked dependency, the dev group included. Each ignore names one
             # that no release this lock can take fixes:

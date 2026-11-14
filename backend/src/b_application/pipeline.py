@@ -11,9 +11,9 @@ from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.model.system.stats import SystemStats
-from a_domain.model.system.user import SignInFlow, User, UserSession
+from a_domain.model.system.user import GoogleConfirmation, SignInFlow, User, UserSession
 from a_domain.model.trading.account import Account, BrokerageStatement, Position
-from a_domain.model.trading.backtest import Backtest, BacktestInputs, SearchInputs
+from a_domain.model.trading.backtest import Backtest, BacktestInputs
 from a_domain.model.trading.order import Order
 from a_domain.model.valuation.scan import MarketValuation, ScanCriteria, ValuationScan
 from a_domain.model.valuation.valuation import ReportSection, StockValuation, ValuationReport
@@ -22,7 +22,6 @@ from a_domain.ports.system.settings_files import SettingChange, SettingField, Se
 from a_domain.rules.fundamentals.stock_analysis import StockAnalysis
 from a_domain.rules.market.breadth import MarketBreadth
 from a_domain.rules.system.registration import SignInOffer
-from a_domain.rules.technical.search import StrategySearch
 from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
 from a_domain.rules.trading.follow import FollowReturn, RankingHoldings
 from a_domain.rules.trading.holdings import PortfolioAnalysis
@@ -58,11 +57,6 @@ from b_application.use_cases.backtest.backtest_replay import BacktestReplay
 from b_application.use_cases.backtest.backtest_save import BacktestSave
 from b_application.use_cases.backtest.backtest_scores import BacktestScores
 from b_application.use_cases.backtest.saved_backtests import SavedBacktests
-from b_application.use_cases.backtest.search_history_loader import SearchHistoryLoader
-from b_application.use_cases.backtest.search_holdout import SearchHoldout
-from b_application.use_cases.backtest.search_validation import SearchValidation
-from b_application.use_cases.backtest.strategy_breeding import StrategyBreeding
-from b_application.use_cases.backtest.strategy_search_save import StrategySearchSave
 from b_application.use_cases.chat.chat_reply import ChatReply
 from b_application.use_cases.chat.dispatcher import Dispatcher
 from b_application.use_cases.collect.archive_warm_up import ArchiveWarmUp
@@ -261,11 +255,6 @@ class Pipeline:
     saved_backtests: SavedBacktests
     backtest_lookup: BacktestLookup
     backtest_removal: BacktestRemoval
-    search_history_loader: SearchHistoryLoader
-    strategy_breeding: StrategyBreeding
-    search_validation: SearchValidation
-    search_holdout: SearchHoldout
-    strategy_search_save: StrategySearchSave
     ranking_history_loader: RankingHistoryLoader
     latest_ranking: LatestRanking
     ranking_standing: StockRankingStanding
@@ -699,23 +688,6 @@ class Pipeline:
 
         return backtest
 
-    async def search_strategies(self, inputs: SearchInputs) -> tuple[StrategySearch, str]:
-        """
-        A search for a better technical strategy than a built-in one at the two scores, on the held daily history: the
-        sessions split in time order, candidates of the level bred on train, the winners picked on validation and
-        reported on the holdout with the luck baseline, then the search saved, and where. Seconds per candidate across
-        strategy_search.workers processes. It reads the history as a backtest does, asks no broker or AI, orders
-        nothing, touches no account and changes no saved strategy or setting: adopting a winner is the owner's.
-        BacktestPeriodUnavailable for a history too short.
-        """
-        strategy = await self.strategy_loader.execute(Workflow.RESEARCH, inputs.strategy_id)
-        history = await self.search_history_loader.execute(strategy)
-        trials = await self.strategy_breeding.execute(strategy, inputs, history)
-        validated = await self.search_validation.execute(trials, history)
-        search = await self.search_holdout.execute(inputs, history, trials, validated)
-
-        return search, await self.strategy_search_save.execute(search)
-
     async def load_ranking(self) -> Ranking:
         """
         The monthly stock ranking by revenue acceleration and nearness to the high at the latest decision session the held
@@ -1002,33 +974,32 @@ class Pipeline:
         """
         return await self.settings_reader.execute()
 
-    async def review_settings_form(
-        self,
-        administrator: User,
-        changes: Sequence[SettingChange],
-        host: str,
-        password: SecretStr | None,
-        google_confirmation: str | None,
-        client: str,
-    ) -> list[SettingsEdit]:
+    async def review_settings_form(self, changes: Sequence[SettingChange], host: str) -> list[SettingsEdit]:
         """
-        The settings form's save, reviewed and confirmed: SettingsEditError for a change the form cannot write,
-        InvalidSettingsError with the problems of new texts the app would refuse, a lockout of the editor reached at
-        `host` included, then PasswordRequired, PasswordRefused or SignInThrottled without the administrator's own
-        password inside its attempt limit, or GoogleConfirmationRequired for an administrator without a password and
-        without the fresh Google authentication `google_confirmation` names. The edit of each file the changes change;
-        nothing is written.
+        The settings form's changes, reviewed: SettingsEditError for a change the form cannot write, InvalidSettingsError
+        with the problems of new texts the app would refuse, a lockout of the editor reached at `host` included. The
+        edit of each file the changes change; nothing is written.
         """
-        edits = await self.settings_editor.execute(changes, host)
+        return await self.settings_editor.execute(changes, host)
+
+    async def confirm_settings_save(
+        self, administrator: User, password: SecretStr | None, google_confirmation: GoogleConfirmation | None, client: str
+    ) -> None:
+        """
+        The administrator confirms a save of the settings: PasswordRequired, PasswordRefused or SignInThrottled without
+        their own password inside its attempt limit, or GoogleConfirmationRequired for an administrator without a
+        password and without the fresh Google authentication `google_confirmation` names, started from the session
+        that saves, which is used up here.
+        """
         await self.settings_confirmation.execute(administrator, password, google_confirmation, client)
-        return edits
 
     async def confirm_settings_with_google(
-        self, flow: SignInFlow, confirmation: str, state: str | None, code: SecretStr | None, client: str
+        self, flow: SignInFlow, confirmation: GoogleConfirmation, state: str | None, code: SecretStr | None, client: str
     ) -> None:
         """
         The browser's return from the fresh Google authentication an administrator without a password made for one
-        settings save: the save `confirmation` names is granted to the administrator Google authenticated just now.
+        settings save: the save `confirmation` names is granted to the session that started it, when Google
+        authenticated that session's administrator just now.
         It raises GoogleSignInRefused or SignInThrottled, granting nothing.
         """
         email = await self.google_identity_check.execute(flow, state, code, client)
@@ -1077,13 +1048,16 @@ class Pipeline:
 
         return user, await self.session_start.execute(user)
 
-    async def start_google_sign_in(self, confirmation: str | None, client: str) -> tuple[SignInFlow, str]:
+    async def start_google_sign_in(
+        self, confirmation_id: str | None, session: SessionToken | None, client: str
+    ) -> tuple[SignInFlow, str]:
         """
-        The start of a sign-in with Google, or with a `confirmation` of the fresh authentication that confirms one
-        settings save: the flow for the browser's cookie and Google's address for it. It raises GoogleSignInRefused
-        where the site offers none, or SignInThrottled.
+        The start of a sign-in with Google, or with a `confirmation_id` of the fresh authentication that confirms one
+        settings save from `session`, the caller's: the flow for the browser's cookie and Google's address for it. It
+        raises GoogleSignInRefused where the site offers none or a confirmation comes without an administrator's
+        session, or SignInThrottled.
         """
-        return await self.google_sign_in_start.execute(confirmation, client)
+        return await self.google_sign_in_start.execute(confirmation_id, session, client)
 
     async def sign_in_with_google(
         self, flow: SignInFlow | None, state: str | None, code: SecretStr | None, client: str

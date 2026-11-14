@@ -5,7 +5,8 @@ from datetime import date, datetime, timedelta
 from typing import override
 
 import numpy as np
-from sqlalchemy import func
+from sqlalchemy import func, or_
+from sqlalchemy.dialects.postgresql import insert
 from sqlmodel import col, select
 
 from a_domain.model.market.ohlcv import Ohlcv
@@ -21,7 +22,7 @@ from a_domain.rules.technical.matrix import DailyBarMatrix
 from a_domain.rules.trading.ranking import ListedHistory, ex_right_matrix
 from a_domain.types.enums import MarketIndex, MarketType
 from b_application.config.market_data_config import MarketDataConfig
-from c_infrastructure.database.db_connector import UPSERT, DatabaseConnector
+from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.ohlcv_dto import ExRightReferenceDTO, ExRightReferenceSpanDTO, ListedRevisionDTO, OhlcvDTO
 
 
@@ -153,10 +154,11 @@ class CachedPriceProvider(ICachedPriceProvider):
 
     @override
     async def sync_index(self, market: MarketType, first: date, last: date) -> None:
-        async with self._sync_lock:
-            for start, end in await self.index_gaps(market, first, last):
-                question = f"index {market.value} from {start} to {end}"
+        """One range under the lock at a time, so a stock page's read of a session waits for one request, not for them all."""
+        for start, end in await self.index_gaps(market, first, last):
+            question = f"index {market.value} from {start} to {end}"
 
+            async with self._sync_lock:
                 if not self.due(question, self._clock.now()):
                     continue
 
@@ -183,11 +185,16 @@ class CachedPriceProvider(ICachedPriceProvider):
 
     @override
     async def sync_references(self, first: date, last: date) -> None:
-        async with self._sync_lock:
-            for market in MarketType:
-                for start, end in await self.reference_gaps(market, first, last):
-                    question = f"ex-right references of {market.value} from {start} to {end}"
+        """
+        One block under the lock at a time: a first sync asks each exchange for years of blocks, a paced request each,
+        and every other read of the reports waits only for the block being asked. A block a sync made together with
+        this one asked first is not due here, which ends this one's blocks of that exchange.
+        """
+        for market in MarketType:
+            for start, end in await self.reference_gaps(market, first, last):
+                question = f"ex-right references of {market.value} from {start} to {end}"
 
+                async with self._sync_lock:
                     if not self.due(question, self._clock.now()):
                         break
 
@@ -208,17 +215,24 @@ class CachedPriceProvider(ICachedPriceProvider):
 
     @override
     async def save_references(self, references: Mapping[tuple[str, date], float]) -> None:
-        """One upsert, which raises the revision."""
+        """One upsert of the references that are new or differ, which raises the revision only when one is."""
         rows = [{"stock_id": stock_id, "session_date": day, "reference_price": price} for (stock_id, day), price in references.items()]
 
         if not rows:
             return
 
         async with self._db.get_session() as session:
-            statement = UPSERT[session.get_bind().dialect.name](ExRightReferenceDTO)
-            replaced = {"reference_price": statement.excluded["reference_price"]}
-            await session.execute(statement.on_conflict_do_update(index_elements=["stock_id", "session_date"], set_=replaced), rows)
-            await session.execute(ListedRevisionDTO.raised(UPSERT[session.get_bind().dialect.name]))
+            statement = insert(ExRightReferenceDTO)
+            price = statement.excluded["reference_price"]
+            written = statement.on_conflict_do_update(
+                index_elements=["stock_id", "session_date"],
+                set_={"reference_price": price},
+                where=statement.table.c.reference_price.is_distinct_from(price),
+            )
+
+            if (await session.execute(written.returning(statement.table.c.stock_id), rows)).first() is not None:
+                await session.execute(ListedRevisionDTO.raised())
+
             await session.commit()
 
     @override
@@ -258,8 +272,7 @@ class CachedPriceProvider(ICachedPriceProvider):
     async def listed_history(self) -> ListedHistory | None:
         """
         Read as plain values on the session's connection, one session a statement, each straight into the matrices: the
-        table's rows, or one object a bar, take minutes and gigabytes over millions of bars, and one statement over them
-        all would hold SQLite's read lock, which no save gets past, for as long as it runs. The stocks and the stamps are
+        table's rows, or one object a bar, take minutes and gigabytes over millions of bars. The stocks and the stamps are
         those held when the read begins: a bar of another stock saved meanwhile goes to a spare row that is dropped.
         """
         stocks = col(OhlcvDTO.stock_id).not_like("^%")
@@ -395,21 +408,25 @@ class CachedPriceProvider(ICachedPriceProvider):
 
     @override
     async def save_bars(self, bars: Mapping[str, list[Ohlcv]]) -> None:
-        """One upsert. A bar saved without a change keeps the change the cache holds of it. Stock bars raise the revision."""
+        """
+        One upsert of the bars that are new or differ. A bar saved without a change keeps the change the cache holds of
+        it. A stock's bar that was written raises the revision; a save of bars the cache already holds leaves it.
+        """
         rows = [OhlcvDTO(stock_id=key, **asdict(bar)).model_dump() for key, key_bars in bars.items() for bar in key_bars]
 
         if not rows:
             return
 
         async with self._db.get_session() as session:
-            statement = UPSERT[session.get_bind().dialect.name](OhlcvDTO)
-            prices = {name: statement.excluded[name] for name in ("open", "high", "low", "close", "volume")}
-            change = func.coalesce(statement.excluded["change"], statement.table.c.change)
-            await session.execute(
-                statement.on_conflict_do_update(index_elements=["stock_id", "ts"], set_=prices | {"change": change}), rows
-            )
+            statement = insert(OhlcvDTO)
+            held = statement.table.c
+            change = func.coalesce(statement.excluded["change"], held.change)
+            values = {name: statement.excluded[name] for name in ("open", "high", "low", "close", "volume")} | {"change": change}
+            differs = or_(*(held[name].is_distinct_from(value) for name, value in values.items()))
+            written = statement.on_conflict_do_update(index_elements=["stock_id", "ts"], set_=values, where=differs)
+            keys = (await session.execute(written.returning(held.stock_id), rows)).scalars()
 
-            if any(not key.startswith("^") for key, key_bars in bars.items() if key_bars):
-                await session.execute(ListedRevisionDTO.raised(UPSERT[session.get_bind().dialect.name]))
+            if any(not key.startswith("^") for key in keys):
+                await session.execute(ListedRevisionDTO.raised())
 
             await session.commit()

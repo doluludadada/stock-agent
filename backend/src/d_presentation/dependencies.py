@@ -39,10 +39,8 @@ from a_domain.ports.system.settings_confirmations import ISettingsConfirmations
 from a_domain.ports.system.settings_files import ISettingsFiles
 from a_domain.ports.system.user_store import IUserStore
 from a_domain.ports.trading.backtest_repository import IBacktestRepository
-from a_domain.ports.trading.candidate_backtester import ICandidateBacktester
 from a_domain.ports.trading.execution_provider import IBrokerExecutionProvider, IExecutionProvider, ISimulatedExecutionProvider
 from a_domain.ports.trading.holding_repository import IHoldingRepository
-from a_domain.ports.trading.strategy_search_repository import IStrategySearchRepository
 from a_domain.ports.trading.trading_journal import ITradingJournal
 from a_domain.ports.trading.users_stocks import IUsersStocks
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
@@ -73,11 +71,6 @@ from b_application.use_cases.backtest.backtest_replay import BacktestReplay
 from b_application.use_cases.backtest.backtest_save import BacktestSave
 from b_application.use_cases.backtest.backtest_scores import BacktestScores
 from b_application.use_cases.backtest.saved_backtests import SavedBacktests
-from b_application.use_cases.backtest.search_history_loader import SearchHistoryLoader
-from b_application.use_cases.backtest.search_holdout import SearchHoldout
-from b_application.use_cases.backtest.search_validation import SearchValidation
-from b_application.use_cases.backtest.strategy_breeding import StrategyBreeding
-from b_application.use_cases.backtest.strategy_search_save import StrategySearchSave
 from b_application.use_cases.chat.chat_reply import ChatReply
 from b_application.use_cases.chat.dispatcher import Dispatcher
 from b_application.use_cases.collect.archive_warm_up import ArchiveWarmUp
@@ -210,12 +203,10 @@ from c_infrastructure.system.attempt_log import MemoryAttemptLog
 from c_infrastructure.system.chat_styler_service import ChatStylerService
 from c_infrastructure.system.logger_service import LoggerService
 from c_infrastructure.system.market_clock import TaiwanMarketClock
-from c_infrastructure.system.ordering_switch import MemoryOrderingSwitch
+from c_infrastructure.system.ordering_switch import SettingsFileOrderingSwitch
 from c_infrastructure.system.settings_confirmations import MemorySettingsConfirmations
 from c_infrastructure.system.settings_files import SettingsFiles
-from c_infrastructure.technical.candidate_backtester import ProcessPoolCandidateBacktester
 from c_infrastructure.technical.sql_technical_settings_repository import SqlTechnicalSettingsRepository
-from c_infrastructure.technical.strategy_search_repository import FileStrategySearchRepository
 from c_infrastructure.trading.mock.mock_execution_provider import MockExecutionProvider
 from d_presentation.web.market_valuation_cache import MarketValuationCache
 
@@ -276,16 +267,9 @@ class Runtime:
         """Whether the site's Shioaji login failed or went down, which the Web API's timer opens a runtime to make again."""
         return self.shioaji is not None and not self.shioaji.up
 
-    ordering_switch: IOrderingSwitch
-    """The process's own (ProcessState): whom the site lets order on each broker now, which every runtime's orders ask."""
-
     def become_current(self) -> None:
-        """
-        What the process takes from the settings of the runtime that serves new work: the log level of its one logger,
-        and whom the site lets order on each broker, which the orders of a run on an earlier runtime are held to as well.
-        """
+        """What the process takes from the settings of the runtime that serves new work: the log level of its one logger."""
         self.logger.set_level(self.config.behavior.log_level)
-        self.ordering_switch.publish(self.config.features.ordering())
 
 
 @dataclass(frozen=True, slots=True)
@@ -313,11 +297,6 @@ class ProcessState:
     """
     settings_confirmations: ISettingsConfirmations = field(default_factory=MemorySettingsConfirmations)
     """The fresh Google authentications granted for a settings save, which a reload of the settings must not forget."""
-    ordering_switch: IOrderingSwitch = field(default_factory=MemoryOrderingSwitch)
-    """
-    Whom the site lets order on each broker now, published by the runtime that becomes current. Every runtime's orders
-    ask it at the send, so a run that started before ordering was turned off sends no order after it.
-    """
 
 
 @dataclass(slots=True)
@@ -359,12 +338,6 @@ class ProviderDependencies:
     monthly ranking's history. It lives with the runtime: each is built at its first read, again when the source holds
     other bars, and anew on new settings.
     """
-    candidate_backtester: ICandidateBacktester
-    """
-    The strategy searches' backtests, in strategy_search.workers processes. It lives with the runtime, as the matrix
-    does; its processes start at the first search and stay for the next.
-    """
-    strategy_search_repository: IStrategySearchRepository
     stock_brief_repository: IStockBriefRepository
     """The site's AI briefs of stocks, one per stock and Taipei calendar day, shared by every user."""
     article_store: IArticleStore
@@ -402,14 +375,14 @@ class ProviderDependencies:
     SinoPac, on the login connect_shioaji made, where the audience offers it and its account check passed; None
     elsewhere. Only the Pipeline of a run an administrator started on it holds it.
     """
+    ordering_switch: IOrderingSwitch
+    """Whom the settings files on disk let order on each broker now, which every order of every runtime and process asks."""
     owned_ports: Callable[[User | None], OwnedPorts]
     """A user, or None signed out -> the adapters that hold that user's data. The order-gate check passes fakes."""
     identity_provider: IIdentityProvider | None = None
     """Google, on the client of the environment's GOOGLE_CLIENT_ID; None while the site offers no sign-in with Google."""
     settings_confirmations: ISettingsConfirmations = field(default_factory=MemorySettingsConfirmations)
     """The process's own (ProcessState), so the runtime a settings save opens still holds the grant that confirms it."""
-    ordering_switch: IOrderingSwitch = field(default_factory=MemoryOrderingSwitch)
-    """The process's own (ProcessState), so a run on a runtime a reload replaced orders by the switch the site holds now."""
 
 
 def create_ai_provider(config: AppConfig, logger: ILoggingProvider, provider: AiProvider) -> IAiProvider:
@@ -708,8 +681,6 @@ async def build_provider_dependencies(
         bar_matrix_provider=DailyBarMatrixProvider(
             stock_provider, price_provider, archive, market_clock, config.ranking.history_rule(), logger
         ),
-        candidate_backtester=ProcessPoolCandidateBacktester(config, market_clock, config.strategy_search.workers),
-        strategy_search_repository=FileStrategySearchRepository(config.project_root / config.strategy_search.folder),
         stock_brief_repository=SqlStockBriefRepository(db),
         article_store=SqlArticleStore(
             db, market_clock, config.stock_page.article_store.retention(), config.stock_page.article_store.max_per_stock
@@ -749,7 +720,7 @@ async def build_provider_dependencies(
         real_broker=real_broker,
         identity_provider=create_identity_provider(config),
         settings_confirmations=process.settings_confirmations,
-        ordering_switch=process.ordering_switch,
+        ordering_switch=SettingsFileOrderingSwitch(config.project_root),
         owned_ports=create_owned_ports(config, db, chroma_client, ai_providers, market_clock, logger, process.cache_writes),
     )
 
@@ -948,11 +919,11 @@ def build_pipeline(
         manual_signal=ManualSignal(journal, market_clock, config, logger),
         decision_memory=DecisionMemory(owned.knowledge_repository, logger),
         order_preparation=OrderPreparation(journal, broker, users, ordering, user_id, market_clock, config, logger),
-        order_execution=OrderExecution(broker, journal, market_clock, logger),
+        order_execution=OrderExecution(broker, journal, users, ordering, user_id, market_clock, config, logger),
         order_outcome=OrderOutcome(broker, journal, market_clock, logger),
         mock_account_loader=AccountLoader(owned.mock_broker, stocks, logger),
         mock_order_preparation=OrderPreparation(journal, owned.mock_broker, users, ordering, user_id, market_clock, config, logger),
-        mock_order_execution=OrderExecution(owned.mock_broker, journal, market_clock, logger),
+        mock_order_execution=OrderExecution(owned.mock_broker, journal, users, ordering, user_id, market_clock, config, logger),
         mock_order_outcome=OrderOutcome(owned.mock_broker, journal, market_clock, logger),
         follow_candidates=FollowCandidates(journal, owned.mock_broker, market_clock, config),
         follow_signals=FollowSignals(journal, market_clock, logger),
@@ -980,11 +951,6 @@ def build_pipeline(
         saved_backtests=SavedBacktests(owned.backtest_repository),
         backtest_lookup=BacktestLookup(owned.backtest_repository),
         backtest_removal=BacktestRemoval(owned.backtest_repository),
-        search_history_loader=SearchHistoryLoader(dependencies.bar_matrix_provider, market_clock, config, logger),
-        strategy_breeding=StrategyBreeding(dependencies.candidate_backtester, config, logger),
-        search_validation=SearchValidation(dependencies.candidate_backtester, config),
-        search_holdout=SearchHoldout(dependencies.candidate_backtester, prices, market_clock, config),
-        strategy_search_save=StrategySearchSave(dependencies.strategy_search_repository),
         ranking_history_loader=RankingHistoryLoader(dependencies.bar_matrix_provider, logger),
         latest_ranking=LatestRanking(stocks, config),
         ranking_standing=StockRankingStanding(config),
@@ -1011,7 +977,9 @@ def build_pipeline(
         sign_in_options=SignInOptions(dependencies.user_store, config),
         first_administrator_setup=FirstAdministratorSetup(dependencies.user_store, market_clock, LEGACY_OWNER_ID, logger),
         sign_in_attempt=SignInAttempt(dependencies.user_store, dependencies.attempt_log, market_clock, config, logger),
-        google_sign_in_start=GoogleSignInStart(dependencies.identity_provider, dependencies.attempt_log, market_clock, config),
+        google_sign_in_start=GoogleSignInStart(
+            dependencies.identity_provider, dependencies.attempt_log, dependencies.user_store, market_clock, config
+        ),
         google_identity_check=GoogleIdentityCheck(
             dependencies.identity_provider, dependencies.attempt_log, market_clock, config, logger
         ),
@@ -1043,7 +1011,6 @@ def compose_runtime(
         broker_market_data=dependencies.broker_market_data,
         shioaji=dependencies.shioaji,
         real_broker=dependencies.real_broker,
-        ordering_switch=dependencies.ordering_switch,
     )
 
 

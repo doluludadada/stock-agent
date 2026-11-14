@@ -6,7 +6,7 @@ from pydantic.dataclasses import dataclass
 
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.trading.account import Account
-from a_domain.types.enums import SearchLevel, SignalSource
+from a_domain.types.enums import SignalSource
 from a_domain.types.ids import BacktestId, new_backtest_id
 from a_domain.types.values import FormulaId, NonEmptyText, PositiveFiniteFloat, ProperFraction, Score
 
@@ -32,27 +32,6 @@ class BacktestInputs:
             raise ValueError("first must not be after last")
 
         return self
-
-
-@dataclass(frozen=True, kw_only=True, config=ConfigDict(use_attribute_docstrings=True))
-class SearchInputs:
-    """What a user chooses for one strategy search, which breeds strategies from a built-in one by backtesting them."""
-
-    strategy_id: FormulaId
-    """The built-in strategy the search starts from."""
-
-    level: SearchLevel
-    random_seed: int
-    """The same inputs and seed on the same history breed the same candidates."""
-
-    population: PositiveInt
-    """New candidates per generation, and the fittest so far kept to breed them from."""
-
-    generations: NonNegativeInt
-    buy_score: Score[int]
-    """The score the strategy it starts from buys at; the search may move it."""
-
-    sell_score: Score[int]
 
 
 @dataclass(

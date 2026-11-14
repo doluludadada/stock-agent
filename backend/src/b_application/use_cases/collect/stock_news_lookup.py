@@ -50,7 +50,7 @@ class StockNewsLookup:
 
         if self._feed is not None:
             fed = await self._feed.fetch(stock_id, self._limit)
-            articles = articles + [article for article in fed if article.published_at < article.fetched_at]
+            articles = articles + [article for article in fed if article.publication_known]
 
         await self._store.save([self._kept_rule.apply(article) for article in articles])
 

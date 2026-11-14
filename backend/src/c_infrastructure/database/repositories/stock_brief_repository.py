@@ -2,12 +2,13 @@ from datetime import date, datetime
 from typing import override
 
 from sqlalchemy import and_, delete, func, inspect, literal, or_, text, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlmodel import col, select
 
 from a_domain.model.analysis.stock_brief import StockBrief
 from a_domain.ports.ai.stock_brief_repository import IStockBriefRepository
-from a_domain.types.enums import BriefStatus, DatabaseBackend
-from c_infrastructure.database.db_connector import UPSERT, DatabaseConnector
+from a_domain.types.enums import BriefStatus
+from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.stock_brief_dto import StockBriefDTO
 
 
@@ -15,8 +16,8 @@ class SqlStockBriefRepository(IStockBriefRepository):
     """
     The stock_briefs table, shared by every user. A claim is one transaction: an UPDATE that takes over a failed or an
     abandoned brief of the day, else an INSERT ... SELECT ... WHERE the day's stocks are under the limit ... ON CONFLICT
-    DO NOTHING, so the primary key lets one of the calls made together take a stock's day. SQLite writes one
-    transaction at a time; PostgreSQL locks the table against other claims until the commit, so the day's count is exact.
+    DO NOTHING, so the primary key lets one of the calls made together take a stock's day. The table is locked
+    against other claims until the commit, so the day's count is exact.
     """
 
     def __init__(self, db: DatabaseConnector) -> None:
@@ -63,15 +64,12 @@ class SqlStockBriefRepository(IStockBriefRepository):
         )
 
         async with self._db.get_session() as session:
-            dialect = session.get_bind().dialect.name
-
-            if dialect == DatabaseBackend.POSTGRESQL:
-                await session.execute(text(f"LOCK TABLE {StockBriefDTO.__tablename__} IN SHARE ROW EXCLUSIVE MODE"))
+            await session.execute(text(f"LOCK TABLE {StockBriefDTO.__tablename__} IN SHARE ROW EXCLUSIVE MODE"))
 
             taken = (await session.execute(retake)).scalar_one_or_none()
 
             if taken is None:
-                first = UPSERT[dialect](StockBriefDTO).from_select(list(values), row).on_conflict_do_nothing()
+                first = insert(StockBriefDTO).from_select(list(values), row).on_conflict_do_nothing()
                 taken = (await session.execute(first.returning(col(StockBriefDTO.stock_id)))).scalar_one_or_none()
 
             await session.commit()

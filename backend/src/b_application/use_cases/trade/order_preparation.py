@@ -9,7 +9,7 @@ from a_domain.ports.system.ordering_switch import IOrderingSwitch
 from a_domain.ports.system.user_store import IUserStore
 from a_domain.ports.trading.execution_provider import IExecutionProvider
 from a_domain.ports.trading.trading_journal import ITradingJournal
-from a_domain.types.enums import OrderStatus, TradeAction
+from a_domain.types.enums import FeatureVisibility, OrderStatus, TradeAction
 from a_domain.types.ids import UserId
 from b_application.config.app_config import AppConfig
 
@@ -23,9 +23,9 @@ class OrderPreparation:
     send to `execution_provider`, the same broker object this one asks. Both read the clock and the broker here, right
     before the send: a quote that aged while the run analysed other stocks is refused, and so is an order the broker
     may not take now. BrokerAccessRule reads what the broker reports of itself (its link) against the run's choice, and
-    for a real broker the site's ordering switch as it is now (`ordering_switch`: the settings that serve new work, not
-    those this run started on, so turning ordering off stops a run already under way), the user as saved now (`user_id`,
-    the Pipeline's user) and the day's BUYs on it in the journal.
+    for a real broker the site's ordering switch as it is now (`ordering_switch`: the settings files on disk, not the
+    settings this run started on, so turning ordering off stops a run already under way), the user as saved now
+    (`user_id`, the Pipeline's user) and the day's BUYs on it in the journal.
     The order is saved PENDING before those BUYs are read, so every order that may reach the broker, this one and one
     of another process of the same owner at the same moment included, is in the total. A decision that already has an
     order in this run gets none, so a workflow can send stop-loss SELLs early and the rest at the end. An order whose
@@ -66,7 +66,7 @@ class OrderPreparation:
         try:
             await self._journal.save_order(order)
             buys = await self._journal.buy_orders(link.broker, day_start) if link.broker.real and order.status.is_open else []
-            ordering = self._ordering_switch.visibility(link.broker)
+            ordering = await self._ordering_switch.visibility(link.broker) if link.broker.real else FeatureVisibility.OFF
             refusal = self._access_rule.apply(order, stats.execution_provider, link, user, ordering, buys)
 
             if order.status.is_open and refusal is not None:

@@ -53,6 +53,11 @@ class Article:
         return f"{self.source.value}|{self.url or self.published_at.astimezone(UTC).isoformat()}"
 
     @property
+    def publication_known(self) -> bool:
+        """False where its source gave no publication time: such an article is stamped with the moment it was fetched."""
+        return self.published_at < self.fetched_at
+
+    @property
     def open_text(self) -> str | None:
         """
         The text a stock page may show beside the title: an open-data item's own text, as its license allows. None for a

@@ -91,16 +91,19 @@ async def sign_in(body: SignInRequest, request: Request, response: Response, pip
 
 @router.get("/google/start", status_code=status.HTTP_303_SEE_OTHER, response_class=RedirectResponse)
 async def start_google_sign_in(
-    request: Request, pipeline: SignedOutPipeline, confirmation: ConfirmationId | None = None
+    request: Request, pipeline: SignedOutPipeline, token: SessionCookie, confirmation: ConfirmationId | None = None
 ) -> RedirectResponse:
     """
     The browser's way to Google, as a navigation, never a fetch: it sets the short-lived flow cookie and redirects to
     Google's sign-in. With `confirmation`, the id the web app made for one settings save, Google authenticates the
-    administrator again for that save. Where the site offers no sign-in with Google, or past the limit per address,
-    it redirects back to the app with ?google= and the reason.
+    administrator again for that save: the start needs the session of an administrator who may edit the settings, and
+    only that session's save is confirmed. Where the site offers no sign-in with Google, a confirmation comes without
+    that session (not_administrator), or past the limit per address, it redirects back to the app with ?google= and
+    the reason.
     """
     try:
-        flow, address = await pipeline.start_google_sign_in(confirmation, client_of(request))
+        session = SessionToken(token) if token else None
+        flow, address = await pipeline.start_google_sign_in(confirmation, session, client_of(request))
     except GoogleSignInRefused as error:
         return back_to_app(request, APP_SETTINGS if confirmation else APP_SIGN_IN, error.refusal)
     except SignInThrottled:

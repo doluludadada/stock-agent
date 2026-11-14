@@ -129,11 +129,11 @@ def test_a_prompt_ending_in_one_line_end_is_a_literal_block_two_columns_past_its
 
 
 def test_a_setting_the_file_does_not_set_is_inserted_after_the_last_setting_of_its_section() -> None:
-    text = "notifications:\n  enabled: false  # off\n\ndb:\n  backend: sqlite\n"
+    text = "notifications:\n  enabled: false  # off\n\ndb:\n  chroma_persist_path: chroma_data\n"
     after = edited(appsetting(text), ("notifications.recipients", ["owner"]))
 
     assert after[SettingsFile.APPSETTING] == (
-        "notifications:\n  enabled: false  # off\n  recipients: [owner]\n\ndb:\n  backend: sqlite\n"
+        "notifications:\n  enabled: false  # off\n  recipients: [owner]\n\ndb:\n  chroma_persist_path: chroma_data\n"
     )
 
 
@@ -186,7 +186,7 @@ def test_a_change_to_the_value_its_field_shows_writes_nothing() -> None:
         ("line.channel_secret", "from-the-web"),
         ("api.allowed_hosts", ["from-the-web"]),
         ("sources.ptt.base_url", "https://from-the-web.example"),
-        ("strategy_search.workers", 2),
+        ("chat.reset_commands", ["from-the-web"]),
     ],
     ids=["unknown", "section", "below-a-setting", "db-password", "api-key", "line-secret", "hosts", "source", "operator-section"],
 )
@@ -240,7 +240,13 @@ def test_no_setting_the_environment_owns_and_no_section_without_settings_is_a_fi
 def test_a_setting_only_an_operator_changes_is_a_setting_of_the_file_and_no_field_of_the_form(tmp_path: Path) -> None:
     form = {field.path for field in settings_fields({})}
     every = {field.path for field in settings_fields({}, with_operator_only=True)}
-    operator_only = {"api.allowed_hosts", "db.backend", "sources.ptt.base_url", "market.stock_ticks", "valuation.low_pe_caveat"}
+    operator_only = {
+        "api.allowed_hosts",
+        "db.chroma_persist_path",
+        "sources.ptt.base_url",
+        "market.stock_ticks",
+        "valuation.low_pe_caveat",
+    }
     document = yaml.safe_load(repository_texts()[SettingsFile.APPSETTING])
     del document["market"]["stock_ticks"]
     project = project_with(tmp_path, yaml.safe_dump(document, allow_unicode=True, sort_keys=False))
@@ -347,6 +353,22 @@ def test_a_file_that_still_sets_a_retired_setting_starts_and_the_start_names_it(
     assert "x_search" not in "".join(settings_notices(PROJECT))
 
 
+@pytest.mark.parametrize("backend", ["sqlite", "postgresql"])
+def test_a_file_that_still_chooses_a_database_backend_starts_on_postgresql_and_the_start_names_the_setting(
+    tmp_path: Path, backend: str
+) -> None:
+    shipped = repository_texts()[SettingsFile.APPSETTING]
+    older = shipped.replace("\n  chroma_persist_path:", f"\n  backend: {backend}\n  chroma_persist_path:", 1)
+    project = project_with(tmp_path, older)
+
+    assert older != shipped
+    assert load_settings(project).db == load_settings(PROJECT).db
+    assert settings_notices(project)[0] == (
+        "appsetting.yaml still sets db.backend: the app no longer reads them. Remove them from the file."
+    )
+    assert "db.backend" not in "".join(settings_notices(PROJECT))
+
+
 def test_a_file_that_still_sets_the_rankings_timestamp_settings_starts_and_the_start_names_them(tmp_path: Path) -> None:
     shipped = repository_texts()[SettingsFile.APPSETTING]
     retired = '  timestamp_calendars:\n    - "https://a.pool.opentimestamps.org"\n  timestamp_timeout_seconds: 10\n'
@@ -360,6 +382,20 @@ def test_a_file_that_still_sets_the_rankings_timestamp_settings_starts_and_the_s
         "the app no longer reads them. Remove them from the file."
     )
     assert "timestamp" not in "".join(settings_notices(PROJECT))
+
+
+def test_a_file_that_still_sets_the_strategy_search_section_starts_and_the_start_names_it(tmp_path: Path) -> None:
+    shipped = repository_texts()[SettingsFile.APPSETTING]
+    retired = "strategy_search:\n  workers: 8\n  levels:\n    price: [0.95, 1.0, 1.05]\n  folder: strategy_searches\n\n"
+    older = shipped.replace("ranking:\n", f"{retired}ranking:\n", 1)
+    project = project_with(tmp_path, older)
+
+    assert older != shipped
+    assert load_settings(project).model_dump() == load_settings(PROJECT).model_dump()
+    assert settings_notices(project)[0] == (
+        "appsetting.yaml still sets strategy_search: the app no longer reads them. Remove them from the file."
+    )
+    assert "strategy_search" not in "".join(settings_notices(PROJECT))
 
 
 def test_an_instructions_file_without_a_prompt_added_since_starts_without_it_and_the_start_names_it(tmp_path: Path) -> None:

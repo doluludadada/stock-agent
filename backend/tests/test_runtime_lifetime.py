@@ -53,14 +53,14 @@ def shioaji_test_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, environment: SystemEnvironment = SystemEnvironment.TEST
 ) -> AppConfig:
     """
-    The shipped settings with the environment's Shioaji key pair, over a SQLite file and a Chroma folder in tmp_path: a
+    The shipped settings with the environment's Shioaji key pair, over the session's database and a Chroma folder in tmp_path: a
     personal site whose login offers SinoPac on the simulation server.
     """
     monkeypatch.setenv("ANTHROPIC_API_KEY", "placeholder")
     shipped = load_settings(get_project_root()).model_copy(update={"project_root": tmp_path})
     config = environment_setup(shipped, environment)
     config.accounts.key = KEY
-    config.db = DbConfig(_env_file=None, backend=config.db.backend, chroma_persist_path=str(tmp_path / "chroma"))
+    config.db = DbConfig(_env_file=None, chroma_persist_path=str(tmp_path / "chroma"))
     return config
 
 

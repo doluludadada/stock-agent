@@ -34,17 +34,6 @@ archive-closes:
 archive-closes:
     cd backend; $env:PYTHONPATH="src"; uv run python -m d_presentation.cli.archive_closes
 
-# Searches for a better technical strategy than a built-in one on the held daily history and prints the report, for
-# example `just search-strategies --level tune --seed 1 --buy-score 70`; `--help` lists the options. It orders nothing,
-# asks no AI and changes no saved strategy or setting. Each search is saved under strategy_search.folder.
-[unix]
-search-strategies *options:
-    cd backend && PYTHONPATH=src uv run python -m d_presentation.cli.strategy_search {{options}}
-
-[windows]
-search-strategies *options:
-    cd backend; $env:PYTHONPATH="src"; uv run python -m d_presentation.cli.strategy_search {{options}}
-
 # Brings the history a stock ranking reads back to a first day on a personal site, for example `just backfill-history
 # 2017-01-01`: every market's monthly revenue from MOPS, each exchange's daily history and ex-right references.
 # What it fetched is saved as it comes, so after a failure or a timeout run it again: it fetches only what is missing,
@@ -89,10 +78,10 @@ ranking-backtest first last *options:
 ranking-backtest first last *options:
     cd backend; $env:PYTHONPATH="src"; uv run python -m d_presentation.cli.ranking backtest {{first}} {{last}} {{options}}
 
-# The database commands (docs/database-migrations.md). Each opens only the database that db.backend selects, so it also
-# works on a database that startup refuses. Backups go to backups/ (owner-only); PostgreSQL's need pg_dump and pg_restore.
+# The database commands (docs/database-migrations.md). Each opens only the database, so it also works on a database
+# that startup refuses. Backups go to backups/ (owner-only) and need pg_dump and pg_restore.
 
-# The backend and where, the schema version and the code's, the pending upgrade steps, and each table's rows.
+# Where the database is, the schema version and the code's, the pending upgrade steps, and each table's rows.
 [unix]
 db-status:
     cd backend && PYTHONPATH=src uv run python -m d_presentation.cli.database status

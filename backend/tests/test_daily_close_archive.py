@@ -1,5 +1,5 @@
 """
-The archive of the TWSE and TPEX open data on a real database of each backend, fed by the real OpenAPI adapter over the
+The archive of the TWSE and TPEX open data on a real PostgreSQL database, fed by the real OpenAPI adapter over the
 exchanges' trimmed real responses (tests/fixtures): the closes, the material information, the year-to-date EPS, the
 valuation ratios, the balance sheets and income statements, the monthly revenue and TWSE's news. Each row is kept under
 the date or period its own payload row names, never today, and each financial report as served; saving the same data
@@ -21,7 +21,7 @@ from pathlib import Path
 import httpx
 import pytest
 from sqlalchemy import inspect, text
-from support.databases import BACKENDS, database_snapshot, empty_database, raw_engine
+from support.databases import database_snapshot, open_database, raw_engine
 from support.fakes import RecordingLogger
 from support.harness import build_harness, harness_config
 from support.settings import shipped_config
@@ -35,15 +35,7 @@ from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.ports.market.daily_close_archive import ArchivedMonth, ArchivedQuarter, ArchivedSession, OpenDataDownload
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from a_domain.types.enums import (
-    ContentType,
-    DatabaseBackend,
-    FinancialStatement,
-    IndustryFormat,
-    InformationSource,
-    MarketIndex,
-    MarketType,
-)
+from a_domain.types.enums import ContentType, FinancialStatement, IndustryFormat, InformationSource, MarketIndex, MarketType
 from a_domain.types.errors import ArchiveSaveRefused, ListingUnavailableError, RealtimeQuotesUnavailable
 from a_domain.types.values import FiscalQuarter
 from b_application.config.api_config import ApiConfig
@@ -230,24 +222,23 @@ async def archive_run(
     return await DailyCloseArchiver(provider, sql_archive(connector, logger), SilentLogger()).execute()
 
 
-async def started_database(backend: DatabaseBackend, folder: Path) -> DatabaseConnector:
-    connector = await empty_database(backend, folder)
+async def started_database(folder: Path) -> DatabaseConnector:
+    connector = open_database(folder)
     await connector.init_db()
     return connector
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
 async def test_each_row_is_kept_under_the_date_or_period_its_own_payload_row_names(
-    backend: DatabaseBackend, tmp_path: Path, payloads: dict[str, list[dict[str, str]]]
+    tmp_path: Path, payloads: dict[str, list[dict[str, str]]]
 ) -> None:
-    connector = await started_database(backend, tmp_path)
+    connector = await started_database(tmp_path)
 
     try:
         sessions, quarters, months = await archive_run(connector)
     finally:
         await connector.close()
 
-    archived = await database_snapshot(backend, tmp_path)
+    archived = await database_snapshot()
     columns, announcements = archived["material_information_archive"]
     kept = [columns.index(name) for name in ("clause", "description", "fact_date", "stock_id")]
     assert (sessions, quarters, months) == (SESSIONS, QUARTERS, MONTHS)
@@ -292,8 +283,8 @@ def served_reports() -> list[tuple[str, str, str, str, str, str, str, dict[str, 
 
 def archived_reports(archived: dict[str, tuple[list[str], list[tuple[str, ...]]]]) -> list[tuple[str, ...]]:
     """
-    financial_report_archive's rows in the order of served_reports, each one's items read back: SQLite hands the JSON
-    column over as its text and PostgreSQL as the object's repr, and both are a Python literal of the served strings.
+    financial_report_archive's rows in the order of served_reports, each one's items read back: the snapshot holds the
+    JSON column as the object's repr, a Python literal of the served strings.
     """
     columns, rows = archived["financial_report_archive"]
     names = ("stock_id", "year", "quarter", "statement", "market", "industry_format", "served_date")
@@ -302,11 +293,10 @@ def archived_reports(archived: dict[str, tuple[list[str], list[tuple[str, ...]]]
     )
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
 async def test_the_archive_serves_a_stocks_material_information_of_the_window_as_news_newest_first_and_as_served(
-    backend: DatabaseBackend, tmp_path: Path, payloads: dict[str, list[dict[str, str]]], monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, payloads: dict[str, list[dict[str, str]]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    connector = await started_database(backend, tmp_path)
+    connector = await started_database(tmp_path)
     archive = sql_archive(connector)
     subjects = {row["發言時間"]: row["主旨 "] for row in payloads[SOURCES.exchange.material_information[MarketType.TWSE].url]}
 
@@ -329,11 +319,10 @@ async def test_the_archive_serves_a_stocks_material_information_of_the_window_as
     assert a_month_later == []
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
 async def test_the_archive_serves_the_twse_news_naming_a_stock_of_the_window_with_its_material_information_newest_first(
-    backend: DatabaseBackend, tmp_path: Path, payloads: dict[str, list[dict[str, str]]]
+    tmp_path: Path, payloads: dict[str, list[dict[str, str]]]
 ) -> None:
-    connector = await started_database(backend, tmp_path)
+    connector = await started_database(tmp_path)
     archive = sql_archive(connector)
     filed = {row["發言時間"]: row["主旨 "] for row in payloads[SOURCES.exchange.material_information[MarketType.TWSE].url]}
     penalty = {
@@ -363,11 +352,10 @@ async def test_the_archive_serves_the_twse_news_naming_a_stock_of_the_window_wit
     assert (news["6604"], news["2330"]) == ([], [])
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
 async def test_the_archive_reads_a_stocks_financials_by_its_industry_formats_columns_with_its_eps_and_monthly_revenue(
-    backend: DatabaseBackend, tmp_path: Path, payloads: dict[str, list[dict[str, str]]]
+    tmp_path: Path, payloads: dict[str, list[dict[str, str]]]
 ) -> None:
-    connector = await started_database(backend, tmp_path)
+    connector = await started_database(tmp_path)
     archive = sql_archive(connector)
 
     for statement in FinancialStatement:
@@ -438,43 +426,36 @@ async def test_the_archive_reads_a_stocks_financials_by_its_industry_formats_col
     assert financials["9999"] == ([], [])
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
-async def test_archiving_the_same_sessions_again_changes_nothing(
-    backend: DatabaseBackend, tmp_path: Path, payloads: dict[str, list[dict[str, str]]]
-) -> None:
-    connector = await started_database(backend, tmp_path)
+async def test_archiving_the_same_sessions_again_changes_nothing(tmp_path: Path, payloads: dict[str, list[dict[str, str]]]) -> None:
+    connector = await started_database(tmp_path)
 
     try:
         first = await archive_run(connector)
-        archived = await database_snapshot(backend, tmp_path)
+        archived = await database_snapshot()
         second = await archive_run(connector)
     finally:
         await connector.close()
 
     assert first == second == (SESSIONS, QUARTERS, MONTHS)
-    assert await database_snapshot(backend, tmp_path) == archived
+    assert await database_snapshot() == archived
 
 
-def refusing(table: str, backend: DatabaseBackend) -> list[str]:
-    """The statements of a trigger that makes the backend's database refuse every row of the table until it is dropped."""
-    if backend == DatabaseBackend.SQLITE:
-        return [f"CREATE TRIGGER refuse_rows BEFORE INSERT ON {table} BEGIN SELECT RAISE(ABORT, 'refused by the test'); END"]
-
+def refusing(table: str) -> list[str]:
+    """The statements of a trigger that makes the database refuse every row of the table until it is dropped."""
     return [
         "CREATE FUNCTION refuse_insert() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'refused by the test'; END $$",
         f"CREATE TRIGGER refuse_rows BEFORE INSERT ON {table} FOR EACH ROW EXECUTE FUNCTION refuse_insert()",
     ]
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
 async def test_a_table_the_database_refuses_fails_the_run_by_name_once_every_other_table_is_saved(
-    backend: DatabaseBackend, tmp_path: Path, payloads: dict[str, list[dict[str, str]]]
+    tmp_path: Path, payloads: dict[str, list[dict[str, str]]]
 ) -> None:
-    connector = await started_database(backend, tmp_path)
-    engine = raw_engine(backend, tmp_path)
+    connector = await started_database(tmp_path)
+    engine = raw_engine()
 
     async with engine.begin() as connection:
-        for statement in refusing("material_information_archive", backend):
+        for statement in refusing("material_information_archive"):
             await connection.execute(text(statement))
 
     await engine.dispose()
@@ -489,7 +470,7 @@ async def test_a_table_the_database_refuses_fails_the_run_by_name_once_every_oth
     finally:
         await connector.close()
 
-    archived = await database_snapshot(backend, tmp_path)
+    archived = await database_snapshot()
     [error] = [message for level, message in logger.records if level == "error"]
     assert "material_information_archive" in error and "refused by the test" in error
     assert archived["material_information_archive"][1] == []
@@ -499,11 +480,10 @@ async def test_a_table_the_database_refuses_fails_the_run_by_name_once_every_oth
     assert (quarters, months) == (QUARTERS, MONTHS)
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
 async def test_a_nul_character_the_exchange_serves_in_a_text_is_archived_without_it(
-    backend: DatabaseBackend, tmp_path: Path, payloads: dict[str, list[dict[str, str]]]
+    tmp_path: Path, payloads: dict[str, list[dict[str, str]]]
 ) -> None:
-    connector = await started_database(backend, tmp_path)
+    connector = await started_database(tmp_path)
     announcement = payloads[SOURCES.exchange.material_information[MarketType.TWSE].url][0]
     announcement["說明"] = announcement["說明"][:4] + "\x00" + announcement["說明"][4:]
 
@@ -512,17 +492,16 @@ async def test_a_nul_character_the_exchange_serves_in_a_text_is_archived_without
     finally:
         await connector.close()
 
-    columns, announcements = (await database_snapshot(backend, tmp_path))["material_information_archive"]
+    columns, announcements = (await database_snapshot())["material_information_archive"]
     kept = [columns.index(name) for name in ("clause", "description", "fact_date", "stock_id")]
     assert sorted(tuple(row[index] for index in kept) for row in announcements) == served_announcements()
     assert sessions == SESSIONS
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
-async def test_a_started_database_indexes_the_session_dates_of_the_archived_closes(backend: DatabaseBackend, tmp_path: Path) -> None:
-    connector = await started_database(backend, tmp_path)
+async def test_a_started_database_indexes_the_session_dates_of_the_archived_closes(tmp_path: Path) -> None:
+    connector = await started_database(tmp_path)
     await connector.close()
-    engine = raw_engine(backend, tmp_path)
+    engine = raw_engine()
 
     async with engine.connect() as connection:
         indexes = await connection.run_sync(lambda sync: inspect(sync).get_indexes("daily_close_archive"))
@@ -531,11 +510,8 @@ async def test_a_started_database_indexes_the_session_dates_of_the_archived_clos
     assert ["session_date"] in [index["column_names"] for index in indexes]
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
-async def test_a_later_report_of_a_session_replaces_its_closes(
-    backend: DatabaseBackend, tmp_path: Path, payloads: dict[str, list[dict[str, str]]]
-) -> None:
-    connector = await started_database(backend, tmp_path)
+async def test_a_later_report_of_a_session_replaces_its_closes(tmp_path: Path, payloads: dict[str, list[dict[str, str]]]) -> None:
+    connector = await started_database(tmp_path)
     tsmc = next(row for row in payloads[SOURCES.exchange.twse_daily_quotes_url] if row["Code"] == "2330")
     taiex = next(row for row in payloads[SOURCES.exchange.twse_index_url] if row["指數"] == "發行量加權股價指數")
 
@@ -546,7 +522,7 @@ async def test_a_later_report_of_a_session_replaces_its_closes(
     finally:
         await connector.close()
 
-    archived = await database_snapshot(backend, tmp_path)
+    archived = await database_snapshot()
     stocks = {row[7]: row[1] for row in archived["daily_close_archive"][1]}
     indexes = {(row[2], row[3]): row[1] for row in archived["index_close_archive"][1]}
     assert sessions == SESSIONS
@@ -554,11 +530,10 @@ async def test_a_later_report_of_a_session_replaces_its_closes(
     assert (indexes["twse", "2026-11-05"], indexes["tpex", "2026-11-05"]) == ("41600.0", "321.47")
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
 async def test_with_every_endpoint_down_the_run_is_refused_and_saves_nothing(
-    backend: DatabaseBackend, tmp_path: Path, payloads: dict[str, list[dict[str, str]]]
+    tmp_path: Path, payloads: dict[str, list[dict[str, str]]]
 ) -> None:
-    connector = await started_database(backend, tmp_path)
+    connector = await started_database(tmp_path)
     payloads.clear()
 
     try:
@@ -567,16 +542,15 @@ async def test_with_every_endpoint_down_the_run_is_refused_and_saves_nothing(
     finally:
         await connector.close()
 
-    archived = await database_snapshot(backend, tmp_path)
+    archived = await database_snapshot()
     assert [archived[table][1] for table in ARCHIVE_TABLES] == [[]] * len(ARCHIVE_TABLES)
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
 async def test_a_database_of_this_schema_version_without_the_archive_gains_it_at_its_next_start(
-    backend: DatabaseBackend, tmp_path: Path, payloads: dict[str, list[dict[str, str]]]
+    tmp_path: Path, payloads: dict[str, list[dict[str, str]]]
 ) -> None:
-    connector = await started_database(backend, tmp_path)
-    engine = raw_engine(backend, tmp_path)
+    connector = await started_database(tmp_path)
+    engine = raw_engine()
 
     async with engine.begin() as connection:
         for table in ARCHIVE_TABLES:
@@ -587,7 +561,7 @@ async def test_a_database_of_this_schema_version_without_the_archive_gains_it_at
         )
 
     await engine.dispose()
-    before = await database_snapshot(backend, tmp_path)
+    before = await database_snapshot()
 
     try:
         state = await connector.state()
@@ -596,7 +570,7 @@ async def test_a_database_of_this_schema_version_without_the_archive_gains_it_at
     finally:
         await connector.close()
 
-    after = await database_snapshot(backend, tmp_path)
+    after = await database_snapshot()
     assert (state.refusal, state.pending) == (None, ())
     assert sorted(set(after) - set(before)) == sorted(ARCHIVE_TABLES)
     assert {table: dump for table, dump in after.items() if table in before} == before
@@ -607,11 +581,10 @@ def taipei(day: date, at: time = time(13, 30)) -> datetime:
     return datetime.combine(day, at, TAIWAN_TIMEZONE)
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
 async def test_the_archive_serves_its_stock_and_index_closes_as_daily_history_and_never_a_realtime_quote(
-    backend: DatabaseBackend, tmp_path: Path, payloads: dict[str, list[dict[str, str]]]
+    tmp_path: Path, payloads: dict[str, list[dict[str, str]]]
 ) -> None:
-    connector = await started_database(backend, tmp_path)
+    connector = await started_database(tmp_path)
     archive = sql_archive(connector)
     stocks = [Stock(stock_id=stock_id) for stock_id in ("2330", "6488", "9999")]
     until_the_6th = taipei(date(2026, 11, 6), time.max)
@@ -653,7 +626,7 @@ async def test_a_report_whose_rows_none_can_be_read_is_an_error_and_one_that_ser
     payloads[ratios] = [{("StockCode" if name == "Code" else name): value for name, value in row.items()} for row in payloads[ratios]]
     payloads[news] = []
     logger = RecordingLogger()
-    connector = await started_database(DatabaseBackend.SQLITE, tmp_path)
+    connector = await started_database(tmp_path)
     provider = TaiwanStockProvider(SOURCES.exchange, TaiwanMarketClock(MarketHoursConfig()), MarketDataConfig(), logger)
 
     try:
@@ -684,16 +657,15 @@ def split_download(missed: date | None) -> OpenDataDownload:
     )
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
 @pytest.mark.parametrize(
     ("missed", "served"),
     [(None, [45.92, 47.16, 47.57, 47.10]), (date(2025, 6, 12), [183.70, 188.65, 47.57, 47.10])],
     ids=["every session held", "the closes of one session missed"],
 )
 async def test_the_archive_keeps_each_bar_as_listed_and_serves_the_history_adjusted(
-    backend: DatabaseBackend, tmp_path: Path, missed: date | None, served: list[float]
+    tmp_path: Path, missed: date | None, served: list[float]
 ) -> None:
-    connector = await started_database(backend, tmp_path)
+    connector = await started_database(tmp_path)
     archive, clock = sql_archive(connector), TaiwanMarketClock(MarketHoursConfig())
     window = (clock.session_close(date(2025, 6, 1)), clock.session_close(date(2025, 6, 30)))
 
@@ -714,10 +686,7 @@ async def test_the_archive_keeps_each_bar_as_listed_and_serves_the_history_adjus
     assert listed == [183.70, 188.65, 47.57, 47.10]
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
-async def test_a_stock_that_moved_from_tpex_to_twse_is_checked_against_each_market_it_was_listed_on(
-    backend: DatabaseBackend, tmp_path: Path
-) -> None:
+async def test_a_stock_that_moved_from_tpex_to_twse_is_checked_against_each_market_it_was_listed_on(tmp_path: Path) -> None:
     clock = TaiwanMarketClock(MarketHoursConfig())
 
     def listed(stock_id: str, market: MarketType, closes: dict[int, tuple[float, float]]) -> Stock:
@@ -746,7 +715,7 @@ async def test_a_stock_that_moved_from_tpex_to_twse_is_checked_against_each_mark
         stocks=[twse_every_session, tpex_without_06_10, *moved],
         indexes={MarketType.TWSE: taiex(TAIEX_2025_06), MarketType.TPEX: tpex_index},
     )
-    connector = await started_database(backend, tmp_path)
+    connector = await started_database(tmp_path)
     archive = sql_archive(connector)
 
     try:
@@ -821,11 +790,10 @@ async def test_the_web_api_shuts_down_only_after_the_archive_run_it_stopped_has_
     assert ended.is_set(), "the shutdown went on while the archive run it cancelled was still ending"
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
 async def test_a_company_without_subsidiaries_reads_its_net_income_and_equity_from_its_totals(
-    backend: DatabaseBackend, tmp_path: Path, payloads: dict[str, list[dict[str, str]]]
+    tmp_path: Path, payloads: dict[str, list[dict[str, str]]]
 ) -> None:
-    connector = await started_database(backend, tmp_path)
+    connector = await started_database(tmp_path)
     archive = sql_archive(connector)
     split_columns = ("淨利（淨損）歸屬於母公司業主", "淨利（淨損）歸屬於非控制權益", "歸屬於母公司業主之權益合計", "非控制權益")
 

@@ -1,12 +1,13 @@
 from typing import override
 
+from sqlalchemy.dialects.postgresql import insert
 from sqlmodel import col
 
 from a_domain.model.chat.message import Message
 from a_domain.ports.ai.ai_provider import IAiProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.types.errors import AiAllowanceSpentError
-from c_infrastructure.database.db_connector import UPSERT, DatabaseConnector
+from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.ai_call_dto import AiCallDTO, AiCallTotalDTO
 
 
@@ -39,13 +40,12 @@ class DailyCappedAiProvider(IAiProvider):
         capped = self._daily_calls is not None
 
         async with self._db.owner_session() as session:
-            upsert = UPSERT[session.get_bind().dialect.name]
-            mine = upsert(AiCallDTO).on_conflict_do_update(
+            mine = insert(AiCallDTO).on_conflict_do_update(
                 index_elements=["owner_id", "day"],
                 set_={"calls": col(AiCallDTO.calls) + 1},
                 where=col(AiCallDTO.calls) < self._daily_calls if capped else None,
             )
-            everyone = upsert(AiCallTotalDTO).on_conflict_do_update(
+            everyone = insert(AiCallTotalDTO).on_conflict_do_update(
                 index_elements=["day"],
                 set_={"calls": col(AiCallTotalDTO.calls) + 1},
                 where=col(AiCallTotalDTO.calls) < self._daily_calls_total if capped else None,

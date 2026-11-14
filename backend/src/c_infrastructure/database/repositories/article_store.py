@@ -8,7 +8,7 @@ from sqlmodel import col, select
 from a_domain.model.market.article import Article
 from a_domain.ports.market.article_store import IArticleStore
 from a_domain.ports.system.market_clock import IMarketClock
-from c_infrastructure.database.db_connector import UPSERT, DatabaseConnector
+from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.article_store_dto import StoredArticleDTO
 from c_infrastructure.database.models.daily_close_archive_dto import replacing
 
@@ -42,7 +42,7 @@ class SqlArticleStore(IArticleStore):
 
             if changed:
                 rows = [StoredArticleDTO.from_domain(article, now).model_dump() for article in changed]
-                await session.execute(replacing(UPSERT[session.get_bind().dialect.name], StoredArticleDTO), rows)
+                await session.execute(replacing(StoredArticleDTO), rows)
 
             await session.execute(delete(StoredArticleDTO).where(col(StoredArticleDTO.published_at) < now - self._retention))
 

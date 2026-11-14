@@ -1,6 +1,6 @@
 """
 Writes tests/fixtures/schema/version_<SCHEMA_VERSION>.json: every table the SQLModel classes declare at the code's
-schema version, with each column's class, its type on SQLite and on PostgreSQL, the enum members it stores and whether
+schema version, with each column's class, its PostgreSQL type, the enum members it stores and whether
 it takes NULL, and each table's primary key, unique constraints, indexes and foreign keys. tests/test_schema_snapshot.py compares
 the classes with the snapshot of the current SCHEMA_VERSION, so a change to an existing table fails until an upgrade
 step raises SCHEMA_VERSION.
@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import Column, Enum, MetaData, Table, UniqueConstraint
-from sqlalchemy.dialects import postgresql, sqlite
+from sqlalchemy.dialects import postgresql
 from sqlmodel import SQLModel
 
 BACKEND = Path(__file__).resolve().parents[1]
@@ -44,7 +44,6 @@ def declared_tables() -> MetaData:
 def column_layout(column: Column[Any]) -> dict[str, Any]:
     layout = {
         "class": type(column.type).__name__,
-        "sqlite": column.type.compile(dialect=sqlite.dialect()),
         "postgresql": column.type.compile(dialect=postgresql.dialect()),
         "nullable": bool(column.nullable),
     }

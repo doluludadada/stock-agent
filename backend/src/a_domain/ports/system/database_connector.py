@@ -5,7 +5,6 @@ from typing import Protocol, Self
 
 from pydantic.dataclasses import dataclass
 
-from a_domain.types.enums import DatabaseBackend
 from a_domain.types.ids import UserId
 
 
@@ -13,9 +12,8 @@ from a_domain.types.ids import UserId
 class DatabaseState:
     """What `just db-status` shows: where the database is, its schema version and the code's, and each table's rows."""
 
-    backend: DatabaseBackend
     location: str
-    """The SQLite file, or the PostgreSQL user, server and database name. Never a password."""
+    """The database's user, server and name. Never a password."""
 
     stamps: tuple[int, ...]
     """The schema version rows. A database startup created holds one; a new database holds none."""
@@ -64,7 +62,7 @@ class IDatabaseConnector[Session](Protocol):
         ...
 
     async def state(self) -> DatabaseState:
-        """Reads the database without changing it. A SQLite file that does not exist yet reads as a new database."""
+        """Reads the database without changing it."""
         ...
 
     async def backup(self) -> Path:
@@ -85,9 +83,9 @@ class IDatabaseConnector[Session](Protocol):
 
     async def restore(self, backup: Path) -> Path | None:
         """
-        Backs the current database up, then replaces it with `backup`, a backup of the same backend, which stays where it
-        is. Returns the backup made first, None when the database had no table to back up. Refuses a file that is not a
-        backup of this backend before changing anything.
+        Backs the current database up, then replaces it with `backup`, which stays where it is. Returns the backup made
+        first, None when the database had no table to back up. Refuses a file that is not a backup before changing
+        anything.
         """
         ...
 

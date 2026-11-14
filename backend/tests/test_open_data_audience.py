@@ -37,7 +37,6 @@ from a_domain.types.enums import (
     AiProvider,
     Audience,
     ContentType,
-    DatabaseBackend,
     ExecutionProvider,
     InformationSource,
     MarketIndex,
@@ -152,7 +151,7 @@ def refused_adapters(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
 def deployment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, audience: Audience) -> AppConfig:
     """
-    The shipped settings for `audience` on the mock broker, over a SQLite file and a Chroma folder in tmp_path, with a
+    The shipped settings for `audience` on the mock broker, over the session's database and a Chroma folder in tmp_path, with a
     Tavily key set and the AI's web search switched on where startup allows it: only on an audience with news articles.
     """
     monkeypatch.setenv("ANTHROPIC_API_KEY", "placeholder")
@@ -163,7 +162,7 @@ def deployment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, audience: Audien
     shipped.ai.user_selectable = [*shipped.ai.user_selectable, AiProvider.GROQ]
     config = environment_setup(shipped, SystemEnvironment.DEV)
     config.accounts.key = KEY
-    config.db = DbConfig(_env_file=None, backend=DatabaseBackend.SQLITE, chroma_persist_path=str(tmp_path / "chroma"))
+    config.db = DbConfig(_env_file=None, chroma_persist_path=str(tmp_path / "chroma"))
     validate_trading_environment(config)
     return config
 

@@ -1,51 +1,45 @@
 """
-The database commands (`just db-status`, `db-backup`, `db-migrate`, `db-restore`) on a real database of each backend:
-what they print, the backups they write, an upgrade that keeps every row, a second migrate and a failed one that change
-nothing, and a restore that puts a backup back after backing the current database up.
+The database commands (`just db-status`, `db-backup`, `db-migrate`, `db-restore`) on a real PostgreSQL database: what
+they print, the backups they write, an upgrade that keeps every row, a second migrate and a failed one that change
+nothing, and a restore that puts a backup back after backing the current database up. The code holds no upgrade step
+yet, so the tests that migrate give it one of their own, from one version below the code's.
 """
 
 import hashlib
 import io
 import re
-from datetime import datetime
+from datetime import datetime, tzinfo
 from pathlib import Path
-from typing import Any
-from uuid import UUID
 
 import pytest
 from rich.console import Console
 from sqlalchemy import text
-from support.databases import BACKENDS, create_version_1_tables, database_config, database_snapshot, empty_database, raw_engine
-from trading_stack import SilentLogger
+from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlmodel import SQLModel
+from support.databases import ENVIRONMENT, database_snapshot, execute, open_database
 
+import c_infrastructure.database.db_connector as db_connector
 import c_infrastructure.database.models.schema_version_dto as schema_version
-from a_domain.types.enums import DatabaseBackend
 from c_infrastructure.database.db_connector import DatabaseCommandError, DatabaseConnector, OutdatedDatabaseError
-from c_infrastructure.database.models.schema_version_dto import SCHEMA_VERSION
+from c_infrastructure.database.models.schema_version_dto import FIRST_SCHEMA_VERSION, SCHEMA_VERSION
 from d_presentation.cli import database as commands, terminal
 
 pytestmark = pytest.mark.asyncio
 
-AT = datetime(2026, 11, 3, 6, 0)
+OLDER = SCHEMA_VERSION - 1
+"""The schema version the tests' own upgrade step starts from."""
 
-# fmt: off
-VERSION_1_ROWS: list[tuple[str, dict[str, Any]]] = [
-    (
-        "workflow_runs",
-        {
-            "run_id": UUID(int=1), "workflow": "FULL_CYCLE", "execution_provider": "MOCK", "order_mode": "MOCK_ONLY",
-            "start_time": AT, "end_time": AT, "total_scanned": 3, "buzz_scanned": 0, "buzz_qualified": 0,
-            "sentiment_analysed": 0, "passed_technical": 1, "ai_analysed": 1, "signals_generated": 1,
-            "orders_submitted": 0, "orders_filled": 0, "orders_refused": 0, "stale_market_data_count": 0,
-            "errors": '["Run aborted: RuntimeError: Yahoo hung"]', "execution_log": "[]",
-        },
-    ),
-    ("ohlcv_data", {"stock_id": "2330", "ts": AT, "open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5, "volume": 9}),
-    ("watchlists", {"stock_id": "2330", "type": "manual", "created_at": AT, "expires_at": None}),
-    ("mock_cash", {"account_id": "mock-dev", "current_cash": 5.0, "initial_cash": 5.0, "created_at": AT, "updated_at": AT}),
-    ("technical_settings", {"owner_id": "local", "active_strategy_id": "trend", "buzz_strategy_id": "buzz", "revision": 4}),
-]
-# fmt: on
+ROWS = (
+    "INSERT INTO technical_settings (owner_id, active_strategy_id, revision) VALUES ('local', 'trend', 1)",
+    "INSERT INTO ohlcv_data (stock_id, ts, open, high, low, close, volume) VALUES ('2330', '2026-11-03 06:00:00', 1, 2, 0.5, 1.5, 9)",
+    "INSERT INTO watchlists (owner_id, stock_id, type, created_at) VALUES ('local', '2330', 'manual', '2026-11-03 06:00:00')",
+    "INSERT INTO mock_cash (owner_id, current_cash, initial_cash, created_at, updated_at) "
+    "VALUES ('local', 5, 5, '2026-11-03 06:00:00', '2026-11-03 06:00:00')",
+)
+"""An owner's settings, a cached bar, a watchlist entry and cash."""
+
+HELD = {"mock_cash": 1, "ohlcv_data": 1, "schema_version": 1, "technical_settings": 1, "watchlists": 1}
+"""The tables that hold a row after ROWS, and how many."""
 
 
 @pytest.fixture
@@ -56,54 +50,32 @@ def output(monkeypatch: pytest.MonkeyPatch) -> io.StringIO:
     return printed
 
 
-def bound(backend: DatabaseBackend, value: Any) -> Any:
-    """A value as the backend's driver takes it in raw SQL: SQLite keeps UUIDs as 32 hex digits and datetimes as text."""
-    if backend == DatabaseBackend.SQLITE and isinstance(value, UUID):
-        return value.hex
-
-    if backend == DatabaseBackend.SQLITE and isinstance(value, datetime):
-        return value.isoformat(sep=" ", timespec="microseconds")
-
-    return value
+async def raise_settings_revisions(connection: AsyncConnection) -> None:
+    """The tests' upgrade step: a change to the rows of one table, which leaves every table as the code declares it."""
+    await connection.execute(text("UPDATE technical_settings SET revision = revision + 10"))
 
 
-async def execute(backend: DatabaseBackend, folder: Path, *statements: str) -> None:
-    engine = raw_engine(backend, folder)
-
-    async with engine.begin() as connection:
-        for statement in statements:
-            await connection.execute(text(statement))
-
-    await engine.dispose()
+async def stops_after_its_first_statement(connection: AsyncConnection) -> None:
+    """The same step, stopped right after its first statement as a crash would stop it."""
+    await raise_settings_revisions(connection)
+    raise RuntimeError("the upgrade stopped after its first statement")
 
 
-async def version_1_database(backend: DatabaseBackend, folder: Path) -> DatabaseConnector:
-    """A version 1 database, from the tables a version 1 app wrote, with a run, a cached bar, a watchlist entry, cash and settings."""
-    connector = await empty_database(backend, folder)
-    await create_version_1_tables(backend, folder)
-    engine = raw_engine(backend, folder)
-
-    async with engine.begin() as connection:
-        for table, row in VERSION_1_ROWS:
-            await connection.execute(
-                text(f"INSERT INTO {table} ({', '.join(row)}) VALUES ({', '.join(f':{column}' for column in row)})"),
-                {column: bound(backend, value) for column, value in row.items()},
-            )
-
-    await engine.dispose()
-    return connector
-
-
-async def current_database(backend: DatabaseBackend, folder: Path) -> DatabaseConnector:
-    """A database startup created, holding one owner's settings row."""
-    connector = await empty_database(backend, folder)
+async def current_database(folder: Path) -> DatabaseConnector:
+    """A database startup created, holding ROWS."""
+    connector = open_database(folder)
     await connector.init_db()
-    await execute(backend, folder, "INSERT INTO technical_settings VALUES ('local', 'trend', 1)")
+    await execute(*ROWS)
     return connector
 
 
-YAHOO_HISTORY = frozenset({"ohlcv_data", "ohlcv_fetches", "ohlcv_windows"})
-"""The Yahoo history and its download records, which version 5 drops; the next start makes ohlcv_data anew."""
+async def older_database(folder: Path, monkeypatch: pytest.MonkeyPatch, step: schema_version.UpgradeStep) -> DatabaseConnector:
+    """A database of the version before the code's, holding ROWS, which `step` alone upgrades to the code's version."""
+    connector = await current_database(folder)
+    await execute(f"UPDATE schema_version SET version = {OLDER}")
+    monkeypatch.setattr(schema_version, "FIRST_SCHEMA_VERSION", OLDER)
+    monkeypatch.setattr(schema_version, "UPGRADES", (step,))
+    return connector
 
 
 def printed_rows(printed: str) -> dict[str, list[str]]:
@@ -125,8 +97,13 @@ def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-async def test_status_of_a_missing_sqlite_file_says_it_is_new_and_creates_no_file(tmp_path: Path, output: io.StringIO) -> None:
-    connector = await empty_database(DatabaseBackend.SQLITE, tmp_path)
+async def settings_rows() -> list[tuple[str, ...]]:
+    """Each owner's settings as (active_strategy_id, owner_id, revision)."""
+    return (await database_snapshot())["technical_settings"][1]
+
+
+async def test_status_of_an_empty_database_says_it_is_new_and_creates_no_table(tmp_path: Path, output: io.StringIO) -> None:
+    connector = open_database(tmp_path)
 
     try:
         assert await commands.status(connector) == 0
@@ -134,17 +111,17 @@ async def test_status_of_a_missing_sqlite_file_says_it_is_new_and_creates_no_fil
         await connector.close()
 
     printed = output.getvalue()
-    assert f"Database:        sqlite {tmp_path / 'stock_agent.db'}" in printed
+    location = f"{ENVIRONMENT['DB_USER']}@{ENVIRONMENT['DB_HOST']}:{ENVIRONMENT['DB_PORT']}/{ENVIRONMENT['DB_NAME']}"
+    assert f"Database:        {location}\n" in printed
     assert f"Schema version:  none (this code needs {SCHEMA_VERSION})" in printed
     assert f"New: the next start creates every table at version {SCHEMA_VERSION}." in printed
-    assert not (tmp_path / "stock_agent.db").exists()
+    assert await database_snapshot() == {}
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
-async def test_status_of_a_version_1_database_names_the_pending_steps_and_counts_every_table(
-    backend: DatabaseBackend, tmp_path: Path, output: io.StringIO
+async def test_status_of_an_older_database_names_the_pending_step_and_counts_every_table(
+    tmp_path: Path, output: io.StringIO, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    connector = await version_1_database(backend, tmp_path)
+    connector = await older_database(tmp_path, monkeypatch, raise_settings_revisions)
 
     try:
         await commands.status(connector)
@@ -152,29 +129,21 @@ async def test_status_of_a_version_1_database_names_the_pending_steps_and_counts
         await connector.close()
 
     printed = output.getvalue()
-    assert f"Schema version:  1 (this code needs {SCHEMA_VERSION})" in printed
-    assert "Pending step:    1 -> 2 record_run_failures\nPending step:    2 -> 3 give_rows_their_owner" in printed
-    assert f"The database is at schema version 1, and this version of stock-agent needs {SCHEMA_VERSION}." in printed
+    assert f"Schema version:  {OLDER} (this code needs {SCHEMA_VERSION})" in printed
+    assert f"Pending step:    {OLDER} -> {SCHEMA_VERSION} raise_settings_revisions\n" in printed
+    assert f"The database is at schema version {OLDER}, and this version of stock-agent needs {SCHEMA_VERSION}." in printed
     assert "Startup never upgrades a database.\nRemedy: run `just db-migrate`. It backs the database up into backups/" in printed
     rows = printed_rows(printed)
-    assert {table: counts for table, counts in rows.items() if counts != ["0"]} == {
-        "ohlcv_data": ["1"],
-        "mock_cash": ["1"],
-        "schema_version": ["1"],
-        "technical_settings": ["1"],
-        "watchlists": ["1"],
-        "workflow_runs": ["1"],
-    }
-    assert len(rows) == 19
+    assert {table: int(counts[0]) for table, counts in rows.items() if counts != ["0"]} == HELD
+    assert rows.keys() == SQLModel.metadata.tables.keys()
     assert "password" not in printed.lower()
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
 async def test_startup_refuses_an_older_database_names_the_migrate_command_and_changes_nothing(
-    backend: DatabaseBackend, tmp_path: Path
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    connector = await version_1_database(backend, tmp_path)
-    before = await database_snapshot(backend, tmp_path)
+    connector = await older_database(tmp_path, monkeypatch, raise_settings_revisions)
+    before = await database_snapshot()
 
     try:
         with pytest.raises(OutdatedDatabaseError) as refused:
@@ -183,75 +152,68 @@ async def test_startup_refuses_an_older_database_names_the_migrate_command_and_c
         await connector.close()
 
     assert str(refused.value) == (
-        f"The database is at schema version 1, and this version of stock-agent needs {SCHEMA_VERSION}. Startup never "
+        f"The database is at schema version {OLDER}, and this version of stock-agent needs {SCHEMA_VERSION}. Startup never "
         "upgrades a database.\nRemedy: run `just db-migrate`. It backs the database up into backups/ first, then upgrades "
         "it in one transaction. `just db-status` shows the steps it runs."
     )
-    assert await database_snapshot(backend, tmp_path) == before
+    assert await database_snapshot() == before
     assert backups(tmp_path) == []
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
-async def test_migrate_backs_up_then_upgrades_version_1_keeping_every_row(
-    backend: DatabaseBackend, tmp_path: Path, output: io.StringIO
+async def test_migrate_backs_up_then_runs_the_pending_step_keeping_every_row(
+    tmp_path: Path, output: io.StringIO, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    connector = await version_1_database(backend, tmp_path)
-    before = await database_snapshot(backend, tmp_path)
+    connector = await older_database(tmp_path, monkeypatch, raise_settings_revisions)
+    before = await database_snapshot()
 
     try:
         assert await commands.migrate(connector) == 0
+        await connector.init_db()
     finally:
         await connector.close()
 
-    after = await database_snapshot(backend, tmp_path)
+    after = await database_snapshot()
     printed = output.getvalue()
     [backup] = backups(tmp_path)
-    assert f"Backed up to {backup}" in printed
-    assert (
-        f"Migrated from version 1 to {SCHEMA_VERSION}:\n  1 -> 2 record_run_failures\n  2 -> 3 give_rows_their_owner\n"
-        "  3 -> 4 add_user_ai_model\n  4 -> 5 add_follows_and_drop_yahoo_history\n  5 -> 6 drop_buzz_strategy\n"
-        "  6 -> 7 drop_order_mode\n  7 -> 8 drop_ranking_records\n  8 -> 9 add_ranking_follow"
-    ) in printed
+    assert f"Backed up to {backup}\n" in printed
+    assert f"Migrated from version {OLDER} to {SCHEMA_VERSION}:\n  {OLDER} -> {SCHEMA_VERSION} raise_settings_revisions\n" in printed
     assert after["schema_version"][1] == [(str(SCHEMA_VERSION),)]
-    kept = before.keys() - YAHOO_HISTORY
-    assert {table: len(rows) for table, (_, rows) in after.items() if table in kept} == {
-        table: len(rows) for table, (_, rows) in before.items() if table in kept
-    }
-    assert {table: counts for table, counts in printed_rows(printed).items() if table in kept} == {
-        table: [str(len(rows)), str(len(rows))] for table, (_, rows) in before.items() if table in kept
-    }
-    assert YAHOO_HISTORY.isdisjoint(after)
-    runs = after["workflow_runs"]
-    assert [row[runs[0].index("failure")] for row in runs[1]] == ["RuntimeError: Yahoo hung"]
+    assert after["technical_settings"][1] == [("trend", "local", "11")]
+    untouched = before.keys() - {"schema_version", "technical_settings"}
+    assert after.keys() == before.keys()
+    assert {table: after[table] for table in untouched} == {table: before[table] for table in untouched}
+    assert printed_rows(printed) == {table: [str(len(rows)), str(len(rows))] for table, (_, rows) in before.items()}
     assert backup.parent == tmp_path / "backups"
-    assert re.fullmatch(r"[a-z_]+\.\d{8}-\d{6}\.v1\.(db|dump)", backup.name)
+    assert backup.name.startswith(f"{ENVIRONMENT['DB_NAME']}.")
+    assert re.fullmatch(rf"\.\d{{8}}-\d{{6}}\.v{OLDER}\.dump", backup.name.removeprefix(ENVIRONMENT["DB_NAME"]))
 
 
-async def test_the_sqlite_backup_is_the_database_before_the_upgrade(tmp_path: Path, output: io.StringIO) -> None:
-    connector = await version_1_database(DatabaseBackend.SQLITE, tmp_path)
-    before = await database_snapshot(DatabaseBackend.SQLITE, tmp_path)
+async def test_the_backup_migrate_made_is_the_database_before_the_upgrade_and_only_its_owner_reads_it(
+    tmp_path: Path, output: io.StringIO, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connector = await older_database(tmp_path, monkeypatch, raise_settings_revisions)
+    before = await database_snapshot()
 
     try:
         await commands.migrate(connector)
+        [backup] = backups(tmp_path)
+        assert await database_snapshot() != before
+        await connector.restore(backup)
     finally:
         await connector.close()
 
-    [backup] = backups(tmp_path)
-    (tmp_path / "copy").mkdir()
-    (tmp_path / "copy" / "stock_agent.db").write_bytes(backup.read_bytes())
-    assert await database_snapshot(DatabaseBackend.SQLITE, tmp_path / "copy") == before
+    assert await database_snapshot() == before
     assert (backup.parent.stat().st_mode & 0o777, backup.stat().st_mode & 0o777) == (0o700, 0o600)
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
 async def test_a_second_migrate_changes_nothing_and_makes_no_backup(
-    backend: DatabaseBackend, tmp_path: Path, output: io.StringIO
+    tmp_path: Path, output: io.StringIO, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    connector = await version_1_database(backend, tmp_path)
+    connector = await older_database(tmp_path, monkeypatch, raise_settings_revisions)
 
     try:
         await commands.migrate(connector)
-        upgraded = await database_snapshot(backend, tmp_path)
+        upgraded = await database_snapshot()
         output.seek(0)
         output.truncate()
         assert await commands.migrate(connector) == 0
@@ -259,34 +221,30 @@ async def test_a_second_migrate_changes_nothing_and_makes_no_backup(
         await connector.close()
 
     assert output.getvalue().strip() == f"Already at version {SCHEMA_VERSION}. Nothing to migrate, and no backup was made."
-    assert await database_snapshot(backend, tmp_path) == upgraded
+    assert await database_snapshot() == upgraded
     assert len(backups(tmp_path)) == 1
 
 
-async def crashes_after_its_first_statement(connection: Any) -> None:
-    """The version 2 to 3 step, stopped right after its first statement as a crash would stop it."""
+async def test_migrate_of_an_empty_database_says_it_is_new_and_makes_no_backup(tmp_path: Path, output: io.StringIO) -> None:
+    connector = open_database(tmp_path)
 
-    class FailsAfterFirstStatement:
-        dialect = connection.dialect
-        statements = 0
+    try:
+        assert await commands.migrate(connector) == 0
+    finally:
+        await connector.close()
 
-        async def execute(self, *args: Any, **kwargs: Any) -> Any:
-            if self.statements == 1:
-                raise RuntimeError("the upgrade stopped after its first statement")
-
-            self.statements += 1
-            return await connection.execute(*args, **kwargs)
-
-    await schema_version.give_rows_their_owner(FailsAfterFirstStatement())
+    assert f"The database is new: the next start creates every table at version {SCHEMA_VERSION}. Nothing to migrate." in (
+        output.getvalue()
+    )
+    assert await database_snapshot() == {}
+    assert backups(tmp_path) == []
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
 async def test_a_failing_step_leaves_the_old_version_and_its_rows_and_names_the_step_and_the_backup(
-    backend: DatabaseBackend, tmp_path: Path, output: io.StringIO, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, output: io.StringIO, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    connector = await version_1_database(backend, tmp_path)
-    before = await database_snapshot(backend, tmp_path)
-    monkeypatch.setattr(schema_version, "UPGRADES", (schema_version.record_run_failures, crashes_after_its_first_statement))
+    connector = await older_database(tmp_path, monkeypatch, stops_after_its_first_statement)
+    before = await database_snapshot()
 
     try:
         with pytest.raises(DatabaseCommandError) as failed:
@@ -296,16 +254,37 @@ async def test_a_failing_step_leaves_the_old_version_and_its_rows_and_names_the_
 
     [backup] = backups(tmp_path)
     message = str(failed.value)
-    assert "The upgrade step 2 -> 3 crashes_after_its_first_statement failed: RuntimeError" in message
-    assert f"still at version 1 with every row it had. Its backup from before the upgrade: {backup}" in message
-    assert await database_snapshot(backend, tmp_path) == before
+    assert f"The upgrade step {OLDER} -> {SCHEMA_VERSION} stops_after_its_first_statement failed: RuntimeError" in message
+    assert f"still at version {OLDER} with every row it had. Its backup from before the upgrade: {backup}" in message
+    assert await database_snapshot() == before
+    assert await settings_rows() == [("trend", "local", "1")]
 
 
-@pytest.mark.parametrize("stamp", [0, SCHEMA_VERSION + 1])
+async def test_an_older_database_whose_table_changed_is_refused_and_the_upgrade_rolls_back(
+    tmp_path: Path, output: io.StringIO, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connector = await older_database(tmp_path, monkeypatch, raise_settings_revisions)
+    await execute("ALTER TABLE mops_quarter_eps ADD COLUMN trading_date DATE")
+    before = await database_snapshot()
+
+    try:
+        with pytest.raises(DatabaseCommandError) as refused:
+            await commands.migrate(connector)
+    finally:
+        await connector.close()
+
+    message = str(refused.value)
+    assert [line.split()[1] for line in message.splitlines() if line.startswith("  - ")] == ["mops_quarter_eps"]
+    assert "columns no longer used: trading_date" in message
+    assert f"The upgrade rolled back: the database is still at version {OLDER}" in message
+    assert await database_snapshot() == before
+
+
+@pytest.mark.parametrize("stamp", [0, FIRST_SCHEMA_VERSION - 1, SCHEMA_VERSION + 1])
 async def test_migrate_refuses_a_version_no_step_reaches_and_makes_no_backup(tmp_path: Path, stamp: int, output: io.StringIO) -> None:
-    connector = await current_database(DatabaseBackend.SQLITE, tmp_path)
-    await execute(DatabaseBackend.SQLITE, tmp_path, f"UPDATE schema_version SET version = {stamp}")
-    before = await database_snapshot(DatabaseBackend.SQLITE, tmp_path)
+    connector = await current_database(tmp_path)
+    await execute(f"UPDATE schema_version SET version = {stamp}")
+    before = await database_snapshot()
 
     try:
         with pytest.raises(OutdatedDatabaseError, match=f"schema version is {stamp}, and this version of stock-agent needs"):
@@ -314,122 +293,122 @@ async def test_migrate_refuses_a_version_no_step_reaches_and_makes_no_backup(tmp
         await connector.close()
 
     assert backups(tmp_path) == []
-    assert await database_snapshot(DatabaseBackend.SQLITE, tmp_path) == before
+    assert await database_snapshot() == before
 
 
-async def test_two_backups_in_one_second_get_two_files(tmp_path: Path, output: io.StringIO) -> None:
-    connector = await current_database(DatabaseBackend.SQLITE, tmp_path)
+class StoppedClock(datetime):
+    """The same second, whenever it is asked."""
+
+    @classmethod
+    def now(cls, tz: tzinfo | None = None) -> StoppedClock:
+        return cls(2026, 11, 3, 6, 0, tzinfo=tz)
+
+
+async def test_two_backups_in_one_second_get_two_files(tmp_path: Path, output: io.StringIO, monkeypatch: pytest.MonkeyPatch) -> None:
+    connector = await current_database(tmp_path)
+    monkeypatch.setattr(db_connector, "datetime", StoppedClock)
 
     try:
         await commands.backup(connector)
         await commands.backup(connector)
+        first, second = backups(tmp_path)
+        await execute("DELETE FROM technical_settings")
+        await connector.restore(second)
     finally:
         await connector.close()
 
-    first, second = backups(tmp_path)
-    assert f"Backed up to {first}" in output.getvalue() and f"Backed up to {second}" in output.getvalue()
-    assert first.read_bytes() == second.read_bytes()
+    assert f"Backed up to {first}\n" in output.getvalue() and f"Backed up to {second}\n" in output.getvalue()
+    assert first.read_bytes().startswith(b"PGDMP") and second.read_bytes().startswith(b"PGDMP")
+    assert await settings_rows() == [("trend", "local", "1")]
 
 
-async def settings_rows(backend: DatabaseBackend, folder: Path) -> list[tuple[str, ...]]:
-    return (await database_snapshot(backend, folder))["technical_settings"][1]
-
-
-@pytest.mark.parametrize("backend", BACKENDS)
-async def test_restore_puts_a_backup_back_after_backing_up_the_current_database(
-    backend: DatabaseBackend, tmp_path: Path, output: io.StringIO
-) -> None:
-    connector = await current_database(backend, tmp_path)
+async def test_restore_puts_a_backup_back_after_backing_up_the_current_database(tmp_path: Path, output: io.StringIO) -> None:
+    connector = await current_database(tmp_path)
 
     try:
         await commands.backup(connector)
         [backup] = backups(tmp_path)
         kept = digest(backup)
         await execute(
-            backend, tmp_path, "UPDATE technical_settings SET revision = 2", "INSERT INTO technical_settings VALUES ('b', 'x', 7)"
+            "UPDATE technical_settings SET revision = 2",
+            "INSERT INTO technical_settings (owner_id, active_strategy_id, revision) VALUES ('b', 'x', 7)",
         )
-        changed = await database_snapshot(backend, tmp_path)
+        changed = await database_snapshot()
         assert await commands.restore(connector, backup, confirmed=True) == 0
+        [current] = [path for path in backups(tmp_path) if path != backup]
+        restored = await settings_rows()
+        await connector.restore(current)
     finally:
         await connector.close()
 
-    [current] = [path for path in backups(tmp_path) if path != backup]
     printed = output.getvalue()
     assert f"Backed the current database up to {current}, then restored {backup}:" in printed
     assert "Current: startup opens it as it is." in printed
     assert printed_rows(printed)["technical_settings"] == ["1"]
-    assert await settings_rows(backend, tmp_path) == [("trend", "local", "1")]
+    assert restored == [("trend", "local", "1")]
     assert digest(backup) == kept
-
-    if backend == DatabaseBackend.SQLITE:
-        (tmp_path / "copy").mkdir()
-        (tmp_path / "copy" / "stock_agent.db").write_bytes(current.read_bytes())
-        assert await database_snapshot(backend, tmp_path / "copy") == changed
+    assert await database_snapshot() == changed
 
 
 async def test_restore_without_yes_changes_nothing(tmp_path: Path, output: io.StringIO) -> None:
-    connector = await current_database(DatabaseBackend.SQLITE, tmp_path)
+    connector = await current_database(tmp_path)
 
     try:
         await commands.backup(connector)
         [backup] = backups(tmp_path)
-        await execute(DatabaseBackend.SQLITE, tmp_path, "UPDATE technical_settings SET revision = 2")
-        before = await database_snapshot(DatabaseBackend.SQLITE, tmp_path)
+        await execute("UPDATE technical_settings SET revision = 2")
+        before = await database_snapshot()
         assert await commands.restore(connector, backup, confirmed=False) == 1
     finally:
         await connector.close()
 
     assert "Run it again with --yes to go ahead. Nothing changed." in output.getvalue()
-    assert await database_snapshot(DatabaseBackend.SQLITE, tmp_path) == before
+    assert await database_snapshot() == before
     assert backups(tmp_path) == [backup]
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
-async def test_restore_refuses_a_file_that_is_not_a_backup_of_the_backend(
-    backend: DatabaseBackend, tmp_path: Path, output: io.StringIO
-) -> None:
-    connector = await current_database(backend, tmp_path)
-    before = await database_snapshot(backend, tmp_path)
-    other = tmp_path / ("stock_agent.v3.db" if backend == DatabaseBackend.POSTGRESQL else "stock_agent.v3.dump")
-    other.write_bytes(b"PGDMP\x01" if backend == DatabaseBackend.SQLITE else b"SQLite format 3\x00")
+async def test_restore_refuses_a_file_pg_dump_did_not_write_and_a_missing_file(tmp_path: Path, output: io.StringIO) -> None:
+    connector = await current_database(tmp_path)
+    before = await database_snapshot()
+    other = tmp_path / "stock_agent.v3.db"
+    other.write_bytes(b"SQLite format 3\x00")
 
     try:
-        with pytest.raises(DatabaseCommandError, match=f"is not a backup of a {backend.value} database. Nothing changed."):
+        with pytest.raises(DatabaseCommandError, match=r"stock_agent\.v3\.db is not a backup that pg_dump wrote\. Nothing changed\."):
             await commands.restore(connector, other, confirmed=True)
 
-        with pytest.raises(DatabaseCommandError, match="There is no file at .*missing.db. Nothing changed."):
-            await commands.restore(connector, tmp_path / "missing.db", confirmed=True)
+        with pytest.raises(DatabaseCommandError, match=r"There is no file at .*missing\.dump\. Nothing changed\."):
+            await commands.restore(connector, tmp_path / "missing.dump", confirmed=True)
     finally:
         await connector.close()
 
     assert backups(tmp_path) == []
-    assert await database_snapshot(backend, tmp_path) == before
+    assert await database_snapshot() == before
 
 
-async def test_restore_brings_back_a_deleted_sqlite_database(tmp_path: Path, output: io.StringIO) -> None:
-    connector = await current_database(DatabaseBackend.SQLITE, tmp_path)
+async def test_restore_into_a_database_without_a_table_makes_no_backup(tmp_path: Path, output: io.StringIO) -> None:
+    connector = await current_database(tmp_path)
 
     try:
         await commands.backup(connector)
         [backup] = backups(tmp_path)
         await connector.close()
-        (tmp_path / "stock_agent.db").unlink()
-        connector = DatabaseConnector(config=database_config(DatabaseBackend.SQLITE, tmp_path), logger=SilentLogger())
+        await execute("DROP SCHEMA public CASCADE", "CREATE SCHEMA public")
+        connector = open_database(tmp_path)
         await commands.restore(connector, backup, confirmed=True)
     finally:
         await connector.close()
 
     assert f"The database had no table, so no backup was made, then restored {backup}:" in output.getvalue()
-    assert await settings_rows(DatabaseBackend.SQLITE, tmp_path) == [("trend", "local", "1")]
+    assert await settings_rows() == [("trend", "local", "1")]
     assert backups(tmp_path) == [backup]
 
 
-@pytest.mark.parametrize("backend", [param for param in BACKENDS if param.id == "postgresql"])
 async def test_a_backup_without_pg_dump_says_how_to_install_it_and_changes_nothing(
-    backend: DatabaseBackend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, output: io.StringIO
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, output: io.StringIO
 ) -> None:
-    connector = await version_1_database(backend, tmp_path)
-    before = await database_snapshot(backend, tmp_path)
+    connector = await older_database(tmp_path, monkeypatch, raise_settings_revisions)
+    before = await database_snapshot()
     monkeypatch.setenv("PATH", str(tmp_path / "no-programs"))
 
     try:
@@ -439,4 +418,4 @@ async def test_a_backup_without_pg_dump_says_how_to_install_it_and_changes_nothi
         await connector.close()
 
     assert backups(tmp_path) == []
-    assert await database_snapshot(backend, tmp_path) == before
+    assert await database_snapshot() == before

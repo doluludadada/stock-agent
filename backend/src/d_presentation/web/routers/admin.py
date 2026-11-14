@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Request, status
 
+from a_domain.model.system.user import GoogleConfirmation
 from a_domain.ports.system.settings_files import SettingField
+from a_domain.types.ids import SessionToken
 from d_presentation.web.schemas import ErrorResponse, ProblemsResponse, SettingsSaveRequest
 from d_presentation.web.session import (
     CurrentUser,
@@ -8,6 +10,7 @@ from d_presentation.web.session import (
     PrivateAccess,
     RequestHold,
     RuntimeSwitchDependency,
+    SessionCookie,
     UserPipeline,
     client_of,
     host_of,
@@ -71,6 +74,7 @@ async def save_settings(
     user: CurrentUser,
     switch: RuntimeSwitchDependency,
     pipeline: UserPipeline,
+    token: SessionCookie,
 ) -> list[SettingField]:
     """
     Writes every change into its settings file in place, every other line, comment and key as it was, opens the app on
@@ -79,12 +83,17 @@ async def save_settings(
     is skipped, and changes that change nothing write nothing. Runs that started earlier finish on the settings they
     started with. The answer is the form after the save.
     """
+    confirmation = (
+        GoogleConfirmation(confirmation_id=body.google_confirmation, session=SessionToken(token))
+        if body.google_confirmation and token
+        else None
+    )
     await switch.save(
         opened,
         user,
         body.changes,
         password=body.password,
-        google_confirmation=body.google_confirmation,
+        google_confirmation=confirmation,
         client=client_of(request),
         host=host_of(request),
     )

@@ -1,9 +1,9 @@
-from collections.abc import Callable
 from datetime import date, datetime
-from typing import Any, ClassVar
+from typing import ClassVar
 
 from pydantic import model_validator
 from sqlalchemy import BigInteger, Executable
+from sqlalchemy.dialects.postgresql import insert
 from sqlmodel import Field, SQLModel
 
 from c_infrastructure.database.utc_datetime import UtcDateTime
@@ -84,7 +84,7 @@ class ListedRevisionDTO(SQLModel, table=True):
     revision: int
 
     @classmethod
-    def raised(cls, upsert: Callable[..., Any]) -> Executable:
-        """The statement that raises the revision by one, from the backend's upsert."""
-        statement = upsert(cls).values(revision=1)
+    def raised(cls) -> Executable:
+        """The statement that raises the revision by one."""
+        statement = insert(cls).values(revision=1)
         return statement.on_conflict_do_update(index_elements=["row"], set_={"revision": statement.table.c.revision + 1})

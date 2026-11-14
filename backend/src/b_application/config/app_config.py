@@ -1,8 +1,7 @@
 from dataclasses import replace
 from pathlib import Path
-from typing import Self
 
-from pydantic import Field, model_validator
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from a_domain.rules.system.registration import RegistrationRule
@@ -25,7 +24,7 @@ from a_domain.rules.trading.ranking import DecisionSessionsRule
 from a_domain.rules.trading.ranking_backtest import RankingBacktestRule, RankingPortfolioRule
 from a_domain.rules.trading.reason import AnalysisSummaryRule, EntryReasonRule, ExitReasonRule
 from a_domain.rules.trading.sizing import BuyCostRule, SizingRule
-from a_domain.types.enums import Audience, DatabaseBackend, SettingGroup, SettingsFile, SystemEnvironment
+from a_domain.types.enums import Audience, SettingGroup, SettingsFile, SystemEnvironment
 from b_application.config.accounts_config import AccountsConfig
 from b_application.config.ai_config import AiConfig, BehaviorConfig, PromptsConfig, SentimentConfig, TavilyConfig
 from b_application.config.api_config import ApiConfig, FeaturesConfig
@@ -46,7 +45,6 @@ from b_application.config.trading_config import (
     MockTradingConfig,
     RankingConfig,
     ShioajiConfig,
-    StrategySearchConfig,
     TechnicalConfig,
     TradingConfig,
     WatchlistConfig,
@@ -56,47 +54,43 @@ from b_application.config.valuation_config import ValuationConfig
 
 class DbConfig(BaseSettings):
     """
-    Where the app keeps its data: the SQL database of accounts, orders, watchlists and technical settings, and the
-    Chroma folder of chat and decision memory. The PostgreSQL credentials come from the environment, the rest from
-    the `db` section of config/appsetting.yaml. Only db.backend chooses the database. Earlier versions switched to
-    PostgreSQL whenever all four credentials were set, so SQLite with all four set is refused as ambiguous.
+    Where the app keeps its data: the PostgreSQL database of accounts, orders, watchlists and technical settings, and
+    the Chroma folder of chat and decision memory. The database's address and credentials come from the environment or
+    .env, never from a settings file, and the app refuses to start while one is missing or blank. `retired` names the
+    setting this section once had and no longer reads (settings_notices).
     """
 
-    model_config = SettingsConfigDict(env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=(".env", "../.env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+        str_strip_whitespace=True,
+        json_schema_extra={"retired": ["backend"]},
+    )
 
-    backend: DatabaseBackend
     chroma_persist_path: str
 
-    user: str | None = Field(default=None, validation_alias="DB_USER")
-    password: str | None = Field(default=None, validation_alias="DB_PASSWORD")
-    host: str | None = Field(default=None, validation_alias="DB_HOST")
+    user: str = Field(min_length=1, validation_alias="DB_USER")
+    password: str = Field(min_length=1, validation_alias="DB_PASSWORD")
+    host: str = Field(min_length=1, validation_alias="DB_HOST")
     port: int = Field(default=5432, validation_alias="DB_PORT")
-    name: str | None = Field(default=None, validation_alias="DB_NAME")
-
-    @model_validator(mode="after")
-    def check_database_selection(self) -> Self:
-        credentials = (self.user, self.password, self.host, self.name)
-        complete = all(value and value.strip() for value in credentials)
-
-        if self.backend == DatabaseBackend.POSTGRESQL and not complete:
-            raise ValueError("db.backend postgresql needs DB_USER, DB_PASSWORD, DB_HOST and DB_NAME; SQLite is not a fallback")
-
-        if self.backend == DatabaseBackend.SQLITE and complete:
-            raise ValueError(
-                "db.backend is sqlite, but DB_USER, DB_PASSWORD, DB_HOST and DB_NAME are all set. Choose the database with "
-                "db.backend: postgresql to use them, or unset them to keep SQLite"
-            )
-
-        return self
+    name: str = Field(min_length=1, validation_alias="DB_NAME")
 
 
 class AppConfig(BaseSettings):
     """
     Application and infrastructure configuration. A section with no default here comes only from config/appsetting.yaml:
     load_settings passes it, and tests read it through tests/support/settings.py.
+    `retired` names the sections the file once had and the app no longer reads (settings_notices).
     """
 
-    model_config = SettingsConfigDict(env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore", frozen=False)
+    model_config = SettingsConfigDict(
+        env_file=(".env", "../.env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+        frozen=False,
+        json_schema_extra={"retired": ["strategy_search"]},
+    )
 
     project_root: Path = Field(exclude=True)
     """Set by load_settings, never by a settings file: `exclude` marks a field the loader sets, and the key check refuses it."""
@@ -133,7 +127,6 @@ class AppConfig(BaseSettings):
     tavily: TavilyConfig = Field(default_factory=TavilyConfig, json_schema_extra={"group": SettingGroup.AI})
     analysis: AnalysisConfig = Field(json_schema_extra={"group": SettingGroup.TRADING_LIMITS})
     technical: TechnicalConfig = Field(json_schema_extra={"group": SettingGroup.TRADING_LIMITS})
-    strategy_search: StrategySearchConfig = Field(json_schema_extra={"group": SettingGroup.ADVANCED, "operator_only": True})
     ranking: RankingConfig = Field(json_schema_extra={"group": SettingGroup.RANKING})
     notifications: NotificationConfig = Field(
         default_factory=NotificationConfig, json_schema_extra={"group": SettingGroup.TRADING_LIMITS}

@@ -55,14 +55,34 @@ def guard_session(session: Session) -> None:
     event.listen(session, "before_flush", check_flush)
 
 
+DATA_EXCEPTION_CLASS = "22"
+"""The SQLSTATE class of a value the database could not take: its message quotes the value, as the driver's own does."""
+
+
 def hide_refused_values(context: ExceptionContext) -> None:
     """
-    Cuts what PostgreSQL adds to a refusal after its message from the error the engine is about to raise: its DETAIL
-    quotes the refused row or key, which may be a person's data, and the engine installs this beside hide_parameters.
+    Cuts the values PostgreSQL and its driver quote in a refusal from the error the engine is about to raise, and from
+    the driver's own error it chains to, which a traceback prints; the engine installs this beside hide_parameters. A
+    refusal's DETAIL quotes the refused row or key, so it is cut. A data exception (SQLSTATE class 22: a value of the
+    wrong type, out of range or too long) quotes the value in its message, so its message is replaced whole. The
+    statement's text stays: a value written into a statement itself, never bound, still shows.
     """
-    for error in (context.original_exception, context.sqlalchemy_exception):
-        if error is not None and error.args:
-            error.args = (str(error.args[0]).partition("\nDETAIL:")[0], *error.args[1:])
+    original = context.original_exception
+    state = str(getattr(original, "sqlstate", ""))
+
+    for error in (original, context.sqlalchemy_exception, original.__cause__):
+        if error is None or not error.args:
+            continue
+
+        message = str(error.args[0]).partition("\nDETAIL:")[0]
+
+        if state.startswith(DATA_EXCEPTION_CLASS):
+            message = f"{type(original.__cause__ or original).__name__}: the database refused a value (SQLSTATE {state})"
+
+        error.args = (message, *error.args[1:])
+
+    if getattr(original.__cause__, "detail", None) is not None:
+        setattr(original.__cause__, "detail", None)  # noqa: B010 asyncpg's error prints its detail from this attribute
 
 
 def scope_statement(state: ORMExecuteState) -> None:

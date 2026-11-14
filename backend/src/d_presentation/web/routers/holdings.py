@@ -70,14 +70,7 @@ async def enter_holding(body: HoldingRequest, pipeline: UserPipeline) -> HeldPos
 
     if position is None:
         raise RequestValidationError(
-            [
-                {
-                    "loc": ("body", "stock_id"),
-                    "msg": f"Not a listed stock: {body.stock_id}",
-                    "type": "unlisted_stock",
-                    "input": body.stock_id,
-                }
-            ]
+            [{"loc": ("body", "stock_id"), "msg": f"Not a listed stock: {body.stock_id}", "type": "unlisted_stock"}]
         )
 
     return HeldPositionResponse.model_validate(position)

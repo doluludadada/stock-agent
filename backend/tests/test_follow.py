@@ -1,5 +1,5 @@
 """
-A follow of a finished Full Cycle into the user's mock account, on a real SQLite journal and mock book: on the personal
+A follow of a finished Full Cycle into the user's mock account, on a real PostgreSQL journal and mock book: on the personal
 site at a fresh realtime quote in continuous trading, on the public site at the official close of the last closed
 session while no session trades. A decision is followed once a follow order of it filled since the account opened; a
 refused or skipped follow leaves it open, and a reset opens every decision again.
@@ -15,6 +15,7 @@ from a_domain.model.system.stats import SystemStats
 from a_domain.model.trading.account import Account, Position
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.signal import TradeSignal
+from a_domain.ports.trading.execution_provider import SendRefusal
 from a_domain.rules.trading.follow import FollowRule, FollowWindowRule, OpenDecisionsRule
 from a_domain.rules.trading.order_rule import BrokerLink
 from a_domain.types.enums import (
@@ -290,7 +291,7 @@ class RealBroker:
     def link(self) -> BrokerLink:
         return BrokerLink(broker=ExecutionProvider.SHIOAJI, up=True, simulation=True)
 
-    async def place_order(self, order: Order) -> Order:
+    async def place_order(self, order: Order, refusal_now: SendRefusal) -> Order:
         self.calls.append("place_order")
         raise AssertionError("a follow sent an order to the real broker")
 

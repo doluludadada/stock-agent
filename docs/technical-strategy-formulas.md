@@ -92,7 +92,7 @@ Settings are rows in five tables, all keyed by owner (`backend/src/c_infrastruct
 | `technical_formula_nodes` | One row per part of a rule's formula: position, parent position, node type, operator, constant, market field, indicator id, output, bars ago. |
 
 Composite foreign keys keep every reference inside one owner and one strategy: a node can only name an indicator of
-its own strategy. SQLite enforces foreign keys because the connector turns them on for each connection. One CHECK
+its own strategy. One CHECK
 constraint gives each rule one root node. A read builds each formula part from its row through the domain classes,
 which validate every column, so a row whose columns do not fit its node type never loads as settings.
 
@@ -120,5 +120,3 @@ takes at setup.
   built-in strategies and the owner's settings, writes ordinary formulas (its quick fills included), describes each
   formula with a sentence generated from it, and saves with the revision it read (see `docs/web-integration.md`).
 - Text formula input. A parser would build the same formula parts; nothing evaluates text.
-- Sign-in and per-account owners. PostgreSQL is wired and selected by `db.backend: postgresql`, but this design has
-  been run on SQLite only.

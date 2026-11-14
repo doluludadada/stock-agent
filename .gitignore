@@ -37,8 +37,6 @@ wheels/
 /backend/chroma_data
 /backend/embedding_models
 /news_archive
-# The strategy searches `just search-strategies` saves (strategy_search.folder)
-/strategy_searches/
 /ai_responses
 /buzz_archive
 /backend/tests/leetcode

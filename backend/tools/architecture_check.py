@@ -96,7 +96,6 @@ FORBIDDEN_LAYER_IMPORTS = {
 DOMAIN_FORBIDDEN_LIBRARIES = frozenset(
     {
         "aiohttp",
-        "aiosqlite",
         "asyncpg",
         "bs4",
         "chromadb",
@@ -173,17 +172,6 @@ PRESENTATION_SETTINGS = {
             "line.channel_secret",
             # The built-in-strategies endpoint lists the strategies that ship in config/strategies.
             "technical.built_in_strategies",
-        }
-    ),
-    # The strategy search command's options default to the search's settings, the strategy an owner starts with and the
-    # scores a run buys and sells at.
-    "d_presentation/cli/strategy_search.py": frozenset(
-        {
-            "strategy_search.population",
-            "strategy_search.generations",
-            "technical.initial_strategy_id",
-            "analysis.min_combined_score_buy",
-            "analysis.max_combined_score_sell",
         }
     ),
     # The menu prints the environment, and before a run on a real broker the server it trades on and the BUY limits the

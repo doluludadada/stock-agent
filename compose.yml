@@ -1,10 +1,16 @@
 # The whole site on one server: `docker compose up -d --build` from the repository root. frontend/docs/deployment.md
 # has the steps. Compose reads STATE_DIR, DB_USER, DB_PASSWORD, DB_NAME, PROXY_BIND, PROXY_PORT, SITE_NAME, APP_UID and
-# APP_GID from .env. Only the proxy publishes a port.
+# APP_GID from .env. Only the proxy publishes a port. Each image names its version, so an update is a change to this file
+# or to a Dockerfile, never what a registry serves that day. No container gains a privilege it did not start with, and
+# each keeps only the capabilities it uses.
 
 services:
   postgres:
-    image: postgres:18
+    image: postgres:18.7
+    # The image's entrypoint starts as root, gives the data folder to the postgres user and drops to it.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    security_opt: ["no-new-privileges:true"]
     environment:
       POSTGRES_USER: ${DB_USER:?Set DB_USER in .env}
       POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
@@ -42,6 +48,8 @@ services:
     build: ./backend
     # The user that owns STATE_DIR on the host, so the app can write its files there.
     user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     env_file: .env
     environment:
       HOST: 0.0.0.0
@@ -73,6 +81,9 @@ services:
 
   proxy:
     build: ./frontend
+    # Not root (frontend/Dockerfile), on a port above 1023, so it needs no capability at all.
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     environment:
       SITE_NAME: ${SITE_NAME:-localhost}
     ports:

@@ -351,7 +351,6 @@ PUBLIC_REQUESTS: dict[tuple[str, str], dict[str, object]] = {
     ("GET", "/v1/market/stocks/{stock_id}"): {"path": {"stock_id": "2330"}},
     ("GET", "/v1/market/stocks/{stock_id}/financials"): {"path": {"stock_id": "2330"}},
     ("GET", "/v1/market/stocks/{stock_id}/analysis"): {"path": {"stock_id": "2330"}},
-    ("GET", "/v1/market/stocks/{stock_id}/news"): {"path": {"stock_id": "2330"}},
     ("GET", "/v1/market/stocks/{stock_id}/brief"): {"path": {"stock_id": "2330"}},
     ("GET", "/v1/market/stocks/{stock_id}/ranking"): {"path": {"stock_id": "2330"}},
     ("GET", "/v1/technical-settings/built-in-strategies"): {},
@@ -388,3 +387,23 @@ async def test_the_line_webhook_needs_no_session_and_no_app_header() -> None:
 
     assert response.status_code in (403, 500)
     assert response.json()["detail"] in ("Invalid signature", "LINE_CHANNEL_SECRET is not set, so LINE calls cannot be verified.")
+
+
+async def test_a_refused_request_says_which_field_and_why_and_repeats_nothing_it_was_sent() -> None:
+    password, setup_code = "carol's long password", "the-setup-code-typed"
+
+    async with serve(build_harness(), authorized=False) as client:
+        answers = [
+            await client.post("/v1/auth/register", json={"username": "carol", "password": password}),
+            await client.post("/v1/auth/register", json={**NEW_USER, "password": password[:7]}),
+            await client.post("/v1/auth/sign-in", json={"identifier": "", "password": password}),
+            await client.post("/v1/auth/setup", json={"username": "c", "password": password, "setup_code": setup_code}),
+        ]
+
+    assert [answer.status_code for answer in answers] == [422] * 4
+    assert all(set(error) == {"type", "loc", "msg"} for answer in answers for error in answer.json()["detail"])
+    assert (answers[0].json()["detail"], answers[0].json()["code"]) == (
+        [{"type": "missing", "loc": ["body", "email"], "msg": "Field required"}],
+        "invalid_request",
+    )
+    assert all(sent not in answer.text for answer in answers for sent in (password, password[:7], setup_code))

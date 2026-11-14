@@ -13,7 +13,7 @@ This project is not financial advice. Treat generated signals as decision suppor
 - API: FastAPI at `backend/main.py` starts Full Cycle and specific-stock analysis (never order), and Buzz, Intraday and a manual BUY of an analysed stock on the account each run chooses; reads runs, signals, orders, the watchlist and the account; serves market data and valuation; reads and saves the owner's technical strategies; and lets an administrator edit the settings files, which the server runs on at once. See [Web API](#web-api).
 - Web UI: `frontend/` (Bun, React, Vite) on the same API through a same-origin `/v1` proxy. See [`docs/web-integration.md`](docs/web-integration.md).
 - Order execution: each user's `MockExecutionProvider` by default. `ShioajiExecutionProvider` (Sinopac) takes the runs an administrator starts on it, see [Real broker (Shioaji)](#real-broker-shioaji). It has not been run against a real Shioaji account.
-- Database: local SQLite at `stock_agent.db` with `db.backend: sqlite`. `db.backend: postgresql` uses the PostgreSQL credentials in `.env` and refuses to start without them.
+- Database: PostgreSQL, named by `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT` and `DB_NAME` in `.env`. The app refuses to start without them. See [Database](#database).
 - Knowledge store: ChromaDB path is configured by `config/appsetting.yaml`.
 
 ## CLI Workflows
@@ -265,10 +265,12 @@ order reaches SinoPac, whatever the environment and whoever the user is. The Web
 `broker=shioaji` (403 `feature_hidden`), the CLI does not offer SinoPac, and `RealBrokerOrdererRule`, which
 `BrokerAccessRule` asks right before each send, rejects the order as `ORDERING_OFF`. So the real account can be connected
 to look at it and to analyse its holdings while the site cannot place an order on it. Turning ordering off also
-stops a run already under way on SinoPac: every other setting of a run stays as it was at its start, but each order asks
-the ordering switch the site holds at the send, so the run's later orders are recorded REJECTED as `ORDERING_OFF`. The
-switch is the process's: a CLI option running in another process reads the saved setting at its next menu choice.
-Turning ordering on is a save in
+stops a run already under way on SinoPac: every other setting of a run stays as it was at its start, but the ordering
+switch is `config/appsetting.yaml` on disk, which each order reads when it is prepared and again right before each
+exchange order it sends, the odd-lot part after the board lots included. So the run's later orders are recorded REJECTED
+as `ORDERING_OFF`, in the Web API and in a CLI running beside it alike, and settings on disk that the app would not load
+let nobody order. A save that turns ordering off writes that one change first, once the administrator confirmed it, so
+ordering is off even when the rest of the save is refused. Turning ordering on is a save in
 the settings page, which asks for the administrator's password or a fresh Google sign-in like every other save.
 
 With ordering on, every run that may order chooses its account when it starts: Buzz, Intraday and a manual BUY order on the user's mock
@@ -278,11 +280,11 @@ each start's confirmation (`?broker=shioaji`), and the CLI asks `Order on` befor
 BUY of menu 4, only where SinoPac is offered. The environment decides which SinoPac server, with which credentials,
 from one table (`SystemEnvironment` in `backend/src/a_domain/types/enums.py`):
 
-| `environment` | SinoPac server and credentials | Database |
-| --- | --- | --- |
-| `dev` (a developer's machine) | simulation, no real money, with `SHIOAJI_API_KEY_TEST` and `SHIOAJI_SECRET_KEY_TEST` only | SQLite or PostgreSQL |
-| `test` (staging before launch) | simulation, no real money, with `SHIOAJI_API_KEY_TEST` and `SHIOAJI_SECRET_KEY_TEST` only | SQLite or PostgreSQL |
-| `prod` (the live service) | production, real money, with `SHIOAJI_API_KEY`, `SHIOAJI_SECRET_KEY`, `SHIOAJI_CA_PATH`, `SHIOAJI_CA_PASSWORD` and `SHIOAJI_PERSON_ID` only | PostgreSQL only |
+| `environment` | SinoPac server and credentials |
+| --- | --- |
+| `dev` (a developer's machine) | simulation, no real money, with `SHIOAJI_API_KEY_TEST` and `SHIOAJI_SECRET_KEY_TEST` only |
+| `test` (staging before launch) | simulation, no real money, with `SHIOAJI_API_KEY_TEST` and `SHIOAJI_SECRET_KEY_TEST` only |
+| `prod` (the live service) | production, real money, with `SHIOAJI_API_KEY`, `SHIOAJI_SECRET_KEY`, `SHIOAJI_CA_PATH`, `SHIOAJI_CA_PASSWORD` and `SHIOAJI_PERSON_ID` only |
 
 A personal site reads its realtime quotes from Shioaji's snapshots, each stamped with the exchange's time of the stock's
 last trade, over one login per process that the SinoPac broker shares. Dev and test log in to the simulation server,
@@ -348,7 +350,20 @@ file; a blank value counts as unset. `environment: prod` requires the variable a
 production app folder may not survive a redeploy, and a key created there would lock every account at the next deploy.
 In Docker Compose the file lives in the state folder (`STATE_DIR`), which outlives the containers.
 
-`db.backend` in `config/appsetting.yaml` chooses the database, never the `DB_*` keys. `postgresql` needs `DB_USER`, `DB_PASSWORD`, `DB_HOST` and `DB_NAME`. `sqlite` keeps the local `stock_agent.db`, and refuses to start while all four are set.
+### Database
+
+PostgreSQL is the only database. The app reads `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT` (5432 when unset) and
+`DB_NAME` from the environment or `.env`, and refuses to start while one of the other four is unset or blank. On a
+developer's machine with PostgreSQL 18 running, create the role and the database once, then put the same five values
+in `.env`:
+
+```bash
+psql -d postgres -c "CREATE ROLE stock_agent LOGIN PASSWORD '<a password of your own>'"
+createdb --owner=stock_agent stock_agent
+```
+
+The first start creates every table. The history a ranking reads is fetched again by `just backfill-history`, and the
+article store by `just backfill-articles`.
 
 ## Development Commands
 
@@ -362,6 +377,15 @@ uv run ruff format --check .
 uv run pytest -q
 uv run python tools/architecture_check.py src --pyright
 ```
+
+The tests run on PostgreSQL at `127.0.0.1:5432` and need no environment variable. Create their role once:
+
+```bash
+psql -d postgres -c "CREATE ROLE stock_agent_test LOGIN CREATEDB PASSWORD 'stock_agent_test'"
+```
+
+Each test session creates its own database, `stock_agent_test_<process id>`, empties it between tests and drops it
+when it ends (`backend/tests/support/databases.py`). The role owns nothing else, so the tests reach no other database.
 
 `tools/architecture_check.py` checks the rules of `docs/clean_architecture_guide.md` (layer direction, one `apply` per domain rule, one `execute` per use case, `@override` on every adapter method, function length and complexity, no hard-coded URLs) and, with `--pyright`, counts pyright errors. It prints a count per rule and must end at `TOTAL 0`.
 
@@ -396,7 +420,7 @@ and the update.
 
 ### Database migrations
 
-The database commands open only the database that `db.backend` selects, so they need no accounts key, AI key or broker. Run them from the repository root with the app stopped:
+The database commands open only the database, so they need no accounts key, AI key or broker. Run them from the repository root with the app stopped:
 
 ```bash
 just db-status                        # where the database is, its schema version and the code's, pending steps, rows per table
@@ -405,7 +429,7 @@ just db-migrate                       # a backup, then the pending upgrade steps
 just db-restore backups/<file> --yes  # a backup of the current database, then the given backup put back
 ```
 
-On PostgreSQL the backups use `pg_dump` and `pg_restore`, which must be on `PATH`. [docs/database-migrations.md](docs/database-migrations.md) covers the commands, backups and restore, and how to write and test an upgrade step.
+The backups use `pg_dump` and `pg_restore`, which must be on `PATH`. [docs/database-migrations.md](docs/database-migrations.md) covers the commands, backups and restore, and how to write and test an upgrade step.
 
 ## Web API
 
@@ -433,7 +457,7 @@ Access: public (sign-in, registration, the first-time setup, the built-in strate
 | `GET /v1/market/audience` | public | The site's audience (`personal` or `public`) and what it allows: `open_data_only`, `realtime_quotes`, `news_articles` and `mops`, from the `Audience` table. The web app shows only what the site can do by it. |
 | `GET /v1/market/attribution` | public | The open data's providers, datasets and license, which a page showing it must credit. |
 | `GET /v1/market/stocks/{id}/analysis` | public | The stock's financial analysis from held data, with no fetch and no AI call: each held month's revenue with its change from a year before and the ranking's acceleration, each held quarter's year-to-date EPS, its own EPS, its change from a year before, its margins and debt ratio, the latest P/E, P/B and dividend yield against each ratio's median over the sessions held, and `readings`, what the figures say by fixed rules. A figure whose history is too short is null and its reading says how much is held. On a personal site the EPS of quarters the archive lacks comes from the MOPS pages it holds, which `just backfill-history` brings back with the monthly revenue. |
-| `GET /v1/market/stocks/{id}/news` | public | What the site's article store keeps of a listed stock, newest first, at most `stock_page.article_store.shown` (50): its material information and the TWSE news naming it, with their text; on a personal site also the cnyes and Yahoo articles and the PTT Stock posts the board's search lists for its code, by title and address only. A request first reads what there is to read now into the store: the archive's items of the last `analysis.material_information_days`, and the sites' and the board's, fetched when a page asks, held for `stock_page.news_freshness_minutes` (30) and fetched once per stock at a time; a source that fails keeps what was held of it. The list therefore also holds what the sources no longer serve. 404 for a code that is not listed. |
+| `GET /v1/market/stocks/{id}/news` | signed in | What the site's article store keeps of a listed stock, newest first, at most `stock_page.article_store.shown` (50): its material information and the TWSE news naming it, with their text; on a personal site also the cnyes and Yahoo articles and the PTT Stock posts the board's search lists for its code, by title and address only. A request first reads what there is to read now into the store: the archive's items of the last `analysis.material_information_days`, and the sites' and the board's, fetched when a page asks, held for `stock_page.news_freshness_minutes` (30) and fetched once per stock at a time; a source that fails keeps what was held of it. The list therefore also holds what the sources no longer serve. 404 for a code that is not listed. |
 | `GET /v1/market/stocks/{id}/ranking` | public | The stock's score: its place among the scored stocks of the monthly ranking at its latest decision session, from the ranking `/v1/rankings/latest` answers with no cut at `ranking.top`, as a percentile from 0 to 100 (100 is the best combined rank), with its two factors, each one's rank, and whether it is in the top `ranking.top`. A stock the ranking leaves out has no score and `exclusion` says why (no history, an ETF, no trade that session, under the price floor, illiquid, a month of revenue not held, a history too short for the high). The score ranks two measured factors and forecasts nothing. 422 `ranking_unavailable` like `/v1/rankings/latest`. |
 | `GET /v1/market/stocks/{id}/financials` | public | The stock's archived quarters (revenue, gross profit, operating income, net income and EPS of the year to the quarter's end; total assets, liabilities and equity; book value per share) and monthly revenue, oldest first. |
 | `GET /v1/market/stocks/{id}/technical` | signed in | The active strategy's evaluation of the stock and each indicator at every bar it read. |
@@ -449,9 +473,9 @@ One workflow runs at a time per server process; a second start answers 409. Run 
 
 ## Data Written Locally
 
-- `stock_agent.db`: SQLite application and mock trading state. The trading record is `workflow_runs`, `trade_signals`, `orders` and `account_snapshots`; the mock broker's book is `mock_cash` and `mock_positions`. Each owner's technical settings are `technical_settings` (selections and revision), `technical_strategies`, `technical_indicators`, `technical_rules` and `technical_formula_nodes` (one row per part of a rule's formula), tied together by foreign keys.
+- The PostgreSQL database: application and mock trading state. The trading record is `workflow_runs`, `trade_signals`, `orders` and `account_snapshots`; the mock broker's book is `mock_cash` and `mock_positions`. Each owner's technical settings are `technical_settings` (selections and revision), `technical_strategies`, `technical_indicators`, `technical_rules` and `technical_formula_nodes` (one row per part of a rule's formula), tied together by foreign keys.
 
-Tables are created with `create_all`, which never changes an existing table. A new database also gets a `schema_version` row, the code's `SCHEMA_VERSION` (`backend/src/c_infrastructure/database/models/schema_version_dto.py`), which says how its rows are stored. Startup never upgrades a database. When the database's schema version is older than the code's, the app stops, changing nothing, and names `just db-migrate`, which backs the database up and then upgrades it in one transaction, keeping every row (see [Database migrations](#database-migrations)). The app also stops when the database is not new and its schema version is missing or one no upgrade reaches, or when an existing table's columns differ from the code. That message names each table to drop. A `stock_agent.db` made before the schema version existed is refused for every table, because several of its tables hold Taiwan wall-clock times that the current code reads as UTC. Delete that file, or drop the tables the message names; the next start recreates them empty. Cached prices and EPS refill themselves, while the mock account, watchlist and trading rows in a dropped table are lost. Such a file's `mock_positions` also hold average costs without the buy fee, and its unused `mock_orders` table can be dropped.
+Tables are created with `create_all`, which never changes an existing table. A new database also gets a `schema_version` row, the code's `SCHEMA_VERSION` (`backend/src/c_infrastructure/database/models/schema_version_dto.py`), which says how its rows are stored. Startup never upgrades a database. When the database's schema version is older than the code's, the app stops, changing nothing, and names `just db-migrate`, which backs the database up and then upgrades it in one transaction, keeping every row (see [Database migrations](#database-migrations)). The app also stops when the database is not new and its schema version is missing or one no upgrade reaches, or when an existing table's columns differ from the code. That message names each table to drop.
 
 The article store is `stored_articles`: what the site read about each stock, once per stock under the article's own key, its source with its address, or with the time it was announced for material information, which has none. A row holds the stock, the source, the title, the address, the time it was published and the text the site may hold: an announcement's and a TWSE news item's on every site, a news site's article's on a personal site only, where it finds the article by meaning and is never shown or sent to an AI, and never a PTT post's, which is kept by title and address. Articles enter when a stock page asks for the stock's news, when the Web API's timer reads the news of every stock a user holds or watches (at most `stock_page.article_store.refresh_stocks`, 200, one stock at a time, at least `stock_page.article_store.refresh_pause_seconds`, 2, apart), and with `just backfill-articles`, which copies what the open-data archive already holds. Saving the same article again changes nothing. An article published more than `stock_page.article_store.retention_days` (730) ago is dropped, and so is a stock's oldest beyond `stock_page.article_store.max_per_stock` (300). Each article has a vector in a Chroma collection of its own, computed on the server by `Xenova/bge-small-zh-v1.5` (ONNX, 23 MB, pinned by `stock_page.article_store.embedding.revision`) from its title and the first `stock_page.article_store.embedded_length` (300) characters of its text; no article is sent anywhere to be embedded, and an unchanged article is never embedded again. A stock's vectors are brought up to date by the timer, by the backfill and before its AI brief is written, never by a page view. The brief searches them by stock, days and meaning with the three queries of `config/instructions.yaml` (`stock_brief_rise_query`, `stock_brief_fall_query`, `stock_brief_company_query`): the window's articles, those of the `stock_page.brief.lead_days` (30) before it, and those that say what the company makes and sells over `stock_page.brief.company_days` (730). While the searches find nothing, the brief reads the window's newest articles as before. A deployment whose `instructions.yaml` predates the three queries runs without them until they are copied in.
 

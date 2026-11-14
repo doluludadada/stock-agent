@@ -15,7 +15,7 @@ from support.settings import environment_setup, shipped_config
 from trading_stack import SilentLogger
 
 from a_domain.rules.trading.order_rule import BrokerLink
-from a_domain.types.enums import DatabaseBackend, ExecutionProvider, ShioajiCredential, SystemEnvironment
+from a_domain.types.enums import ExecutionProvider, ShioajiCredential, SystemEnvironment
 from b_application.config.app_config import AppConfig
 from b_application.config.market_data_config import MarketHoursConfig
 from b_application.config.settings_loader import validate_trading_environment
@@ -145,14 +145,6 @@ async def test_prod_never_logs_in_to_simulation_and_activates_its_certificate(mo
     assert client.ca_activations == [
         {"ca_path": "SHIOAJI_CA_PATH", "ca_passwd": "SHIOAJI_CA_PASSWORD", "person_id": "SHIOAJI_PERSON_ID"}
     ]
-
-
-async def test_prod_refuses_sqlite() -> None:
-    config = trading_config(PROD).model_copy(update={"db": shipped_config().db})
-
-    assert config.db.backend == DatabaseBackend.SQLITE
-    with pytest.raises(TradingSetupError, match="environment prod needs db.backend postgresql, not sqlite"):
-        validate_trading_environment(config)
 
 
 async def test_no_setting_or_variable_chooses_simulation_only_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:

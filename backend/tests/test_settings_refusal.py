@@ -26,8 +26,8 @@ CONFIG = ROOT / "config"
 SECRET = "Kq7x9"
 """Short enough that pydantic's shortened input value shows all of it."""
 
-CREDENTIALS = {"DB_USER": SECRET, "DB_PASSWORD": SECRET, "DB_HOST": "db.example", "DB_NAME": "stock_agent"}
-"""Every PostgreSQL credential set while db.backend is sqlite, which the database selection refuses."""
+CREDENTIALS = {"DB_USER": SECRET, "DB_PASSWORD": SECRET, "DB_HOST": "db.example", "DB_NAME": "stock_agent", "DB_PORT": SECRET}
+"""The database's settings with a port that is no number, which the settings refuse: pydantic's text would show it."""
 
 SERVE = "import uvicorn, main; uvicorn.run(main.app, host='127.0.0.1', port=0)"
 
@@ -46,7 +46,7 @@ def away_from_the_repository_env(folder: Path) -> Path:
 @pytest.mark.parametrize(
     ("environment", "appsetting", "location", "words"),
     [
-        pytest.param(CREDENTIALS, None, "db", "Choose the database with db.backend", id="database-selection"),
+        pytest.param(CREDENTIALS, None, "db.DB_PORT", "Input should be a valid integer", id="database-port"),
         pytest.param(
             {"OPENAI_API_KEY": SECRET},
             without_connection_timeout(),
@@ -68,6 +68,29 @@ def test_settings_that_do_not_validate_name_each_problem_and_never_a_value_from_
 
     assert f"{location}: " in str(refused.value) and words in str(refused.value)
     assert SECRET not in "".join(traceback.format_exception(refused.value))
+
+
+@pytest.mark.parametrize("variable", ["DB_USER", "DB_PASSWORD", "DB_HOST", "DB_NAME"])
+@pytest.mark.parametrize(("value", "words"), [(None, "Field required"), ("  ", "at least 1 character")], ids=["unset", "blank"])
+def test_the_settings_refuse_to_load_while_one_of_the_databases_variables_is_unset_or_blank(
+    variable: str, value: str | None, words: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(away_from_the_repository_env(tmp_path))
+    monkeypatch.delenv("DB_PORT")
+    complete = load_settings(tmp_path).db
+    named = (os.environ["DB_USER"], os.environ["DB_HOST"], os.environ["DB_NAME"])
+
+    if value is None:
+        monkeypatch.delenv(variable)
+    else:
+        monkeypatch.setenv(variable, value)
+
+    with pytest.raises(InvalidSettingsError) as refused:
+        load_settings(tmp_path)
+
+    [problem] = refused.value.problems
+    assert problem.path == f"db.{variable}" and words in problem.message
+    assert (complete.user, complete.host, complete.name, complete.port) == (*named, 5432)
 
 
 def test_a_candidate_is_validated_by_itself_not_by_the_file_on_disk() -> None:
@@ -96,7 +119,7 @@ async def test_the_cli_and_the_served_api_print_invalid_settings_alone_and_exit_
     printed = (stdout + stderr).decode()
 
     assert process.returncode == 1
-    assert "db.backend is sqlite" in printed
+    assert "db.DB_PORT: Input should be a valid" in printed
     assert "Traceback" not in printed and SECRET not in printed
 
 
@@ -224,11 +247,13 @@ def test_an_unsafe_trading_setup_is_located_at_the_setting_it_names(tmp_path: Pa
     text = SHIPPED[SettingsFile.APPSETTING].replace("environment: dev", "environment: prod", 1)
     files = SettingsFiles(project_root=tmp_path, max_bytes=262_144, backups_kept=3, logger=SilentLogger())
 
-    problems = files.check({SettingsFile.APPSETTING: text}, SystemEnvironment.PROD, Audience.PERSONAL, "127.0.0.1")
-    [problem] = [problem for problem in problems if problem.path == "db.backend"]
+    problems = files.check({SettingsFile.APPSETTING: text}, SystemEnvironment.DEV, Audience.PERSONAL, "127.0.0.1")
+    [problem] = [problem for problem in problems if problem.path == "environment"]
 
-    assert (problem.path, problem.line) == ("db.backend", at(text, "backend: sqlite")[0])
-    assert problem.message == "environment prod needs db.backend postgresql, not sqlite"
+    assert (problem.path, problem.line) == ("environment", at(text, "environment: prod")[0])
+    assert problem.message == (
+        "environment is prod in the settings, but this process started as dev: the environment changes only when the app restarts"
+    )
 
 
 def test_a_missing_ai_key_is_a_located_refusal_at_the_first_start(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -364,9 +389,8 @@ def test_a_personal_site_may_search_the_web_and_x(tmp_path: Path, monkeypatch: p
 
 
 def prod_settings(registration_open: str) -> str:
-    """The shipped settings in prod on PostgreSQL, with accounts.registration_open as given."""
+    """The shipped settings in prod, with accounts.registration_open as given."""
     text = SHIPPED[SettingsFile.APPSETTING].replace("environment: dev", "environment: prod", 1)
-    text = text.replace("\n  backend: sqlite", "\n  backend: postgresql", 1)
     return text.replace("registration_open: false", f"registration_open: {registration_open}", 1)
 
 
@@ -378,8 +402,6 @@ def test_registration_ships_closed_and_prod_refuses_to_start_with_it_open_naming
     open_in_dev = SHIPPED[SettingsFile.APPSETTING].replace("registration_open: false", "registration_open: true", 1)
     shipped, dev = startup_settings(project), startup_settings(project, {SettingsFile.APPSETTING: open_in_dev})
 
-    for name in ("DB_USER", "DB_PASSWORD", "DB_HOST", "DB_NAME"):
-        monkeypatch.setenv(name, "placeholder")
     monkeypatch.setenv("ACCOUNTS_KEY", "A" * 43)
 
     with pytest.raises(InvalidSettingsError) as refused:

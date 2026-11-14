@@ -26,7 +26,8 @@ class ExchangeDailyReports(IDailyHistorySource):
     and the index's change. TWSE's TWT49U and TPEX's exDailyQ (sources.exchange.ex_right_references) list the ex-right
     and ex-dividend references of a range of dates, in ROC dates; TWSE's mark the year, the month and the day with a
     character each. A date without a session, or a range without an ex-day, answers no rows: TWSE says so in `stat`,
-    TPEX serves an empty table. An answer of another date than the one asked counts as none.
+    TPEX serves an empty table. An answer of another date than the one asked counts as none. TWSE also refuses a range
+    in `stat`, without a table: any answer of the ex-right references that has no table and is not its `empty_stat` raises.
 
     TWSE refuses an address for minutes after more than about 3 requests in 5 seconds. So a request to one site waits
     until market_data.history_request_interval_seconds after the request to it before, whichever runtime made that one:
@@ -88,7 +89,7 @@ class ExchangeDailyReports(IDailyHistorySource):
         report = self._ex_right_feed.reports[market]
         answer = await self.get(market, report.url.format(first=first, last=last))
 
-        if not answer.get("data") and not answer.get("tables"):
+        if report.empty_stat is not None and answer.get("stat") == report.empty_stat:
             return {}
 
         references: dict[tuple[str, date], float] = {}

@@ -233,8 +233,9 @@ async def test_twses_ex_right_references_of_a_range_are_each_four_digit_stocks_r
 
 
 async def test_a_range_without_an_ex_right_day_has_no_reference(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TWSE's answer for 2027-01-01 to 2027-01-05, read on 2026-11-14."""
     real_client = httpx.AsyncClient
-    empty = {"stat": "no data", "data": []}
+    empty = {"stat": "很抱歉，沒有符合條件的資料!"}
     monkeypatch.setattr(
         httpx,
         "AsyncClient",
@@ -242,6 +243,23 @@ async def test_a_range_without_an_ex_right_day_has_no_reference(monkeypatch: pyt
     )
 
     assert await reports().ex_right_references(MarketType.TWSE, date(2025, 1, 1), date(2025, 1, 5)) == {}
+
+
+@pytest.mark.parametrize("market", list(MarketType))
+async def test_a_range_an_exchange_refuses_in_json_is_not_read_as_one_without_an_ex_right_day(
+    monkeypatch: pytest.MonkeyPatch, market: MarketType
+) -> None:
+    """TWSE's answer to a range it refuses, read on 2026-11-14: a `stat` alone, as for a range without an ex-day."""
+    real_client = httpx.AsyncClient
+    refusal = {"stat": "開始日期大於結束日期，請重新查詢!"}
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kwargs: real_client(transport=httpx.MockTransport(lambda request: httpx.Response(200, json=refusal))),
+    )
+
+    with pytest.raises(ValueError, match="開始日期大於結束日期"):
+        await reports().ex_right_references(market, date(2025, 1, 1), date(2025, 1, 5))
 
 
 async def test_tpexs_ex_right_references_of_a_range_are_each_four_digit_stocks_reference_price_by_day(

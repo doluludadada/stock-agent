@@ -84,6 +84,7 @@ class CnyesNewsProvider(INewsSource):
             return []
 
         articles: list[Article] = []
+        now = datetime.now(UTC)
 
         for item in items:
             raw_content = str(item.get("content", ""))
@@ -98,8 +99,8 @@ class CnyesNewsProvider(INewsSource):
                     content=text or str(item.get("summary", "")).strip(),
                     url=f"{self._article_url}{item.get('newsId', '')}",
                     content_type=ContentType.REPORT,
-                    published_at=datetime.fromtimestamp(publish_at, tz=UTC) if publish_at else datetime.now(UTC),
-                    fetched_at=datetime.now(UTC),
+                    published_at=datetime.fromtimestamp(publish_at, tz=UTC) if publish_at else now,
+                    fetched_at=now,
                 )
             )
 

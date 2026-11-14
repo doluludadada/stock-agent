@@ -849,7 +849,8 @@ class SettingsSaveRequest(Confirmed):
     """
     For an administrator without a password (`has_password` false): the id the web app made for this save and sent to
     GET /v1/auth/google/start?confirmation=, once the fresh Google authentication it started came back. It confirms one
-    save. Without it, or with one used or expired, 403 `google_confirmation_required`.
+    save, from the session that started it. Without it, or with one used, expired or started from another session,
+    403 `google_confirmation_required`.
     """
 
 

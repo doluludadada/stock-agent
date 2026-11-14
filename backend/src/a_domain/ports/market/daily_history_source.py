@@ -30,7 +30,8 @@ class IDailyHistorySource(Protocol):
         """
         The exchange's reference price of each of its stocks with a four-digit code on each of its ex-right or
         ex-dividend days from first to last, by stock id and day, in one request: the price its closing quotes compare
-        to no reference that day. A range without such a day has none.
+        to no reference that day. A range without such a day has none. An answer that is neither the exchange's table
+        nor its word that the range has no such day raises: the range was not read.
         """
         ...
 

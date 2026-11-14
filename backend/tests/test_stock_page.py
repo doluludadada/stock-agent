@@ -11,9 +11,9 @@ from pathlib import Path
 import httpx
 import pytest
 from support.fakes import FakeNewsProvider, FakeSocialMediaProvider
-from support.harness import MARKET_OPEN, build_harness, harness_config, rising_history
+from support.harness import MARKET_OPEN, MEMBER, MEMBER_PASSWORD, build_harness, harness_config, rising_history
 from support.settings import shipped_config
-from support.web import serve
+from support.web import app_of, client_at, serve, sign_in
 from test_ranking import bars, market
 from test_ranking_rule import revenue
 from trading_stack import MovableClock, SilentLogger, StockDirectory
@@ -123,6 +123,43 @@ async def test_only_the_stocks_asked_most_recently_stay_held() -> None:
     assert news.requested == ["2330", "2317", "2454", "2330"]
 
 
+async def test_stocks_asked_together_reach_the_sites_one_stock_at_a_time() -> None:
+    news, asking, most = FakeNewsProvider(), 0, 0
+    answer = news.fetch_news
+
+    async def answer_after_a_moment(stock_id: str, limit: int = 10) -> list[Article]:
+        nonlocal asking, most
+        asking += 1
+        most = max(most, asking)
+        await asyncio.sleep(0)
+        asking -= 1
+        return await answer(stock_id, limit)
+
+    news.fetch_news = answer_after_a_moment
+    feed = HeldStockFeed(news, None, MovableClock(MARKET_OPEN), FRESHNESS, 10, timedelta(0), SilentLogger())
+
+    await asyncio.gather(*(feed.fetch(stock_id, 10) for stock_id in ("2330", "2317", "2454", "2603")))
+
+    assert (most, sorted(news.requested)) == (1, ["2317", "2330", "2454", "2603"])
+
+
+async def test_a_visitor_is_refused_a_stocks_news_before_any_site_is_asked_and_a_signed_in_user_reads_it() -> None:
+    harness = build_harness()
+    harness.users.add(MEMBER, MEMBER_PASSWORD)
+    harness.list_stock("2330", rising_history(100.0))
+    harness.news.articles["2330"] = [article("cnyes says", InformationSource.NEWS_MEDIA, MARKET_OPEN, "https://news.example/a")]
+
+    async with app_of(harness) as app, client_at(app) as visitor, client_at(app) as member:
+        refused = await visitor.get("/v1/market/stocks/2330/news")
+        asked_for_the_visitor = list(harness.news.requested)
+        await sign_in(member, MEMBER.username, MEMBER_PASSWORD)
+        read = await member.get("/v1/market/stocks/2330/news")
+
+    assert (refused.status_code, refused.json()["code"], asked_for_the_visitor) == (401, "sign_in_required", [])
+    assert (read.status_code, [item["title"] for item in read.json()["items"]]) == (200, ["cnyes says"])
+    assert harness.news.requested == ["2330"]
+
+
 async def test_a_personal_stock_page_serves_announcements_news_and_posts_newest_first_with_only_open_text() -> None:
     harness = build_harness()
     harness.list_stock("2330", rising_history(100.0))
@@ -135,7 +172,7 @@ async def test_a_personal_stock_page_serves_announcements_news_and_posts_newest_
         article("[標的] 2330", InformationSource.PTT_STOCK, MARKET_OPEN - timedelta(days=1), "https://ptt.example/1")
     ]
 
-    async with serve(harness, authorized=False) as client:
+    async with serve(harness) as client:
         answer = await client.get("/v1/market/stocks/2330/news")
         await client.get("/v1/market/stocks/2330/news")
 
@@ -157,7 +194,7 @@ async def test_an_article_stamped_with_its_fetch_time_for_want_of_a_publication_
     undated = replace(article("an ad", InformationSource.NEWS_MEDIA, MARKET_OPEN, "https://news.example/ad"), fetched_at=MARKET_OPEN)
     harness.news.articles["2330"] = [undated, article("dated", InformationSource.NEWS_MEDIA, MARKET_OPEN, "https://news.example/a")]
 
-    async with serve(harness, authorized=False) as client:
+    async with serve(harness) as client:
         answer = await client.get("/v1/market/stocks/2330/news")
 
     assert [item["title"] for item in answer.json()["items"]] == ["dated"]
@@ -170,7 +207,7 @@ async def test_a_public_stock_page_serves_the_archive_alone_and_reaches_no_news_
     harness.archive.announcements[("2330", announced.published_at)] = announced
     harness.news.articles["2330"] = [article("cnyes says", InformationSource.NEWS_MEDIA, MARKET_OPEN, "https://news.example/a")]
 
-    async with serve(harness, authorized=False) as client:
+    async with serve(harness) as client:
         answer = await client.get("/v1/market/stocks/2330/news")
 
     assert [item["source"] for item in answer.json()["items"]] == ["twse_mops"]
@@ -181,7 +218,7 @@ async def test_a_code_that_is_not_listed_is_refused_before_any_site_is_asked() -
     harness = build_harness()
     harness.list_stock("2330", rising_history(100.0))
 
-    async with serve(harness, authorized=False) as client:
+    async with serve(harness) as client:
         answer = await client.get("/v1/market/stocks/9999/news")
 
     assert answer.status_code == 404

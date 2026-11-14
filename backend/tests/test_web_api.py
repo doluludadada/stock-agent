@@ -18,7 +18,7 @@ from support.harness import (
     open_harness_switch,
     rising_history,
 )
-from support.settings import shipped_config
+from support.settings import environment_setup, shipped_config
 from support.web import ended, hold_stock_list, run_to_end, serve, write
 
 from a_domain.model.market.ohlcv import Ohlcv
@@ -778,12 +778,12 @@ async def test_a_settings_read_that_a_save_interrupts_answers_409_and_the_next_r
 
 
 async def test_the_api_refuses_to_start_on_the_trading_setups_the_cli_refuses(monkeypatch) -> None:
-    unsafe = shipped_config()
-    unsafe.environment = SystemEnvironment.PROD
+    production = environment_setup(shipped_config(), SystemEnvironment.PROD)
+    unsafe = production.model_copy(update={"environment": SystemEnvironment.DEV})
     monkeypatch.setattr(settings_loader, "load_settings", lambda project_root, texts: unsafe)
     app = create_app(open_runtime_switch)
 
-    with pytest.raises(InvalidSettingsError, match="db.backend: environment prod needs db.backend postgresql, not sqlite"):
+    with pytest.raises(InvalidSettingsError, match="environment: environment dev refuses to start while SHIOAJI_"):
         async with app.router.lifespan_context(app):
             pass
 
@@ -801,7 +801,7 @@ from d_presentation.dependencies import TradingSetupError
 
 @asynccontextmanager
 async def refuse():
-    raise {"outdated": OutdatedDatabaseError, "setup": TradingSetupError}[sys.argv[1]]("Remedy: delete stock_agent.db")
+    raise {"outdated": OutdatedDatabaseError, "setup": TradingSetupError}[sys.argv[1]]("Remedy: run `just db-migrate`")
     yield
 
 
@@ -827,7 +827,7 @@ async def test_the_served_api_prints_a_refused_start_alone_and_exits_1(refusal: 
     stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=120)
 
     assert process.returncode == 1
-    assert "Remedy: delete stock_agent.db" in stderr.decode()
+    assert "Remedy: run `just db-migrate`" in stderr.decode()
     assert "Traceback" not in (stdout + stderr).decode()
 
 

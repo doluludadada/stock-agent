@@ -23,7 +23,7 @@ CHILD_TABLES = (TechnicalFormulaNodeDTO, TechnicalRuleDTO, TechnicalIndicatorDTO
 
 class SqlTechnicalSettingsRepository(ITechnicalSettingsRepository):
     """
-    One owner's technical settings in ordinary SQL tables, on SQLite or PostgreSQL, through a connector bound to that
+    One owner's technical settings in ordinary SQL tables, through a connector bound to that
     owner. A save replaces the owner's rows in the same transaction that checks and raises the revision.
     """
 

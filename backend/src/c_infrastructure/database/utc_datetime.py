@@ -8,7 +8,7 @@ from sqlalchemy.types import TypeDecorator
 class UtcDateTime(TypeDecorator[datetime]):
     """
     The column type of every datetime the database holds, and the only place a datetime crosses into or out of it.
-    SQLite keeps no zone, so a value is stored as UTC wall-clock time and loaded as an aware UTC datetime. A naive
+    The column keeps no zone, so a value is stored as UTC wall-clock time and loaded as an aware UTC datetime. A naive
     value is refused: nothing could tell which zone it meant.
     """
 

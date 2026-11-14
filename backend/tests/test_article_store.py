@@ -321,7 +321,7 @@ async def test_the_stock_page_lists_what_the_store_keeps_after_the_sites_stopped
     later = article("later headline", InformationSource.NEWS_MEDIA, MARKET_OPEN - timedelta(hours=1), "https://news.example/b")
     harness.news.articles["2330"] = [earlier]
 
-    async with serve(harness, authorized=False) as client:
+    async with serve(harness) as client:
         first = await client.get("/v1/market/stocks/2330/news")
         harness.clock.current_time += timedelta(hours=1)
         harness.news.articles["2330"] = [later]

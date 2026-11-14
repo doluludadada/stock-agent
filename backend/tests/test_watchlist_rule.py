@@ -41,7 +41,7 @@ class SettableClock(TaiwanMarketClock):
 
 
 class Watchlist:
-    """The real WatchStocks use case and SQLite repository, driven by a clock the test moves."""
+    """The real WatchStocks use case and SQL repository, driven by a clock the test moves."""
 
     def __init__(self, db: DatabaseConnector, automatic_expiry_sessions: int = 1) -> None:
         self.clock = SettableClock()

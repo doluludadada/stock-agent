@@ -227,6 +227,8 @@ class ExRightReferenceReport(BaseModel):
     date: str
     stock_id: str
     reference: str
+    empty_stat: str | None = None
+    """The `stat` of its answer to a range without an ex-day, where that answer has no table. None where it serves an empty table."""
 
 
 class ExRightReferenceFeed(BaseModel):

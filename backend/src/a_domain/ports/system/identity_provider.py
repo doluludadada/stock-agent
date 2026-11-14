@@ -3,14 +3,16 @@ from typing import Protocol
 
 from pydantic import SecretStr
 
-from a_domain.model.system.user import SignInFlow
+from a_domain.model.system.user import GoogleConfirmation, SignInFlow
 from a_domain.rules.system.google_sign_in import IdTokenClaims
 
 
 class IIdentityProvider(Protocol):
     """An OpenID Connect provider the app is a confidential client of, by the authorization code flow with PKCE."""
 
-    def start(self, redirect_uri: str, confirmation: str | None, now: datetime, expires_at: datetime) -> tuple[SignInFlow, str]:
+    def start(
+        self, redirect_uri: str, confirmation: GoogleConfirmation | None, now: datetime, expires_at: datetime
+    ) -> tuple[SignInFlow, str]:
         """
         A new flow with fresh random values, started `now` and good until `expires_at`, and the provider's address the
         browser goes to for it. A flow with a `confirmation` asks the provider to authenticate the person again and to

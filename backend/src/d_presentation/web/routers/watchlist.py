@@ -37,12 +37,7 @@ async def add_to_manual_watchlist(body: StockIdsRequest, pipeline: UserPipeline)
         listed = {stock.stock_id for stock in stocks}
         raise RequestValidationError(
             [
-                {
-                    "loc": ("body", "stock_ids", index),
-                    "msg": f"Not a listed stock: {stock_id}",
-                    "type": "unlisted_stock",
-                    "input": stock_id,
-                }
+                {"loc": ("body", "stock_ids", index), "msg": f"Not a listed stock: {stock_id}", "type": "unlisted_stock"}
                 for index, stock_id in enumerate(body.stock_ids)
                 if stock_id not in listed
             ]

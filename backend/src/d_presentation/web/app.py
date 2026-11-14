@@ -8,7 +8,6 @@ from dataclasses import asdict
 from typing import Any
 
 from fastapi import FastAPI, Request, Response, status
-from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -96,9 +95,9 @@ of them is decided on its technical score alone, and every valuation endpoint an
 /v1/market/archive-status` says how many sessions the archive holds and how many the built-in strategies need, `GET
 /v1/market/stocks/{stock_id}/financials` answers a stock's archived quarters and monthly revenue, `GET
 /v1/market/stocks/{stock_id}/analysis` reads them, the held EPS filings and the archived valuation ratios into a
-financial analysis by fixed rules with no AI call, `GET /v1/market/stocks/{stock_id}/news` answers what the site's
-article store keeps of the stock, its announcements and exchange news and, on a personal site, its news articles and
-board posts by title and address, `GET
+financial analysis by fixed rules with no AI call, `GET /v1/market/stocks/{stock_id}/news` answers a signed-in user
+what the site's article store keeps of the stock, its announcements and exchange news and, on a personal site, its news
+articles and board posts by title and address, `GET
 /v1/market/stocks/{stock_id}/ranking` answers its score, its place in the monthly ranking as a percentile with its two
 factors, or why the ranking leaves it out, `GET /v1/market/stocks/{stock_id}/brief` answers the AI brief the site holds
 of the stock (what the company is, and how the held facts of a recent window relate to its move, each sentence citing
@@ -247,8 +246,12 @@ async def answer_http_error(request: Request, error: StarletteHTTPException) -> 
 
 
 async def answer_invalid_request(request: Request, error: RequestValidationError) -> JSONResponse:
-    """A body, path or query that does not validate: FastAPI's list of the fields and why, as `detail`, with a code."""
-    content = {"detail": jsonable_encoder(error.errors()), "code": ErrorCode.INVALID_REQUEST}
+    """
+    A body, path or query that does not validate: each refused field's place, the kind of refusal and why, as `detail`,
+    with a code. Never what was sent: FastAPI's own list repeats the input, which can be a password.
+    """
+    detail = [{"type": problem["type"], "loc": problem["loc"], "msg": problem["msg"]} for problem in error.errors()]
+    content = {"detail": detail, "code": ErrorCode.INVALID_REQUEST}
     return JSONResponse(content, status_code=status.HTTP_422_UNPROCESSABLE_CONTENT)
 
 

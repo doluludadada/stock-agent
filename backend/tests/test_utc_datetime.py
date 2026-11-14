@@ -1,18 +1,17 @@
-"""UtcDateTime against a real SQLite file: the one place a datetime crosses into or out of the database."""
+"""UtcDateTime against a real PostgreSQL database: the one place a datetime crosses into or out of the database."""
 
 import importlib
 import pkgutil
-import sqlite3
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import DateTime
+from sqlalchemy import DateTime, text
 from sqlalchemy.exc import StatementError
 from sqlmodel import SQLModel
-from support.settings import shipped_config
+from support.databases import open_database, raw_engine
 from trading_stack import MONDAY_10_00, MovableClock, SilentLogger
 
 import c_infrastructure.database.models
@@ -28,18 +27,24 @@ pytestmark = pytest.mark.asyncio
 
 @pytest_asyncio.fixture
 async def db(tmp_path: Path) -> AsyncIterator[DatabaseConnector]:
-    connector = DatabaseConnector(config=shipped_config(tmp_path), logger=SilentLogger())
+    connector = open_database(tmp_path)
     await connector.init_db()
     yield connector
     await connector.close()
 
 
-def stored_watchlist(tmp_path: Path) -> list[tuple[str, str]]:
-    with sqlite3.connect(tmp_path / "stock_agent.db") as connection:
-        return connection.execute("SELECT created_at, expires_at FROM watchlists").fetchall()
+async def stored_watchlist() -> list[tuple[datetime, datetime | None]]:
+    """The times as the database holds them: without a time zone."""
+    engine = raw_engine()
+
+    async with engine.connect() as connection:
+        rows = (await connection.execute(text("SELECT created_at, expires_at FROM watchlists"))).all()
+
+    await engine.dispose()
+    return [tuple(row) for row in rows]
 
 
-async def test_a_taiwan_time_is_stored_as_utc_and_reads_back_as_the_same_aware_instant(db: DatabaseConnector, tmp_path: Path) -> None:
+async def test_a_taiwan_time_is_stored_as_utc_and_reads_back_as_the_same_aware_instant(db: DatabaseConnector) -> None:
     repository = WatchlistRepository(db.for_owner(LEGACY_OWNER_ID), SilentLogger(), MovableClock(MONDAY_10_00))
     entry = WatchlistEntry(
         stock_id="2330", watchlist_type=WatchlistType.TECHNICAL, created_at=MONDAY_10_00, expires_at=MONDAY_10_00 + timedelta(hours=8)
@@ -50,10 +55,10 @@ async def test_a_taiwan_time_is_stored_as_utc_and_reads_back_as_the_same_aware_i
 
     assert (loaded.created_at, loaded.expires_at) == (entry.created_at, entry.expires_at)
     assert (loaded.created_at.utcoffset(), loaded.expires_at and loaded.expires_at.utcoffset()) == (timedelta(0), timedelta(0))
-    assert stored_watchlist(tmp_path) == [("2026-10-19 02:00:00.000000", "2026-10-19 10:00:00.000000")]
+    assert await stored_watchlist() == [(datetime(2026, 10, 19, 2, 0), datetime(2026, 10, 19, 10, 0))]
 
 
-async def test_a_naive_time_is_refused_and_nothing_is_stored(db: DatabaseConnector, tmp_path: Path) -> None:
+async def test_a_naive_time_is_refused_and_nothing_is_stored(db: DatabaseConnector) -> None:
     repository = WatchlistRepository(db.for_owner(LEGACY_OWNER_ID), SilentLogger(), MovableClock(MONDAY_10_00))
     naive = WatchlistEntry(
         stock_id="2330", watchlist_type=WatchlistType.MANUAL, created_at=datetime(2026, 10, 19, 10, 0), expires_at=None
@@ -63,7 +68,7 @@ async def test_a_naive_time_is_refused_and_nothing_is_stored(db: DatabaseConnect
         await repository.save([naive])
 
     assert isinstance(refused.value.orig, ValueError)
-    assert stored_watchlist(tmp_path) == []
+    assert await stored_watchlist() == []
 
 
 def test_every_datetime_column_of_every_table_is_a_utc_datetime() -> None:

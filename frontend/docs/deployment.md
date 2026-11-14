@@ -200,7 +200,7 @@ simulation server with the `*_TEST` key pair.
    SHIOAJI_PERSON_ID="..."
    ```
 
-3. Check what `prod` needs besides them. It refuses SQLite, which Compose never uses. It reads the accounts key only
+3. Check what `prod` needs besides them. It reads the accounts key only
    from `ACCOUNTS_KEY` in `.env`, never from `secrets/accounts.key`: copy the key the site already uses into `.env`
    first, or no one can sign in. It refuses to start with `accounts.registration_open: true`.
 
@@ -243,7 +243,6 @@ not start.
 | `just ranking-backtest <first> <last>` | `docker compose exec backend python -m d_presentation.cli.ranking backtest <first> <last>` |
 | `just archive-closes` | `docker compose exec backend python -m d_presentation.cli.archive_closes` |
 | `just backfill-articles` | `docker compose exec backend python -m d_presentation.cli.article_store` |
-| `just search-strategies <options>` | `docker compose exec backend python -m d_presentation.cli.strategy_search <options>` |
 
 The working folder of each command is the state folder, so `backups/<file>` names a file in its `backups/`.
 [Database migrations](../../docs/database-migrations.md) describes the four database commands.
@@ -259,12 +258,15 @@ Without `secrets/accounts.key` from the state folder, no one can sign in again, 
    docker compose exec backend python -m d_presentation.cli.database backup
    ```
 
-2. Archive the state folder and `.env`, and move the archives off the server. The archive leaves out `postgres/`,
-   because a copy of the files of a running database is not a backup. The dump from step 1 is.
+2. Archive the state folder and `.env` into a folder of their own outside the checkout, and move the archives off
+   the server. The archives hold the accounts key, the broker's certificate and every dump, so the folder is root's
+   alone (mode 700) and each archive is readable by root only (mode 600). The archive leaves out `postgres/`, because
+   a copy of the files of a running database is not a backup. The dump from step 1 is.
 
    ```bash
-   sudo tar -C /srv --exclude=stock-agent-state/postgres -czf "stock-agent-state-$(date +%F).tar.gz" stock-agent-state
-   cp .env "stock-agent-env-$(date +%F)"
+   sudo install -d -m 700 /srv/stock-agent-backups
+   sudo sh -c 'umask 077 && tar -C /srv --exclude=stock-agent-state/postgres -czf "/srv/stock-agent-backups/stock-agent-state-$(date +%F).tar.gz" stock-agent-state'
+   sudo install -m 600 .env "/srv/stock-agent-backups/stock-agent-env-$(date +%F)"
    ```
 
 To restore on a new server, extract the archive to `/srv`, and put `.env` back. Then restore the dump into the empty
@@ -335,6 +337,30 @@ subnet is taken on your server, change it in `compose.yml` and in `frontend/Cadd
 PostgreSQL runs with `shared_buffers=256MB`, `work_mem=8MB`, and at most 50 connections, set in `compose.yml`. The
 values leave the memory of a server with 7 GB to the backend, which holds years of daily history while it replays a
 backtest.
+
+### What only the operator can do
+
+Two things need the server or an account that no test of the project reaches.
+
+- **Keep the proxy's port off the local network.** Docker publishes a port with its own firewall rules, which run
+  before `ufw`'s, so `ufw deny` does not close it. With `PROXY_BIND="127.0.0.1"` behind `tailscale serve`, the port is
+  on the loopback address and nothing is to do. With `PROXY_BIND` set to the Tailscale address, a device of the
+  local network that routes to that address reaches the port. Refuse it in the chain Docker leaves to the operator,
+  and keep the rule across restarts with `iptables-persistent` or a unit of your own:
+
+  ```bash
+  sudo iptables -I DOCKER-USER ! -i tailscale0 -p tcp -m conntrack --ctorigdstport 8080 --ctdir ORIGINAL -j DROP
+  ```
+
+  Check from another device of the local network that `curl http://<the server's LAN address>:8080/` gets no answer.
+
+- **Confirm a settings save with the real Google once.** An administrator without a password confirms a save by a
+  fresh sign-in to Google, asked with `max_age=0` and checked by the `auth_time` Google returns. The tests run it
+  against a stand-in for Google. If the real one ignores `max_age=0` or sends no `auth_time`, every such confirmation
+  is refused and nothing is saved. So keep a password on the owner's account until it worked once: as a second
+  administrator who signs in with Google only, change one harmless setting and confirm the save through Google. If it
+  is refused, the owner's password still opens the editor, and `just reset-password <login>` on the server sets a
+  password for an account that has none.
 
 ### About HTTPS in a tailnet
 

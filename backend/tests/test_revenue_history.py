@@ -13,7 +13,7 @@ from typing import Any, cast
 import httpx
 import pytest
 from sqlalchemy import text
-from support.databases import BACKENDS, empty_database
+from support.databases import open_database
 from support.fakes import FakeDailyCloseArchive, FakeMarketClock, RecordingLogger
 from support.settings import shipped_config
 from test_daily_close_archive import refusing
@@ -22,7 +22,7 @@ from trading_stack import SilentLogger
 from a_domain.model.fundamentals.monthly_revenue import MonthlyRevenue
 from a_domain.ports.market.daily_close_archive import OpenDataDownload
 from a_domain.rules.fundamentals.filing import RevenueMonthsRule
-from a_domain.types.enums import DatabaseBackend, MarketType
+from a_domain.types.enums import MarketType
 from a_domain.types.errors import ArchiveSaveRefused
 from b_application.config.market_data_config import MarketDataConfig, MarketHoursConfig
 from b_application.use_cases.collect.revenue_history_backfill import RevenueHistoryBackfill
@@ -209,11 +209,8 @@ async def test_a_month_the_archive_holds_from_the_openapi_before_its_deadline_is
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("backend", BACKENDS)
-async def test_a_month_the_archive_could_not_save_fails_the_backfill_and_is_read_again_once_it_can(
-    backend: DatabaseBackend, tmp_path: Path
-) -> None:
-    db = await empty_database(backend, tmp_path)
+async def test_a_month_the_archive_could_not_save_fails_the_backfill_and_is_read_again_once_it_can(tmp_path: Path) -> None:
+    db = open_database(tmp_path)
     await db.init_db()
     archive = SqlDailyCloseArchive(db, TaiwanMarketClock(MarketHoursConfig()), CONFIG.sources.exchange, 30, SilentLogger())
     filed = {
@@ -225,7 +222,7 @@ async def test_a_month_the_archive_could_not_save_fails_the_backfill_and_is_read
 
     try:
         async with db.get_session() as session:
-            for statement in refusing("monthly_revenue_archive", backend):
+            for statement in refusing("monthly_revenue_archive"):
                 await session.execute(text(statement))
 
             await session.commit()
@@ -234,9 +231,7 @@ async def test_a_month_the_archive_could_not_save_fails_the_backfill_and_is_read
             await monthly.execute(date(2025, 1, 1))
 
         async with db.get_session() as session:
-            await session.execute(
-                text(f"DROP TRIGGER refuse_rows{'' if backend == DatabaseBackend.SQLITE else ' ON monthly_revenue_archive'}")
-            )
+            await session.execute(text("DROP TRIGGER refuse_rows ON monthly_revenue_archive"))
             await session.commit()
 
         served.asked.clear()
@@ -254,11 +249,10 @@ async def test_a_site_that_reads_no_mops_backfills_nothing() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("backend", BACKENDS)
 async def test_the_sql_archive_serves_the_latest_served_day_of_each_markets_month_and_the_revenue_of_a_span_of_months(
-    backend: DatabaseBackend, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
-    db = await empty_database(backend, tmp_path)
+    db = open_database(tmp_path)
     await db.init_db()
     archive = SqlDailyCloseArchive(db, TaiwanMarketClock(MarketHoursConfig()), CONFIG.sources.exchange, 30, SilentLogger())
     held = [

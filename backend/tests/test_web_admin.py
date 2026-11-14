@@ -4,14 +4,16 @@ import asyncio
 import json
 import os
 import shutil
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+import asyncpg
 import httpx
 import pytest
 import support.harness
-from sqlalchemy import make_url
-from support.databases import POSTGRES_URL, empty_database
+from support.databases import ENVIRONMENT, SERVER
 from support.harness import (
     ADMINISTRATOR,
     ADMINISTRATOR_PASSWORD,
@@ -25,11 +27,12 @@ from support.harness import (
 from support.web import app_of, client_at, ended, hold_stock_list, serve, sign_in
 
 from a_domain.ports.system.settings_files import SettingChange
-from a_domain.types.enums import DatabaseBackend, SettingsFile
+from a_domain.types.enums import ExecutionProvider, FeatureVisibility, SettingsFile
 from a_domain.types.errors import SettingsConflictError
 from b_application.config.api_config import ApiConfig
 from b_application.config.app_config import AppConfig
 from b_application.config.settings_loader import settings_revision
+from c_infrastructure.system.ordering_switch import SettingsFileOrderingSwitch
 from d_presentation.dependencies import Runtime
 from d_presentation.live_runtime import open_runtime_switch
 from d_presentation.web.app import create_app
@@ -348,10 +351,10 @@ async def test_wrong_passwords_have_their_own_limit_and_never_lock_the_sign_in(p
     [
         ("api.allowed_hosts", ["admin.example"]),
         ("sources.ai.nvidia_base_url", "https://attacker.example/v1"),
-        ("db.backend", "postgresql"),
+        ("db.chroma_persist_path", "elsewhere"),
         ("market.stock_ticks", {"0": "1"}),
     ],
-    ids=["hosts", "ai-base-url", "database", "ticks"],
+    ids=["hosts", "ai-base-url", "chroma-folder", "ticks"],
 )
 async def test_a_setting_only_an_operator_changes_is_not_on_the_form_and_a_save_that_names_it_writes_nothing(
     project: Path, path: str, value: Any
@@ -578,7 +581,7 @@ async def test_a_saved_sinopac_limit_holds_the_runs_that_start_after_it(project:
 
 @pytest.fixture
 def real_project(project: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """The project copy served by the real opener: SQLite and Chroma inside it, no .env."""
+    """The project copy served by the real opener: Chroma inside it, the session's database, no .env."""
     monkeypatch.chdir(project)
     write_by_hand(project, 'chroma_persist_path: "chroma_data"', f'chroma_persist_path: "{project / "chroma"}"')
     return project
@@ -605,7 +608,6 @@ async def test_a_database_that_cannot_be_reached_refuses_the_save_writes_nothing
             "DB_NAME": "absent",
         }.items():
             monkeypatch.setenv(name, value)
-        write_by_hand(real_project, "backend: sqlite", "backend: postgresql")
         text = text_of(real_project)
         response = await save(client, ("ai.temperature", 0.6))
         after = await client.get("/v1/auth/me")
@@ -616,20 +618,29 @@ async def test_a_database_that_cannot_be_reached_refuses_the_save_writes_nothing
     assert text_of(real_project) == text and not (real_project / ".settings-admin").exists()
 
 
-@pytest.mark.skipif(POSTGRES_URL is None, reason="STOCK_AGENT_TEST_POSTGRES_URL is not set")
+@asynccontextmanager
+async def another_empty_database() -> AsyncIterator[str]:
+    """The name of a second database on the tests' server, which holds no table and no account, dropped afterwards."""
+    name = f"{ENVIRONMENT['DB_NAME']}_other"
+    server = await asyncpg.connect(database="postgres", **SERVER)
+
+    try:
+        await server.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+        await server.execute(f'CREATE DATABASE "{name}"')
+        yield name
+    finally:
+        await server.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+        await server.close()
+
+
 async def test_a_database_with_no_account_of_the_saving_administrator_is_refused(
     real_project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     app = create_app(lambda: open_runtime_switch(real_project))
-    await empty_database(DatabaseBackend.POSTGRESQL, real_project)
 
-    async with app.router.lifespan_context(app), client_at(app) as client:
+    async with app.router.lifespan_context(app), client_at(app) as client, another_empty_database() as other:
         await set_up_and_sign_in(app, client)
-        url = make_url(str(POSTGRES_URL))
-        credentials = {"DB_USER": url.username, "DB_PASSWORD": url.password or "trial", "DB_HOST": url.host, "DB_NAME": url.database}
-        for name, value in {**credentials, "DB_PORT": str(url.port or 5432)}.items():
-            monkeypatch.setenv(name, str(value))
-        write_by_hand(real_project, "backend: sqlite", "backend: postgresql")
+        monkeypatch.setenv("DB_NAME", other)
         text = text_of(real_project)
         response = await save(client, ("ai.temperature", 0.6))
 
@@ -655,3 +666,84 @@ async def test_an_edit_on_disk_is_picked_up_by_the_watcher_and_the_form_shows_it
             assert current.runtime.config.ai.temperature == 0.2
 
         assert values_of(await client.get(SETTINGS))["ai.temperature"] == 0.2
+
+
+# ------------------------- turning SinoPac ordering off counts whatever becomes of the rest of the save ------------------------- #
+
+ORDERING_ON, ORDERING_OFF = "sinopac_ordering: administrators", 'sinopac_ordering: "off"'
+SHIOAJI = ExecutionProvider.SHIOAJI
+
+
+@pytest.fixture
+def ordering_project(project: Path) -> Path:
+    """The project copy of a site whose administrators order on SinoPac."""
+    write_by_hand(project, ORDERING_OFF, ORDERING_ON)
+    return project
+
+
+async def test_ordering_turned_off_is_written_although_another_change_of_the_same_save_is_refused(ordering_project: Path) -> None:
+    switch = SettingsFileOrderingSwitch(ordering_project)
+
+    async with serve(admin_harness(ordering_project)) as client:
+        before = await switch.visibility(SHIOAJI)
+        refused = await save(client, ("features.sinopac_ordering", "off"), ("ai.temperature", 99))
+
+    assert before == FeatureVisibility.ADMINISTRATORS
+    assert (refused.status_code, refused.json()["code"]) == (422, "settings_refused")
+    assert ORDERING_ON not in text_of(ordering_project) and "temperature: 0.7\n" in text_of(ordering_project)
+    assert await switch.visibility(SHIOAJI) == FeatureVisibility.OFF
+
+
+async def test_ordering_turned_off_is_written_although_the_app_does_not_start_on_the_new_settings(
+    ordering_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def does_not_start(harness: CliHarness, config: AppConfig) -> Runtime:
+        raise RuntimeError("the new settings' runtime did not open")
+
+    async with serve(admin_harness(ordering_project)) as client:
+        monkeypatch.setattr(support.harness, "runtime_for", does_not_start)
+        refused = await save(client, ("features.sinopac_ordering", "off"), ("ai.temperature", 0.3))
+
+    assert (refused.status_code, refused.json()["code"]) == (422, "settings_refused")
+    assert ORDERING_ON not in text_of(ordering_project) and "temperature: 0.7\n" in text_of(ordering_project)
+    assert await SettingsFileOrderingSwitch(ordering_project).visibility(SHIOAJI) == FeatureVisibility.OFF
+
+
+async def test_ordering_is_not_turned_off_by_a_save_the_administrator_did_not_confirm(ordering_project: Path) -> None:
+    async with serve(admin_harness(ordering_project)) as client:
+        unconfirmed = await save(client, ("features.sinopac_ordering", "off"), password=None)
+        wrong = await save(client, ("features.sinopac_ordering", "off"), password="not the password")
+
+    assert (unconfirmed.json()["code"], wrong.json()["code"]) == ("password_required", "password_refused")
+    assert ORDERING_ON in text_of(ordering_project)
+
+
+async def test_a_save_that_only_turns_ordering_off_runs_on_it_at_once(ordering_project: Path) -> None:
+    async with app_of(admin_harness(ordering_project)) as app, client_at(app) as client:
+        assert (await sign_in(client, ADMINISTRATOR.username, ADMINISTRATOR_PASSWORD)).status_code == 200
+        saved = await save(client, ("features.sinopac_ordering", "off"))
+        running = app.state.runtime_switch.opened[-1].runtime.config.features.sinopac_ordering
+
+    assert values_of(saved)["features.sinopac_ordering"] == "off"
+    assert running == FeatureVisibility.OFF and ORDERING_ON not in text_of(ordering_project)
+
+
+# ------------------------------- the settings files on disk are the switch every process asks ------------------------------- #
+
+
+async def test_the_switch_is_what_the_settings_on_disk_say_at_each_ask_and_off_while_they_do_not_say(ordering_project: Path) -> None:
+    switch, other_process = SettingsFileOrderingSwitch(ordering_project), SettingsFileOrderingSwitch(ordering_project)
+    on = (await switch.visibility(SHIOAJI), await other_process.visibility(SHIOAJI))
+
+    write_by_hand(ordering_project, ORDERING_ON, ORDERING_OFF)
+    off = (await switch.visibility(SHIOAJI), await other_process.visibility(SHIOAJI))
+
+    write_by_hand(ordering_project, f"  {ORDERING_OFF}\n", "")
+    unset = await switch.visibility(SHIOAJI)
+
+    write_by_hand(ordering_project, "temperature: 0.7", f"temperature: 99\n  {ORDERING_ON}")
+    not_loadable = await switch.visibility(SHIOAJI)
+
+    assert on == (FeatureVisibility.ADMINISTRATORS, FeatureVisibility.ADMINISTRATORS)
+    assert off == (FeatureVisibility.OFF, FeatureVisibility.OFF)
+    assert (unset, not_loadable) == (FeatureVisibility.OFF, FeatureVisibility.OFF)

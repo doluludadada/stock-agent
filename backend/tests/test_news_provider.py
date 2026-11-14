@@ -1,4 +1,6 @@
+import json
 from datetime import UTC, datetime
+from pathlib import Path
 
 import httpx
 import pytest
@@ -7,6 +9,7 @@ from support.settings import shipped_config
 from a_domain.model.market.article import Article
 from a_domain.types.enums import InformationSource
 from b_application.config.market_data_config import MarketHoursConfig
+from c_infrastructure.feed.news.cnyes_news_provider import CnyesNewsProvider
 from c_infrastructure.feed.news.yahoo_tw_news_provider import YahooTwNewsProvider
 from c_infrastructure.feed.news_provider import NewsProvider
 from c_infrastructure.system.market_clock import TaiwanMarketClock
@@ -104,3 +107,17 @@ async def test_a_yahoo_article_without_caas_body_keeps_only_paragraphs_longer_th
     body = await YahooTwNewsProvider(SOURCES.news, SilentLogger()).fetch_article_body("https://tw.stock.yahoo.com/news/a.html")
 
     assert body == "b" * 21
+
+
+def test_a_cnyes_item_without_a_time_is_undated_and_the_audit_file_gives_it_no_publication_time(tmp_path: Path) -> None:
+    listing = {"items": {"data": [{"newsId": 1, "title": "timed", "publishAt": 1761790200}, {"newsId": 2, "title": "untimed"}]}}
+    clock = TaiwanMarketClock(MarketHoursConfig())
+
+    articles = CnyesNewsProvider(SOURCES.news, SilentLogger()).parse_listing("2330", json.dumps(listing))
+    NewsProvider((), shipped_config(tmp_path), SilentLogger(), clock).save_as_md_file("2330", articles)
+
+    [saved] = (tmp_path / "news_archive").glob("*/2330_*.md")
+    timed, untimed = saved.read_text(encoding="utf-8").split("## [2] untimed")
+    assert [(article.title, article.publication_known) for article in articles] == [("timed", True), ("untimed", False)]
+    assert articles[0].published_at == datetime(2025, 10, 30, 2, 10, tzinfo=UTC)
+    assert "**Published:** 2025-10-30 10:10" in timed and "Published" not in untimed

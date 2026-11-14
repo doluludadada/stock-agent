@@ -288,9 +288,8 @@ free-form expression submitted by the client. Adding a new formula still require
   do not require shared inheritance to understand one strategy.
 - Users do not author JSON in the normal editor flow. JSON describes supported calculations
   and conditions; it is not executable Python.
-- Save independent user settings through SQL: local SQLite and a separate PostgreSQL service
-  deployment. Use JSON-compatible dictionaries for definition columns and let SQLAlchemy
-  serialize them. Do not encode a JSON string inside a JSON column.
+- Save independent user settings through SQL, in PostgreSQL. Use JSON-compatible dictionaries for
+  definition columns and let SQLAlchemy serialize them. Do not encode a JSON string inside a JSON column.
 - Refine the earlier one-JSON-document-per-owner proposal into the hybrid below. This keeps
   relational ownership and selection fields while retaining each complete rule definition
   as one document. It is not full normalization of the nested conditions.
@@ -438,5 +437,5 @@ silently removing them. The prototype's local state is not the final API contrac
   indicators, historical offsets, arithmetic and combined filters.
 - [StockCharts volume comparisons](https://help.stockcharts.com/scanning-and-alerts/scan-writing-resource-center/scanning-case-studies/scanning-for-consolidation-and-breakouts): comparisons with a preceding average and a multiplier.
 - [TradingView relative volume](https://www.tradingview.com/support/solutions/43000635874-how-do-we-calculate-relative-volume-and-relative-volume-at-time/): an example of explicitly excluding the current bar from the average baseline.
-- [SQLAlchemy JSON type](https://docs.sqlalchemy.org/en/20/core/type_basics.html#sqlalchemy.types.JSON): a JSON column interface supporting PostgreSQL and SQLite.
+- [SQLAlchemy JSON type](https://docs.sqlalchemy.org/en/20/core/type_basics.html#sqlalchemy.types.JSON): a JSON column interface supporting PostgreSQL.
 - [PostgreSQL JSON document design](https://www.postgresql.org/docs/current/datatype-json.html#JSON-DOC-DESIGN): relational and JSON structures can coexist; documents should have predictable structure and manageable boundaries.

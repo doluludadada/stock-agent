@@ -14,10 +14,10 @@ from support.fakes import (
     FakeDailyCloseArchive,
     FakeFundamentalsProvider,
     FakeNewsProvider,
+    FakeOrderingSwitch,
     FakeSentimentClassifier,
     FakeSocialMediaProvider,
     FakeStockBriefRepository,
-    FakeStrategySearchRepository,
     FakeTechnicalSettingsRepository,
     FakeTextEmbedder,
     FakeUsersStocks,
@@ -51,7 +51,6 @@ from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection
 from c_infrastructure.system.attempt_log import MemoryAttemptLog
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
 from c_infrastructure.system.settings_files import SettingsFiles
-from c_infrastructure.technical.candidate_backtester import ProcessPoolCandidateBacktester
 from c_infrastructure.trading.mock.mock_execution_provider import MockExecutionProvider
 from d_presentation.dependencies import OwnedPorts, ProviderDependencies, compose_runtime, create_owned_ports
 
@@ -136,7 +135,7 @@ def analysed_stock(stock_id: str = "2330", composite_score: int | None = 90) -> 
 
 @dataclass
 class TradingStack:
-    """The real runtime on a real SQLite file: the manual-BUY workflow, OrderExecution, the mock broker and the journal."""
+    """The real runtime on a real PostgreSQL database: the manual-BUY workflow, OrderExecution, the mock broker and the journal."""
 
     config: AppConfig
     db: DatabaseConnector
@@ -203,8 +202,6 @@ async def open_stack(
         price_provider=quotes,
         history_cache=None,
         bar_matrix_provider=DailyBarMatrixProvider(stocks, quotes, archive, clock, config.ranking.history_rule(), logger),
-        candidate_backtester=ProcessPoolCandidateBacktester(config, clock, 0),
-        strategy_search_repository=FakeStrategySearchRepository(),
         stock_brief_repository=FakeStockBriefRepository(),
         article_store=FakeArticleStore(
             clock, config.stock_page.article_store.retention(), config.stock_page.article_store.max_per_stock
@@ -225,6 +222,7 @@ async def open_stack(
         user_store=users,
         attempt_log=MemoryAttemptLog(),
         real_broker=real_broker,
+        ordering_switch=FakeOrderingSwitch(config.features),
         owned_ports=owned_ports,
     )
     runtime = compose_runtime(config, logger, clock, dependencies)

@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 from sqlalchemy import text
-from support.databases import BACKENDS, database_config, empty_database, raw_engine
+from support.databases import open_database, raw_engine
 from support.harness import (
     ADMINISTRATOR,
     ADMINISTRATOR_PASSWORD,
@@ -28,13 +28,11 @@ from support.harness import (
 from support.web import app_of, client_at, ended, serve, sign_in, write
 from test_ranking import SESSIONS, bars, market
 from test_web_api import FOLLOWED_RUN, SINOPAC_STARTS, reported_run
-from trading_stack import SilentLogger
 
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.account import BrokerFill, Position, Settlement
-from a_domain.types.enums import DatabaseBackend, ExecutionProvider, FeatureVisibility, OrderStatus, RejectReason, TradeAction
+from a_domain.types.enums import ExecutionProvider, FeatureVisibility, OrderStatus, RejectReason, TradeAction
 from a_domain.types.ids import UserId
-from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.schema_version_dto import SCHEMA_VERSION
 from c_infrastructure.database.repositories.holding_repository import HoldingRepository
 
@@ -201,6 +199,23 @@ async def test_a_stock_the_site_holds_no_close_of_counts_at_its_cost_and_says_it
     assert holding["standing"]["exclusion"] == "no_history"
 
 
+async def test_the_portfolios_return_is_over_the_cost_of_the_holdings_that_have_a_price_alone() -> None:
+    harness = portfolio_site()
+    harness.stocks.stocks["6789"] = Stock(stock_id="6789", name="Unpriced")
+
+    async with serve(harness) as client:
+        await enter(client, "6789", 4000, 50.0)
+        unpriced = (await client.get("/v1/holdings", params={"sources": ["manual"]})).json()
+        await enter(client, "2330", 1000, 100.0)
+        body = (await client.get("/v1/holdings", params={"sources": ["manual"]})).json()
+
+    priced = next(holding["position"] for holding in body["holdings"] if holding["position"]["stock_id"] == "2330")
+
+    assert (body["cost"], body["unrealized_pnl"]) == (300_000, priced["unrealized_pnl"])
+    assert body["unrealized_return"] == pytest.approx(priced["unrealized_pnl"] / 100_000)
+    assert (unpriced["cost"], unpriced["unrealized_pnl"], unpriced["unrealized_return"]) == (200_000, 0, None)
+
+
 async def test_the_sources_asked_for_narrow_the_portfolio_and_an_empty_one_is_all_zero() -> None:
     harness = portfolio_site()
 
@@ -364,14 +379,11 @@ async def test_entering_and_removing_a_holding_orders_nothing_and_touches_no_acc
 # --------------------------------------------- the manual holdings table --------------------------------------------- #
 
 
-@pytest.mark.parametrize("backend", BACKENDS)
-async def test_a_database_made_before_the_holdings_gains_their_table_at_the_next_start_and_keeps_its_rows(
-    backend: DatabaseBackend, tmp_path: Path
-) -> None:
-    before = await empty_database(backend, tmp_path)
+async def test_a_database_made_before_the_holdings_gains_their_table_at_the_next_start_and_keeps_its_rows(tmp_path: Path) -> None:
+    before = open_database(tmp_path)
     await before.init_db()
     await before.close()
-    engine = raw_engine(backend, tmp_path)
+    engine = raw_engine()
 
     async with engine.begin() as connection:
         await connection.execute(text("DROP TABLE manual_holdings"))
@@ -381,7 +393,7 @@ async def test_a_database_made_before_the_holdings_gains_their_table_at_the_next
             )
         )
 
-    database = DatabaseConnector(config=database_config(backend, tmp_path), logger=SilentLogger())
+    database = open_database(tmp_path)
     await database.init_db()
     alice, bob = (HoldingRepository(database.for_owner(UserId(owner))) for owner in ("alice", "bob"))
     await alice.save(Position(stock_id="2330", quantity=37, average_cost=612.5, opened_at=MARKET_OPEN))

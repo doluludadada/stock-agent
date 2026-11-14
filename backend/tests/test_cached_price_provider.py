@@ -71,7 +71,7 @@ def split_on_monday(change: float | None) -> FakeDailyHistory:
 
 @pytest.fixture
 def db(database: DatabaseConnector) -> DatabaseConnector:
-    """The cache's database on each backend: SQLite, and PostgreSQL when the suite has one."""
+    """The cache's database."""
     return database
 
 
@@ -334,3 +334,53 @@ async def test_a_statement_the_database_refuses_raises_without_the_values_it_was
 
     assert "ex_right_references" in str(raised.value)
     assert "A123456789" not in str(raised.value)
+
+
+async def test_saving_what_the_cache_already_holds_leaves_the_history_as_read_and_a_changed_bar_or_reference_does_not(
+    db: DatabaseConnector,
+) -> None:
+    clock = MovableClock(at(MONDAY, 16))
+    cache = cache_over(reports_of(SESSIONS, {"2330": 100.0}), db, clock)
+    bars = {"2330": [session_bar(MONDAY, 100.0)], "^twse": [session_bar(MONDAY, 20000.0)]}
+    references = {("2330", MONDAY): 98.0}
+    await cache.save_bars(bars)
+    await cache.save_references(references)
+    first = await cache.listed_fingerprint()
+
+    await cache.save_bars(bars)
+    await cache.save_references(references)
+    await cache.save_bars({"^twse": [session_bar(MONDAY, 20001.0)]})
+    same = await cache.listed_fingerprint()
+
+    await cache.save_bars({"2330": [session_bar(MONDAY, 101.0)]})
+    changed_bar = await cache.listed_fingerprint()
+    await cache.save_references({("2330", MONDAY): 97.0})
+    changed_reference = await cache.listed_fingerprint()
+
+    assert same == first
+    assert len({first, changed_bar, changed_reference}) == 3
+
+
+async def test_a_sessions_reports_are_read_between_the_blocks_of_a_long_sync_of_the_references(db: DatabaseConnector) -> None:
+    clock = MovableClock(at(MONDAY, 16))
+    reports = reports_of(SESSIONS, {"2330": 100.0})
+    cache = cache_over(reports, db, clock)
+    first_block, release = asyncio.Event(), asyncio.Event()
+    answer = reports.ex_right_references
+
+    async def slow_after_the_first_block(market: MarketType, first: date, last: date) -> dict[tuple[str, date], float]:
+        if first_block.is_set():
+            await release.wait()
+
+        first_block.set()
+        return await answer(market, first, last)
+
+    reports.ex_right_references = slow_after_the_first_block
+    syncing = asyncio.create_task(cache.sync_references(date(2026, 1, 2), MONDAY))
+    await first_block.wait()
+
+    read = await asyncio.wait_for(cache.sync_session(SESSIONS[-1]), timeout=5)
+
+    release.set()
+    await syncing
+    assert read is True and len(reports.references_asked) > 2

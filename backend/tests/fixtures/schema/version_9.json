@@ -4,44 +4,37 @@
       "cash": {
         "class": "Float",
         "nullable": false,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "order_id": {
         "class": "Uuid",
         "nullable": false,
-        "postgresql": "UUID",
-        "sqlite": "CHAR(32)"
+        "postgresql": "UUID"
       },
       "owner_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "positions": {
         "class": "JSON",
         "nullable": false,
-        "postgresql": "JSON",
-        "sqlite": "JSON"
+        "postgresql": "JSON"
       },
       "run_id": {
         "class": "Uuid",
         "nullable": false,
-        "postgresql": "UUID",
-        "sqlite": "CHAR(32)"
+        "postgresql": "UUID"
       },
       "snapshot_id": {
         "class": "Uuid",
         "nullable": false,
-        "postgresql": "UUID",
-        "sqlite": "CHAR(32)"
+        "postgresql": "UUID"
       },
       "taken_at": {
         "class": "UtcDateTime",
         "nullable": false,
-        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
-        "sqlite": "DATETIME"
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
       }
     },
     "foreign_keys": [],
@@ -86,14 +79,12 @@
       "calls": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "day": {
         "class": "Date",
         "nullable": false,
-        "postgresql": "DATE",
-        "sqlite": "DATE"
+        "postgresql": "DATE"
       }
     },
     "foreign_keys": [],
@@ -108,20 +99,17 @@
       "calls": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "day": {
         "class": "Date",
         "nullable": false,
-        "postgresql": "DATE",
-        "sqlite": "DATE"
+        "postgresql": "DATE"
       },
       "owner_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       }
     },
     "foreign_keys": [],
@@ -137,32 +125,27 @@
       "article_url": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "classified_at": {
         "class": "UtcDateTime",
         "nullable": false,
-        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
-        "sqlite": "DATETIME"
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
       },
       "confidence": {
         "class": "Float",
         "nullable": false,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "label": {
         "class": "String",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "stock_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       }
     },
     "foreign_keys": [],
@@ -178,26 +161,22 @@
       "backtest": {
         "class": "JSON",
         "nullable": false,
-        "postgresql": "JSON",
-        "sqlite": "JSON"
+        "postgresql": "JSON"
       },
       "backtest_id": {
         "class": "Uuid",
         "nullable": false,
-        "postgresql": "UUID",
-        "sqlite": "CHAR(32)"
+        "postgresql": "UUID"
       },
       "created_at": {
         "class": "UtcDateTime",
         "nullable": false,
-        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
-        "sqlite": "DATETIME"
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
       },
       "owner_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       }
     },
     "foreign_keys": [],
@@ -221,56 +200,47 @@
       "change": {
         "class": "Float",
         "nullable": true,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "close": {
         "class": "Float",
         "nullable": false,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "high": {
         "class": "Float",
         "nullable": false,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "low": {
         "class": "Float",
         "nullable": false,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "market": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "open": {
         "class": "Float",
         "nullable": false,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "session_date": {
         "class": "Date",
         "nullable": false,
-        "postgresql": "DATE",
-        "sqlite": "DATE"
+        "postgresql": "DATE"
       },
       "stock_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "volume": {
         "class": "BigInteger",
         "nullable": false,
-        "postgresql": "BIGINT",
-        "sqlite": "BIGINT"
+        "postgresql": "BIGINT"
       }
     },
     "foreign_keys": [],
@@ -294,20 +264,17 @@
       "first_date": {
         "class": "Date",
         "nullable": false,
-        "postgresql": "DATE",
-        "sqlite": "DATE"
+        "postgresql": "DATE"
       },
       "last_date": {
         "class": "Date",
         "nullable": false,
-        "postgresql": "DATE",
-        "sqlite": "DATE"
+        "postgresql": "DATE"
       },
       "market": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       }
     },
     "foreign_keys": [],
@@ -322,20 +289,17 @@
       "reference_price": {
         "class": "Float",
         "nullable": false,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "session_date": {
         "class": "Date",
         "nullable": false,
-        "postgresql": "DATE",
-        "sqlite": "DATE"
+        "postgresql": "DATE"
       },
       "stock_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       }
     },
     "foreign_keys": [],
@@ -359,20 +323,17 @@
       "published_on": {
         "class": "Date",
         "nullable": false,
-        "postgresql": "DATE",
-        "sqlite": "DATE"
+        "postgresql": "DATE"
       },
       "title": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "url": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       }
     },
     "foreign_keys": [],
@@ -387,50 +348,42 @@
       "industry_format": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "items": {
         "class": "JSON",
         "nullable": false,
-        "postgresql": "JSON",
-        "sqlite": "JSON"
+        "postgresql": "JSON"
       },
       "market": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "quarter": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "served_date": {
         "class": "Date",
         "nullable": false,
-        "postgresql": "DATE",
-        "sqlite": "DATE"
+        "postgresql": "DATE"
       },
       "statement": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "stock_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "year": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       }
     },
     "foreign_keys": [],
@@ -448,26 +401,22 @@
       "change": {
         "class": "Float",
         "nullable": true,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "close": {
         "class": "Float",
         "nullable": false,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "market": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "session_date": {
         "class": "Date",
         "nullable": false,
-        "postgresql": "DATE",
-        "sqlite": "DATE"
+        "postgresql": "DATE"
       }
     },
     "foreign_keys": [],
@@ -483,14 +432,12 @@
       "revision": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "row": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       }
     },
     "foreign_keys": [],
@@ -505,32 +452,27 @@
       "average_cost": {
         "class": "Float",
         "nullable": false,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "opened_at": {
         "class": "UtcDateTime",
         "nullable": true,
-        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
-        "sqlite": "DATETIME"
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
       },
       "owner_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "quantity": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "stock_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       }
     },
     "foreign_keys": [],
@@ -546,38 +488,32 @@
       "announced_at": {
         "class": "UtcDateTime",
         "nullable": false,
-        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
-        "sqlite": "DATETIME"
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
       },
       "clause": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "description": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "fact_date": {
         "class": "Date",
         "nullable": true,
-        "postgresql": "DATE",
-        "sqlite": "DATE"
+        "postgresql": "DATE"
       },
       "stock_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "subject": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       }
     },
     "foreign_keys": [],
@@ -593,32 +529,27 @@
       "created_at": {
         "class": "UtcDateTime",
         "nullable": false,
-        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
-        "sqlite": "DATETIME"
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
       },
       "current_cash": {
         "class": "Float",
         "nullable": false,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "initial_cash": {
         "class": "Float",
         "nullable": false,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "owner_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "updated_at": {
         "class": "UtcDateTime",
         "nullable": false,
-        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
-        "sqlite": "DATETIME"
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
       }
     },
     "foreign_keys": [],
@@ -633,38 +564,32 @@
       "average_cost": {
         "class": "Float",
         "nullable": false,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "opened_at": {
         "class": "UtcDateTime",
         "nullable": false,
-        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
-        "sqlite": "DATETIME"
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
       },
       "owner_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "quantity": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "stock_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "updated_at": {
         "class": "UtcDateTime",
         "nullable": false,
-        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
-        "sqlite": "DATETIME"
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
       }
     },
     "foreign_keys": [],
@@ -680,98 +605,82 @@
       "company_name": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "cumulative_revenue": {
         "class": "Float",
         "nullable": true,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "cumulative_year_over_year_percent": {
         "class": "Float",
         "nullable": true,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "industry": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "last_year_cumulative_revenue": {
         "class": "Float",
         "nullable": true,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "last_year_revenue": {
         "class": "Float",
         "nullable": true,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "market": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "month": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "month_over_month_percent": {
         "class": "Float",
         "nullable": true,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "note": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "previous_month_revenue": {
         "class": "Float",
         "nullable": true,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "revenue": {
         "class": "Float",
         "nullable": true,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "served_date": {
         "class": "Date",
         "nullable": false,
-        "postgresql": "DATE",
-        "sqlite": "DATE"
+        "postgresql": "DATE"
       },
       "stock_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "year": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "year_over_year_percent": {
         "class": "Float",
         "nullable": true,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       }
     },
     "foreign_keys": [],
@@ -788,32 +697,27 @@
       "cumulative_eps": {
         "class": "JSON",
         "nullable": false,
-        "postgresql": "JSON",
-        "sqlite": "JSON"
+        "postgresql": "JSON"
       },
       "fetched_at": {
         "class": "UtcDateTime",
         "nullable": false,
-        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
-        "sqlite": "DATETIME"
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
       },
       "market": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "quarter": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "year": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       }
     },
     "foreign_keys": [],
@@ -830,50 +734,42 @@
       "change": {
         "class": "Float",
         "nullable": true,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "close": {
         "class": "Float",
         "nullable": false,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "high": {
         "class": "Float",
         "nullable": false,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "low": {
         "class": "Float",
         "nullable": false,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "open": {
         "class": "Float",
         "nullable": false,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "stock_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "ts": {
         "class": "UtcDateTime",
         "nullable": false,
-        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
-        "sqlite": "DATETIME"
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
       },
       "volume": {
         "class": "BigInteger",
         "nullable": false,
-        "postgresql": "BIGINT",
-        "sqlite": "BIGINT"
+        "postgresql": "BIGINT"
       }
     },
     "foreign_keys": [],
@@ -902,50 +798,42 @@
           "HOLD"
         ],
         "nullable": false,
-        "postgresql": "tradeaction",
-        "sqlite": "VARCHAR(4)"
+        "postgresql": "tradeaction"
       },
       "average_filled_price": {
         "class": "Float",
         "nullable": true,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "created_at": {
         "class": "UtcDateTime",
         "nullable": false,
-        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
-        "sqlite": "DATETIME"
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
       },
       "decision_id": {
         "class": "Uuid",
         "nullable": false,
-        "postgresql": "UUID",
-        "sqlite": "CHAR(32)"
+        "postgresql": "UUID"
       },
       "fee": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "filled_quantity": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "id": {
         "class": "Uuid",
         "nullable": false,
-        "postgresql": "UUID",
-        "sqlite": "CHAR(32)"
+        "postgresql": "UUID"
       },
       "limit_price": {
         "class": "Float",
         "nullable": true,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "order_type": {
         "class": "Enum",
@@ -954,38 +842,32 @@
           "LIMIT"
         ],
         "nullable": false,
-        "postgresql": "ordertype",
-        "sqlite": "VARCHAR(6)"
+        "postgresql": "ordertype"
       },
       "owner_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "quantity": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "realized_pnl": {
         "class": "Float",
         "nullable": true,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "reason": {
         "class": "AutoString",
         "nullable": true,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "run_id": {
         "class": "Uuid",
         "nullable": false,
-        "postgresql": "UUID",
-        "sqlite": "CHAR(32)"
+        "postgresql": "UUID"
       },
       "status": {
         "class": "Enum",
@@ -998,20 +880,17 @@
           "REJECTED"
         ],
         "nullable": false,
-        "postgresql": "orderstatus",
-        "sqlite": "VARCHAR(9)"
+        "postgresql": "orderstatus"
       },
       "stock_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "tax": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "time_in_force": {
         "class": "Enum",
@@ -1021,14 +900,12 @@
           "FOK"
         ],
         "nullable": false,
-        "postgresql": "timeinforce",
-        "sqlite": "VARCHAR(3)"
+        "postgresql": "timeinforce"
       },
       "updated_at": {
         "class": "UtcDateTime",
         "nullable": false,
-        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
-        "sqlite": "DATETIME"
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
       }
     },
     "foreign_keys": [],
@@ -1065,26 +942,22 @@
       "eps": {
         "class": "Float",
         "nullable": false,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "quarter": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "stock_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "year": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       }
     },
     "foreign_keys": [],
@@ -1101,32 +974,27 @@
       "owner_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "position": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "report": {
         "class": "JSON",
         "nullable": false,
-        "postgresql": "JSON",
-        "sqlite": "JSON"
+        "postgresql": "JSON"
       },
       "run_id": {
         "class": "Uuid",
         "nullable": false,
-        "postgresql": "UUID",
-        "sqlite": "CHAR(32)"
+        "postgresql": "UUID"
       },
       "stock_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       }
     },
     "foreign_keys": [],
@@ -1142,8 +1010,7 @@
       "version": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       }
     },
     "foreign_keys": [],
@@ -1158,80 +1025,67 @@
       "claimed_at": {
         "class": "UtcDateTime",
         "nullable": false,
-        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
-        "sqlite": "DATETIME"
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
       },
       "company": {
         "class": "Text",
         "nullable": false,
-        "postgresql": "TEXT",
-        "sqlite": "TEXT"
+        "postgresql": "TEXT"
       },
       "day": {
         "class": "Date",
         "nullable": false,
-        "postgresql": "DATE",
-        "sqlite": "DATE"
+        "postgresql": "DATE"
       },
       "language": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "model": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "movement": {
         "class": "Text",
         "nullable": false,
-        "postgresql": "TEXT",
-        "sqlite": "TEXT"
+        "postgresql": "TEXT"
       },
       "price_change": {
         "class": "Float",
         "nullable": true,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "sources": {
         "class": "Text",
         "nullable": false,
-        "postgresql": "TEXT",
-        "sqlite": "TEXT"
+        "postgresql": "TEXT"
       },
       "status": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "stock_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "window_first": {
         "class": "Date",
         "nullable": true,
-        "postgresql": "DATE",
-        "sqlite": "DATE"
+        "postgresql": "DATE"
       },
       "window_last": {
         "class": "Date",
         "nullable": true,
-        "postgresql": "DATE",
-        "sqlite": "DATE"
+        "postgresql": "DATE"
       },
       "written_at": {
         "class": "UtcDateTime",
         "nullable": true,
-        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
-        "sqlite": "DATETIME"
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
       }
     },
     "foreign_keys": [],
@@ -1247,68 +1101,57 @@
       "clause": {
         "class": "AutoString",
         "nullable": true,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "content": {
         "class": "Text",
         "nullable": false,
-        "postgresql": "TEXT",
-        "sqlite": "TEXT"
+        "postgresql": "TEXT"
       },
       "content_type": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "fact_date": {
         "class": "Date",
         "nullable": true,
-        "postgresql": "DATE",
-        "sqlite": "DATE"
+        "postgresql": "DATE"
       },
       "key": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "published_at": {
         "class": "UtcDateTime",
         "nullable": false,
-        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
-        "sqlite": "DATETIME"
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
       },
       "source": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "stock_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "stored_at": {
         "class": "UtcDateTime",
         "nullable": false,
-        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
-        "sqlite": "DATETIME"
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
       },
       "title": {
         "class": "Text",
         "nullable": false,
-        "postgresql": "TEXT",
-        "sqlite": "TEXT"
+        "postgresql": "TEXT"
       },
       "url": {
         "class": "AutoString",
         "nullable": true,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       }
     },
     "foreign_keys": [],
@@ -1332,74 +1175,62 @@
       "bars_ago": {
         "class": "Integer",
         "nullable": true,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "constant": {
         "class": "Float",
         "nullable": true,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "field": {
         "class": "AutoString",
         "nullable": true,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "indicator_id": {
         "class": "AutoString",
         "nullable": true,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "node": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "operator": {
         "class": "AutoString",
         "nullable": true,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "output": {
         "class": "AutoString",
         "nullable": true,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "owner_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "parent_position": {
         "class": "Integer",
         "nullable": true,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "position": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "rule_position": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "strategy_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       }
     },
     "foreign_keys": [
@@ -1476,68 +1307,57 @@
       "d_period": {
         "class": "Integer",
         "nullable": true,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "fast": {
         "class": "Integer",
         "nullable": true,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "indicator_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "k_period": {
         "class": "Integer",
         "nullable": true,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "kind": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "owner_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "period": {
         "class": "Integer",
         "nullable": true,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "signal": {
         "class": "Integer",
         "nullable": true,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "slow": {
         "class": "Integer",
         "nullable": true,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "std": {
         "class": "Float",
         "nullable": true,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "strategy_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       }
     },
     "foreign_keys": [
@@ -1569,32 +1389,27 @@
       "effect": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "name": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "owner_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "position": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "strategy_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       }
     },
     "foreign_keys": [
@@ -1626,20 +1441,17 @@
       "active_strategy_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "owner_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "revision": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       }
     },
     "foreign_keys": [],
@@ -1654,50 +1466,42 @@
       "base_score": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "block_failure_penalty": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "failure_score_reduction": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "name": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "owner_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "pass_score_increase": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "position": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "strategy_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       }
     },
     "foreign_keys": [
@@ -1729,80 +1533,67 @@
           "HOLD"
         ],
         "nullable": false,
-        "postgresql": "tradeaction",
-        "sqlite": "VARCHAR(4)"
+        "postgresql": "tradeaction"
       },
       "ai_report": {
         "class": "JSON",
         "nullable": true,
-        "postgresql": "JSON",
-        "sqlite": "JSON"
+        "postgresql": "JSON"
       },
       "decision_id": {
         "class": "Uuid",
         "nullable": false,
-        "postgresql": "UUID",
-        "sqlite": "CHAR(32)"
+        "postgresql": "UUID"
       },
       "followed_decision_id": {
         "class": "Uuid",
         "nullable": true,
-        "postgresql": "UUID",
-        "sqlite": "CHAR(32)"
+        "postgresql": "UUID"
       },
       "generated_at": {
         "class": "UtcDateTime",
         "nullable": false,
-        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
-        "sqlite": "DATETIME"
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
       },
       "history_until": {
         "class": "UtcDateTime",
         "nullable": true,
-        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
-        "sqlite": "DATETIME"
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
       },
       "owner_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "price_at_signal": {
         "class": "Float",
         "nullable": false,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "price_observed_at": {
         "class": "UtcDateTime",
         "nullable": false,
-        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
-        "sqlite": "DATETIME"
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
       },
       "quantity": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "reason": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "run_id": {
         "class": "Uuid",
         "nullable": false,
-        "postgresql": "UUID",
-        "sqlite": "CHAR(32)"
+        "postgresql": "UUID"
       },
       "score": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "source": {
         "class": "Enum",
@@ -1814,26 +1605,22 @@
           "RANKING"
         ],
         "nullable": false,
-        "postgresql": "signalsource",
-        "sqlite": "VARCHAR(9)"
+        "postgresql": "signalsource"
       },
       "stock_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "stop_loss_price": {
         "class": "Float",
         "nullable": true,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "technical_report": {
         "class": "JSON",
         "nullable": true,
-        "postgresql": "JSON",
-        "sqlite": "JSON"
+        "postgresql": "JSON"
       }
     },
     "foreign_keys": [],
@@ -1863,26 +1650,22 @@
       "created_at": {
         "class": "UtcDateTime",
         "nullable": false,
-        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
-        "sqlite": "DATETIME"
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
       },
       "expires_at": {
         "class": "UtcDateTime",
         "nullable": false,
-        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
-        "sqlite": "DATETIME"
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
       },
       "token_digest": {
         "class": "LargeBinary",
         "nullable": false,
-        "postgresql": "BYTEA",
-        "sqlite": "BLOB"
+        "postgresql": "BYTEA"
       },
       "user_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       }
     },
     "foreign_keys": [
@@ -1931,32 +1714,27 @@
           "CLAUDE"
         ],
         "nullable": true,
-        "postgresql": "aiprovider",
-        "sqlite": "VARCHAR(6)"
+        "postgresql": "aiprovider"
       },
       "created_at": {
         "class": "UtcDateTime",
         "nullable": false,
-        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
-        "sqlite": "DATETIME"
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
       },
       "email_index": {
         "class": "LargeBinary",
         "nullable": false,
-        "postgresql": "BYTEA",
-        "sqlite": "BLOB"
+        "postgresql": "BYTEA"
       },
       "email_sealed": {
         "class": "LargeBinary",
         "nullable": false,
-        "postgresql": "BYTEA",
-        "sqlite": "BLOB"
+        "postgresql": "BYTEA"
       },
       "password_hash": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "role": {
         "class": "Enum",
@@ -1965,8 +1743,7 @@
           "USER"
         ],
         "nullable": false,
-        "postgresql": "role",
-        "sqlite": "VARCHAR(13)"
+        "postgresql": "role"
       },
       "status": {
         "class": "Enum",
@@ -1975,32 +1752,27 @@
           "DEACTIVATED"
         ],
         "nullable": false,
-        "postgresql": "userstatus",
-        "sqlite": "VARCHAR(11)"
+        "postgresql": "userstatus"
       },
       "updated_at": {
         "class": "UtcDateTime",
         "nullable": false,
-        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
-        "sqlite": "DATETIME"
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
       },
       "user_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "username_index": {
         "class": "LargeBinary",
         "nullable": false,
-        "postgresql": "BYTEA",
-        "sqlite": "BLOB"
+        "postgresql": "BYTEA"
       },
       "username_sealed": {
         "class": "LargeBinary",
         "nullable": false,
-        "postgresql": "BYTEA",
-        "sqlite": "BLOB"
+        "postgresql": "BYTEA"
       }
     },
     "foreign_keys": [],
@@ -2022,32 +1794,27 @@
       "dividend_yield": {
         "class": "Float",
         "nullable": true,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "pb_ratio": {
         "class": "Float",
         "nullable": true,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "pe_ratio": {
         "class": "Float",
         "nullable": true,
-        "postgresql": "FLOAT",
-        "sqlite": "FLOAT"
+        "postgresql": "FLOAT"
       },
       "session_date": {
         "class": "Date",
         "nullable": false,
-        "postgresql": "DATE",
-        "sqlite": "DATE"
+        "postgresql": "DATE"
       },
       "stock_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       }
     },
     "foreign_keys": [],
@@ -2063,32 +1830,27 @@
       "created_at": {
         "class": "UtcDateTime",
         "nullable": false,
-        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
-        "sqlite": "DATETIME"
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
       },
       "expires_at": {
         "class": "UtcDateTime",
         "nullable": true,
-        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
-        "sqlite": "DATETIME"
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
       },
       "owner_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "stock_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "type": {
         "class": "String",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       }
     },
     "foreign_keys": [],
@@ -2113,44 +1875,37 @@
       "ai_analysed": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "ai_model": {
         "class": "AutoString",
         "nullable": true,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "buzz_qualified": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "buzz_scanned": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "end_time": {
         "class": "UtcDateTime",
         "nullable": true,
-        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
-        "sqlite": "DATETIME"
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
       },
       "errors": {
         "class": "JSON",
         "nullable": false,
-        "postgresql": "JSON",
-        "sqlite": "JSON"
+        "postgresql": "JSON"
       },
       "execution_log": {
         "class": "JSON",
         "nullable": false,
-        "postgresql": "JSON",
-        "sqlite": "JSON"
+        "postgresql": "JSON"
       },
       "execution_provider": {
         "class": "Enum",
@@ -2159,92 +1914,77 @@
           "SHIOAJI"
         ],
         "nullable": false,
-        "postgresql": "executionprovider",
-        "sqlite": "VARCHAR(7)"
+        "postgresql": "executionprovider"
       },
       "failure": {
         "class": "AutoString",
         "nullable": true,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "followed_run_id": {
         "class": "Uuid",
         "nullable": true,
-        "postgresql": "UUID",
-        "sqlite": "CHAR(32)"
+        "postgresql": "UUID"
       },
       "orders_filled": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "orders_refused": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "orders_submitted": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "owner_id": {
         "class": "AutoString",
         "nullable": false,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "passed_technical": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "run_id": {
         "class": "Uuid",
         "nullable": false,
-        "postgresql": "UUID",
-        "sqlite": "CHAR(32)"
+        "postgresql": "UUID"
       },
       "sentiment_analysed": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "signals_generated": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "stale_market_data_count": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "start_time": {
         "class": "UtcDateTime",
         "nullable": false,
-        "postgresql": "TIMESTAMP WITHOUT TIME ZONE",
-        "sqlite": "DATETIME"
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
       },
       "technical_strategy_id": {
         "class": "AutoString",
         "nullable": true,
-        "postgresql": "VARCHAR",
-        "sqlite": "VARCHAR"
+        "postgresql": "VARCHAR"
       },
       "total_scanned": {
         "class": "Integer",
         "nullable": false,
-        "postgresql": "INTEGER",
-        "sqlite": "INTEGER"
+        "postgresql": "INTEGER"
       },
       "workflow": {
         "class": "Enum",
@@ -2260,8 +2000,7 @@
           "RESEARCH"
         ],
         "nullable": false,
-        "postgresql": "workflow",
-        "sqlite": "VARCHAR(15)"
+        "postgresql": "workflow"
       }
     },
     "foreign_keys": [],

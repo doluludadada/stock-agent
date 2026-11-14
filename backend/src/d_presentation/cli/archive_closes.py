@@ -51,6 +51,6 @@ if __name__ == "__main__":
     except Exception:
         terminal.console.print_exception()
     finally:
-        # The database's aiosqlite worker thread outlives close() and would hold the interpreter at exit, so the process
-        # ends here; anything unexpected is printed above first, since nothing prints after this.
+        # The broker's SDK can leave a thread running that would hold the interpreter at exit, so the process ends
+        # here; anything unexpected is printed above first, since nothing prints after this.
         os._exit(exit_code)
