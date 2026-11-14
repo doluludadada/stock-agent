@@ -74,59 +74,14 @@ class SettingsFiles(ISettingsFiles):
             if current.revision != expected_revision:
                 raise SettingsConflictError(f"{file.file_name} changed since revision {expected_revision[:12]}; read it again")
 
-            await self.keep_backup(current)
-            await self.record(entry)
-            saved = await self.write(file, text)
+            await keep_backup(current, self._admin_folder, self._backups_kept)
+            await record_audit(entry, self._admin_folder, self._audit)
+            await write_settings_file(file, text, self._config_folder)
+            saved = await self.read(file)
 
         self._logger.info(f"Settings file {file.file_name} saved: {current.revision[:12]} -> {saved.revision[:12]}")
 
         return saved
-
-    @override
-    async def keep_backup(self, document: SettingsDocument) -> SettingsBackup:
-        folder = self._admin_folder / "backups" / document.file.value
-
-        for level in (self._admin_folder, folder.parent, folder):
-            level.mkdir(mode=0o700, exist_ok=True)
-
-        created_at = datetime.now(UTC)
-        backup_id = f"{created_at:%Y%m%dT%H%M%SZ}-{uuid4().hex[:12]}"
-        path = folder / f"{backup_id}.yaml"
-        path.write_text(document.text, encoding="utf-8")
-        path.chmod(0o600)
-
-        for stale in sorted(folder.glob("*.yaml"), reverse=True)[self._backups_kept :]:
-            stale.unlink()
-
-        return SettingsBackup(backup_id=backup_id, file=document.file, revision=document.revision, created_at=created_at)
-
-    @override
-    async def write(self, file: SettingsFile, text: str) -> SettingsDocument:
-        path = self._config_folder / file.file_name
-        temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
-        mode = path.stat().st_mode & 0o777
-
-        try:
-            with temporary.open("w", encoding="utf-8", newline="") as handle:
-                handle.write(text)
-                handle.flush()
-                os.fsync(handle.fileno())
-            temporary.chmod(mode)
-            os.replace(temporary, path)
-        finally:
-            temporary.unlink(missing_ok=True)
-
-        return await self.read(file)
-
-    @override
-    async def record(self, entry: SettingsAuditEntry) -> None:
-        self._admin_folder.mkdir(mode=0o700, exist_ok=True)
-        path = self._admin_folder / "audit.jsonl"
-
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(self._audit.dump_python(entry, mode="json"), ensure_ascii=False) + "\n")
-
-        path.chmod(0o600)
 
     @override
     def built_in_strategy_ids(self) -> list[str]:
@@ -144,3 +99,50 @@ class SettingsFiles(ISettingsFiles):
             return tuple(error.problems)
 
         return ()
+
+
+async def keep_backup(document: SettingsDocument, admin_folder: Path, backups_kept: int) -> SettingsBackup:
+    """Copies the text a save is about to replace, owner-only, and drops the backups beyond the kept count."""
+    folder = admin_folder / "backups" / document.file.value
+
+    for level in (admin_folder, folder.parent, folder):
+        level.mkdir(mode=0o700, exist_ok=True)
+
+    created_at = datetime.now(UTC)
+    backup_id = f"{created_at:%Y%m%dT%H%M%SZ}-{uuid4().hex[:12]}"
+    path = folder / f"{backup_id}.yaml"
+    path.write_text(document.text, encoding="utf-8")
+    path.chmod(0o600)
+
+    for stale in sorted(folder.glob("*.yaml"), reverse=True)[backups_kept:]:
+        stale.unlink()
+
+    return SettingsBackup(backup_id=backup_id, file=document.file, revision=document.revision, created_at=created_at)
+
+
+async def write_settings_file(file: SettingsFile, text: str, config_folder: Path) -> None:
+    """Replaces the file atomically: a temporary file in the same folder, flushed to disk, renamed over it."""
+    path = config_folder / file.file_name
+    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    mode = path.stat().st_mode & 0o777
+
+    try:
+        with temporary.open("w", encoding="utf-8", newline="") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary.chmod(mode)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+async def record_audit(entry: SettingsAuditEntry, admin_folder: Path, audit: TypeAdapter[SettingsAuditEntry]) -> None:
+    """Appends the audit entry, owner-only. It holds setting paths and revisions, never a value."""
+    admin_folder.mkdir(mode=0o700, exist_ok=True)
+    path = admin_folder / "audit.jsonl"
+
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(audit.dump_python(entry, mode="json"), ensure_ascii=False) + "\n")
+
+    path.chmod(0o600)

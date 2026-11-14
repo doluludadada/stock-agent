@@ -54,8 +54,7 @@ Each rule makes one decision in `apply`:
 |                 | `AccountAsOfRule`         | The account at the end of a day                                                            |
 |                 | `LatestMarkRule`          | Each stock's latest price: its realtime quote, else its last daily close                   |
 |                 | `PriceHistoryStartRule`   | Where the daily prices the account history needs start                                     |
-| `backtest.py`   | `DailyBarMatrixRule`      | Every stock's daily bars as one matrix, a gap where a stock has no bar                     |
-|                 | `BacktestPeriodRule`      | The first and the last day a backtest may cover with the sessions held                     |
+| `backtest.py`   | `BacktestPeriodRule`      | The first and the last day a backtest may cover with the sessions held                     |
 |                 | `BacktestHistoryRule`     | The bars a backtest of a period reads, and each session's history window                   |
 |                 | `OpenFillRule`            | What a decision fills at a later open: nothing on a locked limit or without a bar          |
 |                 | `SessionStopLossRule`     | The price a stop-loss fills at inside a session: the stop, or a lower open                 |

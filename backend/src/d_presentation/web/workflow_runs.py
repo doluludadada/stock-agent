@@ -24,6 +24,29 @@ class TooManyRuns(Exception):
         super().__init__(f"The server runs {running} workflows already. Start yours after one of them ends.")
 
 
+async def run_workflow(
+    owner_id: UserId,
+    run_id: RunId,
+    workflow: Callable[[RunId], Awaitable[PipelineStatus]],
+    running: dict[UserId, tuple[RunId, asyncio.Task[None]]],
+    failures: dict[tuple[UserId, RunId], str],
+    logger: ILoggingProvider,
+) -> None:
+    try:
+        await workflow(run_id)
+        return
+
+    except Exception as error:
+        logger.error(f"Run {run_id} stopped: {type(error).__name__}: {error}")
+        failures[owner_id, run_id] = f"{type(error).__name__}: {error}"
+
+    finally:
+        del running[owner_id]
+
+    while len(failures) > KEPT_ERRORS:
+        del failures[next(iter(failures))]
+
+
 class WorkflowRuns:
     """
     The workflow runs this server starts in the background: one at a time per user, and at most
@@ -68,7 +91,7 @@ class WorkflowRuns:
         held = ExitStack()
         held.enter_context(hold)
         run_id = new_run_id()
-        task = asyncio.create_task(self._run(user.user_id, run_id, workflow))
+        task = asyncio.create_task(run_workflow(user.user_id, run_id, workflow, self._running, self._failures, self._logger))
         task.add_done_callback(lambda _: held.close())
         self._running[user.user_id] = run_id, task
 
@@ -87,7 +110,7 @@ class WorkflowRuns:
         run of another user is unknown, running or failed.
         """
         failure = record.failure if record is not None else self._failures.get((owner_id, run_id))
-        running = self._is_running(owner_id, run_id)
+        running = (held := self._running.get(owner_id)) is not None and held[0] == run_id
 
         if record is None and failure is None and not running:
             return None
@@ -119,22 +142,3 @@ class WorkflowRuns:
         for task in tasks:
             with suppress(asyncio.CancelledError):
                 await task
-
-    def _is_running(self, owner_id: UserId, run_id: RunId) -> bool:
-        running = self._running.get(owner_id)
-        return running is not None and running[0] == run_id
-
-    async def _run(self, owner_id: UserId, run_id: RunId, workflow: Callable[[RunId], Awaitable[PipelineStatus]]) -> None:
-        try:
-            await workflow(run_id)
-            return
-
-        except Exception as error:
-            self._logger.error(f"Run {run_id} stopped: {type(error).__name__}: {error}")
-            self._failures[owner_id, run_id] = f"{type(error).__name__}: {error}"
-
-        finally:
-            del self._running[owner_id]
-
-        while len(self._failures) > KEPT_ERRORS:
-            del self._failures[next(iter(self._failures))]

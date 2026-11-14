@@ -53,6 +53,8 @@ def test_equity_marks_each_position_at_its_quote_else_its_last_daily_close_else_
     ]
 
     value_rule = AccountValueRule(position_value_rule=PositionValueRule(cost_rule=COSTS))
-    equity = value_rule.apply(Account(cash=100_000, positions=positions), stocks).equity
+    valued = value_rule.apply(Account(cash=100_000, positions=positions), stocks)
 
-    assert equity == 100_000 + 1000 * 100 + 1000 * 95 + 1000 * 90
+    assert valued.equity == 100_000 + 1000 * 100 + 1000 * 95 + 1000 * 90
+    assert [position.weight for position in valued.positions] == [100_000 / 385_000, 95_000 / 385_000, 90_000 / 385_000]
+    assert [position.weight for position in positions] == [None, None, None]

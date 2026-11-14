@@ -332,7 +332,6 @@ class InformationSource(StrEnum):
     NEWS_MEDIA = auto()
     PTT_STOCK = auto()
     PTT_GOSSIPING = auto()
-    REUNION = auto()
 
     @property
     def is_social(self) -> bool:
@@ -541,7 +540,6 @@ class ContentType(StrEnum):
     REPORT = auto()
     ANALYSIS = auto()
     DISCUSSION = auto()
-    NOISE = auto()
 
 
 class WatchlistType(StrEnum):
@@ -1241,8 +1239,6 @@ class SettingUnit(StrEnum):
     DAYS = auto()
     TWD = auto()
     """New Taiwan dollars."""
-
-    BYTES = auto()
 
 
 class Feature(StrEnum):

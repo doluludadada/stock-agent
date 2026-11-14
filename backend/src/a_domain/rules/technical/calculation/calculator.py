@@ -57,7 +57,7 @@ class MacdIndicator:
     signal: IndicatorPeriod
 
     @model_validator(mode="after")
-    def _periods_are_ordered(self) -> Self:
+    def periods_are_ordered(self) -> Self:
         if self.fast >= self.slow:
             raise ValueError("the MACD slow period must be longer than the fast one")
 

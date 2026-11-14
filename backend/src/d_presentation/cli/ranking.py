@@ -7,8 +7,6 @@ ask no AI.
 """
 
 import argparse
-import asyncio
-import os
 import sys
 from collections.abc import Sequence
 from datetime import date
@@ -20,7 +18,7 @@ from a_domain.rules.trading.ranking_backtest import RankingBacktest
 from a_domain.types.errors import BacktestPeriodUnavailable, RankingUnavailable
 from b_application.config.settings_loader import get_project_root, load_settings
 from d_presentation.cli import terminal
-from d_presentation.dependencies import STARTUP_REFUSALS, create_process_state, open_runtime
+from d_presentation.dependencies import create_process_state, open_runtime
 
 
 def arguments_of(arguments: Sequence[str]) -> argparse.Namespace:
@@ -103,18 +101,4 @@ def percent(value: float | None) -> str:
 
 
 if __name__ == "__main__":
-    exit_code = 1
-
-    try:
-        exit_code = asyncio.run(ranking(sys.argv[1:]))
-    except SystemExit as stop:
-        exit_code = stop.code if isinstance(stop.code, int) else 1
-    except (*STARTUP_REFUSALS, RankingUnavailable, BacktestPeriodUnavailable) as error:
-        terminal.console.print(str(error), style="red", markup=False, highlight=False)
-    except Exception:
-        terminal.console.print_exception()
-    finally:
-        # The broker's SDK can leave a thread running that would hold the interpreter at exit, so the process ends
-        # here; anything unexpected is printed above first, since nothing prints after this.
-        sys.stdout.flush()
-        os._exit(exit_code)
+    terminal.run_to_exit(ranking(sys.argv[1:]), RankingUnavailable, BacktestPeriodUnavailable)

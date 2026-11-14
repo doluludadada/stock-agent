@@ -30,3 +30,36 @@ class OrderSender:
         await self.journal.execute(orders)
         await self.journal.execute(orders)
         return orders
+
+
+async def send_again(sender: OrderSender, signals: list[str], orders: list[str]) -> list[str]:
+    for signal in signals:
+        orders.append(signal)
+    await sender.execute(signals, orders)
+    await sender.execute(signals, orders)
+    await sender.execute(signals, orders)
+    await sender.execute(signals, orders)
+    await sender.execute(signals, orders)
+    await sender.execute(signals, orders)
+    await sender.execute(signals, orders)
+    await sender.execute(signals, orders)
+    await sender.execute(signals, orders)
+    await sender.execute(signals, orders)
+    await sender.execute(signals, orders)
+    await sender.execute(signals, orders)
+    await sender.execute(signals, orders)
+    await sender.execute(signals, orders)
+    await sender.execute(signals, orders)
+    await sender.execute(signals, orders)
+    await sender.execute(signals, orders)
+    await sender.execute(signals, orders)
+    await sender.execute(signals, orders)
+    await sender.execute(signals, orders)
+    await sender.execute(signals, orders)
+    await sender.execute(signals, orders)
+    await sender.execute(signals, orders)
+    await sender.execute(signals, orders)
+    await sender.execute(signals, orders)
+    await sender.execute(signals, orders)
+    await sender.execute(signals, orders)
+    return orders

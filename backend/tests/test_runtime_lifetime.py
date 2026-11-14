@@ -30,6 +30,7 @@ from b_application.pipeline import Pipeline
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.repositories.sentiment_repository import SentimentRepository
 from c_infrastructure.database.repositories.user_store import AccountsKeyError, SqlUserStore
+from c_infrastructure.market.mops_fundamentals_provider import save_page
 from c_infrastructure.system.attempt_log import MemoryAttemptLog
 from c_infrastructure.system.market_clock import TaiwanMarketClock
 from d_presentation import dependencies
@@ -161,7 +162,7 @@ async def test_two_runtimes_of_one_process_save_the_same_cached_rows_at_once(tmp
             for runtime, database in zip(runtimes, databases, strict=True)
             for save in (
                 runtime.price_provider.fetch_history([Stock(stock_id=stock)], start, end),
-                runtime.fundamentals_provider.save_page(MarketType.TWSE, page),
+                save_page(MarketType.TWSE, page, shared.cache_writes, database),
                 SentimentRepository(database, shared.cache_writes).save_classified(stock, posts),
             )
         ]

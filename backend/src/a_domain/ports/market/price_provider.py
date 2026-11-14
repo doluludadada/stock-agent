@@ -33,14 +33,6 @@ class IPriceHistoryProvider(Protocol):
         """
         ...
 
-    async def ex_right_references(self, first: date, last: date) -> dict[str, dict[datetime, float]]:
-        """
-        Its exchange's reference price of each stock on each of its ex-right or ex-dividend days from first to last that the
-        source holds, by stock id and the stamp of that session's bars: the price a bar of that session compares its close
-        to where the exchange gave it no change. fetch_history adjusts across those sessions with them.
-        """
-        ...
-
     async def held_span(self) -> tuple[date, date] | None:
         """
         The first and the last session the source already holds stocks' daily bars of, or None when it holds none. It

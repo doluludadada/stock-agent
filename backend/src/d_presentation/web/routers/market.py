@@ -15,6 +15,7 @@ from d_presentation.web.schemas import (
     StockBriefResponse,
     StockFinancialsResponse,
     StockHistoryResponse,
+    StockId,
     StockNewsItemResponse,
     StockNewsResponse,
     StockRankingResponse,
@@ -24,7 +25,7 @@ from d_presentation.web.session import NotFound, PrivateAccess, RuntimeDependenc
 
 router = APIRouter(prefix="/market", tags=["Market data"])
 
-StockIdPath = Annotated[str, Path(pattern=r"^[0-9A-Za-z]{1,10}$")]
+StockIdPath = Annotated[StockId, Path()]
 BarCount = Annotated[int, Query(ge=20, le=500)]
 
 UNAVAILABLE: dict[int | str, dict[str, Any]] = {

@@ -46,7 +46,6 @@ export const NEWS_SOURCES = {
   news_media: { dayOnly: false },
   ptt_stock: { dayOnly: true },
   ptt_gossiping: { dayOnly: true },
-  reunion: { dayOnly: false },
 } as const satisfies Record<NewsItem['source'], { dayOnly: boolean }>
 
 /**
@@ -167,22 +166,12 @@ export interface Check {
   detected?: boolean
 }
 
-const OBSERVATION = /^(.*): (detected|not detected)$/
-
-/**
- * The report names each rule it failed, and each scoring rule as `<name>: detected` or `<name>: not detected`. The
- * names are the strategy's own, a stable key into the rules the same answer carries. The contract answers the
- * observations as these sentences only (`TechnicalReport.observations: string[]`), so the pattern stays until it
- * answers the rule and whether it showed as fields.
- */
+/** The rules the report failed, and each scoring rule with whether its pattern showed, under the strategy's own names. */
 export function reportChecks(report: TechnicalReport): { hard: Check[]; soft: Check[]; observations: Check[] } {
   return {
     hard: report.hard_failures.map((rule) => ({ rule })),
     soft: report.soft_failures.map((rule) => ({ rule })),
-    observations: report.observations.map((text) => {
-      const match = OBSERVATION.exec(text)
-      return match ? { rule: match[1]!, detected: match[2] === 'detected' } : { rule: text }
-    }),
+    observations: report.observations,
   }
 }
 

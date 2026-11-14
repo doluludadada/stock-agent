@@ -23,11 +23,11 @@ class CollectRulesConfig(BaseModel):
     spam_keywords: set[str]
     financial_keywords: set[str]
 
-    buzz_min_mentions: int = Field(ge=0, le=10_000, json_schema_extra={"steps": [5, 10, 20, 50, 100]})
-    buzz_min_engagement: int = Field(ge=0, le=100_000, json_schema_extra={"steps": [20, 50, 100, 200, 500]})
-    social_article_limit: int = Field(ge=1, le=1000, json_schema_extra={"steps": [20, 50, 100, 200, 500]})
+    buzz_min_mentions: int = Field(ge=0, le=10_000)
+    buzz_min_engagement: int = Field(ge=0, le=100_000)
+    social_article_limit: int = Field(ge=1, le=1000)
 
-    ptt_lookback_days: int = Field(ge=1, le=30, json_schema_extra={"steps": [3, 7, 14, 30], "unit": SettingUnit.DAYS})
+    ptt_lookback_days: int = Field(ge=1, le=30)
     ptt_tags: list[str]
 
 
@@ -48,7 +48,7 @@ class StockBriefConfig(BaseModel):
     window_sessions: int = Field(default=20, ge=5, le=120, json_schema_extra={"steps": [5, 10, 20, 40, 60, 120]})
     """The latest sessions whose price move a brief describes, and from whose first day on it reads announcements and news."""
 
-    claim_minutes: int = Field(default=5, ge=1, le=120, json_schema_extra={"operator_only": True, "unit": SettingUnit.MINUTES})
+    claim_minutes: int = Field(default=5, ge=1, le=120, json_schema_extra={"operator_only": True})
     """A brief still being written this long after a request claimed it was left behind by a stopped server, and may be asked again."""
 
     revenue_months: int = Field(default=3, ge=1, le=24, json_schema_extra={"operator_only": True})
@@ -69,11 +69,11 @@ class StockBriefConfig(BaseModel):
     link_pattern: str = Field(default=r"(?i)\(?(?:[a-z][a-z0-9+.-]*://|www\.)\S*", json_schema_extra={"operator_only": True})
     """What is cut out of a sentence the AI wrote as a link (a regular expression): a brief shows only the held items' addresses."""
 
-    lead_days: int = Field(default=30, ge=1, le=365, json_schema_extra={"operator_only": True, "unit": SettingUnit.DAYS})
+    lead_days: int = Field(default=30, ge=1, le=365, json_schema_extra={"operator_only": True})
     lead_articles: int = Field(default=3, ge=0, le=20, json_schema_extra={"operator_only": True})
     """The days before the window a brief also searches, and the most kept articles of them its prompt holds."""
 
-    company_days: int = Field(default=730, ge=1, le=3650, json_schema_extra={"operator_only": True, "unit": SettingUnit.DAYS})
+    company_days: int = Field(default=730, ge=1, le=3650, json_schema_extra={"operator_only": True})
     company_articles: int = Field(default=4, ge=0, le=20, json_schema_extra={"operator_only": True})
     """The days back a brief searches for what the company makes and sells, and the most kept articles of them its prompt holds."""
 
@@ -176,9 +176,7 @@ class ArticleStoreConfig(BaseModel):
     none, and stock pages alone fill the store.
     """
 
-    refresh_pause_seconds: float = Field(
-        default=2, ge=0, le=600, json_schema_extra={"operator_only": True, "unit": SettingUnit.SECONDS}
-    )
+    refresh_pause_seconds: float = Field(default=2, ge=0, le=600, json_schema_extra={"operator_only": True})
     """The least time between two stocks' fetches from the news sites and the board, whoever asks: a page or the timer."""
 
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig, json_schema_extra={"operator_only": True})

@@ -19,7 +19,7 @@ class HeldPositions:
         self,
         holdings: IHoldingRepository,
         mock_broker: IExecutionProvider,
-        brokerage: IBrokerExecutionProvider[Any, Any, Any] | None,
+        brokerage: IBrokerExecutionProvider[Any, Any] | None,
         logger: ILoggingProvider,
     ) -> None:
         self._holdings = holdings

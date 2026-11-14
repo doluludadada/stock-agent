@@ -22,7 +22,7 @@ from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.types.enums import MarketType
 from b_application.config.market_data_config import MarketDataConfig, MarketHoursConfig
 from c_infrastructure.market.exchange_daily_reports import ExchangeDailyReports
-from c_infrastructure.market.twse_provider import TaiwanStockProvider
+from c_infrastructure.market.request_pace import RequestPace
 from c_infrastructure.system.market_clock import TaiwanMarketClock
 
 pytestmark = pytest.mark.asyncio
@@ -72,13 +72,12 @@ def serve(
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: real_client(transport=httpx.MockTransport(answer)))
 
 
-def reports(slots: dict[MarketType, float] | None = None, interval_seconds: float = 0) -> ExchangeDailyReports:
+def reports(paces: dict[MarketType, RequestPace] | None = None, interval_seconds: float = 0) -> ExchangeDailyReports:
     exchange, market_data = shipped_config().sources.exchange, MarketDataConfig(history_request_interval_seconds=interval_seconds)
     return ExchangeDailyReports(
         feeds=exchange.daily_reports,
         ex_right_feed=exchange.ex_right_references,
-        listing=TaiwanStockProvider(exchange=exchange, market_clock=CLOCK, market_data=market_data, logger=SilentLogger()),
-        request_slots={} if slots is None else slots,
+        request_paces=paces or {market: RequestPace() for market in MarketType},
         market_clock=CLOCK,
         market_data=market_data,
         board_lot_shares=1000,
@@ -195,8 +194,8 @@ async def test_requests_to_one_site_wait_the_interval_whichever_runtime_asks_and
 ) -> None:
     asked: list[tuple[str, str, float]] = []
     serve(monkeypatch, asked)
-    slots: dict[MarketType, float] = {}
-    retired, current = reports(slots, interval_seconds=0.3), reports(slots, interval_seconds=0.3)
+    paces = {market: RequestPace() for market in MarketType}
+    retired, current = reports(paces, interval_seconds=0.3), reports(paces, interval_seconds=0.3)
     start = time.monotonic()
 
     await asyncio.gather(retired.session_bars(TUESDAY), current.session_bars(TUESDAY))

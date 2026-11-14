@@ -1,0 +1,13 @@
+from typing import Protocol
+
+
+class IPriceProvider(Protocol):
+    async def fetch(self, stock_id: str) -> float: ...
+
+    async def fetch_history(self, stock_id: str) -> list[float]: ...
+
+    async def __aenter__(self) -> "IPriceProvider": ...
+
+
+class IQuoteFeed(Protocol):
+    async def latest(self, stock_id: str) -> float: ...

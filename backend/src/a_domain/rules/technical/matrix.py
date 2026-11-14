@@ -1,5 +1,5 @@
-from collections.abc import Iterable, Sequence
-from datetime import date
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from datetime import date, datetime
 from functools import reduce
 from itertools import pairwise
 from math import ceil
@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 from pydantic import ConfigDict, model_validator
 from pydantic.dataclasses import dataclass
 
+from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.rules.technical.calculation.calculator import (
     BollingerIndicator,
     IndicatorParameters,
@@ -63,7 +64,7 @@ class DailyBarMatrix:
     volume: Floats
 
     @model_validator(mode="after")
-    def _one_bar_per_cell(self) -> Self:
+    def one_bar_per_cell(self) -> Self:
         shape = (len(self.stock_ids), len(self.sessions))
 
         if any(values.shape != shape or values.dtype != np.float64 for values in self.fields.values()):
@@ -86,6 +87,34 @@ class DailyBarMatrix:
             MarketField.CLOSE: self.close,
             MarketField.VOLUME: self.volume,
         }
+
+
+@dataclass(frozen=True)
+class DailyBarMatrixRule:
+    """Every stock's daily bars as one matrix: the stocks in id order, and one column per session any of them traded."""
+
+    def apply(self, history: Mapping[str, Sequence[Ohlcv]], trading_date: Callable[[datetime], date]) -> DailyBarMatrix:
+        days = {stamp: trading_date(stamp) for stamp in {bar.ts for bars in history.values() for bar in bars}}
+        sessions = tuple(sorted(set(days.values())))
+        columns = {session: column for column, session in enumerate(sessions)}
+        stock_ids = tuple(sorted(history))
+        cells = {name: np.full((len(stock_ids), len(sessions)), np.nan) for name in ("open", "high", "low", "close", "volume")}
+
+        for row, stock_id in enumerate(stock_ids):
+            held = [columns[days[bar.ts]] for bar in history[stock_id]]
+
+            for name, values in cells.items():
+                values[row, held] = [getattr(bar, name) for bar in history[stock_id]]
+
+        return DailyBarMatrix(stock_ids=stock_ids, sessions=sessions, **cells)
+
+
+def last_closes(close: np.ndarray) -> np.ndarray:
+    """Each row's latest value at or before each column: NaN only before the row's first value."""
+    columns = np.where(np.isnan(close), 0, np.arange(close.shape[1]))
+    np.maximum.accumulate(columns, axis=1, out=columns)
+
+    return np.take_along_axis(close, columns, axis=1)
 
 
 @dataclass(frozen=True, config=ConfigDict(arbitrary_types_allowed=True))

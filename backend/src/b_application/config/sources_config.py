@@ -3,7 +3,7 @@ from typing import Self
 
 from pydantic import BaseModel, Field, NonNegativeInt, model_validator
 
-from a_domain.types.enums import FinancialStatement, IndustryFormat, MarketType, SettingUnit
+from a_domain.types.enums import FinancialStatement, IndustryFormat, MarketType
 
 
 class TwseIndexFields(BaseModel):
@@ -112,7 +112,7 @@ class FinancialReportFeeds(BaseModel):
         return frozenset([*self.served_date, *self.year, *self.quarter, *self.stock_id, *self.company_name])
 
     @model_validator(mode="after")
-    def _every_report_has_an_address_and_every_format_a_summary(self) -> Self:
+    def every_report_has_an_address_and_every_format_a_summary(self) -> Self:
         for market in MarketType:
             for statement in FinancialStatement:
                 if missing := set(IndustryFormat) - set(self.urls.get(market, {}).get(statement, {})):
@@ -257,7 +257,7 @@ class ExchangeSources(BaseModel):
     industry_names: dict[str, str]
     """The exchanges' industry codes, which both company profiles use, and the industry name of each."""
 
-    industry_max_age_hours: float = Field(gt=0, le=168, json_schema_extra={"steps": [1, 6, 12, 24, 48], "unit": SettingUnit.HOURS})
+    industry_max_age_hours: float = Field(gt=0, le=168)
     """A market's company profiles are downloaded again once they are this old."""
 
     material_information: dict[MarketType, MaterialInformationFeed]
@@ -270,7 +270,7 @@ class ExchangeSources(BaseModel):
     ex_right_references: ExRightReferenceFeed
 
     @model_validator(mode="after")
-    def _every_feed_serves_both_markets(self) -> Self:
+    def every_feed_serves_both_markets(self) -> Self:
         feeds = {
             "company_profiles": self.company_profiles,
             "material_information": self.material_information,
@@ -313,23 +313,21 @@ class MopsSources(BaseModel):
     revenue_deadline_day: int = Field(ge=1, le=28)
     """Companies file a month's revenue by this day of the month after it."""
 
-    request_interval_seconds: float = Field(ge=0, le=60, json_schema_extra={"steps": [0.5, 1, 2, 5, 10], "unit": SettingUnit.SECONDS})
+    request_interval_seconds: float = Field(ge=0, le=60)
     """A cold load sends ten requests to a shared public service, so they go one at a time, this far apart."""
 
-    timeout_seconds: float = Field(gt=0, le=600, json_schema_extra={"steps": [15, 30, 60, 120], "unit": SettingUnit.SECONDS})
-    provisional_page_max_age_hours: float = Field(
-        gt=0, le=168, json_schema_extra={"steps": [1, 3, 6, 12, 24], "unit": SettingUnit.HOURS}
-    )
+    timeout_seconds: float = Field(gt=0, le=600)
+    provisional_page_max_age_hours: float = Field(gt=0, le=168)
     """A page that is not final yet is downloaded again once it is this old."""
 
     filing_deadlines: dict[int, tuple[int, int]]
     """Each quarter's latest statutory filing deadline across company types, as (month, day)."""
 
-    filing_grace_days: NonNegativeInt = Field(le=90, json_schema_extra={"steps": [0, 3, 7, 14, 30], "unit": SettingUnit.DAYS})
+    filing_grace_days: NonNegativeInt = Field(le=90)
     """A quarter's filings are final this many days after its deadline, since a deadline on a holiday moves."""
 
     @model_validator(mode="after")
-    def _every_quarter_has_a_real_deadline(self) -> Self:
+    def every_quarter_has_a_real_deadline(self) -> Self:
         if set(self.filing_deadlines) != {1, 2, 3, 4}:
             raise ValueError("sources.mops.filing_deadlines needs a deadline for each of the quarters 1 to 4")
 
@@ -358,14 +356,14 @@ class PttSources(BaseModel):
 
     posting_reminder_marker: str
     previous_page_label: str
-    timeout_seconds: float = Field(gt=0, le=600, json_schema_extra={"steps": [5, 10, 15, 30, 60], "unit": SettingUnit.SECONDS})
-    max_pages: int = Field(gt=0, le=1000, json_schema_extra={"steps": [5, 10, 30, 50, 100]})
+    timeout_seconds: float = Field(gt=0, le=600)
+    max_pages: int = Field(gt=0, le=1000)
     """The most search pages read for one tag."""
 
-    max_body_length: int = Field(gt=0, le=100_000, json_schema_extra={"steps": [1000, 3000, 5000, 10000]})
+    max_body_length: int = Field(gt=0, le=100_000)
     """An article's text, its reactions line included, is cut to this many characters."""
 
-    archive_excerpt_length: int = Field(gt=0, le=100_000, json_schema_extra={"steps": [200, 500, 1000, 2000]})
+    archive_excerpt_length: int = Field(gt=0, le=100_000)
     """How many characters of each article the buzz archive quotes."""
 
     user_agent: str
@@ -380,12 +378,12 @@ class NewsSources(BaseModel):
     cnyes_article_url: str
     yahoo_base_url: str
     yahoo_quote_url: str
-    cnyes_timeout_seconds: float = Field(gt=0, le=600, json_schema_extra={"steps": [5, 10, 15, 30, 60], "unit": SettingUnit.SECONDS})
-    yahoo_timeout_seconds: float = Field(gt=0, le=600, json_schema_extra={"steps": [5, 10, 15, 30, 60], "unit": SettingUnit.SECONDS})
-    yahoo_min_headline_length: int = Field(ge=0, le=1000, json_schema_extra={"steps": [3, 5, 10, 20]})
+    cnyes_timeout_seconds: float = Field(gt=0, le=600)
+    yahoo_timeout_seconds: float = Field(gt=0, le=600)
+    yahoo_min_headline_length: int = Field(ge=0, le=1000)
     """A Yahoo news link whose headline is shorter than this is not an article."""
 
-    yahoo_short_paragraph_length: int = Field(ge=0, le=1000, json_schema_extra={"steps": [10, 20, 50, 100]})
+    yahoo_short_paragraph_length: int = Field(ge=0, le=1000)
     """Without a caas-body, an article's text is its paragraphs longer than this many characters."""
 
     cnyes_user_agent: str
@@ -406,9 +404,9 @@ class LineSources(BaseModel):
 
     push_url: str
     multicast_url: str
-    multicast_timeout_seconds: float = Field(json_schema_extra={"steps": [5, 10, 30, 60], "unit": SettingUnit.SECONDS})
+    multicast_timeout_seconds: float
     sentence_endings: str
-    max_message_length: int = Field(json_schema_extra={"steps": [400, 1000, 2000, 5000]})
+    max_message_length: int
 
 
 class AttributedProvider(BaseModel):

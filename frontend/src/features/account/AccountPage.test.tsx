@@ -15,7 +15,7 @@ const FULL_CYCLE = '11111111-1111-4111-8111-111111111111'
 const FOLLOW_RUN = '22222222-2222-4222-8222-222222222222'
 const INTRADAY = '33333333-3333-4333-8333-333333333333'
 
-const unpriced = { stock_id: '2330', quantity: 1000, average_cost: 100, mark_price: 100, marked_at: null, market_value: 100_000, unrealized_pnl: 0 }
+const unpriced = { stock_id: '2330', quantity: 1000, average_cost: 100, mark_price: 100, marked_at: null, market_value: 100_000, unrealized_pnl: 0, cost_basis: 100_000, unrealized_return: null, opened_at: null, weight: 100_000 / 1_012_000 }
 const value = { cash: 912_000, market_value: 100_000, unrealized_pnl: 0, equity: 1_012_000, positions: [unpriced] }
 const HISTORY: History = {
   current: value,

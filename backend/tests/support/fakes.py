@@ -86,6 +86,7 @@ from a_domain.types.ids import BacktestId, DecisionId, RunId, SessionToken, User
 from a_domain.types.values import FiscalQuarter, comparable_name
 from b_application.config.api_config import FeaturesConfig
 from b_application.config.market_data_config import MarketHoursConfig
+from c_infrastructure.database.chroma.article_index import embedded_text
 from c_infrastructure.database.models.trading_journal_dto import RunStockReportDTO
 from c_infrastructure.system.market_clock import TaiwanMarketClock
 
@@ -386,9 +387,6 @@ class FakeOhlcvProvider:
     async def listed_fingerprint(self) -> tuple[object, ...]:
         bars = tuple((stock_id, *bars) for stock_id, bars in self.history.items())
         return bars, tuple((stock_id, *days.items()) for stock_id, days in self.references.items())
-
-    async def ex_right_references(self, first: date, last: date) -> dict[str, dict[datetime, float]]:
-        return {stock_id: dict(days) for stock_id, days in self.references.items()}
 
     async def fetch_realtime_bars(self, stocks: list[Stock]) -> dict[str, Ohlcv]:
         self.realtime_requests.extend(stock.stock_id for stock in stocks)
@@ -834,10 +832,9 @@ class FakeTextEmbedder:
         self.failure: Exception | None = None
 
     async def embed(self, texts: Sequence[str]) -> list[list[float]]:
-        return self.embed_batch(texts)
+        if self.failure is not None:
+            raise self.failure
 
-    def embed_batch(self, texts: Sequence[str]) -> list[list[float]]:
-        self.load()
         self.embedded.extend(texts)
         vectors = []
 
@@ -851,10 +848,6 @@ class FakeTextEmbedder:
             vectors.append([count / length for count in counts])
 
         return vectors
-
-    def load(self) -> None:
-        if self.failure is not None:
-            raise self.failure
 
 
 class FakeArticleStore:
@@ -911,7 +904,7 @@ class FakeArticleIndex:
         self.entries: dict[tuple[str, str], tuple[str, date, list[float]]] = {}
 
     async def sync(self, stock_id: str, articles: Sequence[Article]) -> int:
-        wanted = {article.key: (self.embedded_text(article), article.published_at.date()) for article in articles}
+        wanted = {article.key: (embedded_text(article, self.text_length), article.published_at.date()) for article in articles}
         missing = [key for key, described in wanted.items() if self.entries.get((stock_id, key), ("", None, []))[:2] != described]
         vectors = await self.embedder.embed([wanted[key][0] for key in missing]) if missing else []
         self.entries = {place: entry for place, entry in self.entries.items() if place[0] != stock_id or place[1] in wanted}
@@ -926,10 +919,6 @@ class FakeArticleIndex:
             if held_id == stock_id and (first is None or day >= first) and (last is None or day < last)
         }
         return sorted(within, key=lambda key: within[key], reverse=True)[:limit]
-
-    def embedded_text(self, article: Article) -> str:
-        text = article.content[: self.text_length]
-        return article.title if not text or text == article.title else f"{article.title}\n{text}"
 
 
 class FakeUsersStocks:

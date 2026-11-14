@@ -5,15 +5,12 @@ API does at its start and on its timer, then prints every date, quarter and mont
 database and the exchange's OpenAPI, so it needs no broker login, accounts key or AI key.
 """
 
-import asyncio
-import os
-
 from rich.table import Table
 
 from a_domain.types.errors import ListingUnavailableError
 from b_application.config.settings_loader import get_project_root, load_settings
 from d_presentation.cli import terminal
-from d_presentation.dependencies import STARTUP_REFUSALS, open_archiver
+from d_presentation.dependencies import open_archiver
 
 
 async def archive_closes() -> int:
@@ -42,15 +39,4 @@ async def archive_closes() -> int:
 
 
 if __name__ == "__main__":
-    exit_code = 1
-
-    try:
-        exit_code = asyncio.run(archive_closes())
-    except (*STARTUP_REFUSALS, ListingUnavailableError) as error:
-        terminal.console.print(str(error), style="red", markup=False, highlight=False)
-    except Exception:
-        terminal.console.print_exception()
-    finally:
-        # The broker's SDK can leave a thread running that would hold the interpreter at exit, so the process ends
-        # here; anything unexpected is printed above first, since nothing prints after this.
-        os._exit(exit_code)
+    terminal.run_to_exit(archive_closes(), ListingUnavailableError)

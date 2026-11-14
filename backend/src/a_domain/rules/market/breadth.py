@@ -33,6 +33,15 @@ class MarketBreadth:
     """The same stocks per industry. A stock without an industry counts in `market` only."""
 
 
+def breadth(changes: list[float]) -> Breadth:
+    return Breadth(
+        advancers=sum(change > 0 for change in changes),
+        decliners=sum(change < 0 for change in changes),
+        unchanged=sum(change == 0 for change in changes),
+        average_change_percent=sum(changes) / len(changes),
+    )
+
+
 @dataclass(frozen=True)
 class MarketBreadthRule:
     """
@@ -60,14 +69,6 @@ class MarketBreadthRule:
 
         return MarketBreadth(
             session_close=session_close,
-            market=self._breadth(list(changes.values())),
-            industries={industry: self._breadth(group) for industry, group in by_industry.items()},
-        )
-
-    def _breadth(self, changes: list[float]) -> Breadth:
-        return Breadth(
-            advancers=sum(change > 0 for change in changes),
-            decliners=sum(change < 0 for change in changes),
-            unchanged=sum(change == 0 for change in changes),
-            average_change_percent=sum(changes) / len(changes),
+            market=breadth(list(changes.values())),
+            industries={industry: breadth(group) for industry, group in by_industry.items()},
         )

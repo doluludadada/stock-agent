@@ -10,19 +10,11 @@ import numpy as np
 import pytest
 from support.trading_rules import COSTS, EXIT_REASON, run_decisions_rule
 
-from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.trading.account import Account
 from a_domain.model.trading.backtest import BacktestTrade
 from a_domain.rules.technical.matrix import DailyBarMatrix, StrategyScores
 from a_domain.rules.trading.account_value import PositionValueRule
-from a_domain.rules.trading.backtest import (
-    BacktestHistoryRule,
-    BacktestPeriodRule,
-    BacktestRule,
-    DailyBarMatrixRule,
-    OpenFillRule,
-    SessionStopLossRule,
-)
+from a_domain.rules.trading.backtest import BacktestHistoryRule, BacktestPeriodRule, BacktestRule, OpenFillRule, SessionStopLossRule
 from a_domain.rules.trading.cost import AffordableQuantityRule
 from a_domain.rules.trading.exit import StopLossRule
 from a_domain.types.enums import SignalSource, TradeAction
@@ -384,16 +376,3 @@ def test_a_period_the_history_cannot_replay_is_refused_with_what_it_can(first: d
 def test_a_history_shorter_than_the_window_allows_no_backtest() -> None:
     with pytest.raises(BacktestPeriodUnavailable, match="No backtest can run yet: the daily history holds 2026-03-02 to 2026-03-06"):
         BacktestHistoryRule(period_rule=BacktestPeriodRule()).apply(weekday_bars(5), date(2026, 3, 4), date(2026, 3, 6), 7)
-
-
-def test_daily_bars_become_one_matrix_with_a_gap_where_a_stock_has_no_bar() -> None:
-    def bar(column: int, close: float) -> Ohlcv:
-        return Ohlcv(ts=session_close(session(column)), open=close - 1, high=close + 1, low=close - 2, close=close, volume=500)
-
-    history = {"2454": [bar(0, 50), bar(2, 52)], "2330": [bar(1, 101), bar(2, 102)]}
-    bars = DailyBarMatrixRule().apply(history, lambda stamp: stamp.astimezone(TAIWAN_TIMEZONE).date())
-
-    assert (bars.stock_ids, bars.sessions) == (("2330", "2454"), (session(0), session(1), session(2)))
-    assert np.array_equal(bars.close, [[np.nan, 101, 102], [50, np.nan, 52]], equal_nan=True)
-    assert np.array_equal(bars.open, [[np.nan, 100, 101], [49, np.nan, 51]], equal_nan=True)
-    assert np.array_equal(bars.volume, [[np.nan, 500, 500], [500, np.nan, 500]], equal_nan=True)

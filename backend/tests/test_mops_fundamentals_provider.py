@@ -11,7 +11,8 @@ from a_domain.rules.fundamentals.trailing_eps import QuarterEps
 from a_domain.types.enums import MarketType
 from a_domain.types.values import FiscalQuarter
 from b_application.config.market_data_config import MarketHoursConfig
-from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider
+from c_infrastructure.market import mops_fundamentals_provider
+from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider, parse_cumulative_eps
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
 
 SOURCES = shipped_config().sources
@@ -63,26 +64,19 @@ async def build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[MopsFu
         db=db, market_clock=clock, mops=SOURCES.mops, listing=cast(Any, None), logger=SilentLogger(), write_lock=asyncio.Lock()
     )
     mops = FakeMops()
-    monkeypatch.setattr(provider, "download", mops.download)
+    markets = {SOURCES.mops.twse_market_code: MarketType.TWSE, SOURCES.mops.tpex_market_code: MarketType.TPEX}
+
+    async def download(market_code: str, quarter: FiscalQuarter, *context: object) -> dict[str, float] | None:
+        return await mops.download(markets[market_code], quarter)
+
+    monkeypatch.setattr(mops_fundamentals_provider, "download_cumulative_eps", download)
     return provider, mops, clock
-
-
-def parser() -> MopsFundamentalsProvider:
-    """Parsing reads no database and no clock."""
-    return MopsFundamentalsProvider(
-        db=cast(Any, None),
-        market_clock=MovableClock(),
-        mops=SOURCES.mops,
-        listing=cast(Any, None),
-        logger=SilentLogger(),
-        write_lock=asyncio.Lock(),
-    )
 
 
 def test_parser_reads_every_industry_table_of_a_real_page() -> None:
     html = (FIXTURES / "mops_t163sb04_sii_115_02.html").read_text(encoding="utf-8")
 
-    assert parser().parse_cumulative_eps(html) == {
+    assert parse_cumulative_eps(html, SOURCES.mops) == {
         "2801": 0.94,
         "2855": 6.96,
         "1101": 0.38,
@@ -97,11 +91,11 @@ def test_parser_reads_every_industry_table_of_a_real_page() -> None:
 def test_parser_reads_an_unpublished_season_as_no_filings_yet() -> None:
     html = (FIXTURES / "mops_t163sb04_sii_115_04_unpublished.html").read_text(encoding="utf-8")
 
-    assert parser().parse_cumulative_eps(html) == {}
+    assert parse_cumulative_eps(html, SOURCES.mops) == {}
 
 
 def test_parser_rejects_a_page_it_does_not_recognise() -> None:
-    assert parser().parse_cumulative_eps("<html><body>系統忙碌中，請稍後再試</body></html>") is None
+    assert parse_cumulative_eps("<html><body>系統忙碌中，請稍後再試</body></html>", SOURCES.mops) is None
 
 
 @pytest.mark.asyncio

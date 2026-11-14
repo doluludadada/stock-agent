@@ -63,33 +63,34 @@ class ChromaKnowledgeRepository(IKnowledgeRepository):
             raise SignInRequired("Sign in first.")
 
         collection = self._client.get_or_create_collection(name=self._collection_name)
-        collection.upsert(ids=[str(signal.decision_id)], documents=[self.describe_decision(stock, signal)], metadatas=[metadata])
+        collection.upsert(ids=[str(signal.decision_id)], documents=[describe_decision(stock, signal)], metadatas=[metadata])
 
         self._logger.debug(f"RAG decision saved: {signal.action.value} {signal.stock_id}")
 
-    @override
-    def describe_decision(self, stock: Stock, signal: TradeSignal) -> str:
-        report = stock.ai_report
-        lines = [
-            f"Stock: {stock.stock_id}",
-            f"Decision: {signal.action.value}",
-            f"Source: {signal.source.value}",
-            f"Generated At: {signal.generated_at.isoformat()}",
-            f"Price: {signal.price_at_signal}",
-            f"Quantity: {signal.quantity}",
-            f"Technical Score: {stock.technical_score if stock.technical_score is not None else 'Unavailable'}",
-            f"AI Score: {stock.ai_score if stock.ai_score is not None else 'Unavailable'}",
-            f"Combined Score: {signal.score}",
-            f"Reason: {signal.reason}",
-            f"Hard Failures: {', '.join(stock.hard_failures)}",
-            f"Soft Failures: {', '.join(stock.soft_failures)}",
-            f"Observations: {', '.join(stock.observations)}",
-            f"AI Summary: {report.summary if report is not None else ''}",
-            f"Bullish Factors: {', '.join(report.bullish_factors) if report is not None else ''}",
-            f"Bearish Factors: {', '.join(report.bearish_factors) if report is not None else ''}",
-        ]
 
-        if signal.stop_loss_price is not None:
-            lines.append(f"Stop Loss Price: {signal.stop_loss_price}")
+def describe_decision(stock: Stock, signal: TradeSignal) -> str:
+    """The decision and its evidence as the text the AI later reads back in the stock's decision history."""
+    report = stock.ai_report
+    lines = [
+        f"Stock: {stock.stock_id}",
+        f"Decision: {signal.action.value}",
+        f"Source: {signal.source.value}",
+        f"Generated At: {signal.generated_at.isoformat()}",
+        f"Price: {signal.price_at_signal}",
+        f"Quantity: {signal.quantity}",
+        f"Technical Score: {stock.technical_score if stock.technical_score is not None else 'Unavailable'}",
+        f"AI Score: {stock.ai_score if stock.ai_score is not None else 'Unavailable'}",
+        f"Combined Score: {signal.score}",
+        f"Reason: {signal.reason}",
+        f"Hard Failures: {', '.join(stock.hard_failures)}",
+        f"Soft Failures: {', '.join(stock.soft_failures)}",
+        f"Observations: {', '.join(stock.observations)}",
+        f"AI Summary: {report.summary if report is not None else ''}",
+        f"Bullish Factors: {', '.join(report.bullish_factors) if report is not None else ''}",
+        f"Bearish Factors: {', '.join(report.bearish_factors) if report is not None else ''}",
+    ]
 
-        return "\n".join(lines)
+    if signal.stop_loss_price is not None:
+        lines.append(f"Stop Loss Price: {signal.stop_loss_price}")
+
+    return "\n".join(lines)

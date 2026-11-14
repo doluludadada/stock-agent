@@ -6,6 +6,7 @@ from a_domain.ports.market.price_provider import IOhlcvProvider
 from a_domain.ports.market.stock_provider import IStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
+from a_domain.ports.trading.backtest_repository import IBacktestRepository
 from a_domain.rules.technical.matrix import DailyBarMatrix, StrategyScores
 from a_domain.rules.technical.strategy import TechnicalStrategy
 from a_domain.types.enums import MarketIndex
@@ -15,9 +16,10 @@ from b_application.config.app_config import AppConfig
 class BacktestReplay:
     """
     Replays the live trading rules day by day on `scores` alone (BacktestRule), from `inputs.first` on an account of
-    `inputs.initial_cash`, and returns the backtest, unsaved, with the TAIEX over the same sessions. The fees, the tax,
-    the stop-loss and the risk per trade are the live settings; the two scores are the backtest's own. It reads no
-    account, asks no AI and places no order.
+    `inputs.initial_cash`, and returns the backtest with the TAIEX over the same sessions, saved for its user beside the
+    user's newest accounts.saved_backtests, so runs can be compared. The fees, the tax, the stop-loss and the risk per
+    trade are the live settings; the two scores are the backtest's own. It reads no account, asks no AI and places no
+    order.
 
     The replay is computation alone, so it runs in a worker thread and the Web API keeps answering meanwhile.
     """
@@ -26,12 +28,15 @@ class BacktestReplay:
         self,
         stock_provider: IStockProvider,
         ohlcv_provider: IOhlcvProvider,
+        backtest_repository: IBacktestRepository,
         market_clock: IMarketClock,
         config: AppConfig,
         logger: ILoggingProvider,
     ) -> None:
         self._stock_provider = stock_provider
         self._ohlcv_provider = ohlcv_provider
+        self._backtest_repository = backtest_repository
+        self._keep = config.accounts.saved_backtests
         self._market_clock = market_clock
         self._backtest_rule = config.backtest_rule
         self._stop_loss_pct = config.analysis.stop_loss_pct
@@ -51,7 +56,7 @@ class BacktestReplay:
             f"{perf_counter() - started:.2f}s"
         )
 
-        return Backtest(
+        backtest = Backtest(
             created_at=self._market_clock.now(),
             strategy_id=strategy.strategy_id,
             strategy_name=strategy.name,
@@ -62,3 +67,6 @@ class BacktestReplay:
             benchmark=await self._ohlcv_provider.fetch_index_history(MarketIndex.TAIEX, close(first), close(last)),
             trades=trades,
         )
+        await self._backtest_repository.save(backtest, self._keep)
+
+        return backtest

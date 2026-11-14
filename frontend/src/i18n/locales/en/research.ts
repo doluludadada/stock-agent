@@ -217,6 +217,7 @@ const research = {
   news: {
     title: 'News and discussion',
     failed: 'The news could not be loaded.',
+    signIn: 'Sign in to read the news and discussion',
     none: {
       title: 'Nothing recent about this stock',
       articles: 'No announcement, news or post found.',
@@ -228,7 +229,6 @@ const research = {
       news_media: 'News',
       ptt_stock: 'PTT Stock',
       ptt_gossiping: 'PTT Gossiping',
-      reunion: 'Reunion',
     },
     opens: '(opens the source in a new tab)',
     showAll: 'Show all {{count}} items',

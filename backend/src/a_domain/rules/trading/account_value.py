@@ -24,7 +24,7 @@ class PositionValueRule:
         proceeds = self.cost_rule.apply(TradeAction.SELL, position.stock_id, price, position.quantity, now=at).net
         pnl = position.profit_on_sale(position.quantity, proceeds)
 
-        return replace(position, mark=Mark(price=price, at=at, unrealized_pnl=pnl))
+        return replace(position, mark=Mark(price=price, at=at, unrealized_pnl=pnl), weight=None)
 
 
 @dataclass(frozen=True)
@@ -32,8 +32,9 @@ class AccountValueRule:
     """
     The account valued at the latest price the run has for each position: Stock.latest_bar, its realtime quote, else
     its last daily close. A position whose stock has neither has no mark and counts at its average cost. A run sizes
-    its BUYs on this account's equity, and menu 7 shows it as the account now. It returns a new Account and changes
-    neither the account nor its positions, which the run still holds.
+    its BUYs on this account's equity, and menu 7 shows it as the account now. Each position carries its weight, its
+    market value over that equity. It returns a new Account and changes neither the account nor its positions, which
+    the run still holds.
     """
 
     position_value_rule: PositionValueRule
@@ -46,8 +47,9 @@ class AccountValueRule:
             else self.position_value_rule.apply(position, bar.close, bar.ts)
             for position in account.positions
         ]
+        equity = account.cash + sum(position.market_value for position in positions)
 
-        return replace(account, positions=positions)
+        return replace(account, positions=[replace(position, weight=position.market_value / equity) for position in positions])
 
 
 @dataclass(frozen=True)
@@ -90,7 +92,7 @@ class FillSnapshotRule:
         if fill_price is not None:
             marks[order.stock_id] = Mark(price=fill_price, at=taken_at)
 
-        positions = [replace(position, mark=marks.get(position.stock_id)) for position in account.positions]
+        positions = [replace(position, mark=marks.get(position.stock_id), weight=None) for position in account.positions]
 
         return AccountSnapshot(
             taken_at=taken_at, run_id=order.run_id, order_id=order.id, account=replace(account, positions=positions)

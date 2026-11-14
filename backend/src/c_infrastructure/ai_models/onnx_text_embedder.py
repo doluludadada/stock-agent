@@ -37,8 +37,7 @@ class OnnxTextEmbedder(ITextEmbedder):
         self._embedding = embedding
         self._folder = folder
         self._logger = logger
-        self._session: InferenceSession | None = None
-        self._tokenizer: Tokenizer | None = None
+        self._model: tuple[Tokenizer, InferenceSession] | None = None
         self._embedding_one_batch = asyncio.Lock()
 
     @override
@@ -47,52 +46,51 @@ class OnnxTextEmbedder(ITextEmbedder):
 
         async with self._embedding_one_batch:
             for batch in batched(texts, self._embedding.batch_size, strict=False):
-                vectors.extend(await asyncio.to_thread(self.embed_batch, batch))
+                if self._model is None:
+                    self._model = await asyncio.to_thread(opened_model, self._embedding, self._folder, self._logger)
+
+                vectors.extend(await asyncio.to_thread(batch_vectors, batch, *self._model, self._embedding.pooling))
 
         return vectors
 
-    @override
-    def embed_batch(self, texts: Sequence[str]) -> list[list[float]]:
-        if self._session is None or self._tokenizer is None:
-            self.load()
 
-        if self._session is None or self._tokenizer is None:
-            raise RuntimeError("The text embedding model did not open.")
+def batch_vectors(
+    texts: Sequence[str], tokenizer: Tokenizer, session: InferenceSession, pooling: EmbeddingPooling
+) -> list[list[float]]:
+    """The vectors of one batch, computed on the calling thread."""
+    encoded = tokenizer.encode_batch(list(texts))
+    mask = numpy.array([item.attention_mask for item in encoded], dtype=numpy.int64)
+    given = {
+        "input_ids": numpy.array([item.ids for item in encoded], dtype=numpy.int64),
+        "attention_mask": mask,
+        "token_type_ids": numpy.zeros_like(mask),
+    }
+    inputs = {item.name: given[item.name] for item in session.get_inputs()}
+    tokens = numpy.asarray(session.run(None, inputs)[0], dtype=numpy.float32)
 
-        encoded = self._tokenizer.encode_batch(list(texts))
-        mask = numpy.array([item.attention_mask for item in encoded], dtype=numpy.int64)
-        given = {
-            "input_ids": numpy.array([item.ids for item in encoded], dtype=numpy.int64),
-            "attention_mask": mask,
-            "token_type_ids": numpy.zeros_like(mask),
-        }
-        inputs = {item.name: given[item.name] for item in self._session.get_inputs()}
-        tokens = numpy.asarray(self._session.run(None, inputs)[0], dtype=numpy.float32)
+    match pooling:
+        case EmbeddingPooling.CLS:
+            pooled = tokens[:, 0]
+        case EmbeddingPooling.MEAN:
+            pooled = (tokens * mask[..., None]).sum(axis=1) / mask.sum(axis=1, keepdims=True)
 
-        match self._embedding.pooling:
-            case EmbeddingPooling.CLS:
-                pooled = tokens[:, 0]
-            case EmbeddingPooling.MEAN:
-                pooled = (tokens * mask[..., None]).sum(axis=1) / mask.sum(axis=1, keepdims=True)
+    return (pooled / numpy.linalg.norm(pooled, axis=1, keepdims=True)).tolist()
 
-        return (pooled / numpy.linalg.norm(pooled, axis=1, keepdims=True)).tolist()
 
-    @override
-    def load(self) -> None:
-        import onnxruntime
+def opened_model(embedding: EmbeddingConfig, folder: Path, logger: ILoggingProvider) -> tuple[Tokenizer, InferenceSession]:
+    """The model's tokenizer and session, its files fetched into the server's folder first when they are not there yet."""
+    import onnxruntime
 
-        embedding = self._embedding
-        self._logger.info(f"Opening the text embedding model {embedding.repository} at {embedding.revision[:12]}.")
-        files = [
-            hf_hub_download(embedding.repository, name, revision=embedding.revision, cache_dir=self._folder)
-            for name in (embedding.tokenizer_file, embedding.model_file)
-        ]
-        tokenizer = Tokenizer.from_file(files[0])
-        tokenizer.enable_truncation(embedding.max_tokens)
-        tokenizer.enable_padding()
-        options = onnxruntime.SessionOptions()
-        options.intra_op_num_threads = embedding.threads
-        options.inter_op_num_threads = 1
-        options.enable_cpu_mem_arena = False
-        self._tokenizer = tokenizer
-        self._session = onnxruntime.InferenceSession(files[1], options, providers=["CPUExecutionProvider"])
+    logger.info(f"Opening the text embedding model {embedding.repository} at {embedding.revision[:12]}.")
+    files = [
+        hf_hub_download(embedding.repository, name, revision=embedding.revision, cache_dir=folder)
+        for name in (embedding.tokenizer_file, embedding.model_file)
+    ]
+    tokenizer = Tokenizer.from_file(files[0])
+    tokenizer.enable_truncation(embedding.max_tokens)
+    tokenizer.enable_padding()
+    options = onnxruntime.SessionOptions()
+    options.intra_op_num_threads = embedding.threads
+    options.inter_op_num_threads = 1
+    options.enable_cpu_mem_arena = False
+    return tokenizer, onnxruntime.InferenceSession(files[1], options, providers=["CPUExecutionProvider"])

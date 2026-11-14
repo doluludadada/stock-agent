@@ -35,6 +35,7 @@ EXPECTED_FAILURES: dict[str, list[tuple[str, int]]] = {
         ("a_domain/ports/market/price_provider.py", 19),
         ("a_domain/ports/system/clock.py", 5),
     ],
+    "PORT-CALLERS": [("a_domain/ports/market/price_provider.py", line) for line in (7, 13, 15)],
     "RULE-APPLY": [("a_domain/rules/shipping.py", line) for line in (12, 20, 24, 30, 34)],
     "USECASE-EXECUTE": [
         ("b_application/use_cases/order/place_order.py", 11),
@@ -57,11 +58,15 @@ EXPECTED_FAILURES: dict[str, list[tuple[str, int]]] = {
     "SETTINGS-LOCATION": [("b_application/schemas/config.py", 9), ("c_infrastructure/technical/settings.py", 4)],
     "INFRA-OVERRIDE": [
         ("c_infrastructure/market/price_adapter.py", 14),
-        ("c_infrastructure/market/price_adapter.py", 17),
-        ("c_infrastructure/market/price_adapter.py", 20),
         ("c_infrastructure/market/price_adapter.py", 23),
         ("c_infrastructure/market/price_adapter.py", 28),
-        ("c_infrastructure/market/quote_parser.py", 1),
+    ],
+    "PRIVATE-METHOD": [
+        ("a_domain/model/order.py", 12),
+        *(("a_domain/rules/shipping.py", line) for line in (13, 25, 29)),
+        ("c_infrastructure/database/models/price_row.py", 7),
+        *(("c_infrastructure/market/price_adapter.py", line) for line in (11, 14, 17)),
+        ("d_presentation/web/runs.py", 7),
     ],
     "FACTORY-ONLY": [
         ("b_application/pipeline.py", 6),
@@ -88,7 +93,7 @@ EXPECTED_FAILURES: dict[str, list[tuple[str, int]]] = {
         ("c_infrastructure/technical/technical_settings_schema.py", 12),
         ("c_infrastructure/technical/technical_settings_schema.py", 12),
     ],
-    "FUNC-LENGTH": [("b_application/use_cases/trade/order_sender.py", 2), ("module.py", 1), ("module.py", 35)],
+    "FUNC-LENGTH": [("b_application/use_cases/trade/order_sender.py", 35), ("module.py", 1), ("module.py", 35)],
     "NAMES": [("module.py", line) for line in (1, 4, 5, 6, 9, 10, 14, 16, 18)],
     "STORY-ID": [("module.py", 1), ("module.py", 5), ("module.py", 6), ("module.py", 12)],
     "TYPE-IGNORE": [("module.py", 5), ("module.py", 6), ("module.py", 7)],
@@ -111,6 +116,8 @@ EXPECTED_FAILURES: dict[str, list[tuple[str, int]]] = {
     "RULE-CALLERS": [
         ("a_domain/model/account.py", 1),
         *(("b_application/pipeline.py", line) for line in (1, 2, 3, 4, 5, 6)),
+        *(("c_infrastructure/market/quotes.py", line) for line in (1, 2, 3, 4, 5)),
+        ("c_infrastructure/system/attempt_log.py", 1),
         ("d_presentation/dependencies.py", 1),
     ],
     "USECASE-STATUS": [("b_application/use_cases/trade/load_account.py", line) for line in (6, 7, 8, 10, 14)],

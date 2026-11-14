@@ -14,7 +14,7 @@ class CompositeScoreRule:
     ai_weight: Fraction
 
     @model_validator(mode="after")
-    def _weights_add_up_to_one(self) -> Self:
+    def weights_add_up_to_one(self) -> Self:
         if abs(self.technical_weight + self.ai_weight - 1) >= 0.001:
             raise ValueError("the technical and AI weights must add up to 1")
 

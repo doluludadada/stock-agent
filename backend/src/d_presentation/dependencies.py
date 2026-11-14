@@ -64,11 +64,9 @@ from b_application.use_cases.admin.settings_editor import SettingsEditor
 from b_application.use_cases.admin.settings_reader import SettingsReader
 from b_application.use_cases.admin.settings_reauthentication import SettingsReauthentication
 from b_application.use_cases.admin.settings_save import SettingsSave
-from b_application.use_cases.backtest.backtest_lookup import BacktestLookup
 from b_application.use_cases.backtest.backtest_options import BacktestOptions
 from b_application.use_cases.backtest.backtest_removal import BacktestRemoval
 from b_application.use_cases.backtest.backtest_replay import BacktestReplay
-from b_application.use_cases.backtest.backtest_save import BacktestSave
 from b_application.use_cases.backtest.backtest_scores import BacktestScores
 from b_application.use_cases.backtest.saved_backtests import SavedBacktests
 from b_application.use_cases.chat.chat_reply import ChatReply
@@ -79,32 +77,25 @@ from b_application.use_cases.collect.article_store_backfill import ArticleStoreB
 from b_application.use_cases.collect.buzz_scanner import BuzzScanner
 from b_application.use_cases.collect.daily_close_archiver import DailyCloseArchiver
 from b_application.use_cases.collect.daily_history_backfill import DailyHistoryBackfill
-from b_application.use_cases.collect.daily_history_refresh import DailyHistoryRefresh
-from b_application.use_cases.collect.eps_history_backfill import EpsHistoryBackfill
-from b_application.use_cases.collect.financials_lookup import FinancialsLookup
 from b_application.use_cases.collect.fundamentals_feed import FundamentalsFeed
+from b_application.use_cases.collect.fundamentals_history_backfill import FundamentalsHistoryBackfill
 from b_application.use_cases.collect.index_history_loader import IndexHistoryLoader
 from b_application.use_cases.collect.intraday_candidates import IntradayCandidates
 from b_application.use_cases.collect.market_breadth_loader import MarketBreadthLoader
 from b_application.use_cases.collect.market_data_collector import MarketDataCollector
-from b_application.use_cases.collect.market_scanner import MarketScanner
 from b_application.use_cases.collect.most_traded import MostTraded
 from b_application.use_cases.collect.news_feed import NewsFeed
-from b_application.use_cases.collect.official_change_feed import OfficialChangeFeed
 from b_application.use_cases.collect.realtime_quote_feed import RealtimeQuoteFeed
-from b_application.use_cases.collect.revenue_history_backfill import RevenueHistoryBackfill
 from b_application.use_cases.collect.stock_analysis_lookup import StockAnalysisLookup
-from b_application.use_cases.collect.stock_brief_lookup import StockBriefLookup
 from b_application.use_cases.collect.stock_lookup import StockLookup
 from b_application.use_cases.collect.stock_news_lookup import StockNewsLookup
 from b_application.use_cases.collect.stock_search import StockSearch
 from b_application.use_cases.process.ai_analyser import AiAnalyser
 from b_application.use_cases.process.article_indexer import ArticleIndexer
+from b_application.use_cases.process.daily_stock_brief import DailyStockBrief
 from b_application.use_cases.process.indicator_readings import IndicatorReadings
 from b_application.use_cases.process.sentiment_analyser import SentimentAnalyser
-from b_application.use_cases.process.stock_brief_claim import StockBriefClaim
 from b_application.use_cases.process.stock_brief_context import StockBriefContext
-from b_application.use_cases.process.stock_brief_writer import StockBriefWriter
 from b_application.use_cases.process.strategy_loader import StrategyLoader
 from b_application.use_cases.process.technical_filter import TechnicalFilter
 from b_application.use_cases.process.technical_settings_editor import TechnicalSettingsEditor
@@ -113,7 +104,6 @@ from b_application.use_cases.ranking.ranking_history_loader import RankingHistor
 from b_application.use_cases.ranking.ranking_replay import RankingReplay
 from b_application.use_cases.ranking.ranking_standing import StockRankingStanding
 from b_application.use_cases.ship.decision_memory import DecisionMemory
-from b_application.use_cases.ship.recent_runs import RecentRuns
 from b_application.use_cases.ship.reporting import Reporting
 from b_application.use_cases.ship.run_history import RunHistory
 from b_application.use_cases.ship.run_lookup import RunLookup
@@ -149,13 +139,11 @@ from b_application.use_cases.users.google_identity_check import GoogleIdentityCh
 from b_application.use_cases.users.google_sign_in_start import GoogleSignInStart
 from b_application.use_cases.users.password_reset import PasswordReset
 from b_application.use_cases.users.session_start import SessionStart
-from b_application.use_cases.users.session_user import SessionUser
 from b_application.use_cases.users.sign_in_attempt import SignInAttempt
 from b_application.use_cases.users.sign_in_options import SignInOptions
 from b_application.use_cases.users.sign_out import SignOut
 from b_application.use_cases.users.user_change import UserChange
 from b_application.use_cases.users.user_directory import UserDirectory
-from b_application.use_cases.users.user_lookup import UserLookup
 from b_application.use_cases.users.user_registration import UserRegistration
 from b_application.use_cases.valuation.market_valuation_loader import MarketValuationLoader
 from b_application.use_cases.valuation.valuation_appraiser import ValuationAppraiser
@@ -196,6 +184,7 @@ from c_infrastructure.market.cached_price_provider import CachedPriceProvider
 from c_infrastructure.market.daily_bar_matrix_provider import DailyBarMatrixProvider
 from c_infrastructure.market.exchange_daily_reports import ExchangeDailyReports
 from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider
+from c_infrastructure.market.request_pace import RequestPace
 from c_infrastructure.market.twse_provider import TaiwanStockProvider
 from c_infrastructure.platforms.line.line_adapter import LinePlatformAdapter
 from c_infrastructure.platforms.line.line_notification_adapter import LineNotificationAdapter
@@ -216,7 +205,7 @@ if TYPE_CHECKING:
     from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection
 
 
-type RealBroker = IBrokerExecutionProvider[Any, Any, Any]
+type RealBroker = IBrokerExecutionProvider[Any, Any]
 """A real broker whatever its SDK's types: the wiring names none of them."""
 
 
@@ -287,8 +276,10 @@ class ProcessState:
     One save at a time of the price history, the MOPS EPS pages and the classified posts, across every runtime: a
     retired runtime still finishing a run and the current one would otherwise insert the same row at once.
     """
-    exchange_request_slots: dict[MarketType, float] = field(default_factory=dict)
-    """When the process last asked each exchange's site for a daily report, which every runtime's requests wait after."""
+    exchange_request_paces: dict[MarketType, RequestPace] = field(
+        default_factory=lambda: {market: RequestPace() for market in MarketType}
+    )
+    """The pace of the requests to each exchange's site for a daily report, which every runtime's requests keep."""
     shioaji_connections: dict[ShioajiLogin, ShioajiConnection] = field(default_factory=dict)
     """
     The Shioaji connection of each login the process made: its client, logged in once and again only after the login
@@ -447,7 +438,7 @@ def site_login(config: AppConfig) -> ShioajiLogin | None:
 
 async def connect_shioaji(
     config: AppConfig, process: ProcessState, market_clock: TaiwanMarketClock
-) -> tuple[IBrokerQuoteProvider[Any] | None, RealBroker | None]:
+) -> tuple[IBrokerQuoteProvider | None, RealBroker | None]:
     """
     The market data and the SinoPac broker of a runtime on the process's Shioaji login. Both read the client of the
     environment's key pair, simulation in dev and test, production in prod, which the process logs in once and every
@@ -496,11 +487,11 @@ async def connect_shioaji(
 
     login_line = f"Reused the process's Shioaji {server} login" if reused else f"Logged in to Shioaji {server}"
     logger.info(f"{login_line} for realtime quotes")
-    return quotes, await connect_sinopac(config, connection, quotes, login, logger)
+    return quotes, await connect_sinopac(config, connection, login, logger)
 
 
 async def connect_sinopac(
-    config: AppConfig, connection: ShioajiConnection, quotes: IBrokerQuoteProvider[Any], login: ShioajiLogin, logger: ILoggingProvider
+    config: AppConfig, connection: ShioajiConnection, login: ShioajiLogin, logger: ILoggingProvider
 ) -> RealBroker | None:
     """SinoPac's broker on the login the quotes hold, where the audience offers it and its account check passes, else None."""
     from c_infrastructure.trading.shioaji.execution_provider import ShioajiExecutionProvider
@@ -508,7 +499,7 @@ async def connect_sinopac(
     if ExecutionProvider.SHIOAJI not in config.audience.brokers:
         return None
 
-    broker = ShioajiExecutionProvider(connection=connection, quotes=quotes, login=login, config=config, logger=logger)
+    broker = ShioajiExecutionProvider(connection=connection, login=login, config=config, logger=logger)
     server = "simulation" if login.simulation else "production"
 
     try:
@@ -617,9 +608,8 @@ def create_history_cache(
     db: DatabaseConnector,
     process: ProcessState,
     market_clock: TaiwanMarketClock,
-    quotes: IBrokerQuoteProvider[Any] | None,
+    quotes: IBrokerQuoteProvider | None,
     archive: IDailyCloseArchive,
-    stock_provider: TaiwanStockProvider,
 ) -> CachedPriceProvider | None:
     """
     The exchanges' daily reports, kept in the database, with the broker's realtime quotes over the Shioaji login
@@ -634,8 +624,7 @@ def create_history_cache(
         source=ExchangeDailyReports(
             feeds=config.sources.exchange.daily_reports,
             ex_right_feed=config.sources.exchange.ex_right_references,
-            listing=stock_provider,
-            request_slots=process.exchange_request_slots,
+            request_paces=process.exchange_request_paces,
             market_clock=market_clock,
             market_data=config.market_data,
             board_lot_shares=config.market.board_lot_shares,
@@ -657,7 +646,7 @@ async def build_provider_dependencies(
     process: ProcessState,
     market_clock: TaiwanMarketClock,
     accounts_key: SecretStr,
-    quotes: IBrokerQuoteProvider[Any] | None,
+    quotes: IBrokerQuoteProvider | None,
     real_broker: RealBroker | None,
 ) -> ProviderDependencies:
     logger = process.logger
@@ -670,7 +659,7 @@ async def build_provider_dependencies(
 
     ai_providers = {provider: create_ai_provider(config, logger, provider) for provider in config.ai.offered_models}
     archive = SqlDailyCloseArchive(db, market_clock, config.sources.exchange, config.analysis.material_information_days, logger)
-    history_cache = create_history_cache(config, db, process, market_clock, quotes, archive, stock_provider)
+    history_cache = create_history_cache(config, db, process, market_clock, quotes, archive)
     login = site_login(config)
     price_provider = archive if history_cache is None else history_cache
 
@@ -870,7 +859,6 @@ def build_pipeline(
             journal, market_clock, config, logger, config.ai.model_for(user.ai_model if user is not None else None), chosen
         ),
         account_loader=AccountLoader(broker, stocks, logger),
-        market_scanner=MarketScanner(stocks, logger),
         stock_lookup=StockLookup(stocks, logger),
         stock_search=StockSearch(stocks, config),
         most_traded=MostTraded(stocks, config),
@@ -878,17 +866,13 @@ def build_pipeline(
         index_history_loader=IndexHistoryLoader(prices, market_clock, config),
         buzz_scanner=BuzzScanner(dependencies.social_media_provider, stocks, logger, config),
         intraday_candidates=IntradayCandidates(stocks, owned.watchlist_repository, logger),
-        data_collector=MarketDataCollector(prices, history_archive, market_clock, config, logger),
-        official_change_feed=OfficialChangeFeed(stocks),
+        data_collector=MarketDataCollector(prices, stocks, history_archive, market_clock, config, logger),
         daily_close_archiver=DailyCloseArchiver(stocks, dependencies.daily_close_archive, logger),
-        daily_history_refresh=DailyHistoryRefresh(dependencies.history_cache, market_clock, config),
-        daily_history_backfill=DailyHistoryBackfill(dependencies.history_cache, market_clock),
-        revenue_history_backfill=RevenueHistoryBackfill(
+        daily_history_backfill=DailyHistoryBackfill(dependencies.history_cache, market_clock, config),
+        fundamentals_history_backfill=FundamentalsHistoryBackfill(
             dependencies.fundamentals_provider, dependencies.daily_close_archive, market_clock, config, logger
         ),
         archive_warm_up=ArchiveWarmUp(dependencies.daily_close_archive, config),
-        financials_lookup=FinancialsLookup(dependencies.daily_close_archive),
-        eps_history_backfill=EpsHistoryBackfill(dependencies.fundamentals_provider, market_clock, logger),
         stock_analysis_lookup=StockAnalysisLookup(
             dependencies.daily_close_archive, dependencies.fundamentals_provider, market_clock, config
         ),
@@ -898,12 +882,12 @@ def build_pipeline(
         article_store_backfill=ArticleStoreBackfill(
             dependencies.daily_close_archive, dependencies.article_store, stocks, market_clock, config, logger
         ),
-        stock_brief_lookup=StockBriefLookup(dependencies.stock_brief_repository, market_clock, config),
         stock_brief_context=StockBriefContext(
             stocks, prices, dependencies.article_store, dependencies.article_index, market_clock, config, logger
         ),
-        stock_brief_claim=StockBriefClaim(dependencies.stock_brief_repository, market_clock, config, ai_model),
-        stock_brief_writer=StockBriefWriter(dependencies.stock_brief_repository, owned.ai_provider, market_clock, config, logger),
+        daily_stock_brief=DailyStockBrief(
+            dependencies.stock_brief_repository, owned.ai_provider, market_clock, config, logger, ai_model
+        ),
         realtime_quote_feed=RealtimeQuoteFeed(prices, market_clock, config, logger),
         technical_filter=TechnicalFilter(logger),
         indicator_readings=IndicatorReadings(),
@@ -940,16 +924,13 @@ def build_pipeline(
         holding_removal=HoldingRemoval(owned.holding_repository),
         reporting=Reporting(notifications, config, logger),
         run_reports=RunReports(journal, logger),
-        recent_runs=RecentRuns(journal),
         run_lookup=RunLookup(journal),
         active_watchlist=ActiveWatchlist(owned.watchlist_repository),
         account_history=AccountHistory(broker, journal, stocks, prices, market_clock, config, logger),
         backtest_options=BacktestOptions(prices, config),
         backtest_scores=BacktestScores(dependencies.bar_matrix_provider, config, logger),
-        backtest_replay=BacktestReplay(stocks, prices, market_clock, config, logger),
-        backtest_save=BacktestSave(owned.backtest_repository, config),
+        backtest_replay=BacktestReplay(stocks, prices, owned.backtest_repository, market_clock, config, logger),
         saved_backtests=SavedBacktests(owned.backtest_repository),
-        backtest_lookup=BacktestLookup(owned.backtest_repository),
         backtest_removal=BacktestRemoval(owned.backtest_repository),
         ranking_history_loader=RankingHistoryLoader(dependencies.bar_matrix_provider, logger),
         latest_ranking=LatestRanking(stocks, config),
@@ -984,13 +965,11 @@ def build_pipeline(
             dependencies.identity_provider, dependencies.attempt_log, market_clock, config, logger
         ),
         google_account=GoogleAccount(dependencies.user_store, market_clock, config, LEGACY_OWNER_ID, logger),
-        user_lookup=UserLookup(dependencies.user_store),
         password_reset=PasswordReset(dependencies.user_store, market_clock, logger),
         user_registration=UserRegistration(dependencies.user_store, dependencies.attempt_log, market_clock, config, logger),
         session_start=SessionStart(dependencies.user_store, market_clock, config),
-        session_user=SessionUser(dependencies.user_store, market_clock),
         sign_out=SignOut(dependencies.user_store),
-        user_directory=UserDirectory(dependencies.user_store),
+        user_directory=UserDirectory(dependencies.user_store, market_clock),
         user_change=UserChange(dependencies.user_store, market_clock, logger),
         ai_model_lookup=AiModelLookup(config),
         ai_model_choice=AiModelChoice(dependencies.user_store, market_clock, config, logger),

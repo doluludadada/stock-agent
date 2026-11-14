@@ -18,17 +18,30 @@ How the rules measure:
   dependencies.py, whose builders are flat lists of constructor arguments. It skips the Pipeline too,
   whose operations are flat lists of use case calls. The same inline five-line loop sends orders five
   times there, twice in Buzz, twice in Intraday and once in the manual BUY, and splitting an operation
-  would hide the order of its steps. Cyclomatic complexity is ruff's C901, which checks both files.
+  would hide the order of its steps. It skips a method named `execute` of a class in a file under
+  b_application/use_cases as well: a use case is one function with one responsibility and has no private method
+  to move lines into. Any other function of such a file is measured. Cyclomatic complexity is ruff's C901, which
+  checks all three.
 - RULE-APPLY never counts a method decorated `@property`, so a rule may expose read-only values derived
-  from its fields. A property's setter still counts. A method is public when its name does not start
-  with `_`. A class with no public method is a value of the rule in its file. Every other class has
-  `apply` and no other public method, static methods and class methods included. Dataclass fields are
-  not methods.
+  from its fields, nor one decorated `model_validator` or `field_validator`, which pydantic calls and no caller
+  does. A property's setter still counts. A method is public when its name does not start with `_`. A class with
+  no public method is a value of the rule in its file. Every other class has `apply` and no other public method,
+  static methods and class methods included. Dataclass fields are not methods.
 - USECASE-EXECUTE allows only `__init__` and `execute`, and one class per use case file.
-- INFRA-OVERRIDE lets `__init__` go unmarked, requires `@override` on every other public or dunder
-  method, and forbids `_name` and `__name` methods. It skips DTOs (`table=True`, or any class under
-  c_infrastructure/database/models/), enums, exceptions and value holders (`BaseModel`, `SQLModel`,
-  `BaseSettings`, `TypedDict`, `NamedTuple`, `@dataclass`, and their subclasses).
+- INFRA-OVERRIDE lets `__init__` go unmarked and requires `@override` on every other public or dunder method. A
+  `_name` or `__name` method is PRIVATE-METHOD's finding and is not reported here. It skips DTOs (`table=True`, or
+  any class under c_infrastructure/database/models/), enums, exceptions and value holders (`BaseModel`, `SQLModel`,
+  `BaseSettings`, `TypedDict`, `NamedTuple`, `@dataclass`, and their subclasses). A module-level function is an
+  adapter's helper and is not reported.
+- PRIVATE-METHOD reports every method whose name starts with `_` and is not a dunder (`__name__`), in every class
+  of every file, a nested class and a class under c_infrastructure/database/models/ included. It skips no folder.
+  A pydantic validator is a method too, so it is named without the underscore. A private attribute and a
+  module-level function are not methods.
+- PORT-CALLERS takes every method of a Protocol in a_domain/ports, dunder methods aside, and looks for an attribute
+  read of its name in the files checked. The port's own file does not count, and neither does a file that defines a
+  class descending from the port, a sub-port or an adapter: a method read nowhere else is a helper only its own
+  adapter calls. It matches by name, so a method that shares its name with something another file reads counts as
+  called. PORT_CALLERS_EXEMPT names the methods left on a port without such a caller, each with its reason.
 - PORT-PROTOCOL treats every top-level class in a_domain/ports as a port, except a pydantic dataclass: that is a
   type only its port and the port's adapters use, and it lives in the port's file.
 - FACTORY-ONLY treats a called name that starts with an upper-case letter as a class.
@@ -56,7 +69,12 @@ How the rules measure:
   name a rule's input or result type), b_application/use_cases and b_application/config (a settings class builds
   each rule from its own values, so a rule is configured in one place) there may import a_domain.rules. The Pipeline
   may also import it annotation-only, as PRESENTATION-DECIDES-NOTHING defines it. The rest of d_presentation is left
-  to PRESENTATION-DECIDES-NOTHING, and infrastructure is not checked.
+  to PRESENTATION-DECIDES-NOTHING. In c_infrastructure it reads the rule file an import names, from the disk, and
+  sorts each imported name. A value is a class without an `apply` method, a type alias or an assignment, and an
+  adapter may import it, since a port may name a rule's input or result type. A decision is a class with `apply` or
+  a function, and so is a name the rule file does not define at its top level, a module included. Importing a
+  decision is a finding unless INFRASTRUCTURE_RULES names it for that file, with the reason the port's promise is
+  that rule's result. An entry of the table that its file no longer imports is a finding too.
 - USECASE-STATUS treats `status`, and every parameter annotated `PipelineStatus`, as the run's status. Below
   b_application/use_cases it reports an assignment or deletion under any field but `stats`, a mutating collection
   method called on such a field, and a status method whose name does not start with `require_`.
@@ -82,7 +100,7 @@ import subprocess
 import sys
 import tokenize
 from collections import Counter
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import override
@@ -201,6 +219,7 @@ DOMAIN_FORBIDDEN_BASES = frozenset({"BaseModel", "RootModel", "SQLModel"})
 CONSTANT_FREE_FOLDERS = ("a_domain", "b_application/use_cases", "b_application/schemas", "b_application/pipeline.py")
 TYPE_FACTORIES = frozenset({"NewType", "TypeVar"})
 CONSTANT_HOMES = "a fixed name is a StrEnum member in enums.py, an alias a type statement, any other value a setting"
+NOT_CALLED = frozenset({"property", "model_validator", "field_validator"})
 RULE_USERS = ("a_domain/rules", "a_domain/ports", "b_application/use_cases", "b_application/config")
 RULE_CALLER_SCOPE = ("a_domain", "b_application", "d_presentation/dependencies.py")
 COLLECTION_MUTATORS = frozenset(
@@ -211,6 +230,55 @@ COPY_SCOPE = ("a_domain/model", "b_application/schemas")
 COPY_SHARE = 0.8
 COPY_EXEMPT = frozenset({"WebSearchResult"})
 """WebSearchResult belongs to the LINE chat, which stays unchanged until it is rebuilt as a customer-service bot."""
+PORT_CALLERS_EXEMPT = frozenset(
+    {
+        ("ITaiwanStockProvider", "cached_stocks"),
+        ("ICachedPriceProvider", "sync_index"),
+        ("ICachedPriceProvider", "sync_references"),
+        ("IFundamentalsProvider", "fetch_page"),
+        ("ISocialMediaProvider", "fetch_tag_articles"),
+        ("IBrokerExecutionProvider", "send"),
+        ("IAttemptLog", "record"),
+    }
+)
+"""
+Port methods that only their own adapter calls, left on the port until the owner rules on them. Each but the last is
+a step of one of its adapter's port methods that reads or writes most of what the adapter holds, its locks, its
+cached state, its source, the database and the clock: as a module-level function it would take eight to ten
+arguments, or the adapter itself. ICachedPriceProvider.sync_session, IBrokerExecutionProvider.place and
+ISimulatedExecutionProvider.fill are steps of the same kind, which the name match does not report: another file
+reads the same name on something else. IAttemptLog.record is the log's one write, which admit makes under each key;
+the attempt-log tests pin its windows and its sweep through it.
+"""
+INFRASTRUCTURE_RULES = {
+    # The port promises each post's stance, whatever model reads it. The prompt and the reply's contract are how the
+    # AI provider this adapter asks gives one; a classifier that asks no AI would need neither.
+    "c_infrastructure/ai_models/sentiment_classifier.py": frozenset({"SentimentPromptBuilder", "parse_sentiment_reply"}),
+    # The tables store the owner's strategies, which are these classes: fields that carry their own apply. The DTO
+    # builds and reads them and never calls apply.
+    "c_infrastructure/database/models/technical_settings_dto.py": frozenset({"TechnicalScoring", "TechnicalStrategy"}),
+    # The archive saves each bar as its exchange listed it. The port promises the adjusted history, computed on read
+    # by the rule (guide 5), and the listed history as the ranking reads it.
+    "c_infrastructure/database/repositories/daily_close_archive.py": frozenset({"HistoryAdjustmentRule", "ListedHistoryRule"}),
+    # The same promise as the archive's, over the cached sessions: the adjusted history and the listed history.
+    "c_infrastructure/market/cached_price_provider.py": frozenset({"HistoryAdjustmentRule", "ex_right_matrix"}),
+    # The port promises the bars as one matrix and the ranking's history, each built once from what the stores hold
+    # and kept until the stores change. The rules build them, and this adapter is where they are kept.
+    "c_infrastructure/market/daily_bar_matrix_provider.py": frozenset({"DailyBarMatrixRule", "RankingHistoryRule"}),
+    # The port promises a quarter's EPS page, fetched again only while it may still change. Whether a held page is
+    # final is the rule's answer, asked here, where the page is held.
+    "c_infrastructure/market/mops_fundamentals_provider.py": frozenset({"FilingDeadlineRule", "FinalFilingsRule"}),
+    # The port promises admission: each attempt recorded and judged against its limit in one step, so two attempts
+    # cannot both pass a limit that has room for one. The port's own signature names the rule.
+    "c_infrastructure/system/attempt_log.py": frozenset({"AttemptLimitRule"}),
+    # The simulated broker promises what an exchange would do with the order: whether it accepts it and what fills.
+    "c_infrastructure/trading/mock/mock_execution_provider.py": frozenset({"FillRule", "OrderAcceptanceRule"}),
+    # The SinoPac adapter promises the domain order's outcome: it refuses what the app never sends before any request,
+    # splits the order into the exchange orders the broker takes, and reads their reports back into fills and costs.
+    "c_infrastructure/trading/shioaji/execution_provider.py": frozenset(
+        {"BrokerOutcomeRule", "FillRule", "LotSplitRule", "OrderAcceptanceRule", "TradingCostRule"}
+    ),
+}
 ANSWER_SOURCES = ("a_domain/model", "a_domain/types", "a_domain/ports")
 STORY_ID = re.compile(r"\bUS-\d+|\bTODO\b|(?<![\w&])#\d+\b")
 TYPE_IGNORE = re.compile(r"#\s*(?:type|pyright)\s*:\s*ignore\b")
@@ -454,6 +522,30 @@ def check_port_protocol(files: Sequence[SourceFile]) -> Iterator[Finding]:
                 yield source.path, node.lineno, f"port {node.name} is not re-exported from {display(init)}"
 
 
+def check_port_callers(files: Sequence[SourceFile]) -> Iterator[Finding]:
+    read_names = {source.path: {node.attr for node in ast.walk(source.tree) if isinstance(node, ast.Attribute)} for source in files}
+    for source in files:
+        if not source.under("a_domain/ports"):
+            continue
+        for port in top_level_classes(source.tree):
+            if "Protocol" not in base_names(port):
+                continue
+            called = names_read_outside(files, read_names, source.path, port.name)
+            for method in methods(port):
+                is_dunder = method.name.startswith("__") and method.name.endswith("__")
+                if is_dunder or method.name in called or (port.name, method.name) in PORT_CALLERS_EXEMPT:
+                    continue
+                helper_home = "only its own adapter calls it; make it a module-level function beside the adapter"
+                yield source.path, method.lineno, f"{port.name}.{method.name}: {helper_home}"
+
+
+def names_read_outside(files: Sequence[SourceFile], read_names: Mapping[Path, set[str]], port_file: Path, port: str) -> set[str]:
+    """Every attribute name read in a file that is neither the port's own nor one that defines a class descending from it."""
+    family = subclass_names(files, lambda base: base == port)
+    own = {port_file} | {source.path for source in files if any(node.name in family for node in all_classes(source.tree))}
+    return {name for path, names in read_names.items() if path not in own for name in names}
+
+
 def check_rule_apply(files: Sequence[SourceFile]) -> Iterator[Finding]:
     for source in files:
         if not source.under("a_domain/rules"):
@@ -462,7 +554,7 @@ def check_rule_apply(files: Sequence[SourceFile]) -> Iterator[Finding]:
             public = [
                 method
                 for method in methods(node)
-                if not method.name.startswith("_") and "property" not in {name_of(decorator) for decorator in method.decorator_list}
+                if not method.name.startswith("_") and not NOT_CALLED & {name_of(decorator) for decorator in method.decorator_list}
             ]
             if not public:
                 continue
@@ -534,6 +626,19 @@ def check_settings_location(files: Sequence[SourceFile]) -> Iterator[Finding]:
                 yield source.path, node.lineno, f"settings class {node.name} belongs in b_application/config/"
 
 
+def is_private(name: str) -> bool:
+    return name.startswith("_") and not (name.startswith("__") and name.endswith("__"))
+
+
+def check_private_method(files: Sequence[SourceFile]) -> Iterator[Finding]:
+    homes = "make it a module-level function in this file, another rule, or a method of the model it is about"
+    for source in files:
+        for node in all_classes(source.tree):
+            for method in methods(node):
+                if is_private(method.name):
+                    yield source.path, method.lineno, f"{node.name}.{method.name} is private; {homes}"
+
+
 def check_infra_override(files: Sequence[SourceFile]) -> Iterator[Finding]:
     exempt = (
         exception_names(files)
@@ -543,9 +648,6 @@ def check_infra_override(files: Sequence[SourceFile]) -> Iterator[Finding]:
     for source in files:
         if not source.under("c_infrastructure") or source.under("c_infrastructure/database/models"):
             continue
-        for function in source.tree.body:
-            if isinstance(function, ast.FunctionDef | ast.AsyncFunctionDef):
-                yield source.path, function.lineno, f"{function.name} is a module-level helper; make it a public port method"
         for node in top_level_classes(source.tree):
             if node.name in exempt or is_table_or_dataclass(node):
                 continue
@@ -562,14 +664,10 @@ def is_table_or_dataclass(node: ast.ClassDef) -> bool:
 
 
 def override_problem(node: ast.ClassDef, method: FunctionNode) -> str | None:
-    name = method.name
-    if name == "__init__":
+    if method.name == "__init__" or is_private(method.name):
         return None
-    is_dunder = name.startswith("__") and name.endswith("__")
-    if name.startswith("_") and not is_dunder:
-        return f"{node.name}.{name} is private; adapter helpers are public port methods marked @override"
     if "override" not in {name_of(decorator) for decorator in method.decorator_list}:
-        return f"{node.name}.{name} is not marked @override"
+        return f"{node.name}.{method.name} is not marked @override"
     return None
 
 
@@ -663,9 +761,16 @@ def check_func_length(files: Sequence[SourceFile]) -> Iterator[Finding]:
     for source in files:
         if source.module in (FACTORY_MODULE, PIPELINE_MODULE):
             continue
+        executes = [
+            method
+            for node in source.tree.body
+            if isinstance(node, ast.ClassDef) and source.under("b_application/use_cases")
+            for method in node.body
+            if isinstance(method, ast.FunctionDef | ast.AsyncFunctionDef) and method.name == "execute"
+        ]
         for function in functions(source.tree):
             length = function_length(function)
-            if length > MAX_FUNCTION_LINES:
+            if length > MAX_FUNCTION_LINES and function not in executes:
                 yield source.path, function.lineno, f"{function.name} is {length} lines long (max {MAX_FUNCTION_LINES})"
 
 
@@ -912,10 +1017,42 @@ def pipeline_field_problem(field: ast.AnnAssign, bound: dict[str, str]) -> str |
 
 def check_rule_callers(files: Sequence[SourceFile]) -> Iterator[Finding]:
     for source in files:
+        if source.under("c_infrastructure"):
+            yield from infrastructure_rule_findings(source)
         if not any(source.under(folder) for folder in RULE_CALLER_SCOPE) or any(source.under(folder) for folder in RULE_USERS):
             continue
         for line, module in rule_imports(source, annotations_allowed=source.module == PIPELINE_MODULE):
             yield source.path, line, f"imports {module}; only use cases and other rules use a rule"
+
+
+def infrastructure_rule_findings(source: SourceFile) -> Iterator[Finding]:
+    allowed = INFRASTRUCTURE_RULES.get(source.module.as_posix() if source.module else "", frozenset())
+    imported: set[str] = set()
+    for line, module, names in imports(source):
+        if not any(is_within(candidate, "a_domain.rules") for candidate in [module, *(f"{module}.{name}" for name in names)]):
+            continue
+        values = rule_values(source.root, module)
+        imported |= set(names)
+        for name in names or (module,):
+            if name not in values and name not in allowed:
+                yield (
+                    source.path,
+                    line,
+                    f"imports the decision {name} of {module}; infrastructure carries data, and the use case that calls "
+                    "the adapter runs the rule, unless INFRASTRUCTURE_RULES names it with its reason",
+                )
+    for name in sorted(allowed - imported):
+        yield source.path, 1, f"INFRASTRUCTURE_RULES names {name}, which this file does not import"
+
+
+def rule_values(root: Path | None, module: str) -> frozenset[str]:
+    """The names a rule file defines at its top level that decide nothing: a class without `apply`, an alias, an assignment."""
+    try:
+        tree = ast.parse(((root or Path()) / f"{module.replace('.', '/')}.py").read_text(encoding="utf-8"))
+    except OSError, SyntaxError, ValueError:
+        return frozenset()
+    deciding = {node.name for node in top_level_classes(tree) if "apply" in {method.name for method in methods(node)}}
+    return frozenset(module_names(tree) - deciding)
 
 
 def rule_imports(source: SourceFile, *, annotations_allowed: bool) -> Iterator[tuple[int, str]]:
@@ -1008,11 +1145,13 @@ RULES: dict[str, Callable[[Sequence[SourceFile]], Iterator[Finding]]] = {
     "ERRORS-LOCATION": check_errors_location,
     "ENUM-STR": check_enum_str,
     "PORT-PROTOCOL": check_port_protocol,
+    "PORT-CALLERS": check_port_callers,
     "RULE-APPLY": check_rule_apply,
     "USECASE-EXECUTE": check_usecase_execute,
     "ONE-PIPELINE": check_one_pipeline,
     "SETTINGS-LOCATION": check_settings_location,
     "INFRA-OVERRIDE": check_infra_override,
+    "PRIVATE-METHOD": check_private_method,
     "FACTORY-ONLY": check_factory_only,
     "PRESENTATION-DECIDES-NOTHING": check_presentation_decides_nothing,
     "STRATEGY-FROM-SETTINGS": check_strategy_from_settings,

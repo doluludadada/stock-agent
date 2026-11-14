@@ -9,6 +9,10 @@ const position = (stock_id: string, quantity: number, average_cost: number, mark
   marked_at: '2026-11-03T13:30:00+08:00',
   market_value: quantity * mark_price,
   unrealized_pnl: quantity * (mark_price - average_cost),
+  cost_basis: quantity * average_cost,
+  unrealized_return: mark_price / average_cost - 1,
+  opened_at: null,
+  weight: (quantity * mark_price) / 500_000,
 })
 
 const value: AccountValue = {
@@ -21,12 +25,9 @@ const value: AccountValue = {
 value.unrealized_pnl = value.positions.reduce((sum, item) => sum + item.unrealized_pnl, 0)
 
 describe('the account blotter', () => {
-  it('lists the largest position first with its return and weight', () => {
-    const rows = holdings(value)
-
-    expect(rows.map((row) => row.stock_id)).toEqual(['2317', '2330'])
-    expect(rows[0]).toMatchObject({ returnRatio: -0.04, weight: 0.48 })
-    expect(rows[1]).toMatchObject({ returnRatio: 0.1, weight: 0.44 })
+  it('lists the largest position first, as the server valued it', () => {
+    expect(holdings(value)).toEqual([value.positions[0], value.positions[1]])
+    expect(holdings({ ...value, positions: [value.positions[1]!, value.positions[0]!] }).map((row) => row.stock_id)).toEqual(['2317', '2330'])
   })
 
   it('measures the unrealized result against what the positions cost', () => {

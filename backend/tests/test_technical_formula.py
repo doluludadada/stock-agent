@@ -10,7 +10,7 @@ import pytest
 from pydantic import TypeAdapter
 from support.formulas import LATEST_PRICE, Json, arithmetic, compare, group, indicator, market, rule
 
-from a_domain.model.analysis.technical_report import TechnicalReport
+from a_domain.model.analysis.technical_report import TechnicalObservation, TechnicalReport
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.rules.technical.strategy import TechnicalStrategy
@@ -456,8 +456,16 @@ SCORING = {"base_score": 60, "block_failure_penalty": 20, "failure_score_reducti
         ("block_on_fail", THREE_HOLDING, TechnicalReport(score=60)),
         ("reduce_score_on_fail", THREE_FAILING, TechnicalReport(score=53, soft_failures=["Rule"])),
         ("reduce_score_on_fail", THREE_HOLDING, TechnicalReport(score=60)),
-        ("increase_score_on_pass", THREE_HOLDING, TechnicalReport(score=64, observations=["Rule: detected"])),
-        ("increase_score_on_pass", THREE_FAILING, TechnicalReport(score=60, observations=["Rule: not detected"])),
+        (
+            "increase_score_on_pass",
+            THREE_HOLDING,
+            TechnicalReport(score=64, observations=[TechnicalObservation(rule="Rule", detected=True)]),
+        ),
+        (
+            "increase_score_on_pass",
+            THREE_FAILING,
+            TechnicalReport(score=60, observations=[TechnicalObservation(rule="Rule", detected=False)]),
+        ),
     ],
     ids=["block-failed", "block-passed", "reduce-failed", "reduce-passed", "increase-passed", "increase-failed"],
 )
@@ -474,7 +482,7 @@ def test_failures_and_bonuses_of_several_rules_add_up() -> None:
     )
 
     assert strategy(*rules, scoring=SCORING).apply(stock(TWELVE_AFTER_EIGHT)) == TechnicalReport(
-        score=37, hard_failures=["Blocks"], soft_failures=["Reduces"], observations=["Adds: detected"]
+        score=37, hard_failures=["Blocks"], soft_failures=["Reduces"], observations=[TechnicalObservation(rule="Adds", detected=True)]
     )
 
 

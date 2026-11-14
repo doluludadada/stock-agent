@@ -26,13 +26,16 @@ class YahooTwNewsProvider(INewsSource):
     async def fetch_news(self, stock_id: str, limit: int) -> list[Article]:
         """The stock's Yahoo news page lists headlines; each article's page gives its text, else the headline stands in."""
         self._logger.debug(f"Fetching Yahoo TW News for {stock_id}...")
-        page = await self.fetch_page(f"{self._news.yahoo_quote_url}{stock_id}/news")
+        page = await fetch_page(self._client, self._logger, f"{self._news.yahoo_quote_url}{stock_id}/news")
 
         if page is None:
             return []
 
-        articles = self.parse_listing(stock_id, page)[:limit]
-        bodies = await asyncio.gather(*(self.fetch_article_body(str(article.url)) for article in articles), return_exceptions=True)
+        articles = parse_listing(stock_id, page, self._news)[:limit]
+        bodies = await asyncio.gather(
+            *(fetch_article_body(str(article.url), self._client, self._news, self._logger) for article in articles),
+            return_exceptions=True,
+        )
 
         for article, body in zip(articles, bodies, strict=True):
             article.content = body if isinstance(body, str) and body else article.title
@@ -40,61 +43,63 @@ class YahooTwNewsProvider(INewsSource):
         self._logger.info(f"Successfully scraped {len(articles)} articles with content for {stock_id} from Yahoo.")
         return articles
 
-    @override
-    async def fetch_page(self, url: str, params: Mapping[str, str | int] | None = None) -> str | None:
-        try:
-            response = await self._client.get(url, params=params)
-            response.raise_for_status()
-            return response.text
-        except Exception as error:
-            self._logger.error(f"Unexpected error reading Yahoo News page {url}: {error}")
-            return None
 
-    @override
-    def parse_listing(self, stock_id: str, page: str) -> list[Article]:
-        """Each news link with a headline of at least yahoo_min_headline_length characters, once per URL. Its first link names it."""
-        links = BeautifulSoup(page, "lxml").find_all("a", href=lambda href: bool(href) and "/news/" in href and ".html" in href)
-        headlines: dict[str, str] = {}
+async def fetch_page(
+    client: httpx.AsyncClient, logger: ILoggingProvider, url: str, params: Mapping[str, str | int] | None = None
+) -> str | None:
+    try:
+        response = await client.get(url, params=params)
+        response.raise_for_status()
+        return response.text
+    except Exception as error:
+        logger.error(f"Unexpected error reading Yahoo News page {url}: {error}")
+        return None
 
-        for link in links:
-            href = link.get("href")
-            headlines.setdefault(str(href[0]) if isinstance(href, list) else str(href or ""), link.get_text(strip=True))
 
-        now = datetime.now(UTC)
+def parse_listing(stock_id: str, page: str, news: NewsSources) -> list[Article]:
+    """Each news link with a headline of at least yahoo_min_headline_length characters, once per URL. Its first link names it."""
+    links = BeautifulSoup(page, "lxml").find_all("a", href=lambda href: bool(href) and "/news/" in href and ".html" in href)
+    headlines: dict[str, str] = {}
 
-        return [
-            Article(
-                id=uuid4(),
-                stock_id=stock_id,
-                source=InformationSource.NEWS_MEDIA,
-                title=title,
-                content="",
-                url=href if href.startswith("http") else f"{self._news.yahoo_base_url}{href}",
-                content_type=ContentType.REPORT,
-                published_at=now,
-                fetched_at=now,
-            )
-            for href, title in headlines.items()
-            if len(title) >= self._news.yahoo_min_headline_length
-        ]
+    for link in links:
+        href = link.get("href")
+        headlines.setdefault(str(href[0]) if isinstance(href, list) else str(href or ""), link.get_text(strip=True))
 
-    @override
-    async def fetch_article_body(self, url: str) -> str:
-        """Yahoo wraps an article's text in caas-body; without it, the page's paragraphs longer than yahoo_short_paragraph_length."""
-        try:
-            response = await self._client.get(url)
+    now = datetime.now(UTC)
 
-            if response.status_code != 200:
-                return ""
+    return [
+        Article(
+            id=uuid4(),
+            stock_id=stock_id,
+            source=InformationSource.NEWS_MEDIA,
+            title=title,
+            content="",
+            url=href if href.startswith("http") else f"{news.yahoo_base_url}{href}",
+            content_type=ContentType.REPORT,
+            published_at=now,
+            fetched_at=now,
+        )
+        for href, title in headlines.items()
+        if len(title) >= news.yahoo_min_headline_length
+    ]
 
-            soup = BeautifulSoup(response.text, "lxml")
-            body = soup.find("div", class_="caas-body")
 
-            if body:
-                return body.get_text(separator="\n", strip=True)
+async def fetch_article_body(url: str, client: httpx.AsyncClient, news: NewsSources, logger: ILoggingProvider) -> str:
+    """Yahoo wraps an article's text in caas-body; without it, the page's paragraphs longer than yahoo_short_paragraph_length."""
+    try:
+        response = await client.get(url)
 
-            paragraphs = [paragraph.get_text(strip=True) for paragraph in soup.find_all("p")]
-            return "\n".join(paragraph for paragraph in paragraphs if len(paragraph) > self._news.yahoo_short_paragraph_length)
-        except Exception as error:
-            self._logger.debug(f"Failed to fetch Yahoo body for {url}: {error}")
+        if response.status_code != 200:
             return ""
+
+        soup = BeautifulSoup(response.text, "lxml")
+        body = soup.find("div", class_="caas-body")
+
+        if body:
+            return body.get_text(separator="\n", strip=True)
+
+        paragraphs = [paragraph.get_text(strip=True) for paragraph in soup.find_all("p")]
+        return "\n".join(paragraph for paragraph in paragraphs if len(paragraph) > news.yahoo_short_paragraph_length)
+    except Exception as error:
+        logger.debug(f"Failed to fetch Yahoo body for {url}: {error}")
+        return ""

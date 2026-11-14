@@ -7,17 +7,26 @@ from a_domain.types.errors import ListingUnavailableError
 
 class StockLookup:
     """
-    Loads explicitly requested stock IDs for specific-stock analysis, the stock page and the manual watchlist: each ID
-    once, in the order asked. An unknown ID is a run error, not an exception; an empty listing is an outage, which
-    raises ListingUnavailableError rather than calling every ID unknown.
+    Loads stocks from the exchange listing, each a new copy. Given None, it is the full stock universe, every listed
+    and OTC stock, counted as the run's scanned stocks: an outage leaves it empty, which ends a run with nothing and
+    leaves a page's stocks unnamed. Given stock IDs, for specific-stock analysis, the stock page and the manual
+    watchlist, it is each ID once, in the order asked: an unknown ID is a run error, not an exception, and an empty
+    listing is an outage, which raises ListingUnavailableError rather than calling every ID unknown.
     """
 
     def __init__(self, stock_provider: IStockProvider, logger: ILoggingProvider) -> None:
         self._stock_provider = stock_provider
         self._logger = logger
 
-    async def execute(self, stock_ids: list[str], stats: SystemStats) -> list[Stock]:
-        listing = {stock.stock_id: stock for stock in await self._stock_provider.get_all()}
+    async def execute(self, stock_ids: list[str] | None, stats: SystemStats) -> list[Stock]:
+        universe = await self._stock_provider.get_all()
+
+        if stock_ids is None:
+            stats.total_scanned = len(universe)
+            self._logger.info(f"Loaded {len(universe)} universe stocks into analysis candidates.")
+            return universe
+
+        listing = {stock.stock_id: stock for stock in universe}
 
         if not listing:
             raise ListingUnavailableError("The TWSE and TPEX listings could not be loaded.")

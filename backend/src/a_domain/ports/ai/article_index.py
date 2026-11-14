@@ -27,7 +27,3 @@ class IArticleIndex(Protocol):
         closest first.
         """
         ...
-
-    def embedded_text(self, article: Article) -> str:
-        """What of an article its vector stands for: its title, then the text kept with it, cut to the length the index reads."""
-        ...

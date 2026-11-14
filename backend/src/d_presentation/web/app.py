@@ -46,6 +46,7 @@ from d_presentation.live_runtime import RuntimeSwitch, collect_daily_data, watch
 from d_presentation.web.backtest_replays import BacktestReplays, TooManyBacktests
 from d_presentation.web.routers.api_v1 import router as api_v1_router
 from d_presentation.web.session import (
+    API_PATH,
     FLOW_PATH,
     AdministratorsOnly,
     AppRequestRequired,
@@ -91,19 +92,7 @@ index trend from the exchanges' own daily reports; without a Shioaji login it ha
 answers Buzz and Intraday the same way. A public site reads no news site and no MOPS: the AI step
 reads the archived material information, the TWSE news naming the stock and its archived financials, a stock with none
 of them is decided on its technical score alone, and every valuation endpoint answers 403 `mops_unavailable`. `GET
-/v1/market/audience` answers the site's audience and what it allows, so the web app offers only that. `GET
-/v1/market/archive-status` says how many sessions the archive holds and how many the built-in strategies need, `GET
-/v1/market/stocks/{stock_id}/financials` answers a stock's archived quarters and monthly revenue, `GET
-/v1/market/stocks/{stock_id}/analysis` reads them, the held EPS filings and the archived valuation ratios into a
-financial analysis by fixed rules with no AI call, `GET /v1/market/stocks/{stock_id}/news` answers a signed-in user
-what the site's article store keeps of the stock, its announcements and exchange news and, on a personal site, its news
-articles and board posts by title and address, `GET
-/v1/market/stocks/{stock_id}/ranking` answers its score, its place in the monthly ranking as a percentile with its two
-factors, or why the ranking leaves it out, `GET /v1/market/stocks/{stock_id}/brief` answers the AI brief the site holds
-of the stock (what the company is, and how the held facts of a recent window relate to its move, each sentence citing
-held items), one per stock and Taipei calendar day for every viewer, with no AI call, `POST` on the same address makes
-a signed-in user's one paid AI call for today's brief when none is held, and `GET
-/v1/market/attribution` names the open data's providers, datasets and license, which a page showing it must credit.
+/v1/market/audience` answers the site's audience and what it allows, so the web app offers only that.
 
 Backtests. `POST /v1/backtests` replays the user's active technical strategy over past sessions the site already
 holds, with the live trading rules on the technical score alone, and saves the result for the user (`GET
@@ -142,7 +131,7 @@ API_SECURITY_HEADERS = {
 async def add_security_headers(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     """
     Marks every API answer private, not framable and not sniffable, and refuses a body larger than MAX_BODY_BYTES
-    with 413 before anything reads it: FastAPI parses a body before it checks the bearer token.
+    with 413 before anything reads it: FastAPI parses a body before a route's gates check the session.
     """
     declared = request.headers.get("content-length", "0")
 
@@ -157,7 +146,7 @@ async def add_security_headers(request: Request, call_next: Callable[[Request], 
 
     response = await call_next(request)
 
-    if request.url.path.startswith("/v1"):
+    if request.url.path.startswith(API_PATH):
         response.headers.update(API_SECURITY_HEADERS)
 
     return response

@@ -5,7 +5,7 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from a_domain.ports.system.settings_files import SettingsProblem
-from a_domain.types.enums import AiProvider, SettingGroup, SettingUnit
+from a_domain.types.enums import AiProvider, SettingUnit
 
 
 def placeholders(required: set[str], optional: set[str] | None = None) -> AfterValidator:
@@ -135,9 +135,7 @@ class BehaviorConfig(BaseModel):
 
     model_config = ConfigDict(json_schema_extra={"retired": ["x_search_allowed_handles", "x_search_excluded_handles"]})
 
-    log_level: Literal["TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"] | int = Field(
-        json_schema_extra={"group": SettingGroup.ADVANCED}
-    )
+    log_level: Literal["TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"] | int
     """A loguru level name or number: the logger refuses any other at startup."""
     enable_web_search: bool
     enable_x_search: bool

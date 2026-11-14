@@ -10,7 +10,7 @@ from pydantic.dataclasses import dataclass
 from a_domain.rules.technical.matrix import Flags, Floats
 from a_domain.rules.trading.ranking import DecisionSessionsRule, MonthlyRankingRule, Ranking, RankingHistory
 from a_domain.types.errors import BacktestPeriodUnavailable
-from a_domain.types.values import NonEmptyText
+from a_domain.types.values import NonEmptyText, max_drawdown
 
 type Curve = Annotated[dict[date, float], Field(min_length=1)]
 
@@ -49,7 +49,7 @@ class RankingBacktest:
     """The fees and the tax paid, each as a fraction of the value it was paid from, summed."""
 
     @model_validator(mode="after")
-    def _the_benchmark_covers_the_same_sessions(self) -> Self:
+    def the_benchmark_covers_the_same_sessions(self) -> Self:
         if self.benchmark_curve and self.benchmark_curve.keys() != self.equity_curve.keys():
             raise ValueError("the benchmark curve covers the equity curve's sessions")
 
@@ -69,7 +69,7 @@ class RankingBacktest:
     @computed_field
     @property
     def max_drawdown(self) -> float:
-        return drawdown(self.equity_curve)
+        return max_drawdown(self.equity_curve.values())
 
     @computed_field
     @property
@@ -90,7 +90,7 @@ class RankingBacktest:
     @computed_field
     @property
     def benchmark_max_drawdown(self) -> float | None:
-        return drawdown(self.benchmark_curve) if self.benchmark_curve else None
+        return max_drawdown(self.benchmark_curve.values()) if self.benchmark_curve else None
 
     @computed_field
     @property
@@ -104,12 +104,6 @@ def curve_return(curve: dict[date, float]) -> float:
 
 def annual(curve: dict[date, float], sessions_per_year: float) -> float | None:
     return (1 + curve_return(curve)) ** (sessions_per_year / (len(curve) - 1)) - 1 if len(curve) > 1 else None
-
-
-def drawdown(curve: dict[date, float]) -> float:
-    """The deepest fall from an earlier high, as a fraction of that high."""
-    values = np.array(list(curve.values()))
-    return float((1 - values / np.maximum.accumulate(values)).max())
 
 
 def yearly(curve: dict[date, float]) -> dict[int, float]:
@@ -130,6 +124,69 @@ class RankingBook:
     holdings: dict[date, list[str]] = Field(default_factory=dict)
     equity: float = 1.0
     costs: float = 0.0
+
+
+def replay(
+    book: RankingBook, history: RankingHistory, decisions: Mapping[int, Ranking], columns: range, fee_rate: float, tax_rate: float
+) -> None:
+    sessions, traded = history.bars.sessions, ~np.isnan(history.bars.close)
+    intraday = np.where(traded, history.bars.close / history.bars.open - 1, 0.0)
+
+    for column in columns:
+        if book.rankings[-1].decided_on == sessions[column - 1]:
+            book.holdings[sessions[column]] = rebalance(
+                book, history, traded[:, column], intraday[:, column], column, fee_rate, tax_rate
+            )
+        else:
+            hold(book, history.returns[:, column])
+
+        book.curve[sessions[column]] = book.equity
+
+        if column in decisions:
+            book.rankings.append(decisions[column])
+
+
+def hold(book: RankingBook, returns: Floats) -> None:
+    growth = 1 + float(book.weights @ returns)
+    book.equity *= growth
+    book.weights = book.weights * (1 + returns) / growth
+
+
+def rebalance(
+    book: RankingBook, history: RankingHistory, traded: Flags, intraday: Floats, column: int, fee_rate: float, tax_rate: float
+) -> list[str]:
+    """Trades at the session's open to the ranking's equal weights, then holds through its close; the stocks held."""
+    hold(book, (1 + history.returns[:, column]) / (1 + intraday) - 1)
+    drift = book.weights
+    rows = [history.bars.stock_ids.index(stock.stock_id) for stock in book.rankings[-1].stocks]
+    target = np.zeros(len(drift))
+    target[rows] = 1 / len(rows) if rows else 0.0
+    one_price = traded & (history.bars.high[:, column] == history.bars.low[:, column])
+    target[(target > 0) & (~traded | (one_price & (drift == 0)))] = 0
+    stuck = (drift > 0) & ~traded
+    target[stuck] = drift[stuck]
+    free = np.where(stuck, 0.0, target)
+
+    if free.sum() > 0:
+        free *= (1 - target[stuck].sum()) / free.sum()
+
+    target = np.where(stuck, target, free)
+    charge = np.clip(drift - target, 0, None).sum() * (fee_rate + tax_rate) + np.clip(target - drift, 0, None).sum() * fee_rate
+    book.equity *= 1 - charge
+    book.costs += charge
+    book.weights = target
+    hold(book, intraday)
+    held = [row for row in rows if target[row] > 0] + [row for row in np.flatnonzero(stuck).tolist() if row not in rows]
+
+    return [history.bars.stock_ids[row] for row in held]
+
+
+def benchmark_curve(history: RankingHistory, start: int, end: int, benchmark_id: NonEmptyText) -> dict[date, float]:
+    if benchmark_id not in history.bars.stock_ids:
+        return {}
+
+    level = history.level[history.bars.stock_ids.index(benchmark_id), start : end + 1]
+    return {session: float(value / level[0]) for session, value in zip(history.bars.sessions[start : end + 1], level, strict=True)}
 
 
 @dataclass(frozen=True)
@@ -166,7 +223,7 @@ class RankingPortfolioRule:
 
         start, end = min(decisions), bisect_right(sessions, last) - 1
         book = RankingBook(weights=np.zeros(len(history.bars.stock_ids)), rankings=[decisions[start]], curve={sessions[start]: 1.0})
-        self._replay(book, history, decisions, range(start + 1, end + 1))
+        replay(book, history, decisions, range(start + 1, end + 1), self.fee_rate, self.tax_rate)
 
         return RankingBacktest(
             first=first,
@@ -176,67 +233,11 @@ class RankingPortfolioRule:
             tax_rate=self.tax_rate,
             sessions_per_year=self.sessions_per_year,
             equity_curve=book.curve,
-            benchmark_curve=self._benchmark(history, start, end),
+            benchmark_curve=benchmark_curve(history, start, end, self.benchmark_id),
             rankings=book.rankings,
             holdings=book.holdings,
             costs=book.costs,
         )
-
-    def _replay(self, book: RankingBook, history: RankingHistory, decisions: Mapping[int, Ranking], columns: range) -> None:
-        sessions, traded = history.bars.sessions, ~np.isnan(history.bars.close)
-        intraday = np.where(traded, history.bars.close / history.bars.open - 1, 0.0)
-
-        for column in columns:
-            if book.rankings[-1].decided_on == sessions[column - 1]:
-                book.holdings[sessions[column]] = self._rebalance(book, history, traded[:, column], intraday[:, column], column)
-            else:
-                self._hold(book, history.returns[:, column])
-
-            book.curve[sessions[column]] = book.equity
-
-            if column in decisions:
-                book.rankings.append(decisions[column])
-
-    def _hold(self, book: RankingBook, returns: Floats) -> None:
-        growth = 1 + float(book.weights @ returns)
-        book.equity *= growth
-        book.weights = book.weights * (1 + returns) / growth
-
-    def _rebalance(self, book: RankingBook, history: RankingHistory, traded: Flags, intraday: Floats, column: int) -> list[str]:
-        """Trades at the session's open to the ranking's equal weights, then holds through its close; the stocks held."""
-        self._hold(book, (1 + history.returns[:, column]) / (1 + intraday) - 1)
-        drift = book.weights
-        rows = [history.bars.stock_ids.index(stock.stock_id) for stock in book.rankings[-1].stocks]
-        target = np.zeros(len(drift))
-        target[rows] = 1 / len(rows) if rows else 0.0
-        one_price = traded & (history.bars.high[:, column] == history.bars.low[:, column])
-        target[(target > 0) & (~traded | (one_price & (drift == 0)))] = 0
-        stuck = (drift > 0) & ~traded
-        target[stuck] = drift[stuck]
-        free = np.where(stuck, 0.0, target)
-
-        if free.sum() > 0:
-            free *= (1 - target[stuck].sum()) / free.sum()
-
-        target = np.where(stuck, target, free)
-        charge = (
-            np.clip(drift - target, 0, None).sum() * (self.fee_rate + self.tax_rate)
-            + np.clip(target - drift, 0, None).sum() * self.fee_rate
-        )
-        book.equity *= 1 - charge
-        book.costs += charge
-        book.weights = target
-        self._hold(book, intraday)
-        held = [row for row in rows if target[row] > 0] + [row for row in np.flatnonzero(stuck).tolist() if row not in rows]
-
-        return [history.bars.stock_ids[row] for row in held]
-
-    def _benchmark(self, history: RankingHistory, start: int, end: int) -> dict[date, float]:
-        if self.benchmark_id not in history.bars.stock_ids:
-            return {}
-
-        level = history.level[history.bars.stock_ids.index(self.benchmark_id), start : end + 1]
-        return {session: float(value / level[0]) for session, value in zip(history.bars.sessions[start : end + 1], level, strict=True)}
 
 
 @dataclass(frozen=True)

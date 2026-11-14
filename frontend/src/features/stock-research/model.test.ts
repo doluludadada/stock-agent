@@ -19,12 +19,12 @@ describe('the last session of a stock', () => {
 })
 
 describe('the checks of a report', () => {
-  it('read the rule names, and whether each scoring pattern showed, so the page can say them in its own words', () => {
+  it('are the rule names, and for each scoring rule whether its pattern showed, so the page can say them in its own words', () => {
     const checks = reportChecks({
       score: 40,
       hard_failures: ['Price Above MA_20'],
       soft_failures: ['ADX Trend 20-50: with Bullish Direction'],
-      observations: ['RSI Range 50-70: not detected', 'Golden Cross: detected'],
+      observations: [{ rule: 'RSI Range 50-70', detected: false }, { rule: 'Golden Cross', detected: true }],
     })
     expect(checks.hard).toEqual([{ rule: 'Price Above MA_20' }])
     expect(checks.soft).toEqual([{ rule: 'ADX Trend 20-50: with Bullish Direction' }])

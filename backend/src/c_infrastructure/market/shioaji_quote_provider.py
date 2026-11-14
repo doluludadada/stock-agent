@@ -1,6 +1,5 @@
 import asyncio
-import time
-from collections.abc import Callable, Collection
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import override
@@ -18,6 +17,7 @@ from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from b_application.config.market_data_config import MarketDataConfig
 from b_application.config.trading_config import ShioajiLogin
+from c_infrastructure.market.request_pace import RequestPace
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 
 
@@ -27,8 +27,8 @@ class ShioajiConnection:
     The process's link to Shioaji on one login, which the quote provider of every runtime on that login shares. `client`
     is the client of the latest login and `login` that login in its thread. `up` says the login succeeded and Shioaji has
     not reported its session down since: Solace calls the session-down callback from its own thread once its reconnects
-    gave up. `request_slot` and `last_request_at` pace every request on the login, whichever runtime makes it, since
-    Shioaji counts its 50 market-data queries per 10 seconds per login. `earlier_clients` keeps every client a login was
+    gave up. `pace` paces every market-data request on the login, whichever runtime makes it, since Shioaji counts its
+    50 market-data queries per 10 seconds per login. `earlier_clients` keeps every client a login was
     made on before `client` for the life of the process: none is logged out or collected, because shioaji 1.3.1 on
     Python 3.14 segfaults at the next garbage collection after a logout.
     """
@@ -36,12 +36,11 @@ class ShioajiConnection:
     client: Shioaji
     up: bool = False
     login: asyncio.Future[None] | None = None
-    request_slot: asyncio.Lock = field(default_factory=asyncio.Lock)
-    last_request_at: float | None = None
+    pace: RequestPace = field(default_factory=RequestPace)
     earlier_clients: list[Shioaji] = field(default_factory=list)
 
 
-class ShioajiQuoteProvider(IBrokerQuoteProvider[Snapshot]):
+class ShioajiQuoteProvider(IBrokerQuoteProvider):
     """
     Sinopac's market data over the Shioaji client, on the simulation or the production server as the login says: each
     stock's snapshot for realtime quotes. The simulation server serves the same exchange data as production. Shioaji
@@ -115,76 +114,81 @@ class ShioajiQuoteProvider(IBrokerQuoteProvider[Snapshot]):
         try:
             await asyncio.shield(connection.login)
         except Exception as error:
-            raise RuntimeError(self.failure_of(error)) from None
+            raise RuntimeError(failure_of(error)) from None
 
     @override
     async def fetch_realtime_bars(self, stocks: list[Stock]) -> dict[str, Ohlcv]:
-        """A stock Shioaji has no contract for gets no quote."""
+        """
+        A stock Shioaji has no contract for gets no quote. The contract lookup waits while the login still fetches the
+        contracts.
+        """
         requested = list(dict.fromkeys(stock.stock_id for stock in stocks))
-        snapshots = await self.snapshots(requested)
-        quotes = {snapshot.code: quote for snapshot in snapshots if (quote := self.quote_of(snapshot)) is not None}
+        listed = self._connection.client.Contracts.Stocks
+        contracts = await asyncio.to_thread(lambda: [found for code in requested if (found := listed[code]) is not None])
+        quotes: dict[str, Ohlcv] = {}
+
+        for offset in range(0, len(contracts), self._batch_size):
+            batch, client = contracts[offset : offset + self._batch_size], self._connection.client
+            await self._connection.pace.wait(self._quote_interval_seconds)
+            snapshots: list[Snapshot] = await sdk_request(client.snapshots, batch, timeout=self._timeout_milliseconds)
+            quotes |= {
+                snapshot.code: quote
+                for snapshot in snapshots
+                if (quote := quote_of(snapshot, self._epoch, self._board_lot_shares)) is not None
+            }
 
         self._logger.info(f"Shioaji quotes: {len(quotes)}/{len(requested)} stocks with a trade this session")
         return quotes
 
-    @override
-    async def snapshots(self, stock_ids: Collection[str]) -> list[Snapshot]:
-        """The contract lookup waits while the login still fetches the contracts."""
-        stocks = self._connection.client.Contracts.Stocks
-        contracts = await asyncio.to_thread(lambda: [found for code in stock_ids if (found := stocks[code]) is not None])
-        answers: list[Snapshot] = []
 
-        for offset in range(0, len(contracts), self._batch_size):
-            batch, client = contracts[offset : offset + self._batch_size], self._connection.client
-            answer = await self.request(self._quote_interval_seconds, client.snapshots, batch, timeout=self._timeout_milliseconds)
-            answers.extend(answer)
+def quote_of(snapshot: Snapshot, epoch: datetime, board_lot_shares: int) -> Ohlcv | None:
+    """
+    The session so far, closing at the last trade and stamped with the exchange's time of that trade, with its change
+    from the session's reference price. A stock that has not traded this session gets no quote: its price is the
+    reference price, which nobody paid.
 
-        return answers
+    After a session a snapshot is stamped 13:30 for a last trade in the closing auction and 14:30 for one in the
+    after-hours fixed-price session. A stock that has not traded yet is stamped 08:30 of the day with a total
+    volume of 0. Volumes count board lots.
+    """
+    if snapshot.total_volume <= 0:
+        return None
 
-    @override
-    def quote_of(self, snapshot: Snapshot) -> Ohlcv | None:
-        """
-        After a session a snapshot is stamped 13:30 for a last trade in the closing auction and 14:30 for one in the
-        after-hours fixed-price session. A stock that has not traded yet is stamped 08:30 of the day with a total
-        volume of 0. Volumes count board lots.
-        """
-        if snapshot.total_volume <= 0:
-            return None
+    return Ohlcv(
+        ts=epoch + timedelta(microseconds=snapshot.ts // 1000),
+        open=snapshot.open,
+        high=snapshot.high,
+        low=snapshot.low,
+        close=snapshot.close,
+        volume=snapshot.total_volume * board_lot_shares,
+        change=snapshot.change_price,
+    )
 
-        return Ohlcv(
-            ts=self._epoch + timedelta(microseconds=snapshot.ts // 1000),
-            open=snapshot.open,
-            high=snapshot.high,
-            low=snapshot.low,
-            close=snapshot.close,
-            volume=snapshot.total_volume * self._board_lot_shares,
-            change=snapshot.change_price,
-        )
 
-    @override
-    async def request[**Arguments, Answer](
-        self, interval_seconds: float, call: Callable[Arguments, Answer], *args: Arguments.args, **kwargs: Arguments.kwargs
-    ) -> Answer:
-        connection = self._connection
+async def sdk_request[**Arguments, Answer](
+    call: Callable[Arguments, Answer], *args: Arguments.args, **kwargs: Arguments.kwargs
+) -> Answer:
+    """
+    Makes one request of the SDK, `call` with its arguments in a worker thread. Its failure raises RuntimeError saying
+    what failure_of says of the SDK's error, never the error's text.
+    """
+    try:
+        return await asyncio.to_thread(call, *args, **kwargs)
+    except Exception as error:
+        raise RuntimeError(f"Shioaji answered {failure_of(error)}") from None
 
-        async with connection.request_slot:
-            if connection.last_request_at is not None:
-                await asyncio.sleep(max(0.0, interval_seconds - (time.monotonic() - connection.last_request_at)))
 
-            connection.last_request_at = time.monotonic()
+def failure_of(error: Exception) -> str:
+    """
+    What logs and run records may say of an error of the broker's SDK: its type and the server's status. Never its
+    text, which holds the server's whole answer, the login's person id and addresses included.
 
-        try:
-            return await asyncio.to_thread(call, *args, **kwargs)
-        except Exception as error:
-            raise RuntimeError(f"Shioaji answered {self.failure_of(error)}") from None
+    The SDK's errors carry the server's status as `code`, or as status.status_code of the answer they hold.
+    """
+    answer = error.args[0] if error.args and isinstance(error.args[0], dict) else {}
+    status = getattr(error, "code", None)
 
-    @override
-    def failure_of(self, error: Exception) -> str:
-        """The SDK's errors carry the server's status as `code`, or as status.status_code of the answer they hold."""
-        answer = error.args[0] if error.args and isinstance(error.args[0], dict) else {}
-        status = getattr(error, "code", None)
+    if status is None and isinstance(answer.get("status"), dict):
+        status = answer["status"].get("status_code")
 
-        if status is None and isinstance(answer.get("status"), dict):
-            status = answer["status"].get("status_code")
-
-        return type(error).__name__ if status is None else f"{type(error).__name__}, status {status}"
+    return type(error).__name__ if status is None else f"{type(error).__name__}, status {status}"

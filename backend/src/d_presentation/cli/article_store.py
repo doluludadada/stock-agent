@@ -5,13 +5,10 @@ the text embedding model's files once; a later run embeds only what is new, and 
 them again from the kept articles. It starts without a broker login, reaches no news site, orders nothing and asks no AI.
 """
 
-import asyncio
-import os
-
 from a_domain.types.errors import ListingUnavailableError
 from b_application.config.settings_loader import get_project_root, load_settings
 from d_presentation.cli import terminal
-from d_presentation.dependencies import STARTUP_REFUSALS, create_process_state, open_runtime
+from d_presentation.dependencies import create_process_state, open_runtime
 
 
 async def backfill_articles() -> int:
@@ -28,15 +25,4 @@ async def backfill_articles() -> int:
 
 
 if __name__ == "__main__":
-    exit_code = 1
-
-    try:
-        exit_code = asyncio.run(backfill_articles())
-    except (*STARTUP_REFUSALS, ListingUnavailableError) as error:
-        terminal.console.print(str(error), style="red", markup=False, highlight=False)
-    except Exception:
-        terminal.console.print_exception()
-    finally:
-        # The broker's SDK can leave a thread running that would hold the interpreter at exit, so the process ends
-        # here; anything unexpected is printed above first, since nothing prints after this.
-        os._exit(exit_code)
+    terminal.run_to_exit(backfill_articles(), ListingUnavailableError)

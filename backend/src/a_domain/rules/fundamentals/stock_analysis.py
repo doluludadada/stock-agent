@@ -1,3 +1,4 @@
+import math
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime
 from statistics import median
@@ -9,8 +10,9 @@ from a_domain.model.fundamentals.monthly_revenue import MonthlyRevenue
 from a_domain.model.fundamentals.quarter_financials import QuarterFinancials
 from a_domain.ports.market.daily_close_archive import ValuationRatios
 from a_domain.rules.fundamentals.trailing_eps import QuarterEps
+from a_domain.rules.trading.ranking import revenue_acceleration, revenue_matrix
 from a_domain.types.enums import ReadingKind
-from a_domain.types.values import FiscalQuarter
+from a_domain.types.values import FiscalQuarter, month_index
 
 
 def ratio(part: float | None, whole: float | None) -> float | None:
@@ -77,6 +79,17 @@ class RevenueTrend:
     """The latest months in a row above the same month a year before, negative for below. None when the latest has no change."""
 
 
+def year_over_year_change(held: Mapping[int, MonthlyRevenue], index: int) -> float | None:
+    revenue = held[index]
+
+    if revenue.year_over_year_percent is not None:
+        return revenue.year_over_year_percent / 100
+
+    before = held[index - 12].revenue if index - 12 in held else revenue.last_year_revenue
+    change = ratio(revenue.revenue, before)
+    return None if change is None else change - 1
+
+
 @dataclass(frozen=True)
 class RevenueTrendRule:
     """
@@ -89,14 +102,19 @@ class RevenueTrendRule:
     long_months: PositiveInt
 
     def apply(self, revenues: Sequence[MonthlyRevenue]) -> RevenueTrend:
-        held = {revenue.year * 12 + revenue.month - 1: revenue for revenue in revenues}
+        held = {month_index(revenue.year, revenue.month): revenue for revenue in revenues}
+        amounts, _ = revenue_matrix([""], {("", revenue.year, revenue.month): revenue.revenue for revenue in revenues})
+        first = min(held, default=0)
+        accelerations = {
+            index: float(revenue_acceleration(amounts, index - first, self.short_months, self.long_months)[0]) for index in held
+        }
         months = [
             RevenueMonth(
                 year=revenue.year,
                 month=revenue.month,
                 revenue=revenue.revenue,
-                year_over_year=self._year_over_year(held, index),
-                acceleration=self._acceleration(held, index),
+                year_over_year=year_over_year_change(held, index),
+                acceleration=None if math.isnan(accelerations[index]) else accelerations[index],
                 served_date=revenue.served_date,
             )
             for index, revenue in sorted(held.items())
@@ -109,25 +127,6 @@ class RevenueTrendRule:
             accelerating_months=run_length([month.acceleration for month in months], 1.0),
             growing_months=run_length([month.year_over_year for month in months], 0.0),
         )
-
-    def _year_over_year(self, held: Mapping[int, MonthlyRevenue], index: int) -> float | None:
-        revenue = held[index]
-
-        if revenue.year_over_year_percent is not None:
-            return revenue.year_over_year_percent / 100
-
-        before = held[index - 12].revenue if index - 12 in held else revenue.last_year_revenue
-        change = ratio(revenue.revenue, before)
-        return None if change is None else change - 1
-
-    def _acceleration(self, held: Mapping[int, MonthlyRevenue], index: int) -> float | None:
-        window = [held[month].revenue if month in held else None for month in range(index + 1 - self.long_months, index + 1)]
-        amounts = [amount for amount in window if amount is not None]
-
-        if len(amounts) < self.long_months:
-            return None
-
-        return ratio(sum(amounts[-self.short_months :]) / self.short_months, sum(amounts) / self.long_months)
 
 
 @dataclass(frozen=True)
@@ -175,6 +174,24 @@ class EarningsTrend:
     """When the newest MOPS page that gave a quarter's EPS was fetched. None when every EPS is the open-data archive's."""
 
 
+def quarter_result(quarter: FiscalQuarter, held: QuarterFinancials | None, eps: Mapping[FiscalQuarter, float]) -> QuarterResult:
+    year_to_date = eps.get(quarter)
+    before = 0.0 if quarter.quarter == 1 else eps.get(quarter.previous())
+    change = ratio(year_to_date, eps.get(FiscalQuarter(quarter.year - 1, quarter.quarter)))
+    figures = held or QuarterFinancials(quarter=quarter)
+
+    return QuarterResult(
+        quarter=quarter,
+        eps_year_to_date=year_to_date,
+        quarter_eps=None if year_to_date is None or before is None else year_to_date - before,
+        eps_year_over_year=None if change is None else change - 1,
+        gross_margin=ratio(figures.gross_profit, figures.revenue),
+        operating_margin=ratio(figures.operating_income, figures.revenue),
+        net_margin=ratio(figures.net_income, figures.revenue),
+        debt_ratio=ratio(figures.total_liabilities, figures.total_assets),
+    )
+
+
 @dataclass(frozen=True)
 class EarningsTrendRule:
     """
@@ -188,29 +205,12 @@ class EarningsTrendRule:
         archived = {quarter.quarter: quarter.eps for quarter in quarters if quarter.eps is not None}
         filed = {page.quarter: page for page in pages if stock_id in page.cumulative_eps and page.quarter not in archived}
         eps = archived | {quarter: page.cumulative_eps[stock_id] for quarter, page in filed.items()}
-        results = [self._result(quarter, held.get(quarter), eps) for quarter in sorted(held.keys() | eps.keys())]
+        results = [quarter_result(quarter, held.get(quarter), eps) for quarter in sorted(held.keys() | eps.keys())]
 
         return EarningsTrend(
             quarters=results,
             eps_growing_quarters=run_length([result.eps_year_over_year for result in results], 0.0),
             filed_eps_fetched_at=max((page.fetched_at for page in filed.values()), default=None),
-        )
-
-    def _result(self, quarter: FiscalQuarter, held: QuarterFinancials | None, eps: Mapping[FiscalQuarter, float]) -> QuarterResult:
-        year_to_date = eps.get(quarter)
-        before = 0.0 if quarter.quarter == 1 else eps.get(quarter.previous())
-        change = ratio(year_to_date, eps.get(FiscalQuarter(quarter.year - 1, quarter.quarter)))
-        figures = held or QuarterFinancials(quarter=quarter)
-
-        return QuarterResult(
-            quarter=quarter,
-            eps_year_to_date=year_to_date,
-            quarter_eps=None if year_to_date is None or before is None else year_to_date - before,
-            eps_year_over_year=None if change is None else change - 1,
-            gross_margin=ratio(figures.gross_profit, figures.revenue),
-            operating_margin=ratio(figures.operating_income, figures.revenue),
-            net_margin=ratio(figures.net_income, figures.revenue),
-            debt_ratio=ratio(figures.total_liabilities, figures.total_assets),
         )
 
 
@@ -245,6 +245,14 @@ class ValuationStanding:
     dividend_yield: RatioStanding
 
 
+def ratio_standing(values: Sequence[float | None], min_sessions: PositiveInt) -> RatioStanding:
+    given = [value for value in values if value is not None]
+
+    return RatioStanding(
+        latest=values[-1] if values else None, median=median(given) if len(given) >= min_sessions else None, sessions=len(given)
+    )
+
+
 @dataclass(frozen=True)
 class ValuationStandingRule:
     """
@@ -264,18 +272,9 @@ class ValuationStandingRule:
             first_session=sessions[0].session_date if sessions else None,
             sessions=len(sessions),
             min_sessions=self.min_sessions,
-            pe_ratio=self._standing([ratios.pe_ratio for ratios in sessions]),
-            pb_ratio=self._standing([ratios.pb_ratio for ratios in sessions]),
-            dividend_yield=self._standing([ratios.dividend_yield for ratios in sessions]),
-        )
-
-    def _standing(self, values: Sequence[float | None]) -> RatioStanding:
-        given = [value for value in values if value is not None]
-
-        return RatioStanding(
-            latest=values[-1] if values else None,
-            median=median(given) if len(given) >= self.min_sessions else None,
-            sessions=len(given),
+            pe_ratio=ratio_standing([ratios.pe_ratio for ratios in sessions], self.min_sessions),
+            pb_ratio=ratio_standing([ratios.pb_ratio for ratios in sessions], self.min_sessions),
+            dividend_yield=ratio_standing([ratios.dividend_yield for ratios in sessions], self.min_sessions),
         )
 
 
@@ -296,6 +295,58 @@ class StockAnalysis:
     valuation: ValuationStanding
     readings: list[Reading]
     """What the figures say, by fixed rules, in page order: revenue, earnings, valuation. No AI writes any of it."""
+
+
+def revenue_readings(revenue: RevenueTrend) -> list[Reading]:
+    if not revenue.months:
+        return [Reading(ReadingKind.NO_REVENUE)]
+
+    readings: list[Reading] = []
+
+    if revenue.accelerating_months is None:
+        readings.append(Reading(ReadingKind.REVENUE_HISTORY_SHORT, len(revenue.months)))
+
+    if revenue.accelerating_months:
+        kind = ReadingKind.REVENUE_ACCELERATING if revenue.accelerating_months > 0 else ReadingKind.REVENUE_SLOWING
+        readings.append(Reading(kind, abs(revenue.accelerating_months)))
+
+    if revenue.growing_months:
+        kind = ReadingKind.REVENUE_GROWING if revenue.growing_months > 0 else ReadingKind.REVENUE_SHRINKING
+        readings.append(Reading(kind, abs(revenue.growing_months)))
+
+    return readings
+
+
+def earnings_reading(earnings: EarningsTrend) -> Reading:
+    held = [result for result in earnings.quarters if result.eps_year_to_date is not None]
+
+    if not held:
+        return Reading(ReadingKind.NO_EPS)
+
+    if not earnings.eps_growing_quarters:
+        return Reading(ReadingKind.EPS_HISTORY_SHORT, len(held))
+
+    kind = ReadingKind.EPS_UP if earnings.eps_growing_quarters > 0 else ReadingKind.EPS_DOWN
+    return Reading(kind, abs(earnings.eps_growing_quarters))
+
+
+def valuation_reading(valuation: ValuationStanding) -> Reading:
+    price_to_earnings = valuation.pe_ratio
+
+    if valuation.session_date is None:
+        return Reading(ReadingKind.NO_VALUATION)
+
+    if price_to_earnings.latest is None:
+        return Reading(ReadingKind.NO_PE)
+
+    if price_to_earnings.median is None:
+        return Reading(ReadingKind.VALUATION_HISTORY_SHORT, price_to_earnings.sessions)
+
+    if price_to_earnings.latest == price_to_earnings.median:
+        return Reading(ReadingKind.PE_AT_MEDIAN, price_to_earnings.sessions)
+
+    kind = ReadingKind.PE_ABOVE_MEDIAN if price_to_earnings.latest > price_to_earnings.median else ReadingKind.PE_BELOW_MEDIAN
+    return Reading(kind, price_to_earnings.sessions)
 
 
 @dataclass(frozen=True)
@@ -322,55 +373,6 @@ class StockAnalysisRule:
         revenue = self.revenue_rule.apply(revenues)
         earnings = self.earnings_rule.apply(stock_id, quarters, pages)
         valuation = self.valuation_rule.apply(ratios)
-        readings = [*self._revenue_readings(revenue), self._earnings_reading(earnings), self._valuation_reading(valuation)]
+        readings = [*revenue_readings(revenue), earnings_reading(earnings), valuation_reading(valuation)]
 
         return StockAnalysis(revenue=revenue, earnings=earnings, valuation=valuation, readings=readings)
-
-    def _revenue_readings(self, revenue: RevenueTrend) -> list[Reading]:
-        if not revenue.months:
-            return [Reading(ReadingKind.NO_REVENUE)]
-
-        readings: list[Reading] = []
-
-        if revenue.accelerating_months is None:
-            readings.append(Reading(ReadingKind.REVENUE_HISTORY_SHORT, len(revenue.months)))
-
-        if revenue.accelerating_months:
-            kind = ReadingKind.REVENUE_ACCELERATING if revenue.accelerating_months > 0 else ReadingKind.REVENUE_SLOWING
-            readings.append(Reading(kind, abs(revenue.accelerating_months)))
-
-        if revenue.growing_months:
-            kind = ReadingKind.REVENUE_GROWING if revenue.growing_months > 0 else ReadingKind.REVENUE_SHRINKING
-            readings.append(Reading(kind, abs(revenue.growing_months)))
-
-        return readings
-
-    def _earnings_reading(self, earnings: EarningsTrend) -> Reading:
-        held = [result for result in earnings.quarters if result.eps_year_to_date is not None]
-
-        if not held:
-            return Reading(ReadingKind.NO_EPS)
-
-        if not earnings.eps_growing_quarters:
-            return Reading(ReadingKind.EPS_HISTORY_SHORT, len(held))
-
-        kind = ReadingKind.EPS_UP if earnings.eps_growing_quarters > 0 else ReadingKind.EPS_DOWN
-        return Reading(kind, abs(earnings.eps_growing_quarters))
-
-    def _valuation_reading(self, valuation: ValuationStanding) -> Reading:
-        price_to_earnings = valuation.pe_ratio
-
-        if valuation.session_date is None:
-            return Reading(ReadingKind.NO_VALUATION)
-
-        if price_to_earnings.latest is None:
-            return Reading(ReadingKind.NO_PE)
-
-        if price_to_earnings.median is None:
-            return Reading(ReadingKind.VALUATION_HISTORY_SHORT, price_to_earnings.sessions)
-
-        if price_to_earnings.latest == price_to_earnings.median:
-            return Reading(ReadingKind.PE_AT_MEDIAN, price_to_earnings.sessions)
-
-        kind = ReadingKind.PE_ABOVE_MEDIAN if price_to_earnings.latest > price_to_earnings.median else ReadingKind.PE_BELOW_MEDIAN
-        return Reading(kind, price_to_earnings.sessions)

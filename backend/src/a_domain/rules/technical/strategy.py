@@ -4,7 +4,7 @@ from typing import Annotated, Self
 from pydantic import ConfigDict, Field, NonNegativeInt, model_validator
 from pydantic.dataclasses import dataclass
 
-from a_domain.model.analysis.technical_report import TechnicalReport
+from a_domain.model.analysis.technical_report import TechnicalObservation, TechnicalReport
 from a_domain.model.market.stock import Stock
 from a_domain.rules.technical.calculation.calculator import IndicatorParameters, indicator_outputs
 from a_domain.rules.technical.formula import (
@@ -45,7 +45,7 @@ class TechnicalScoring:
     def apply(self, rules: Sequence[TechnicalRule], passed: Sequence[bool]) -> TechnicalReport:
         hard_failures: list[str] = []
         soft_failures: list[str] = []
-        observations: list[str] = []
+        observations: list[TechnicalObservation] = []
         score = self.base_score
 
         for rule, rule_passed in zip(rules, passed, strict=True):
@@ -57,12 +57,22 @@ class TechnicalScoring:
                     soft_failures.append(rule.name)
                     score -= self.failure_score_reduction
                 case RuleEffect.INCREASE_SCORE_ON_PASS:
-                    observations.append(f"{rule.name}: {'detected' if rule_passed else 'not detected'}")
+                    observations.append(TechnicalObservation(rule=rule.name, detected=rule_passed))
                     score += self.pass_score_increase if rule_passed else 0
 
         return TechnicalReport(
             score=max(0, min(100, score)), hard_failures=hard_failures, soft_failures=soft_failures, observations=observations
         )
+
+
+def bars_needed(reference: DataReference, shift: int, indicators: dict[FormulaId, IndicatorParameters]) -> int:
+    match reference:
+        case IndicatorValue(indicator_id=indicator_id, bars_ago=bars_ago):
+            return indicators[indicator_id].required_bars + bars_ago + shift
+        case MarketValue(bars_ago=bars_ago):
+            return bars_ago + shift + 1
+        case _:
+            return 1
 
 
 @dataclass(frozen=True, config=ConfigDict(extra="forbid"))
@@ -80,7 +90,7 @@ class TechnicalStrategy:
     rules: Annotated[tuple[TechnicalRule, ...], Field(min_length=1, max_length=100)]
 
     @model_validator(mode="after")
-    def _indicator_references_exist(self) -> Self:
+    def indicator_references_exist(self) -> Self:
         for rule in self.rules:
             for reference, _ in references(rule.condition):
                 if not isinstance(reference, IndicatorValue):
@@ -104,7 +114,9 @@ class TechnicalStrategy:
     @property
     def required_bars(self) -> int:
         """The completed daily bars the rules need: each reference's own history plus how far back it is read."""
-        needs = (self._bars_needed(reference, shift) for rule in self.rules for reference, shift in references(rule.condition))
+        needs = (
+            bars_needed(reference, shift, self.indicators) for rule in self.rules for reference, shift in references(rule.condition)
+        )
         return max(needs, default=1)
 
     def apply(self, stock: Stock) -> TechnicalReport:
@@ -134,15 +146,6 @@ class TechnicalStrategy:
 
         return self.scoring.apply(self.rules, passed)
 
-    def _bars_needed(self, reference: DataReference, shift: int) -> int:
-        match reference:
-            case IndicatorValue(indicator_id=indicator_id, bars_ago=bars_ago):
-                return self.indicators[indicator_id].required_bars + bars_ago + shift
-            case MarketValue(bars_ago=bars_ago):
-                return bars_ago + shift + 1
-            case _:
-                return 1
-
 
 @dataclass(frozen=True, config=ConfigDict(extra="forbid"))
 class TechnicalSettings:
@@ -156,7 +159,7 @@ class TechnicalSettings:
     revision: NonNegativeInt = 0
 
     @model_validator(mode="after")
-    def _selects_its_own_strategies(self) -> Self:
+    def selects_its_own_strategies(self) -> Self:
         strategy_ids = {strategy.strategy_id for strategy in self.strategies}
 
         if len(strategy_ids) != len(self.strategies):

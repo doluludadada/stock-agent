@@ -59,7 +59,7 @@ from a_domain.types.enums import (
 )
 from a_domain.types.values import EmailAddress, NewPassword, PositiveFiniteFloat, Username
 
-StockId = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=10, pattern=r"^[0-9A-Za-z]+$")]
+StockId = Annotated[str, StringConstraints(strip_whitespace=True, pattern=r"^[0-9A-Za-z]{1,10}$")]
 
 REDACTIONS = (
     (re.compile(r"(?i)\b(bearer|token|api[_-]?key|secret|password)(\s*[:=]\s*|\s+)[^\s,;]+"), r"\1\2[redacted]"),
@@ -100,11 +100,6 @@ class Response(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-# ---------------------------------------------------------------------------- #
-#                                   Requests                                   #
-# ---------------------------------------------------------------------------- #
-
-
 class Confirmed(BaseModel):
     """Every write repeats the caller's confirmation in its body, so a stray or replayed request without it changes nothing."""
 
@@ -115,6 +110,10 @@ def each_once(stock_ids: list[str]) -> list[str]:
     """Each ID once, in the order given: a repeated ID is dropped before any lookup or AI call."""
     return list(dict.fromkeys(stock_ids))
 
+
+PageLimit = Annotated[int, Field(ge=1, le=100)]
+PageOffset = Annotated[int, Field(ge=0, le=10_000)]
+"""A page of a list that answers newest first: `limit` items after the `offset` newest. Ask for limit + 1 to know of a next page."""
 
 type StockIdList = Annotated[list[StockId], Field(min_length=1, max_length=20), AfterValidator(each_once)]
 """At most 20 stock IDs per request: each analysed stock is one paid AI call."""
@@ -127,11 +126,6 @@ class StockIdsRequest(Confirmed):
 class TechnicalSettingsRequest(Confirmed):
     settings: TechnicalSettings
     """What GET /v1/technical-settings answered, edited, with the revision it carried. It is validated as a whole."""
-
-
-# ---------------------------------------------------------------------------- #
-#                                     Runs                                     #
-# ---------------------------------------------------------------------------- #
 
 
 class RunAccepted(BaseModel):
@@ -257,11 +251,6 @@ class FollowResponse(BaseModel):
     """Every follow of the run's decisions so far, oldest first."""
 
 
-# ---------------------------------------------------------------------------- #
-#                                   Watchlist                                  #
-# ---------------------------------------------------------------------------- #
-
-
 class WatchlistEntryResponse(Response):
     stock_id: str
     name: str | None = None
@@ -286,12 +275,9 @@ class WatchlistRemovalResponse(BaseModel):
     """Requested stocks that had no MANUAL entry; their TECHNICAL or BUZZ entries, if any, are untouched."""
 
 
-# ---------------------------------------------------------------------------- #
-#                                    Account                                   #
-# ---------------------------------------------------------------------------- #
+class HeldPositionResponse(Response):
+    """A position (Position): what is held, its cost, and the gain or loss at its mark."""
 
-
-class PositionValueResponse(Response):
     stock_id: str
     quantity: int
     average_cost: float
@@ -301,16 +287,18 @@ class PositionValueResponse(Response):
 
     market_value: float
     unrealized_pnl: float
-
-
-class HeldPositionResponse(PositionValueResponse):
-    """A position of a holdings page: what is held, its cost, and the gain or loss at its mark."""
-
     cost_basis: float
     unrealized_return: float | None
     """The unrealized PnL over the cost: 0.1 is 10% up. None without a price."""
 
     opened_at: datetime | None
+
+
+class PositionValueResponse(HeldPositionResponse):
+    """A position of an account's value."""
+
+    weight: float | None
+    """Its market value over the account's equity. None in an account of a past day or of a backtest."""
 
 
 class AccountValueResponse(Response):
@@ -485,11 +473,6 @@ class BrokerageAccountResponse(BaseModel):
     """None while the login is down."""
 
 
-# ---------------------------------------------------------------------------- #
-#                                   Holdings                                   #
-# ---------------------------------------------------------------------------- #
-
-
 class HoldingRequest(Confirmed):
     """A holding the user enters by hand: shares of a listed stock at their average cost, with the day bought if known."""
 
@@ -546,11 +529,6 @@ class HoldingsResponse(Response):
     weighted_score: float | None
     lowest: HoldingResponse | None
     highest: HoldingResponse | None
-
-
-# ---------------------------------------------------------------------------- #
-#                                  Market data                                 #
-# ---------------------------------------------------------------------------- #
 
 
 class ListedStockResponse(Response):
@@ -721,11 +699,6 @@ class StockTechnicalResponse(BaseModel):
     notes: list[PublicText]
 
 
-# ---------------------------------------------------------------------------- #
-#                                   Valuation                                  #
-# ---------------------------------------------------------------------------- #
-
-
 class ExplanationRequest(Confirmed):
     """One AI call explains one stock's valuation; the numbers are the domain's, the AI writes only text."""
 
@@ -824,11 +797,6 @@ class ValuationScanResponse(BaseModel):
 class ValuationExplanationResponse(BaseModel):
     report: ValuationReportResponse
     sections: tuple[ReportSection, ...]
-
-
-# ---------------------------------------------------------------------------- #
-#                                Settings form                                 #
-# ---------------------------------------------------------------------------- #
 
 
 type ConfirmationId = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{16,64}$")]

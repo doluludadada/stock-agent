@@ -36,6 +36,13 @@ class BriefSentence:
     """Keys of the brief's sources."""
 
 
+def move_to(brief: StockBrief, status: BriefStatus) -> None:
+    if status not in brief.status.next_statuses:
+        raise IllegalBriefTransition(f"A brief cannot go from {brief.status} to {status}.")
+
+    brief.status = status
+
+
 @dataclass(config=ConfigDict(validate_assignment=True), kw_only=True)
 class StockBrief:
     """
@@ -77,14 +84,8 @@ class StockBrief:
 
     @validate_call
     def write(self, company: list[BriefSentence], movement: list[BriefSentence], sources: list[BriefSource], now: datetime) -> None:
-        self._move(BriefStatus.WRITTEN)
+        move_to(self, BriefStatus.WRITTEN)
         self.company, self.movement, self.sources, self.written_at = company, movement, sources, now
 
     def fail(self) -> None:
-        self._move(BriefStatus.FAILED)
-
-    def _move(self, status: BriefStatus) -> None:
-        if status not in self.status.next_statuses:
-            raise IllegalBriefTransition(f"A brief cannot go from {self.status} to {status}.")
-
-        self.status = status
+        move_to(self, BriefStatus.FAILED)

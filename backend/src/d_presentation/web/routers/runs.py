@@ -1,7 +1,7 @@
-from typing import Annotated, Any
+from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, status
 
 from a_domain.model.trading.order import Order
 from a_domain.types.enums import Feature, FollowRefusal
@@ -13,6 +13,8 @@ from d_presentation.web.schemas import (
     FollowItem,
     FollowResponse,
     ManualBuyRequest,
+    PageLimit,
+    PageOffset,
     RunAccepted,
     RunResponse,
     SignalResponse,
@@ -201,11 +203,7 @@ async def follow_run(run_id: UUID, body: Confirmed, pipeline: UserPipeline, user
 
 @router.get("", dependencies=[ShowsRuns])
 async def list_runs(
-    pipeline: UserPipeline,
-    user: CurrentUser,
-    runs: WorkflowRunsDependency,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
-    offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
+    pipeline: UserPipeline, user: CurrentUser, runs: WorkflowRunsDependency, limit: PageLimit = 20, offset: PageOffset = 0
 ) -> list[RunResponse]:
     """Recorded runs, newest first, whichever entry point (CLI or API) started them. Ask for limit + 1 to know of a next page."""
     records = await pipeline.load_runs(limit, offset)

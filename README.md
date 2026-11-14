@@ -125,7 +125,7 @@ flowchart TD
     WF --> DAY[Run Intraday Trading]
     WF --> ONE[Analyse Specific Stocks]
 
-    FULL --> MS1[MarketScanner: universe, MarketDataCollector: daily OHLCV]
+    FULL --> MS1[StockLookup: universe, MarketDataCollector: daily OHLCV]
     BUZZ --> BS[BuzzScanner: social candidates]
     BUZZ --> MS2[MarketDataCollector: candidate daily OHLCV]
     DAY --> LOAD[IntradayCandidates: held positions + active watchlist]
@@ -162,7 +162,7 @@ Important distinction:
 - `NewsFeed` and `AiAnalyser` only gather news, ask the AI and combine the technical and AI scores into the composite score.
 - `Pipeline` (`backend/src/b_application/pipeline.py`) holds every workflow as one method. Each method lists the use cases it runs, so it alone decides whether signals, reporting, watchlist writes or order steps happen.
 - The order steps run one decision at a time: `OrderPreparation` checks the trading phase, the quote's age and the broker the order would reach, and records the order, `OrderExecution` sends it to the broker, and `OrderOutcome` records what the broker did.
-- `MarketScanner` loads the universe, `StockLookup` the requested stock IDs and `IntradayCandidates` the held and watched stocks. `MarketDataCollector` loads daily OHLCV, `RealtimeQuoteFeed` loads the realtime quotes that price orders, and `TechnicalFilter` calculates the strategy's indicators and applies its rules.
+- `StockLookup` loads the universe or the requested stock IDs and `IntradayCandidates` the held and watched stocks. `MarketDataCollector` loads daily OHLCV, `RealtimeQuoteFeed` loads the realtime quotes that price orders, and `TechnicalFilter` calculates the strategy's indicators and applies its rules.
 
 ## Architecture
 

@@ -19,7 +19,13 @@ from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.daily_close_archive_dto import DailyCloseDTO
 from c_infrastructure.database.models.ohlcv_dto import ExRightReferenceDTO
 from c_infrastructure.database.repositories.daily_close_archive import SqlDailyCloseArchive
-from c_infrastructure.market.cached_price_provider import CachedPriceProvider
+from c_infrastructure.market.cached_price_provider import (
+    CachedPriceProvider,
+    held_ex_right_references,
+    reference_blocks,
+    save_bars,
+    save_references,
+)
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 
 pytestmark = pytest.mark.asyncio
@@ -166,9 +172,7 @@ async def test_the_timer_asks_again_once_for_sessions_saved_without_any_change_a
 ) -> None:
     """Shioaji's daily quotes gave no change: the timer asks the reports for those sessions, and a read serves them as held."""
     clock = MovableClock(at(MONDAY, 16))
-    await cache_over(FakeDailyHistory(), db, clock).save_bars(
-        {"2330": [session_bar(day, 100.0) for day in SESSIONS[:-1]] + [session_bar(MONDAY, 51.0, volume=4000)]}
-    )
+    await save_bars({"2330": [session_bar(day, 100.0) for day in SESSIONS[:-1]] + [session_bar(MONDAY, 51.0, volume=4000)]}, db)
     reports = split_on_monday(1.0)
     reports.sessions = {
         day: {stock: replace(bar, change=bar.change or 0.0) for stock, bar in bars.items()} for day, bars in reports.sessions.items()
@@ -254,7 +258,7 @@ async def test_a_dividend_twse_compared_to_no_reference_is_adjusted_by_its_ex_ri
 
     assert reports.references_asked == [(market, date(2026, 10, 10), MONDAY) for market in MarketType]
     assert [bar.close for bar in history[-2:]] == [98.0, 97.0]
-    assert await cache.ex_right_references(date(2026, 1, 1), MONDAY) == {"2330": {at(MONDAY, 13, 30): 98.0}}
+    assert await held_ex_right_references(date(2026, 1, 1), MONDAY, db, clock) == {"2330": {at(MONDAY, 13, 30): 98.0}}
 
 
 async def test_a_tpex_dividend_counts_as_no_loss_in_the_rankings_total_return_once_its_reference_is_saved(
@@ -319,9 +323,9 @@ async def test_a_reference_request_that_fails_leaves_its_range_and_the_older_one
     assert unread == [(date(2026, 4, 1), date(2026, 6, 30)), (date(2026, 1, 2), date(2026, 3, 31))]
     assert reports.references_asked == [
         *((MarketType.TWSE, *gap) for gap in unread),
-        *((MarketType.TPEX, *gap) for gap in cache.reference_blocks(date(2026, 1, 2), date(2026, 10, 9))[::-1]),
+        *((MarketType.TPEX, *gap) for gap in reference_blocks(date(2026, 1, 2), date(2026, 10, 9), 3)[::-1]),
     ]
-    assert await cache.ex_right_references(date(2026, 1, 1), MONDAY) == {"2330": {at(date(2026, 2, 3), 13, 30): 90.0}}
+    assert await held_ex_right_references(date(2026, 1, 1), MONDAY, db, clock) == {"2330": {at(date(2026, 2, 3), 13, 30): 90.0}}
     assert [await cache.reference_gaps(market, date(2026, 1, 2), MONDAY) for market in MarketType] == [[], []]
 
 
@@ -343,18 +347,18 @@ async def test_saving_what_the_cache_already_holds_leaves_the_history_as_read_an
     cache = cache_over(reports_of(SESSIONS, {"2330": 100.0}), db, clock)
     bars = {"2330": [session_bar(MONDAY, 100.0)], "^twse": [session_bar(MONDAY, 20000.0)]}
     references = {("2330", MONDAY): 98.0}
-    await cache.save_bars(bars)
-    await cache.save_references(references)
+    await save_bars(bars, db)
+    await save_references(references, db)
     first = await cache.listed_fingerprint()
 
-    await cache.save_bars(bars)
-    await cache.save_references(references)
-    await cache.save_bars({"^twse": [session_bar(MONDAY, 20001.0)]})
+    await save_bars(bars, db)
+    await save_references(references, db)
+    await save_bars({"^twse": [session_bar(MONDAY, 20001.0)]}, db)
     same = await cache.listed_fingerprint()
 
-    await cache.save_bars({"2330": [session_bar(MONDAY, 101.0)]})
+    await save_bars({"2330": [session_bar(MONDAY, 101.0)]}, db)
     changed_bar = await cache.listed_fingerprint()
-    await cache.save_references({("2330", MONDAY): 97.0})
+    await save_references({("2330", MONDAY): 97.0}, db)
     changed_reference = await cache.listed_fingerprint()
 
     assert same == first

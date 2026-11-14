@@ -112,18 +112,16 @@ class AppConfig(BaseSettings):
     ai: AiConfig = Field(json_schema_extra={"group": SettingGroup.AI})
     line: LineConfig = Field(default_factory=LineConfig, json_schema_extra={"group": SettingGroup.ADVANCED})
     api: ApiConfig = Field(default_factory=ApiConfig, json_schema_extra={"group": SettingGroup.ADVANCED})
-    behavior: BehaviorConfig = Field(json_schema_extra={"group": SettingGroup.AI, "operator_only": True})
+    behavior: BehaviorConfig = Field(json_schema_extra={"operator_only": True})
     """
     `operator_only` marks a setting, or every setting of a section, that only an operator who edits
     config/appsetting.yaml changes: the settings form neither shows it nor accepts a change to it. The file, the load
     and the start's notices read it like any other setting.
     """
 
-    db: DbConfig = Field(json_schema_extra={"group": SettingGroup.ADVANCED, "operator_only": True})
-    chat: ChatConfig = Field(json_schema_extra={"group": SettingGroup.ADVANCED, "operator_only": True})
-    folder: FolderConfig = Field(
-        default_factory=FolderConfig, json_schema_extra={"group": SettingGroup.ADVANCED, "operator_only": True}
-    )
+    db: DbConfig = Field(json_schema_extra={"operator_only": True})
+    chat: ChatConfig = Field(json_schema_extra={"operator_only": True})
+    folder: FolderConfig = Field(default_factory=FolderConfig, json_schema_extra={"operator_only": True})
     tavily: TavilyConfig = Field(default_factory=TavilyConfig, json_schema_extra={"group": SettingGroup.AI})
     analysis: AnalysisConfig = Field(json_schema_extra={"group": SettingGroup.TRADING_LIMITS})
     technical: TechnicalConfig = Field(json_schema_extra={"group": SettingGroup.TRADING_LIMITS})
@@ -133,14 +131,12 @@ class AppConfig(BaseSettings):
     )
     prompts: PromptsConfig = Field(default_factory=PromptsConfig, json_schema_extra={"group": SettingGroup.AI})
     sentiment: SentimentConfig = Field(default_factory=SentimentConfig, json_schema_extra={"group": SettingGroup.DATA_HISTORY})
-    collect_rules: CollectRulesConfig = Field(json_schema_extra={"group": SettingGroup.DATA_HISTORY, "operator_only": True})
+    collect_rules: CollectRulesConfig = Field(json_schema_extra={"operator_only": True})
     quality: QualityFiltersConfig = Field(default_factory=QualityFiltersConfig, json_schema_extra={"group": SettingGroup.DATA_HISTORY})
     stock_page: StockPageConfig = Field(default_factory=StockPageConfig, json_schema_extra={"group": SettingGroup.DATA_HISTORY})
     market: MarketConfig = Field(json_schema_extra={"group": SettingGroup.TRADING_LIMITS})
     freshness: FreshnessConfig = Field(default_factory=FreshnessConfig, json_schema_extra={"group": SettingGroup.DATA_HISTORY})
-    market_hours: MarketHoursConfig = Field(
-        default_factory=MarketHoursConfig, json_schema_extra={"group": SettingGroup.ADVANCED, "operator_only": True}
-    )
+    market_hours: MarketHoursConfig = Field(default_factory=MarketHoursConfig, json_schema_extra={"operator_only": True})
     market_data: MarketDataConfig = Field(default_factory=MarketDataConfig, json_schema_extra={"group": SettingGroup.DATA_HISTORY})
     trading: TradingConfig = Field(json_schema_extra={"group": SettingGroup.TRADING_LIMITS})
     mock_trading: MockTradingConfig = Field(
@@ -151,7 +147,7 @@ class AppConfig(BaseSettings):
     watchlist: WatchlistConfig = Field(default_factory=WatchlistConfig, json_schema_extra={"group": SettingGroup.DATA_HISTORY})
     valuation: ValuationConfig = Field(json_schema_extra={"group": SettingGroup.AI})
     accounts: AccountsConfig = Field(json_schema_extra={"group": SettingGroup.SITE_ACCESS})
-    sources: SourcesConfig = Field(json_schema_extra={"group": SettingGroup.ADVANCED, "operator_only": True})
+    sources: SourcesConfig = Field(json_schema_extra={"operator_only": True})
     features: FeaturesConfig = Field(default_factory=FeaturesConfig, json_schema_extra={"group": SettingGroup.FEATURES})
 
     def sizing_rule(self) -> SizingRule:

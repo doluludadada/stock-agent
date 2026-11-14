@@ -88,7 +88,8 @@ from pydantic.dataclasses import dataclass
   pydantic validates every assignment.
 - A limit on one field is a `Field(...)`. A limit that several classes share is one `type` alias
   in `a_domain/types/values.py`.
-- A check across fields is one `@model_validator(mode="after")`.
+- A check across fields is one `@model_validator(mode="after")`, named for what it checks, with no leading
+  underscore.
 - A method checks its arguments with `@validate_call` and the same types. A failed
   `model_validator` does not undo an assignment, so an entity's method checks first and changes
   after.
@@ -218,8 +219,8 @@ infrastructure decides how.
 - Group ports by concern in sub folders, and re-export them from each `__init__.py`.
 - Methods take and return domain models, never database rows or DTOs.
 - I/O methods are `async`.
-- If an adapter needs a helper, the helper is a method on the port, not a private method in the
-  adapter. Section 5 names the one kind of infrastructure code that is never a port method.
+- A port holds only what a caller outside its own adapters uses: a use case, the wiring, or another port's adapter.
+  A helper that only the adapter itself calls is not a port method (5).
 - A type that only this port and its adapters use lives in the port's file.
 
 ```python
@@ -240,6 +241,10 @@ A rule is one business decision you can test on its own.
   (3.2), a rule may also expose read-only properties derived from its own fields that choose
   nothing, such as `TechnicalStrategy.required_bars`, the daily bars its formulas need. A class in
   a rule file with only fields and properties is one of the rule's values, not a rule.
+- A rule has no private method (7). A part of `apply` that needs its own lines is a module-level function in the
+  rule's file, named for what it returns, or for what it does when it returns nothing, and taking the values it
+  reads, or the rule itself when it reads most of the rule's fields. A part that is a decision of its own is
+  another rule.
 - Use cases call rules, and rules may call other rules. The Pipeline and the presentation layer
   never call a rule.
 - Keep a rule easy: a few checks a reader understands at a glance. If it grows, split it into
@@ -273,17 +278,22 @@ like reading a list of steps in plain English.
 
 ### 4.1 Use cases (`b_application/use_cases/<area>/`)
 
-- A use case is one step that a person would name: load the account, scan the market, send the
-  orders. It calls every port and rule that the step needs.
-- A rule call is never a use case by itself. It goes inside the use case whose step needs its
-  answer.
+- A use case is one step that a person would name: load the account, scan the market, send the orders. It is one
+  substantial function with one responsibility, and it calls every port and rule that the step needs.
+- One call of one port is not a step, and neither is one rule call. Each goes inside the use case whose step needs
+  its answer, for example a save inside the step that made what is saved.
+- Where an operation is nothing but a read, one use case owns the reads of that store, and its arguments say what
+  to read: one use case for the saved backtests, all of them or one, never one class per query.
+- An argument says what a use case reads, never which verb it performs: no flag turns a lookup into a deletion or a
+  save. A command that is a whole operation and one call of one port, such as deleting a saved backtest or ending a
+  session, stays its own use case when no step shares its responsibility.
 - One use case class per file, grouped by area in sub folders.
 - Each use case has exactly one public method, always named `execute`.
 - `__init__` receives ports and settings, and builds its rules from the settings.
 - `execute` returns its result. It may read `PipelineStatus` for its inputs and add to
   `status.stats` (counters and errors). It writes no other field of the status.
 - Use cases only orchestrate. No SQL, no data mapping, no business calculations inside them.
-- No private methods. A helper becomes a domain rule, a port method or a model method.
+- No private methods. A helper becomes a domain rule or a model method.
 - Use cases do not call each other. The Pipeline puts them in order.
 
 ### 4.2 Pipeline (`b_application/pipeline.py`)
@@ -294,6 +304,8 @@ The Pipeline holds every operation the outside world can start.
   ports, no rules, no settings and no classes that group its fields.
 - The presentation layer calls only `Pipeline` methods. Each public method is one operation,
   including an operation with one step.
+- What many operations share is said once, in the class's docstring: an operation asks an AI, records a run or
+  sends an order only where its lines call the step that does, so no operation's docstring says what it does not do.
 - An operation is a flat list of use case calls, in order. The Pipeline stores each result in
   `PipelineStatus`, so the Pipeline shows where every field of the status comes from:
 
@@ -339,17 +351,19 @@ async def checkout(self, cart_id: CartId) -> PipelineStatus:
 
 ## 5. Infrastructure (`c_infrastructure/`)
 
-- Every class here implements a port. It has only that port's methods, and each one is marked
-  `@override`.
-- One folder also holds code that implements no port: `c_infrastructure/database/models/`. Next to
-  the tables (DTOs) it holds code whose subject is the tables themselves and never a domain model:
-  the schema upgrade steps, which run on a raw connection; the owner guard that the database
-  connector installs on every session it opens; the key derivation and sealing of the users
-  table's columns; and the copies of the whole database that backups and restores make. Such code has no domain meaning, so it is never a port method. A port that named
-  a session hook, a storage name or a cipher would put a library's detail into the domain. Module
-  functions and plain classes are allowed in that folder for this code only. Any other helper of an
-  adapter is a port method (3.4), and a name the wiring can compute, such as a collection name, is
-  passed to the adapter's constructor.
+- Every class here implements a port. It has only that port's methods, each marked `@override`.
+- A helper that only an adapter calls has no domain meaning, so it is not a port method. It is not a private method
+  either (7). It is a module-level function beside the adapter that uses it, and it takes what it reads as
+  arguments. A helper several adapters need, such as parsing a number or a Republic of China date, pacing the
+  requests to one host or upserting rows, lives once in one shared module of the folder those adapters share. A
+  helper that must remember something between calls, such as when the last request left, is a plain dataclass
+  there. A name the wiring can compute, such as a collection name, is passed to the adapter's constructor.
+- One folder holds code that implements no port and is not an adapter's helper: `c_infrastructure/database/models/`.
+  Next to the tables (DTOs) it holds code whose subject is the tables themselves and never a domain model: the
+  schema upgrade steps, which run on a raw connection; the owner guard that the database connector installs on
+  every session it opens; the key derivation and sealing of the users table's columns; and the copies of the whole
+  database that backups and restores make. A port that named a session hook, a storage name or a cipher would put
+  a library's detail into the domain.
 - Infrastructure carries data in and out. It makes no domain decision.
 - Database rows (DTOs) live only here, one DTO file per area, and are converted to domain models
   here. `SQLModel` is used only for these tables. Information only a table needs, such as a row's
@@ -397,7 +411,7 @@ async def checkout(self, cart_id: CartId) -> PipelineStatus:
 
 ## 7. Code style
 
-- Every function at most 30 lines, cyclomatic complexity at most 10. Two kinds of function are
+- Every function at most 30 lines, cyclomatic complexity at most 10. Three kinds of function are
   exempt from the length limit, but not from the complexity limit:
   - The builders in `dependencies.py`. One constructor argument per line is wiring, not logic,
     and splitting it would add groups.
@@ -405,7 +419,12 @@ async def checkout(self, cart_id: CartId) -> PipelineStatus:
     stock-agent's operations send orders with the same inline five-line loop seven times: twice in
     Buzz, twice in Intraday, once in the manual BUY, once in a follow of a run and once in a follow
     of the ranking. Splitting an operation would hide the order of its steps.
+  - A use case's `execute` (4.1). A use case is one function with one responsibility, and it has no private method
+    to move lines into. Splitting a step at 30 lines made use cases of one line.
 - Reduce nesting only with early returns.
+- No class has a private method (`_name`). What a class needs help with is a module-level function in the same
+  file, another rule, or a method of the model it is about. A class's whole surface is what a reader sees in its
+  public methods.
 - Names say what something is. No single-letter names except `i`, `j`, `k` in loops. No
   abbreviations (`membership`, not `mship`; `configuration` or `config`, but pick one).
 - No vague names such as manager, handler, processor, helper, util or service, unless the name
@@ -414,7 +433,8 @@ async def checkout(self, cart_id: CartId) -> PipelineStatus:
   `candidate` in one file, it is `candidate` everywhere. Never add a second name for an existing
   concept.
 - Code, comments and docs are in English.
-- Comments say what the code does in words. No ticket numbers or story ids (`US-304`).
+- A comment says why, when the code cannot: a constraint, an invariant or a decision. Code that needs a comment to
+  say what it does is renamed or split instead. No ticket numbers or story ids (`US-304`).
 - No hard-coded values. Section 3.3 gives every constant its home, and rules and use cases
   receive settings through their constructor.
 
@@ -516,6 +536,18 @@ From the work of 2026-11-06 and 2026-11-07:
   the SDK's error text could reach the logs and the run records unchanged. Section 5 now says the
   adapter removes them first.
 
+From the owner's review of 2026-11-14:
+
+- "An adapter's helper is a method on the port" put `parse_number`, `parse_roc_date`, `log_unread` and a host's
+  request pacing on domain ports that no use case calls: 90 port methods had no caller outside infrastructure. A
+  port holds what its callers use, and an adapter's helper is a module-level function beside it.
+- 77 private methods hid work inside classes whose rule is "one public method". The owner's words: a private
+  method inside is the one thing not wanted. The checker's PRIVATE-METHOD now reports every one.
+- The Pipeline may hold only use cases and the presentation may call only the Pipeline, so every one-call read
+  became its own class: 19 use cases were one line and 40 of the Pipeline's 76 operations forwarded to one of
+  them. The use cases were the defect, not the Pipeline. A use case is a substantial step, and one use case owns a
+  store's reads.
+
 ---
 
 ## Checklist
@@ -528,7 +560,8 @@ Copy this list for a review.
 - [ ] No two classes hold the same idea, and no class wraps a single field.
 - [ ] `a_domain/model` holds only standard models and their parts: no copy of a model, no rule
       result, no port-only type and no table-only information.
-- [ ] Every use case is a step a person would name. None only wraps one rule call.
+- [ ] Every use case is a substantial step a person would name. None only wraps one rule call or forwards to one
+      port method.
 - [ ] The Pipeline only calls use cases and stores their results.
 - [ ] The diff is the smallest one that does the job, and it rebuilds nothing a library does.
 
@@ -544,7 +577,8 @@ Copy this list for a review.
 - [ ] Every use case has one `execute` method that returns its result, writes only
       `status.stats`, has no private methods, and calls no other use case.
 - [ ] One `Pipeline` whose fields are only use cases and the logger. One `PipelineStatus`.
-- [ ] Infrastructure classes implement a port and mark every method `@override`.
+- [ ] Infrastructure classes implement a port and mark every method `@override`. A port has no method that only
+      its adapters call; an adapter's helper is a module-level function.
 - [ ] An adapter removes ids, IP addresses, account numbers and tokens from a third party's text
       before it logs, raises or saves it.
 - [ ] What depends on a kind is a property of its enum. No code outside the enum compares members.
@@ -552,6 +586,8 @@ Copy this list for a review.
       user.
 - [ ] Only `dependencies.py` creates objects.
 - [ ] Python 3.14 style from section 2.
-- [ ] Functions ≤ 30 lines, complexity ≤ 10, early returns, no single-letter or shortened names.
+- [ ] Functions ≤ 30 lines except a use case's `execute`, complexity ≤ 10, early returns, no single-letter or
+      shortened names.
+- [ ] No class has a private method.
 - [ ] Same word for the same thing everywhere. No story numbers in comments.
 - [ ] `pyright` at 0 errors, the architecture check at 0 and the tests pass.

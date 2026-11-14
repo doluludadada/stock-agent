@@ -26,11 +26,12 @@ from support.harness import (
     runtime_for,
 )
 from support.web import app_of, client_at, ended, serve, sign_in, write
-from test_ranking import SESSIONS, bars, market
+from test_ranking import SESSIONS, bars, market, revenue
 from test_web_api import FOLLOWED_RUN, SINOPAC_STARTS, reported_run
 
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.account import BrokerFill, Position, Settlement
+from a_domain.rules.trading.ranking import MonthlyRankingRule, Ranking
 from a_domain.types.enums import ExecutionProvider, FeatureVisibility, OrderStatus, RejectReason, TradeAction
 from a_domain.types.ids import UserId
 from c_infrastructure.database.models.schema_version_dto import SCHEMA_VERSION
@@ -181,6 +182,50 @@ async def test_each_holding_carries_the_stock_pages_own_standing_or_why_it_has_n
     assert (held["1101"]["revenue"]["acceleration"], held["1101"]["accelerating_months"]) == (pytest.approx(2 / 3), -1)
     assert (held["0050"]["revenue"], held["0050"]["accelerating_months"]) == (None, None)
     assert (held["2454"]["revenue"], held["2454"]["accelerating_months"]) == (None, None)
+
+
+async def test_the_holdings_rank_the_market_three_times_however_many_stocks_are_held(monkeypatch: pytest.MonkeyPatch) -> None:
+    harness = portfolio_site()
+    harness.stocks.stocks["6789"] = Stock(stock_id="6789", name="Unpriced")
+    harness.list_stock("3008", bars([5, 5, 5, 5, 5]))
+    harness.list_stock("6547", [replace(bar, volume=1) for bar in bars([100, 101, 102, 103, 104])])
+    harness.list_stock("6898", bars([100, 101, 102, 103, 104])[3:])
+
+    for stock_id in ("0050", "3008", "6547", "6898"):
+        for month in (1, 2):
+            harness.archive.monthly_revenues[(stock_id, 2026, month)] = revenue(stock_id, 2026, month, 100.0)
+
+    held = (*MANUAL, "2317", "6789", "3008", "6547", "6898")
+    rank = MonthlyRankingRule.apply
+    ranked: list[MonthlyRankingRule] = []
+
+    def counted(rule: MonthlyRankingRule, *arguments: Any) -> Ranking:
+        ranked.append(rule)
+        return rank(rule, *arguments)
+
+    async with serve(harness) as client:
+        for stock_id in held:
+            assert (await enter(client, stock_id, 100, 50.0)).status_code == 200
+
+        pages = {stock_id: (await client.get(f"/v1/market/stocks/{stock_id}/ranking")).json() for stock_id in held}
+        monkeypatch.setattr(MonthlyRankingRule, "apply", counted)
+        body = (await client.get("/v1/holdings", params={"sources": ["manual"]})).json()
+
+    standings = {holding["position"]["stock_id"]: holding["standing"] for holding in body["holdings"]}
+
+    assert standings == pages
+    assert {stock_id: standing["exclusion"] or standing["place"] for stock_id, standing in standings.items()} == {
+        "2330": 1,
+        "2317": 2,
+        "1101": 3,
+        "6789": "no_history",
+        "0050": "not_a_stock",
+        "6898": "not_traded",
+        "6547": "illiquid",
+        "3008": "price_under_floor",
+        "2454": "no_revenue_history",
+    }
+    assert [(rule.min_traded_value > 0, rule.min_close > 0) for rule in ranked] == [(True, True), (False, True), (False, False)]
 
 
 async def test_a_stock_the_site_holds_no_close_of_counts_at_its_cost_and_says_it_has_no_price() -> None:

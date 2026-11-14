@@ -22,7 +22,7 @@ import { Stat } from '@/shared/ui/stat'
 import { StateBlock } from '@/shared/ui/state-block'
 import { useAccountHistory, useTrades, type AccountHistory } from './api'
 import { TradesPanel } from './Trades'
-import { equityPoints, holdings, moveBetween, totalReturn, unrealizedRatio, type AccountValue, type EquityPoint, type Holding } from './model'
+import { equityPoints, holdings, moveBetween, totalReturn, unrealizedRatio, type AccountValue, type EquityPoint, type Position } from './model'
 
 const ValueChart = lazy(() => import('@/shared/ui/value-chart').then((module) => ({ default: module.ValueChart })))
 
@@ -200,7 +200,7 @@ function AllocationPanel({ value, names, className }: { value: AccountValue; nam
   const rows = useMemo(() => holdings(value), [value])
   const stocks = value.equity ? value.market_value / value.equity : 0
   const cash = value.equity ? value.cash / value.equity : 0
-  const widest = Math.max(...rows.map((row) => row.weight), 0)
+  const widest = Math.max(...rows.map((row) => row.weight ?? 0), 0)
 
   return (
     <Panel className={className} title={t('allocation.title')}>
@@ -232,9 +232,9 @@ function AllocationPanel({ value, names, className }: { value: AccountValue; nam
               {rows.map((row) => (
                 <li key={row.stock_id} className="grid grid-cols-[minmax(0,1fr)_3.5rem] items-center gap-x-3 gap-y-1 text-sm">
                   <StockName stockId={row.stock_id} name={names.get(row.stock_id)} />
-                  <span className="tabular text-right">{format.percent(row.weight)}</span>
+                  <span className="tabular text-right">{format.percent(row.weight ?? 0)}</span>
                   <span aria-hidden className="col-span-2 h-1.5 overflow-hidden rounded-full bg-muted">
-                    <span className="block h-full rounded-full bg-brand/70" style={{ width: `${widest ? (row.weight / widest) * 100 : 0}%` }} />
+                    <span className="block h-full rounded-full bg-brand/70" style={{ width: `${widest ? ((row.weight ?? 0) / widest) * 100 : 0}%` }} />
                   </span>
                 </li>
               ))}
@@ -258,7 +258,7 @@ function Positions({ value, liveStockIds, names, className }: PositionsProps) {
   const format = useFormat()
   const rows = useMemo(() => holdings(value), [value])
   const live = new Set(liveStockIds)
-  const columns: Column<Holding>[] = [
+  const columns: Column<Position>[] = [
     {
       key: 'stock',
       header: t('column.stock'),
@@ -292,11 +292,11 @@ function Positions({ value, liveStockIds, names, className }: PositionsProps) {
       cell: (row) => (
         <span className="flex flex-col items-end leading-tight sm:flex-row sm:items-baseline sm:justify-end sm:gap-2">
           <ChangeValue value={row.unrealized_pnl} format="absolute" fractionDigits={0} />
-          <ChangeValue value={row.returnRatio} format="percent" className="text-xs" />
+          <ChangeValue value={row.unrealized_return ?? 0} format="percent" className="text-xs" />
         </span>
       ),
     },
-    { key: 'weight', header: t('column.weight'), numeric: true, from: 'lg', cell: (row) => <span className="text-muted-foreground">{format.percent(row.weight)}</span> },
+    { key: 'weight', header: t('column.weight'), numeric: true, from: 'lg', cell: (row) => <span className="text-muted-foreground">{format.percent(row.weight ?? 0)}</span> },
   ]
 
   return (

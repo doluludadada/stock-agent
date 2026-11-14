@@ -144,6 +144,26 @@ class RankingHoldingsRule:
         )
 
 
+def sale_proceeds(
+    sell: TradeSignal, now: datetime, limit_price_rule: LimitPriceRule, affordable_quantity_rule: AffordableQuantityRule
+) -> float:
+    limit_price = limit_price_rule.apply(TradeAction.SELL, sell.stock_id, sell.price_at_signal)
+
+    return affordable_quantity_rule.cost_rule.apply(TradeAction.SELL, sell.stock_id, limit_price, sell.quantity, now=now).net
+
+
+def buy_decision(rule: RankingFollowRule, stock: Stock, budget: float, reason: str, now: datetime) -> TradeSignal | str:
+    limit_price = rule.limit_price_rule.apply(TradeAction.BUY, stock.stock_id, stock.current_price or 0.0)
+    quantity = rule.affordable_quantity_rule.apply(
+        cash=budget, stock_id=stock.stock_id, price=limit_price, lot_size=rule.lot_size, now=now
+    )
+
+    if quantity == 0:
+        return f"{stock.stock_id}: its share of the account, {budget:,.0f}, buys no lot of {rule.lot_size} at {limit_price}"
+
+    return TradeSignal.of(stock, now, TradeAction.BUY, SignalSource.RANKING, 0, reason, quantity)
+
+
 @dataclass(frozen=True)
 class RankingFollowRule:
     """
@@ -173,28 +193,12 @@ class RankingFollowRule:
             if stock_id in priced and (position := account.position_for(stock_id))
         ]
         entrants = [stock_id for stock_id in holdings.lacking if stock_id in priced]
-        cash = account.cash + sum(self._proceeds(sell, now) for sell in sells)
+        cash = account.cash + sum(sale_proceeds(sell, now, self.limit_price_rule, self.affordable_quantity_rule) for sell in sells)
         budget = min(account.equity / len(ranking.stocks), cash / len(entrants)) if entrants else 0.0
         places = {stock.stock_id: place for place, stock in enumerate(ranking.stocks, 1)}
-        buys = [self._buy(priced[stock_id], budget, f"Place {places[stock_id]} of {decision}", now) for stock_id in entrants]
+        buys = [buy_decision(self, priced[stock_id], budget, f"Place {places[stock_id]} of {decision}", now) for stock_id in entrants]
 
         return [*unpriced, *sells, *buys]
-
-    def _proceeds(self, sell: TradeSignal, now: datetime) -> float:
-        limit_price = self.limit_price_rule.apply(TradeAction.SELL, sell.stock_id, sell.price_at_signal)
-
-        return self.affordable_quantity_rule.cost_rule.apply(TradeAction.SELL, sell.stock_id, limit_price, sell.quantity, now=now).net
-
-    def _buy(self, stock: Stock, budget: float, reason: str, now: datetime) -> TradeSignal | str:
-        limit_price = self.limit_price_rule.apply(TradeAction.BUY, stock.stock_id, stock.current_price or 0.0)
-        quantity = self.affordable_quantity_rule.apply(
-            cash=budget, stock_id=stock.stock_id, price=limit_price, lot_size=self.lot_size, now=now
-        )
-
-        if quantity == 0:
-            return f"{stock.stock_id}: its share of the account, {budget:,.0f}, buys no lot of {self.lot_size} at {limit_price}"
-
-        return TradeSignal.of(stock, now, TradeAction.BUY, SignalSource.RANKING, 0, reason, quantity)
 
 
 @dataclass(

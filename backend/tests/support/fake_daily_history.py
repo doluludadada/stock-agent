@@ -1,10 +1,8 @@
 """The exchanges' daily reports as CachedPriceProvider reads them (IDailyHistorySource), scripted by the test, without the network."""
 
-from collections.abc import Collection
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time
 from itertools import pairwise
-from typing import Any
 
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
@@ -65,24 +63,6 @@ class FakeDailyHistory:
         self.fail_if_told()
         served = self.references if market is MarketType.TWSE else self.tpex_references
         return {key: price for key, price in served.items() if first <= key[1] <= last}
-
-    async def get(self, market: MarketType, url: str) -> Any:
-        raise AssertionError("the fake serves bars, never a report")
-
-    def rows(self, answer: Any, fields: Collection[str]) -> list[dict[str, str]]:
-        return []
-
-    def quotes(self, answer: Any, market: MarketType, session: date) -> dict[str, Ohlcv]:
-        return {}
-
-    def change(self, sign: str, text: str, close: float) -> float | None:
-        return None
-
-    def index_month(self, prices: Any, volumes: Any, market: MarketType) -> list[Ohlcv]:
-        return []
-
-    def session_date(self, text: str) -> date | None:
-        return None
 
     def fail_if_told(self) -> None:
         if self.failure is not None:

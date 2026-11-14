@@ -11,6 +11,7 @@ import httpx
 import pytest
 from support.fake_daily_history import FakeDailyHistory, session_bar
 from support.harness import build_harness, harness_config
+from support.settings import shipped_config
 from test_cached_price_provider import MONDAY, SESSIONS, at, cache_over
 from test_revenue_history import revenue
 from trading_stack import MovableClock
@@ -19,6 +20,7 @@ from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.types.enums import Audience, MarketType
 from b_application.use_cases.collect.daily_history_backfill import DailyHistoryBackfill
 from c_infrastructure.database.db_connector import DatabaseConnector
+from c_infrastructure.market.cached_price_provider import held_ex_right_references
 
 pytestmark = pytest.mark.asyncio
 
@@ -49,17 +51,15 @@ async def test_a_backfill_holds_every_session_from_its_first_day_and_a_rerun_aft
     reports.references = {("2330", SESSIONS[3]): 99.0}
     reports.stop = SESSIONS[10]
 
-    held, missing, unread = await DailyHistoryBackfill(cache_over(reports, database, clock), clock).execute(SESSIONS[0]) or (
-        [],
-        [],
-        [],
-    )
+    held, missing, unread = await DailyHistoryBackfill(cache_over(reports, database, clock), clock, shipped_config()).execute(
+        SESSIONS[0]
+    ) or ([], [], [])
 
     assert (held, missing, unread) == (SESSIONS[11:], SESSIONS[:11], [])
     assert reports.references_asked == [(market, SESSIONS[0], MONDAY) for market in MarketType]
 
     reports.stop, reports.asked = None, []
-    rerun = await DailyHistoryBackfill(cache_over(reports, database, clock), clock).execute(SESSIONS[0])
+    rerun = await DailyHistoryBackfill(cache_over(reports, database, clock), clock, shipped_config()).execute(SESSIONS[0])
 
     assert rerun == (SESSIONS, [], [])
     assert [question for question in reports.asked if question.startswith("quotes")] == [
@@ -70,14 +70,32 @@ async def test_a_backfill_holds_every_session_from_its_first_day_and_a_rerun_aft
 async def test_a_backfill_goes_back_before_the_earliest_session_the_cache_holds(database: DatabaseConnector) -> None:
     clock = MovableClock(at(MONDAY, 16))
     reports = FakeDailyHistory(sessions=reported(SESSIONS, 100.0), index={market: SESSIONS for market in MarketType})
-    await DailyHistoryBackfill(cache_over(reports, database, clock), clock).execute(SESSIONS[-5])
+    await DailyHistoryBackfill(cache_over(reports, database, clock), clock, shipped_config()).execute(SESSIONS[-5])
     earlier = [SESSIONS[0] - timedelta(days=offset) for offset in (21, 20, 17)]
     reports.sessions |= reported(earlier, 90.0)
     reports.index = {market: [*earlier, *SESSIONS] for market in MarketType}
 
-    held, missing, unread = await DailyHistoryBackfill(cache_over(reports, database, clock), clock).execute(earlier[0]) or ([], [], [])
+    held, missing, unread = await DailyHistoryBackfill(cache_over(reports, database, clock), clock, shipped_config()).execute(
+        earlier[0]
+    ) or ([], [], [])
 
     assert (held, missing, unread) == ([*earlier, *SESSIONS], [], [])
+
+
+async def test_without_a_first_day_the_backfill_covers_the_stock_pages_longest_chart_as_the_timer_runs_it(
+    database: DatabaseConnector,
+) -> None:
+    clock = MovableClock(at(MONDAY, 16))
+    reports = FakeDailyHistory(sessions=reported(SESSIONS, 100.0), index={market: SESSIONS for market in MarketType})
+    config = shipped_config()
+    window_first = MONDAY - timedelta(days=config.analysis.history_days(config.market_data.history_backfill_bars))
+
+    refreshed = await DailyHistoryBackfill(cache_over(reports, database, clock), clock, config).execute()
+
+    assert refreshed is not None
+    assert (refreshed[0], refreshed[1]) == (SESSIONS, [])
+    assert reports.asked[0] == f"index {MarketType.TWSE.value} {window_first} {MONDAY}"
+    assert await DailyHistoryBackfill(cache_over(reports, database, clock), clock, config).execute(window_first) == refreshed
 
 
 async def test_a_backfill_names_the_ex_right_references_a_failed_request_left_unread_and_a_rerun_reads_them(
@@ -88,16 +106,16 @@ async def test_a_backfill_names_the_ex_right_references_a_failed_request_left_un
     reports.tpex_references = {("6488", SESSIONS[3]): 99.0}
     reports.references_failing = {(MarketType.TPEX, SESSIONS[0]): httpx.ReadTimeout("The read operation timed out")}
 
-    answer = await DailyHistoryBackfill(cache_over(reports, database, clock), clock).execute(SESSIONS[0])
+    answer = await DailyHistoryBackfill(cache_over(reports, database, clock), clock, shipped_config()).execute(SESSIONS[0])
 
     assert answer == ([], SESSIONS, [(MarketType.TPEX, SESSIONS[0], MONDAY)])
 
     reports.references_failing = {}
     rerun_cache = cache_over(reports, database, clock)
-    rerun = await DailyHistoryBackfill(rerun_cache, clock).execute(SESSIONS[0])
+    rerun = await DailyHistoryBackfill(rerun_cache, clock, shipped_config()).execute(SESSIONS[0])
 
     assert rerun == (SESSIONS, [], [])
-    assert await rerun_cache.ex_right_references(SESSIONS[0], MONDAY) == {"6488": {at(SESSIONS[3], 13, 30): 99.0}}
+    assert await held_ex_right_references(SESSIONS[0], MONDAY, database, clock) == {"6488": {at(SESSIONS[3], 13, 30): 99.0}}
 
 
 async def test_the_operation_reads_the_revenue_of_every_month_from_the_first_day_and_a_public_site_backfills_nothing() -> None:
@@ -124,6 +142,6 @@ async def test_a_backfill_whose_reports_fail_names_each_exchanges_index_range_it
     reports = FakeDailyHistory(sessions=reported(SESSIONS, 100.0), index={market: SESSIONS for market in MarketType})
     reports.failure = httpx.ConnectError("TWSE refuses the address")
 
-    answer = await DailyHistoryBackfill(cache_over(reports, database, clock), clock).execute(SESSIONS[0])
+    answer = await DailyHistoryBackfill(cache_over(reports, database, clock), clock, shipped_config()).execute(SESSIONS[0])
 
     assert answer == ([], [], [(MarketType.TWSE, SESSIONS[0], MONDAY), (MarketType.TPEX, SESSIONS[0], MONDAY)])

@@ -15,7 +15,8 @@ from a_domain.ports.market.daily_close_archive import ValuationRatios
 from a_domain.types.enums import EpsKind, MarketType
 from a_domain.types.values import FiscalQuarter
 from b_application.config.market_data_config import MarketDataConfig, MarketHoursConfig
-from c_infrastructure.market.twse_provider import TaiwanStockProvider
+from c_infrastructure.market import twse_provider
+from c_infrastructure.market.twse_provider import TaiwanStockProvider, parse_announcement, parse_quarter_eps, parse_valuation_ratios
 from c_infrastructure.system.market_clock import TaiwanMarketClock
 
 SOURCES = shipped_config().sources
@@ -266,11 +267,11 @@ async def test_industries_merge_every_market_and_refetch_a_market_only_once_its_
     down = {MarketType.TPEX}
     requests: list[MarketType] = []
 
-    async def fetch_reports(urls: dict[MarketType, str]) -> dict[MarketType, list[dict[str, Any]]]:
+    async def fetch_reports(urls: dict[MarketType, str], *context: object) -> dict[MarketType, list[dict[str, Any]]]:
         requests.extend(urls)
         return {market: profiles[market] for market in urls if market not in down}
 
-    monkeypatch.setattr(provider, "fetch_reports", fetch_reports)
+    monkeypatch.setattr(twse_provider, "fetch_reports", fetch_reports)
 
     assert await provider.fetch_industries() == {"2330": "半導體業"}
 
@@ -306,10 +307,8 @@ async def test_industries_come_from_every_companys_profile_and_name_its_industry
 
 
 def test_an_announcement_without_a_valid_date_time_or_company_is_left_out_and_a_blank_fact_date_is_none() -> None:
-    provider, fetched_at = (
-        make_provider(),
-        datetime(2026, 11, 6, 10, 0, tzinfo=TaiwanMarketClock(MarketHoursConfig()).session_close(date(2026, 11, 6)).tzinfo),
-    )
+    clock = TaiwanMarketClock(MarketHoursConfig())
+    fetched_at = datetime(2026, 11, 6, 10, 0, tzinfo=clock.session_close(date(2026, 11, 6)).tzinfo)
     row = {
         "公司代號": "2330",
         "發言日期": "1151105",
@@ -320,7 +319,7 @@ def test_an_announcement_without_a_valid_date_time_or_company_is_left_out_and_a_
         "說明": "text",
     }
 
-    announcement = provider.parse_announcement(row, MarketType.TWSE, fetched_at)
+    announcement = parse_announcement(row, MarketType.TWSE, fetched_at, SOURCES.exchange, clock)
 
     assert announcement is not None and announcement.published_at.isoformat() == "2026-11-05T09:05:01+08:00"
     assert (announcement.title, announcement.content, announcement.clause, announcement.fact_date) == (
@@ -330,7 +329,7 @@ def test_an_announcement_without_a_valid_date_time_or_company_is_left_out_and_a_
         None,
     )
     for broken in ({"發言日期": "115/11/05"}, {"發言時間": "250000"}, {"公司代號": " "}):
-        assert provider.parse_announcement(row | broken, MarketType.TWSE, fetched_at) is None
+        assert parse_announcement(row | broken, MarketType.TWSE, fetched_at, SOURCES.exchange, clock) is None
 
 
 def test_quarter_eps_is_the_year_to_date_figure_of_the_quarter_its_row_names_and_a_row_without_one_is_left_out() -> None:
@@ -341,7 +340,7 @@ def test_quarter_eps_is_the_year_to_date_figure_of_the_quarter_its_row_names_and
         {"SecuritiesCompanyCode": "1570", "Year": "115", "季別": "3", "基本每股盈餘": ""},
     ]
 
-    filed = make_provider().parse_quarter_eps(rows, MarketType.TPEX)
+    filed = parse_quarter_eps(rows, MarketType.TPEX, SOURCES.exchange, TaiwanMarketClock(MarketHoursConfig()))
 
     assert {stock_id: (eps.value, eps.period_end, eps.kind) for stock_id, eps in filed.items()} == {
         "1268": (11.2, FiscalQuarter(2026, 3), EpsKind.CUMULATIVE),
@@ -356,7 +355,7 @@ def test_valuation_ratios_keep_the_session_their_row_names_and_a_blank_ratio_as_
         {"Date": "", "Code": "2317", "Name": "鴻海", "PEratio": "15.49", "DividendYield": "3.05", "PBratio": "1.73"},
     ]
 
-    assert make_provider().parse_valuation_ratios(rows, MarketType.TWSE) == [
+    assert parse_valuation_ratios(rows, MarketType.TWSE, SOURCES.exchange) == [
         ValuationRatios(stock_id="1101", session_date=date(2026, 11, 5), pe_ratio=None, dividend_yield=2.94, pb_ratio=0.88),
         ValuationRatios(stock_id="2330", session_date=date(2026, 11, 4), pe_ratio=1025.96, dividend_yield=None, pb_ratio=9.03),
     ]

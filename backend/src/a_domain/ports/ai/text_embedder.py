@@ -10,13 +10,5 @@ class ITextEmbedder(Protocol):
     """
 
     async def embed(self, texts: Sequence[str]) -> list[list[float]]:
-        """One vector per text, in the texts' order. Raises when the model cannot be loaded."""
-        ...
-
-    def embed_batch(self, texts: Sequence[str]) -> list[list[float]]:
-        """The vectors of one batch, computed on the calling thread. The first call loads the model."""
-        ...
-
-    def load(self) -> None:
-        """Opens the model, fetching its files into the server's folder first when they are not there yet."""
+        """One vector per text, in the texts' order. The first text opens the model. Raises when it cannot be opened."""
         ...

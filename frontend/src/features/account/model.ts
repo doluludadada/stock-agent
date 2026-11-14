@@ -1,31 +1,16 @@
 import type { AccountHistory } from './api'
 
 export type AccountValue = AccountHistory['current']
-type Position = AccountValue['positions'][number]
-
-const costOf = (position: Position) => position.average_cost * position.quantity
-
-/**
- * A position with the two ratios `/v1/account/history` does not answer. The holdings and the SinoPac statement get
- * theirs from the server (`unrealized_return`, `weight`); the mock account's positions carry amounts only.
- */
-export interface Holding extends Position {
-  /** Unrealized profit or loss over the cost. */
-  returnRatio: number
-  /** Market value over the account's equity. */
-  weight: number
-}
+export type Position = AccountValue['positions'][number]
 
 /** The positions, largest first. */
-export function holdings(value: AccountValue): Holding[] {
-  return value.positions
-    .map((position) => ({ ...position, returnRatio: costOf(position) ? position.unrealized_pnl / costOf(position) : 0, weight: value.equity ? position.market_value / value.equity : 0 }))
-    .sort((a, b) => b.market_value - a.market_value)
+export function holdings(value: AccountValue): Position[] {
+  return [...value.positions].sort((a, b) => b.market_value - a.market_value)
 }
 
 /** Unrealized profit or loss over what the open positions cost; 0 without positions. */
 export function unrealizedRatio(value: AccountValue): number {
-  const cost = value.positions.reduce((sum, position) => sum + costOf(position), 0)
+  const cost = value.positions.reduce((sum, position) => sum + position.cost_basis, 0)
   return cost ? value.unrealized_pnl / cost : 0
 }
 

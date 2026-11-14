@@ -30,7 +30,7 @@ def test_built_in_strategies_score_every_stock_as_the_criteria_they_replaced() -
                     "passed": report.passed,
                     "hard": len(report.hard_failures),
                     "soft": len(report.soft_failures),
-                    "detected": [observation.endswith(": detected") for observation in report.observations],
+                    "detected": [observation.detected for observation in report.observations],
                 }
             )
 

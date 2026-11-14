@@ -1,5 +1,7 @@
 import unicodedata
+from collections.abc import Iterable
 from dataclasses import replace
+from datetime import date
 from typing import Annotated, Self, override
 
 from pydantic import AfterValidator, Field, SecretStr
@@ -46,6 +48,27 @@ def comparable_name(text: str) -> str:
     names this way, and no other.
     """
     return unicodedata.normalize("NFKC", text).strip().casefold()
+
+
+def month_index(year: int, month: int) -> int:
+    """A calendar month as a count of months, so the months between two are a subtraction and a range."""
+    return year * 12 + month - 1
+
+
+def month_start(index: int) -> date:
+    """The first day of the month that month_index counts as `index`."""
+    return date(index // 12, index % 12 + 1, 1)
+
+
+def max_drawdown(values: Iterable[float]) -> float:
+    """The deepest fall of `values`, oldest first, from an earlier high, as a fraction of that high. 0 without a value."""
+    high, deepest = 0.0, 0.0
+
+    for value in values:
+        high = max(high, value)
+        deepest = max(deepest, 1 - value / high)
+
+    return deepest
 
 
 type SignInName = Annotated[str, AfterValidator(comparable_name)]

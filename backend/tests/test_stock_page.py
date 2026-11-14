@@ -263,6 +263,34 @@ async def test_a_public_analysis_reads_no_mops_page() -> None:
     assert answer.json()["earnings"]["quarters"] == []
 
 
+async def test_the_financials_read_the_archives_quarters_and_revenue_and_no_mops_page_or_valuation_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = build_harness()
+    harness.archive.held_financials["2330"] = ([], [revenue("2330", 2026, 9, 100.0)])
+    read: list[str] = []
+
+    async def no_ratios(stock_id: str) -> list[ValuationRatios]:
+        read.append(f"valuation history of {stock_id}")
+        return []
+
+    async def no_page(market: MarketType, quarter: FiscalQuarter) -> QuarterEps | None:
+        read.append(f"{market} page of {quarter}")
+        return None
+
+    monkeypatch.setattr(harness.archive, "valuation_history", no_ratios)
+    monkeypatch.setattr(harness.fundamentals, "load_page", no_page)
+
+    async with serve(harness, authorized=False) as client:
+        financials = await client.get("/v1/market/stocks/2330/financials")
+        unread = list(read)
+        await client.get("/v1/market/stocks/2330/analysis")
+
+    assert [(month["year"], month["month"]) for month in financials.json()["monthly_revenues"]] == [(2026, 9)]
+    assert unread == []
+    assert "valuation history of 2330" in read and len(read) > 1
+
+
 async def test_a_stocks_score_is_its_place_in_the_rankings_own_order_as_a_percentile_and_is_public() -> None:
     harness = market()
 

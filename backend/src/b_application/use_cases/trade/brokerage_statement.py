@@ -14,9 +14,7 @@ class BrokerageStatementReader:
     login is down. It only reads: it holds no order step, sends no order and records no run.
     """
 
-    def __init__(
-        self, brokerage: IBrokerExecutionProvider[Any, Any, Any] | None, market_clock: IMarketClock, config: AppConfig
-    ) -> None:
+    def __init__(self, brokerage: IBrokerExecutionProvider[Any, Any] | None, market_clock: IMarketClock, config: AppConfig) -> None:
         self._brokerage = brokerage
         self._market_clock = market_clock
         self._realized_days = config.holdings.realized_days

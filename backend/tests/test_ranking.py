@@ -25,6 +25,7 @@ from a_domain.ports.market.daily_close_archive import OpenDataDownload
 from a_domain.rules.trading.ranking import ListedHistory, ListedHistoryRule, RankingHistoryRule
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.repositories.daily_close_archive import SqlDailyCloseArchive
+from c_infrastructure.market.cached_price_provider import held_ex_right_references, save_bars, save_references
 from c_infrastructure.market.daily_bar_matrix_provider import DailyBarMatrixProvider
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 
@@ -195,10 +196,12 @@ async def test_the_history_cache_reads_its_bars_a_session_at_a_time_into_the_lis
     cache = cache_over(FakeDailyHistory(), database, clock)
     history, references = synthetic_market()
     empty = await cache.listed_history()
-    await cache.save_bars(history)
-    await cache.save_references(references)
+    await save_bars(history, database)
+    await save_references(references, database)
     stocks = {stock_id: bars for stock_id, bars in history.items() if stock_id != "^twse"}
-    plain = ListedHistoryRule().apply(stocks, await cache.ex_right_references(date.min, date.max), clock.to_trading_date)
+    plain = ListedHistoryRule().apply(
+        stocks, await held_ex_right_references(date.min, date.max, database, clock), clock.to_trading_date
+    )
 
     fast = await cache.listed_history()
 
@@ -225,8 +228,8 @@ async def test_the_listed_fingerprint_changes_with_every_bar_or_reference_saved_
     seen = [await cache.listed_fingerprint()]
 
     async def fingerprint_after(saved: dict[str, list[Ohlcv]], references: dict[tuple[str, date], float]) -> tuple[object, ...]:
-        await cache.save_bars(saved)
-        await cache.save_references(references)
+        await save_bars(saved, database)
+        await save_references(references, database)
         return await cache.listed_fingerprint()
 
     changes: list[tuple[dict[str, list[Ohlcv]], dict[tuple[str, date], float]]] = [
@@ -257,10 +260,10 @@ async def test_the_ranking_history_is_never_older_than_the_bars_the_references_a
     cache = cache_over(FakeDailyHistory(), database, clock)
     archive = SqlDailyCloseArchive(database, clock, shipped_config().sources.exchange, 7, SilentLogger())
     provider = DailyBarMatrixProvider(StockDirectory(), cache, archive, clock, RankingHistoryRule(daily_limit=0.105), SilentLogger())
-    await cache.save_bars({"2330": bars([100, 100, 90, 90, 90])})
+    await save_bars({"2330": bars([100, 100, 90, 90, 90])}, database)
     first = await provider.load_ranking_history()
     again = await provider.load_ranking_history()
-    await cache.save_references({("2330", SESSIONS[2]): 90.0})
+    await save_references({("2330", SESSIONS[2]): 90.0}, database)
     referenced = await provider.load_ranking_history()
     held = OpenDataDownload(
         stocks=[],

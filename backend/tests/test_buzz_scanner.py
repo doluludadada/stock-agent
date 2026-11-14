@@ -1,3 +1,4 @@
+import re
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -9,18 +10,24 @@ from trading_stack import run_stats
 
 from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
-from a_domain.model.market.post_listing import PostListing
 from a_domain.model.market.stock import Stock
 from a_domain.model.system.stats import SystemStats
 from a_domain.types.enums import InformationSource, Workflow
 from b_application.config.app_config import AppConfig
 from b_application.config.market_data_config import MarketDataConfig, MarketHoursConfig
 from b_application.use_cases.collect.buzz_scanner import BuzzScanner
-from c_infrastructure.feed.ptt_provider import PttProvider
+from c_infrastructure.feed.ptt_provider import PostListing, PttProvider, extract_stock_id, parse_article
+from c_infrastructure.market import twse_provider
 from c_infrastructure.market.twse_provider import TaiwanStockProvider
 from c_infrastructure.system.market_clock import TaiwanMarketClock
 
 SOURCES = shipped_config().sources
+TICKERS = (
+    re.compile(SOURCES.ptt.ticker_label_pattern),
+    re.compile(SOURCES.ptt.ticker_parenthesized_pattern),
+    re.compile(SOURCES.ptt.title_ticker_pattern),
+)
+CLOCK = TaiwanMarketClock(MarketHoursConfig())
 
 
 class SilentLogger:
@@ -70,10 +77,10 @@ async def make_stock_provider(monkeypatch: pytest.MonkeyPatch, stock_ids: list[s
         logger=SilentLogger(),
     )
 
-    async def fetch_listings() -> tuple[list[Stock], dict[str, Ohlcv]]:
+    async def fetch_listings(*context: object) -> tuple[list[Stock], dict[str, Ohlcv]]:
         return [Stock(stock_id=stock_id) for stock_id in stock_ids], {}
 
-    monkeypatch.setattr(provider, "fetch_listings", fetch_listings)
+    monkeypatch.setattr(twse_provider, "fetch_listings", fetch_listings)
     return provider
 
 
@@ -140,15 +147,9 @@ def test_ptt_post_engagement_counts_every_push_boo_and_arrow() -> None:
       <div class="push"><span class="push-tag">→ </span><span>u4</span></div>
     </div>
     """
-    ptt = PttProvider(
-        config=shipped_config(),
-        logger=SilentLogger(),
-        stock_provider=FakeStockList(),
-        market_clock=TaiwanMarketClock(MarketHoursConfig()),
-    )
     listing = PostListing(title="[標的] 2330 台積電 多", url="https://www.ptt.cc/bbs/Stock/M.1.html", posted_on=date(2026, 10, 30))
 
-    article = ptt.parse_article(html, listing, stock_ids={"2330"})
+    article = parse_article(html, listing, {"2330"}, TICKERS, SOURCES.ptt, CLOCK)
 
     assert article is not None
     assert article.stock_id == "2330"
@@ -200,15 +201,11 @@ async def test_ptt_pages_back_through_the_search_until_a_post_is_older_than_the_
 
 
 def test_a_ptt_article_is_cut_to_3000_characters() -> None:
-    ptt = PttProvider(
-        config=shipped_config(),
-        logger=SilentLogger(),
-        stock_provider=FakeStockList(),
-        market_clock=TaiwanMarketClock(MarketHoursConfig()),
-    )
     listing = PostListing(title="[標的] 2330 台積電 多", url="https://www.ptt.cc/bbs/Stock/M.1.html", posted_on=date(2026, 10, 30))
 
-    article = ptt.parse_article(f'<div id="main-content">股票代碼：2330\n{"長" * 4000}</div>', listing, stock_ids={"2330"})
+    article = parse_article(
+        f'<div id="main-content">股票代碼：2330\n{"長" * 4000}</div>', listing, {"2330"}, TICKERS, SOURCES.ptt, CLOCK
+    )
 
     assert article is not None
     assert len(article.content) == 3000
@@ -272,11 +269,4 @@ def test_the_buzz_archive_quotes_the_first_500_characters_of_each_post(tmp_path:
     [("[標的] 2330 台積電 多", "2330"), ("[新聞] 台積電 2330A", "2330"), ("[標的] 123 多", None), ("[閒聊] 台積電", None)],
 )
 def test_a_post_whose_body_names_no_stock_takes_its_stock_id_from_the_title(title: str, stock_id: str | None) -> None:
-    ptt = PttProvider(
-        config=shipped_config(),
-        logger=SilentLogger(),
-        stock_provider=FakeStockList(),
-        market_clock=TaiwanMarketClock(MarketHoursConfig()),
-    )
-
-    assert ptt.extract_stock_id("A post with no ticker line.", title) == stock_id
+    assert extract_stock_id("A post with no ticker line.", title, TICKERS) == stock_id

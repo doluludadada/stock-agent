@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any, ClassVar, Self
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import JSON, Column, Index
 from sqlmodel import Field, SQLModel
 
@@ -11,9 +11,26 @@ from a_domain.model.analysis.technical_report import TechnicalReport
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.account import Account, AccountSnapshot, Mark, Position
+from a_domain.model.trading.signal import TradeSignal
 from a_domain.types.enums import ExecutionProvider, OrderStatus, OrderType, SignalSource, TimeInForce, TradeAction, Workflow
 from a_domain.types.ids import OrderId, RunId
 from c_infrastructure.database.utc_datetime import UtcDateTime
+
+
+def stored_technical_report(report: dict[str, Any] | None) -> dict[str, Any] | None:
+    """
+    A report as TechnicalReport reads it. A row written before an observation was an item holds each one as the
+    sentence `<rule>: detected` or `<rule>: not detected`, which says the same two things.
+    """
+    if report is None:
+        return None
+
+    observations = [
+        {"rule": item.rpartition(": ")[0], "detected": item.endswith(": detected")} if isinstance(item, str) else item
+        for item in report.get("observations", [])
+    ]
+
+    return {**report, "observations": observations}
 
 
 class WorkflowRunDTO(SQLModel, table=True):
@@ -80,6 +97,11 @@ class TradeSignalDTO(SQLModel, table=True):
     owner_id: str = Field(exclude=True)
     followed_decision_id: UUID | None = None
     """A follow's decision: the decision of another run it follows. Last, as the upgrade to version 5 added it."""
+
+    def to_domain(self) -> TradeSignal:
+        row = self.model_dump(exclude={"run_id"})
+
+        return TradeSignal(**{**row, "technical_report": stored_technical_report(self.technical_report)})
 
 
 class OrderDTO(SQLModel, table=True):
@@ -199,6 +221,11 @@ class StockReportJson(BaseModel):
     technical_report: TechnicalReport | None
     ai_report: AiAnalysisReport | None
     composite_score: int | None
+
+    @field_validator("technical_report", mode="before")
+    @classmethod
+    def reads_a_stored_report(cls, report: object) -> object:
+        return stored_technical_report(report) if isinstance(report, dict) else report
 
 
 class RunStockReportDTO(SQLModel, table=True):

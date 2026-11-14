@@ -105,6 +105,36 @@ class PortfolioAnalysis:
         return self.unrealized_pnl / cost if cost else None
 
 
+def portfolio_analysis(
+    sources: list[HoldingSource], holdings: list[AnalysedHolding], total: float, concentration_positions: PositiveInt
+) -> PortfolioAnalysis:
+    by_stock: defaultdict[str, float] = defaultdict(float)
+
+    for holding in holdings:
+        by_stock[holding.position.stock_id] += holding.weight
+
+    largest = sorted(by_stock.values(), reverse=True)[:concentration_positions]
+
+    scored = [(holding, holding.score) for holding in holdings if holding.score is not None]
+    scored_share = math.fsum(holding.weight for holding, _ in scored)
+    weighted = math.fsum(holding.weight * score for holding, score in scored)
+
+    return PortfolioAnalysis(
+        sources=sources,
+        holdings=holdings,
+        market_value=total,
+        cost=math.fsum(holding.position.cost_basis for holding in holdings),
+        unrealized_pnl=math.fsum(holding.position.unrealized_pnl for holding in holdings),
+        concentration_positions=concentration_positions,
+        concentration=min(1.0, math.fsum(largest)),
+        top_share=min(1.0, math.fsum(holding.weight for holding in holdings if holding.standing and holding.standing.in_top)),
+        scored_share=min(1.0, scored_share),
+        weighted_score=min(100.0, weighted / scored_share) if scored_share else None,
+        lowest=min(scored, key=lambda pair: pair[1])[0] if scored else None,
+        highest=max(scored, key=lambda pair: pair[1])[0] if scored else None,
+    )
+
+
 @dataclass(frozen=True)
 class PortfolioAnalysisRule:
     """
@@ -143,31 +173,4 @@ class PortfolioAnalysisRule:
             for source, position in sorted(valued, key=lambda pair: (-pair[1].market_value, pair[1].stock_id, pair[0]))
         ]
 
-        return self._portfolio(sorted(held), holdings, total)
-
-    def _portfolio(self, sources: list[HoldingSource], holdings: list[AnalysedHolding], total: float) -> PortfolioAnalysis:
-        by_stock: defaultdict[str, float] = defaultdict(float)
-
-        for holding in holdings:
-            by_stock[holding.position.stock_id] += holding.weight
-
-        largest = sorted(by_stock.values(), reverse=True)[: self.concentration_positions]
-
-        scored = [(holding, holding.score) for holding in holdings if holding.score is not None]
-        scored_share = math.fsum(holding.weight for holding, _ in scored)
-        weighted = math.fsum(holding.weight * score for holding, score in scored)
-
-        return PortfolioAnalysis(
-            sources=sources,
-            holdings=holdings,
-            market_value=total,
-            cost=math.fsum(holding.position.cost_basis for holding in holdings),
-            unrealized_pnl=math.fsum(holding.position.unrealized_pnl for holding in holdings),
-            concentration_positions=self.concentration_positions,
-            concentration=min(1.0, math.fsum(largest)),
-            top_share=min(1.0, math.fsum(holding.weight for holding in holdings if holding.standing and holding.standing.in_top)),
-            scored_share=min(1.0, scored_share),
-            weighted_score=min(100.0, weighted / scored_share) if scored_share else None,
-            lowest=min(scored, key=lambda pair: pair[1])[0] if scored else None,
-            highest=max(scored, key=lambda pair: pair[1])[0] if scored else None,
-        )
+        return portfolio_analysis(sorted(held), holdings, total, self.concentration_positions)

@@ -9,8 +9,7 @@ from support.settings import shipped_config
 from a_domain.model.market.article import Article
 from a_domain.types.enums import InformationSource
 from b_application.config.market_data_config import MarketHoursConfig
-from c_infrastructure.feed.news.cnyes_news_provider import CnyesNewsProvider
-from c_infrastructure.feed.news.yahoo_tw_news_provider import YahooTwNewsProvider
+from c_infrastructure.feed.news import cnyes_news_provider, yahoo_tw_news_provider
 from c_infrastructure.feed.news_provider import NewsProvider
 from c_infrastructure.system.market_clock import TaiwanMarketClock
 
@@ -84,7 +83,7 @@ def test_a_yahoo_news_page_lists_each_headline_once_with_its_full_url() -> None:
     <a href="/quote/2330">Quote page</a>
     """
 
-    articles = YahooTwNewsProvider(SOURCES.news, SilentLogger()).parse_listing("2330", page)
+    articles = yahoo_tw_news_provider.parse_listing("2330", page, SOURCES.news)
 
     assert [(item.title, item.url) for item in articles] == [
         ("TSMC raises its outlook", f"{SOURCES.news.yahoo_base_url}/news/tsmc-1.html"),
@@ -104,7 +103,10 @@ async def test_a_yahoo_article_without_caas_body_keeps_only_paragraphs_longer_th
         lambda **kwargs: real_client(transport=httpx.MockTransport(lambda request: httpx.Response(200, text=page))),
     )
 
-    body = await YahooTwNewsProvider(SOURCES.news, SilentLogger()).fetch_article_body("https://tw.stock.yahoo.com/news/a.html")
+    async with httpx.AsyncClient() as client:
+        body = await yahoo_tw_news_provider.fetch_article_body(
+            "https://tw.stock.yahoo.com/news/a.html", client, SOURCES.news, SilentLogger()
+        )
 
     assert body == "b" * 21
 
@@ -113,7 +115,7 @@ def test_a_cnyes_item_without_a_time_is_undated_and_the_audit_file_gives_it_no_p
     listing = {"items": {"data": [{"newsId": 1, "title": "timed", "publishAt": 1761790200}, {"newsId": 2, "title": "untimed"}]}}
     clock = TaiwanMarketClock(MarketHoursConfig())
 
-    articles = CnyesNewsProvider(SOURCES.news, SilentLogger()).parse_listing("2330", json.dumps(listing))
+    articles = cnyes_news_provider.parse_listing("2330", json.dumps(listing), SOURCES.news.cnyes_article_url, SilentLogger())
     NewsProvider((), shipped_config(tmp_path), SilentLogger(), clock).save_as_md_file("2330", articles)
 
     [saved] = (tmp_path / "news_archive").glob("*/2330_*.md")

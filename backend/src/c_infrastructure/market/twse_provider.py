@@ -1,5 +1,4 @@
 import asyncio
-import math
 from collections.abc import Callable, Collection, Mapping
 from copy import deepcopy
 from datetime import UTC, date, datetime, timedelta
@@ -20,8 +19,8 @@ from a_domain.types.enums import ContentType, EpsBasis, EpsKind, FinancialStatem
 from a_domain.types.values import FiscalQuarter
 from b_application.config.market_data_config import MarketDataConfig
 from b_application.config.sources_config import ExchangeSources
+from c_infrastructure.market.exchange_text import ROC_YEAR_OFFSET, parse_change, parse_number, parse_optional_roc_date, parse_roc_date
 
-ROC_YEAR_OFFSET = 1911
 STOCK_CODE_LENGTH = 4
 
 
@@ -94,141 +93,9 @@ class TaiwanStockProvider(ITaiwanStockProvider):
                 self._logger.debug(f"Returning cached stock list ({len(self._cache)} stocks)")
                 return self._cache
 
-            self._cache, self._closes = await self.fetch_listings()
+            self._cache, self._closes = await fetch_listings(self._exchange, self._clock, self._timeout_seconds, self._logger)
             self._cache_expiry = now + self._cache_ttl
             return self._cache
-
-    @override
-    async def fetch_listings(self) -> tuple[list[Stock], dict[str, Ohlcv]]:
-        stocks: list[Stock] = []
-        closes: dict[str, Ohlcv] = {}
-
-        async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
-            try:
-                for market, url in (
-                    (MarketType.TWSE, self._exchange.twse_daily_quotes_url),
-                    (MarketType.TPEX, self._exchange.tpex_daily_quotes_url),
-                ):
-                    self._logger.debug(f"Fetching {market} stocks...")
-                    response = await client.get(url)
-                    response.raise_for_status()
-                    rows = response.json()
-                    listed, listed_closes = self.parse_listing(rows, market)
-                    self.log_unread(url, rows, len(listed_closes))
-                    stocks.extend(listed)
-                    closes.update(listed_closes)
-
-                self._logger.success(f"Successfully loaded {len(stocks)} stocks and {len(closes)} daily closes from API.")
-                return stocks, closes
-
-            except Exception as error:
-                self._logger.error(f"Failed to fetch stock list: {error}")
-                return [], {}
-
-    @override
-    def parse_listing(self, rows: list[dict[str, Any]], market: MarketType) -> tuple[list[Stock], dict[str, Ohlcv]]:
-        fields = LISTING_FIELDS[market]
-        stocks: list[Stock] = []
-        closes: dict[str, Ohlcv] = {}
-
-        for row in rows:
-            code = str(row.get(fields.code) or "")
-
-            if len(code) != STOCK_CODE_LENGTH:
-                continue
-
-            stocks.append(Stock(stock_id=code, name=str(row.get(fields.name) or "").strip(), market=market))
-
-            if (close := self.parse_daily_close(row, fields.bar)) is not None:
-                closes[code] = close
-
-        return stocks, closes
-
-    @override
-    def parse_roc_date(self, text: str) -> date:
-        return date(int(text[:-4]) + ROC_YEAR_OFFSET, int(text[-4:-2]), int(text[-2:]))
-
-    @override
-    def parse_optional_roc_date(self, text: str) -> date | None:
-        try:
-            return self.parse_roc_date(text)
-        except ValueError:
-            return None
-
-    @override
-    def parse_daily_close(self, row: dict[str, Any], fields: tuple[str, str, str, str, str, str, str]) -> Ohlcv | None:
-        date_field, open_field, high_field, low_field, close_field, volume_field, change_field = fields
-
-        try:
-            session = self.parse_roc_date(str(row.get(date_field, "")))
-            open_, high, low, close = (
-                float(str(row.get(field, "")).replace(",", "")) for field in (open_field, high_field, low_field, close_field)
-            )
-            volume = int(str(row.get(volume_field, "")).replace(",", ""))
-        except ValueError:
-            return None
-
-        if not all(math.isfinite(price) and price > 0 for price in (open_, high, low, close)):
-            return None
-
-        return Ohlcv(
-            ts=self._clock.session_close(session),
-            open=open_,
-            high=high,
-            low=low,
-            close=close,
-            volume=volume,
-            change=self.parse_change(str(row.get(change_field, "")), close),
-        )
-
-    @override
-    async def fetch_reports(self, urls: Mapping[MarketType, str]) -> dict[MarketType, list[dict[str, Any]]]:
-        reports: dict[MarketType, list[dict[str, Any]]] = {}
-
-        async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
-            for market, url in urls.items():
-                try:
-                    response = await client.get(url)
-                    response.raise_for_status()
-                    rows = response.json()
-
-                    if not isinstance(rows, list):
-                        raise ValueError(f"the report is a {type(rows).__name__}, not a list of rows")
-
-                    reports[market] = [
-                        {name: value.replace("\x00", "") if isinstance(value, str) else value for name, value in row.items()}
-                        for row in rows
-                        if isinstance(row, dict)
-                    ]
-                except Exception as error:
-                    self._logger.error(f"Failed to fetch {url}: {error}")
-
-        return reports
-
-    @override
-    async def read_reports[Readings: Collection[Any]](
-        self, urls: Mapping[MarketType, str], read: Callable[[list[dict[str, Any]], MarketType], Readings]
-    ) -> dict[MarketType, Readings]:
-        read_by_market: dict[MarketType, Readings] = {}
-
-        for market, rows in (await self.fetch_reports(urls)).items():
-            read_by_market[market] = read(rows, market)
-            self.log_unread(urls[market], rows, len(read_by_market[market]))
-
-        return read_by_market
-
-    @override
-    def log_unread(self, url: str, rows: list[dict[str, Any]], read: int) -> None:
-        if read:
-            return
-
-        served = [row for row in rows if sum(1 for value in row.values() if str(value).strip()) > 1]
-
-        if not served:
-            self._logger.info(f"Open data feed {url} served no rows")
-            return
-
-        self._logger.error(f"Open data feed {url} served {len(served)} rows and none could be read")
 
     @override
     async def fetch_industries(self) -> dict[str, str]:
@@ -239,120 +106,46 @@ class TaiwanStockProvider(ITaiwanStockProvider):
             if market not in self._industries_fetched_at or now - self._industries_fetched_at[market] >= self._industry_max_age
         }
 
-        for market, rows in (await self.fetch_reports(stale)).items():
-            self._industries[market] = self.parse_industries(rows, market)
+        for market, rows in (await fetch_reports(stale, self._timeout_seconds, self._logger)).items():
+            self._industries[market] = parse_industries(rows, market, self._exchange)
             self._industries_fetched_at[market] = now
 
         return {stock_id: industry for industries in self._industries.values() for stock_id, industry in industries.items()}
 
     @override
-    def parse_industries(self, rows: list[dict[str, Any]], market: MarketType) -> dict[str, str]:
-        feed, names = self._exchange.company_profiles[market], self._exchange.industry_names
-        return {
-            str(row[feed.stock_id]).strip(): names[code]
-            for row in rows
-            if row.get(feed.stock_id) and (code := str(row.get(feed.industry, "")).strip()) in names
-        }
-
-    @override
     async def fetch_material_information(self) -> list[Article]:
         fetched_at = self._clock.now()
-        reports = await self.read_reports(
+        reports = await read_reports(
             {market: feed.url for market, feed in self._exchange.material_information.items()},
             lambda rows, market: [
-                announcement for row in rows if (announcement := self.parse_announcement(row, market, fetched_at)) is not None
+                announcement
+                for row in rows
+                if (announcement := parse_announcement(row, market, fetched_at, self._exchange, self._clock)) is not None
             ],
+            self._timeout_seconds,
+            self._logger,
         )
         return [announcement for announcements in reports.values() for announcement in announcements]
 
     @override
-    def parse_announcement(self, row: dict[str, Any], market: MarketType, fetched_at: datetime) -> Article | None:
-        feed = self._exchange.material_information[market]
-        stock_id, time_text = str(row.get(feed.stock_id, "")).strip(), str(row.get(feed.time, "")).zfill(6)
-
-        try:
-            announced_at = self._clock.session_close(self.parse_roc_date(str(row.get(feed.date, "")))).replace(
-                hour=int(time_text[:2]), minute=int(time_text[2:4]), second=int(time_text[4:])
-            )
-        except ValueError:
-            return None
-
-        if not stock_id:
-            return None
-
-        return Article(
-            stock_id=stock_id,
-            source=InformationSource.TWSE_MOPS,
-            content_type=ContentType.FACT,
-            title=str(row.get(feed.subject, "")),
-            content=str(row.get(feed.description, "")),
-            published_at=announced_at,
-            fetched_at=fetched_at,
-            clause=str(row.get(feed.clause, "")),
-            fact_date=self.parse_optional_roc_date(str(row.get(feed.fact_date, ""))),
-        )
-
-    @override
     async def fetch_quarter_eps(self) -> dict[str, Eps]:
-        reports = await self.read_reports(
-            {market: feed.url for market, feed in self._exchange.quarter_eps.items()}, self.parse_quarter_eps
+        reports = await read_reports(
+            {market: feed.url for market, feed in self._exchange.quarter_eps.items()},
+            lambda rows, market: parse_quarter_eps(rows, market, self._exchange, self._clock),
+            self._timeout_seconds,
+            self._logger,
         )
         return {stock_id: eps for filed in reports.values() for stock_id, eps in filed.items()}
 
     @override
-    def parse_quarter_eps(self, rows: list[dict[str, Any]], market: MarketType) -> dict[str, Eps]:
-        feed, fetched_at = self._exchange.quarter_eps[market], self._clock.now()
-        filed: dict[str, Eps] = {}
-
-        for row in rows:
-            stock_id = str(row.get(feed.stock_id, "")).strip()
-
-            try:
-                quarter = FiscalQuarter(int(str(row.get(feed.year, ""))) + ROC_YEAR_OFFSET, int(str(row.get(feed.quarter, ""))))
-            except ValueError:
-                continue
-
-            if stock_id and (value := self.parse_number(str(row.get(feed.eps, "")))) is not None:
-                filed[stock_id] = Eps(
-                    value=value,
-                    kind=EpsKind.CUMULATIVE,
-                    period_end=quarter,
-                    basis=EpsBasis.ACTUAL,
-                    source=InformationSource.TWSE_MOPS,
-                    fetched_at=fetched_at,
-                )
-
-        return filed
-
-    @override
     async def fetch_valuation_ratios(self) -> list[ValuationRatios]:
-        reports = await self.read_reports(
-            {market: feed.url for market, feed in self._exchange.valuation_ratios.items()}, self.parse_valuation_ratios
+        reports = await read_reports(
+            {market: feed.url for market, feed in self._exchange.valuation_ratios.items()},
+            lambda rows, market: parse_valuation_ratios(rows, market, self._exchange),
+            self._timeout_seconds,
+            self._logger,
         )
         return [ratios for published in reports.values() for ratios in published]
-
-    @override
-    def parse_valuation_ratios(self, rows: list[dict[str, Any]], market: MarketType) -> list[ValuationRatios]:
-        feed = self._exchange.valuation_ratios[market]
-        published: list[ValuationRatios] = []
-
-        for row in rows:
-            stock_id = str(row.get(feed.stock_id, "")).strip()
-
-            if not stock_id or (session := self.parse_optional_roc_date(str(row.get(feed.date, "")))) is None:
-                continue
-
-            published.append(
-                ValuationRatios(
-                    stock_id=stock_id,
-                    session_date=session,
-                    pe_ratio=self.parse_number(str(row.get(feed.pe_ratio, ""))),
-                    dividend_yield=self.parse_number(str(row.get(feed.dividend_yield, ""))),
-                    pb_ratio=self.parse_number(str(row.get(feed.pb_ratio, ""))),
-                )
-            )
-
-        return published
 
     @override
     async def fetch_financial_reports(self) -> list[FinancialReport]:
@@ -361,54 +154,27 @@ class TaiwanStockProvider(ITaiwanStockProvider):
 
         for statement in FinancialStatement:
             for industry_format in IndustryFormat:
-                served = await self.read_reports(
+                served = await read_reports(
                     {market: urls[statement][industry_format] for market, urls in feeds.urls.items()},
                     lambda rows, market, statement=statement, industry_format=industry_format: [
                         report
                         for row in rows
-                        if (report := self.parse_financial_report(row, market, statement, industry_format)) is not None
+                        if (report := parse_financial_report(row, market, statement, industry_format, self._exchange)) is not None
                     ],
+                    self._timeout_seconds,
+                    self._logger,
                 )
                 reports.extend(report for filed in served.values() for report in filed)
 
         return reports
 
     @override
-    def parse_financial_report(
-        self, row: dict[str, Any], market: MarketType, statement: FinancialStatement, industry_format: IndustryFormat
-    ) -> FinancialReport | None:
-        feeds = self._exchange.financial_reports
-        stock_id = self.served_field(row, feeds.stock_id)
-
-        try:
-            year, quarter = (int(self.served_field(row, names)) for names in (feeds.year, feeds.quarter))
-            period = FiscalQuarter(year + ROC_YEAR_OFFSET, quarter)
-            served_date = self.parse_roc_date(self.served_field(row, feeds.served_date))
-        except ValueError:
-            return None
-
-        if not stock_id:
-            return None
-
-        return FinancialReport(
-            stock_id=stock_id,
-            quarter=period,
-            statement=statement,
-            market=market,
-            industry_format=industry_format,
-            served_date=served_date,
-            items={name: str(value) for name, value in row.items() if name not in feeds.identity},
-        )
-
-    @override
-    def served_field(self, row: dict[str, Any], names: list[str]) -> str:
-        return next((str(row[name]).strip() for name in names if name in row), "")
-
-    @override
     async def fetch_monthly_revenues(self) -> list[MonthlyRevenue]:
-        reports = await self.read_reports(
+        reports = await read_reports(
             {market: feed.url for market, feed in self._exchange.monthly_revenue.items()},
             lambda rows, market: [revenue for row in rows if (revenue := self.parse_monthly_revenue(row, market)) is not None],
+            self._timeout_seconds,
+            self._logger,
         )
         return [revenue for revenues in reports.values() for revenue in revenues]
 
@@ -416,11 +182,11 @@ class TaiwanStockProvider(ITaiwanStockProvider):
     def parse_monthly_revenue(self, row: dict[str, Any], market: MarketType) -> MonthlyRevenue | None:
         feed = self._exchange.monthly_revenue[market]
 
-        if not (stock_id := self.served_field(row, [feed.stock_id])):
+        if not (stock_id := served_field(row, [feed.stock_id])):
             return None
 
-        year_month = "".join(part.zfill(2) for part in self.served_field(row, [feed.year_month]).split("/"))
-        served = "".join(part.zfill(2) for part in self.served_field(row, [feed.served_date]).split("/"))
+        year_month = "".join(part.zfill(2) for part in served_field(row, [feed.year_month]).split("/"))
+        served = "".join(part.zfill(2) for part in served_field(row, [feed.served_date]).split("/"))
 
         try:
             return MonthlyRevenue(
@@ -428,111 +194,379 @@ class TaiwanStockProvider(ITaiwanStockProvider):
                 year=int(year_month[:-2]) + ROC_YEAR_OFFSET,
                 month=int(year_month[-2:]),
                 market=market,
-                served_date=self.parse_roc_date(served),
-                company_name=self.served_field(row, [feed.company_name]),
-                industry=self.served_field(row, [feed.industry]),
-                revenue=self.parse_number(self.served_field(row, [feed.revenue])),
-                previous_month_revenue=self.parse_number(self.served_field(row, [feed.previous_month_revenue])),
-                last_year_revenue=self.parse_number(self.served_field(row, [feed.last_year_revenue])),
-                month_over_month_percent=self.parse_number(self.served_field(row, [feed.month_over_month_percent])),
-                year_over_year_percent=self.parse_number(self.served_field(row, [feed.year_over_year_percent])),
-                cumulative_revenue=self.parse_number(self.served_field(row, [feed.cumulative_revenue])),
-                last_year_cumulative_revenue=self.parse_number(self.served_field(row, [feed.last_year_cumulative_revenue])),
-                cumulative_year_over_year_percent=self.parse_number(self.served_field(row, [feed.cumulative_year_over_year_percent])),
-                note=self.served_field(row, [feed.note]),
+                served_date=parse_roc_date(served),
+                company_name=served_field(row, [feed.company_name]),
+                industry=served_field(row, [feed.industry]),
+                revenue=parse_number(served_field(row, [feed.revenue])),
+                previous_month_revenue=parse_number(served_field(row, [feed.previous_month_revenue])),
+                last_year_revenue=parse_number(served_field(row, [feed.last_year_revenue])),
+                month_over_month_percent=parse_number(served_field(row, [feed.month_over_month_percent])),
+                year_over_year_percent=parse_number(served_field(row, [feed.year_over_year_percent])),
+                cumulative_revenue=parse_number(served_field(row, [feed.cumulative_revenue])),
+                last_year_cumulative_revenue=parse_number(served_field(row, [feed.last_year_cumulative_revenue])),
+                cumulative_year_over_year_percent=parse_number(served_field(row, [feed.cumulative_year_over_year_percent])),
+                note=served_field(row, [feed.note]),
             )
         except ValueError:
             return None
 
     @override
     async def fetch_exchange_news(self) -> list[ExchangeNews]:
-        reports = await self.read_reports(
+        reports = await read_reports(
             {MarketType.TWSE: self._exchange.exchange_news.url},
-            lambda rows, market: [news for row in rows if (news := self.parse_exchange_news(row)) is not None],
+            lambda rows, market: [news for row in rows if (news := parse_exchange_news(row, self._exchange)) is not None],
+            self._timeout_seconds,
+            self._logger,
         )
         return [news for items in reports.values() for news in items]
 
     @override
-    def parse_exchange_news(self, row: dict[str, Any]) -> ExchangeNews | None:
-        feed = self._exchange.exchange_news
-        url = self.served_field(row, [feed.link])
-
-        if not url or (published_on := self.parse_optional_roc_date(self.served_field(row, [feed.date]))) is None:
-            return None
-
-        return ExchangeNews(url=url, title=self.served_field(row, [feed.title]), published_on=published_on)
-
-    @override
-    def parse_number(self, text: str) -> float | None:
-        try:
-            value = float(text.replace(",", ""))
-        except ValueError:
-            return None
-
-        return value if math.isfinite(value) else None
-
-    @override
     async def fetch_index_closes(self) -> dict[MarketType, list[Ohlcv]]:
-        parsers = {MarketType.TWSE: self.parse_twse_index, MarketType.TPEX: self.parse_tpex_index}
-        return await self.read_reports(
+        return await read_reports(
             {MarketType.TWSE: self._exchange.twse_index_url, MarketType.TPEX: self._exchange.tpex_index_url},
-            lambda rows, market: parsers[market](rows),
+            lambda rows, market: (
+                parse_twse_index(rows, self._exchange, self._clock)
+                if market == MarketType.TWSE
+                else parse_tpex_index(rows, self._clock)
+            ),
+            self._timeout_seconds,
+            self._logger,
         )
 
-    @override
-    def parse_twse_index(self, rows: list[dict[str, Any]]) -> list[Ohlcv]:
-        fields = self._exchange.twse_index_fields
-        closes: list[Ohlcv] = []
 
-        for row in rows:
-            if row.get(fields.index) != fields.taiex:
-                continue
+async def fetch_listings(
+    exchange: ExchangeSources, clock: IMarketClock, timeout_seconds: float, logger: ILoggingProvider
+) -> tuple[list[Stock], dict[str, Ohlcv]]:
+    """Both listings' stocks and their closes. A failed fetch is logged and yields neither."""
+    stocks: list[Stock] = []
+    closes: dict[str, Ohlcv] = {}
 
-            try:
-                session = self.parse_roc_date(str(row.get(fields.date, "")))
-            except ValueError:
-                continue
-
-            sign = "-" if row.get(fields.sign) == "-" else ""
-            close_text, change_text = str(row.get(fields.close, "")), sign + str(row.get(fields.change, ""))
-
-            if (close := self.parse_index_close(session, close_text, change_text)) is not None:
-                closes.append(close)
-
-        return closes
-
-    @override
-    def parse_tpex_index(self, rows: list[dict[str, Any]]) -> list[Ohlcv]:
-        closes: list[Ohlcv] = []
-
-        for row in rows:
-            try:
-                session = date.fromisoformat(str(row.get("Date", "")))
-            except ValueError:
-                continue
-
-            if (close := self.parse_index_close(session, str(row.get("Close", "")), str(row.get("Change", "")))) is not None:
-                closes.append(close)
-
-        return closes
-
-    @override
-    def parse_index_close(self, session: date, close_text: str, change_text: str) -> Ohlcv | None:
+    async with httpx.AsyncClient(timeout=timeout_seconds) as client:
         try:
-            close = float(close_text.replace(",", ""))
-        except ValueError:
-            return None
+            for market, url in ((MarketType.TWSE, exchange.twse_daily_quotes_url), (MarketType.TPEX, exchange.tpex_daily_quotes_url)):
+                logger.debug(f"Fetching {market} stocks...")
+                response = await client.get(url)
+                response.raise_for_status()
+                rows = response.json()
+                listed, listed_closes = parse_listing(rows, market, clock)
+                log_unread(url, rows, len(listed_closes), logger)
+                stocks.extend(listed)
+                closes.update(listed_closes)
 
-        if not (math.isfinite(close) and close > 0):
-            return None
+            logger.success(f"Successfully loaded {len(stocks)} stocks and {len(closes)} daily closes from API.")
+            return stocks, closes
 
-        return Ohlcv(ts=self._clock.session_close(session), close=close, change=self.parse_change(change_text, close))
+        except Exception as error:
+            logger.error(f"Failed to fetch stock list: {error}")
+            return [], {}
 
-    @override
-    def parse_change(self, text: str, close: float) -> float | None:
+
+def parse_listing(rows: list[dict[str, Any]], market: MarketType, clock: IMarketClock) -> tuple[list[Stock], dict[str, Ohlcv]]:
+    """The stocks with a four-digit code in one exchange's listing, and the official close of each that traded."""
+    fields = LISTING_FIELDS[market]
+    stocks: list[Stock] = []
+    closes: dict[str, Ohlcv] = {}
+
+    for row in rows:
+        code = str(row.get(fields.code) or "")
+
+        if len(code) != STOCK_CODE_LENGTH:
+            continue
+
+        stocks.append(Stock(stock_id=code, name=str(row.get(fields.name) or "").strip(), market=market))
+
+        if (close := parse_daily_close(row, fields.bar, clock)) is not None:
+            closes[code] = close
+
+    return stocks, closes
+
+
+def parse_daily_close(row: dict[str, Any], fields: tuple[str, str, str, str, str, str, str], clock: IMarketClock) -> Ohlcv | None:
+    """
+    The row's official daily bar with its change, or None when the stock did not trade (TWSE leaves prices blank,
+    TPEX writes '---').
+    """
+    date_field, open_field, high_field, low_field, close_field, volume_field, change_field = fields
+
+    open_, high, low, close = (
+        parse_number(str(row.get(field, ""))) or 0.0 for field in (open_field, high_field, low_field, close_field)
+    )
+
+    try:
+        session = parse_roc_date(str(row.get(date_field, "")))
+        volume = int(str(row.get(volume_field, "")).replace(",", ""))
+    except ValueError:
+        return None
+
+    if min(open_, high, low, close) <= 0:
+        return None
+
+    return Ohlcv(
+        ts=clock.session_close(session),
+        open=open_,
+        high=high,
+        low=low,
+        close=close,
+        volume=volume,
+        change=parse_change(str(row.get(change_field, "")), close),
+    )
+
+
+async def fetch_reports(
+    urls: Mapping[MarketType, str], timeout_seconds: float, logger: ILoggingProvider
+) -> dict[MarketType, list[dict[str, Any]]]:
+    """
+    Each exchange's report at its URL, its rows as served but for the NUL characters in their text, which PostgreSQL's
+    text refuses. A report that fails to load is logged and left out.
+    """
+    reports: dict[MarketType, list[dict[str, Any]]] = {}
+
+    async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+        for market, url in urls.items():
+            try:
+                response = await client.get(url)
+                response.raise_for_status()
+                rows = response.json()
+
+                if not isinstance(rows, list):
+                    raise ValueError(f"the report is a {type(rows).__name__}, not a list of rows")
+
+                reports[market] = [
+                    {name: value.replace("\x00", "") if isinstance(value, str) else value for name, value in row.items()}
+                    for row in rows
+                    if isinstance(row, dict)
+                ]
+            except Exception as error:
+                logger.error(f"Failed to fetch {url}: {error}")
+
+    return reports
+
+
+async def read_reports[Readings: Collection[Any]](
+    urls: Mapping[MarketType, str],
+    read: Callable[[list[dict[str, Any]], MarketType], Readings],
+    timeout_seconds: float,
+    logger: ILoggingProvider,
+) -> dict[MarketType, Readings]:
+    """
+    Each exchange's report at its URL (fetch_reports), as `read` reads its rows. A report of which nothing was read
+    is logged (log_unread).
+    """
+    read_by_market: dict[MarketType, Readings] = {}
+
+    for market, rows in (await fetch_reports(urls, timeout_seconds, logger)).items():
+        read_by_market[market] = read(rows, market)
+        log_unread(urls[market], rows, len(read_by_market[market]), logger)
+
+    return read_by_market
+
+
+def log_unread(url: str, rows: list[dict[str, Any]], read: int, logger: ILoggingProvider) -> None:
+    """
+    Logs a report of which nothing was read. One that served rows none of which could be read, as when the exchange
+    renames a field, is an error: what it serves now is lost to the archive, since the OpenAPI serves only its latest
+    period. One that served no rows is logged as information: a row holding nothing but the day it was served is how
+    the OpenAPI serves nothing, as for an industry format no company has filed yet. A report that failed to load is
+    logged by fetch_reports.
+    """
+    if read:
+        return
+
+    served = [row for row in rows if sum(1 for value in row.values() if str(value).strip()) > 1]
+
+    if not served:
+        logger.info(f"Open data feed {url} served no rows")
+        return
+
+    logger.error(f"Open data feed {url} served {len(served)} rows and none could be read")
+
+
+def parse_industries(rows: list[dict[str, Any]], market: MarketType, exchange: ExchangeSources) -> dict[str, str]:
+    """One market's stock_id -> industry name. A company whose industry code has no name in the settings is absent."""
+    feed, names = exchange.company_profiles[market], exchange.industry_names
+    return {
+        str(row[feed.stock_id]).strip(): names[code]
+        for row in rows
+        if row.get(feed.stock_id) and (code := str(row.get(feed.industry, "")).strip()) in names
+    }
+
+
+def parse_announcement(
+    row: dict[str, Any], market: MarketType, fetched_at: datetime, exchange: ExchangeSources, clock: IMarketClock
+) -> Article | None:
+    """
+    One material information announcement, its subject the title and its text the content, both as served, or None
+    when the row names no company or no valid date and time.
+    """
+    feed = exchange.material_information[market]
+    stock_id, time_text = str(row.get(feed.stock_id, "")).strip(), str(row.get(feed.time, "")).zfill(6)
+
+    try:
+        announced_at = clock.session_close(parse_roc_date(str(row.get(feed.date, "")))).replace(
+            hour=int(time_text[:2]), minute=int(time_text[2:4]), second=int(time_text[4:])
+        )
+    except ValueError:
+        return None
+
+    if not stock_id:
+        return None
+
+    return Article(
+        stock_id=stock_id,
+        source=InformationSource.TWSE_MOPS,
+        content_type=ContentType.FACT,
+        title=str(row.get(feed.subject, "")),
+        content=str(row.get(feed.description, "")),
+        published_at=announced_at,
+        fetched_at=fetched_at,
+        clause=str(row.get(feed.clause, "")),
+        fact_date=parse_optional_roc_date(str(row.get(feed.fact_date, ""))),
+    )
+
+
+def parse_quarter_eps(
+    rows: list[dict[str, Any]], market: MarketType, exchange: ExchangeSources, clock: IMarketClock
+) -> dict[str, Eps]:
+    """One market's year-to-date EPS by stock_id, leaving out a row without a number or a valid ROC year and quarter."""
+    feed, fetched_at = exchange.quarter_eps[market], clock.now()
+    filed: dict[str, Eps] = {}
+
+    for row in rows:
+        stock_id = str(row.get(feed.stock_id, "")).strip()
+
         try:
-            change = float(text.replace(",", ""))
+            quarter = FiscalQuarter(int(str(row.get(feed.year, ""))) + ROC_YEAR_OFFSET, int(str(row.get(feed.quarter, ""))))
         except ValueError:
-            return None
+            continue
 
-        return change if math.isfinite(change) and close - change > 0 else None
+        if stock_id and (value := parse_number(str(row.get(feed.eps, "")))) is not None:
+            filed[stock_id] = Eps(
+                value=value,
+                kind=EpsKind.CUMULATIVE,
+                period_end=quarter,
+                basis=EpsBasis.ACTUAL,
+                source=InformationSource.TWSE_MOPS,
+                fetched_at=fetched_at,
+            )
+
+    return filed
+
+
+def parse_valuation_ratios(rows: list[dict[str, Any]], market: MarketType, exchange: ExchangeSources) -> list[ValuationRatios]:
+    """One market's valuation ratios, leaving out a row without a stock or a valid session date."""
+    feed = exchange.valuation_ratios[market]
+    published: list[ValuationRatios] = []
+
+    for row in rows:
+        stock_id = str(row.get(feed.stock_id, "")).strip()
+
+        if not stock_id or (session := parse_optional_roc_date(str(row.get(feed.date, "")))) is None:
+            continue
+
+        published.append(
+            ValuationRatios(
+                stock_id=stock_id,
+                session_date=session,
+                pe_ratio=parse_number(str(row.get(feed.pe_ratio, ""))),
+                dividend_yield=parse_number(str(row.get(feed.dividend_yield, ""))),
+                pb_ratio=parse_number(str(row.get(feed.pb_ratio, ""))),
+            )
+        )
+
+    return published
+
+
+def parse_financial_report(
+    row: dict[str, Any], market: MarketType, statement: FinancialStatement, industry_format: IndustryFormat, exchange: ExchangeSources
+) -> FinancialReport | None:
+    """
+    One company's statement of one report, or None when the row names no company or no valid ROC year, quarter and
+    served date: a report of a format nobody filed yet serves one row with only its date.
+    """
+    feeds = exchange.financial_reports
+    stock_id = served_field(row, feeds.stock_id)
+
+    try:
+        year, quarter = (int(served_field(row, names)) for names in (feeds.year, feeds.quarter))
+        period = FiscalQuarter(year + ROC_YEAR_OFFSET, quarter)
+        served_date = parse_roc_date(served_field(row, feeds.served_date))
+    except ValueError:
+        return None
+
+    if not stock_id:
+        return None
+
+    return FinancialReport(
+        stock_id=stock_id,
+        quarter=period,
+        statement=statement,
+        market=market,
+        industry_format=industry_format,
+        served_date=served_date,
+        items={name: str(value) for name, value in row.items() if name not in feeds.identity},
+    )
+
+
+def served_field(row: dict[str, Any], names: list[str]) -> str:
+    """The value of the first of the names the row holds, stripped, or '' when it holds none of them."""
+    return next((str(row[name]).strip() for name in names if name in row), "")
+
+
+def parse_exchange_news(row: dict[str, Any], exchange: ExchangeSources) -> ExchangeNews | None:
+    """One news item, or None when it has no address or no valid ROC date."""
+    feed = exchange.exchange_news
+    url = served_field(row, [feed.link])
+
+    if not url or (published_on := parse_optional_roc_date(served_field(row, [feed.date]))) is None:
+        return None
+
+    return ExchangeNews(url=url, title=served_field(row, [feed.title]), published_on=published_on)
+
+
+def parse_twse_index(rows: list[dict[str, Any]], exchange: ExchangeSources, clock: IMarketClock) -> list[Ohlcv]:
+    """The TAIEX in MI_INDEX, which lists every TWSE index of one session and writes the change's sign apart."""
+    fields = exchange.twse_index_fields
+    closes: list[Ohlcv] = []
+
+    for row in rows:
+        if row.get(fields.index) != fields.taiex:
+            continue
+
+        try:
+            session = parse_roc_date(str(row.get(fields.date, "")))
+        except ValueError:
+            continue
+
+        sign = "-" if row.get(fields.sign) == "-" else ""
+        close_text, change_text = str(row.get(fields.close, "")), sign + str(row.get(fields.change, ""))
+
+        if (close := parse_index_close(session, close_text, change_text, clock)) is not None:
+            closes.append(close)
+
+    return closes
+
+
+def parse_tpex_index(rows: list[dict[str, Any]], clock: IMarketClock) -> list[Ohlcv]:
+    """The TPEx Index in tpex_index, one row per recent session, dated '20261106'."""
+    closes: list[Ohlcv] = []
+
+    for row in rows:
+        try:
+            session = date.fromisoformat(str(row.get("Date", "")))
+        except ValueError:
+            continue
+
+        if (close := parse_index_close(session, str(row.get("Close", "")), str(row.get("Change", "")), clock)) is not None:
+            closes.append(close)
+
+    return closes
+
+
+def parse_index_close(session: date, close_text: str, change_text: str, clock: IMarketClock) -> Ohlcv | None:
+    """The index's close of the session with its signed change, or None when the close is not a positive number."""
+    close = parse_number(close_text)
+
+    if close is None or close <= 0:
+        return None
+
+    return Ohlcv(ts=clock.session_close(session), close=close, change=parse_change(change_text, close))

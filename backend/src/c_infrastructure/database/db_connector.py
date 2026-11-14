@@ -71,8 +71,8 @@ class DatabaseConnector(IDatabaseConnector[AsyncSession]):
         async with self._engine.begin() as connection:
             live_columns, stamps = await live_layout(connection)
 
-            if outdated := self.outdated_tables(live_columns, stamps):
-                raise OutdatedDatabaseError(self.outdated_message(outdated, stamps))
+            if outdated := outdated_tables(live_columns, stamps):
+                raise OutdatedDatabaseError(outdated_message(outdated, stamps))
 
             if not stamps:
                 # A database with tables and no stamp is refused, so the stamp goes in before any other table.
@@ -81,58 +81,6 @@ class DatabaseConnector(IDatabaseConnector[AsyncSession]):
 
             self._logger.debug("Running DB schema creation...")
             await connection.run_sync(SQLModel.metadata.create_all)
-
-    @override
-    def outdated_tables(self, live_columns: Mapping[str, frozenset[str]], stamps: Sequence[int]) -> list[str]:
-        existing = [table for table in SQLModel.metadata.sorted_tables if table.name in live_columns]
-
-        if not stamps and all(table.name == SchemaVersionDTO.__tablename__ for table in existing):
-            return []
-
-        is_current = list(stamps) == [SCHEMA_VERSION]
-        outdated = []
-
-        for table in existing:
-            declared = frozenset(column.name for column in table.columns)
-            live = live_columns[table.name]
-
-            if declared != live:
-                missing = ", ".join(sorted(declared - live)) or "none"
-                unused = ", ".join(sorted(live - declared)) or "none"
-                outdated.append(f"{table.name} (missing columns: {missing}; columns no longer used: {unused})")
-            elif not is_current:
-                outdated.append(table.name)
-
-        return outdated
-
-    @override
-    def outdated_message(self, outdated: list[str], stamps: Sequence[int]) -> str:
-        if pending_steps(stamps):
-            return (
-                f"The database is at schema version {stamps[0]}, and this version of stock-agent needs {SCHEMA_VERSION}. "
-                "Startup never upgrades a database.\nRemedy: run `just db-migrate`. It backs the database up into backups/ "
-                "first, then upgrades it in one transaction. `just db-status` shows the steps it runs."
-            )
-
-        found = ", ".join(str(stamp) for stamp in stamps) or "none"
-        version = (
-            []
-            if list(stamps) == [SCHEMA_VERSION]
-            else [
-                f"The database's schema version is {found}, and this version of stock-agent needs {SCHEMA_VERSION}. Rows of "
-                "another version can store the same columns differently, so a table whose columns match must go too."
-            ]
-        )
-
-        return "\n".join(
-            [
-                "The database has tables from another version of stock-agent that startup cannot upgrade in place:",
-                *(f"  - {table}" for table in outdated),
-                *version,
-                "Remedy: drop the tables named above. The next start recreates them empty.",
-                "Cached prices and EPS refill themselves; mock account, watchlist and trading rows in a dropped table are lost.",
-            ]
-        )
 
     @override
     async def state(self) -> DatabaseState:
@@ -144,7 +92,7 @@ class DatabaseConnector(IDatabaseConnector[AsyncSession]):
             }
 
         pending = tuple(pending_steps(stamps))
-        outdated = self.outdated_tables(live_columns, stamps)
+        outdated = outdated_tables(live_columns, stamps)
 
         return DatabaseState(
             location=f"{self._db.user}@{self._db.host}:{self._db.port}/{self._db.name}",
@@ -152,7 +100,7 @@ class DatabaseConnector(IDatabaseConnector[AsyncSession]):
             required=SCHEMA_VERSION,
             pending=pending,
             rows=rows,
-            refusal=self.outdated_message(outdated, stamps) if outdated else None,
+            refusal=outdated_message(outdated, stamps) if outdated else None,
         )
 
     @override
@@ -191,8 +139,8 @@ class DatabaseConnector(IDatabaseConnector[AsyncSession]):
                 await upgrade(connection, before.stamps)
                 live_columns, stamps = await live_layout(connection)
 
-                if outdated := self.outdated_tables(live_columns, stamps):
-                    raise OutdatedDatabaseError(self.outdated_message(outdated, stamps))
+                if outdated := outdated_tables(live_columns, stamps):
+                    raise OutdatedDatabaseError(outdated_message(outdated, stamps))
 
         except Exception as error:
             raise DatabaseCommandError(
@@ -268,3 +216,61 @@ class DatabaseConnector(IDatabaseConnector[AsyncSession]):
             await self._engine.dispose()
         except Exception:
             pass
+
+
+def outdated_tables(live_columns: Mapping[str, frozenset[str]], stamps: Sequence[int]) -> list[str]:
+    """
+    The existing tables startup must refuse, given each live table's columns and the stored schema version stamps:
+    every table when the database is not new and its stamp is not the code's, else each table whose columns differ.
+    A table whose columns differ is described with those columns.
+    """
+    existing = [table for table in SQLModel.metadata.sorted_tables if table.name in live_columns]
+
+    if not stamps and all(table.name == SchemaVersionDTO.__tablename__ for table in existing):
+        return []
+
+    is_current = list(stamps) == [SCHEMA_VERSION]
+    outdated = []
+
+    for table in existing:
+        declared = frozenset(column.name for column in table.columns)
+        live = live_columns[table.name]
+
+        if declared != live:
+            missing = ", ".join(sorted(declared - live)) or "none"
+            unused = ", ".join(sorted(live - declared)) or "none"
+            outdated.append(f"{table.name} (missing columns: {missing}; columns no longer used: {unused})")
+        elif not is_current:
+            outdated.append(table.name)
+
+    return outdated
+
+
+def outdated_message(outdated: list[str], stamps: Sequence[int]) -> str:
+    """What the user reads when startup refuses the database: the outdated tables, the stamp found, and the remedy."""
+    if pending_steps(stamps):
+        return (
+            f"The database is at schema version {stamps[0]}, and this version of stock-agent needs {SCHEMA_VERSION}. "
+            "Startup never upgrades a database.\nRemedy: run `just db-migrate`. It backs the database up into backups/ "
+            "first, then upgrades it in one transaction. `just db-status` shows the steps it runs."
+        )
+
+    found = ", ".join(str(stamp) for stamp in stamps) or "none"
+    version = (
+        []
+        if list(stamps) == [SCHEMA_VERSION]
+        else [
+            f"The database's schema version is {found}, and this version of stock-agent needs {SCHEMA_VERSION}. Rows of "
+            "another version can store the same columns differently, so a table whose columns match must go too."
+        ]
+    )
+
+    return "\n".join(
+        [
+            "The database has tables from another version of stock-agent that startup cannot upgrade in place:",
+            *(f"  - {table}" for table in outdated),
+            *version,
+            "Remedy: drop the tables named above. The next start recreates them empty.",
+            "Cached prices and EPS refill themselves; mock account, watchlist and trading rows in a dropped table are lost.",
+        ]
+    )

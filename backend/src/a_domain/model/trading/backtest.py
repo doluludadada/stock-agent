@@ -8,7 +8,7 @@ from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.trading.account import Account
 from a_domain.types.enums import SignalSource
 from a_domain.types.ids import BacktestId, new_backtest_id
-from a_domain.types.values import FormulaId, NonEmptyText, PositiveFiniteFloat, ProperFraction, Score
+from a_domain.types.values import FormulaId, NonEmptyText, PositiveFiniteFloat, ProperFraction, Score, max_drawdown
 
 
 @dataclass(frozen=True, kw_only=True, config=ConfigDict(use_attribute_docstrings=True))
@@ -27,7 +27,7 @@ class BacktestInputs:
     """A held stock at or below this score is sold: analysis.max_combined_score_sell in a run."""
 
     @model_validator(mode="after")
-    def _first_is_not_after_last(self) -> Self:
+    def first_is_not_after_last(self) -> Self:
         if self.first > self.last:
             raise ValueError("first must not be after last")
 
@@ -74,7 +74,7 @@ class BacktestTrade:
     """Sessions from the first BUY to the SELL, or to the last session."""
 
     @model_validator(mode="after")
-    def _a_sale_has_its_session_price_and_source(self) -> Self:
+    def a_sale_has_its_session_price_and_source(self) -> Self:
         if len({self.sold_on is None, self.sold_at is None, self.exit_source is None}) != 1:
             raise ValueError("a sold trade has sold_on, sold_at and exit_source, and an open one has none of them")
 
@@ -145,13 +145,7 @@ class Backtest:
     @property
     def max_drawdown_pct(self) -> float:
         """The deepest fall of the equity from an earlier high, as a fraction of that high."""
-        high, deepest = self.inputs.initial_cash, 0.0
-
-        for account in self.equity_curve.values():
-            high = max(high, account.equity)
-            deepest = max(deepest, 1 - account.equity / high)
-
-        return deepest
+        return max_drawdown([self.inputs.initial_cash, *(account.equity for account in self.equity_curve.values())])
 
     @property
     def trade_count(self) -> int:

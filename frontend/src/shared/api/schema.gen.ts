@@ -2189,7 +2189,7 @@ export interface components {
         };
         /**
          * HeldPositionResponse
-         * @description A position of a holdings page: what is held, its cost, and the gain or loss at its mark.
+         * @description A position (Position): what is held, its cost, and the gain or loss at its mark.
          */
         HeldPositionResponse: {
             /** Average Cost */
@@ -2335,7 +2335,7 @@ export interface components {
          * InformationSource
          * @enum {string}
          */
-        InformationSource: "twse_mops" | "twse_news" | "news_media" | "ptt_stock" | "ptt_gossiping" | "reunion";
+        InformationSource: "twse_mops" | "twse_news" | "news_media" | "ptt_stock" | "ptt_gossiping";
         JsonValue: unknown;
         /**
          * LatestPrice
@@ -2691,22 +2691,33 @@ export interface components {
          * @enum {string}
          */
         Permission: "manage_users" | "edit_system_settings" | "use_cli" | "use_real_broker" | "notify_recipients" | "uncapped_ai" | "see_administrator_features" | "uncapped_runs";
-        /** PositionValueResponse */
+        /**
+         * PositionValueResponse
+         * @description A position of an account's value.
+         */
         PositionValueResponse: {
             /** Average Cost */
             average_cost: number;
+            /** Cost Basis */
+            cost_basis: number;
             /** Mark Price */
             mark_price: number;
             /** Marked At */
             marked_at: string | null;
             /** Market Value */
             market_value: number;
+            /** Opened At */
+            opened_at: string | null;
             /** Quantity */
             quantity: number;
             /** Stock Id */
             stock_id: string;
             /** Unrealized Pnl */
             unrealized_pnl: number;
+            /** Unrealized Return */
+            unrealized_return: number | null;
+            /** Weight */
+            weight: number | null;
         };
         PositiveFiniteFloat: number;
         /**
@@ -3234,7 +3245,7 @@ export interface components {
          * @description What a setting's number counts, so the form words a value as 2%, 15 minutes or NT$100,000.
          * @enum {string}
          */
-        SettingUnit: "percent" | "seconds" | "minutes" | "hours" | "days" | "twd" | "bytes";
+        SettingUnit: "percent" | "seconds" | "minutes" | "hours" | "days" | "twd";
         /**
          * SettingsFile
          * @description A settings file in config/ the administrator may edit from the Web. Nothing else on disk can be named.
@@ -3584,18 +3595,27 @@ export interface components {
             warnings: string[];
         };
         /**
+         * TechnicalObservation
+         * @description Whether the pattern of a rule that adds to the score showed. `rule` is the rule's name in its strategy.
+         */
+        TechnicalObservation: {
+            /** Detected */
+            detected: boolean;
+            rule: components["schemas"]["NonEmptyText"];
+        };
+        /**
          * TechnicalReport
          * @description Result produced by a TechnicalStrategy.
          *
          *     Hard failures reject the stock.
          *     Soft failures reduce technical quality without rejecting the stock.
-         *     Observations describe optional technical signals.
+         *     Observations say, for each rule that adds to the score, whether its pattern showed.
          */
         TechnicalReport: {
             /** Hard Failures */
             hard_failures: string[];
             /** Observations */
-            observations: string[];
+            observations: components["schemas"]["TechnicalObservation"][];
             score: components["schemas"]["Score_int_"];
             /** Soft Failures */
             soft_failures: string[];

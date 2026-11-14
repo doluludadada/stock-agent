@@ -15,9 +15,9 @@ from b_application.config.app_config import AppConfig
 class HoldingsAnalysis:
     """
     Use Case: Read the holdings as one portfolio from held data alone (PortfolioAnalysisRule): each stock's last close
-    in the ranking's daily history, its name in the listing, its standing in the monthly ranking as the stock page
-    answers it, and its revenue trend from the archived months by the stock page's own rule. It fetches no price, asks
-    no AI and never orders. A listing outage leaves the holdings unnamed.
+    in the ranking's daily history, its name in the listing, its standing in the monthly ranking as `standings` holds
+    it, and its revenue trend from the archived months by the stock page's own rule. It fetches no price. A listing
+    outage leaves the holdings unnamed.
     """
 
     def __init__(

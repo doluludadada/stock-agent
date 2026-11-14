@@ -22,9 +22,10 @@ from support.settings import shipped_config
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.rules.technical.calculation.calculator import IndicatorParameters, indicator_outputs
-from a_domain.rules.technical.matrix import DailyBarMatrix, StrategyScoresRule
+from a_domain.rules.technical.matrix import DailyBarMatrix, DailyBarMatrixRule, StrategyScoresRule
 from a_domain.rules.technical.strategy import TechnicalStrategy
 from a_domain.types.enums import ArithmeticOperator, ComparisonOperator, IndicatorKind, MarketField, RuleEffect
+from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 
 STRATEGY = TypeAdapter(TechnicalStrategy)
 INDICATOR: TypeAdapter[IndicatorParameters] = TypeAdapter(IndicatorParameters)
@@ -250,6 +251,22 @@ def test_a_bar_without_every_field_is_refused() -> None:
 
     with pytest.raises(ValidationError, match="every field"):
         DailyBarMatrix(stock_ids=("2330",), sessions=(date(2026, 1, 5), date(2026, 1, 6)), **fields)
+
+
+def test_daily_bars_become_one_matrix_with_a_gap_where_a_stock_has_no_bar() -> None:
+    sessions = (date(2026, 3, 2), date(2026, 3, 3), date(2026, 3, 4))
+
+    def bar(column: int, close: float) -> Ohlcv:
+        stamp = datetime.combine(sessions[column], time(13, 30), TAIWAN_TIMEZONE)
+        return Ohlcv(ts=stamp, open=close - 1, high=close + 1, low=close - 2, close=close, volume=500)
+
+    history = {"2454": [bar(0, 50), bar(2, 52)], "2330": [bar(1, 101), bar(2, 102)]}
+    bars = DailyBarMatrixRule().apply(history, lambda stamp: stamp.astimezone(TAIWAN_TIMEZONE).date())
+
+    assert (bars.stock_ids, bars.sessions) == (("2330", "2454"), sessions)
+    assert np.array_equal(bars.close, [[np.nan, 101, 102], [50, np.nan, 52]], equal_nan=True)
+    assert np.array_equal(bars.open, [[np.nan, 100, 101], [49, np.nan, 51]], equal_nan=True)
+    assert np.array_equal(bars.volume, [[np.nan, 500, 500], [500, np.nan, 500]], equal_nan=True)
 
 
 def random_strategy(generator: random.Random, index: int, reached: set[str]) -> TechnicalStrategy:

@@ -1701,9 +1701,7 @@
             "type": "boolean"
           },
           "stock_id": {
-            "maxLength": 10,
-            "minLength": 1,
-            "pattern": "^[0-9A-Za-z]+$",
+            "pattern": "^[0-9A-Za-z]{1,10}$",
             "title": "Stock Id",
             "type": "string"
           },
@@ -1950,7 +1948,7 @@
         "type": "object"
       },
       "HeldPositionResponse": {
-        "description": "A position of a holdings page: what is held, its cost, and the gain or loss at its mark.",
+        "description": "A position (Position): what is held, its cost, and the gain or loss at its mark.",
         "properties": {
           "average_cost": {
             "title": "Average Cost",
@@ -2039,9 +2037,7 @@
             "type": "boolean"
           },
           "stock_id": {
-            "maxLength": 10,
-            "minLength": 1,
-            "pattern": "^[0-9A-Za-z]+$",
+            "pattern": "^[0-9A-Za-z]{1,10}$",
             "title": "Stock Id",
             "type": "string"
           }
@@ -2086,9 +2082,7 @@
             "type": "integer"
           },
           "stock_id": {
-            "maxLength": 10,
-            "minLength": 1,
-            "pattern": "^[0-9A-Za-z]+$",
+            "pattern": "^[0-9A-Za-z]{1,10}$",
             "title": "Stock Id",
             "type": "string"
           }
@@ -2457,8 +2451,7 @@
           "twse_news",
           "news_media",
           "ptt_stock",
-          "ptt_gossiping",
-          "reunion"
+          "ptt_gossiping"
         ],
         "title": "InformationSource",
         "type": "string"
@@ -2560,9 +2553,7 @@
             "type": "integer"
           },
           "stock_id": {
-            "maxLength": 10,
-            "minLength": 1,
-            "pattern": "^[0-9A-Za-z]+$",
+            "pattern": "^[0-9A-Za-z]{1,10}$",
             "title": "Stock Id",
             "type": "string"
           }
@@ -3282,9 +3273,14 @@
         "type": "string"
       },
       "PositionValueResponse": {
+        "description": "A position of an account's value.",
         "properties": {
           "average_cost": {
             "title": "Average Cost",
+            "type": "number"
+          },
+          "cost_basis": {
+            "title": "Cost Basis",
             "type": "number"
           },
           "mark_price": {
@@ -3307,6 +3303,18 @@
             "title": "Market Value",
             "type": "number"
           },
+          "opened_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opened At"
+          },
           "quantity": {
             "title": "Quantity",
             "type": "integer"
@@ -3318,6 +3326,28 @@
           "unrealized_pnl": {
             "title": "Unrealized Pnl",
             "type": "number"
+          },
+          "unrealized_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unrealized Return"
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight"
           }
         },
         "required": [
@@ -3327,7 +3357,11 @@
           "mark_price",
           "marked_at",
           "market_value",
-          "unrealized_pnl"
+          "unrealized_pnl",
+          "cost_basis",
+          "unrealized_return",
+          "opened_at",
+          "weight"
         ],
         "title": "PositionValueResponse",
         "type": "object"
@@ -4676,8 +4710,7 @@
           "minutes",
           "hours",
           "days",
-          "twd",
-          "bytes"
+          "twd"
         ],
         "title": "SettingUnit",
         "type": "string"
@@ -5286,9 +5319,7 @@
       },
       "StockIdList": {
         "items": {
-          "maxLength": 10,
-          "minLength": 1,
-          "pattern": "^[0-9A-Za-z]+$",
+          "pattern": "^[0-9A-Za-z]{1,10}$",
           "type": "string"
         },
         "maxItems": 20,
@@ -5731,8 +5762,26 @@
         "title": "StockValuationResponse",
         "type": "object"
       },
+      "TechnicalObservation": {
+        "description": "Whether the pattern of a rule that adds to the score showed. `rule` is the rule's name in its strategy.",
+        "properties": {
+          "detected": {
+            "title": "Detected",
+            "type": "boolean"
+          },
+          "rule": {
+            "$ref": "#/components/schemas/NonEmptyText"
+          }
+        },
+        "required": [
+          "rule",
+          "detected"
+        ],
+        "title": "TechnicalObservation",
+        "type": "object"
+      },
       "TechnicalReport": {
-        "description": "Result produced by a TechnicalStrategy.\n\nHard failures reject the stock.\nSoft failures reduce technical quality without rejecting the stock.\nObservations describe optional technical signals.",
+        "description": "Result produced by a TechnicalStrategy.\n\nHard failures reject the stock.\nSoft failures reduce technical quality without rejecting the stock.\nObservations say, for each rule that adds to the score, whether its pattern showed.",
         "properties": {
           "hard_failures": {
             "items": {
@@ -5743,7 +5792,7 @@
           },
           "observations": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/TechnicalObservation"
             },
             "title": "Observations",
             "type": "array"
@@ -6592,7 +6641,7 @@
     }
   },
   "info": {
-    "description": "\nRuns the stock-agent workflows and reads what they recorded, on the same runtime as the CLI.\n\nUsers. Anyone may register (`POST /v1/auth/register`) while registration is open, and signs in with a username or an\nemail (`POST /v1/auth/sign-in`), which sets the HttpOnly session cookie `stock_agent_session`. A site with a Google\nclient also signs in with Google: the browser goes to `GET /v1/auth/google/start`, and Google sends it back to `GET\n/v1/auth/google/callback`, which sets the same cookie and sends the browser to the app. Public: sign-in,\nregistration, the first-time setup, the built-in strategies and market data (`/v1/market`). Signed in: every other\nread and write, each on the user's own runs, decisions, orders, watchlist, mock account and saved technical settings.\nAdministrator: the users (`/v1/admin/users`) and the settings form (`/v1/admin/settings`). 401 means sign in: the\nsession is missing, expired or ended. 403 means signed in but not allowed, and never ends the session. Every write\nsends the header `X-Requested-With: stock-agent`, and every write but sign-in, sign-out, registration and setup\nrepeats `\"confirm\": true` in its body.\n\nOrders. Full Cycle, specific-stock analysis, valuation and market data never order. Buzz, Intraday and a manual BUY\nof a stock a specific-stock run reported (`POST /v1/runs/{run_id}/manual-buy`) send orders through the same gates and\ntrading journal as the CLI, on the broker their `broker` query names for the whole run: the user's mock account by\ndefault, or SinoPac (`shioaji`) for an administrator while the site's Shioaji login is up, on its simulation server\nin dev and test and on the real account in prod, each BUY within trading.max_order_value and the day's within\ntrading.max_daily_buy_value (`GET /v1/account/brokers` names them). A follow (`POST /v1/runs/{run_id}/follow`) places a\nfinished Full Cycle's open decisions in the user's mock account only, priced again: at a fresh realtime quote in\ncontinuous trading, or on a site without realtime quotes at the last session's official close while no session\ntrades. A ranking follow (`POST /v1/rankings/follow`) brings that mock account to the monthly ranking's latest decision,\npriced the same way, on the mock account only. No endpoint cancels or modifies an order.\n\nOpen data. A public site (`audience: public`) uses only the TWSE and TPEX OpenAPI data the server archives: daily\nhistory and the index trend come from that archive, it has no realtime quote, so Buzz and Intraday answer 403\n`realtime_quotes_unavailable`, and it trades on the mock broker only. A personal site reads its daily history and\nindex trend from the exchanges' own daily reports; without a Shioaji login it has no realtime quote either, so it\nanswers Buzz and Intraday the same way. A public site reads no news site and no MOPS: the AI step\nreads the archived material information, the TWSE news naming the stock and its archived financials, a stock with none\nof them is decided on its technical score alone, and every valuation endpoint answers 403 `mops_unavailable`. `GET\n/v1/market/audience` answers the site's audience and what it allows, so the web app offers only that. `GET\n/v1/market/archive-status` says how many sessions the archive holds and how many the built-in strategies need, `GET\n/v1/market/stocks/{stock_id}/financials` answers a stock's archived quarters and monthly revenue, `GET\n/v1/market/stocks/{stock_id}/analysis` reads them, the held EPS filings and the archived valuation ratios into a\nfinancial analysis by fixed rules with no AI call, `GET /v1/market/stocks/{stock_id}/news` answers a signed-in user\nwhat the site's article store keeps of the stock, its announcements and exchange news and, on a personal site, its news\narticles and board posts by title and address, `GET\n/v1/market/stocks/{stock_id}/ranking` answers its score, its place in the monthly ranking as a percentile with its two\nfactors, or why the ranking leaves it out, `GET /v1/market/stocks/{stock_id}/brief` answers the AI brief the site holds\nof the stock (what the company is, and how the held facts of a recent window relate to its move, each sentence citing\nheld items), one per stock and Taipei calendar day for every viewer, with no AI call, `POST` on the same address makes\na signed-in user's one paid AI call for today's brief when none is held, and `GET\n/v1/market/attribution` names the open data's providers, datasets and license, which a page showing it must credit.\n\nBacktests. `POST /v1/backtests` replays the user's active technical strategy over past sessions the site already\nholds, with the live trading rules on the technical score alone, and saves the result for the user (`GET\n/v1/backtests`, `GET /v1/backtests/{backtest_id}`). `GET /v1/backtests/options` names the period it may cover. A\nbacktest asks no AI, touches no account, watchlist or run record, and never orders.\n\nRankings. `GET /v1/rankings/latest` answers the monthly stock ranking by revenue acceleration and nearness to the high at\nthe latest decision session the site's daily history holds, and `GET /v1/rankings/backtest?first=&last=` replays it over\na period against the ranking.benchmark_id held over the same sessions. Both read only the held history and the archived\nmonthly revenue, which `just backfill-history` brings back; they ask no AI, touch no account and never order. `GET\n/v1/rankings/follow` answers the user's mock account against that ranking, and its return since it first followed it\nagainst the benchmark; `POST /v1/rankings/follow` brings the mock account to the ranking, as a run that orders on the\nmock account only.\n\nThe server replays `accounts.max_concurrent_backtests` strategy backtests and ranking backtests at once, and one more\nwaits its turn. A user's request past `accounts.max_backtests_per_user` replaying or waiting answers 429\n`too_many_backtests`.\n\nWorkflows run in the background, one at a time per user and a few at a time per server: a start answers 202 with the\nrun id, and GET /v1/runs/{run_id} reports the run's state and its record; another user's run id answers 404. Run the\nserver with one worker process.\n",
+    "description": "\nRuns the stock-agent workflows and reads what they recorded, on the same runtime as the CLI.\n\nUsers. Anyone may register (`POST /v1/auth/register`) while registration is open, and signs in with a username or an\nemail (`POST /v1/auth/sign-in`), which sets the HttpOnly session cookie `stock_agent_session`. A site with a Google\nclient also signs in with Google: the browser goes to `GET /v1/auth/google/start`, and Google sends it back to `GET\n/v1/auth/google/callback`, which sets the same cookie and sends the browser to the app. Public: sign-in,\nregistration, the first-time setup, the built-in strategies and market data (`/v1/market`). Signed in: every other\nread and write, each on the user's own runs, decisions, orders, watchlist, mock account and saved technical settings.\nAdministrator: the users (`/v1/admin/users`) and the settings form (`/v1/admin/settings`). 401 means sign in: the\nsession is missing, expired or ended. 403 means signed in but not allowed, and never ends the session. Every write\nsends the header `X-Requested-With: stock-agent`, and every write but sign-in, sign-out, registration and setup\nrepeats `\"confirm\": true` in its body.\n\nOrders. Full Cycle, specific-stock analysis, valuation and market data never order. Buzz, Intraday and a manual BUY\nof a stock a specific-stock run reported (`POST /v1/runs/{run_id}/manual-buy`) send orders through the same gates and\ntrading journal as the CLI, on the broker their `broker` query names for the whole run: the user's mock account by\ndefault, or SinoPac (`shioaji`) for an administrator while the site's Shioaji login is up, on its simulation server\nin dev and test and on the real account in prod, each BUY within trading.max_order_value and the day's within\ntrading.max_daily_buy_value (`GET /v1/account/brokers` names them). A follow (`POST /v1/runs/{run_id}/follow`) places a\nfinished Full Cycle's open decisions in the user's mock account only, priced again: at a fresh realtime quote in\ncontinuous trading, or on a site without realtime quotes at the last session's official close while no session\ntrades. A ranking follow (`POST /v1/rankings/follow`) brings that mock account to the monthly ranking's latest decision,\npriced the same way, on the mock account only. No endpoint cancels or modifies an order.\n\nOpen data. A public site (`audience: public`) uses only the TWSE and TPEX OpenAPI data the server archives: daily\nhistory and the index trend come from that archive, it has no realtime quote, so Buzz and Intraday answer 403\n`realtime_quotes_unavailable`, and it trades on the mock broker only. A personal site reads its daily history and\nindex trend from the exchanges' own daily reports; without a Shioaji login it has no realtime quote either, so it\nanswers Buzz and Intraday the same way. A public site reads no news site and no MOPS: the AI step\nreads the archived material information, the TWSE news naming the stock and its archived financials, a stock with none\nof them is decided on its technical score alone, and every valuation endpoint answers 403 `mops_unavailable`. `GET\n/v1/market/audience` answers the site's audience and what it allows, so the web app offers only that.\n\nBacktests. `POST /v1/backtests` replays the user's active technical strategy over past sessions the site already\nholds, with the live trading rules on the technical score alone, and saves the result for the user (`GET\n/v1/backtests`, `GET /v1/backtests/{backtest_id}`). `GET /v1/backtests/options` names the period it may cover. A\nbacktest asks no AI, touches no account, watchlist or run record, and never orders.\n\nRankings. `GET /v1/rankings/latest` answers the monthly stock ranking by revenue acceleration and nearness to the high at\nthe latest decision session the site's daily history holds, and `GET /v1/rankings/backtest?first=&last=` replays it over\na period against the ranking.benchmark_id held over the same sessions. Both read only the held history and the archived\nmonthly revenue, which `just backfill-history` brings back; they ask no AI, touch no account and never order. `GET\n/v1/rankings/follow` answers the user's mock account against that ranking, and its return since it first followed it\nagainst the benchmark; `POST /v1/rankings/follow` brings the mock account to the ranking, as a run that orders on the\nmock account only.\n\nThe server replays `accounts.max_concurrent_backtests` strategy backtests and ranking backtests at once, and one more\nwaits its turn. A user's request past `accounts.max_backtests_per_user` replaying or waiting answers 429\n`too_many_backtests`.\n\nWorkflows run in the background, one at a time per user and a few at a time per server: a start answers 202 with the\nrun id, and GET /v1/runs/{run_id} reports the run's state and its record; another user's run id answers 404. Run the\nserver with one worker process.\n",
     "title": "TW-Stock-Alpha-Agent",
     "version": "0.2.0"
   },
@@ -9820,9 +9869,7 @@
             "required": true,
             "schema": {
               "items": {
-                "maxLength": 10,
-                "minLength": 1,
-                "pattern": "^[0-9A-Za-z]+$",
+                "pattern": "^[0-9A-Za-z]{1,10}$",
                 "type": "string"
               },
               "maxItems": 20,

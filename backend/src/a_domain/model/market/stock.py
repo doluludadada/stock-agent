@@ -21,13 +21,11 @@ class Stock:
     During pipeline execution, fields are progressively populated.
     """
 
-    # --------------------------------- Identity --------------------------------- #
     stock_id: str
     name: str | None = None
     market: MarketType = MarketType.TWSE
     industry: str | None = None
 
-    # ----------------------------------- Data ----------------------------------- #
     ohlcv: list[Ohlcv] = Field(default_factory=list)
     realtime_bar: Ohlcv | None = None
     """
@@ -38,7 +36,6 @@ class Stock:
     articles: list[Article] = Field(default_factory=list)
     eps: Eps | EpsUnavailable = Field(default_factory=lambda: EpsUnavailable(EpsUnavailableReason.NOT_LOADED))
 
-    # -------------------------------- Analysis ---------------------------------- #
     technical_report: TechnicalReport | None = None
     ai_report: AiAnalysisReport | None = None
     composite_score: int | None = None
@@ -54,7 +51,6 @@ class Stock:
         """The listing's official change of a session goes onto the daily bar of that session, which has none of its own."""
         self.ohlcv = [replace(bar, change=close.change) if bar.ts == close.ts else bar for bar in self.ohlcv]
 
-    # -------------------------------- Shortcuts --------------------------------- #
     @property
     def today(self) -> Ohlcv | None:
         return self.ohlcv[-1] if self.ohlcv else None
@@ -98,4 +94,5 @@ class Stock:
 
     @property
     def observations(self) -> list[str]:
-        return self.technical_report.observations if self.technical_report else []
+        """Each observation of the technical report as an English sentence, for a printout or a prompt."""
+        return [observation.sentence for observation in self.technical_report.observations] if self.technical_report else []

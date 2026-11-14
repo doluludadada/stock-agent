@@ -1,4 +1,3 @@
-from collections.abc import Mapping
 from datetime import date, datetime
 from typing import Protocol
 
@@ -28,10 +27,6 @@ class ICachedPriceProvider(IOhlcvProvider, Protocol):
     every read. An index's bars are kept under `^` and its market, which no stock id can be.
     """
 
-    def sessions_of(self, start_date: datetime, end_date: datetime) -> tuple[date, date]:
-        """The window's first session and its last, which is never after the last settled session."""
-        ...
-
     async def sync(self, start_date: datetime, end_date: datetime, *, reported: bool = False) -> tuple[date, date]:
         """
         Fetches what the cache lacks of the window's sessions, up to the last settled session, and returns the window's
@@ -60,27 +55,13 @@ class ICachedPriceProvider(IOhlcvProvider, Protocol):
         """
         ...
 
-    async def save_references(self, references: Mapping[tuple[str, date], float]) -> None:
-        """Saves each ex-right reference by stock id and day, replacing what the cache holds of the same stock and day."""
-        ...
-
-    async def save_reference_span(self, market: MarketType, first: date, last: date) -> None:
-        """Widens the days the cache read the exchange's ex-right references of to hold first to last."""
-        ...
-
     async def reference_gaps(self, market: MarketType, first: date, last: date) -> list[tuple[date, date]]:
         """
         The ranges from first to last whose ex-right references the cache never read from the exchange, in the order
-        sync_references asks for them (reference_blocks): those before the days it read newest first, then those after
-        them oldest first, so the days read stay one span whichever request fails. A range read and found without an
-        ex-day is no gap.
-        """
-        ...
-
-    def reference_blocks(self, first: date, last: date) -> list[tuple[date, date]]:
-        """
-        first to last cut at the boundaries of sources.exchange.ex_right_references.months_per_request calendar
-        months, oldest first.
+        sync_references asks for them, each cut at the boundaries of
+        sources.exchange.ex_right_references.months_per_request calendar months: those before the days it read newest
+        first, then those after them oldest first, so the days read stay one span whichever request fails. A range read
+        and found without an ex-day is no gap.
         """
         ...
 
@@ -88,13 +69,6 @@ class ICachedPriceProvider(IOhlcvProvider, Protocol):
         """
         Fetches and saves one session's bars unless the cache holds its reported bars or the exchanges were asked for it
         within the retry interval. Returns whether it saved any.
-        """
-        ...
-
-    def due(self, question: str, now: datetime) -> bool:
-        """
-        Whether the exchanges may be asked `question` now: it never was, or was a retry interval ago, and no request
-        failed within the retry interval, since a site that refuses the address refuses every question.
         """
         ...
 
@@ -107,15 +81,4 @@ class ICachedPriceProvider(IOhlcvProvider, Protocol):
 
     async def index_sessions(self, first: date, last: date) -> dict[MarketType, list[Ohlcv]]:
         """Each market's index bars from first to last, oldest first."""
-        ...
-
-    async def stored_bars(self, stock_ids: list[str], first: date, last: date) -> dict[str, list[Ohlcv]]:
-        """
-        Each stock's bars from first to last as the exchanges reported them, oldest first, a bar without a change with
-        the open-data archive's official change of its stock and session where the archive holds one.
-        """
-        ...
-
-    async def save_bars(self, bars: Mapping[str, list[Ohlcv]]) -> None:
-        """Saves each key's bars, replacing what the cache holds of the same key and session."""
         ...

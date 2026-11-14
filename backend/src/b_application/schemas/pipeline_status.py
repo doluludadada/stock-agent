@@ -42,8 +42,8 @@ class PipelineStatus:
 
     universe_stocks: list[Stock] = field(default_factory=list)
     """
-    MarketScanner: every listed stock, for Full Cycle and the valuation workflows, and the names of the watched stocks.
-    Empty during a listing outage.
+    StockLookup, asked for all: every listed stock, for Full Cycle and the valuation workflows, and the names of the
+    watched stocks. Empty during a listing outage.
     """
 
     watchlist: list[WatchlistEntry] = field(default_factory=list)
@@ -128,7 +128,7 @@ class PipelineStatus:
     def stocks(self) -> dict[str, Stock]:
         """
         Every stock the run loaded, by id, the first object per id. AccountLoader and BuzzScanner reuse a stock they
-        find here; MarketScanner loads its own copies. Fill snapshots, the equity and decision memory read stocks
+        find here; StockLookup loads its own copies. Fill snapshots, the equity and decision memory read stocks
         through it. The full market comes first, so Full
         Cycle marks a held stock with the copy whose history it loaded.
         """

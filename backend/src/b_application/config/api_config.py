@@ -17,34 +17,19 @@ class ApiConfig(BaseSettings):
     )
     """The Host header names the API answers; any other gets 400. A reverse proxy's public host name goes here."""
 
-    settings_file_max_bytes: Annotated[
-        int,
-        Field(
-            gt=0,
-            le=1_048_576,
-            json_schema_extra={"steps": [65536, 131072, 262144, 524288, 1048576], "unit": SettingUnit.BYTES, "operator_only": True},
-        ),
-    ] = 262_144
+    settings_file_max_bytes: Annotated[int, Field(gt=0, le=1_048_576, json_schema_extra={"operator_only": True})] = 262_144
     """The largest settings file the administrator's editor reads or writes."""
 
-    settings_backups_kept: Annotated[
-        int, Field(ge=1, le=500, json_schema_extra={"steps": [5, 10, 20, 50, 100], "operator_only": True})
-    ] = 20
+    settings_backups_kept: Annotated[int, Field(ge=1, le=500, json_schema_extra={"operator_only": True})] = 20
     """How many backups of each settings file the editor keeps; older ones are deleted."""
 
-    settings_build_timeout_seconds: Annotated[
-        float,
-        Field(gt=0, le=600, json_schema_extra={"steps": [15, 30, 60, 120, 300], "unit": SettingUnit.SECONDS, "operator_only": True}),
-    ] = 30
+    settings_build_timeout_seconds: Annotated[float, Field(gt=0, le=600, json_schema_extra={"operator_only": True})] = 30
     """
     How long the app may take to start on new settings (the database and the broker login included) before a save or
     a reload of them is refused and the running settings keep serving.
     """
 
-    settings_poll_seconds: Annotated[
-        float,
-        Field(gt=0, le=3600, json_schema_extra={"steps": [1, 2, 5, 10, 30, 60], "unit": SettingUnit.SECONDS, "operator_only": True}),
-    ] = 2
+    settings_poll_seconds: Annotated[float, Field(gt=0, le=3600, json_schema_extra={"operator_only": True})] = 2
     """How often the Web API looks at the settings files on disk, to reload an edit made outside the app."""
 
     valuation_cache_minutes: Annotated[

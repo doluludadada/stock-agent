@@ -98,14 +98,20 @@ async def ended(runs: WorkflowRuns, run_id: RunId) -> None:
 
 
 async def drained(switch: RuntimeSwitch) -> None:
-    """Waits until every runtime but the current one has closed."""
-    for _ in range(1000):
-        if all(opened.closing is not None and opened.closing.done() for opened in switch.opened[:-1]):
-            return
+    """
+    Waits until every runtime but the current one has closed. It waits on the close itself: a real runtime closes its
+    database connections, which takes time a count of loop turns can run out of on a slower machine.
+    """
+    earlier = switch.opened[:-1]
 
-        await asyncio.sleep(0)
+    try:
+        async with asyncio.timeout(60):
+            while any(opened.closing is None for opened in earlier):
+                await asyncio.sleep(0)
 
-    raise AssertionError("an earlier runtime never closed")
+            await asyncio.gather(*(opened.closing for opened in earlier if opened.closing is not None))
+    except TimeoutError:
+        raise AssertionError("an earlier runtime never closed") from None
 
 
 async def test_a_reload_while_a_run_holds_the_old_runtime_closes_it_only_after_the_run(project: Path) -> None:

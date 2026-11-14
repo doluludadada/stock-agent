@@ -3,8 +3,9 @@ import { render, screen, within } from '@testing-library/react'
 import { I18nextProvider } from 'react-i18next'
 import { MemoryRouter } from 'react-router'
 import { initI18n } from '@/i18n'
-import type { Visibilities } from '@/shared/api'
+import { session, type Visibilities } from '@/shared/api'
 import { siteShowing } from '@/test/features'
+import { TEST_USER } from '@/test/users'
 import { AnalysisPanel } from './AnalysisPanel'
 import type { StockAnalysis, StockNews, StockRanking } from './api'
 import { newsText, outboundUrl, shownQuarters } from './model'
@@ -210,6 +211,9 @@ describe('the financial analysis', () => {
 })
 
 describe('the news', () => {
+  beforeEach(() => session.signIn(TEST_USER))
+  afterEach(() => session.signOut())
+
   it('renders third-party titles and text as text, and links only to http addresses', async () => {
     renderWith(news, <NewsPanel stockId="2330" />)
     const list = within(await screen.findByRole('list'))

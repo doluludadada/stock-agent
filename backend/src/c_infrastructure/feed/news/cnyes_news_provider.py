@@ -38,13 +38,15 @@ class CnyesNewsProvider(INewsSource):
         )
 
         for url, params in feeds:
-            page = await self.fetch_page(url, params)
+            page = await fetch_page(self._client, self._logger, url, params)
             from_search = url.endswith("/search")
-            articles = [] if page is None else self.parse_listing(stock_id, page)
+            articles = [] if page is None else parse_listing(stock_id, page, self._article_url, self._logger)
             articles = [article for article in articles if not from_search or stock_id in f"{article.title}\n{article.content}"]
             # symbolNews lists headlines only, so read the missing bodies from the article pages.
             missing_body = [article for article in articles if not article.content]
-            bodies = await asyncio.gather(*(self.fetch_article_body(str(article.url)) for article in missing_body))
+            bodies = await asyncio.gather(
+                *(fetch_article_body(str(article.url), self._client, self._logger) for article in missing_body)
+            )
 
             for article, body in zip(missing_body, bodies, strict=True):
                 article.content = body
@@ -56,64 +58,69 @@ class CnyesNewsProvider(INewsSource):
         self._logger.warning(f"No Cnyes articles found for {stock_id}.")
         return []
 
-    @override
-    async def fetch_page(self, url: str, params: Mapping[str, str | int] | None = None) -> str | None:
-        try:
-            response = await self._client.get(url, params=params)
-            response.raise_for_status()
-            return response.text
-        except httpx.HTTPStatusError as error:
-            status_code = error.response.status_code
 
-            if status_code >= 500:
-                self._logger.warning(f"Cnyes endpoint {url} unavailable (HTTP {status_code}); trying next source.")
-            else:
-                self._logger.error(f"Cnyes rejected request {url} (HTTP {status_code}): {error}")
+async def fetch_page(
+    client: httpx.AsyncClient, logger: ILoggingProvider, url: str, params: Mapping[str, str | int] | None = None
+) -> str | None:
+    """The text of a listing page or feed, or None when the site refused or could not be reached."""
+    try:
+        response = await client.get(url, params=params)
+        response.raise_for_status()
+        return response.text
+    except httpx.HTTPStatusError as error:
+        status_code = error.response.status_code
 
-            return None
-        except httpx.RequestError as error:
-            self._logger.warning(f"Cnyes request {url} failed: {error}")
-            return None
+        if status_code >= 500:
+            logger.warning(f"Cnyes endpoint {url} unavailable (HTTP {status_code}); trying next source.")
+        else:
+            logger.error(f"Cnyes rejected request {url} (HTTP {status_code}): {error}")
 
-    @override
-    def parse_listing(self, stock_id: str, page: str) -> list[Article]:
-        try:
-            items = json.loads(page).get("items", {}).get("data", [])
-        except (ValueError, AttributeError) as error:
-            self._logger.error(f"Unexpected Cnyes response for {stock_id}: {error}")
-            return []
+        return None
+    except httpx.RequestError as error:
+        logger.warning(f"Cnyes request {url} failed: {error}")
+        return None
 
-        articles: list[Article] = []
-        now = datetime.now(UTC)
 
-        for item in items:
-            raw_content = str(item.get("content", ""))
-            publish_at = item.get("publishAt")
-            text = BeautifulSoup(raw_content, "html.parser").get_text(separator="\n", strip=True) if raw_content else ""
-            articles.append(
-                Article(
-                    id=uuid4(),
-                    stock_id=stock_id,
-                    source=InformationSource.NEWS_MEDIA,
-                    title=str(item.get("title", "")).strip(),
-                    content=text or str(item.get("summary", "")).strip(),
-                    url=f"{self._article_url}{item.get('newsId', '')}",
-                    content_type=ContentType.REPORT,
-                    published_at=datetime.fromtimestamp(publish_at, tz=UTC) if publish_at else now,
-                    fetched_at=now,
-                )
+def parse_listing(stock_id: str, page: str, article_url: str, logger: ILoggingProvider) -> list[Article]:
+    """The articles a listing page or feed names, in its order, with the text the listing itself carries."""
+    try:
+        items = json.loads(page).get("items", {}).get("data", [])
+    except (ValueError, AttributeError) as error:
+        logger.error(f"Unexpected Cnyes response for {stock_id}: {error}")
+        return []
+
+    articles: list[Article] = []
+    now = datetime.now(UTC)
+
+    for item in items:
+        raw_content = str(item.get("content", ""))
+        publish_at = item.get("publishAt")
+        text = BeautifulSoup(raw_content, "html.parser").get_text(separator="\n", strip=True) if raw_content else ""
+        articles.append(
+            Article(
+                id=uuid4(),
+                stock_id=stock_id,
+                source=InformationSource.NEWS_MEDIA,
+                title=str(item.get("title", "")).strip(),
+                content=text or str(item.get("summary", "")).strip(),
+                url=f"{article_url}{item.get('newsId', '')}",
+                content_type=ContentType.REPORT,
+                published_at=datetime.fromtimestamp(publish_at, tz=UTC) if publish_at else now,
+                fetched_at=now,
             )
+        )
 
-        return articles
+    return articles
 
-    @override
-    async def fetch_article_body(self, url: str) -> str:
-        try:
-            response = await self._client.get(url)
-            response.raise_for_status()
-        except httpx.HTTPError as error:
-            self._logger.debug(f"Failed to fetch Cnyes body for {url}: {error!r}")
-            return ""
 
-        body = BeautifulSoup(response.text, "html.parser").select_one("#article-container")
-        return body.get_text(separator="\n", strip=True) if body else ""
+async def fetch_article_body(url: str, client: httpx.AsyncClient, logger: ILoggingProvider) -> str:
+    """The text of an article page, or an empty string when the page cannot be read."""
+    try:
+        response = await client.get(url)
+        response.raise_for_status()
+    except httpx.HTTPError as error:
+        logger.debug(f"Failed to fetch Cnyes body for {url}: {error!r}")
+        return ""
+
+    body = BeautifulSoup(response.text, "html.parser").select_one("#article-container")
+    return body.get_text(separator="\n", strip=True) if body else ""

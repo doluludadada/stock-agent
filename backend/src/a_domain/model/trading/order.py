@@ -10,6 +10,22 @@ from a_domain.types.ids import DecisionId, OrderId, RunId, new_order_id
 from a_domain.types.values import NonEmptyText, PositiveFiniteFloat
 
 
+def check_move(order: Order, status: OrderStatus) -> None:
+    if status not in order.status.next_statuses:
+        raise IllegalOrderTransition(f"Cannot move order from {order.status} to {status}")
+
+
+def move_to(order: Order, status: OrderStatus, now: datetime, reason: str | None = None) -> None:
+    check_move(order, status)
+
+    if status in {OrderStatus.CANCELLED, OrderStatus.REJECTED, OrderStatus.FAILED} and not (reason and reason.strip()):
+        raise ValueError(f"{status.value.capitalize()} order requires a reason")
+
+    order.status = status
+    order.reason = reason
+    order.updated_at = now
+
+
 @dataclass(config=ConfigDict(validate_assignment=True, json_schema_serialization_defaults_required=True), kw_only=True)
 class Order:
     """
@@ -43,7 +59,7 @@ class Order:
     updated_at: datetime
 
     @model_validator(mode="after")
-    def _price_matches_order_type(self) -> Self:
+    def price_matches_order_type(self) -> Self:
         if (self.order_type == OrderType.LIMIT) != (self.limit_price is not None):
             raise ValueError("A LIMIT order needs a limit_price and a MARKET order must not have one")
 
@@ -65,7 +81,7 @@ class Order:
 
     def submit(self, *, now: datetime) -> None:
         """The broker accepted the order."""
-        self._move_to(OrderStatus.SUBMITTED, now)
+        move_to(self, OrderStatus.SUBMITTED, now)
 
     @validate_call
     def fill(
@@ -79,7 +95,7 @@ class Order:
         now: datetime,
     ) -> None:
         """Records one execution and what it cost. The order becomes FILLED when nothing remains, otherwise it keeps working."""
-        self._check_move(OrderStatus.FILLED)
+        check_move(self, OrderStatus.FILLED)
 
         if quantity > self.remaining_quantity:
             raise ValueError(f"Fill quantity {quantity} is more than the remaining {self.remaining_quantity}")
@@ -91,7 +107,7 @@ class Order:
             raise ValueError("SELL fill price cannot be below limit_price")
 
         filled_quantity = self.filled_quantity + quantity
-        self._move_to(OrderStatus.FILLED if filled_quantity == self.quantity else OrderStatus.SUBMITTED, now)
+        move_to(self, OrderStatus.FILLED if filled_quantity == self.quantity else OrderStatus.SUBMITTED, now)
         self.average_filled_price = ((self.average_filled_price or 0) * self.filled_quantity + price * quantity) / filled_quantity
         self.filled_quantity = filled_quantity
         self.fee += fee
@@ -101,32 +117,18 @@ class Order:
             self.realized_pnl = (self.realized_pnl or 0) + realized_pnl
 
     def cancel(self, reason: str, *, now: datetime) -> None:
-        self._move_to(OrderStatus.CANCELLED, now, reason)
+        move_to(self, OrderStatus.CANCELLED, now, reason)
 
     def reject(self, reason: RejectReason, detail: str, *, now: datetime) -> None:
-        self._move_to(OrderStatus.REJECTED, now, f"{reason.name}: {detail}")
+        move_to(self, OrderStatus.REJECTED, now, f"{reason.name}: {detail}")
 
     def fail(self, reason: str, *, now: datetime) -> None:
-        self._move_to(OrderStatus.FAILED, now, reason)
+        move_to(self, OrderStatus.FAILED, now, reason)
 
     def fail_if_open(self, reason: str, *, now: datetime) -> None:
         """FAILS an order that is still open; an order that already ended keeps its status."""
         if self.status.is_open:
             self.fail(reason, now=now)
-
-    def _check_move(self, status: OrderStatus) -> None:
-        if status not in self.status.next_statuses:
-            raise IllegalOrderTransition(f"Cannot move order from {self.status} to {status}")
-
-    def _move_to(self, status: OrderStatus, now: datetime, reason: str | None = None) -> None:
-        self._check_move(status)
-
-        if status in {OrderStatus.CANCELLED, OrderStatus.REJECTED, OrderStatus.FAILED} and not (reason and reason.strip()):
-            raise ValueError(f"{status.value.capitalize()} order requires a reason")
-
-        self.status = status
-        self.reason = reason
-        self.updated_at = now
 
 
 @dataclass(frozen=True, kw_only=True)

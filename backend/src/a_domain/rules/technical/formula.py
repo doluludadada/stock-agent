@@ -79,7 +79,7 @@ class Comparison:
     right: NumericExpression
 
     @model_validator(mode="after")
-    def _reads_data(self) -> Self:
+    def reads_data(self) -> Self:
         if not any(True for _ in references(self)):
             raise ValueError("a comparison needs a side that reads market or indicator data")
 

@@ -28,12 +28,14 @@ from d_presentation.web.backtest_replays import BacktestReplays
 from d_presentation.web.market_valuation_cache import MarketValuationCache
 from d_presentation.web.workflow_runs import WorkflowRuns
 
+API_PATH = "/v1"
+"""Where every route lives, and the only path the browser sends the session cookie to."""
 SESSION_COOKIE = "stock_agent_session"
 APP_REQUEST_HEADER = "X-Requested-With"
 APP_REQUEST_VALUE = "stock-agent"
 
 FLOW_COOKIE = "stock_agent_google_flow"
-FLOW_PATH = "/v1/auth/google"
+FLOW_PATH = f"{API_PATH}/auth/google"
 FLOW_JSON = TypeAdapter(SignInFlow)
 APP_HOME = "/"
 APP_SIGN_IN = "/sign-in"
@@ -334,7 +336,7 @@ def set_session_cookie(request: Request, response: Response, session: UserSessio
         SESSION_COOKIE,
         session.token,
         max_age=int((session.expires_at - session.created_at).total_seconds()),
-        path="/v1",
+        path=API_PATH,
         secure=request.url.scheme == "https",
         httponly=True,
         samesite="strict",
@@ -342,7 +344,7 @@ def set_session_cookie(request: Request, response: Response, session: UserSessio
 
 
 def clear_session_cookie(request: Request, response: Response) -> None:
-    response.delete_cookie(SESSION_COOKIE, path="/v1", secure=request.url.scheme == "https", httponly=True, samesite="strict")
+    response.delete_cookie(SESSION_COOKIE, path=API_PATH, secure=request.url.scheme == "https", httponly=True, samesite="strict")
 
 
 def set_flow_cookie(request: Request, response: Response, flow: SignInFlow) -> None:

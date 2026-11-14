@@ -1,4 +1,3 @@
-from collections.abc import Mapping, Sequence
 from contextlib import AbstractAsyncContextManager
 from pathlib import Path
 from typing import Protocol, Self
@@ -87,18 +86,6 @@ class IDatabaseConnector[Session](Protocol):
         first, None when the database had no table to back up. Refuses a file that is not a backup before changing
         anything.
         """
-        ...
-
-    def outdated_tables(self, live_columns: Mapping[str, frozenset[str]], stamps: Sequence[int]) -> list[str]:
-        """
-        The existing tables startup must refuse, given each live table's columns and the stored schema version stamps:
-        every table when the database is not new and its stamp is not the code's, else each table whose columns differ.
-        A table whose columns differ is described with those columns.
-        """
-        ...
-
-    def outdated_message(self, outdated: list[str], stamps: Sequence[int]) -> str:
-        """What the user reads when startup refuses the database: the outdated tables, the stamp found, and the remedy."""
         ...
 
     def get_session(self) -> AbstractAsyncContextManager[Session]:

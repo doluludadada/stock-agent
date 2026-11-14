@@ -1,7 +1,7 @@
 from datetime import date
-from typing import Annotated, Any
+from typing import Any
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, status
 
 from a_domain.model.trading.account import AccountOpening
 from a_domain.types.enums import ExecutionProvider, Feature
@@ -13,6 +13,8 @@ from d_presentation.web.schemas import (
     BrokerageStatementResponse,
     BrokerResponse,
     ErrorResponse,
+    PageLimit,
+    PageOffset,
     ResetRequest,
     RunReference,
     TradeResponse,
@@ -111,9 +113,7 @@ async def get_account_history(
 
 
 @router.get("/trades", responses=BROKER_READ, dependencies=[AccountShown])
-async def get_trades(
-    pipeline: BrokerPipeline, limit: Annotated[int, Query(ge=1, le=100)] = 20, offset: Annotated[int, Query(ge=0, le=10_000)] = 0
-) -> list[TradeResponse]:
+async def get_trades(pipeline: BrokerPipeline, limit: PageLimit = 20, offset: PageOffset = 0) -> list[TradeResponse]:
     """
     Every order of a run on the `broker` account (the mock account by default) that filled at least one share, since
     the mock account opened or every one at a real broker, newest first, each with the run whose decision it carried

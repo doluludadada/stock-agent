@@ -22,10 +22,12 @@ from trading_stack import SilentLogger
 from a_domain.model.fundamentals.monthly_revenue import MonthlyRevenue
 from a_domain.ports.market.daily_close_archive import OpenDataDownload
 from a_domain.rules.fundamentals.filing import RevenueMonthsRule
+from a_domain.rules.fundamentals.trailing_eps import QuarterEps
 from a_domain.types.enums import MarketType
 from a_domain.types.errors import ArchiveSaveRefused
+from a_domain.types.values import FiscalQuarter
 from b_application.config.market_data_config import MarketDataConfig, MarketHoursConfig
-from b_application.use_cases.collect.revenue_history_backfill import RevenueHistoryBackfill
+from b_application.use_cases.collect.fundamentals_history_backfill import FundamentalsHistoryBackfill
 from c_infrastructure.database.repositories.daily_close_archive import SqlDailyCloseArchive
 from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider
 from c_infrastructure.market.twse_provider import TaiwanStockProvider
@@ -156,9 +158,12 @@ class ServedMonths:
         self.asked.append((market, year, month))
         return self.months.get((market, year, month))
 
+    async def fetch_cumulative_eps(self, quarters: list[FiscalQuarter]) -> dict[FiscalQuarter, QuarterEps | None]:
+        return {}
 
-def backfill(served: ServedMonths | None, archive: FakeDailyCloseArchive, logger: RecordingLogger) -> RevenueHistoryBackfill:
-    return RevenueHistoryBackfill(cast(Any, served), cast(Any, archive), FakeMarketClock(NOW), CONFIG, logger)
+
+def backfill(served: ServedMonths | None, archive: FakeDailyCloseArchive, logger: RecordingLogger) -> FundamentalsHistoryBackfill:
+    return FundamentalsHistoryBackfill(cast(Any, served), cast(Any, archive), FakeMarketClock(NOW), CONFIG, logger)
 
 
 @pytest.mark.asyncio
@@ -171,7 +176,7 @@ async def test_the_backfill_saves_each_month_it_reads_and_a_rerun_reads_only_wha
     }
     served, archive, logger = ServedMonths(months), FakeDailyCloseArchive(), RecordingLogger()
 
-    first = await backfill(served, archive, logger).execute(date(2024, 12, 1))
+    first, _ = await backfill(served, archive, logger).execute(date(2024, 12, 1))
 
     assert first == (2, 4)
     assert served.asked == [(TWSE, 2024, 12), (TPEX, 2024, 12), (TWSE, 2025, 1)]
@@ -181,7 +186,7 @@ async def test_the_backfill_saves_each_month_it_reads_and_a_rerun_reads_only_wha
     months[(TWSE, 2025, 1)] = [revenue("2330", TWSE, 2025, 1, filed)]
     served.asked.clear()
 
-    assert await backfill(served, archive, logger).execute(date(2024, 12, 1)) == (2, 2)
+    assert (await backfill(served, archive, logger).execute(date(2024, 12, 1)))[0] == (2, 2)
     assert served.asked == [(TWSE, 2025, 1), (TPEX, 2025, 1)]
     assert sorted(archive.monthly_revenues) == [("2330", 2024, 12), ("2330", 2025, 1), ("6488", 2024, 12), ("6488", 2025, 1)]
 
@@ -203,7 +208,7 @@ async def test_a_month_the_archive_holds_from_the_openapi_before_its_deadline_is
     )
     served = ServedMonths({(TWSE, 2025, 1): [revenue("2330", TWSE, 2025, 1, date(2025, 2, 12), amount=120.0)]})
 
-    assert await backfill(served, archive, RecordingLogger()).execute(date(2025, 1, 1)) == (1, 1)
+    assert (await backfill(served, archive, RecordingLogger()).execute(date(2025, 1, 1)))[0] == (1, 1)
     assert served.asked == [(TWSE, 2025, 1)]
     assert archive.monthly_revenues[("2330", 2025, 1)].revenue == 120.0
 
@@ -218,7 +223,7 @@ async def test_a_month_the_archive_could_not_save_fails_the_backfill_and_is_read
         (TPEX, 2025, 1): [revenue("6488", TPEX, 2025, 1, date(2025, 2, 12))],
     }
     served = ServedMonths(filed)
-    monthly = RevenueHistoryBackfill(cast(Any, served), archive, FakeMarketClock(NOW), CONFIG, SilentLogger())
+    monthly = FundamentalsHistoryBackfill(cast(Any, served), archive, FakeMarketClock(NOW), CONFIG, SilentLogger())
 
     try:
         async with db.get_session() as session:
@@ -236,7 +241,7 @@ async def test_a_month_the_archive_could_not_save_fails_the_backfill_and_is_read
 
         served.asked.clear()
 
-        assert await monthly.execute(date(2025, 1, 1)) == (2, 2)
+        assert (await monthly.execute(date(2025, 1, 1)))[0] == (2, 2)
         assert served.asked == [(TWSE, 2025, 1), (TPEX, 2025, 1)]
         assert sorted(await archive.revenue_history(date(2025, 1, 1), date(2025, 1, 31))) == [("2330", 2025, 1), ("6488", 2025, 1)]
     finally:
@@ -245,7 +250,7 @@ async def test_a_month_the_archive_could_not_save_fails_the_backfill_and_is_read
 
 @pytest.mark.asyncio
 async def test_a_site_that_reads_no_mops_backfills_nothing() -> None:
-    assert await backfill(None, FakeDailyCloseArchive(), RecordingLogger()).execute(date(2024, 1, 1)) is None
+    assert await backfill(None, FakeDailyCloseArchive(), RecordingLogger()).execute(date(2024, 1, 1)) == (None, None)
 
 
 @pytest.mark.asyncio

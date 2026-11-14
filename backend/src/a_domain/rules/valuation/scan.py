@@ -7,6 +7,22 @@ from a_domain.rules.valuation.valuation import AppraisalRule
 from a_domain.types.enums import EliminationReason, PeNotApplicableReason
 
 
+def scan_elimination(report: ValuationReport, min_undervaluation: float) -> ScanElimination | None:
+    if isinstance(report.fair_value, PeNotApplicableReason):
+        return ScanElimination(report, report.fair_value.elimination_reason, report.fair_value.label)
+
+    if not report.valuation.close_is_fresh:
+        return ScanElimination(report, EliminationReason.PRICE_STALE, report.valuation.price_text)
+
+    undervaluation = report.fair_value.base.undervaluation
+
+    if undervaluation < min_undervaluation:
+        detail = f"undervaluation {undervaluation:.1%} is below {min_undervaluation:.1%}"
+        return ScanElimination(report, EliminationReason.BELOW_MIN_UNDERVALUATION, detail)
+
+    return None
+
+
 @dataclass(frozen=True)
 class ValuationStepRule:
     """
@@ -24,7 +40,7 @@ class ValuationStepRule:
 
         for valuation in market.valuations.values():
             report = self.appraisal_rule.apply(valuation, criteria.target_pe)
-            elimination = self._elimination(report, criteria.min_undervaluation)
+            elimination = scan_elimination(report, criteria.min_undervaluation)
 
             if elimination is None:
                 survivors.append(report)
@@ -37,18 +53,3 @@ class ValuationStepRule:
             eliminations=tuple(eliminations),
             max_explanations=self.max_explanations,
         )
-
-    def _elimination(self, report: ValuationReport, min_undervaluation: float) -> ScanElimination | None:
-        if isinstance(report.fair_value, PeNotApplicableReason):
-            return ScanElimination(report, report.fair_value.elimination_reason, report.fair_value.label)
-
-        if not report.valuation.close_is_fresh:
-            return ScanElimination(report, EliminationReason.PRICE_STALE, report.valuation.price_text)
-
-        undervaluation = report.fair_value.base.undervaluation
-
-        if undervaluation < min_undervaluation:
-            detail = f"undervaluation {undervaluation:.1%} is below {min_undervaluation:.1%}"
-            return ScanElimination(report, EliminationReason.BELOW_MIN_UNDERVALUATION, detail)
-
-        return None

@@ -32,7 +32,9 @@ from a_domain.types.enums import (
     Workflow,
 )
 from b_application.config.app_config import AppConfig
+from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
+from c_infrastructure.trading.mock.mock_execution_provider import save_account
 
 pytestmark = pytest.mark.asyncio
 
@@ -98,7 +100,7 @@ async def holding(stack: TradingStack, *positions: tuple[str, int, float], cash:
         account.buy(stock_id, quantity, price=average_cost, total_cost=quantity * average_cost)
 
     account.cash = account.cash if cash is None else cash
-    await stack.broker.save_account(account, stack.clock.now())
+    await save_account(account, stack.clock.now(), stack.db.for_owner(LEGACY_OWNER_ID))
 
 
 def affordable(budget: float, price: float) -> int:

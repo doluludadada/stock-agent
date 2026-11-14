@@ -122,7 +122,7 @@ class TradingJournal(ITradingJournal):
             statement = select(TradeSignalDTO).where(col(TradeSignalDTO.run_id) == run_id).order_by(col(TradeSignalDTO.generated_at))
             rows = (await session.execute(statement)).scalars().all()
 
-        return [TradeSignal(**row.model_dump(exclude={"run_id"})) for row in rows]
+        return [row.to_domain() for row in rows]
 
     @override
     async def orders_of(self, run_id: RunId) -> list[Order]:
@@ -145,7 +145,7 @@ class TradingJournal(ITradingJournal):
         async with self._db.owner_session() as session:
             rows = (await session.execute(statement)).all()
 
-        return [(TradeSignal(**signal.model_dump(exclude={"run_id"})), Order(**order.model_dump())) for signal, order in rows]
+        return [(signal.to_domain(), Order(**order.model_dump())) for signal, order in rows]
 
     @override
     async def trades(

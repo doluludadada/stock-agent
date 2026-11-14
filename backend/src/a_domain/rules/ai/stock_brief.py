@@ -98,6 +98,112 @@ class BriefSearchRule:
         ]
 
 
+def keyed_facts(found: Sequence[tuple[BriefSourceKind, date, str, str | None, str | None]]) -> list[BriefFact]:
+    return [
+        BriefFact(source=BriefSource(key=f"S{number}", kind=kind, dated=dated_on, title=title, url=url), text=text)
+        for number, (kind, dated_on, text, title, url) in enumerate(found, start=1)
+    ]
+
+
+def company_line(stock: Stock, revenue: RevenueTrend) -> str:
+    year = [month.revenue for month in revenue.months[-12:] if month.revenue is not None]
+    scale = f"revenue of the latest {len(year)} held months {sum(year):,.0f} thousand TWD" if year else "no revenue held"
+    listed = f"{stock.stock_id} {stock.name or 'name not held'}, listed on {stock.market.value}"
+    return f"{listed}, industry in the exchange's listing: {stock.industry or 'not held'}; {scale}"
+
+
+def price_facts(window: Sequence[Ohlcv], largest_moves: PositiveInt) -> list[tuple[BriefSourceKind, date, str, None, None]]:
+    change = close_change(window)
+
+    if change is None:
+        return []
+
+    first, last = window[0], window[-1]
+    moves = [(bar.ts.date(), bar.close / before.close - 1) for before, bar in pairwise(window) if before.close > 0]
+    largest = sorted(moves, key=lambda move: abs(move[1]), reverse=True)[:largest_moves]
+    days = ", ".join(f"{session.isoformat()} {move:+.1%}" for session, move in sorted(largest))
+    text = (
+        f"close {first.close:,.2f} on {first.ts.date().isoformat()} to {last.close:,.2f} on {last.ts.date().isoformat()}: "
+        f"{change:+.1%} over {len(window)} sessions; largest daily moves: {days or 'none'}"
+    )
+    return [(BriefSourceKind.PRICE, last.ts.date(), text, None, None)]
+
+
+def revenue_fact(month: RevenueMonth, trend: RevenueTrend) -> tuple[BriefSourceKind, date, str, None, None]:
+    figures = [
+        None if month.revenue is None else f"{month.revenue:,.0f} thousand TWD",
+        None if month.year_over_year is None else f"{month.year_over_year:+.1%} from a year before",
+        None
+        if month.acceleration is None
+        else f"mean of the latest {trend.short_months} months {month.acceleration:.2f} times that of the {trend.long_months}",
+    ]
+    said = ", ".join(figure for figure in figures if figure is not None) or "no figure served"
+    return (BriefSourceKind.REVENUE, month.served_date, f"revenue of {month.year}-{month.month:02d}: {said}", None, None)
+
+
+def quarters_with_eps(analysis: StockAnalysis, limit: PositiveInt) -> list[QuarterResult]:
+    return [result for result in analysis.earnings.quarters if result.eps_year_to_date is not None][-limit:]
+
+
+def quarter_fact(result: QuarterResult) -> tuple[BriefSourceKind, date, str, None, None]:
+    quarter = result.quarter
+    figures = [
+        f"EPS of the year to its end {result.eps_year_to_date:.2f} TWD",
+        None if result.quarter_eps is None else f"the quarter's own EPS {result.quarter_eps:.2f} TWD",
+        None if result.eps_year_over_year is None else f"year-to-date EPS {result.eps_year_over_year:+.1%} from a year before",
+        None if result.gross_margin is None else f"gross margin {result.gross_margin:.1%}",
+        None if result.net_margin is None else f"net margin {result.net_margin:.1%}",
+    ]
+    ended = date(quarter.year, quarter.quarter * 3, monthrange(quarter.year, quarter.quarter * 3)[1])
+    return (BriefSourceKind.EARNINGS, ended, f"{quarter}: " + ", ".join(figure for figure in figures if figure), None, None)
+
+
+def standing_facts(standing: RankingStanding | None) -> list[tuple[BriefSourceKind, date, str, None, None]]:
+    if standing is None or standing.place is None:
+        return []
+
+    text = (
+        f"place {standing.place} of {standing.scored} stocks scored by revenue acceleration and nearness to the high, "
+        f"{'inside' if standing.in_top else 'outside'} the top {standing.top}"
+    )
+    return [(BriefSourceKind.RANKING, standing.decided_on, text, None, None)]
+
+
+def article_facts(
+    articles: Sequence[Article], retrieved: Sequence[Article], first: date | None, limit: PositiveInt, article_text_length: PositiveInt
+) -> list[tuple[BriefSourceKind, date, str, str, str | None]]:
+    dated = [article for article in retrieved or articles if first is None or article.published_at.date() >= first]
+
+    if not retrieved:
+        return [article_fact(article, article_text_length) for article in dated[:limit]]
+
+    newest_first = sorted(dated, key=lambda article: article.published_at, reverse=True)
+    earlier = [article for article in retrieved if first is not None and article.published_at.date() < first]
+    once: dict[str, tuple[BriefSourceKind, date, str, str, str | None]] = {}
+
+    for article in (*newest_first, *earlier):
+        fact = article_fact(article, article_text_length)
+        once.setdefault(fact[2], fact)
+
+    return list(once.values())
+
+
+def article_fact(article: Article, article_text_length: PositiveInt) -> tuple[BriefSourceKind, date, str, str, str | None]:
+    match article.source:
+        case InformationSource.TWSE_MOPS:
+            kind = BriefSourceKind.ANNOUNCEMENT
+        case InformationSource.TWSE_NEWS:
+            kind = BriefSourceKind.EXCHANGE_NEWS
+        case InformationSource.NEWS_MEDIA:
+            kind = BriefSourceKind.NEWS
+        case InformationSource.PTT_STOCK | InformationSource.PTT_GOSSIPING:
+            kind = BriefSourceKind.POST
+
+    body = " ".join((article.open_text or "").split())[:article_text_length]
+    title = " ".join(article.title.split())
+    return (kind, article.published_at.date(), f"{title} | {body}" if body and body != title else title, title, article.url)
+
+
 @dataclass(frozen=True, kw_only=True)
 class BriefContextRule:
     """
@@ -134,12 +240,12 @@ class BriefContextRule:
         window = list(bars[-self.window_sessions :])
         first = window[0].ts.date() if window else None
         found = [
-            (BriefSourceKind.COMPANY, day, self._company(stock, analysis.revenue), None, None),
-            *self._price(window),
-            *[self._revenue(month, analysis.revenue) for month in analysis.revenue.months[-self.revenue_months :]],
-            *[self._quarter(result) for result in self._quarters(analysis)],
-            *self._standing(standing),
-            *self._articles(articles, retrieved, first),
+            (BriefSourceKind.COMPANY, day, company_line(stock, analysis.revenue), None, None),
+            *price_facts(window, self.largest_moves),
+            *[revenue_fact(month, analysis.revenue) for month in analysis.revenue.months[-self.revenue_months :]],
+            *[quarter_fact(result) for result in quarters_with_eps(analysis, self.quarters)],
+            *standing_facts(standing),
+            *article_facts(articles, retrieved, first, self.articles, self.article_text_length),
         ]
         return BriefContext(
             stock_id=stock.stock_id,
@@ -147,105 +253,8 @@ class BriefContextRule:
             window_first=first,
             window_last=window[-1].ts.date() if window else None,
             price_change=close_change(window),
-            facts=self._keyed(found),
+            facts=keyed_facts(found),
         )
-
-    def _keyed(self, found: Sequence[tuple[BriefSourceKind, date, str, str | None, str | None]]) -> list[BriefFact]:
-        return [
-            BriefFact(source=BriefSource(key=f"S{number}", kind=kind, dated=dated_on, title=title, url=url), text=text)
-            for number, (kind, dated_on, text, title, url) in enumerate(found, start=1)
-        ]
-
-    def _company(self, stock: Stock, revenue: RevenueTrend) -> str:
-        year = [month.revenue for month in revenue.months[-12:] if month.revenue is not None]
-        scale = f"revenue of the latest {len(year)} held months {sum(year):,.0f} thousand TWD" if year else "no revenue held"
-        listed = f"{stock.stock_id} {stock.name or 'name not held'}, listed on {stock.market.value}"
-        return f"{listed}, industry in the exchange's listing: {stock.industry or 'not held'}; {scale}"
-
-    def _price(self, window: Sequence[Ohlcv]) -> list[tuple[BriefSourceKind, date, str, None, None]]:
-        change = close_change(window)
-
-        if change is None:
-            return []
-
-        first, last = window[0], window[-1]
-        moves = [(bar.ts.date(), bar.close / before.close - 1) for before, bar in pairwise(window) if before.close > 0]
-        largest = sorted(moves, key=lambda move: abs(move[1]), reverse=True)[: self.largest_moves]
-        days = ", ".join(f"{session.isoformat()} {move:+.1%}" for session, move in sorted(largest))
-        text = (
-            f"close {first.close:,.2f} on {first.ts.date().isoformat()} to {last.close:,.2f} on {last.ts.date().isoformat()}: "
-            f"{change:+.1%} over {len(window)} sessions; largest daily moves: {days or 'none'}"
-        )
-        return [(BriefSourceKind.PRICE, last.ts.date(), text, None, None)]
-
-    def _revenue(self, month: RevenueMonth, trend: RevenueTrend) -> tuple[BriefSourceKind, date, str, None, None]:
-        figures = [
-            None if month.revenue is None else f"{month.revenue:,.0f} thousand TWD",
-            None if month.year_over_year is None else f"{month.year_over_year:+.1%} from a year before",
-            None
-            if month.acceleration is None
-            else f"mean of the latest {trend.short_months} months {month.acceleration:.2f} times that of the {trend.long_months}",
-        ]
-        said = ", ".join(figure for figure in figures if figure is not None) or "no figure served"
-        return (BriefSourceKind.REVENUE, month.served_date, f"revenue of {month.year}-{month.month:02d}: {said}", None, None)
-
-    def _quarters(self, analysis: StockAnalysis) -> list[QuarterResult]:
-        return [result for result in analysis.earnings.quarters if result.eps_year_to_date is not None][-self.quarters :]
-
-    def _quarter(self, result: QuarterResult) -> tuple[BriefSourceKind, date, str, None, None]:
-        quarter = result.quarter
-        figures = [
-            f"EPS of the year to its end {result.eps_year_to_date:.2f} TWD",
-            None if result.quarter_eps is None else f"the quarter's own EPS {result.quarter_eps:.2f} TWD",
-            None if result.eps_year_over_year is None else f"year-to-date EPS {result.eps_year_over_year:+.1%} from a year before",
-            None if result.gross_margin is None else f"gross margin {result.gross_margin:.1%}",
-            None if result.net_margin is None else f"net margin {result.net_margin:.1%}",
-        ]
-        ended = date(quarter.year, quarter.quarter * 3, monthrange(quarter.year, quarter.quarter * 3)[1])
-        return (BriefSourceKind.EARNINGS, ended, f"{quarter}: " + ", ".join(figure for figure in figures if figure), None, None)
-
-    def _standing(self, standing: RankingStanding | None) -> list[tuple[BriefSourceKind, date, str, None, None]]:
-        if standing is None or standing.place is None:
-            return []
-
-        text = (
-            f"place {standing.place} of {standing.scored} stocks scored by revenue acceleration and nearness to the high, "
-            f"{'inside' if standing.in_top else 'outside'} the top {standing.top}"
-        )
-        return [(BriefSourceKind.RANKING, standing.decided_on, text, None, None)]
-
-    def _articles(
-        self, articles: Sequence[Article], retrieved: Sequence[Article], first: date | None
-    ) -> list[tuple[BriefSourceKind, date, str, str, str | None]]:
-        dated = [article for article in retrieved or articles if first is None or article.published_at.date() >= first]
-
-        if not retrieved:
-            return [self._article(article) for article in dated[: self.articles]]
-
-        newest_first = sorted(dated, key=lambda article: article.published_at, reverse=True)
-        earlier = [article for article in retrieved if first is not None and article.published_at.date() < first]
-        once: dict[str, tuple[BriefSourceKind, date, str, str, str | None]] = {}
-
-        for article in (*newest_first, *earlier):
-            fact = self._article(article)
-            once.setdefault(fact[2], fact)
-
-        return list(once.values())
-
-    def _article(self, article: Article) -> tuple[BriefSourceKind, date, str, str, str | None]:
-        match article.source:
-            case InformationSource.TWSE_MOPS:
-                kind = BriefSourceKind.ANNOUNCEMENT
-            case InformationSource.TWSE_NEWS:
-                kind = BriefSourceKind.EXCHANGE_NEWS
-            case InformationSource.NEWS_MEDIA | InformationSource.REUNION:
-                kind = BriefSourceKind.NEWS
-            case InformationSource.PTT_STOCK | InformationSource.PTT_GOSSIPING:
-                kind = BriefSourceKind.POST
-
-        body = " ".join((article.open_text or "").split())[: self.article_text_length]
-        title = " ".join(article.title.split())
-        return (kind, article.published_at.date(), f"{title} | {body}" if body and body != title else title, title, article.url)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -290,6 +299,27 @@ class BriefReply:
     sources: list[BriefSource]
 
 
+def allowed_sentences(rule: BriefReplyRule, part: object, known: dict[str, BriefSource]) -> list[BriefSentence]:
+    items = [item for item in (part if isinstance(part, list) else []) if isinstance(item, dict)]
+    kept = [
+        sentence for item in items if (sentence := allowed_sentence(rule, item.get("text"), item.get("sources"), known)) is not None
+    ]
+    return kept[: rule.sentences]
+
+
+def allowed_sentence(rule: BriefReplyRule, text: object, cited: object, known: dict[str, BriefSource]) -> BriefSentence | None:
+    keys = [key for key in (cited if isinstance(cited, list) else []) if isinstance(key, str) and key in known]
+    said = " ".join(re.sub(rule.link_pattern, "", text if isinstance(text, str) else "").split())[: rule.sentence_length]
+
+    if not said or not keys:
+        return None
+
+    if any(phrase.casefold() in said.casefold() for phrase in rule.advice_phrases):
+        return None
+
+    return BriefSentence(text=said, sources=list(dict.fromkeys(keys)))
+
+
 @dataclass(frozen=True, kw_only=True)
 class BriefReplyRule:
     """
@@ -315,28 +345,11 @@ class BriefReplyRule:
             return None
 
         known = {fact.source.key: fact.source for fact in context.facts}
-        company = self._sentences(parsed.get("company"), known)
-        movement = self._sentences(parsed.get("movement"), known)
+        company = allowed_sentences(self, parsed.get("company"), known)
+        movement = allowed_sentences(self, parsed.get("movement"), known)
 
         if not company or not movement:
             return None
 
         cited = {key for sentence in (*company, *movement) for key in sentence.sources}
         return BriefReply(company=company, movement=movement, sources=[source for key, source in known.items() if key in cited])
-
-    def _sentences(self, part: object, known: dict[str, BriefSource]) -> list[BriefSentence]:
-        items = [item for item in (part if isinstance(part, list) else []) if isinstance(item, dict)]
-        kept = [sentence for item in items if (sentence := self._sentence(item.get("text"), item.get("sources"), known)) is not None]
-        return kept[: self.sentences]
-
-    def _sentence(self, text: object, cited: object, known: dict[str, BriefSource]) -> BriefSentence | None:
-        keys = [key for key in (cited if isinstance(cited, list) else []) if isinstance(key, str) and key in known]
-        said = " ".join(re.sub(self.link_pattern, "", text if isinstance(text, str) else "").split())[: self.sentence_length]
-
-        if not said or not keys:
-            return None
-
-        if any(phrase.casefold() in said.casefold() for phrase in self.advice_phrases):
-            return None
-
-        return BriefSentence(text=said, sources=list(dict.fromkeys(keys)))

@@ -306,7 +306,7 @@ class ShioajiConfig(BaseSettings):
 
     @field_validator("api_key", "secret_key", "ca_path", "ca_password", "person_id", "api_key_test", "secret_key_test", mode="before")
     @classmethod
-    def _blank_is_missing(cls, value: object) -> object:
+    def blank_is_missing(cls, value: object) -> object:
         return None if isinstance(value, str) and not value.strip() else value
 
     def given(self) -> frozenset[ShioajiCredential]:

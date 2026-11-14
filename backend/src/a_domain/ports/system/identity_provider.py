@@ -27,7 +27,3 @@ class IIdentityProvider(Protocol):
         no token, code or secret.
         """
         ...
-
-    def read_id_token(self, id_token: str) -> IdTokenClaims:
-        """What an ID token says, unchecked. Raises IdentityProviderError for one that cannot be read."""
-        ...

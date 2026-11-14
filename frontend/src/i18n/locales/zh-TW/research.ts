@@ -220,6 +220,7 @@ const research: DictionaryShape<typeof en> = {
   news: {
     title: '新聞與討論',
     failed: '無法載入新聞。',
+    signIn: '登入後查看新聞與討論',
     none: {
       title: '近期沒有這檔股票的消息',
       articles: '沒有找到重大訊息、新聞或討論。',
@@ -231,7 +232,6 @@ const research: DictionaryShape<typeof en> = {
       news_media: '新聞',
       ptt_stock: 'PTT 股板',
       ptt_gossiping: 'PTT 八卦板',
-      reunion: 'Reunion',
     },
     opens: '（在新分頁開啟來源）',
     showAll: '顯示全部 {{count}} 則',

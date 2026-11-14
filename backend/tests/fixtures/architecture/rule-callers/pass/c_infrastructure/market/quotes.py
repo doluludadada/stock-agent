@@ -1,1 +1,1 @@
-from a_domain.rules.trading import tick
+from a_domain.rules.trading.cost import Fee, TradeCost

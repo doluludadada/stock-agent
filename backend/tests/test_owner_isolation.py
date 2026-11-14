@@ -399,15 +399,6 @@ async def save_decision(owners: Owners) -> None:
     assert "Alice's reason" not in await owners.bob.knowledge_repository.find_decision_history("2330")
 
 
-async def describe_decision(owners: Owners) -> None:
-    """It reads nothing stored: both owners describe the same decision alike."""
-    stock, signal = analysed_stock(), decision()
-
-    assert owners.alice.knowledge_repository.describe_decision(stock, signal) == owners.bob.knowledge_repository.describe_decision(
-        stock, signal
-    )
-
-
 # ------------------------------------------------------ the mock book ------------------------------------------------------ #
 
 
@@ -446,14 +437,6 @@ async def place_order(owners: Owners) -> None:
     assert [position.quantity for position in (await owners.alice.mock_broker.get_account()).positions] == [1000]
 
 
-async def refusal_for(owners: Owners) -> None:
-    await alice_buys(owners)
-    sale = replace(order_of(run_stats().run_id, decision()), action=TradeAction.SELL)
-
-    assert owners.bob.mock_broker.refusal_for(sale, await owners.bob.mock_broker.get_account()) is not None
-    assert owners.alice.mock_broker.refusal_for(sale, await owners.alice.mock_broker.get_account()) is None
-
-
 async def fill(owners: Owners) -> None:
     order = order_of(run_stats().run_id, decision())
     order.submit(now=AT)
@@ -473,15 +456,6 @@ async def reset(owners: Owners) -> None:
     assert await owners.bob.mock_broker.get_account() == bobs
     alices = await owners.alice.mock_broker.get_account()
     assert (alices.cash, alices.positions, alices.opening and alices.opening.initial_cash) == (250_000, [], 250_000)
-
-
-async def save_account(owners: Owners) -> None:
-    alices = await owners.alice.mock_broker.get_account()
-    held = replace(alices, cash=10.0, positions=[Position(stock_id="2603", quantity=1000, average_cost=50.0)])
-    await owners.alice.mock_broker.save_account(held, AT)
-
-    assert (await owners.bob.mock_broker.get_account()).positions == []
-    assert (await owners.alice.mock_broker.get_account()).cash == 10.0
 
 
 # ---------------------------------------------------- the counted AI calls ------------------------------------------------- #
@@ -604,19 +578,13 @@ CASES: dict[str, dict[str, Case]] = {
     },
     "watchlist_repository": {"get_active": get_active, "save": save, "remove": remove},
     "technical_settings_repository": {"load": load, "save": save_settings},
-    "knowledge_repository": {
-        "find_decision_history": find_decision_history,
-        "save_decision": save_decision,
-        "describe_decision": describe_decision,
-    },
+    "knowledge_repository": {"find_decision_history": find_decision_history, "save_decision": save_decision},
     "mock_broker": {
         "connect": connect,
         "link": link,
         "get_account": get_account,
         "place_order": place_order,
-        "refusal_for": refusal_for,
         "fill": fill,
-        "save_account": save_account,
         "reset": reset,
     },
     "ai_provider": {"generate_reply": generate_reply, "save_response": save_response},

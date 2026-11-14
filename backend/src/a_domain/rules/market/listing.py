@@ -46,6 +46,61 @@ class MostTradedRule:
         return [stock_id for stock_id, _ in ranked[: self.limit]]
 
 
+def session_runs(index: Sequence[Ohlcv]) -> dict[datetime, tuple[int, int]]:
+    """
+    Each session's run of sessions with none missing between them, numbered from the oldest, and its place among
+    the sessions.
+    """
+    sessions = {bar.ts: (0, 0) for bar in index[:1]}
+
+    for place, (earlier, later) in enumerate(pairwise(index), start=1):
+        reference = reference_price(earlier.close, later, None)
+        follows = reference is not None and isclose(reference, earlier.close)
+        sessions[later.ts] = (sessions[earlier.ts][0] + (0 if follows else 1), place)
+
+    return sessions
+
+
+def comparable(earlier: tuple[int, int] | None, later: tuple[int, int] | None, market: MarketType) -> bool:
+    """Whether the later bar's change can be read against the earlier bar's close."""
+    if earlier is None or later is None or earlier[0] != later[0]:
+        return False
+
+    return later[1] - earlier[1] == 1 or not market.changes_from_a_moved_reference
+
+
+def adjustment_factor(earlier: Ohlcv, later: Ohlcv, listed: float | None) -> float:
+    reference = reference_price(earlier.close, later, listed)
+
+    if reference is None or isclose(reference, earlier.close):
+        return 1.0
+
+    return reference / earlier.close
+
+
+def reference_price(previous_close: float, bar: Ohlcv, listed: float | None) -> float | None:
+    """
+    The price the exchange compared the bar's close to; where its change compares to none, the ex-right reference
+    `listed` of its session, or None.
+    """
+    if bar.change is None or (bar.change == 0 and not isclose(bar.close, previous_close)):
+        return listed
+
+    return bar.close - bar.change
+
+
+def scaled_bar(bar: Ohlcv, factor: float) -> Ohlcv:
+    return replace(
+        bar,
+        open=bar.open * factor,
+        high=bar.high * factor,
+        low=bar.low * factor,
+        close=bar.close * factor,
+        volume=round(bar.volume / factor),
+        change=None if bar.change is None else bar.change * factor,
+    )
+
+
 @dataclass(frozen=True)
 class HistoryAdjustmentRule:
     """
@@ -70,63 +125,13 @@ class HistoryAdjustmentRule:
     def apply(
         self, bars: Sequence[Ohlcv], index: Sequence[Ohlcv], market: MarketType, references: Mapping[datetime, float]
     ) -> list[Ohlcv]:
-        sessions = self._sessions(index)
+        sessions = session_runs(index)
         adjusted, factor = list(bars[-1:]), 1.0
 
         for earlier, later in reversed(list(pairwise(bars))):
-            if self._comparable(sessions.get(earlier.ts), sessions.get(later.ts), market):
-                factor *= self._factor(earlier, later, references.get(later.ts))
+            if comparable(sessions.get(earlier.ts), sessions.get(later.ts), market):
+                factor *= adjustment_factor(earlier, later, references.get(later.ts))
 
-            adjusted.append(earlier if factor == 1 else self._scaled(earlier, factor))
+            adjusted.append(earlier if factor == 1 else scaled_bar(earlier, factor))
 
         return adjusted[::-1]
-
-    def _sessions(self, index: Sequence[Ohlcv]) -> dict[datetime, tuple[int, int]]:
-        """
-        Each session's run of sessions with none missing between them, numbered from the oldest, and its place among
-        the sessions.
-        """
-        sessions = {bar.ts: (0, 0) for bar in index[:1]}
-
-        for place, (earlier, later) in enumerate(pairwise(index), start=1):
-            reference = self._reference(earlier.close, later, None)
-            follows = reference is not None and isclose(reference, earlier.close)
-            sessions[later.ts] = (sessions[earlier.ts][0] + (0 if follows else 1), place)
-
-        return sessions
-
-    def _comparable(self, earlier: tuple[int, int] | None, later: tuple[int, int] | None, market: MarketType) -> bool:
-        """Whether the later bar's change can be read against the earlier bar's close."""
-        if earlier is None or later is None or earlier[0] != later[0]:
-            return False
-
-        return later[1] - earlier[1] == 1 or not market.changes_from_a_moved_reference
-
-    def _factor(self, earlier: Ohlcv, later: Ohlcv, listed: float | None) -> float:
-        reference = self._reference(earlier.close, later, listed)
-
-        if reference is None or isclose(reference, earlier.close):
-            return 1.0
-
-        return reference / earlier.close
-
-    def _reference(self, previous_close: float, bar: Ohlcv, listed: float | None) -> float | None:
-        """
-        The price the exchange compared the bar's close to; where its change compares to none, the ex-right reference
-        `listed` of its session, or None.
-        """
-        if bar.change is None or (bar.change == 0 and not isclose(bar.close, previous_close)):
-            return listed
-
-        return bar.close - bar.change
-
-    def _scaled(self, bar: Ohlcv, factor: float) -> Ohlcv:
-        return replace(
-            bar,
-            open=bar.open * factor,
-            high=bar.high * factor,
-            low=bar.low * factor,
-            close=bar.close * factor,
-            volume=round(bar.volume / factor),
-            change=None if bar.change is None else bar.change * factor,
-        )

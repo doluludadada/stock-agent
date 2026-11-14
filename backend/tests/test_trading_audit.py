@@ -19,6 +19,7 @@ from b_application.use_cases.trade.order_execution import OrderExecution
 from c_infrastructure.database.models.trading_journal_dto import AccountSnapshotDTO, OrderDTO, TradeSignalDTO, WorkflowRunDTO
 from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
 from c_infrastructure.database.repositories.trading_journal import TradingJournal
+from c_infrastructure.trading.mock.mock_execution_provider import save_account
 
 pytestmark = pytest.mark.asyncio
 
@@ -145,7 +146,7 @@ async def test_a_manual_buy_that_cannot_become_an_order_says_why(
 
 async def hold(stack: TradingStack, cash: float, *positions: Position) -> None:
     await stack.broker.connect()
-    await stack.broker.save_account(Account(cash=cash, positions=list(positions)), MONDAY_10_00)
+    await save_account(Account(cash=cash, positions=list(positions)), MONDAY_10_00, stack.db.for_owner(LEGACY_OWNER_ID))
 
 
 async def test_a_manual_buy_risks_a_share_of_the_equity_with_an_unpriced_position_at_its_average_cost(tmp_path) -> None:

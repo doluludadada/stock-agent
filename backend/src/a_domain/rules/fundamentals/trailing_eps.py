@@ -43,6 +43,33 @@ def ttm_inputs(quarter: FiscalQuarter) -> tuple[FiscalQuarter, ...]:
     return (quarter, FiscalQuarter(quarter.year - 1, 4), FiscalQuarter(quarter.year - 1, quarter.quarter))
 
 
+def trailing_eps(stock_id: str, filing: QuarterEps, filings: EpsFilings, newer: tuple[FiscalQuarter, ...]) -> Eps | EpsUnavailable:
+    value = filing.cumulative_eps[stock_id]
+    prior_year = ttm_inputs(filing.quarter)[1:]
+
+    for needed, sign in zip(prior_year, (1, -1), strict=False):
+        prior = filings.get(needed)
+
+        if prior is None:
+            return EpsUnavailable(reason=EpsUnavailableReason.SOURCE_FAILED, quarter=needed)
+
+        if stock_id not in prior.cumulative_eps:
+            return EpsUnavailable(reason=EpsUnavailableReason.INCOMPLETE_HISTORY, quarter=needed)
+
+        value += sign * prior.cumulative_eps[stock_id]
+
+    # MOPS reports two decimals; rounding keeps a TTM that nets to zero at exactly 0.
+    return Eps(
+        value=round(value, 2),
+        kind=EpsKind.TRAILING_TWELVE_MONTHS,
+        period_end=filing.quarter,
+        basis=EpsBasis.ACTUAL,
+        source=InformationSource.TWSE_MOPS,
+        fetched_at=filing.fetched_at,
+        newer_quarters=newer,
+    )
+
+
 @dataclass(frozen=True)
 class TrailingEpsRule:
     """
@@ -60,7 +87,7 @@ class TrailingEpsRule:
             filing = filings.get(candidate)
 
             if filing is not None and stock_id in filing.cumulative_eps:
-                return self._trailing(stock_id, filing, filings, tuple(newer))
+                return trailing_eps(stock_id, filing, filings, tuple(newer))
 
             newer.append(candidate)
 
@@ -68,34 +95,6 @@ class TrailingEpsRule:
         reason = EpsUnavailableReason.SOURCE_FAILED if filings.get(oldest) is None else EpsUnavailableReason.NOT_REPORTED
 
         return EpsUnavailable(reason=reason, quarter=oldest)
-
-    def _trailing(
-        self, stock_id: str, filing: QuarterEps, filings: EpsFilings, newer: tuple[FiscalQuarter, ...]
-    ) -> Eps | EpsUnavailable:
-        value = filing.cumulative_eps[stock_id]
-        prior_year = ttm_inputs(filing.quarter)[1:]
-
-        for needed, sign in zip(prior_year, (1, -1), strict=False):
-            prior = filings.get(needed)
-
-            if prior is None:
-                return EpsUnavailable(reason=EpsUnavailableReason.SOURCE_FAILED, quarter=needed)
-
-            if stock_id not in prior.cumulative_eps:
-                return EpsUnavailable(reason=EpsUnavailableReason.INCOMPLETE_HISTORY, quarter=needed)
-
-            value += sign * prior.cumulative_eps[stock_id]
-
-        # MOPS reports two decimals; rounding keeps a TTM that nets to zero at exactly 0.
-        return Eps(
-            value=round(value, 2),
-            kind=EpsKind.TRAILING_TWELVE_MONTHS,
-            period_end=filing.quarter,
-            basis=EpsBasis.ACTUAL,
-            source=InformationSource.TWSE_MOPS,
-            fetched_at=filing.fetched_at,
-            newer_quarters=newer,
-        )
 
 
 @dataclass(frozen=True)

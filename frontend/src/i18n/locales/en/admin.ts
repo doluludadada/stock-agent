@@ -72,7 +72,6 @@ const admin = {
       hours: '{{value}} h',
       days: '{{value}} d',
       twd: 'NT${{value}}',
-      bytes: '{{value}} bytes',
     },
     field: {
       environment: 'Environment',

@@ -48,11 +48,16 @@ export function useStockAnalysis(stockId: string) {
 /** The server holds a stock's fetched news for its own freshness window; five minutes keeps a revisit from asking it again. */
 const NEWS_STALE_MS = 5 * 60_000
 
-/** What is said about the stock: announcements, exchange news and, where the site may read them, articles and posts. Public. */
+/**
+ * What is said about the stock: announcements, exchange news and, where the site may read them, articles and posts.
+ * Private: the server asks a news site or the board only for a signed-in viewer.
+ */
 export function useStockNews(stockId: string) {
+  const signedIn = useIsSignedIn()
   return useQuery({
-    queryKey: ['public', 'market', 'news', stockId] as const,
+    queryKey: ['owner', 'market', 'news', stockId] as const,
     queryFn: ({ signal }) => apiRequest('get', '/v1/market/stocks/{stock_id}/news', { params: { stock_id: stockId }, signal }),
+    enabled: signedIn,
     staleTime: NEWS_STALE_MS,
   })
 }

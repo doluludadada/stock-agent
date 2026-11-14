@@ -6,7 +6,7 @@ from pydantic.dataclasses import dataclass
 
 from a_domain.types.enums import TradeAction
 from a_domain.types.ids import OrderId, RunId
-from a_domain.types.values import NonEmptyText, NonNegativeFiniteFloat, PositiveFiniteFloat
+from a_domain.types.values import Fraction, NonEmptyText, NonNegativeFiniteFloat, PositiveFiniteFloat
 
 
 @dataclass(frozen=True)
@@ -40,6 +40,9 @@ class Position:
 
     mark: Mark | None = None
     """None: no price is known, so the position counts at its average cost with no unrealized PnL."""
+
+    weight: Fraction | None = None
+    """Its market value over the equity of the account AccountValueRule valued it in. None anywhere else."""
 
     @property
     def cost_basis(self) -> float:
@@ -80,11 +83,12 @@ class Position:
 
     @validate_call
     def add(self, quantity: PositiveInt, price: PositiveFiniteFloat) -> None:
-        """Buys more at `price`. The mark valued the old quantity, so it goes."""
+        """Buys more at `price`. The mark and the weight valued the old quantity, so they go."""
         total_quantity = self.quantity + quantity
         self.average_cost = (self.cost_basis + quantity * price) / total_quantity
         self.quantity = total_quantity
         self.mark = None
+        self.weight = None
 
     @validate_call
     def remaining_after_sell(self, quantity: PositiveInt) -> int:
@@ -95,9 +99,10 @@ class Position:
 
     @validate_call
     def reduce(self, quantity: PositiveInt) -> None:
-        """Sells `quantity` shares. The mark valued the old quantity, so it goes."""
+        """Sells `quantity` shares. The mark and the weight valued the old quantity, so they go."""
         self.quantity = self.remaining_after_sell(quantity)
         self.mark = None
+        self.weight = None
 
 
 @dataclass(frozen=True)

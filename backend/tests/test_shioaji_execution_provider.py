@@ -36,9 +36,7 @@ def provider(client: FakeShioaji) -> ShioajiExecutionProvider:
         client.stock_account = client.account_at_login
 
     login, connection = login_of(simulation=True), ShioajiConnection(client=client, up=True)
-    return ShioajiExecutionProvider(
-        connection=connection, quotes=quotes_of(connection, login), login=login, config=CONFIG, logger=SilentLogger()
-    )
+    return ShioajiExecutionProvider(connection=connection, login=login, config=CONFIG, logger=SilentLogger())
 
 
 def login_of(simulation: bool) -> ShioajiLogin:
@@ -54,7 +52,7 @@ async def connected(client: FakeShioaji, simulation: bool) -> ShioajiExecutionPr
     """
     login, connection = login_of(simulation), ShioajiConnection(client=client)
     quotes = quotes_of(connection, login)
-    broker = ShioajiExecutionProvider(connection=connection, quotes=quotes, login=login, config=CONFIG, logger=SilentLogger())
+    broker = ShioajiExecutionProvider(connection=connection, login=login, config=CONFIG, logger=SilentLogger())
     await quotes.connect()
     await broker.connect()
     return broker
@@ -459,7 +457,7 @@ async def test_the_days_fills_count_shares_for_every_lot_the_holder_traded_elsew
             ),
         )
 
-    fills = await broker.fills(date(2026, 10, 19))
+    fills = (await broker.statement(date(2026, 10, 19), date(2026, 10, 19))).fills
 
     assert [fill.quantity for fill in fills] == [2000, 1000, 30, 7]
 

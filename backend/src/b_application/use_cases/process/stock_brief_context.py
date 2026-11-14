@@ -57,7 +57,7 @@ class StockBriefContext:
         window = self._market_clock.history_window(self._history_days)
         bars = (await self._ohlcv_provider.fetch_history([stock], *window)).get(stock.stock_id, [])
         decisions = self._decision_rule.apply(history.bars.sessions) if self._ranking_shown else []
-        standing = self._standing_rule.apply(history, *decisions[-1], stock.stock_id) if decisions else None
+        standing = self._standing_rule.apply(history, *decisions[-1], [stock.stock_id])[stock.stock_id] if decisions else None
         today = self._market_clock.today()
         retrieved: list[Article] = []
 

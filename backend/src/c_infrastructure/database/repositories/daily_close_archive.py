@@ -340,11 +340,6 @@ class SqlDailyCloseArchive(IDailyCloseArchive):
             return tuple((await session.execute(select(func.count(), func.count(col(DailyCloseDTO.change)), *sums))).one())
 
     @override
-    async def ex_right_references(self, first: date, last: date) -> dict[str, dict[datetime, float]]:
-        """None: the exchanges serve a range of them on their sites alone, which a public site may not download."""
-        return {}
-
-    @override
     async def held_span(self) -> tuple[date, date] | None:
         span = select(func.min(col(DailyCloseDTO.session_date)), func.max(col(DailyCloseDTO.session_date)))
 

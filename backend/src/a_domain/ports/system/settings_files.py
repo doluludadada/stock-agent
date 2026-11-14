@@ -179,18 +179,6 @@ class ISettingsFiles(Protocol):
         """
         ...
 
-    async def keep_backup(self, document: SettingsDocument) -> SettingsBackup:
-        """Copies the text a save is about to replace, owner-only, and drops the backups beyond the kept count."""
-        ...
-
-    async def write(self, file: SettingsFile, text: str) -> SettingsDocument:
-        """Replaces the file atomically: a temporary file in the same folder, flushed to disk, renamed over it."""
-        ...
-
-    async def record(self, entry: SettingsAuditEntry) -> None:
-        """Appends the audit entry, owner-only. It holds setting paths and revisions, never a value."""
-        ...
-
     def built_in_strategy_ids(self) -> list[str]:
         """The ids of the built-in strategies config/strategies/ holds, sorted: one <id>.json each."""
         ...

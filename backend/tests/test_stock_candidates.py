@@ -7,6 +7,7 @@ from trading_stack import SilentLogger, run_stats
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.watchlist import WatchlistEntry
 from a_domain.types.enums import MarketType, WatchlistType
+from a_domain.types.errors import ListingUnavailableError
 from b_application.use_cases.collect.intraday_candidates import IntradayCandidates
 from b_application.use_cases.collect.stock_lookup import StockLookup
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
@@ -30,6 +31,17 @@ async def test_lookup_loads_each_requested_stock_once_and_reports_unknown_ids() 
     assert [stock.stock_id for stock in stocks] == ["2330", "2603"]
     assert stocks[0].market == MarketType.TPEX
     assert stats.errors == ["Stock not found: 9999"]
+
+
+async def test_lookup_of_no_ids_is_the_whole_listing_counted_as_scanned_and_empty_during_an_outage() -> None:
+    stats, outage = run_stats(), run_stats()
+
+    universe = await StockLookup(listed("2330", "2603"), SilentLogger()).execute(None, stats)
+
+    assert ([stock.stock_id for stock in universe], stats.total_scanned, stats.errors) == (["2330", "2603"], 2, [])
+    assert await StockLookup(listed(), SilentLogger()).execute(None, outage) == []
+    with pytest.raises(ListingUnavailableError):
+        await StockLookup(listed(), SilentLogger()).execute(["2330"], outage)
 
 
 async def test_intraday_candidates_are_held_stocks_plus_the_active_watchlist() -> None:

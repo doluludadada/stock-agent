@@ -1,5 +1,5 @@
 from bisect import bisect_left, bisect_right
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import date, datetime, timedelta
 
@@ -13,7 +13,7 @@ from a_domain.model.market.stock import Stock
 from a_domain.model.trading.account import Account, Position
 from a_domain.model.trading.backtest import BacktestTrade
 from a_domain.model.trading.signal import TradeSignal
-from a_domain.rules.technical.matrix import DailyBarMatrix, StrategyScores
+from a_domain.rules.technical.matrix import DailyBarMatrix, StrategyScores, last_closes
 from a_domain.rules.trading.account_value import PositionValueRule
 from a_domain.rules.trading.cost import AffordableQuantityRule, TradingCostRule
 from a_domain.rules.trading.decision import RunDecisionsRule
@@ -21,26 +21,6 @@ from a_domain.rules.trading.exit import StopLossRule
 from a_domain.types.enums import SignalSource, TradeAction
 from a_domain.types.errors import BacktestPeriodUnavailable
 from a_domain.types.values import Score
-
-
-@dataclass(frozen=True)
-class DailyBarMatrixRule:
-    """Every stock's daily bars as one matrix: the stocks in id order, and one column per session any of them traded."""
-
-    def apply(self, history: Mapping[str, Sequence[Ohlcv]], trading_date: Callable[[datetime], date]) -> DailyBarMatrix:
-        days = {stamp: trading_date(stamp) for stamp in {bar.ts for bars in history.values() for bar in bars}}
-        sessions = tuple(sorted(set(days.values())))
-        columns = {session: column for column, session in enumerate(sessions)}
-        stock_ids = tuple(sorted(history))
-        cells = {name: np.full((len(stock_ids), len(sessions)), np.nan) for name in ("open", "high", "low", "close", "volume")}
-
-        for row, stock_id in enumerate(stock_ids):
-            held = [columns[days[bar.ts]] for bar in history[stock_id]]
-
-            for name, values in cells.items():
-                values[row, held] = [getattr(bar, name) for bar in history[stock_id]]
-
-        return DailyBarMatrix(stock_ids=stock_ids, sessions=sessions, **cells)
 
 
 @dataclass(frozen=True)
@@ -176,6 +156,124 @@ class BacktestBook:
     trades: list[BacktestTrade] = Field(default_factory=list)
 
 
+def fill_at_the_open(book: BacktestBook, column: int, now: datetime, open_fill_rule: OpenFillRule, cost_rule: TradingCostRule) -> None:
+    waiting: list[TradeSignal] = []
+
+    for signal in sorted(book.pending, key=lambda signal: signal.action != TradeAction.SELL):
+        row, held = book.rows[signal.stock_id], book.account.position_for(signal.stock_id)
+        bar, previous_close = session_bar(book.bars, row, column, now), book.last_close[row, column - 1]
+        fill = open_fill_rule.apply(signal, bar, previous_close, book.account.cash, now=now)
+
+        if fill is not None and signal.action == TradeAction.BUY:
+            fill_buy(book, signal.stock_id, *fill, column, now, cost_rule)
+        elif held is not None and (fill is None or not fill_sell(book, held, fill[1], signal.source, column, now, cost_rule)):
+            waiting.append(signal)
+
+    book.pending = waiting
+
+
+def check_stop_losses(
+    book: BacktestBook, column: int, now: datetime, session_stop_loss_rule: SessionStopLossRule, cost_rule: TradingCostRule
+) -> None:
+    waiting = {signal.stock_id for signal in book.pending}
+
+    for position in list(book.account.positions):
+        row = book.rows[position.stock_id]
+        bar = session_bar(book.bars, row, column, now)
+
+        if bar is None or position.stock_id in waiting:
+            continue
+
+        price = session_stop_loss_rule.apply(position, bar, book.last_close[row, column - 1], now=now)
+
+        if price is not None:
+            fill_sell(book, position, price, SignalSource.STOP_LOSS, column, now, cost_rule)
+
+
+def fill_buy(
+    book: BacktestBook, stock_id: str, quantity: int, price: float, column: int, now: datetime, cost_rule: TradingCostRule
+) -> None:
+    cost = cost_rule.apply(TradeAction.BUY, stock_id, price, quantity, now=now)
+    book.account.buy(stock_id, quantity, price, -cost.net)
+    book.opened.setdefault(stock_id, column)
+    book.fees[stock_id] = book.fees.get(stock_id, 0) + cost.fee
+
+
+def fill_sell(
+    book: BacktestBook, position: Position, price: float, source: SignalSource, column: int, now: datetime, cost_rule: TradingCostRule
+) -> bool:
+    """Whether the position was sold. The fee can exceed what a few shares bring: a sale the cash cannot pay for does not fill."""
+    cost = cost_rule.apply(TradeAction.SELL, position.stock_id, price, position.quantity, now=now)
+
+    if book.account.cash + cost.net < 0:
+        return False
+
+    pnl = position.profit_on_sale(position.quantity, cost.net)
+    book.fees[position.stock_id] += cost.fee
+    trade = open_trade(book, position, column, pnl)
+    book.trades.append(replace(trade, sold_on=book.bars.sessions[column], sold_at=price, exit_source=source, tax=cost.tax))
+    book.account.sell(position.stock_id, position.quantity, cost.net)
+    del book.opened[position.stock_id], book.fees[position.stock_id]
+
+    return True
+
+
+def open_trade(book: BacktestBook, position: Position, column: int, pnl: float) -> BacktestTrade:
+    """The position's trade as it stands at `column`, still open: its PnL is `pnl`, and its fees those paid so far."""
+    opened = book.opened[position.stock_id]
+
+    return BacktestTrade(
+        stock_id=position.stock_id,
+        stock_name=book.names.get(position.stock_id),
+        quantity=position.quantity,
+        bought_on=book.bars.sessions[opened],
+        average_cost=position.average_cost,
+        pnl=pnl,
+        fee=book.fees[position.stock_id],
+        tax=0,
+        held_sessions=column - opened,
+    )
+
+
+def marked_account(book: BacktestBook, column: int, now: datetime, position_value_rule: PositionValueRule) -> Account:
+    positions = [
+        position_value_rule.apply(position, book.last_close[book.rows[position.stock_id], column], now)
+        for position in book.account.positions
+    ]
+
+    return replace(book.account, positions=positions)
+
+
+def close_decisions(
+    book: BacktestBook,
+    scores: StrategyScores,
+    column: int,
+    equity: float,
+    now: datetime,
+    buy_score: Score[int],
+    run_decisions_rule: RunDecisionsRule,
+) -> list[TradeSignal]:
+    buyable = np.flatnonzero(scores.passed[:, column] & (scores.score[:, column] >= buy_score))
+    held = {book.rows[stock_id] for stock_id in book.account.stock_ids}
+    waiting = {book.rows[signal.stock_id] for signal in book.pending}
+    stocks = [
+        Stock(
+            stock_id=book.bars.stock_ids[row],
+            name=book.names.get(book.bars.stock_ids[row]),
+            ohlcv=[bar],
+            technical_report=TechnicalReport(
+                score=int(scores.score[row, column]), hard_failures=[] if scores.passed[row, column] else ["Failed the strategy"]
+            ),
+            composite_score=int(scores.score[row, column]),
+        )
+        for row in sorted({*buyable.tolist(), *held} - waiting)
+        if (bar := session_bar(book.bars, row, column, now)) is not None
+    ]
+    signals = run_decisions_rule.apply(stocks, book.account, equity, now=now)
+
+    return [signal for signal in signals if signal.action != TradeAction.HOLD]
+
+
 @dataclass(frozen=True)
 class BacktestRule:
     """
@@ -221,122 +319,17 @@ class BacktestRule:
 
         for column in range(bisect_left(bars.sessions, first), last + 1):
             now = session_close(bars.sessions[column])
-            self._fill_at_the_open(book, column, now)
-            self._check_stop_losses(book, column, now)
-            curve[bars.sessions[column]] = marked = self._marked(book, column, now)
+            fill_at_the_open(book, column, now, self.open_fill_rule, self.cost_rule)
+            check_stop_losses(book, column, now, self.session_stop_loss_rule, self.cost_rule)
+            curve[bars.sessions[column]] = marked = marked_account(book, column, now, self.position_value_rule)
 
             if column < last:
-                book.pending += self._decide(book, scores, column, marked.equity, now)
+                book.pending += close_decisions(book, scores, column, marked.equity, now, self.buy_score, self.run_decisions_rule)
 
         closing = curve[bars.sessions[last]]
-        still_open = [self._trade(book, position, last, position.unrealized_pnl) for position in closing.positions]
+        still_open = [open_trade(book, position, last, position.unrealized_pnl) for position in closing.positions]
 
         return curve, book.trades + still_open
-
-    def _fill_at_the_open(self, book: BacktestBook, column: int, now: datetime) -> None:
-        waiting: list[TradeSignal] = []
-
-        for signal in sorted(book.pending, key=lambda signal: signal.action != TradeAction.SELL):
-            row, held = book.rows[signal.stock_id], book.account.position_for(signal.stock_id)
-            bar, previous_close = session_bar(book.bars, row, column, now), book.last_close[row, column - 1]
-            fill = self.open_fill_rule.apply(signal, bar, previous_close, book.account.cash, now=now)
-
-            if fill is not None and signal.action == TradeAction.BUY:
-                self._buy(book, signal.stock_id, *fill, column, now)
-            elif held is not None and (fill is None or not self._sell(book, held, fill[1], signal.source, column, now)):
-                waiting.append(signal)
-
-        book.pending = waiting
-
-    def _check_stop_losses(self, book: BacktestBook, column: int, now: datetime) -> None:
-        waiting = {signal.stock_id for signal in book.pending}
-
-        for position in list(book.account.positions):
-            row = book.rows[position.stock_id]
-            bar = session_bar(book.bars, row, column, now)
-
-            if bar is None or position.stock_id in waiting:
-                continue
-
-            price = self.session_stop_loss_rule.apply(position, bar, book.last_close[row, column - 1], now=now)
-
-            if price is not None:
-                self._sell(book, position, price, SignalSource.STOP_LOSS, column, now)
-
-    def _buy(self, book: BacktestBook, stock_id: str, quantity: int, price: float, column: int, now: datetime) -> None:
-        cost = self.cost_rule.apply(TradeAction.BUY, stock_id, price, quantity, now=now)
-        book.account.buy(stock_id, quantity, price, -cost.net)
-        book.opened.setdefault(stock_id, column)
-        book.fees[stock_id] = book.fees.get(stock_id, 0) + cost.fee
-
-    def _sell(self, book: BacktestBook, position: Position, price: float, source: SignalSource, column: int, now: datetime) -> bool:
-        """Whether the position was sold. The fee can exceed what a few shares bring: a sale the cash cannot pay for does not fill."""
-        cost = self.cost_rule.apply(TradeAction.SELL, position.stock_id, price, position.quantity, now=now)
-
-        if book.account.cash + cost.net < 0:
-            return False
-
-        pnl = position.profit_on_sale(position.quantity, cost.net)
-        book.fees[position.stock_id] += cost.fee
-        trade = self._trade(book, position, column, pnl)
-        book.trades.append(replace(trade, sold_on=book.bars.sessions[column], sold_at=price, exit_source=source, tax=cost.tax))
-        book.account.sell(position.stock_id, position.quantity, cost.net)
-        del book.opened[position.stock_id], book.fees[position.stock_id]
-
-        return True
-
-    def _trade(self, book: BacktestBook, position: Position, column: int, pnl: float) -> BacktestTrade:
-        """The position's trade as it stands at `column`, still open: its PnL is `pnl`, and its fees those paid so far."""
-        opened = book.opened[position.stock_id]
-
-        return BacktestTrade(
-            stock_id=position.stock_id,
-            stock_name=book.names.get(position.stock_id),
-            quantity=position.quantity,
-            bought_on=book.bars.sessions[opened],
-            average_cost=position.average_cost,
-            pnl=pnl,
-            fee=book.fees[position.stock_id],
-            tax=0,
-            held_sessions=column - opened,
-        )
-
-    def _marked(self, book: BacktestBook, column: int, now: datetime) -> Account:
-        positions = [
-            self.position_value_rule.apply(position, book.last_close[book.rows[position.stock_id], column], now)
-            for position in book.account.positions
-        ]
-
-        return replace(book.account, positions=positions)
-
-    def _decide(self, book: BacktestBook, scores: StrategyScores, column: int, equity: float, now: datetime) -> list[TradeSignal]:
-        buyable = np.flatnonzero(scores.passed[:, column] & (scores.score[:, column] >= self.buy_score))
-        held = {book.rows[stock_id] for stock_id in book.account.stock_ids}
-        waiting = {book.rows[signal.stock_id] for signal in book.pending}
-        stocks = [
-            Stock(
-                stock_id=book.bars.stock_ids[row],
-                name=book.names.get(book.bars.stock_ids[row]),
-                ohlcv=[bar],
-                technical_report=TechnicalReport(
-                    score=int(scores.score[row, column]), hard_failures=[] if scores.passed[row, column] else ["Failed the strategy"]
-                ),
-                composite_score=int(scores.score[row, column]),
-            )
-            for row in sorted({*buyable.tolist(), *held} - waiting)
-            if (bar := session_bar(book.bars, row, column, now)) is not None
-        ]
-        signals = self.run_decisions_rule.apply(stocks, book.account, equity, now=now)
-
-        return [signal for signal in signals if signal.action != TradeAction.HOLD]
-
-
-def last_closes(close: np.ndarray) -> np.ndarray:
-    """Each row's latest value at or before each column: NaN only before the row's first value."""
-    columns = np.where(np.isnan(close), 0, np.arange(close.shape[1]))
-    np.maximum.accumulate(columns, axis=1, out=columns)
-
-    return np.take_along_axis(close, columns, axis=1)
 
 
 def session_bar(bars: DailyBarMatrix, row: int, column: int, at: datetime) -> Ohlcv | None:

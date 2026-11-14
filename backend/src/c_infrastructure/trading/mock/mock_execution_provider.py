@@ -12,7 +12,7 @@ from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.execution_provider import ISimulatedExecutionProvider, SendRefusal
 from a_domain.rules.trading.execution import FillRule, OrderAcceptanceRule
 from a_domain.rules.trading.order_rule import BrokerLink
-from a_domain.types.enums import ExecutionProvider, RejectReason, TimeInForce, TradeAction
+from a_domain.types.enums import ExecutionProvider, TimeInForce, TradeAction
 from b_application.config.app_config import AppConfig
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.mock_trading_dto import MockCash, MockPosition
@@ -95,7 +95,7 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
 
         try:
             account = await self.get_account()
-            refusal = self.refusal_for(order, account) or await refusal_now()
+            refusal = self._acceptance_rule.apply(order, account) or await refusal_now()
 
             if refusal is not None:
                 order.reject(*refusal, now=now)
@@ -136,10 +136,6 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
         return Account(account_id=cash.owner_id, cash=cash.current_cash, positions=positions, opening=opening)
 
     @override
-    def refusal_for(self, order: Order, account: Account) -> tuple[RejectReason, str] | None:
-        return self._acceptance_rule.apply(order, account)
-
-    @override
     async def fill(self, order: Order, account: Account, now: datetime) -> None:
         available = order.quantity if self._max_fill_quantity is None else min(order.quantity, self._max_fill_quantity)
         quantity = 0 if order.time_in_force == TimeInForce.FOK and available < order.quantity else available
@@ -155,45 +151,12 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
         else:
             account.sell(order.stock_id, quantity, cash_delta=cost.net)
 
-        await self.save_account(account, now)
+        await save_account(account, now, self._db)
         order.fill(quantity, price, cost.fee, cost.tax, realized_pnl, now=now)
         self._logger.success(
             f"Mock order filled. {order.action} {order.stock_id} x {quantity} @ {price} "
             f"(fee {cost.fee}, tax {cost.tax}, cash {cost.net:+,.0f})"
         )
-
-    @override
-    async def save_account(self, account: Account, now: datetime) -> None:
-        """Deletes the rows of positions no longer held, adds the new ones, and updates the ones whose shares or cost changed."""
-        held = {position.stock_id: position for position in account.positions}
-
-        async with self._db.owner_session() as session:
-            cash = await session.get_one(MockCash, self._db.owner_id)
-            result = await session.execute(select(MockPosition))
-            rows = {row.stock_id: row for row in result.scalars().all()}
-
-            for stock_id in rows.keys() - held.keys():
-                await session.delete(rows[stock_id])
-
-            for stock_id, position in held.items():
-                row = rows.get(stock_id)
-
-                if row is None:
-                    session.add(
-                        MockPosition(
-                            owner_id=self._db.owner_id,
-                            stock_id=stock_id,
-                            quantity=position.quantity,
-                            average_cost=position.average_cost,
-                        )
-                    )
-
-                elif (row.quantity, row.average_cost) != (position.quantity, position.average_cost):
-                    row.quantity, row.average_cost, row.updated_at = position.quantity, position.average_cost, now
-
-            cash.current_cash = account.cash
-            cash.updated_at = now
-            await session.commit()
 
     @override
     async def reset(self, initial_cash: float, now: datetime) -> Account:
@@ -210,3 +173,36 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
 
         self._logger.info(f"Mock account reset to {initial_cash:,.0f}.")
         return await self.get_account()
+
+
+async def save_account(account: Account, now: datetime, db: DatabaseConnector) -> None:
+    """
+    Writes the account's cash and positions to the owner's book: deletes the rows of positions no longer held, adds the
+    new ones, and updates the ones whose shares or cost changed.
+    """
+    held = {position.stock_id: position for position in account.positions}
+
+    async with db.owner_session() as session:
+        cash = await session.get_one(MockCash, db.owner_id)
+        result = await session.execute(select(MockPosition))
+        rows = {row.stock_id: row for row in result.scalars().all()}
+
+        for stock_id in rows.keys() - held.keys():
+            await session.delete(rows[stock_id])
+
+        for stock_id, position in held.items():
+            row = rows.get(stock_id)
+
+            if row is None:
+                session.add(
+                    MockPosition(
+                        owner_id=db.owner_id, stock_id=stock_id, quantity=position.quantity, average_cost=position.average_cost
+                    )
+                )
+
+            elif (row.quantity, row.average_cost) != (position.quantity, position.average_cost):
+                row.quantity, row.average_cost, row.updated_at = position.quantity, position.average_cost, now
+
+        cash.current_cash = account.cash
+        cash.updated_at = now
+        await session.commit()

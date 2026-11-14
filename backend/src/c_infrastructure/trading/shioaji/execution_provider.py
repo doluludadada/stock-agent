@@ -1,6 +1,6 @@
 import asyncio
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from typing import override
@@ -12,21 +12,20 @@ from shioaji import Shioaji
 from shioaji.account import StockAccount
 from shioaji.constant import Action, OrderType as BrokerTimeInForce, Status, StockOrderCond, StockOrderLot, StockPriceType, Unit
 from shioaji.contracts import Stock as StockContract
-from shioaji.data import Snapshot
 from shioaji.order import Order as BrokerOrder, StockOrder, Trade
 from shioaji.position import SettlementV1, StockPosition, StockProfitLoss
 
 from a_domain.model.trading.account import Account, BrokerageStatement, BrokerFill, Mark, Position, Settlement
 from a_domain.model.trading.order import ExchangeOrder, Order
-from a_domain.ports.market.broker_quote_provider import IBrokerQuoteProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.trading.execution_provider import IBrokerExecutionProvider, SendRefusal
+from a_domain.rules.trading.cost import TradingCostRule
 from a_domain.rules.trading.execution import BrokerOutcomeRule, FillRule, LotSplitRule, OrderAcceptanceRule
 from a_domain.rules.trading.order_rule import BrokerLink
 from a_domain.types.enums import ExecutionProvider, LotKind, OrderStatus, RejectReason, TimeInForce, TradeAction
 from b_application.config.app_config import AppConfig
-from b_application.config.trading_config import ShioajiLogin
-from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection
+from b_application.config.trading_config import ShioajiConfig, ShioajiLogin
+from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection, sdk_request
 
 BROKER = "Shioaji"
 
@@ -72,8 +71,11 @@ What each Shioaji status means in the domain order lifecycle (OrderStatus.next_s
 - Inactive: done, with no documented meaning, so it is reported as an error for a human to look at.
 """
 
+type UnitShares = Mapping[StockOrderLot, int]
+"""The shares in one unit of an order's quantity, by the order's lot."""
 
-class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContract, Trade]):
+
+class ShioajiExecutionProvider(IBrokerExecutionProvider[StockContract, Trade]):
     """
     The Sinopac broker through the Shioaji client, simulation or production as the login's environment says. The client
     is the one ShioajiQuoteProvider logged in once for the process, so quotes and orders share one login.
@@ -85,7 +87,7 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
     the whole quantity.
 
     Before sending, the order must be one the app sends and the account must cover it (OrderAcceptanceRule, with the
-    cash that `cash` reads). A stock Shioaji has no contract for is refused first.
+    cash that `available_cash` reads). A stock Shioaji has no contract for is refused first.
 
     After sending, the adapter refreshes each broker order until ORDER_STATUS says it is done. One still
     working after the polls is cancelled and refreshed again; BrokerOutcomeRule then gives the domain order
@@ -103,17 +105,9 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
     exchange order the broker gave a message for says its status code instead of the message.
     """
 
-    def __init__(
-        self,
-        connection: ShioajiConnection,
-        quotes: IBrokerQuoteProvider[Snapshot],
-        login: ShioajiLogin,
-        config: AppConfig,
-        logger: ILoggingProvider,
-    ) -> None:
+    def __init__(self, connection: ShioajiConnection, login: ShioajiLogin, config: AppConfig, logger: ILoggingProvider) -> None:
         self._connection = connection
         self._client: Shioaji = connection.client
-        self._quotes = quotes
         self._login = login
         self._logger = logger
         self._cost_rule = config.market.cost_rule()
@@ -131,8 +125,7 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
             StockOrderLot.Odd: 1,
             StockOrderLot.IntradayOdd: 1,
         }
-        self._poll_interval_seconds = config.shioaji.poll_interval_seconds
-        self._max_polls = config.shioaji.max_polls
+        self._polling = config.shioaji
 
     @override
     async def connect(self) -> None:
@@ -155,7 +148,7 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
         if ca_path is None or ca_password is None or person_id is None:
             raise RuntimeError("Shioaji production needs the CA certificate's path, its password and the person id")
 
-        if not await self.request(self._client.activate_ca, ca_path, ca_password.get_secret_value(), person_id.get_secret_value()):
+        if not await sdk_request(self._client.activate_ca, ca_path, ca_password.get_secret_value(), person_id.get_secret_value()):
             raise RuntimeError(f"the CA certificate at {ca_path} was not activated")
 
         if not account.signed:
@@ -182,29 +175,20 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
         if stock_account is None:
             raise RuntimeError("Shioaji has no stock account: ShioajiQuoteProvider.connect() logs in first")
 
-        cash = await self.cash(stock_account)
+        cash = await available_cash(stock_account, self._client, self._shares_per_unit, self._cost_rule)
         positions = [replace(position, mark=None) for position in await self.open_positions()]
 
         return Account(account_id=stock_account.account_id, cash=cash, positions=positions)
 
     @override
-    def stock_account(self) -> StockAccount:
-        stock_account = self._client.stock_account
-
-        if stock_account is None:
-            raise RuntimeError("Shioaji has no stock account: ShioajiQuoteProvider.connect() logs in first")
-
-        return stock_account
-
-    @override
     async def statement(self, sales_from: date, today: date) -> BrokerageStatement:
-        stock_account = self.stock_account()
-        balance = await self.request(self._client.account_balance)
+        stock_account = login_stock_account(self._client)
+        balance = await sdk_request(self._client.account_balance)
 
         if balance.errmsg:
             raise RuntimeError("Shioaji answered the account balance with an error message")
 
-        settlements = await self.request(self._client.settlements, stock_account)
+        settlements = await sdk_request(self._client.settlements, stock_account)
 
         return BrokerageStatement(
             read_at=datetime.now(UTC),
@@ -216,14 +200,14 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
                 if isinstance(settlement, SettlementV1)
             ],
             positions=await self.open_positions(),
-            fills=await self.fills(today),
-            sales=await self.sales(sales_from, today),
+            fills=await todays_fills(today, self._client, self._shares_per_unit, self._logger),
+            sales=await settled_sales(sales_from, today, self._client),
             sales_from=sales_from,
         )
 
     @override
     async def open_positions(self) -> list[Position]:
-        rows = await self.request(self._client.list_positions, self.stock_account(), unit=Unit.Share)
+        rows = await sdk_request(self._client.list_positions, login_stock_account(self._client), unit=Unit.Share)
         stock_rows = [row for row in rows if isinstance(row, StockPosition)]
 
         if len(stock_rows) < len(rows):
@@ -245,63 +229,13 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
         return positions
 
     @override
-    async def fills(self, today: date) -> list[BrokerFill]:
-        stock_account = self.stock_account()
-        await self.request(self._client.update_status, account=stock_account)
-        trades = await self.request(self._client.list_trades)
-        fills: list[BrokerFill] = []
-
-        for trade in trades:
-            if trade.order.account != stock_account or not isinstance(trade.order, StockOrder):
-                continue
-
-            shares_per_unit = self._shares_per_unit.get(trade.order.order_lot)
-
-            if shares_per_unit is None:
-                self._logger.warning(f"Ignored the deals of a Shioaji {trade.order.order_lot.value} order: its unit is unknown.")
-                continue
-
-            fills += [
-                BrokerFill(
-                    stock_id=trade.contract.code,
-                    action=TRADE_ACTION[trade.order.action],
-                    quantity=deal.quantity * shares_per_unit,
-                    price=deal.price,
-                    filled_on=today,
-                )
-                for deal in trade.status.deals or []
-                if deal.quantity > 0 and deal.price > 0
-            ]
-
-        return fills
-
-    @override
-    async def sales(self, first: date, last: date) -> list[BrokerFill]:
-        rows = await self.request(
-            self._client.list_profit_loss, self.stock_account(), first.isoformat(), last.isoformat(), unit=Unit.Share
-        )
-
-        return [
-            BrokerFill(
-                stock_id=row.code,
-                action=TradeAction.SELL,
-                quantity=row.quantity,
-                price=row.price,
-                filled_on=date.fromisoformat(row.date),
-                realized_pnl=row.pnl,
-            )
-            for row in rows
-            if isinstance(row, StockProfitLoss) and row.quantity > 0 and row.price > 0
-        ]
-
-    @override
     async def place_order(self, order: Order, refusal_now: SendRefusal) -> Order:
         try:
             account = await self.get_account()
-            contract = await self.request(lambda: self._client.Contracts.Stocks[order.stock_id])
+            contract = await sdk_request(lambda: self._client.Contracts.Stocks[order.stock_id])
             parts: list[ExchangeOrder] = []
             refusal = (
-                self.refusal_for(order, account)
+                refusal_for(order, account, self._acceptance_rule, self._lot_split_rule)
                 if isinstance(contract, StockContract)
                 else (RejectReason.BROKER_REFUSED, f"Shioaji has no stock contract {order.stock_id}")
             )
@@ -326,61 +260,6 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
         return order
 
     @override
-    def refusal_for(self, order: Order, account: Account) -> tuple[RejectReason, str] | None:
-        refusal = self._acceptance_rule.apply(order, account)
-
-        if refusal is not None:
-            return refusal
-
-        parts = self._lot_split_rule.apply(order.quantity)
-
-        if order.time_in_force == TimeInForce.FOK and any(lot == LotKind.ODD_LOT for lot, _ in parts):
-            return (
-                RejectReason.UNSUPPORTED_TIME_IN_FORCE,
-                f"FOK cannot cover {order.quantity} shares: the exchange takes intraday odd lots as ROD only",
-            )
-
-        return None
-
-    @override
-    async def cash(self, broker_account: StockAccount) -> float:
-        """
-        The broker checks a BUY against the trading limit, not the cash, so without this a BUY could exceed the cash and
-        default at settlement. Cash is the bank balance, minus the settlement payments still due (T to T+2), minus every
-        BUY the broker lists as dealt today with its fee. A purchase the broker already counts in its settlements is
-        subtracted twice, and pending receipts from sales are not counted, so cash can be understated, never overstated,
-        as long as the broker reports payments as negative settlement amounts.
-        """
-        balance = await self.request(self._client.account_balance)
-
-        if balance.errmsg:
-            raise RuntimeError("Shioaji answered the account balance with an error message")
-
-        settlements = await self.request(self._client.settlements, broker_account)
-        payments_due = [min(settlement.amount, 0) for settlement in settlements if isinstance(settlement, SettlementV1)]
-
-        if len(payments_due) < len(settlements):
-            raise RuntimeError("Shioaji listed a settlement without an amount")
-
-        await self.request(self._client.update_status, account=broker_account)
-        trades = await self.request(self._client.list_trades)
-        dealt_buys = [
-            self.exchange_order_of(trade)
-            for trade in trades
-            if trade.order.account == broker_account
-            and trade.order.action == Action.Buy
-            and sum(deal.quantity for deal in trade.status.deals or []) > 0
-        ]
-        now = datetime.now(UTC)
-        bought_today = math.fsum(
-            -self._cost_rule.apply(TradeAction.BUY, part.stock_id, part.fill_price, part.dealt_shares, now=now).net
-            for part in dealt_buys
-            if part.fill_price is not None
-        )
-
-        return max(balance.acc_balance + math.fsum(payments_due) - bought_today, 0)
-
-    @override
     async def send(
         self, contract: StockContract, order: Order, held: Position | None, refusal_now: SendRefusal
     ) -> tuple[list[ExchangeOrder], tuple[RejectReason, str] | None]:
@@ -390,12 +269,13 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
             if (refusal := await refusal_now()) is not None:
                 return parts, refusal
 
-            trade = await self.refresh(await self.place(contract, order, lot, shares, index))
+            trade = await self.place(contract, order, lot, shares, index)
+            trade = await refreshed(trade, self._client, self._shares_per_unit, self._polling, self._logger)
 
-            if self.exchange_order_of(trade).status.is_open:
-                trade = await self.cancel(trade)
+            if exchange_order_of(trade, self._shares_per_unit).status.is_open:
+                trade = await cancelled(trade, self._client, self._shares_per_unit, self._polling, self._logger)
 
-            part = self.exchange_order_of(trade)
+            part = exchange_order_of(trade, self._shares_per_unit)
             parts.append(part)
             self._logger.info(f"Shioaji order {trade.order.custom_field}: {part.description}")
 
@@ -434,10 +314,10 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
         )
 
         try:
-            return await self.request(self._client.place_order, contract, broker_order)
+            return await sdk_request(self._client.place_order, contract, broker_order)
 
         except Exception as error:
-            trade = await self.find_trade(broker_order.custom_field)
+            trade = await find_trade(broker_order.custom_field, self._client, self._logger)
 
             if trade is None:
                 raise RuntimeError(
@@ -447,98 +327,219 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockAccount, StockContr
 
             return trade
 
-    @override
-    async def refresh(self, trade: Trade) -> Trade:
-        """
-        Returns the freshest copy: the one list_trades holds under the same tag, else `trade` itself. A failed read counts
-        as one poll.
-        """
-        tag = trade.order.custom_field
 
-        for poll in range(self._max_polls):
-            if poll:
-                await asyncio.sleep(self._poll_interval_seconds)
+def login_stock_account(client: Shioaji) -> StockAccount:
+    """The SDK's stock account of the login. Raises while the login gave none."""
+    stock_account = client.stock_account
 
-            try:
-                await self.request(self._client.update_status, trade=trade)
-                listed = await self.request(self._client.list_trades)
+    if stock_account is None:
+        raise RuntimeError("Shioaji has no stock account: ShioajiQuoteProvider.connect() logs in first")
 
-            except Exception as error:
-                self._logger.warning(f"Shioaji status refresh failed: {error}")
-                continue
+    return stock_account
 
-            trade = next((known for known in listed if known.order.custom_field == tag), trade)
 
-            if not self.exchange_order_of(trade).status.is_open:
-                break
+async def todays_fills(today: date, client: Shioaji, unit_shares: UnitShares, logger: ILoggingProvider) -> list[BrokerFill]:
+    """Every deal of the account's exchange orders the broker lists for today, in shares."""
+    stock_account = login_stock_account(client)
+    await sdk_request(client.update_status, account=stock_account)
+    trades = await sdk_request(client.list_trades)
+    fills: list[BrokerFill] = []
 
-        return trade
+    for trade in trades:
+        if trade.order.account != stock_account or not isinstance(trade.order, StockOrder):
+            continue
 
-    @override
-    async def cancel(self, trade: Trade) -> Trade:
+        shares_per_unit = unit_shares.get(trade.order.order_lot)
+
+        if shares_per_unit is None:
+            logger.warning(f"Ignored the deals of a Shioaji {trade.order.order_lot.value} order: its unit is unknown.")
+            continue
+
+        fills += [
+            BrokerFill(
+                stock_id=trade.contract.code,
+                action=TRADE_ACTION[trade.order.action],
+                quantity=deal.quantity * shares_per_unit,
+                price=deal.price,
+                filled_on=today,
+            )
+            for deal in trade.status.deals or []
+            if deal.quantity > 0 and deal.price > 0
+        ]
+
+    return fills
+
+
+async def settled_sales(first: date, last: date, client: Shioaji) -> list[BrokerFill]:
+    """The account's sales the broker settled from `first` to `last`, each with the PnL the broker says it realized."""
+    rows = await sdk_request(
+        client.list_profit_loss, login_stock_account(client), first.isoformat(), last.isoformat(), unit=Unit.Share
+    )
+
+    return [
+        BrokerFill(
+            stock_id=row.code,
+            action=TradeAction.SELL,
+            quantity=row.quantity,
+            price=row.price,
+            filled_on=date.fromisoformat(row.date),
+            realized_pnl=row.pnl,
+        )
+        for row in rows
+        if isinstance(row, StockProfitLoss) and row.quantity > 0 and row.price > 0
+    ]
+
+
+async def available_cash(broker_account: StockAccount, client: Shioaji, unit_shares: UnitShares, cost_rule: TradingCostRule) -> float:
+    """
+    The cash the account can still pay for a BUY with. Never more than the broker will settle.
+
+    The broker checks a BUY against the trading limit, not the cash, so without this a BUY could exceed the cash and
+    default at settlement. Cash is the bank balance, minus the settlement payments still due (T to T+2), minus every
+    BUY the broker lists as dealt today with its fee. A purchase the broker already counts in its settlements is
+    subtracted twice, and pending receipts from sales are not counted, so cash can be understated, never overstated,
+    as long as the broker reports payments as negative settlement amounts.
+    """
+    balance = await sdk_request(client.account_balance)
+
+    if balance.errmsg:
+        raise RuntimeError("Shioaji answered the account balance with an error message")
+
+    settlements = await sdk_request(client.settlements, broker_account)
+    payments_due = [min(settlement.amount, 0) for settlement in settlements if isinstance(settlement, SettlementV1)]
+
+    if len(payments_due) < len(settlements):
+        raise RuntimeError("Shioaji listed a settlement without an amount")
+
+    await sdk_request(client.update_status, account=broker_account)
+    trades = await sdk_request(client.list_trades)
+    dealt_buys = [
+        exchange_order_of(trade, unit_shares)
+        for trade in trades
+        if trade.order.account == broker_account
+        and trade.order.action == Action.Buy
+        and sum(deal.quantity for deal in trade.status.deals or []) > 0
+    ]
+    now = datetime.now(UTC)
+    bought_today = math.fsum(
+        -cost_rule.apply(TradeAction.BUY, part.stock_id, part.fill_price, part.dealt_shares, now=now).net
+        for part in dealt_buys
+        if part.fill_price is not None
+    )
+
+    return max(balance.acc_balance + math.fsum(payments_due) - bought_today, 0)
+
+
+async def refreshed(trade: Trade, client: Shioaji, unit_shares: UnitShares, polling: ShioajiConfig, logger: ILoggingProvider) -> Trade:
+    """
+    Re-reads the exchange order until it is done or the polls run out, and returns the freshest copy.
+
+    Returns the freshest copy: the one list_trades holds under the same tag, else `trade` itself. A failed read counts
+    as one poll.
+    """
+    tag = trade.order.custom_field
+
+    for poll in range(polling.max_polls):
+        if poll:
+            await asyncio.sleep(polling.poll_interval_seconds)
+
         try:
-            await self.request(self._client.cancel_order, trade)
+            await sdk_request(client.update_status, trade=trade)
+            listed = await sdk_request(client.list_trades)
 
         except Exception as error:
-            self._logger.error(f"Shioaji cancel of the order tagged {trade.order.custom_field} failed: {error}")
+            logger.warning(f"Shioaji status refresh failed: {error}")
+            continue
 
-        return await self.refresh(trade)
+        trade = next((known for known in listed if known.order.custom_field == tag), trade)
 
-    @override
-    async def find_trade(self, tag: str) -> Trade | None:
-        stock_account = self._client.stock_account
+        if not exchange_order_of(trade, unit_shares).status.is_open:
+            break
 
-        if stock_account is None:
-            return None
+    return trade
 
-        try:
-            await self.request(self._client.update_status, account=stock_account)
-            listed = await self.request(self._client.list_trades)
 
-        except Exception as error:
-            self._logger.error(f"Shioaji lookup of the order tagged {tag} failed: {error}")
-            return None
+async def cancelled(trade: Trade, client: Shioaji, unit_shares: UnitShares, polling: ShioajiConfig, logger: ILoggingProvider) -> Trade:
+    """Asks the broker to cancel a working exchange order, then refreshes it."""
+    try:
+        await sdk_request(client.cancel_order, trade)
 
-        return next((trade for trade in listed if trade.order.custom_field == tag), None)
+    except Exception as error:
+        logger.error(f"Shioaji cancel of the order tagged {trade.order.custom_field} failed: {error}")
 
-    @override
-    def exchange_order_of(self, trade: Trade) -> ExchangeOrder:
-        """Shares are the order's units times the shares in one unit of its lot. Deals at one price fill at exactly that price."""
-        broker_order = trade.order
+    return await refreshed(trade, client, unit_shares, polling, logger)
 
-        if not isinstance(broker_order, StockOrder):
-            raise RuntimeError(f"Shioaji trade {broker_order.custom_field} is not a stock order")
 
-        shares_per_unit = self._shares_per_unit[broker_order.order_lot]
-        deals = trade.status.deals or []
-        dealt_units = sum(deal.quantity for deal in deals)
-        prices = {deal.price for deal in deals}
-        fill_price = None
+async def find_trade(tag: str, client: Shioaji, logger: ILoggingProvider) -> Trade | None:
+    """The exchange order with this tag, after re-reading the account's orders. None when absent or the read fails."""
+    stock_account = client.stock_account
 
-        if dealt_units:
-            fill_price = prices.pop() if len(prices) == 1 else math.fsum(deal.price * deal.quantity for deal in deals) / dealt_units
+    if stock_account is None:
+        return None
 
-        unit = "lots" if broker_order.order_lot == StockOrderLot.Common else "shares"
-        text = (
-            f"{broker_order.order_lot.value} {broker_order.quantity} {unit} {broker_order.order_type.value} "
-            f"{trade.status.status.value}, dealt {dealt_units * shares_per_unit} shares"
+    try:
+        await sdk_request(client.update_status, account=stock_account)
+        listed = await sdk_request(client.list_trades)
+
+    except Exception as error:
+        logger.error(f"Shioaji lookup of the order tagged {tag} failed: {error}")
+        return None
+
+    return next((trade for trade in listed if trade.order.custom_field == tag), None)
+
+
+def exchange_order_of(trade: Trade, unit_shares: UnitShares) -> ExchangeOrder:
+    """
+    The exchange order in the domain's terms.
+
+    Shares are the order's units times the shares in one unit of its lot. Deals at one price fill at exactly that price.
+    """
+    broker_order = trade.order
+
+    if not isinstance(broker_order, StockOrder):
+        raise RuntimeError(f"Shioaji trade {broker_order.custom_field} is not a stock order")
+
+    shares_per_unit = unit_shares[broker_order.order_lot]
+    deals = trade.status.deals or []
+    dealt_units = sum(deal.quantity for deal in deals)
+    prices = {deal.price for deal in deals}
+    fill_price = None
+
+    if dealt_units:
+        fill_price = prices.pop() if len(prices) == 1 else math.fsum(deal.price * deal.quantity for deal in deals) / dealt_units
+
+    unit = "lots" if broker_order.order_lot == StockOrderLot.Common else "shares"
+    text = (
+        f"{broker_order.order_lot.value} {broker_order.quantity} {unit} {broker_order.order_type.value} "
+        f"{trade.status.status.value}, dealt {dealt_units * shares_per_unit} shares"
+    )
+
+    return ExchangeOrder(
+        stock_id=trade.contract.code,
+        status=ORDER_STATUS[trade.status.status],
+        ordered_shares=broker_order.quantity * shares_per_unit,
+        dealt_shares=dealt_units * shares_per_unit,
+        reported_dealt_shares=trade.status.deal_quantity * shares_per_unit,
+        fill_price=fill_price,
+        description=f"{text} (status {trade.status.status_code})" if trade.status.msg else text,
+    )
+
+
+def refusal_for(
+    order: Order, account: Account, acceptance_rule: OrderAcceptanceRule, lot_split_rule: LotSplitRule
+) -> tuple[RejectReason, str] | None:
+    """Why this broker will not take `order` from `account`, or None. Checked before anything is sent."""
+    refusal = acceptance_rule.apply(order, account)
+
+    if refusal is not None:
+        return refusal
+
+    parts = lot_split_rule.apply(order.quantity)
+
+    if order.time_in_force == TimeInForce.FOK and any(lot == LotKind.ODD_LOT for lot, _ in parts):
+        return (
+            RejectReason.UNSUPPORTED_TIME_IN_FORCE,
+            f"FOK cannot cover {order.quantity} shares: the exchange takes intraday odd lots as ROD only",
         )
 
-        return ExchangeOrder(
-            stock_id=trade.contract.code,
-            status=ORDER_STATUS[trade.status.status],
-            ordered_shares=broker_order.quantity * shares_per_unit,
-            dealt_shares=dealt_units * shares_per_unit,
-            reported_dealt_shares=trade.status.deal_quantity * shares_per_unit,
-            fill_price=fill_price,
-            description=f"{text} (status {trade.status.status_code})" if trade.status.msg else text,
-        )
-
-    @override
-    async def request[**Arguments, Answer](
-        self, call: Callable[Arguments, Answer], *args: Arguments.args, **kwargs: Arguments.kwargs
-    ) -> Answer:
-        try:
-            return await asyncio.to_thread(call, *args, **kwargs)
-        except Exception as error:
-            raise RuntimeError(f"Shioaji answered {self._quotes.failure_of(error)}") from None
+    return None

@@ -11,14 +11,15 @@ from support.settings import shipped_config
 from trading_stack import SilentLogger
 
 from a_domain.model.analysis.ai_analysis_report import AiAnalysisReport
-from a_domain.model.analysis.technical_report import TechnicalReport
+from a_domain.model.analysis.technical_report import TechnicalObservation, TechnicalReport
 from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.model.system.stats import SystemStats
 from a_domain.model.trading.account import Account, AccountSnapshot, Mark, Position
-from a_domain.types.enums import ExecutionProvider, InformationSource, Workflow
+from a_domain.types.enums import ExecutionProvider, InformationSource, SignalSource, TradeAction, Workflow
 from c_infrastructure.database.db_connector import DatabaseConnector
+from c_infrastructure.database.models.trading_journal_dto import RunStockReportDTO, TradeSignalDTO
 from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
 from c_infrastructure.database.repositories.trading_journal import TradingJournal
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
@@ -64,7 +65,12 @@ async def test_a_specific_stock_report_keeps_the_price_and_the_reports_never_the
     article = Article(
         stock_id="2330", source=InformationSource.PTT_STOCK, title="t", content="c", published_at=FILLED_AT, fetched_at=FILLED_AT
     )
-    technical = TechnicalReport(score=62, hard_failures=[], soft_failures=["Volume: below average"], observations=["Trend: detected"])
+    technical = TechnicalReport(
+        score=62,
+        hard_failures=[],
+        soft_failures=["Volume: below average"],
+        observations=[TechnicalObservation(rule="Trend", detected=True)],
+    )
     ai = AiAnalysisReport(score=70, bullish_factors=["margin"], bearish_factors=[], summary="steady", raw_response="{}")
     stock = Stock(
         stock_id="2330",
@@ -85,3 +91,38 @@ async def test_a_specific_stock_report_keeps_the_price_and_the_reports_never_the
     assert (read.stock_id, read.name, read.current_price, read.latest_market_data_at) == ("2330", "TSMC", 105.5, FILLED_AT)
     assert (read.technical_report, read.ai_report, read.composite_score) == (technical, ai, 66)
     assert (len(read.ohlcv), read.realtime_bar, read.articles) == (1, None, [])
+
+
+async def test_a_row_saved_when_observations_were_sentences_reads_as_the_same_observations() -> None:
+    stored = {"score": 62, "hard_failures": [], "soft_failures": ["Volume: below average"]}
+    stored["observations"] = ["Trend: detected", "RSI Range 50-70: with Slope: not detected"]
+    report = {"stock_id": "2330", "name": "TSMC", "current_price": None, "latest_market_data_at": None}
+    report |= {"technical_report": stored, "ai_report": None, "composite_score": 62}
+    stock_row = RunStockReportDTO(run_id=uuid4(), position=0, stock_id="2330", report=report, owner_id=LEGACY_OWNER_ID)
+    signal_row = TradeSignalDTO(
+        decision_id=uuid4(),
+        run_id=uuid4(),
+        stock_id="2330",
+        action=TradeAction.BUY,
+        source=SignalSource.COMBINED,
+        score=62,
+        reason="trend",
+        quantity=1000,
+        generated_at=FILLED_AT,
+        price_at_signal=100.0,
+        price_observed_at=FILLED_AT,
+        technical_report=stored,
+        owner_id=LEGACY_OWNER_ID,
+    )
+    read = TechnicalReport(
+        score=62,
+        soft_failures=["Volume: below average"],
+        observations=[
+            TechnicalObservation(rule="Trend", detected=True),
+            TechnicalObservation(rule="RSI Range 50-70: with Slope", detected=False),
+        ],
+    )
+
+    assert stock_row.to_domain().technical_report == read
+    assert signal_row.to_domain().technical_report == read
+    assert stock_row.to_domain().observations == stored["observations"]

@@ -87,7 +87,7 @@ class GoogleIdentityProvider(IIdentityProvider):
                 response = await client.post(self._token_endpoint, data=form)
 
             response.raise_for_status()
-            return self.read_id_token(response.json()["id_token"])
+            return read_id_token(response.json()["id_token"])
         except httpx.HTTPStatusError as error:
             raise IdentityProviderError(f"the token endpoint answered {error.response.status_code}.") from None
         except httpx.HTTPError as error:
@@ -95,20 +95,21 @@ class GoogleIdentityProvider(IIdentityProvider):
         except ValueError, LookupError, TypeError:
             raise IdentityProviderError("the token endpoint answered without an ID token.") from None
 
-    @override
-    def read_id_token(self, id_token: str) -> IdTokenClaims:
-        try:
-            payload = id_token.split(".")[1]
-            token = json.loads(urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
-            audience, authenticated_at = token["aud"], token.get("auth_time")
-            return IdTokenClaims(
-                issuer=token["iss"],
-                audiences=(audience,) if isinstance(audience, str) else tuple(audience),
-                nonce=token.get("nonce", ""),
-                email=token["email"],
-                email_verified=token.get("email_verified") is True,
-                expires_at=datetime.fromtimestamp(token["exp"], UTC),
-                authenticated_at=datetime.fromtimestamp(authenticated_at, UTC) if authenticated_at is not None else None,
-            )
-        except ValueError, LookupError, TypeError, AttributeError, OverflowError, OSError:
-            raise IdentityProviderError("the token endpoint answered an ID token the app cannot read.") from None
+
+def read_id_token(id_token: str) -> IdTokenClaims:
+    """What an ID token says, unchecked. Raises IdentityProviderError for one that cannot be read."""
+    try:
+        payload = id_token.split(".")[1]
+        token = json.loads(urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+        audience, authenticated_at = token["aud"], token.get("auth_time")
+        return IdTokenClaims(
+            issuer=token["iss"],
+            audiences=(audience,) if isinstance(audience, str) else tuple(audience),
+            nonce=token.get("nonce", ""),
+            email=token["email"],
+            email_verified=token.get("email_verified") is True,
+            expires_at=datetime.fromtimestamp(token["exp"], UTC),
+            authenticated_at=datetime.fromtimestamp(authenticated_at, UTC) if authenticated_at is not None else None,
+        )
+    except ValueError, LookupError, TypeError, AttributeError, OverflowError, OSError:
+        raise IdentityProviderError("the token endpoint answered an ID token the app cannot read.") from None

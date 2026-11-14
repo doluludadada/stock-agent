@@ -7,15 +7,13 @@ broker login, orders nothing and asks no AI.
 """
 
 import argparse
-import asyncio
-import os
 import sys
 from collections.abc import Sequence
 from datetime import date
 
 from b_application.config.settings_loader import get_project_root, load_settings
 from d_presentation.cli import terminal
-from d_presentation.dependencies import STARTUP_REFUSALS, create_process_state, open_runtime
+from d_presentation.dependencies import create_process_state, open_runtime
 
 
 async def backfill_history(arguments: Sequence[str]) -> int:
@@ -48,18 +46,4 @@ async def backfill_history(arguments: Sequence[str]) -> int:
 
 
 if __name__ == "__main__":
-    exit_code = 1
-
-    try:
-        exit_code = asyncio.run(backfill_history(sys.argv[1:]))
-    except SystemExit as stop:
-        exit_code = stop.code if isinstance(stop.code, int) else 1
-    except STARTUP_REFUSALS as error:
-        terminal.console.print(str(error), style="red", markup=False, highlight=False)
-    except Exception:
-        terminal.console.print_exception()
-    finally:
-        # The broker's SDK can leave a thread running that would hold the interpreter at exit, so the process ends
-        # here; anything unexpected is printed above first, since nothing prints after this.
-        sys.stdout.flush()
-        os._exit(exit_code)
+    terminal.run_to_exit(backfill_history(sys.argv[1:]))

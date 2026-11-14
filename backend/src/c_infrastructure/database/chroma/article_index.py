@@ -38,7 +38,7 @@ class ChromaArticleIndex(IArticleIndex):
 
     @override
     async def sync(self, stock_id: str, articles: Sequence[Article]) -> int:
-        texts = {f"{stock_id}|{article.key}": self.embedded_text(article) for article in articles}
+        texts = {f"{stock_id}|{article.key}": embedded_text(article, self._text_length) for article in articles}
         days = [self._market_clock.to_market_datetime(article.published_at).date() for article in articles]
         described: dict[str, Metadata] = {
             entry: {
@@ -81,7 +81,8 @@ class ChromaArticleIndex(IArticleIndex):
 
         return [entry.partition("|")[2] for entry in (found.get(ChromaResultKey.IDS) or [[]])[0]]
 
-    @override
-    def embedded_text(self, article: Article) -> str:
-        text = article.content[: self._text_length]
-        return article.title if not text or text == article.title else f"{article.title}\n{text}"
+
+def embedded_text(article: Article, text_length: int) -> str:
+    """What of an article its vector stands for: its title, then the text kept with it, cut to the length the index reads."""
+    text = article.content[:text_length]
+    return article.title if not text or text == article.title else f"{article.title}\n{text}"

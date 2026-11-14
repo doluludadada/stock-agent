@@ -7,7 +7,7 @@ from pydantic.dataclasses import dataclass
 
 from a_domain.rules.fundamentals.trailing_eps import EpsFilings
 from a_domain.types.enums import MarketType
-from a_domain.types.values import FiscalQuarter
+from a_domain.types.values import FiscalQuarter, month_index, month_start
 
 
 @dataclass(frozen=True)
@@ -76,12 +76,12 @@ class RevenueMonthsRule:
     deadline_day: Annotated[int, Field(ge=1, le=28)]
 
     def apply(self, first: date, today: date, served: Mapping[tuple[MarketType, int, int], date]) -> list[tuple[MarketType, int, int]]:
-        months = range(first.year * 12 + first.month - 1, today.year * 12 + today.month - 1)
+        months = range(month_index(first.year, first.month), month_index(today.year, today.month))
         due: list[tuple[MarketType, int, int]] = []
 
         for index in months:
             year, month = divmod(index, 12)
-            deadline = date(year + (month + 1) // 12, (month + 1) % 12 + 1, self.deadline_day)
+            deadline = month_start(index + 1).replace(day=self.deadline_day)
             due += [
                 (market, year, month + 1) for market in MarketType if not served.get((market, year, month + 1), deadline) > deadline
             ]

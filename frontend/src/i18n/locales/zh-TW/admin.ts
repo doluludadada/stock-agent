@@ -75,7 +75,6 @@ const admin: DictionaryShape<typeof en> = {
       hours: '{{value}} 小時',
       days: '{{value}} 天',
       twd: 'NT${{value}}',
-      bytes: '{{value}} 位元組',
     },
     field: {
       environment: '執行環境',

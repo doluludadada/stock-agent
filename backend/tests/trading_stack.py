@@ -28,7 +28,7 @@ from support.harness import ADMINISTRATOR, ADMINISTRATOR_PASSWORD, UNUSED_PROJEC
 from support.settings import shipped_config
 
 from a_domain.model.analysis.ai_analysis_report import AiAnalysisReport
-from a_domain.model.analysis.technical_report import TechnicalReport
+from a_domain.model.analysis.technical_report import TechnicalObservation, TechnicalReport
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.model.system.stats import SystemStats
@@ -127,7 +127,9 @@ def analysed_stock(stock_id: str = "2330", composite_score: int | None = 90) -> 
     return Stock(
         stock_id=stock_id,
         ohlcv=[bar(MONDAY_10_00 - timedelta(days=3, hours=-3, minutes=-30), 98)],
-        technical_report=TechnicalReport(score=90, soft_failures=["volume_expansion"], observations=["golden_cross: detected"]),
+        technical_report=TechnicalReport(
+            score=90, soft_failures=["volume_expansion"], observations=[TechnicalObservation(rule="golden_cross", detected=True)]
+        ),
         ai_report=AiAnalysisReport(score=90, bullish_factors=["AI demand"], bearish_factors=[], summary="Strong", raw_response="{}"),
         composite_score=composite_score,
     )

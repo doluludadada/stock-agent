@@ -208,5 +208,5 @@ class AccountsConfig(BaseSettings):
 
     @field_validator("key", "google_client_id", "google_client_secret", mode="before")
     @classmethod
-    def _blank_is_unset(cls, value: object) -> object:
+    def blank_is_unset(cls, value: object) -> object:
         return None if isinstance(value, str) and not value.strip() else value

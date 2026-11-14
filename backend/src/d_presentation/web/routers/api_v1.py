@@ -15,9 +15,9 @@ from d_presentation.web.routers import (
     watchlist,
     webhook_router,
 )
-from d_presentation.web.session import AppRequest, KnownHost
+from d_presentation.web.session import API_PATH, AppRequest, KnownHost
 
-router = APIRouter(prefix="/v1")
+router = APIRouter(prefix=API_PATH)
 
 for module in (
     auth,

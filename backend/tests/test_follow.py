@@ -299,9 +299,6 @@ class RealBroker:
         self.calls.append("get_account")
         raise AssertionError("a follow read the real broker's account")
 
-    def refusal_for(self, order: Order, account: Account) -> None:
-        self.calls.append("refusal_for")
-
 
 async def test_a_follow_on_a_pipeline_built_for_sinopac_never_reaches_it_and_orders_nothing(tmp_path) -> None:
     real = RealBroker()

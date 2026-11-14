@@ -47,7 +47,7 @@ class TradeSignal:
     """On a follow's decision only: the decision of the followed run it carries out again, at its own price."""
 
     @model_validator(mode="after")
-    def _orderable_signals_have_shares(self) -> Self:
+    def orderable_signals_have_shares(self) -> Self:
         if self.action != TradeAction.HOLD and self.quantity <= 0:
             raise ValueError(f"{self.action} signal needs a positive quantity")
 

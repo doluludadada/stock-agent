@@ -37,7 +37,7 @@ describe('the stock page’s checks', () => {
             required_bars: 61,
             bar_times: bars.map((bar) => bar.ts),
             latest_price: 2260,
-            report: { score: 20, hard_failures: [excluding!.name], soft_failures: [], observations: [`${bonus!.name}: not detected`] },
+            report: { score: 20, hard_failures: [excluding!.name], soft_failures: [], observations: [{ rule: bonus!.name, detected: false }] },
             readings: {},
             notes: [],
           })

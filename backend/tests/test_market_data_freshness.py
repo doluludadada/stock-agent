@@ -1,6 +1,7 @@
 from datetime import date, datetime, time, timedelta
 
 import pytest
+from support.fakes import FakeStockProvider
 from support.settings import shipped_config
 from trading_stack import SilentLogger, run_stats
 
@@ -51,6 +52,7 @@ def freshness_config(tmp_path) -> AppConfig:
 def collector(feed: QuoteFeed, tmp_path) -> MarketDataCollector:
     return MarketDataCollector(
         ohlcv_provider=feed,
+        stock_provider=FakeStockProvider(),
         archive=None,
         market_clock=ClockAt(MarketHoursConfig()),
         config=freshness_config(tmp_path),
@@ -142,6 +144,7 @@ async def test_a_session_is_missing_only_when_none_of_an_exchanges_stocks_has_it
 
     await MarketDataCollector(
         ohlcv_provider=SessionFeed(sessions),
+        stock_provider=FakeStockProvider(),
         archive=None,
         market_clock=ClockAt(MarketHoursConfig()),
         config=freshness_config(tmp_path),

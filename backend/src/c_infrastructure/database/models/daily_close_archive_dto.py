@@ -1,4 +1,3 @@
-import math
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime
 from typing import ClassVar, Self
@@ -18,6 +17,7 @@ from a_domain.types.enums import ContentType, IndustryFormat, InformationSource,
 from a_domain.types.values import FiscalQuarter
 from b_application.config.sources_config import FinancialSummaryFields
 from c_infrastructure.database.utc_datetime import UtcDateTime
+from c_infrastructure.market.exchange_text import parse_number
 
 
 def replacing(table: type[SQLModel]) -> Insert:
@@ -242,14 +242,7 @@ class FinancialReportDTO(SQLModel, table=True):
     @staticmethod
     def figure(items: Mapping[str, str], columns: list[str]) -> float | None:
         """The first of the columns the items fill, as a number, or None when they fill none of them or no finite number."""
-        text = next((items[column] for column in columns if items.get(column, "").strip()), "")
-
-        try:
-            value = float(text.replace(",", ""))
-        except ValueError:
-            return None
-
-        return value if math.isfinite(value) else None
+        return parse_number(next((items[column] for column in columns if items.get(column, "").strip()), ""))
 
 
 class MonthlyRevenueDTO(SQLModel, table=True):

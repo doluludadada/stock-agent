@@ -7,10 +7,9 @@ from pydantic import ConfigDict, Field, FiniteFloat, NonNegativeFloat, NonNegati
 from pydantic.dataclasses import dataclass
 
 from a_domain.model.market.ohlcv import Ohlcv
-from a_domain.rules.technical.matrix import DailyBarMatrix, Flags, Floats
-from a_domain.rules.trading.backtest import DailyBarMatrixRule, last_closes
+from a_domain.rules.technical.matrix import DailyBarMatrix, DailyBarMatrixRule, Flags, Floats, last_closes
 from a_domain.types.enums import SecurityKind
-from a_domain.types.values import Fraction, NonEmptyText, ProperFraction
+from a_domain.types.values import Fraction, NonEmptyText, ProperFraction, month_index, month_start
 
 type DayOfMonth = Annotated[int, Field(ge=1, le=28)]
 
@@ -122,7 +121,7 @@ def revenue_matrix(stock_ids: Sequence[str], revenues: Mapping[tuple[str, int, i
     """
     rows = {stock_id: row for row, stock_id in enumerate(stock_ids)}
     held = [
-        (rows[stock_id], year * 12 + month - 1, amount) for (stock_id, year, month), amount in revenues.items() if stock_id in rows
+        (rows[stock_id], month_index(year, month), amount) for (stock_id, year, month), amount in revenues.items() if stock_id in rows
     ]
     months = range(min((month for _, month, _ in held), default=0), max((month for _, month, _ in held), default=-1) + 1)
     matrix = np.full((len(rows), len(months)), np.nan)
@@ -130,7 +129,7 @@ def revenue_matrix(stock_ids: Sequence[str], revenues: Mapping[tuple[str, int, i
     for row, month, amount in held:
         matrix[row, month - months.start] = np.nan if amount is None else amount
 
-    return matrix, tuple(date(month // 12, month % 12 + 1, 1) for month in months)
+    return matrix, tuple(month_start(month) for month in months)
 
 
 @dataclass(frozen=True)
@@ -152,8 +151,8 @@ class DecisionSessionsRule:
             if session.day < self.decision_day or (session.year, session.month) in decisions:
                 continue
 
-            month = session.year * 12 + session.month - (2 if session.day > self.deadline_day else 3)
-            decisions[(session.year, session.month)] = (column, date(month // 12, month % 12 + 1, 1))
+            month = month_index(session.year, session.month) - (1 if session.day > self.deadline_day else 2)
+            decisions[(session.year, session.month)] = (column, month_start(month))
 
         return list(decisions.values())
 
@@ -201,6 +200,58 @@ class Ranking:
     """The `top` best scores, best first; equal scores in stock id order."""
 
 
+def in_universe(
+    bars: DailyBarMatrix,
+    column: int,
+    min_close: NonNegativeFloat,
+    min_traded_value: NonNegativeFloat,
+    traded_value_sessions: PositiveInt,
+) -> Flags:
+    if column + 1 < traded_value_sessions:
+        return np.zeros(len(bars.stock_ids), dtype=np.bool_)
+
+    window = slice(column + 1 - traded_value_sessions, column + 1)
+    traded_value = np.nan_to_num(bars.close[:, window] * bars.volume[:, window]).mean(axis=1)
+    stock = np.array([SecurityKind.of(stock_id) == SecurityKind.STOCK for stock_id in bars.stock_ids])
+
+    with np.errstate(invalid="ignore"):
+        return stock & (bars.close[:, column] >= min_close) & (traded_value >= min_traded_value)
+
+
+def revenue_column(history: RankingHistory, revenue_month: date) -> int:
+    """The column of `revenue_month` in the history's revenue, which may lie before its first month or after its last."""
+    first = history.months[0] if history.months else revenue_month
+    return month_index(revenue_month.year, revenue_month.month) - month_index(first.year, first.month)
+
+
+def revenue_acceleration(revenue: Floats, month: int, short_months: PositiveInt, long_months: PositiveInt) -> Floats:
+    """
+    Each row's mean revenue of the `short_months` months to column `month` over its mean of the `long_months` months
+    to it. NaN where a month of the window is not held or the ratio is not finite. The monthly ranking and a stock's
+    revenue trend both read it here.
+    """
+    if month + 1 < long_months or month >= revenue.shape[1]:
+        return np.full(revenue.shape[0], np.nan)
+
+    short = np.sum(revenue[:, month + 1 - short_months : month + 1], axis=1) / short_months
+    long = np.sum(revenue[:, month + 1 - long_months : month + 1], axis=1) / long_months
+
+    with np.errstate(all="ignore"):
+        acceleration = short / long
+
+    return np.where(np.isfinite(acceleration), acceleration, np.nan)
+
+
+def nearness_to_high(history: RankingHistory, column: int, high_sessions: PositiveInt) -> Floats:
+    first = column + 1 - high_sessions
+
+    if first < 0:
+        return np.full(len(history.bars.stock_ids), np.nan)
+
+    listed = ~np.isnan(history.bars.close[:, : first + 1]).all(axis=1)
+    return np.where(listed, history.level[:, column] / history.level[:, first : column + 1].max(axis=1), np.nan)
+
+
 @dataclass(frozen=True)
 class MonthlyRankingRule:
     """
@@ -223,16 +274,17 @@ class MonthlyRankingRule:
     long_months: PositiveInt
 
     @model_validator(mode="after")
-    def _the_short_months_are_among_the_long(self) -> Self:
+    def the_short_months_are_among_the_long(self) -> Self:
         if self.short_months > self.long_months:
             raise ValueError("short_months must not be more than long_months")
 
         return self
 
     def apply(self, history: RankingHistory, column: int, revenue_month: date, names: Mapping[str, str | None]) -> Ranking:
-        universe = self._universe(history.bars, column)
-        acceleration = np.where(universe, self._acceleration(history, revenue_month), np.nan)
-        nearness = np.where(universe, self._nearness(history, column), np.nan)
+        universe = in_universe(history.bars, column, self.min_close, self.min_traded_value, self.traded_value_sessions)
+        month = revenue_column(history, revenue_month)
+        acceleration = np.where(universe, revenue_acceleration(history.revenue, month, self.short_months, self.long_months), np.nan)
+        nearness = np.where(universe, nearness_to_high(history, column, self.high_sessions), np.nan)
         acceleration_rank, nearness_rank = ranks(acceleration), ranks(nearness)
         score = acceleration_rank + nearness_rank
         scored = np.flatnonzero(~np.isnan(score))
@@ -257,41 +309,6 @@ class MonthlyRankingRule:
             scored=len(scored),
             stocks=stocks,
         )
-
-    def _universe(self, bars: DailyBarMatrix, column: int) -> Flags:
-        if column + 1 < self.traded_value_sessions:
-            return np.zeros(len(bars.stock_ids), dtype=np.bool_)
-
-        window = slice(column + 1 - self.traded_value_sessions, column + 1)
-        traded_value = np.nan_to_num(bars.close[:, window] * bars.volume[:, window]).mean(axis=1)
-        stock = np.array([SecurityKind.of(stock_id) == SecurityKind.STOCK for stock_id in bars.stock_ids])
-
-        with np.errstate(invalid="ignore"):
-            return stock & (bars.close[:, column] >= self.min_close) & (traded_value >= self.min_traded_value)
-
-    def _acceleration(self, history: RankingHistory, revenue_month: date) -> Floats:
-        first = history.months[0] if history.months else revenue_month
-        month = (revenue_month.year - first.year) * 12 + revenue_month.month - first.month
-
-        if month + 1 < self.long_months or month >= len(history.months):
-            return np.full(len(history.bars.stock_ids), np.nan)
-
-        short = np.sum(history.revenue[:, month + 1 - self.short_months : month + 1], axis=1) / self.short_months
-        long = np.sum(history.revenue[:, month + 1 - self.long_months : month + 1], axis=1) / self.long_months
-
-        with np.errstate(all="ignore"):
-            acceleration = short / long
-
-        return np.where(np.isfinite(acceleration), acceleration, np.nan)
-
-    def _nearness(self, history: RankingHistory, column: int) -> Floats:
-        first = column + 1 - self.high_sessions
-
-        if first < 0:
-            return np.full(len(history.bars.stock_ids), np.nan)
-
-        listed = ~np.isnan(history.bars.close[:, : first + 1]).all(axis=1)
-        return np.where(listed, history.level[:, column] / history.level[:, first : column + 1].max(axis=1), np.nan)
 
 
 def ranks(values: Floats) -> Floats:
