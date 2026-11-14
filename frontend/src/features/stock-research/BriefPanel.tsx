@@ -1,8 +1,8 @@
-import { ArrowDown, CircleSlash, ExternalLink, PenLine, Sparkles } from 'lucide-react'
+import { ArrowDown, Check, Circle, CircleSlash, ExternalLink, LoaderCircle, PenLine, Sparkles } from 'lucide-react'
 import { useId } from 'react'
 import { Link, useLocation } from 'react-router'
 import { useLocale, useTranslation } from '@/i18n'
-import { useSession } from '@/shared/api'
+import { useAllows, useSession } from '@/shared/api'
 import { useFormat } from '@/shared/lib/format'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
@@ -13,23 +13,30 @@ import { Panel } from '@/shared/ui/panel'
 import { useAuthLinks } from '@/shared/ui/require-sign-in'
 import { Skeleton } from '@/shared/ui/skeleton'
 import { StateBlock } from '@/shared/ui/state-block'
-import { useStockBrief, useWriteStockBrief } from './api'
-import { briefView, citedSources, sourceLink, usedSources, type BriefAsk, type BriefSentence, type BriefSource, type BriefView, type StockBrief } from './brief'
+import { useStockBrief, useStockCompany, useWriteStockBrief } from './api'
+import { briefSteps, briefView, citedSources, sourceLink, usedSources, type BriefAsk, type BriefSentence, type BriefSource, type BriefStep, type BriefView, type StockBrief } from './brief'
 
 /**
- * The AI's brief of the stock: what the company is, and how the facts the site holds relate to its recent move. The
+ * The AI's brief of the stock: how the facts the site holds relate to its recent move; what the company is, the
+ * company card above it says. The
  * site writes one per stock and day for every viewer, and only when a signed-in viewer clicks: opening the page never
- * spends an AI call. Every sentence and title is the AI's or a third party's and renders as text.
+ * spends an AI call. Every sentence and title is the AI's or a third party's and renders as text. A first brief of a
+ * stock can take a minute, because the site first reads the company's filings and writes its card: while it is being
+ * written the card says each step and which one the site is at, from what the site holds, asked again every few
+ * seconds.
  */
 export function BriefPanel({ stockId }: { stockId: string }) {
   const { t } = useTranslation('research')
   const brief = useStockBrief(stockId)
   const write = useWriteStockBrief(stockId)
   const viewer = useSession().status
+  const view = brief.data ? briefView(brief.data, { pending: write.isPending, error: write.error }, viewer) : null
+  const company = useStockCompany(stockId, view?.kind === 'writing')
+  const reads = { mainBusiness: useAllows('mops'), annualReports: useAllows('annual_reports') }
   return (
     <Panel title={t('brief.title')}>
-      {brief.data ? (
-        <View view={briefView(brief.data, { pending: write.isPending, error: write.error }, viewer)} onWrite={() => write.mutate()} />
+      {brief.data && view ? (
+        <View view={view} steps={briefSteps(company.data, brief.data, reads)} onWrite={() => write.mutate()} />
       ) : brief.isError ? (
         <ErrorState error={brief.error} title={t('brief.loadFailed')} onRetry={() => void brief.refetch()} />
       ) : (
@@ -39,12 +46,14 @@ export function BriefPanel({ stockId }: { stockId: string }) {
   )
 }
 
-function View({ view, onWrite }: { view: BriefView; onWrite: () => void }) {
+function View({ view, steps, onWrite }: { view: BriefView; steps: readonly BriefStep[]; onWrite: () => void }) {
   const { t } = useTranslation('research')
   if (view.kind === 'written') return <ShownBrief brief={view.brief} />
   return (
     <div className="space-y-4">
-      {view.kind === 'writing' && <StateBlock icon={PenLine} title={t('brief.writing.title')} description={t('brief.writing.description')} className="py-4" />}
+      {view.kind === 'writing' && (
+        <StateBlock icon={PenLine} title={t('brief.writing.title')} description={t('brief.writing.description')} action={<Steps steps={steps} />} className="py-4" />
+      )}
       {view.kind === 'failed' &&
         (view.error ? (
           <ErrorState error={view.error} title={t('brief.failed.title')} className="py-4" />
@@ -56,6 +65,27 @@ function View({ view, onWrite }: { view: BriefView; onWrite: () => void }) {
       {(view.kind === 'failed' || view.kind === 'unwritten') && <Ask ask={view.ask} label={t(view.kind === 'failed' ? 'brief.retry' : 'brief.write')} onWrite={onWrite} />}
       {view.earlier && <Earlier brief={view.earlier} />}
     </div>
+  )
+}
+
+const STEP_ICON = { done: Check, active: LoaderCircle, waiting: Circle } as const
+
+/** What the site does for the brief, in order, and where it is now; each step also says its state in words. The state block around it announces a change. */
+function Steps({ steps }: { steps: readonly BriefStep[] }) {
+  const { t } = useTranslation('research')
+  return (
+    <ol className="space-y-1.5 text-left text-sm">
+      {steps.map(({ step, state }) => {
+        const Icon = STEP_ICON[state]
+        return (
+          <li key={step} aria-current={state === 'active' ? 'step' : undefined} className={state === 'waiting' ? 'flex items-center gap-2 text-muted-foreground' : 'flex items-center gap-2'}>
+            <Icon aria-hidden className={state === 'active' ? 'size-4 shrink-0 animate-spin text-brand motion-reduce:animate-none' : 'size-4 shrink-0'} />
+            <span>{t(`brief.writing.step.${step}`)}</span>
+            <span className="sr-only">{t(`brief.writing.state.${state}`)}</span>
+          </li>
+        )
+      })}
+    </ol>
   )
 }
 
@@ -110,14 +140,7 @@ function ShownBrief({ brief }: { brief: StockBrief }) {
   return (
     <div className="space-y-4">
       <div className="space-y-1.5 text-xs text-pretty text-muted-foreground">
-        <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <Badge variant="secondary">
-            <Sparkles aria-hidden />
-            {t('brief.aiGenerated')}
-          </Badge>
-          <span className="font-mono break-all">{brief.model}</span>
-          {brief.written_at && <time dateTime={brief.written_at}>{t('brief.writtenAt', { time: format.monthDayTime(brief.written_at) })}</time>}
-        </p>
+        <Byline brief={brief} />
         {brief.window_first && brief.window_last ? (
           <p>
             {t('brief.window', { first: format.date(brief.window_first), last: format.date(brief.window_last) })}
@@ -133,11 +156,27 @@ function ShownBrief({ brief }: { brief: StockBrief }) {
         )}
         {brief.language !== locale && <p>{t(`brief.writtenIn.${brief.language}`)}</p>}
       </div>
-      <Part title={t('brief.part.company')} sentences={brief.company ?? []} sources={sources} />
+      {(brief.company ?? []).length > 0 && <Part title={t('brief.part.company')} sentences={brief.company ?? []} sources={sources} />}
       <Part title={t('brief.part.movement')} sentences={brief.movement ?? []} sources={sources} />
       <CitedSources sources={usedSources(brief)} />
       <NotAdviceNote className="border-t pt-3" />
     </div>
+  )
+}
+
+/** That a text is the AI's, which model wrote it and when: the label every AI text on the page carries. */
+export function Byline({ brief }: { brief: StockBrief }) {
+  const { t } = useTranslation('research')
+  const format = useFormat()
+  return (
+    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-pretty text-muted-foreground">
+      <Badge variant="secondary">
+        <Sparkles aria-hidden />
+        {t('brief.aiGenerated')}
+      </Badge>
+      <span className="font-mono break-all">{brief.model}</span>
+      {brief.written_at && <time dateTime={brief.written_at}>{t('brief.writtenAt', { time: format.monthDayTime(brief.written_at) })}</time>}
+    </p>
   )
 }
 
@@ -150,7 +189,6 @@ function useSourceLabel(): (source: BriefSource) => string {
 
 function Part({ title, sentences, sources }: { title: string; sentences: readonly BriefSentence[]; sources: readonly BriefSource[] }) {
   const { t } = useTranslation('research')
-  const label = useSourceLabel()
   const id = useId()
   return (
     <section aria-labelledby={id} className="space-y-2">
@@ -158,18 +196,24 @@ function Part({ title, sentences, sources }: { title: string; sentences: readonl
         {title}
       </h3>
       {sentences.length === 0 && <p className="text-sm text-muted-foreground">{t('brief.part.none')}</p>}
-      {sentences.map((sentence, index) => (
-        <p key={index} className="text-sm leading-relaxed text-pretty break-words">
-          {sentence.text}{' '}
-          {citedSources(sentence, sources).map((source) => (
-            <span key={source.key} className="tabular mr-1 inline-block rounded-full border px-1.5 text-xs leading-5 whitespace-nowrap text-muted-foreground">
-              {label(source)}
-            </span>
-          ))}
-        </p>
-      ))}
+      <Sentences sentences={sentences} sources={sources} />
     </section>
   )
+}
+
+/** An AI text's sentences, each as text with the held items it rests on named after it. */
+export function Sentences({ sentences, sources }: { sentences: readonly BriefSentence[]; sources: readonly BriefSource[] }) {
+  const label = useSourceLabel()
+  return sentences.map((sentence, index) => (
+    <p key={index} className="text-sm leading-relaxed text-pretty break-words">
+      {sentence.text}{' '}
+      {citedSources(sentence, sources).map((source) => (
+        <span key={source.key} className="tabular mr-1 inline-block rounded-full border px-1.5 text-xs leading-5 whitespace-nowrap text-muted-foreground">
+          {label(source)}
+        </span>
+      ))}
+    </p>
+  ))
 }
 
 function CitedSources({ sources }: { sources: readonly BriefSource[] }) {

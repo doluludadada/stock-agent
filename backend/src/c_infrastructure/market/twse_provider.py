@@ -9,6 +9,7 @@ import httpx
 from a_domain.model.fundamentals.eps import Eps
 from a_domain.model.fundamentals.monthly_revenue import MonthlyRevenue
 from a_domain.model.market.article import Article
+from a_domain.model.market.company_profile import CompanyProfile
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.ports.market.daily_close_archive import ExchangeNews, FinancialReport, ValuationRatios
@@ -19,7 +20,15 @@ from a_domain.types.enums import ContentType, EpsBasis, EpsKind, FinancialStatem
 from a_domain.types.values import FiscalQuarter
 from b_application.config.market_data_config import MarketDataConfig
 from b_application.config.sources_config import ExchangeSources
-from c_infrastructure.market.exchange_text import ROC_YEAR_OFFSET, parse_change, parse_number, parse_optional_roc_date, parse_roc_date
+from c_infrastructure.market.exchange_text import (
+    ROC_YEAR_OFFSET,
+    parse_change,
+    parse_number,
+    parse_optional_date,
+    parse_optional_roc_date,
+    parse_roc_date,
+    web_address,
+)
 
 STOCK_CODE_LENGTH = 4
 
@@ -111,6 +120,19 @@ class TaiwanStockProvider(ITaiwanStockProvider):
             self._industries_fetched_at[market] = now
 
         return {stock_id: industry for industries in self._industries.values() for stock_id, industry in industries.items()}
+
+    @override
+    async def fetch_company_profiles(self) -> list[CompanyProfile]:
+        fetched_at = self._clock.now()
+        reports = await read_reports(
+            {market: feed.url for market, feed in self._exchange.company_profiles.items()},
+            lambda rows, market: [
+                profile for row in rows if (profile := parse_company_profile(row, market, self._exchange, fetched_at)) is not None
+            ],
+            self._timeout_seconds,
+            self._logger,
+        )
+        return [profile for profiles in reports.values() for profile in profiles]
 
     @override
     async def fetch_material_information(self) -> list[Article]:
@@ -389,6 +411,37 @@ def parse_industries(rows: list[dict[str, Any]], market: MarketType, exchange: E
         for row in rows
         if row.get(feed.stock_id) and (code := str(row.get(feed.industry, "")).strip()) in names
     }
+
+
+def parse_company_profile(
+    row: dict[str, Any], market: MarketType, exchange: ExchangeSources, fetched_at: datetime
+) -> CompanyProfile | None:
+    """One company's profile as its row serves it, a blank field None; None when the row names no company."""
+    feed = exchange.company_profiles[market]
+
+    if not (stock_id := served_field(row, [feed.stock_id])):
+        return None
+
+    capital, shares = parse_number(served_field(row, [feed.paid_in_capital])), parse_number(served_field(row, [feed.issued_shares]))
+
+    return CompanyProfile(
+        stock_id=stock_id,
+        market=market,
+        full_name=served_field(row, [feed.full_name]) or None,
+        short_name=served_field(row, [feed.short_name]) or None,
+        english_short_name=served_field(row, [feed.english_short_name]) or None,
+        industry_code=served_field(row, [feed.industry]) or None,
+        founded_on=parse_optional_date(served_field(row, [feed.founded_on])),
+        listed_on=parse_optional_date(served_field(row, [feed.listed_on])),
+        paid_in_capital=capital if capital is not None and capital >= 0 else None,
+        issued_shares=int(shares) if shares is not None and shares >= 0 else None,
+        chairman=served_field(row, [feed.chairman]) or None,
+        general_manager=served_field(row, [feed.general_manager]) or None,
+        address=served_field(row, [feed.address]) or None,
+        website=web_address(served_field(row, [feed.website]), exchange.website_scheme),
+        reported_on=parse_optional_roc_date(served_field(row, [feed.report_date])),
+        fetched_at=fetched_at,
+    )
 
 
 def parse_announcement(

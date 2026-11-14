@@ -1,3 +1,4 @@
+from a_domain.ports.market.company_profile_repository import ICompanyProfileRepository
 from a_domain.ports.market.daily_close_archive import (
     ArchivedMonth,
     ArchivedQuarter,
@@ -17,12 +18,20 @@ class DailyCloseArchiver:
     statistics, the valuation ratios, the latest quarter's balance sheets and income statements, the latest month's
     revenue and TWSE's own news, each under the date or period its own row names. Saving the same data again changes
     nothing. It answers every date, quarter and month the archive holds; ArchiveSaveRefused when the database refused
-    part of it, which a run reports as its failure.
+    part of it, which a run reports as its failure. Then it keeps each company's profile as the exchanges serve it now,
+    one per stock (ICompanyProfileRepository.save_listings); an exchange whose profiles fail to load keeps those held.
     """
 
-    def __init__(self, stock_provider: ITaiwanStockProvider, archive: IDailyCloseArchive, logger: ILoggingProvider) -> None:
+    def __init__(
+        self,
+        stock_provider: ITaiwanStockProvider,
+        archive: IDailyCloseArchive,
+        profiles: ICompanyProfileRepository,
+        logger: ILoggingProvider,
+    ) -> None:
         self._stock_provider = stock_provider
         self._archive = archive
+        self._profiles = profiles
         self._logger = logger
 
     async def execute(self) -> tuple[list[ArchivedSession], list[ArchivedQuarter], list[ArchivedMonth]]:
@@ -53,5 +62,9 @@ class DailyCloseArchiver:
             f"{len(download.valuation_ratios)} stocks' valuation ratios, {len(download.financial_reports)} financial reports, "
             f"{len(download.monthly_revenues)} monthly revenues and {len(download.exchange_news)} TWSE news items."
         )
+
+        profiles = await self._stock_provider.fetch_company_profiles()
+        await self._profiles.save_listings(profiles)
+        self._logger.info(f"Kept {len(profiles)} company profiles.")
 
         return await self._archive.sessions(), await self._archive.quarters(), await self._archive.months()

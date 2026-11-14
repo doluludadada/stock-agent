@@ -4,10 +4,11 @@ from datetime import date
 
 from pydantic import PositiveInt, SecretStr
 
-from a_domain.model.analysis.stock_brief import StockBrief
+from a_domain.model.analysis.stock_brief import BriefSource, StockBrief
 from a_domain.model.fundamentals.monthly_revenue import MonthlyRevenue
 from a_domain.model.fundamentals.quarter_financials import QuarterFinancials
 from a_domain.model.market.article import Article
+from a_domain.model.market.company_profile import CompanyProfile
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.model.system.stats import SystemStats
@@ -57,6 +58,7 @@ from b_application.use_cases.backtest.backtest_scores import BacktestScores
 from b_application.use_cases.backtest.saved_backtests import SavedBacktests
 from b_application.use_cases.chat.chat_reply import ChatReply
 from b_application.use_cases.chat.dispatcher import Dispatcher
+from b_application.use_cases.collect.annual_report_refresh import AnnualReportRefresh
 from b_application.use_cases.collect.archive_warm_up import ArchiveWarmUp
 from b_application.use_cases.collect.article_refresh_stocks import ArticleRefreshStocks
 from b_application.use_cases.collect.article_store_backfill import ArticleStoreBackfill
@@ -67,6 +69,7 @@ from b_application.use_cases.collect.fundamentals_feed import FundamentalsFeed
 from b_application.use_cases.collect.fundamentals_history_backfill import FundamentalsHistoryBackfill
 from b_application.use_cases.collect.index_history_loader import IndexHistoryLoader
 from b_application.use_cases.collect.intraday_candidates import IntradayCandidates
+from b_application.use_cases.collect.main_business_refresh import MainBusinessRefresh
 from b_application.use_cases.collect.market_breadth_loader import MarketBreadthLoader
 from b_application.use_cases.collect.market_data_collector import MarketDataCollector
 from b_application.use_cases.collect.most_traded import MostTraded
@@ -78,11 +81,13 @@ from b_application.use_cases.collect.stock_news_lookup import StockNewsLookup
 from b_application.use_cases.collect.stock_search import StockSearch
 from b_application.use_cases.process.ai_analyser import AiAnalyser
 from b_application.use_cases.process.article_indexer import ArticleIndexer
+from b_application.use_cases.process.company_background import CompanyBackground
 from b_application.use_cases.process.daily_stock_brief import DailyStockBrief
 from b_application.use_cases.process.indicator_readings import IndicatorReadings
 from b_application.use_cases.process.sentiment_analyser import SentimentAnalyser
 from b_application.use_cases.process.stock_brief_context import StockBriefContext
 from b_application.use_cases.process.strategy_loader import StrategyLoader
+from b_application.use_cases.process.system_writing_stocks import SystemWritingStocks
 from b_application.use_cases.process.technical_filter import TechnicalFilter
 from b_application.use_cases.process.technical_settings_editor import TechnicalSettingsEditor
 from b_application.use_cases.ranking.latest_ranking import LatestRanking
@@ -191,6 +196,11 @@ class Pipeline:
     article_indexer: ArticleIndexer
     article_refresh_stocks: ArticleRefreshStocks
     article_store_backfill: ArticleStoreBackfill
+    main_business_refresh: MainBusinessRefresh
+    annual_report_refresh: AnnualReportRefresh
+    system_writing_stocks: SystemWritingStocks
+    company_background: CompanyBackground
+    company_card: DailyStockBrief
     stock_brief_context: StockBriefContext
     daily_stock_brief: DailyStockBrief
     realtime_quote_feed: RealtimeQuoteFeed
@@ -835,6 +845,54 @@ class Pipeline:
 
         return kept, len(stock_ids), embedded
 
+    async def backfill_company_background(self, top: PositiveInt) -> tuple[int, tuple[int, int], tuple[int, int]]:
+        """
+        `just backfill-company-background`: what a personal site reads about the companies of the monthly ranking at
+        its latest decision session, the `top` best scores first: each one's main business from MOPS, then each one's
+        annual-report sections from the document site, when they are due, one request at a time at each site's pace,
+        saved as it comes, so a rerun after a stop reads only the rest. It answers the companies asked for, the main
+        businesses read and left due, and the reports read and the companies left due. A public site reads none.
+        RankingUnavailable while the history holds no decision session.
+        """
+        history = await self.ranking_history_loader.execute()
+        ranking = await self.latest_ranking.execute(history, top)
+        stock_ids = [stock.stock_id for stock in ranking.stocks]
+        businesses = await self.main_business_refresh.execute(stock_ids)
+        reports = await self.annual_report_refresh.execute(stock_ids)
+
+        return len(stock_ids), businesses, reports
+
+    async def load_system_writing(self) -> list[str]:
+        """
+        The Web API's timer: the stocks the site still writes for by itself now, the monthly ranking's top stocks of
+        the round that began when the latest session's daily data was held, less those whose brief is written; empty
+        once the round is done. The timer then asks for each one's brief (write_stock_brief), on the Pipeline of the
+        site's own writing, whose AI calls are counted against stock_page.system_writing.daily_ai_calls. It ranks the
+        market only at a round's first look.
+        """
+        return await self.system_writing_stocks.execute()
+
+    async def load_company(
+        self, stock_id: str
+    ) -> tuple[CompanyProfile | None, list[BriefSource], StockBrief | None, StockBrief | None] | None:
+        """
+        A stock's page: what the site holds about the company itself. Its profile, the held items a company card may
+        cite, each with the page of MOPS or of the document site it is from, the company's card if one was claimed
+        today in Taipei, and its newest written card of an earlier day. It reads held data alone. None for a stock
+        that is not listed.
+        """
+        status = PipelineStatus.read_only(Workflow.RESEARCH)
+        status.manual_stocks = await self.stock_lookup.execute([stock_id], status.stats)
+
+        if not status.manual_stocks:
+            return None
+
+        _, _, analysis = await self.stock_analysis_lookup.execute(stock_id)
+        profile, context = await self.company_background.execute(status.manual_stocks[0], analysis)
+        card, kept_card, _ = await self.company_card.execute(stock_id)
+
+        return profile, [fact.source for fact in context.facts], card, kept_card
+
     async def load_stock_brief(self, stock_id: str) -> tuple[StockBrief | None, StockBrief | None, int]:
         """
         A stock's page: the AI brief the site holds of the stock today in Taipei, its newest written brief of an earlier
@@ -844,11 +902,14 @@ class Pipeline:
 
     async def write_stock_brief(self, stock_id: str) -> tuple[StockBrief | None, StockBrief | None, int] | None:
         """
-        A signed-in viewer asks for a stock's AI brief of today in Taipei: what the company is and how the held facts of
-        a recent window relate to the stock's move. The brief's news is what its searches find in the article store, so
-        the stock's vectors are brought up to date first. The site writes one per stock and day, so only the request
-        that claims it calls the AI, once; every other request answers what is held. Then what load_stock_brief
-        answers. None for a stock that is not listed.
+        A stock's AI brief of today in Taipei is asked for, by a signed-in viewer or by the site's own timer: how the
+        held facts of a recent window relate to the stock's move. First a personal site reads the company's main
+        business from MOPS and its annual report's sections from the document site when either is due, and the
+        company's card is written if it has none or what it rests on changed, one AI call. The brief's news is what its
+        searches find in the article store, so the stock's vectors are brought up to date, and the card's text is the
+        brief's fact of what the company is. The site writes one brief per stock and day, so only the request that
+        claims it calls the AI, once; every other request answers what is held. Then what load_stock_brief answers.
+        None for a stock that is not listed.
         """
         status = PipelineStatus.read_only(Workflow.RESEARCH)
         status.manual_stocks = await self.stock_lookup.execute([stock_id], status.stats)
@@ -858,9 +919,13 @@ class Pipeline:
 
         _, _, analysis = await self.stock_analysis_lookup.execute(stock_id)
         articles = await self.stock_news_lookup.execute(stock_id) or []
+        await self.main_business_refresh.execute([stock_id])
+        await self.annual_report_refresh.execute([stock_id])
         await self.article_indexer.execute(stock_id)
+        _, card_context = await self.company_background.execute(status.manual_stocks[0], analysis)
+        card, kept_card, _ = await self.company_card.execute(stock_id, card_context)
         history = await self.ranking_history_loader.execute()
-        context = await self.stock_brief_context.execute(status.manual_stocks[0], analysis, articles, history)
+        context = await self.stock_brief_context.execute(status.manual_stocks[0], analysis, articles, history, (card, kept_card))
 
         return await self.daily_stock_brief.execute(stock_id, context)
 

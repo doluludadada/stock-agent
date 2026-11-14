@@ -13,6 +13,7 @@ from a_domain.types.values import FiscalQuarter
 from b_application.config.market_data_config import MarketHoursConfig
 from c_infrastructure.market import mops_fundamentals_provider
 from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider, parse_cumulative_eps
+from c_infrastructure.market.request_pace import RequestPace
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
 
 SOURCES = shipped_config().sources
@@ -61,7 +62,13 @@ async def build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[MopsFu
     await db.init_db()
     clock = MovableClock()
     provider = MopsFundamentalsProvider(
-        db=db, market_clock=clock, mops=SOURCES.mops, listing=cast(Any, None), logger=SilentLogger(), write_lock=asyncio.Lock()
+        db=db,
+        market_clock=clock,
+        mops=SOURCES.mops,
+        listing=cast(Any, None),
+        logger=SilentLogger(),
+        write_lock=asyncio.Lock(),
+        pace=RequestPace(),
     )
     mops = FakeMops()
     markets = {SOURCES.mops.twse_market_code: MarketType.TWSE, SOURCES.mops.tpex_market_code: MarketType.TPEX}

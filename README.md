@@ -243,6 +243,69 @@ technical-strategy pages, the mock account and the SinoPac account. Ordering on 
 `off`. The Web API refuses a hidden feature's requests (403 `feature_hidden`), the web app hides its pages, and a change
 in the settings page applies at once. `docs/web-integration.md` lists what each gates.
 
+### Company background and the site's own writing
+
+A stock page says what the company is in one card, above the AI brief. What it shows comes from four places:
+
+| What | Source | Audience | Kept in |
+| --- | --- | --- | --- |
+| The company's profile: names, founding and listing dates, paid-in capital, issued shares, chairman, general manager, address, website | The exchanges' company basic data in their OpenAPI (`sources.exchange.company_profiles`), Open Government Data License v1 | every audience | `company_profiles`, one row per stock |
+| The main business as the company filed it, and its English name | MOPS's company basic information, one POST per company to its JSON API (`sources.mops.company_basics_url`) | `personal` only | the same row of `company_profiles` |
+| The sections of the shareholders'-meeting annual report: business scope, product mix, customers of a tenth of sales, industry overview, employees | The exchange's document site, doc.twse.com.tw, three requests a report (`sources.annual_reports`) | `personal` only | `stored_articles`, source `annual_report` |
+| The company card: what the company makes and sells, to whom, and its scale, each sentence citing its source | The AI, from the three rows above and the last full year's revenue | every audience, from what it holds | `company_cards` |
+
+MOPS and the document site disallow every robot, so a public deployment builds neither adapter, and its card rests on
+the open data alone. An annual report's sections are documents of record, not news: the stock page's news list leaves
+them out, the article store's limit per stock does not count them, and the card's sources link the page that lists
+the report. The card is written once and kept. It is written again only when what it rests on, its prompt or the
+brief's language changes (a fingerprint of them is kept with the card), never because a day passed.
+
+When each part is read:
+
+- The profile: with the open-data archive, at the Web API's start, every `api.archive_interval_hours`, and with
+  `just archive-closes`.
+- The main business and the annual report: when a signed-in viewer asks for a stock's brief, when the site writes for
+  a stock by itself, and with `just backfill-company-background`. The main business is asked again after
+  `sources.mops.company_basics_max_age_days` (90). The annual report is looked for once a year from June
+  (`sources.annual_reports.first_month`), and again every `retry_days` (7) until it appears. A report the site cannot
+  read (larger than `max_bytes`, no PDF, or a reading that ran out of time or memory) is logged, looked for again
+  after `retry_days`, and never holds up the next company.
+- The card: before a brief, when the company has none or what it rests on changed. It costs one AI call.
+
+Every request to MOPS waits `sources.mops.request_interval_seconds` (5) after the one before it, and every request to
+the document site `sources.annual_reports.request_interval_seconds` (5). Each pace is kept in the database
+(`request_paces`), so the Web API and a command run beside it share it. A report's PDF is streamed to a temporary file
+that has no name and read by a worker process, which the server kills after `read_timeout_seconds` (180); the worker
+also ends itself once it used that much processor time, and on Linux it may address at most `read_memory_mb` (1024).
+
+A viewer's first brief of a stock can take a minute, because the request reads the main business and the annual
+report, writes the card and then the brief. The page lists those steps and marks the one the site is at. One request
+at a time works for a stock: a second one waits for the first and then answers what is held.
+
+The site's own writing is off until `stock_page.system_writing.daily_ai_calls` is above 0 (the shipped file sets 60).
+Then the Web API's timer, once the daily bars of a new session are held, begins one round for the stocks of the
+monthly ranking's top (`ranking.top`), and for the stocks users hold or watch too where
+`stock_page.system_writing.users_stocks` is on. For each stock it does what a viewer's request does. A round goes on
+after a restart, a spent budget or a failed stock. Its AI calls go to `ai.system_model` (Claude unless set), are
+counted per Taiwan calendar day in `system_ai_calls`, and are never taken from a user's allowance. Its briefs and
+cards take none of `stock_page.brief.daily_stocks` (30) and `stock_page.card.daily_stocks` (200), which bound what
+viewers' requests may claim a day. Only the timer holds the Pipeline that spends this budget: a request made on the
+signed-out Pipeline is refused by its AI provider, as before.
+
+The prompts are in `config/instructions.yaml`: `company_card_prompt` for the card, and `stock_brief_prompt`, which
+now asks for the movement alone and takes the card's text as its fact of what the company is. A deployment whose file
+lacks `company_card_prompt` writes no card, and one whose file names no address for MOPS's company basic information
+or for the document site reads neither. The start says each in one log line, and the app runs as before.
+
+```bash
+just archive-closes                          # the open data, with each company's profile
+just backfill-company-background --top 20    # the main business and annual report of the ranking's 20 best scores
+just backfill-company-background             # of every scored stock: about 20 seconds a company
+```
+
+`just backfill-company-background` asks no AI. It saves each company as it comes, stops at the first request a site
+does not answer, and ends with exit code 2 while anything is still due, so run it again later.
+
 ### Sign in with Google
 
 The site can sign users in with Google next to the password sign-in. It offers Google when `GOOGLE_CLIENT_ID` and

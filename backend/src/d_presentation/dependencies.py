@@ -1,7 +1,7 @@
 import asyncio
 from collections.abc import AsyncGenerator, Callable, Mapping
 from contextlib import AsyncExitStack, asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from hashlib import sha256
 from typing import TYPE_CHECKING, Any
@@ -16,12 +16,16 @@ from a_domain.ports.ai.article_index import IArticleIndex
 from a_domain.ports.ai.knowledge_repository import IKnowledgeRepository
 from a_domain.ports.ai.sentiment_classifier import ISentimentClassifier
 from a_domain.ports.ai.stock_brief_repository import IStockBriefRepository
+from a_domain.ports.ai.system_writing_log import ISystemWritingLog
 from a_domain.ports.analysis.technical_settings_repository import ITechnicalSettingsRepository
 from a_domain.ports.chat.conversation_repository import IConversationRepository
 from a_domain.ports.chat.platform_provider import IPlatformProvider
+from a_domain.ports.market.annual_report_provider import IAnnualReportProvider
 from a_domain.ports.market.article_store import IArticleStore
 from a_domain.ports.market.broker_quote_provider import IBrokerQuoteProvider
 from a_domain.ports.market.cached_price_provider import ICachedPriceProvider
+from a_domain.ports.market.company_basics_provider import ICompanyBasicsProvider
+from a_domain.ports.market.company_profile_repository import ICompanyProfileRepository
 from a_domain.ports.market.daily_bar_matrix_provider import IDailyBarMatrixProvider
 from a_domain.ports.market.daily_close_archive import IDailyCloseArchive
 from a_domain.ports.market.fundamentals_provider import IFundamentalsProvider
@@ -44,7 +48,7 @@ from a_domain.ports.trading.holding_repository import IHoldingRepository
 from a_domain.ports.trading.trading_journal import ITradingJournal
 from a_domain.ports.trading.users_stocks import IUsersStocks
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
-from a_domain.types.enums import AiProvider, ExecutionProvider, MarketType, Permission
+from a_domain.types.enums import AiProvider, BriefKind, ExecutionProvider, MarketType, Permission
 from a_domain.types.errors import BrokerUnavailable, RealBrokerRefused
 from a_domain.types.ids import UserId
 from b_application.config.api_config import FeaturesConfig
@@ -71,6 +75,7 @@ from b_application.use_cases.backtest.backtest_scores import BacktestScores
 from b_application.use_cases.backtest.saved_backtests import SavedBacktests
 from b_application.use_cases.chat.chat_reply import ChatReply
 from b_application.use_cases.chat.dispatcher import Dispatcher
+from b_application.use_cases.collect.annual_report_refresh import AnnualReportRefresh
 from b_application.use_cases.collect.archive_warm_up import ArchiveWarmUp
 from b_application.use_cases.collect.article_refresh_stocks import ArticleRefreshStocks
 from b_application.use_cases.collect.article_store_backfill import ArticleStoreBackfill
@@ -81,6 +86,7 @@ from b_application.use_cases.collect.fundamentals_feed import FundamentalsFeed
 from b_application.use_cases.collect.fundamentals_history_backfill import FundamentalsHistoryBackfill
 from b_application.use_cases.collect.index_history_loader import IndexHistoryLoader
 from b_application.use_cases.collect.intraday_candidates import IntradayCandidates
+from b_application.use_cases.collect.main_business_refresh import MainBusinessRefresh
 from b_application.use_cases.collect.market_breadth_loader import MarketBreadthLoader
 from b_application.use_cases.collect.market_data_collector import MarketDataCollector
 from b_application.use_cases.collect.most_traded import MostTraded
@@ -92,11 +98,13 @@ from b_application.use_cases.collect.stock_news_lookup import StockNewsLookup
 from b_application.use_cases.collect.stock_search import StockSearch
 from b_application.use_cases.process.ai_analyser import AiAnalyser
 from b_application.use_cases.process.article_indexer import ArticleIndexer
+from b_application.use_cases.process.company_background import CompanyBackground
 from b_application.use_cases.process.daily_stock_brief import DailyStockBrief
 from b_application.use_cases.process.indicator_readings import IndicatorReadings
 from b_application.use_cases.process.sentiment_analyser import SentimentAnalyser
 from b_application.use_cases.process.stock_brief_context import StockBriefContext
 from b_application.use_cases.process.strategy_loader import StrategyLoader
+from b_application.use_cases.process.system_writing_stocks import SystemWritingStocks
 from b_application.use_cases.process.technical_filter import TechnicalFilter
 from b_application.use_cases.process.technical_settings_editor import TechnicalSettingsEditor
 from b_application.use_cases.ranking.latest_ranking import LatestRanking
@@ -154,6 +162,7 @@ from c_infrastructure.ai_models.ai_adapter.daily_capped_ai_provider import Daily
 from c_infrastructure.ai_models.ai_adapter.gemini_adapter import GeminiAIAdapter
 from c_infrastructure.ai_models.ai_adapter.grok_adapter import GrokAdapter
 from c_infrastructure.ai_models.ai_adapter.openai_adapter import OpenAIAdapter
+from c_infrastructure.ai_models.ai_adapter.system_ai_provider import SystemAiProvider
 from c_infrastructure.ai_models.ai_adapter.web_search_adapter import WebSearchAiAdapter
 from c_infrastructure.ai_models.onnx_text_embedder import OnnxTextEmbedder
 from c_infrastructure.ai_models.sentiment_classifier import AiSentimentClassifier
@@ -162,13 +171,16 @@ from c_infrastructure.database.chroma.conversation_repository import ChromaConve
 from c_infrastructure.database.chroma.knowledge_repository import ChromaKnowledgeRepository
 from c_infrastructure.database.chroma.schema import ChromaCollection
 from c_infrastructure.database.db_connector import DatabaseConnector, OutdatedDatabaseError
+from c_infrastructure.database.models.stock_brief_dto import CompanyCardDTO, StockBriefDTO
 from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID, load_accounts_key
 from c_infrastructure.database.repositories.article_store import SqlArticleStore
 from c_infrastructure.database.repositories.backtest_repository import SqlBacktestRepository
+from c_infrastructure.database.repositories.company_profile_repository import SqlCompanyProfileRepository
 from c_infrastructure.database.repositories.daily_close_archive import SqlDailyCloseArchive
 from c_infrastructure.database.repositories.holding_repository import HoldingRepository
 from c_infrastructure.database.repositories.sentiment_repository import SentimentRepository
 from c_infrastructure.database.repositories.stock_brief_repository import SqlStockBriefRepository
+from c_infrastructure.database.repositories.system_writing_log import SqlSystemWritingLog
 from c_infrastructure.database.repositories.trading_journal import TradingJournal
 from c_infrastructure.database.repositories.user_store import AccountsKeyError, SqlUserStore
 from c_infrastructure.database.repositories.users_stocks import SqlUsersStocks
@@ -183,8 +195,10 @@ from c_infrastructure.identity.google_identity_provider import GoogleIdentityPro
 from c_infrastructure.market.cached_price_provider import CachedPriceProvider
 from c_infrastructure.market.daily_bar_matrix_provider import DailyBarMatrixProvider
 from c_infrastructure.market.exchange_daily_reports import ExchangeDailyReports
+from c_infrastructure.market.mops_company_basics import MopsCompanyBasicsProvider
 from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider
-from c_infrastructure.market.request_pace import RequestPace
+from c_infrastructure.market.request_pace import PacedHost, RequestPace, SharedRequestPace
+from c_infrastructure.market.twse_annual_report_provider import TwseAnnualReportProvider
 from c_infrastructure.market.twse_provider import TaiwanStockProvider
 from c_infrastructure.platforms.line.line_adapter import LinePlatformAdapter
 from c_infrastructure.platforms.line.line_notification_adapter import LineNotificationAdapter
@@ -217,12 +231,20 @@ class Runtime:
     change waits on a cache: the mock account unless the run chose a real broker, which only a user with
     USE_REAL_BROKER gets (RealBrokerRefused) while its login is up (BrokerUnavailable). signed_out is the graph of
     nobody, built once, for sign-in, setup, the public market pages and LINE chat: its ports that hold users' data refuse
-    their first call with SignInRequired. open_runtime() builds it from the real adapters; compose_runtime() wires the
-    same graph over any ports, so tests and the order-gate check run it over fakes.
+    their first call with SignInRequired, its AI provider among them, so no request made through it spends an AI call.
+    open_runtime() builds it from the real adapters; compose_runtime() wires the same graph over any ports, so tests
+    and the order-gate check run it over fakes.
     """
 
     pipeline_for: Callable[[User, ExecutionProvider], Pipeline]
     signed_out: Pipeline
+    system_writer: Pipeline | None
+    """
+    The graph of the site's own writing, which the Web API's timer alone runs (write_for_system_stocks): signed_out
+    with its brief and its company card written on the system's provider, whose calls count against
+    stock_page.system_writing.daily_ai_calls and are named for no user. No request's dependency answers it, so no
+    route spends the system's budget. None while the site's own writing is off.
+    """
     market_valuation_cache: MarketValuationCache
     """
     The market valuation this runtime loaded, reused for api.valuation_cache_minutes. It lives and dies with the
@@ -331,6 +353,18 @@ class ProviderDependencies:
     """
     stock_brief_repository: IStockBriefRepository
     """The site's AI briefs of stocks, one per stock and Taipei calendar day, shared by every user."""
+    company_card_repository: IStockBriefRepository
+    """The site's company cards, each under the day it was claimed on, in a table of their own, shared by every user."""
+    system_writing_log: ISystemWritingLog
+    """The rounds of the site's own writing, one per session, kept across restarts."""
+    system_ai_provider: IAiProvider | None
+    """
+    The provider of the site's own writing, on ai.system_model, its calls counted per day against
+    stock_page.system_writing.daily_ai_calls and named for no user. Only Runtime.system_writer's briefs and cards use
+    it. None while the site's own writing is off, which builds no adapter for it.
+    """
+    company_profile_repository: ICompanyProfileRepository
+    """What the site holds about each listed company itself, one profile per stock, shared by every user."""
     article_store: IArticleStore
     """What the site read about each stock, kept in the database and shared by every user."""
     article_index: IArticleIndex
@@ -347,6 +381,10 @@ class ProviderDependencies:
     daily_close_archive: IDailyCloseArchive
     fundamentals_provider: IFundamentalsProvider | None
     """MOPS, or None for an audience that reads no MOPS (public): its valuation is refused."""
+    company_basics_provider: ICompanyBasicsProvider | None
+    """MOPS's company basic information, or None for an audience that reads no MOPS (public): no main business is read."""
+    annual_report_provider: IAnnualReportProvider | None
+    """The exchange's document site, or None for an audience that reads no annual report (public)."""
 
     news_provider: INewsProvider
     """The news sites, or the open-data archive's material information for an audience without news articles (public)."""
@@ -557,7 +595,7 @@ def create_fundamentals_provider(
 ) -> IFundamentalsProvider | None:
     """
     MOPS's income statements and monthly revenue summaries, or None for an audience that reads no MOPS, which never builds
-    its adapter.
+    its adapter. Each request waits on MOPS's pace in the database, which every runtime and every process shares.
     """
     if not config.audience.mops:
         return None
@@ -569,7 +607,59 @@ def create_fundamentals_provider(
         listing=listing,
         logger=process.logger,
         write_lock=process.cache_writes,
+        pace=SharedRequestPace(db, PacedHost.MOPS),
     )
+
+
+def create_system_ai_provider(
+    config: AppConfig,
+    db: DatabaseConnector,
+    ai_providers: Mapping[AiProvider, IAiProvider],
+    market_clock: TaiwanMarketClock,
+    logger: ILoggingProvider,
+) -> IAiProvider | None:
+    """
+    The counted provider of the site's own writing over ai.system_model's adapter, the one `ai_providers` holds where a
+    user's setting offers that model too. None while stock_page.system_writing.daily_ai_calls is 0.
+    """
+    if not config.stock_page.system_writing.enabled:
+        return None
+
+    return SystemAiProvider(
+        ai_providers.get(config.ai.system_model) or create_ai_provider(config, logger, config.ai.system_model),
+        db,
+        market_clock,
+        config.stock_page.system_writing.daily_ai_calls,
+    )
+
+
+def create_company_basics_provider(
+    config: AppConfig, db: DatabaseConnector, logger: ILoggingProvider
+) -> ICompanyBasicsProvider | None:
+    """
+    MOPS's company basic information, or None for an audience that reads no MOPS, which never builds its adapter, and
+    while the settings name no address for it, as a deployment's older settings file does. Its requests wait on the
+    pace the income statements' requests wait on.
+    """
+    if not config.audience.mops or not config.sources.mops.company_basics_set:
+        return None
+
+    return MopsCompanyBasicsProvider(config.sources.mops, SharedRequestPace(db, PacedHost.MOPS), logger)
+
+
+def create_annual_report_provider(
+    config: AppConfig, db: DatabaseConnector, market_clock: TaiwanMarketClock, logger: ILoggingProvider
+) -> IAnnualReportProvider | None:
+    """
+    The exchange's document site, or None for an audience that reads no annual report, which never builds its adapter,
+    and while the settings name no address for it, as a deployment's older settings file does. Its requests wait on
+    the site's pace in the database, which every runtime and every process shares.
+    """
+    if not config.audience.annual_reports or not config.sources.annual_reports.addresses_set:
+        return None
+
+    pace = SharedRequestPace(db, PacedHost.DOCUMENT_SITE)
+    return TwseAnnualReportProvider(config.sources.annual_reports, pace, market_clock, logger)
 
 
 def create_platform_provider(config: AppConfig, logger: ILoggingProvider) -> IPlatformProvider | None:
@@ -670,7 +760,11 @@ async def build_provider_dependencies(
         bar_matrix_provider=DailyBarMatrixProvider(
             stock_provider, price_provider, archive, market_clock, config.ranking.history_rule(), logger
         ),
-        stock_brief_repository=SqlStockBriefRepository(db),
+        stock_brief_repository=SqlStockBriefRepository(db, StockBriefDTO),
+        company_card_repository=SqlStockBriefRepository(db, CompanyCardDTO),
+        system_writing_log=SqlSystemWritingLog(db),
+        system_ai_provider=create_system_ai_provider(config, db, ai_providers, market_clock, logger),
+        company_profile_repository=SqlCompanyProfileRepository(db),
         article_store=SqlArticleStore(
             db, market_clock, config.stock_page.article_store.retention(), config.stock_page.article_store.max_per_stock
         ),
@@ -688,6 +782,8 @@ async def build_provider_dependencies(
         shioaji=process.shioaji_connections.get(login) if login is not None else None,
         daily_close_archive=archive,
         fundamentals_provider=create_fundamentals_provider(config, db, process, market_clock, stock_provider),
+        company_basics_provider=create_company_basics_provider(config, db, logger),
+        annual_report_provider=create_annual_report_provider(config, db, market_clock, logger),
         news_provider=create_news_provider(config, logger, archive, market_clock),
         social_media_provider=(
             PttProvider(config=config, logger=logger, stock_provider=stock_provider, market_clock=market_clock)
@@ -851,7 +947,6 @@ def build_pipeline(
     user_id = user.user_id if user is not None else None
     chat_styler = ChatStylerService(config.sources.line.sentence_endings, config.sources.line.max_message_length)
     ai_model = config.ai.offered_models[config.ai.model_for(user.ai_model if user is not None else None)]
-
     return Pipeline(
         strategy_loader=StrategyLoader(owned.technical_settings_repository, config, logger),
         technical_settings_editor=TechnicalSettingsEditor(owned.technical_settings_repository, config),
@@ -867,7 +962,9 @@ def build_pipeline(
         buzz_scanner=BuzzScanner(dependencies.social_media_provider, stocks, logger, config),
         intraday_candidates=IntradayCandidates(stocks, owned.watchlist_repository, logger),
         data_collector=MarketDataCollector(prices, stocks, history_archive, market_clock, config, logger),
-        daily_close_archiver=DailyCloseArchiver(stocks, dependencies.daily_close_archive, logger),
+        daily_close_archiver=DailyCloseArchiver(
+            stocks, dependencies.daily_close_archive, dependencies.company_profile_repository, logger
+        ),
         daily_history_backfill=DailyHistoryBackfill(dependencies.history_cache, market_clock, config),
         fundamentals_history_backfill=FundamentalsHistoryBackfill(
             dependencies.fundamentals_provider, dependencies.daily_close_archive, market_clock, config, logger
@@ -878,9 +975,36 @@ def build_pipeline(
         ),
         stock_news_lookup=StockNewsLookup(dependencies.daily_close_archive, stock_feed, dependencies.article_store, stocks, config),
         article_indexer=ArticleIndexer(dependencies.article_store, dependencies.article_index, config, logger),
+        main_business_refresh=MainBusinessRefresh(
+            dependencies.company_basics_provider, dependencies.company_profile_repository, market_clock, config, logger
+        ),
+        annual_report_refresh=AnnualReportRefresh(
+            dependencies.annual_report_provider,
+            dependencies.company_profile_repository,
+            dependencies.article_store,
+            market_clock,
+            config,
+            logger,
+        ),
         article_refresh_stocks=ArticleRefreshStocks(dependencies.users_stocks, config, logger),
         article_store_backfill=ArticleStoreBackfill(
             dependencies.daily_close_archive, dependencies.article_store, stocks, market_clock, config, logger
+        ),
+        system_writing_stocks=SystemWritingStocks(
+            prices,
+            dependencies.bar_matrix_provider,
+            dependencies.system_writing_log,
+            dependencies.stock_brief_repository,
+            dependencies.users_stocks,
+            market_clock,
+            config,
+            logger,
+        ),
+        company_background=CompanyBackground(
+            dependencies.company_profile_repository, dependencies.article_store, market_clock, config
+        ),
+        company_card=DailyStockBrief(
+            dependencies.company_card_repository, owned.ai_provider, market_clock, config, logger, ai_model, BriefKind.COMPANY
         ),
         stock_brief_context=StockBriefContext(
             stocks, prices, dependencies.article_store, dependencies.article_index, market_clock, config, logger
@@ -976,6 +1100,36 @@ def build_pipeline(
     )
 
 
+def system_writer_pipeline(
+    config: AppConfig,
+    logger: ILoggingProvider,
+    market_clock: TaiwanMarketClock,
+    dependencies: ProviderDependencies,
+    signed_out: Pipeline,
+) -> Pipeline | None:
+    """
+    The Pipeline of the site's own writing: `signed_out` with its two writers of AI texts, the company card's and the
+    daily brief's, on the system's counted provider and ai.system_model, their claims held by no limit of stocks.
+    Every other step is the signed-out graph's, so it holds nobody's data and the mock account of nobody. None while
+    the site's own writing is off.
+    """
+    writer = dependencies.system_ai_provider
+
+    if writer is None:
+        return None
+
+    model = config.ai.available_models[config.ai.system_model]
+    return replace(
+        signed_out,
+        company_card=DailyStockBrief(
+            dependencies.company_card_repository, writer, market_clock, config, logger, model, BriefKind.COMPANY, for_system=True
+        ),
+        daily_stock_brief=DailyStockBrief(
+            dependencies.stock_brief_repository, writer, market_clock, config, logger, model, for_system=True
+        ),
+    )
+
+
 def compose_runtime(
     config: AppConfig, logger: ILoggingProvider, market_clock: TaiwanMarketClock, dependencies: ProviderDependencies
 ) -> Runtime:
@@ -984,6 +1138,7 @@ def compose_runtime(
     return Runtime(
         pipeline_for=lambda user, broker: build_pipeline(config, logger, market_clock, dependencies, user, broker, stock_feed),
         signed_out=signed_out,
+        system_writer=system_writer_pipeline(config, logger, market_clock, dependencies, signed_out),
         market_valuation_cache=MarketValuationCache(signed_out.load_market_valuation, config.api.valuation_cache_minutes * 60),
         config=config,
         logger=logger,
@@ -1066,7 +1221,7 @@ async def open_archiver(config: AppConfig) -> AsyncGenerator[DailyCloseArchiver]
         archive = SqlDailyCloseArchive(
             database, market_clock, config.sources.exchange, config.analysis.material_information_days, logger
         )
-        yield DailyCloseArchiver(exchange, archive, logger)
+        yield DailyCloseArchiver(exchange, archive, SqlCompanyProfileRepository(database), logger)
 
     finally:
         await database.close()

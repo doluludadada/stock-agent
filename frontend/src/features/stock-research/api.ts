@@ -78,6 +78,23 @@ export function useStockRanking(stockId: string) {
 /** A brief being written is asked for again this often, until the AI has answered. */
 export const BRIEF_POLL_MS = 3_000
 
+export const companyKey = (stockId: string) => ['public', 'market', 'company', stockId] as const
+
+/**
+ * What the site holds about the stock's company: its profile, its sources and its card, with no fetch and no AI call.
+ * Public. While a brief is being written (`writing`) it is asked again as often as the brief, since that request
+ * reads the company's filings and writes its card first: the page says how far it has come, and the card shows once
+ * it is written.
+ */
+export function useStockCompany(stockId: string, writing = false) {
+  return useQuery({
+    queryKey: companyKey(stockId),
+    queryFn: ({ signal }) => apiRequest('get', '/v1/market/stocks/{stock_id}/company', { params: { stock_id: stockId }, signal }),
+    staleTime: FINANCIALS_STALE_MS,
+    refetchInterval: writing ? BRIEF_POLL_MS : false,
+  })
+}
+
 /** A brief changes when a viewer asks for one; a minute keeps a revisit from asking the server again. */
 const BRIEF_STALE_MS = 60_000
 
@@ -95,7 +112,9 @@ export function useStockBrief(stockId: string) {
 
 /**
  * One paid AI call per click, never made by a render: the server writes one brief per stock and day for every viewer
- * and waits for the AI before it answers. A refusal reloads what the site holds, since another viewer may hold the claim.
+ * and waits for the AI before it answers. The same request first reads the company's filings where they are due and
+ * writes its card when it has none, which can take a minute, so the card is read again after it. A refusal reloads
+ * what the site holds, since another viewer may hold the claim.
  */
 export function useWriteStockBrief(stockId: string) {
   const client = useQueryClient()
@@ -105,6 +124,7 @@ export function useWriteStockBrief(stockId: string) {
     onMutate: sentInSession,
     onSuccess: (answer, _nothing, sent) => {
       if (isSameSession(sent)) client.setQueryData(key, answer)
+      void client.invalidateQueries({ queryKey: companyKey(stockId) })
     },
     onError: () => client.invalidateQueries({ queryKey: key }),
   })

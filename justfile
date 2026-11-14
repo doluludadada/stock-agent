@@ -58,6 +58,19 @@ backfill-articles:
 backfill-articles:
     cd backend; $env:PYTHONPATH="src"; uv run python -m d_presentation.cli.article_store
 
+# Reads what a personal site holds about the companies of the monthly ranking, the best scores first: each company's
+# main business from MOPS, one request every sources.mops.request_interval_seconds, then each company's annual-report
+# sections from the exchange's document site, three requests a report, each saved as it comes. Run again after
+# a stop or a refusal: it reads only what is still due, and ends with exit code 2 while anything is. `--top 20` covers
+# the ranking's top 20; without it, every scored stock. It orders nothing and asks no AI.
+[unix]
+backfill-company-background *options:
+    cd backend && PYTHONPATH=src uv run python -m d_presentation.cli.company_background {{options}}
+
+[windows]
+backfill-company-background *options:
+    cd backend; $env:PYTHONPATH="src"; uv run python -m d_presentation.cli.company_background {{options}}
+
 # The monthly stock ranking by revenue acceleration and nearness to the high at the latest decision session the held
 # history holds. It reads only the held daily history and monthly revenue, orders nothing and asks no AI.
 [unix]

@@ -410,7 +410,7 @@ def test_an_instructions_file_without_a_prompt_added_since_starts_without_it_and
     assert prompts.social_sentiment == load_settings(PROJECT).prompts.social_sentiment != ""
     assert settings_notices(project)[-1] == (
         "instructions.yaml does not set stock_brief_prompt, stock_brief_advice_phrases, stock_brief_rise_query, "
-        "stock_brief_fall_query, stock_brief_company_query: what each feeds is off until it does. "
+        "stock_brief_fall_query, stock_brief_company_query, company_card_prompt: what each feeds is off until it does. "
         "The shipped instructions.yaml has them."
     )
     assert "instructions.yaml" not in "".join(settings_notices(PROJECT))
@@ -460,10 +460,19 @@ def test_a_deployments_older_file_starts_on_the_defaults_and_the_start_says_what
     monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
     monkeypatch.delenv("GOOGLE_CLIENT_SECRET", raising=False)
     older, shipped = startup_settings(project), load_settings(PROJECT)
-    google, defaulted = settings_notices(project)
+    writing, google, defaulted = settings_notices(project)
+    own_writing = shipped.stock_page.system_writing
 
     assert not older.accounts.google_sign_in
-    assert (older.stock_page, older.features) == (shipped.stock_page, shipped.features)
+    assert not older.stock_page.system_writing.enabled and own_writing.enabled
+    assert (older.stock_page.model_copy(update={"system_writing": own_writing}), older.features) == (
+        shipped.stock_page,
+        shipped.features,
+    )
+    assert writing == (
+        "appsetting.yaml does not set stock_page.system_writing.daily_ai_calls: the site writes no company card and no brief by "
+        "itself until it does. The shipped appsetting.yaml has them."
+    )
     assert older.accounts.google_flow_minutes == shipped.accounts.google_flow_minutes
     assert google == (
         "appsetting.yaml does not set accounts.google_issuer, accounts.google_authorization_endpoint, "
@@ -496,3 +505,34 @@ def test_the_settings_of_google_and_the_stock_page_get_a_control_and_only_the_em
         "stock_page.news_freshness_minutes": SettingUnit.MINUTES,
     }
     assert {added[path].group for path in added if path not in typed} == {SettingGroup.SITE_ACCESS, SettingGroup.DATA_HISTORY}
+
+
+def test_a_file_that_names_no_address_or_field_of_the_company_background_starts_and_the_start_names_each(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    document = yaml.safe_load(repository_texts()[SettingsFile.APPSETTING])
+    del document["sources"]["annual_reports"], document["stock_page"]["system_writing"]
+    document["sources"]["mops"] = {key: value for key, value in document["sources"]["mops"].items() if "company_basics" not in key}
+    profiles = document["sources"]["exchange"]["company_profiles"]
+    document["sources"]["exchange"]["company_profiles"] = {
+        market: {key: feed[key] for key in ("url", "stock_id", "industry")} for market, feed in profiles.items()
+    }
+    project = project_with(tmp_path, yaml.safe_dump(document, allow_unicode=True, sort_keys=False))
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    older = load_settings(project)
+    without_claude = older.ai.model_copy(update={"active_model": AiProvider.OPENAI, "user_selectable": []})
+    notices = "\n".join(settings_notices(project))
+
+    assert not older.sources.mops.company_basics_set and not older.sources.annual_reports.addresses_set
+    assert without_claude.missing_keys(older.stock_page.system_writing.enabled) == {}, "a site that writes nothing needs no key for it"
+    assert set(without_claude.missing_keys(True)) == {"ai.system_model"}
+    assert "sources.mops.company_basics_url" in notices and "no company's main business is read from MOPS until it does" in notices
+    assert "sources.annual_reports.index_url" in notices and "no company's annual report is read until it does" in notices
+    assert "stock_page.system_writing.daily_ai_calls: the site writes no company card and no brief by itself" in notices
+    assert (
+        "appsetting.yaml does not set sources.exchange.company_profiles.twse.report_date, "
+        "sources.exchange.company_profiles.twse.full_name" in notices
+    )
+    assert "sources.exchange.company_profiles.tpex.website: a company's profile holds no such fact until it does." in notices
+    assert "company_profiles" not in "".join(settings_notices(PROJECT))

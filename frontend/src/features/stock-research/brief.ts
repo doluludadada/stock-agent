@@ -5,6 +5,8 @@ export type StockBriefAnswer = Schemas['StockBriefResponse']
 export type StockBrief = Schemas['StockBrief']
 export type BriefSentence = Schemas['BriefSentence']
 export type BriefSource = Schemas['BriefSource']
+export type StockCompanyAnswer = Schemas['StockCompanyResponse']
+export type CompanyProfile = Schemas['CompanyProfile']
 
 /** What the viewer may do about a brief that is not written: ask for it, sign in to ask, or nothing. */
 export type BriefAsk = 'write' | 'signIn' | 'none'
@@ -57,6 +59,59 @@ export function usedSources(brief: StockBrief): BriefSource[] {
   return (brief.sources ?? []).filter((source) => cited.has(source.key))
 }
 
+/** The company's card: the one claimed today once it is written, else the newest written one of an earlier day. */
+export function companyCard(answer: StockCompanyAnswer): StockBrief | null {
+  return answer.today?.status === 'written' ? answer.today : (answer.previous ?? null)
+}
+
+export interface CompanyLink {
+  kind: 'profile' | 'annual_report'
+  href: string
+}
+
+/**
+ * The pages the company's facts are from, one per kind: MOPS's page of the company, and the document site's page that
+ * lists its annual report, whose sections share it. Only a plain http or https address is a link.
+ */
+export function companyLinks(answer: StockCompanyAnswer): CompanyLink[] {
+  const links: CompanyLink[] = []
+  for (const kind of ['profile', 'annual_report'] as const) {
+    const href = answer.sources.map((source) => (source.kind === kind ? outboundUrl(source.url?.split('#')[0] ?? null) : null)).find(Boolean)
+    if (href) links.push({ kind, href })
+  }
+  return links
+}
+
+/** One thing the site does for a stock's brief, in the order it does them, and how far it has come. */
+export interface BriefStep {
+  step: 'mainBusiness' | 'annualReport' | 'card' | 'brief'
+  state: 'done' | 'active' | 'waiting'
+}
+
+/**
+ * How far a request for today's brief has come, from what the site holds now: the company's main business read from
+ * MOPS and its annual report looked for, on a site that reads them (`reads`), then its card, then the brief. A step
+ * is done once the site holds what it leaves, and the one being worked on is the first that is not; a card or a
+ * brief being written says so itself, whatever came before it.
+ */
+export function briefSteps(
+  company: StockCompanyAnswer | undefined,
+  brief: StockBriefAnswer,
+  reads: { mainBusiness: boolean; annualReports: boolean },
+): BriefStep[] {
+  const profile = company?.profile
+  const cardWriting = company?.today?.status === 'writing'
+  const steps: { step: BriefStep['step']; done: boolean }[] = [
+    ...(reads.mainBusiness ? [{ step: 'mainBusiness' as const, done: Boolean(profile?.main_business_fetched_at) }] : []),
+    ...(reads.annualReports ? [{ step: 'annualReport' as const, done: Boolean(profile?.annual_report_checked_at) }] : []),
+    { step: 'card', done: !cardWriting && company !== undefined && companyCard(company) !== null },
+    { step: 'brief', done: false },
+  ]
+  const card = steps.length - 2
+  const active = brief.today?.status === 'writing' ? card + 1 : cardWriting ? card : steps.findIndex((step) => !step.done)
+  return steps.map(({ step }, index) => ({ step, state: index < active ? 'done' : index === active ? 'active' : 'waiting' }))
+}
+
 /** The part of the stock page that shows each kind of held item, by its element id; null where the page has none. */
 export const SECTION_ANCHORS = {
   company: null,
@@ -68,6 +123,8 @@ export const SECTION_ANCHORS = {
   exchange_news: 'stock-news-panel',
   news: 'stock-news-panel',
   post: 'stock-news-panel',
+  annual_report: null,
+  profile: null,
 } as const satisfies Record<BriefSource['kind'], string | null>
 
 export type SourceLink = { to: 'outbound'; href: string } | { to: 'section'; anchor: string } | { to: 'nowhere' }

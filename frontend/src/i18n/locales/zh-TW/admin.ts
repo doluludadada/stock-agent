@@ -152,6 +152,7 @@ const admin: DictionaryShape<typeof en> = {
         stock_brief_rise_query: '股價上漲時，AI 摘要在保存的文章中搜尋的內容',
         stock_brief_fall_query: '股價下跌時，AI 摘要在保存的文章中搜尋的內容',
         stock_brief_company_query: 'AI 摘要為了說明公司業務而搜尋的內容',
+        company_card: '個股頁面公司簡介提示詞',
       },
       sentiment: {
         min_confidence: '貼文最低信心度',
@@ -340,6 +341,7 @@ const admin: DictionaryShape<typeof en> = {
         stock_brief_fall_query: '這不是提示詞，不會送給 AI。收盤價下跌時使用，作用與上漲那一欄相同。',
         stock_brief_company_query:
           '這不是提示詞，不會送給 AI。摘要會取出意思最接近這些詞的保存文章，用來說明公司生產或銷售什麼。請用文章的語言填寫，不必寫公司名稱。留空時不搜尋。',
+        company_card: 'AI 依公司基本資料與股東會年報寫一次公司簡介，資料或這段提示詞變動時才重寫。留空時不寫簡介。',
       },
       sentiment: {
         min_confidence: 'AI 判讀信心度低於這個值（0 到 1）的貼文算作「不明」。社群熱度報告的情緒只供參考，不會改變訊號或委託。',

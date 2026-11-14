@@ -16,7 +16,8 @@ class StockNewsLookup:
     source gave no publication time is stamped with the moment it was fetched (Yahoo's listing gives none), so it is
     left out: the page shows no time it cannot stand behind. It keeps those in the article store (IArticleStore), each
     with the text the site may hold of it (KeptArticleRule), and answers the stock's newest
-    stock_page.article_store.shown kept articles, so the page also lists what the sources no longer serve. `feed` is
+    stock_page.article_store.shown kept articles, so the page also lists what the sources no longer serve; an annual
+    report's sections are no news and are left out (IArticleStore.latest). `feed` is
     None on a site without news articles (public), which reads the archive alone. Only a listed stock is asked for, so
     no made-up code reaches a news site: None for any other, and ListingUnavailableError during a listing outage.
     """

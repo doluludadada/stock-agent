@@ -8,13 +8,13 @@ from itertools import pairwise
 from pydantic import FiniteFloat, NonNegativeInt, PositiveInt, validate_call
 from pydantic.dataclasses import dataclass
 
-from a_domain.model.analysis.stock_brief import BriefSentence, BriefSource
+from a_domain.model.analysis.stock_brief import BriefSentence, BriefSource, StockBrief
 from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.rules.fundamentals.stock_analysis import QuarterResult, RevenueMonth, RevenueTrend, StockAnalysis, ratio
 from a_domain.rules.trading.ranking_standing import RankingStanding
-from a_domain.types.enums import BriefLanguage, BriefSourceKind, InformationSource
+from a_domain.types.enums import BriefKind, BriefLanguage, BriefSourceKind, BriefStatus, InformationSource
 from a_domain.types.values import NonEmptyText
 
 
@@ -36,6 +36,8 @@ class BriefContext:
     window_last: date | None
     price_change: FiniteFloat | None
     facts: list[BriefFact]
+    fingerprint: str | None = None
+    """A digest of what a company card is written from (CompanyCardContextRule). None for a daily brief."""
 
 
 def close_change(window: Sequence[Ohlcv]) -> float | None:
@@ -63,7 +65,8 @@ class BriefSearchRule:
     the `lead_articles` closest of the `lead_days` days before the window, which may have led into it. For what the
     company is: the `company_articles` closest to `company_query` of the `company_days` days up to `day`. Every kept
     article is about the stock already, so a query names no company. A search with an empty query or no article to take
-    is left out, and so are the two of the move while no daily history is held.
+    is left out, and so are the two of the move while no daily history is held, and the company's while the stock has a
+    company card (`card_held`), which says what the company is already.
     """
 
     window_sessions: PositiveInt
@@ -76,7 +79,7 @@ class BriefSearchRule:
     company_days: PositiveInt
     company_articles: NonNegativeInt
 
-    def apply(self, bars: Sequence[Ohlcv], day: date) -> list[BriefSearch]:
+    def apply(self, bars: Sequence[Ohlcv], day: date, card_held: bool = False) -> list[BriefSearch]:
         window = list(bars[-self.window_sessions :])
         fell = (close_change(window) or 0) < 0
         move_query = self.fall_query if fell else self.rise_query
@@ -89,7 +92,8 @@ class BriefSearchRule:
                 (move_query, first - timedelta(days=self.lead_days), first, self.lead_articles),
             ]
 
-        wanted.append((self.company_query, day - timedelta(days=self.company_days), None, self.company_articles))
+        if not card_held:
+            wanted.append((self.company_query, day - timedelta(days=self.company_days), None, self.company_articles))
 
         return [
             BriefSearch(query=query, first=since, last=before, limit=limit)
@@ -110,6 +114,22 @@ def company_line(stock: Stock, revenue: RevenueTrend) -> str:
     scale = f"revenue of the latest {len(year)} held months {sum(year):,.0f} thousand TWD" if year else "no revenue held"
     listed = f"{stock.stock_id} {stock.name or 'name not held'}, listed on {stock.market.value}"
     return f"{listed}, industry in the exchange's listing: {stock.industry or 'not held'}; {scale}"
+
+
+def written_card(cards: Sequence[StockBrief | None]) -> StockBrief | None:
+    """The company's card among the texts given, newest first: the first that is written. None while it has none."""
+    return next((card for card in cards if card is not None and card.status == BriefStatus.WRITTEN and card.company), None)
+
+
+def company_fact(
+    stock: Stock, revenue: RevenueTrend, card: StockBrief | None, day: date
+) -> tuple[BriefSourceKind, date, str, None, None]:
+    """What the company is, in one fact: its card's sentences where it has a card, else its listing and revenue scale."""
+    if card is None:
+        return (BriefSourceKind.COMPANY, day, company_line(stock, revenue), None, None)
+
+    said = " ".join(sentence.text for sentence in card.company)
+    return (BriefSourceKind.COMPANY, card.day, f"{stock.stock_id} {stock.name or ''}: {said}", None, None)
 
 
 def price_facts(window: Sequence[Ohlcv], largest_moves: PositiveInt) -> list[tuple[BriefSourceKind, date, str, None, None]]:
@@ -198,6 +218,8 @@ def article_fact(article: Article, article_text_length: PositiveInt) -> tuple[Br
             kind = BriefSourceKind.NEWS
         case InformationSource.PTT_STOCK | InformationSource.PTT_GOSSIPING:
             kind = BriefSourceKind.POST
+        case InformationSource.ANNUAL_REPORT:
+            kind = BriefSourceKind.ANNUAL_REPORT
 
     body = " ".join((article.open_text or "").split())[:article_text_length]
     title = " ".join(article.title.split())
@@ -207,8 +229,9 @@ def article_fact(article: Article, article_text_length: PositiveInt) -> tuple[Br
 @dataclass(frozen=True, kw_only=True)
 class BriefContextRule:
     """
-    What a stock's brief may rest on, chosen from held data alone and bounded in size: the company as the exchange lists
-    it with its revenue of the latest held year, the closes of the latest `window_sessions` sessions with their largest
+    What a stock's brief may rest on, chosen from held data alone and bounded in size: what the company is, as its
+    company card says it where one of `cards` is written, else as the exchange lists it with its revenue of the latest
+    held year, the closes of the latest `window_sessions` sessions with their largest
     daily moves, the latest `revenue_months` months of revenue, the latest `quarters` quarters with an EPS, the ranking
     standing when the site shows the ranking to every viewer, and what is said about the stock. That is `retrieved`,
     what the brief's searches found among the stock's kept articles (BriefSearchRule): those dated from the window's
@@ -236,11 +259,12 @@ class BriefContextRule:
         articles: Sequence[Article],
         retrieved: Sequence[Article],
         day: date,
+        cards: Sequence[StockBrief | None] = (),
     ) -> BriefContext:
         window = list(bars[-self.window_sessions :])
         first = window[0].ts.date() if window else None
         found = [
-            (BriefSourceKind.COMPANY, day, company_line(stock, analysis.revenue), None, None),
+            company_fact(stock, analysis.revenue, written_card(cards), day),
             *price_facts(window, self.largest_moves),
             *[revenue_fact(month, analysis.revenue) for month in analysis.revenue.months[-self.revenue_months :]],
             *[quarter_fact(result) for result in quarters_with_eps(analysis, self.quarters)],
@@ -324,12 +348,15 @@ def allowed_sentence(rule: BriefReplyRule, text: object, cited: object, known: d
 class BriefReplyRule:
     """
     Reads the AI's reply against the brief's contract, and keeps only what the contract allows: a JSON object with the
-    two parts, each a list of sentences that cite keys of the context. A link in a sentence is cut out, since the only
-    addresses a brief shows are those of the held items it cites; a sentence that cites no known key, or that words
-    advice (`advice_phrases`, compared without case), is dropped; a part keeps its first `sentences` sentences, each cut
-    at `sentence_length`. None when the reply is no such object or either part ends up empty: the brief failed.
+    parts `company` and `movement`, each a list of sentences that cite keys of the context. A link in a sentence is cut
+    out, since the only addresses a brief shows are those of the held items it cites; a sentence that cites no known
+    key, or that words advice (`advice_phrases`, compared without case), is dropped; a part keeps its first `sentences`
+    sentences, each cut at `sentence_length`. None when the reply is no such object or the part the text's `kind` names
+    ends up empty: the text failed. A daily brief keeps a company part the reply holds besides, as a prompt written
+    before the company card asks for; a company card keeps the company part alone.
     """
 
+    kind: BriefKind
     sentences: PositiveInt
     sentence_length: PositiveInt
     link_pattern: NonEmptyText
@@ -345,11 +372,13 @@ class BriefReplyRule:
             return None
 
         known = {fact.source.key: fact.source for fact in context.facts}
-        company = allowed_sentences(self, parsed.get("company"), known)
-        movement = allowed_sentences(self, parsed.get("movement"), known)
+        parts = {part: allowed_sentences(self, parsed.get(part.value), known) for part in BriefKind}
 
-        if not company or not movement:
+        if not parts[self.kind]:
             return None
+
+        company = parts[BriefKind.COMPANY]
+        movement = parts[BriefKind.MOVEMENT] if self.kind == BriefKind.MOVEMENT else []
 
         cited = {key for sentence in (*company, *movement) for key in sentence.sources}
         return BriefReply(company=company, movement=movement, sources=[source for key, source in known.items() if key in cited])

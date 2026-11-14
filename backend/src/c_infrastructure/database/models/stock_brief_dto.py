@@ -2,7 +2,7 @@ from datetime import date, datetime
 from typing import Any, ClassVar, Self
 
 from pydantic import TypeAdapter
-from sqlalchemy import Column, Text
+from sqlalchemy import Text
 from sqlmodel import Field, SQLModel
 
 from a_domain.model.analysis.stock_brief import BriefSentence, BriefSource, StockBrief
@@ -10,13 +10,12 @@ from a_domain.types.enums import BriefLanguage, BriefStatus
 from c_infrastructure.database.utc_datetime import UtcDateTime
 
 
-class StockBriefDTO(SQLModel, table=True):
+class BriefColumns(SQLModel):
     """
-    The AI's brief of one stock on one Taipei calendar day, shared by every user: the primary key keeps one per stock
-    and day. `status`, `language` and `model` are saved as text, and the sentences with the sources they cite as JSON.
+    The columns of an AI text about one stock, shared by every user: the primary key keeps one per stock and Taipei
+    calendar day. `status`, `language` and `model` are saved as text, and the sentences with the sources they cite as
+    JSON. Each kind of text has a table of its own with these columns.
     """
-
-    __tablename__: ClassVar[str] = "stock_briefs"
 
     stock_id: str = Field(primary_key=True)
     day: date = Field(primary_key=True)
@@ -28,17 +27,17 @@ class StockBriefDTO(SQLModel, table=True):
     window_first: date | None = None
     window_last: date | None = None
     price_change: float | None = None
-    company: str = Field(sa_column=Column(Text, nullable=False))
-    movement: str = Field(sa_column=Column(Text, nullable=False))
-    sources: str = Field(sa_column=Column(Text, nullable=False))
+    company: str = Field(sa_type=Text)
+    movement: str = Field(sa_type=Text)
+    sources: str = Field(sa_type=Text)
 
     SENTENCES: ClassVar[TypeAdapter[list[BriefSentence]]] = TypeAdapter(list[BriefSentence])
     SOURCES: ClassVar[TypeAdapter[list[BriefSource]]] = TypeAdapter(list[BriefSource])
 
     @classmethod
     def values_of(cls, brief: StockBrief) -> dict[str, Any]:
-        """The row's columns for `brief`."""
-        return {
+        """The row's columns for `brief`: those this table has."""
+        values = {
             "stock_id": brief.stock_id,
             "day": brief.day,
             "status": brief.status.value,
@@ -52,7 +51,9 @@ class StockBriefDTO(SQLModel, table=True):
             "company": cls.SENTENCES.dump_json(brief.company).decode(),
             "movement": cls.SENTENCES.dump_json(brief.movement).decode(),
             "sources": cls.SOURCES.dump_json(brief.sources).decode(),
+            "fingerprint": brief.fingerprint,
         }
+        return {name: value for name, value in values.items() if name in cls.model_fields}
 
     @classmethod
     def from_domain(cls, brief: StockBrief) -> Self:
@@ -73,4 +74,22 @@ class StockBriefDTO(SQLModel, table=True):
             company=self.SENTENCES.validate_json(self.company),
             movement=self.SENTENCES.validate_json(self.movement),
             sources=self.SOURCES.validate_json(self.sources),
+            fingerprint=getattr(self, "fingerprint", None),
         )
+
+
+class StockBriefDTO(BriefColumns, table=True):
+    """The AI's brief of one stock on one Taipei calendar day."""
+
+    __tablename__: ClassVar[str] = "stock_briefs"
+
+
+class CompanyCardDTO(BriefColumns, table=True):
+    """
+    The AI's card of one company, under the Taipei calendar day it was claimed on: the newest written one is the
+    company's card, and the earlier ones are kept. `fingerprint` is of the inputs it was written from.
+    """
+
+    __tablename__: ClassVar[str] = "company_cards"
+
+    fingerprint: str | None = None

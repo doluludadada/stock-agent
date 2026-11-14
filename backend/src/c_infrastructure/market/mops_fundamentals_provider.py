@@ -22,7 +22,7 @@ from b_application.config.sources_config import MopsSources
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.quarter_eps_dto import QuarterEpsDTO
 from c_infrastructure.market.exchange_text import ROC_YEAR_OFFSET, parse_number
-from c_infrastructure.market.request_pace import RequestPace
+from c_infrastructure.market.request_pace import HostPace
 
 
 class MopsFundamentalsProvider(IFundamentalsProvider):
@@ -31,7 +31,8 @@ class MopsFundamentalsProvider(IFundamentalsProvider):
     monthly revenue summary of a past month (one CSV per market and month), read with the exchange listing's parser.
 
     A quarter's cached page is final, and never fetched again, once it was fetched after the quarter's last filing
-    deadline plus grace and is not empty. Any other page is reused for `provisional_page_max_age_hours`.
+    deadline plus grace and is not empty. Any other page is reused for `provisional_page_max_age_hours`. Each request
+    waits its turn on `pace`, the one pace for every request to MOPS, which the wiring keeps in the database.
     """
 
     def __init__(
@@ -42,6 +43,7 @@ class MopsFundamentalsProvider(IFundamentalsProvider):
         listing: ITaiwanStockProvider,
         logger: ILoggingProvider,
         write_lock: asyncio.Lock,
+        pace: HostPace,
     ) -> None:
         self._db = db
         self._listing = listing
@@ -55,7 +57,7 @@ class MopsFundamentalsProvider(IFundamentalsProvider):
         )
         self._clock = market_clock
         self._logger = logger
-        self._pace = RequestPace()
+        self._pace = pace
 
     @override
     async def fetch_cumulative_eps(self, quarters: Collection[FiscalQuarter]) -> EpsFilings:
@@ -153,7 +155,7 @@ def is_reusable(
 
 
 async def download_cumulative_eps(
-    market_code: str, quarter: FiscalQuarter, mops: MopsSources, pace: RequestPace, logger: ILoggingProvider
+    market_code: str, quarter: FiscalQuarter, mops: MopsSources, pace: HostPace, logger: ILoggingProvider
 ) -> dict[str, float] | None:
     """One request for the page: {} when the quarter has no filings yet, None when the request or the page fails."""
     label = f"MOPS {quarter} {market_code}"

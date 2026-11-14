@@ -55,8 +55,11 @@ from c_infrastructure.feed.ptt_provider import PttProvider
 from c_infrastructure.feed.tavily_provider import TavilySearchAdapter
 from c_infrastructure.market.cached_price_provider import CachedPriceProvider
 from c_infrastructure.market.exchange_daily_reports import ExchangeDailyReports
+from c_infrastructure.market.mops_company_basics import MopsCompanyBasicsProvider
 from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider
+from c_infrastructure.market.request_pace import SharedRequestPace
 from c_infrastructure.market.shioaji_quote_provider import ShioajiQuoteProvider
+from c_infrastructure.market.twse_annual_report_provider import TwseAnnualReportProvider
 from c_infrastructure.system.attempt_log import MemoryAttemptLog
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
 from d_presentation import dependencies
@@ -119,11 +122,15 @@ CLOSED_SOURCES = (
     YahooTwNewsProvider,
     PttProvider,
     MopsFundamentalsProvider,
+    MopsCompanyBasicsProvider,
+    TwseAnnualReportProvider,
+    SharedRequestPace,
     TavilySearchAdapter,
 )
 """
 Every adapter of a source whose terms a public site breaks: the exchanges' own reports and their history cache,
-Shioaji's quotes, cnyes, Yahoo news, PTT, MOPS, Tavily.
+Shioaji's quotes, cnyes, Yahoo news, PTT, MOPS's income statements and company basic information, the document site's
+annual reports, the pace of the requests to those two sites, Tavily.
 """
 
 
@@ -325,6 +332,7 @@ async def test_a_personal_run_says_nothing_of_the_archive() -> None:
                 "realtime_quotes": False,
                 "news_articles": False,
                 "mops": False,
+                "annual_reports": False,
                 "order_pricing": "official_close",
             },
         ),
@@ -336,6 +344,7 @@ async def test_a_personal_run_says_nothing_of_the_archive() -> None:
                 "realtime_quotes": True,
                 "news_articles": True,
                 "mops": True,
+                "annual_reports": True,
                 "order_pricing": "realtime_quote",
             },
         ),

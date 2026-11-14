@@ -1,3 +1,6 @@
+from collections.abc import Sequence
+
+from a_domain.model.analysis.stock_brief import StockBrief
 from a_domain.model.market.article import Article
 from a_domain.model.market.stock import Stock
 from a_domain.ports.ai.article_index import IArticleIndex
@@ -6,7 +9,7 @@ from a_domain.ports.market.price_provider import IOhlcvProvider
 from a_domain.ports.market.taiwan_stock_provider import ITaiwanStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
-from a_domain.rules.ai.stock_brief import BriefContext
+from a_domain.rules.ai.stock_brief import BriefContext, written_card
 from a_domain.rules.fundamentals.stock_analysis import StockAnalysis
 from a_domain.rules.trading.ranking import RankingHistory
 from a_domain.rules.trading.ranking_standing import RankingStandingRule
@@ -23,7 +26,9 @@ class StockBriefContext:
     window, those shortly before it and those that say what the company makes and sells. While the searches find
     nothing, because the stock has no indexed article or the index cannot be asked, which is logged, it is `articles`,
     what the stock page shows. The standing is left out where the site does not show the ranking to every viewer,
-    because the brief is shown to every viewer of the stock page, and where the history holds no decision session. It
+    because the brief is shown to every viewer of the stock page, and where the history holds no decision session.
+    `cards` are the company's cards as the site holds them, newest first: where one is written, it says what the
+    company is, so the brief's prompt holds its text and no search for what the company makes and sells is made. It
     asks no AI.
     """
 
@@ -52,7 +57,14 @@ class StockBriefContext:
         )
         self._context_rule = config.stock_page.brief.context_rule()
 
-    async def execute(self, stock: Stock, analysis: StockAnalysis, articles: list[Article], history: RankingHistory) -> BriefContext:
+    async def execute(
+        self,
+        stock: Stock,
+        analysis: StockAnalysis,
+        articles: list[Article],
+        history: RankingHistory,
+        cards: Sequence[StockBrief | None] = (),
+    ) -> BriefContext:
         stock.industry = (await self._stock_provider.fetch_industries()).get(stock.stock_id, stock.industry)
         window = self._market_clock.history_window(self._history_days)
         bars = (await self._ohlcv_provider.fetch_history([stock], *window)).get(stock.stock_id, [])
@@ -62,7 +74,7 @@ class StockBriefContext:
         retrieved: list[Article] = []
 
         try:
-            for search in self._search_rule.apply(bars, today):
+            for search in self._search_rule.apply(bars, today, card_held=written_card(cards) is not None):
                 keys = await self._index.search(stock.stock_id, search.query, search.first, search.last, search.limit)
                 kept = {article.key: article for article in await self._store.find(stock.stock_id, keys)}
                 retrieved.extend(kept[key] for key in keys if key in kept)
@@ -72,4 +84,4 @@ class StockBriefContext:
             )
             retrieved = []
 
-        return self._context_rule.apply(stock, bars, analysis, standing, articles, retrieved, today)
+        return self._context_rule.apply(stock, bars, analysis, standing, articles, retrieved, today, cards)

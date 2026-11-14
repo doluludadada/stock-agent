@@ -28,6 +28,7 @@ from a_domain.types.enums import Audience, InstructionKey, SettingGroup, Setting
 from a_domain.types.errors import SettingsEditError
 from a_domain.types.values import FormulaId
 from b_application.config.app_config import AppConfig
+from b_application.config.sources_config import CompanyProfileFeed
 
 
 def get_project_root() -> Path:
@@ -295,7 +296,31 @@ def settings_notices(project_root: Path) -> list[str]:
     if defaulted := [path for path in unset if path not in without]:
         notices.append(f"{file.file_name} does not set {', '.join(defaulted)}: each runs on its default.")
 
-    return notices + unset_prompts_notice(project_root)
+    return notices + unnamed_profile_fields_notice(document) + unset_prompts_notice(project_root)
+
+
+def unnamed_profile_fields_notice(document: dict[str, Any]) -> list[str]:
+    """
+    One line that names the fields of a company's profile an exchange's feed in config/appsetting.yaml does not name,
+    as a deployment's older copy of the file does for those added since, or none.
+    """
+    file = SettingsFile.APPSETTING
+    feeds = section_of(document, ("sources", "exchange", "company_profiles", "")) or {}
+    added = [name for name, field in CompanyProfileFeed.model_fields.items() if not field.is_required()]
+    unnamed = [
+        f"sources.exchange.company_profiles.{market}.{name}"
+        for market, feed in feeds.items()
+        for name in added
+        if isinstance(feed, dict) and name not in feed
+    ]
+
+    if not unnamed:
+        return []
+
+    return [
+        f"{file.file_name} does not set {', '.join(unnamed)}: a company's profile holds no such fact until it does. "
+        f"The shipped {file.file_name} has them."
+    ]
 
 
 def unset_prompts_notice(project_root: Path) -> list[str]:
@@ -941,7 +966,7 @@ def validate_ai_setup(config: AppConfig, texts: Mapping[SettingsFile, str]) -> N
             [replace(locate(texts, path, message), code="search_on_open_data", params=params) for path in searching]
         )
 
-    if missing := config.ai.missing_keys():
+    if missing := config.ai.missing_keys(config.stock_page.system_writing.enabled):
         raise InvalidSettingsError(
             [
                 replace(locate(texts, path, f"{need.message}; the app would not start"), code=need.code, params=need.params)

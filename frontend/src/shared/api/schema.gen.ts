@@ -751,8 +751,9 @@ export interface paths {
          * Get Stock Brief
          * @description The AI brief the site holds of one stock, with no AI call: `today` is the brief of today in Taipei if a viewer
          *     asked for one (`status` writing, written or failed), `previous` the newest written brief of an earlier day, and
-         *     `stocks_left` how many more stocks may get a new brief today. A written brief has two parts, `company` and
-         *     `movement`, each a list of sentences with the keys of the `sources` it rests on: the held figures and the
+         *     `stocks_left` how many more stocks may get a new brief today. A written brief has the part `movement`, and
+         *     `company` where it was written before the company card took that part over, each a list of sentences with the
+         *     keys of the `sources` it rests on: the held figures and the
          *     announcements, news and posts the page shows, by kind, date, title and address. It names the model that wrote it,
          *     when, in which language, and the window of sessions with the close's change over it. Every text is the AI's or a
          *     third party's: show it as text, never as markup. It describes and gives no advice. Public.
@@ -764,11 +765,42 @@ export interface paths {
          * @description Asks for the stock's AI brief of today in Taipei, then answers what GET answers. The site writes one brief per
          *     stock and day for every viewer: the first request claims it and makes one paid AI call on the user's allowance,
          *     waiting for the reply; a request made meanwhile, or after it is written, calls nothing and answers what is held. A
-         *     failed brief may be asked again. 429 brief_limit_reached when the stock has none today and
-         *     stock_page.brief.daily_stocks stocks have one; 429 ai_allowance_spent when the user's or the site's paid AI calls of
-         *     the day are spent. It reads held data only, records no run and never orders. Private: a visitor never causes a call.
+         *     failed brief may be asked again. Before the brief, a personal site reads the company's main business and annual
+         *     report when they are due, which can take a minute the first time, and the company's card is written when it has
+         *     none or what it rests on changed, a second paid call. GET /stocks/{stock_id}/company answers each of them as it is
+         *     held, so a page that asks it meanwhile can say how far the request has come. One request at a time works for a
+         *     stock: a second one waits for the first and then answers what is held, with no second fetch and no second call. 429
+         *     brief_limit_reached when the stock has none today and stock_page.brief.daily_stocks stocks have one; 429
+         *     ai_allowance_spent when the user's or the site's paid AI calls of the day are spent. It reads held data only, records no run and
+         *     never orders. Private: a visitor never causes a call.
          */
         post: operations["write_stock_brief_v1_market_stocks__stock_id__brief_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/market/stocks/{stock_id}/company": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Stock Company
+         * @description What the site holds about one listed stock's company, with no fetch and no AI call: its `profile`, the names,
+         *     founding and listing dates, paid-in capital, chairman and website of the exchanges' open data and, on a personal
+         *     site, its main business as filed with MOPS with the page it is from; the `sources` a company card rests on, each
+         *     with its address; and the company card, `today` if one was claimed today in Taipei and `previous` the newest
+         *     written one of an earlier day. A card is written when a signed-in viewer asks for the stock's brief, or by the
+         *     site for the monthly ranking's stocks, and again only when what it rests on changed. Every text is the AI's or a
+         *     third party's: show it as text, never as markup. 404 for a code that is not listed. Public.
+         */
+        get: operations["get_stock_company_v1_market_stocks__stock_id__company_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1533,6 +1565,8 @@ export interface components {
          *     do. The server still refuses the rest on every request.
          */
         AudienceResponse: {
+            /** Annual Reports */
+            annual_reports: boolean;
             audience: components["schemas"]["Audience"];
             /** Mops */
             mops: boolean;
@@ -1824,7 +1858,7 @@ export interface components {
          * @description What kind of held item a brief's sentence cites, so the stock page can name it and link to where it shows it.
          * @enum {string}
          */
-        BriefSourceKind: "company" | "price" | "revenue" | "earnings" | "ranking" | "announcement" | "exchange_news" | "news" | "post";
+        BriefSourceKind: "company" | "price" | "revenue" | "earnings" | "ranking" | "announcement" | "exchange_news" | "news" | "post" | "annual_report" | "profile";
         /**
          * BriefStatus
          * @description Where a stock's AI brief of one day stands. One brief exists per stock and Taipei calendar day, for the whole site.
@@ -1908,6 +1942,60 @@ export interface components {
             settlements: components["schemas"]["Settlement"][];
             /** Unrealized Pnl */
             unrealized_pnl: number;
+        };
+        /**
+         * CompanyProfile
+         * @description What the site holds about one listed company itself, one per stock, each part as its source served it and None
+         *     until that source was read. The exchange's company basic data in its OpenAPI gives the names, the dates, the
+         *     capital, the people, the address and the website, on every site. MOPS's company basic information gives the main
+         *     business and the English name, and the annual report on the exchange's document site is named by its fiscal year
+         *     and file: a personal site alone reads those two.
+         */
+        CompanyProfile: {
+            /** Address */
+            address?: string | null;
+            /** Annual Report Checked At */
+            annual_report_checked_at?: string | null;
+            /** Annual Report File */
+            annual_report_file?: string | null;
+            /** Annual Report Year */
+            annual_report_year?: number | null;
+            /** Chairman */
+            chairman?: string | null;
+            /** English Name */
+            english_name?: string | null;
+            /** English Short Name */
+            english_short_name?: string | null;
+            /** Fetched At */
+            fetched_at?: string | null;
+            /** Founded On */
+            founded_on?: string | null;
+            /** Full Name */
+            full_name?: string | null;
+            /** General Manager */
+            general_manager?: string | null;
+            /** Industry Code */
+            industry_code?: string | null;
+            /** Issued Shares */
+            issued_shares?: number | null;
+            /** Listed On */
+            listed_on?: string | null;
+            /** Main Business */
+            main_business?: string | null;
+            /** Main Business Fetched At */
+            main_business_fetched_at?: string | null;
+            /** Main Business Url */
+            main_business_url?: string | null;
+            market?: components["schemas"]["MarketType"] | null;
+            /** Paid In Capital */
+            paid_in_capital?: number | null;
+            /** Reported On */
+            reported_on?: string | null;
+            /** Short Name */
+            short_name?: string | null;
+            stock_id: components["schemas"]["NonEmptyText"];
+            /** Website */
+            website?: string | null;
         };
         /**
          * Comparison
@@ -2335,7 +2423,7 @@ export interface components {
          * InformationSource
          * @enum {string}
          */
-        InformationSource: "twse_mops" | "twse_news" | "news_media" | "ptt_stock" | "ptt_gossiping";
+        InformationSource: "twse_mops" | "twse_news" | "news_media" | "ptt_stock" | "ptt_gossiping" | "annual_report";
         JsonValue: unknown;
         /**
          * LatestPrice
@@ -3397,7 +3485,9 @@ export interface components {
          * StockBrief
          * @description The AI's short description of one stock on one Taipei calendar day, shared by every viewer of the site: what the
          *     company is, and how the held facts of a recent window of sessions relate to the stock's move over it. It describes
-         *     and never advises. One exists per stock and day; its status says whether the AI is still asked.
+         *     and never advises. One exists per stock and day; its status says whether the AI is still asked. A company card is
+         *     one too (BriefKind): it holds the `company` part alone, under the day it was claimed on, and the newest written one
+         *     is the company's card.
          */
         StockBrief: {
             /**
@@ -3412,6 +3502,8 @@ export interface components {
              * Format: date
              */
             day: string;
+            /** Fingerprint */
+            fingerprint?: string | null;
             language: components["schemas"]["BriefLanguage"];
             model: components["schemas"]["NonEmptyText"];
             /** Movement */
@@ -3441,6 +3533,21 @@ export interface components {
             stock_id: string;
             /** Stocks Left */
             stocks_left: number;
+            today: components["schemas"]["StockBrief"] | null;
+        };
+        /**
+         * StockCompanyResponse
+         * @description What the site holds about a stock's company itself: its profile, the held items a company card rests on, and the
+         *     card. The card is the AI's wording of those items, each sentence naming the ones it rests on; it describes and
+         *     gives no advice. A profile's main business and a card's sentences are a third party's and the AI's text.
+         */
+        StockCompanyResponse: {
+            previous: components["schemas"]["StockBrief"] | null;
+            profile: components["schemas"]["CompanyProfile"] | null;
+            /** Sources */
+            sources: components["schemas"]["BriefSource"][];
+            /** Stock Id */
+            stock_id: string;
             today: components["schemas"]["StockBrief"] | null;
         };
         /**
@@ -5137,6 +5244,51 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description The exchange listing could not be loaded. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_stock_company_v1_market_stocks__stock_id__company_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                stock_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StockCompanyResponse"];
+                };
+            };
+            /** @description Not a listed stock. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
             /** @description The exchange listing could not be loaded. */
             503: {

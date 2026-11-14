@@ -19,14 +19,16 @@ class IStockBriefRepository(Protocol):
         ...
 
     async def claimed_stocks(self, day: date) -> int:
-        """How many stocks have a brief of that day, whatever its status."""
+        """How many stocks have a brief of that day that a viewer's request claimed, whatever its status."""
         ...
 
-    async def claim(self, brief: StockBrief, daily_stocks: int, stale_before: datetime) -> bool:
+    async def claim(self, brief: StockBrief, daily_stocks: int | None, stale_before: datetime) -> bool:
         """
         Takes the day's brief of the stock for one writer, as `brief` states it, and says whether this call took it: it
-        does when the stock has no brief of the day while fewer than `daily_stocks` stocks have one, or when its brief of
-        the day failed or was claimed before `stale_before` and never written. Of calls made together, one takes it.
+        does when the stock has no brief of the day while fewer than `daily_stocks` stocks have one a viewer's request
+        claimed, or when its brief of the day failed or was claimed before `stale_before` and never written. Of calls
+        made together, one takes it. `daily_stocks` is None for the site's own writing: no limit of stocks holds its
+        claim, and the brief it takes counts as none of the day's stocks, until a viewer's request takes it over.
         """
         ...
 

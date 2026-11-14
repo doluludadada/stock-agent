@@ -3,6 +3,7 @@ from typing import Any, Protocol
 from a_domain.model.fundamentals.eps import Eps
 from a_domain.model.fundamentals.monthly_revenue import MonthlyRevenue
 from a_domain.model.market.article import Article
+from a_domain.model.market.company_profile import CompanyProfile
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.ports.market.daily_close_archive import ExchangeNews, FinancialReport, ValuationRatios
@@ -26,6 +27,13 @@ class ITaiwanStockProvider(IStockProvider, Protocol):
         """
         stock_id -> industry name from both exchanges' company profiles, merged. A market's profiles are reused until
         they are industry_max_age_hours old; a market whose download fails keeps the ones it had.
+        """
+        ...
+
+    async def fetch_company_profiles(self) -> list[CompanyProfile]:
+        """
+        Both exchanges' company profiles as served now, one per company: its names, industry code, dates, capital,
+        people, address and website, the website as an http or https address. A market whose download fails is left out.
         """
         ...
 

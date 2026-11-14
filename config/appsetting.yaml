@@ -202,7 +202,8 @@ stock_page:
     # The page's AI brief: what the company is and how the held facts of a recent window relate to the stock's move.
     # One is written per stock and Taiwan calendar day for the whole site, when a signed-in viewer asks for it; every
     # later viewer reads the stored one. Its prompt is stock_brief_prompt in config/instructions.yaml.
-    # How many stocks may get a new brief per Taiwan calendar day, for all users together.
+    # How many stocks may get a new brief per Taiwan calendar day at viewers' requests, for all users together. The
+    # briefs the site writes by itself (system_writing below) take none of them.
     daily_stocks: 30
     # The language every brief is written in: zh-TW or en.
     language: zh-TW
@@ -210,6 +211,14 @@ stock_page:
     window_sessions: 20
     # What it says about the stock it searches for in the article store (article_store below), with the queries
     # stock_brief_rise_query, stock_brief_fall_query and stock_brief_company_query of config/instructions.yaml.
+  system_writing:
+    # The site's own writing. Once a session's daily data is held, the Web API's timer makes sure each stock of the
+    # monthly ranking's top (ranking.top) has its company card and the day's brief, after reading the company's main
+    # business and annual report where a personal site may. It asks the AI model ai.system_model (Claude unless the
+    # file sets another), and its calls are counted here, apart from every user's allowance and from
+    # stock_page.brief.daily_stocks. This is how many paid AI calls it may make per Taiwan calendar day: a brief is
+    # one, and a card one more when it is written. 0, and a file that does not set it, turn the site's own writing off.
+    daily_ai_calls: 60
   article_store:
     # What the site read about each stock is kept so that it accumulates: announcements and TWSE news with their text,
     # and on a personal site news articles and PTT posts. Articles enter when a stock page asks for the stock's news,
@@ -407,10 +416,41 @@ sources:
     tpex_index_url: "https://www.tpex.org.tw/openapi/v1/tpex_index"
     # The company profiles list every listed and OTC company with its industry code. The income-statement summaries
     # list only the companies that filed the latest quarter, a few percent of them early in each filing window.
+    # The archive keeps each company's row in company_profiles, one per stock, by the fields named here. The dates
+    # are written YYYYMMDD, and the report's own date as an ROC date.
     company_profiles:
-      twse: { url: "https://openapi.twse.com.tw/v1/opendata/t187ap03_L", stock_id: "公司代號", industry: "產業別" }
+      twse:
+        url: "https://openapi.twse.com.tw/v1/opendata/t187ap03_L"
+        stock_id: "公司代號"
+        industry: "產業別"
+        report_date: "出表日期"
+        full_name: "公司名稱"
+        short_name: "公司簡稱"
+        english_short_name: "英文簡稱"
+        founded_on: "成立日期"
+        listed_on: "上市日期"
+        paid_in_capital: "實收資本額"
+        issued_shares: "已發行普通股數或TDR原股發行股數"
+        chairman: "董事長"
+        general_manager: "總經理"
+        address: "住址"
+        website: "網址"
       tpex:
-        { url: "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O", stock_id: "SecuritiesCompanyCode", industry: "SecuritiesIndustryCode" }
+        url: "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O"
+        stock_id: "SecuritiesCompanyCode"
+        industry: "SecuritiesIndustryCode"
+        report_date: "Date"
+        full_name: "CompanyName"
+        short_name: "CompanyAbbreviation"
+        english_short_name: "Symbol"
+        founded_on: "DateOfIncorporation"
+        listed_on: "DateOfListing"
+        paid_in_capital: "Paidin.Capital.NTDollars"
+        issued_shares: "IssueShares"
+        chairman: "Chairman"
+        general_manager: "GeneralManager"
+        address: "Address"
+        website: "WebAddress"
     # The names the TWSE ISIN listing (isin.twse.com.tw) gives the codes in use on 2026-11-04. A code not listed here,
     # such as 91 for depositary receipts, leaves the company without an industry.
     industry_names:
@@ -743,7 +783,17 @@ sources:
     # Companies file each month's revenue by this day of the month after it, so a summary served later holds every
     # company, and a decision after it reads that month.
     revenue_deadline_day: 10
-    request_interval_seconds: 2.0
+    # Every request to MOPS, for a page of income statements or one company's basic information, leaves this far
+    # after the one before it. Three requests in ten seconds got the address refused on 2026-11-14; five seconds
+    # apart, fourteen of fourteen were answered.
+    request_interval_seconds: 5.0
+    # A company's basic information, one POST per company to MOPS's JSON API, for its main business and English name,
+    # which the exchanges' open data lacks. A personal site alone asks, for a stock whose brief is asked for and with
+    # `just backfill-company-background`, and again after sources.mops.company_basics_max_age_days (90). The page
+    # address is what a reader opens from the stock page: a template of {stock_id}.
+    company_basics_url: "https://mops.twse.com.tw/mops/api/t05st03"
+    company_basics_origin: "https://mops.twse.com.tw"
+    company_basics_page_url: "https://mopsov.twse.com.tw/mops/web/ajax_t05st03?encodeURIComponent=1&step=1&firstin=1&off=1&queryName=co_id&inpuType=co_id&TYPEK=all&co_id={stock_id}"
     timeout_seconds: 60.0
     provisional_page_max_age_hours: 6
     # The latest statutory filing deadline of each quarter across company types, as [month, day]. Financial holdings
@@ -752,6 +802,41 @@ sources:
     # A deadline on a holiday moves to the next business day, so a quarter's filings count as final only this many
     # days after its deadline.
     filing_grace_days: 7
+  # The exchange's document site, where each company uploads its shareholders'-meeting annual report as a PDF. A
+  # personal site alone reads it: for a stock whose brief is asked for and with `just backfill-company-background`,
+  # once a year from June, and again each week until the new report appears. A report takes three requests, 5 seconds
+  # apart: the page that lists the meeting year's files ({roc_year} is the ROC year of the meeting), the request that
+  # answers the file's time-stamped address, and the file. Its text is read in a worker process, and the sections on
+  # the business scope, the product mix, the customers of a tenth of sales or more, the industry and the employees
+  # are kept as text in the article store, each under the listing page's address.
+  annual_reports:
+    index_url: "https://doc.twse.com.tw/server-java/t57sb01?step=1&colorchg=1&co_id={stock_id}&year={roc_year}&mtype=F&dtype=F04"
+    file_url: "https://doc.twse.com.tw/server-java/t57sb01"
+    site_url: "https://doc.twse.com.tw"
+    # What marks each section in a report's text, as regular expressions tried in order, read after full-width
+    # characters became ordinary ones: the first that matches past the table of contents starts the section's window
+    # of sources.annual_reports.section_length (2500) characters. Seen in the reports of 2026: the customers' section is
+    # headed by the tenth of sales, written 百分之十 or 10%, of sales alone or of purchases and sales together, and a
+    # heading may be written with a space between its characters.
+    section_patterns:
+      business_scope: ["業務之?主要內容", "業\\s*務\\s*範\\s*圍"]
+      product_mix: ["營\\s*業\\s*比\\s*重"]
+      major_customers:
+        - "[占佔]銷貨總額\\s*(?:百分之十|10\\s*%)"
+        - "銷貨客戶"
+        - "[占佔]進\\s*\\(銷\\)\\s*貨總額\\s*(?:百分之十|10\\s*%)"
+        - "[占佔]進貨總額\\s*(?:百分之十|10\\s*%)"
+        - "[占佔]全年度銷貨\\s*淨額\\s*比率"
+      industry_overview: ["產業概況", "產業之現況與發展"]
+      employees: ["從業員工", "員工人數"]
+    # A kept section's title, from the report's ROC fiscal year and the section's heading below.
+    title: "{roc_year}年度股東會年報：{section}"
+    section_titles:
+      business_scope: "業務範圍"
+      product_mix: "主要產品及營業比重"
+      major_customers: "主要客戶"
+      industry_overview: "產業概況"
+      employees: "從業員工"
   ptt:
     base_url: "https://www.ptt.cc"
     search_path: "/bbs/Stock/search"

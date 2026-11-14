@@ -48,7 +48,9 @@ class StockBrief:
     """
     The AI's short description of one stock on one Taipei calendar day, shared by every viewer of the site: what the
     company is, and how the held facts of a recent window of sessions relate to the stock's move over it. It describes
-    and never advises. One exists per stock and day; its status says whether the AI is still asked.
+    and never advises. One exists per stock and day; its status says whether the AI is still asked. A company card is
+    one too (BriefKind): it holds the `company` part alone, under the day it was claimed on, and the newest written one
+    is the company's card.
     """
 
     stock_id: NonEmptyText
@@ -81,6 +83,12 @@ class StockBrief:
 
     sources: list[BriefSource] = Field(default_factory=list)
     """The held items the sentences cite."""
+
+    fingerprint: str | None = None
+    """
+    What a company card was written from, as a digest: the card is written again only when it changes. None for a
+    daily brief, which is written once a day whatever it rests on.
+    """
 
     @validate_call
     def write(self, company: list[BriefSentence], movement: list[BriefSentence], sources: list[BriefSource], now: datetime) -> None:

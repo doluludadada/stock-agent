@@ -243,6 +243,7 @@ not start.
 | `just ranking-backtest <first> <last>` | `docker compose exec backend python -m d_presentation.cli.ranking backtest <first> <last>` |
 | `just archive-closes` | `docker compose exec backend python -m d_presentation.cli.archive_closes` |
 | `just backfill-articles` | `docker compose exec backend python -m d_presentation.cli.article_store` |
+| `just backfill-company-background --top 20` | `docker compose exec backend python -m d_presentation.cli.company_background --top 20` |
 
 The working folder of each command is the state folder, so `backups/<file>` names a file in its `backups/`.
 [Database migrations](../../docs/database-migrations.md) describes the four database commands.
@@ -306,6 +307,14 @@ docker compose up -d --build
    `Field required`, that setting has no default: copy it from `config/appsetting.yaml` into your file, and run
    `docker compose up -d` again.
 
+   The company background (the main business from MOPS, the annual reports, the company card and the site's own
+   writing) is off on a file that lacks its settings, and the start names each missing one:
+   `sources.mops.company_basics_url` and its two neighbours, the `sources.annual_reports` section,
+   `stock_page.system_writing.daily_ai_calls`, the new field names of `sources.exchange.company_profiles`, and the
+   prompt `company_card_prompt`. Copy them from the shipped files, with `sources.mops.request_interval_seconds: 5.0`
+   and the shipped `stock_brief_prompt`. [README.md](../../README.md#company-background-and-the-sites-own-writing)
+   describes each.
+
 3. If `docker compose logs backend` names an older database schema, upgrade the database. The command dumps the
    database first.
 
@@ -314,6 +323,33 @@ docker compose up -d --build
    docker compose run --rm backend python -m d_presentation.cli.database migrate
    docker compose up -d
    ```
+
+### Read the company background
+
+MOPS and the exchange's document site are sources of a personal site only. A public site reads neither, and these
+commands read nothing there.
+
+1. Keep each company's profile from the open data. The Web API also does this by itself at its start.
+
+   ```bash
+   docker compose exec backend python -m d_presentation.cli.archive_closes
+   ```
+
+2. Read the main business and the annual report of the monthly ranking's best scores.
+
+   ```bash
+   docker compose exec backend python -m d_presentation.cli.company_background --top 20
+   ```
+
+   It takes about 20 seconds a company and asks no AI. Exit code 2 means a site did not answer and something is
+   still due: run it again later. It shares the pace of its requests with the running Web API.
+
+3. Look at a stock page. A signed-in viewer's first brief of a stock writes the company's card, and the site writes
+   the cards and briefs of the ranking's top stocks by itself while `stock_page.system_writing.daily_ai_calls` is
+   above 0.
+
+The backend container needs no change for this: the PDF library is in the image, the worker process is the image's
+own Python, and its temporary file is in the container's `/tmp`, which the backend's user may write.
 
 ### Settings of the deployment
 

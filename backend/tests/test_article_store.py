@@ -532,7 +532,7 @@ async def test_a_stock_with_no_kept_article_gets_the_brief_it_got_before_the_sto
 
     assert plain_ai.prompts == searching_ai.prompts and len(plain_ai.prompts) == 1
     assert [source.kind for source in (await searching.briefs.find("2330", MARKET_OPEN.date())).sources if source.title] == []
-    assert BriefSourceKind.NEWS.value not in plain_ai.prompts[0].split("Facts:")[1].split("Write two parts")[0]
+    assert BriefSourceKind.NEWS.value not in plain_ai.prompts[0].split("Facts:")[1].split("Write one part")[0]
 
 
 async def test_the_fake_index_answers_as_the_chroma_index_does() -> None:

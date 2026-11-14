@@ -7,7 +7,7 @@ from a_domain.ports.ai.stock_brief_repository import IStockBriefRepository
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.rules.ai.stock_brief import BriefContext, BriefPromptBuilder
-from a_domain.types.enums import BriefStatus, MessageRole
+from a_domain.types.enums import BriefKind, BriefStatus, MessageRole
 from a_domain.types.errors import AiAllowanceSpentError, BriefLimitReached
 from b_application.config.app_config import AppConfig
 
@@ -31,6 +31,17 @@ class DailyStockBrief:
     stocks, and raises AiAllowanceSpentError. Any other failed call, a reply that breaks the contract and an empty
     prompts.stock_brief leave the brief failed, which a later request may take over; what the provider answered goes
     to the log and the saved replies alone. `model` is the id of the AI model the user's calls go to.
+
+    `kind` says which of the site's two texts this one writes, and with it the prompt, the reply's part and the limits
+    it reads. The daily brief (BriefKind.MOVEMENT) is as above. The company card (BriefKind.COMPANY) is kept under the
+    day it was claimed on in a repository of its own, and is the same in every way but when it is written: only while
+    prompts.company_card is set, and only when the context's fingerprint differs from that of the company's newest
+    written card, so a card is written once and again only when what it rests on changed (BriefKind.daily). Its answer
+    is today's card if one was claimed today, the newest written card of an earlier day, and how many more companies
+    may get a card today (stock_page.card.daily_stocks).
+
+    `for_system` says the site writes by itself, on the provider that counts the system's own calls: no limit of
+    stocks holds its claim, and its text takes none of the day's stocks, which are the viewers'.
     """
 
     def __init__(
@@ -41,24 +52,39 @@ class DailyStockBrief:
         config: AppConfig,
         logger: ILoggingProvider,
         model: str,
+        kind: BriefKind = BriefKind.MOVEMENT,
+        for_system: bool = False,
     ) -> None:
         self._briefs = briefs
         self._ai_provider = ai_provider
         self._market_clock = market_clock
         self._logger = logger
         self._model = model
-        self._template = config.prompts.stock_brief
+        self._kind = kind
         self._language = config.stock_page.brief.language
-        self._sentences = config.stock_page.brief.sentences
-        self._reply_rule = config.stock_page.brief.reply_rule(config.prompts.advice_phrases())
-        self._daily_stocks = config.stock_page.brief.daily_stocks
         self._claim_time = timedelta(minutes=config.stock_page.brief.claim_minutes)
+        brief, card, advice = config.stock_page.brief, config.stock_page.card, config.prompts.advice_phrases()
+
+        match kind:
+            case BriefKind.MOVEMENT:
+                self._template, self._sentences, self._daily_stocks = config.prompts.stock_brief, brief.sentences, brief.daily_stocks
+                self._reply_rule = brief.reply_rule(advice)
+            case BriefKind.COMPANY:
+                self._template, self._sentences, self._daily_stocks = config.prompts.company_card, card.sentences, card.daily_stocks
+                self._reply_rule = card.reply_rule(advice, brief.link_pattern)
+
+        self._claim_limit = None if for_system else self._daily_stocks
 
     async def execute(self, stock_id: str, context: BriefContext | None = None) -> tuple[StockBrief | None, StockBrief | None, int]:
         asked = self._market_clock.now()
         brief = None
+        due = context is not None and self._kind.daily
 
-        if context is not None:
+        if context is not None and not self._kind.daily and self._template:
+            kept = await self._briefs.latest_written(stock_id, asked.date() + timedelta(days=1))
+            due = kept is None or kept.fingerprint != context.fingerprint
+
+        if context is not None and due:
             brief = StockBrief(
                 stock_id=context.stock_id,
                 day=asked.date(),
@@ -69,9 +95,10 @@ class DailyStockBrief:
                 window_first=context.window_first,
                 window_last=context.window_last,
                 price_change=context.price_change,
+                fingerprint=context.fingerprint,
             )
 
-        claimed = brief is not None and await self._briefs.claim(brief, self._daily_stocks, asked - self._claim_time)
+        claimed = brief is not None and await self._briefs.claim(brief, self._claim_limit, asked - self._claim_time)
 
         if brief is not None and not claimed and await self._briefs.find(brief.stock_id, brief.day) is None:
             raise BriefLimitReached("Today's new AI briefs are spent. They renew at midnight Taiwan time.")

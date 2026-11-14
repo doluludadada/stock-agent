@@ -38,6 +38,7 @@ from a_domain.types.errors import AiAllowanceSpentError, IllegalBriefTransition
 from b_application.config.app_config import AppConfig
 from b_application.config.settings_loader import load_yaml
 from c_infrastructure.database.db_connector import DatabaseConnector
+from c_infrastructure.database.models.stock_brief_dto import CompanyCardDTO, StockBriefDTO
 from c_infrastructure.database.repositories.stock_brief_repository import SqlStockBriefRepository
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 
@@ -216,11 +217,12 @@ async def test_a_link_the_model_writes_is_cut_out_of_the_sentence(written: str) 
     [
         "I'm sorry, I'm having trouble connecting to Claude right now.",
         "[1, 2]",
-        json.dumps({"company": [], "movement": [{"text": "It rose.", "sources": ["S2"]}]}),
+        json.dumps({"company": [{"text": "A company.", "sources": ["S1"]}], "movement": []}),
         json.dumps({"company": [{"text": "A company.", "sources": ["S1"]}], "movement": "It rose."}),
+        json.dumps({"movement": [{"text": "It rose.", "sources": ["S99"]}]}),
     ],
 )
-async def test_a_reply_that_is_not_the_two_cited_parts_is_no_brief(reply: str) -> None:
+async def test_a_reply_without_a_cited_sentence_on_the_move_is_no_brief(reply: str) -> None:
     config = brief_config()
 
     assert config.stock_page.brief.reply_rule(config.prompts.advice_phrases()).apply(reply, context_of(config, [])) is None
@@ -238,7 +240,7 @@ async def test_a_written_brief_is_final() -> None:
 
 
 async def test_of_claims_made_together_for_one_stock_one_takes_the_day(database: DatabaseConnector) -> None:
-    briefs = SqlStockBriefRepository(database)
+    briefs = SqlStockBriefRepository(database, StockBriefDTO)
     stale = MARKET_OPEN - timedelta(minutes=5)
 
     taken = await asyncio.gather(*(briefs.claim(writing("2330"), 30, stale) for _ in range(8)))
@@ -248,7 +250,7 @@ async def test_of_claims_made_together_for_one_stock_one_takes_the_day(database:
 
 
 async def test_claims_made_together_for_many_stocks_stop_at_the_daily_limit(database: DatabaseConnector) -> None:
-    briefs = SqlStockBriefRepository(database)
+    briefs = SqlStockBriefRepository(database, StockBriefDTO)
     stale = MARKET_OPEN - timedelta(minutes=5)
 
     taken = await asyncio.gather(*(briefs.claim(writing(f"{1100 + number}"), 3, stale) for number in range(8)))
@@ -258,10 +260,33 @@ async def test_claims_made_together_for_many_stocks_stop_at_the_daily_limit(data
     assert await briefs.claim(writing("2330", TODAY + timedelta(days=1)), 3, stale)
 
 
+async def test_a_claim_of_the_sites_own_writing_meets_no_limit_and_takes_none_of_the_days_stocks(database: DatabaseConnector) -> None:
+    briefs, cards = SqlStockBriefRepository(database, StockBriefDTO), SqlStockBriefRepository(database, CompanyCardDTO)
+    stale = MARKET_OPEN - timedelta(minutes=5)
+
+    assert await briefs.claim(writing("2330"), 1, stale)
+    assert not await briefs.claim(writing("2317"), 1, stale), "the viewers' one stock of the day is taken"
+    assert await briefs.claim(writing("2317"), None, stale) and await briefs.claim(writing("2454"), None, stale)
+    assert await briefs.claimed_stocks(TODAY) == 1
+    assert await cards.claimed_stocks(TODAY) == 0 and await cards.claim(writing("2317"), 1, stale), "each table counts its own"
+
+    failed = await briefs.find("2454", TODAY)
+    assert failed is not None
+    failed.fail()
+    await briefs.save(failed)
+
+    assert await briefs.claim(writing("2454"), 1, stale), "a failed brief is taken over whatever the limit"
+    assert await briefs.claimed_stocks(TODAY) == 2, "and counts once a viewer's request holds it"
+
+    await briefs.release("2317", TODAY)
+    assert await briefs.claim(writing("2317"), 3, stale)
+    assert await briefs.claimed_stocks(TODAY) == 3, "a released claim leaves no name behind"
+
+
 async def test_a_brief_outlives_the_server_and_only_a_failed_or_an_abandoned_one_is_taken_again(
     database: DatabaseConnector, tmp_path: Path
 ) -> None:
-    briefs = SqlStockBriefRepository(database)
+    briefs = SqlStockBriefRepository(database, StockBriefDTO)
     stale = MARKET_OPEN - timedelta(minutes=5)
     written = writing("2330")
     assert await briefs.claim(written, 30, stale)
@@ -276,7 +301,7 @@ async def test_a_brief_outlives_the_server_and_only_a_failed_or_an_abandoned_one
 
     restarted = open_database(tmp_path)
     await restarted.init_db()
-    after = SqlStockBriefRepository(restarted)
+    after = SqlStockBriefRepository(restarted, StockBriefDTO)
     held = await after.find("2330", TODAY)
     retaken = [await after.claim(writing(stock_id), 4, stale) for stock_id in ("2330", "2317", "2454", "2303")]
     await restarted.close()
@@ -286,7 +311,7 @@ async def test_a_brief_outlives_the_server_and_only_a_failed_or_an_abandoned_one
 
 
 async def test_the_newest_written_brief_before_a_day_is_the_previous_one(database: DatabaseConnector) -> None:
-    briefs = SqlStockBriefRepository(database)
+    briefs = SqlStockBriefRepository(database, StockBriefDTO)
 
     for days_ago, fails in ((3, False), (2, False), (1, True)):
         brief = writing("2330", TODAY - timedelta(days=days_ago))

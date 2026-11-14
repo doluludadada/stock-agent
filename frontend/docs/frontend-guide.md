@@ -43,7 +43,8 @@ src/
                        one portfolio, each stock with its ranking score and revenue; the entry form
     admin-settings/    every setting of appsetting.yaml and the AI prompts of instructions.yaml as one form of choices,
                        generated from the server's fields; a save with the password applies at once
-    stock-research/    stock page: the ranking score and the monthly revenue at the top, the financial analysis the backend
+    stock-research/    stock page: the ranking score and the monthly revenue at the top, then the company (its AI card,
+                       written once and kept, its facts and their source pages), the financial analysis the backend
                        reads from held data (the reading in sentences, the revenue and earnings trends, the valuation
                        against its own history), the related news and discussion, the archived financials, the
                        strategy's evaluation
@@ -108,6 +109,7 @@ the contract by `catalog.test.ts`.
 | A stock's archived quarters and monthly revenue | `stock-research/api.ts` | `/v1/market/stocks/{id}/financials` |
 | A stock's financial analysis from held data and its reading by fixed rules; what is said about it; its score, the place in the monthly ranking as a percentile | `stock-research/api.ts` | `/v1/market/stocks/{id}/analysis`, `/news`, `/ranking` |
 | A stock's AI brief as the site holds it; a signed-in viewer's request to write today's | `stock-research/api.ts` | `/v1/market/stocks/{id}/brief` |
+| A stock's company as the site holds it: the profile's facts, the company card and the pages they come from | `stock-research/api.ts` | `/v1/market/stocks/{id}/company` |
 | The open data's providers, datasets and license | `attribution/api.ts` | `/v1/market/attribution` |
 | Built-in strategies, owner settings, saves with revisions | `strategies/api/queries.ts` | `/v1/technical-settings` |
 | Runs, decisions, orders; a start of Buzz or Intraday on the broker chosen | `runs/api.ts` | `/v1/runs` |
@@ -177,12 +179,19 @@ in the reader's language, with its count), and a figure the held history is too 
 that says how much is held. `BriefPanel` sits right under `StockSummary`, never above it: the AI's brief of the stock, which the site writes
 once per stock and Taipei day for every viewer. `briefView` (`stock-research/brief.ts`) decides the one state the card
 says: written, being written, failed, the day's limit reached, or not written. Only a signed-in viewer's click asks
-for a brief, never a page open, since each one spends an AI call and one of the day's new briefs. A shown brief always
+for a brief, never a page open, since each one spends an AI call and one of the day's new briefs. A stock's first
+brief can take a minute, because the server first reads the company's main business and annual report and writes its
+card: while a brief is being written the card lists those steps and marks the one the site is at (`briefSteps`), from
+what `/company` and `/brief` hold, asked again every three seconds, and a second request for the same stock waits for
+the first on the server. `CompanyPanel`, between `StockSummary` and the brief, shows the company card, the profile's
+facts and the two source pages; the main business as the company filed it shows only while there is no card, since the
+card says it. A shown brief always
 names the AI, the model, the Taipei time, the window and the close's change over it. A citation's name comes from its
 kind and date, never from the AI's text, and a cited source leads to its own http address or to the page's part of
 its kind (`SECTION_ANCHORS`). `NewsPanel` lists announcements, exchange news and, where the audience allows
 `news_articles`, articles and board posts, as the site's article store keeps them, so the list reaches back past what
-the sources serve today. Every title and text there is a third party's: it renders as text, and an
+the sources serve today. An annual report's sections are no news: the server leaves them out, and the company card's
+sources lead to them. Every title and text there is a third party's: it renders as text, and an
 address is a link only when `outboundUrl` finds it plain http or https, opened with `rel="noopener noreferrer nofollow"`.
 
 ## What the administrator shows

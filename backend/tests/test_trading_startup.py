@@ -233,10 +233,12 @@ BOOLEAN_SETTINGS = {
     "behavior.enable_inline_citations",
     "notifications.enabled",
     "sources.exchange.daily_reports.index_volume_lots",
+    "stock_page.system_writing.users_stocks",
 }
 """
 None of them sends or stops an order: open registration, the AI's web search, X search and inline citations, LINE
-notifications, and whether an exchange's index report counts its volume in lots.
+notifications, whether an exchange's index report counts its volume in lots, and whether the site's own writing also
+covers the stocks users hold or watch, which writes texts and never orders.
 """
 
 

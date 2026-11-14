@@ -8,6 +8,7 @@ from sqlmodel import col, select
 from a_domain.model.market.article import Article
 from a_domain.ports.market.article_store import IArticleStore
 from a_domain.ports.system.market_clock import IMarketClock
+from a_domain.types.enums import InformationSource
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.article_store_dto import StoredArticleDTO
 from c_infrastructure.database.models.daily_close_archive_dto import replacing
@@ -18,7 +19,8 @@ class SqlArticleStore(IArticleStore):
     The stored_articles table, shared by every user. A save reads what the table holds of the stocks named and writes
     only the articles that are new or whose title or text changed, in one statement that replaces a row of the same
     stock and key, so two saves of the same article at once keep one row. In the same transaction it drops every
-    article published more than `retention` ago, of any stock, and each named stock's oldest beyond `max_per_stock`.
+    article published more than `retention` ago, of any stock, and each named stock's oldest beyond `max_per_stock`,
+    which a document of record does not count toward (InformationSource.is_reference).
     An article's publication time is answered in the exchange's zone.
     """
 
@@ -34,6 +36,7 @@ class SqlArticleStore(IArticleStore):
         given = {(article.stock_id, article.key): article for article in articles if article.published_at >= now - self._retention}
         stock_ids = sorted({stock_id for stock_id, _ in given})
         newest_first = col(StoredArticleDTO.published_at).desc()
+        daily = col(StoredArticleDTO.source).not_in(reference_sources())
 
         async with self._db.get_session() as session:
             held = (await session.execute(select(StoredArticleDTO).where(col(StoredArticleDTO.stock_id).in_(stock_ids)))).scalars()
@@ -48,7 +51,7 @@ class SqlArticleStore(IArticleStore):
 
             for stock_id in stock_ids:
                 of_stock = col(StoredArticleDTO.stock_id) == stock_id
-                beyond = select(StoredArticleDTO.key).where(of_stock).order_by(newest_first).offset(self._max_per_stock)
+                beyond = select(StoredArticleDTO.key).where(of_stock, daily).order_by(newest_first).offset(self._max_per_stock)
                 surplus = (await session.execute(beyond)).scalars().all()
                 await session.execute(delete(StoredArticleDTO).where(of_stock, col(StoredArticleDTO.key).in_(surplus)))
 
@@ -60,7 +63,7 @@ class SqlArticleStore(IArticleStore):
     async def latest(self, stock_id: str, limit: int) -> list[Article]:
         newest_first = (
             select(StoredArticleDTO)
-            .where(col(StoredArticleDTO.stock_id) == stock_id)
+            .where(col(StoredArticleDTO.stock_id) == stock_id, col(StoredArticleDTO.source).not_in(reference_sources()))
             .order_by(col(StoredArticleDTO.published_at).desc(), col(StoredArticleDTO.key))
             .limit(limit)
         )
@@ -80,8 +83,24 @@ class SqlArticleStore(IArticleStore):
         return [row.to_domain(self._market_clock.to_market_datetime(row.published_at)) for row in rows]
 
     @override
+    async def references(self, stock_id: str) -> list[Article]:
+        kept = select(StoredArticleDTO).where(
+            col(StoredArticleDTO.stock_id) == stock_id, col(StoredArticleDTO.source).in_(reference_sources())
+        )
+
+        async with self._db.get_session() as session:
+            rows = (await session.execute(kept)).scalars().all()
+
+        return [row.to_domain(self._market_clock.to_market_datetime(row.published_at)) for row in rows]
+
+    @override
     async def stock_ids(self) -> list[str]:
         distinct = select(StoredArticleDTO.stock_id).distinct().order_by(col(StoredArticleDTO.stock_id))
 
         async with self._db.get_session() as session:
             return list((await session.execute(distinct)).scalars().all())
+
+
+def reference_sources() -> list[str]:
+    """The sources of documents of record, as the table stores them."""
+    return [source.value for source in InformationSource if source.is_reference]

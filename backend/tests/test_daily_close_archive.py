@@ -42,6 +42,7 @@ from b_application.config.api_config import ApiConfig
 from b_application.config.market_data_config import MarketDataConfig, MarketHoursConfig
 from b_application.use_cases.collect.daily_close_archiver import DailyCloseArchiver
 from c_infrastructure.database.db_connector import DatabaseConnector
+from c_infrastructure.database.repositories.company_profile_repository import SqlCompanyProfileRepository
 from c_infrastructure.database.repositories.daily_close_archive import SqlDailyCloseArchive
 from c_infrastructure.market.twse_provider import TaiwanStockProvider
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
@@ -219,7 +220,8 @@ async def archive_run(
     """One run of the archive with a fresh download of every endpoint, as `just archive-closes` starts it."""
     clock = TaiwanMarketClock(MarketHoursConfig())
     provider = TaiwanStockProvider(SOURCES.exchange, clock, MarketDataConfig(), SilentLogger())
-    return await DailyCloseArchiver(provider, sql_archive(connector, logger), SilentLogger()).execute()
+    profiles = SqlCompanyProfileRepository(connector)
+    return await DailyCloseArchiver(provider, sql_archive(connector, logger), profiles, SilentLogger()).execute()
 
 
 async def started_database(folder: Path) -> DatabaseConnector:
@@ -630,7 +632,7 @@ async def test_a_report_whose_rows_none_can_be_read_is_an_error_and_one_that_ser
     provider = TaiwanStockProvider(SOURCES.exchange, TaiwanMarketClock(MarketHoursConfig()), MarketDataConfig(), logger)
 
     try:
-        await DailyCloseArchiver(provider, sql_archive(connector), SilentLogger()).execute()
+        await DailyCloseArchiver(provider, sql_archive(connector), SqlCompanyProfileRepository(connector), SilentLogger()).execute()
     finally:
         await connector.close()
 

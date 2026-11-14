@@ -159,6 +159,19 @@ const research = {
     acceleration: '{{short}}-month over {{long}}-month average',
     chart: 'Bar chart of the last {{count}} months of revenue; the monthly table below lists each figure.',
   },
+  company: {
+    title: 'Company',
+    loadFailed: 'The company’s facts could not be loaded.',
+    none: 'No company facts held yet',
+    mainBusiness: 'Main business:',
+    founded: 'Founded',
+    listed: 'Listed',
+    capital: 'Paid-in capital',
+    twd: 'NT${{value}}',
+    chairman: 'Chairman',
+    website: 'Website',
+    sources: 'Sources:',
+  },
   brief: {
     title: 'AI brief',
     loadFailed: 'The brief could not be loaded.',
@@ -187,6 +200,8 @@ const research = {
       exchange_news: 'Exchange news',
       news: 'News',
       post: 'Board post',
+      annual_report: 'Annual report',
+      profile: 'MOPS company profile',
     },
     sources: {
       title: 'Cited sources',
@@ -203,7 +218,18 @@ const research = {
     signIn: 'Signed-in users can ask for today’s brief.',
     writing: {
       title: 'Today’s brief is being written',
-      description: 'Usually within half a minute.',
+      description: 'Usually within half a minute. A stock’s first brief can take a minute.',
+      step: {
+        mainBusiness: 'Read the company’s main business on MOPS',
+        annualReport: 'Read its annual report',
+        card: 'Write the company card',
+        brief: 'Write today’s brief',
+      },
+      state: {
+        done: '(done)',
+        active: '(in progress)',
+        waiting: '(waiting)',
+      },
     },
     failed: {
       title: 'Today’s brief could not be written',
@@ -229,6 +255,7 @@ const research = {
       news_media: 'News',
       ptt_stock: 'PTT Stock',
       ptt_gossiping: 'PTT Gossiping',
+      annual_report: 'Annual report',
     },
     opens: '(opens the source in a new tab)',
     showAll: 'Show all {{count}} items',

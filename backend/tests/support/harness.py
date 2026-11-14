@@ -63,9 +63,12 @@ from support.fakes import (
     PROMPT_TEMPLATES,
     VALUATION_PROMPT_TEMPLATE,
     FakeAiProvider,
+    FakeAnnualReportProvider,
     FakeArticleIndex,
     FakeArticleStore,
     FakeBacktestRepository,
+    FakeCompanyBasicsProvider,
+    FakeCompanyProfileRepository,
     FakeConversationRepository,
     FakeDailyCloseArchive,
     FakeFundamentalsProvider,
@@ -79,6 +82,7 @@ from support.fakes import (
     FakeSocialMediaProvider,
     FakeStockBriefRepository,
     FakeStockProvider,
+    FakeSystemWritingLog,
     FakeTechnicalSettingsRepository,
     FakeTextEmbedder,
     FakeTradingJournal,
@@ -183,6 +187,12 @@ class CliHarness:
     stocks: FakeStockProvider
     archive: FakeDailyCloseArchive
     briefs: FakeStockBriefRepository
+    cards: FakeStockBriefRepository
+    system_writings: FakeSystemWritingLog
+    system_ai: FakeAiProvider
+    profiles: FakeCompanyProfileRepository
+    company_basics: FakeCompanyBasicsProvider
+    annual_reports: FakeAnnualReportProvider
     articles: FakeArticleStore
     article_index: FakeArticleIndex
     embedder: FakeTextEmbedder
@@ -427,6 +437,12 @@ def build_harness(
     backtests = FakeBacktestRepository()
     holdings = FakeHoldingRepository()
     briefs = FakeStockBriefRepository()
+    cards = FakeStockBriefRepository()
+    system_writings = FakeSystemWritingLog()
+    system_ai = FakeAiProvider()
+    profiles = FakeCompanyProfileRepository()
+    company_basics = FakeCompanyBasicsProvider()
+    annual_reports = FakeAnnualReportProvider()
     store_settings = config.stock_page.article_store
     articles = FakeArticleStore(clock, store_settings.retention(), store_settings.max_per_stock)
     embedder = FakeTextEmbedder()
@@ -464,6 +480,10 @@ def build_harness(
         history_cache=None,
         bar_matrix_provider=DailyBarMatrixProvider(stocks, prices, archive, clock, config.ranking.history_rule(), logger),
         stock_brief_repository=briefs,
+        company_card_repository=cards,
+        system_writing_log=system_writings,
+        system_ai_provider=system_ai,
+        company_profile_repository=profiles,
         article_store=articles,
         article_index=article_index,
         users_stocks=users_stocks,
@@ -471,6 +491,8 @@ def build_harness(
         shioaji=ShioajiConnection(client=FakeShioaji(), up=True) if login else None,
         daily_close_archive=archive,
         fundamentals_provider=fundamentals if config.audience.mops else None,
+        company_basics_provider=company_basics if config.audience.mops else None,
+        annual_report_provider=annual_reports if config.audience.annual_reports else None,
         news_provider=news if config.audience.news_articles else archive,
         social_media_provider=social if config.audience.realtime_quotes else None,
         ai_provider=ai,
@@ -493,6 +515,12 @@ def build_harness(
         stocks=stocks,
         archive=archive,
         briefs=briefs,
+        cards=cards,
+        system_writings=system_writings,
+        system_ai=system_ai,
+        profiles=profiles,
+        company_basics=company_basics,
+        annual_reports=annual_reports,
         articles=articles,
         article_index=article_index,
         embedder=embedder,

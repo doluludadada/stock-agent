@@ -25,6 +25,7 @@ from a_domain.model.fundamentals.eps import Eps
 from a_domain.model.fundamentals.monthly_revenue import MonthlyRevenue
 from a_domain.model.fundamentals.quarter_financials import QuarterFinancials
 from a_domain.model.market.article import Article
+from a_domain.model.market.company_profile import CompanyProfile
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.model.system.stats import SystemStats
@@ -42,6 +43,9 @@ from a_domain.model.trading.backtest import Backtest
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.model.trading.watchlist import WatchlistEntry
+from a_domain.ports.ai.system_writing_log import SystemWriting
+from a_domain.ports.market.annual_report_provider import AnnualReport
+from a_domain.ports.market.company_basics_provider import CompanyBasics
 from a_domain.ports.market.daily_close_archive import (
     ArchivedMonth,
     ArchivedQuarter,
@@ -155,6 +159,7 @@ class FakeStockProvider:
         self.closes: dict[str, Ohlcv] = {}
         self.index_closes: dict[MarketType, list[Ohlcv]] = {}
         self.industries: dict[str, str] = {}
+        self.company_profiles: list[CompanyProfile] = []
         self.material_information: list[Article] = []
         self.quarter_eps: dict[str, Eps] = {}
         self.valuation_ratios: list[ValuationRatios] = []
@@ -177,6 +182,9 @@ class FakeStockProvider:
 
     async def fetch_industries(self) -> dict[str, str]:
         return dict(self.industries)
+
+    async def fetch_company_profiles(self) -> list[CompanyProfile]:
+        return list(self.company_profiles)
 
     async def fetch_material_information(self) -> list[Article]:
         return [replace(article) for article in self.material_information]
@@ -780,11 +788,79 @@ class FakeBacktestRepository:
         return deleted
 
 
+class FakeAnnualReportProvider:
+    """
+    The document site: what a test put in `listed` for a stock and fiscal year; any other is answered as not listed, and
+    a stock in `refused` is not answered.
+    """
+
+    def __init__(self) -> None:
+        self.listed: dict[tuple[str, int], AnnualReport] = {}
+        self.refused: set[str] = set()
+        self.asked: list[tuple[str, int]] = []
+
+    async def fetch(self, stock_id: str, fiscal_year: int) -> AnnualReport | None:
+        self.asked.append((stock_id, fiscal_year))
+
+        if stock_id in self.refused:
+            return None
+
+        return self.listed.get((stock_id, fiscal_year), AnnualReport(fiscal_year=fiscal_year, file=None))
+
+
+class FakeCompanyBasicsProvider:
+    """MOPS's company basic information: what a test put in `served` for a stock; a stock in `refused` is not answered."""
+
+    def __init__(self) -> None:
+        self.served: dict[str, CompanyBasics] = {}
+        self.refused: set[str] = set()
+        self.asked: list[str] = []
+
+    async def fetch(self, stock_id: str) -> CompanyBasics | None:
+        self.asked.append(stock_id)
+
+        if stock_id in self.refused:
+            return None
+
+        return self.served.get(stock_id, CompanyBasics(main_business=None, english_name=None, url=f"https://mops.example/{stock_id}"))
+
+
+class FakeCompanyProfileRepository:
+    """Like the SQL repository: one profile per stock, and the exchanges' profiles replace only the exchange's fields."""
+
+    def __init__(self) -> None:
+        self.rows: dict[str, CompanyProfile] = {}
+
+    async def find(self, stock_id: str) -> CompanyProfile | None:
+        return self.rows.get(stock_id)
+
+    async def save_listings(self, profiles: Sequence[CompanyProfile]) -> None:
+        for profile in profiles:
+            held = self.rows.get(profile.stock_id, CompanyProfile(stock_id=profile.stock_id))
+            self.rows[profile.stock_id] = replace(
+                profile,
+                main_business=held.main_business,
+                english_name=held.english_name,
+                main_business_url=held.main_business_url,
+                main_business_fetched_at=held.main_business_fetched_at,
+                annual_report_year=held.annual_report_year,
+                annual_report_file=held.annual_report_file,
+                annual_report_checked_at=held.annual_report_checked_at,
+            )
+
+    async def save(self, profile: CompanyProfile) -> None:
+        self.rows[profile.stock_id] = profile
+
+
 class FakeStockBriefRepository:
-    """Like the SQL repository: one brief per stock and day, a claim one caller takes, and a limit on a day's stocks."""
+    """
+    Like the SQL repository: one brief per stock and day, a claim one caller takes, and a limit on the day's stocks
+    viewers' requests claimed, which a claim of the site's own writing (no limit) neither meets nor counts toward.
+    """
 
     def __init__(self) -> None:
         self.rows: dict[tuple[str, date], StockBrief] = {}
+        self.by_system: set[tuple[str, date]] = set()
 
     async def find(self, stock_id: str, day: date) -> StockBrief | None:
         held = self.rows.get((stock_id, day))
@@ -799,17 +875,19 @@ class FakeStockBriefRepository:
         return max(written, key=lambda brief: brief.day, default=None)
 
     async def claimed_stocks(self, day: date) -> int:
-        return sum(held_day == day for _, held_day in self.rows)
+        return sum(held_day == day for _, held_day in self.rows.keys() - self.by_system)
 
-    async def claim(self, brief: StockBrief, daily_stocks: int, stale_before: datetime) -> bool:
-        held = self.rows.get((brief.stock_id, brief.day))
+    async def claim(self, brief: StockBrief, daily_stocks: int | None, stale_before: datetime) -> bool:
+        key = (brief.stock_id, brief.day)
+        held = self.rows.get(key)
         abandoned = held is not None and held.status == BriefStatus.WRITING and held.claimed_at < stale_before
-        free = held is None and await self.claimed_stocks(brief.day) < daily_stocks
+        free = held is None and (daily_stocks is None or await self.claimed_stocks(brief.day) < daily_stocks)
 
         if not (free or abandoned or (held is not None and held.status == BriefStatus.FAILED)):
             return False
 
-        self.rows[(brief.stock_id, brief.day)] = replace(brief)
+        self.rows[key] = replace(brief)
+        self.by_system = self.by_system | {key} if daily_stocks is None else self.by_system - {key}
         return True
 
     async def save(self, brief: StockBrief) -> None:
@@ -817,6 +895,7 @@ class FakeStockBriefRepository:
 
     async def release(self, stock_id: str, day: date) -> None:
         self.rows.pop((stock_id, day), None)
+        self.by_system.discard((stock_id, day))
 
 
 class FakeTextEmbedder:
@@ -884,8 +963,11 @@ class FakeArticleStore:
         }
         return changed
 
+    async def references(self, stock_id: str) -> list[Article]:
+        return [replace(article) for (held_id, _), article in self.rows.items() if held_id == stock_id and article.source.is_reference]
+
     async def latest(self, stock_id: str, limit: int) -> list[Article]:
-        held = [article for (held_id, _), article in self.rows.items() if held_id == stock_id]
+        held = [article for (held_id, _), article in self.rows.items() if held_id == stock_id and not article.source.is_reference]
         return [replace(article) for article in sorted(held, key=lambda article: article.published_at, reverse=True)[:limit]]
 
     async def find(self, stock_id: str, keys: Collection[str]) -> list[Article]:
@@ -919,6 +1001,19 @@ class FakeArticleIndex:
             if held_id == stock_id and (first is None or day >= first) and (last is None or day < last)
         }
         return sorted(within, key=lambda key: within[key], reverse=True)[:limit]
+
+
+class FakeSystemWritingLog:
+    """Like the SQL log: one round per session, and the first one begun is the one kept."""
+
+    def __init__(self) -> None:
+        self.rounds: dict[date, SystemWriting] = {}
+
+    async def find(self, session: date) -> SystemWriting | None:
+        return self.rounds.get(session)
+
+    async def begin(self, writing: SystemWriting) -> SystemWriting:
+        return self.rounds.setdefault(writing.session, writing)
 
 
 class FakeUsersStocks:

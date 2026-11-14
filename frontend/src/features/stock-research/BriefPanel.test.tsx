@@ -5,9 +5,10 @@ import { I18nextProvider } from 'react-i18next'
 import { MemoryRouter } from 'react-router'
 import { initI18n, type Locale } from '@/i18n'
 import { session } from '@/shared/api'
+import { PERSONAL_SITE } from '@/test/audiences'
 import { TEST_USER } from '@/test/users'
 import { BRIEF_POLL_MS } from './api'
-import type { StockBrief, StockBriefAnswer } from './brief'
+import type { StockBrief, StockBriefAnswer, StockCompanyAnswer } from './brief'
 import { BriefPanel } from './BriefPanel'
 
 const written: StockBrief = {
@@ -41,10 +42,17 @@ const answer = (parts: Partial<StockBriefAnswer>): StockBriefAnswer => ({ stock_
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 
-/** A backend that answers each GET with the next of `held` (the last one from then on) and a POST with `posted`. */
-function backend(held: StockBriefAnswer[], posted: () => Response = () => json(answer({ today: written }))) {
+const nothingHeld: StockCompanyAnswer = { stock_id: '2330', profile: null, sources: [], today: null, previous: null }
+
+/**
+ * A backend that answers each GET of the brief with the next of `held` (the last one from then on) and a POST with
+ * `posted`. The company is what `company` holds when it is asked, and the site is a personal one.
+ */
+function backend(held: StockBriefAnswer[], posted: () => Response = () => json(answer({ today: written })), company = { held: nothingHeld }) {
   const calls = { get: 0, post: 0 }
   const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === '/v1/market/audience') return json(PERSONAL_SITE)
+    if (url === '/v1/market/stocks/2330/company') return json(company.held)
     expect(url).toBe('/v1/market/stocks/2330/brief')
     if (init?.method === 'POST') {
       expect(JSON.parse(String(init.body))).toEqual({ confirm: true })
@@ -159,6 +167,40 @@ describe('a stock’s AI brief', () => {
     expect(screen.queryByText(/Yesterday’s words\./)).not.toBeInTheDocument()
     expect(calls).toEqual({ get: 1, post: 1 })
   })
+
+  it('says each step of a first brief and which one the site is at, from what the site holds as it is asked again', async () => {
+    let reply = (_response: Response) => {}
+    const posting = new Promise<Response>((resolve) => (reply = resolve))
+    const company = { held: nothingHeld }
+    backend([answer({})], () => posting as unknown as Response, company)
+    session.signIn(TEST_USER)
+    const user = userEvent.setup()
+    renderPanel()
+    const steps = () => screen.getAllByRole('listitem').map((step) => step.textContent)
+
+    await user.click(await screen.findByRole('button', { name: 'Write today’s brief' }))
+
+    await waitFor(() =>
+      expect(steps()).toEqual([
+        'Read the company’s main business on MOPS(in progress)',
+        'Read its annual report(waiting)',
+        'Write the company card(waiting)',
+        'Write today’s brief(waiting)',
+      ]),
+    )
+
+    const profile = { stock_id: '2330', main_business_fetched_at: '2026-11-13T01:00:05Z', annual_report_checked_at: '2026-11-13T01:00:25Z' }
+    company.held = { ...nothingHeld, profile: profile as StockCompanyAnswer['profile'], today: today('writing') }
+
+    await waitFor(() => expect(steps().map((step) => step?.match(/\((.+)\)/)?.[1])).toEqual(['done', 'done', 'in progress', 'waiting']), {
+      timeout: BRIEF_POLL_MS + 2_000,
+    })
+    expect(screen.getByRole('listitem', { current: 'step' })).toHaveTextContent('Write the company card')
+
+    reply(json(answer({ today: written })))
+    expect(await screen.findByText(/It makes chips for other firms\./)).toBeInTheDocument()
+    expect(screen.queryByText('Write the company card')).not.toBeInTheDocument()
+  }, 15_000)
 
   it('shows the earlier brief while another viewer’s request is being written, and asks again until it is', async () => {
     const calls = backend([answer({ today: today('writing'), previous: earlier }), answer({ today: written, previous: earlier })])

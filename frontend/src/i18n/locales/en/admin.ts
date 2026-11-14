@@ -149,6 +149,7 @@ const admin = {
         stock_brief_rise_query: 'What an AI brief searches the kept articles for after a rise',
         stock_brief_fall_query: 'What an AI brief searches the kept articles for after a fall',
         stock_brief_company_query: 'What an AI brief searches the kept articles for about the company',
+        company_card: 'Stock page company card prompt',
       },
       sentiment: {
         min_confidence: 'Least confidence of a post',
@@ -339,6 +340,8 @@ const admin = {
           'Not a prompt: no AI reads it. The same for a window the close fell over.',
         stock_brief_company_query:
           'Not a prompt: no AI reads it. A brief takes the kept articles whose meaning is closest to these words to say what the company makes and sells. Write them in the articles’ language, without a company name. Empty, a brief searches for none.',
+        company_card:
+          'The AI writes a company’s card from its profile and its annual report once, and again only when one of them or this prompt changes. Empty, no card is written.',
       },
       sentiment: {
         min_confidence: 'A post classified with less confidence than this, from 0 to 1, counts as unclear. The Buzz report’s sentiment never changes a signal or an order.',

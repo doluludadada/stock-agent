@@ -356,6 +356,13 @@
     "unit": null
   },
   {
+    "path": "prompts.company_card",
+    "kind": "text",
+    "group": "advanced",
+    "options": [],
+    "unit": null
+  },
+  {
     "path": "prompts.stock_brief_advice_phrases",
     "kind": "text",
     "group": "advanced",

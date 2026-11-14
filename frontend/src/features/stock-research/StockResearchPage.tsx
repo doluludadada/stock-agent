@@ -27,6 +27,7 @@ import { AnalysisPanel } from './AnalysisPanel'
 import { useStockTechnical, type StockTechnical } from './api'
 import { SECTION_ANCHORS } from './brief'
 import { BriefPanel } from './BriefPanel'
+import { CompanyPanel } from './CompanyPanel'
 import { FinancialsPanel } from './FinancialsPanel'
 import { NewsPanel } from './NewsPanel'
 import { StockSummary } from './StockSummary'
@@ -81,6 +82,7 @@ function WithoutBars({ history, actions }: { history: StockHistory; actions: Sto
       <StockHeader history={history} actions={actions} />
       <p className="text-sm text-muted-foreground">{t('noBars')}</p>
       <StockSummary stockId={history.stock.stock_id} />
+      <CompanyPanel stockId={history.stock.stock_id} />
       <div id={SECTION_ANCHORS.news}>
         <NewsPanel stockId={history.stock.stock_id} />
       </div>
@@ -146,6 +148,8 @@ function Research({ history, actions, strategyName, ruleSentences, ruleName }: O
       <StockHeader history={history} actions={actions} />
 
       <StockSummary stockId={history.stock.stock_id} />
+
+      <CompanyPanel stockId={history.stock.stock_id} />
 
       <div className="card-grid xl:grid-cols-12">
         <div className="min-w-0 xl:col-span-8">

@@ -4,6 +4,7 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from a_domain.rules.ai.company_card import CompanyCardContextRule
 from a_domain.rules.system.registration import RegistrationRule
 from a_domain.rules.trading.backtest import BacktestRule, OpenFillRule, SessionStopLossRule
 from a_domain.rules.trading.cost import AffordableQuantityRule
@@ -207,6 +208,14 @@ class AppConfig(BaseSettings):
             session_stop_loss_rule=SessionStopLossRule(stop_loss_rule=self.stop_loss_rule()),
             cost_rule=self.market.cost_rule(),
             position_value_rule=self.market.position_value_rule(),
+        )
+
+    def company_card_context_rule(self) -> CompanyCardContextRule:
+        """What a company card rests on; its prompt and language are part of what a card is written from."""
+        return CompanyCardContextRule(
+            section_length=self.stock_page.card.section_length,
+            industry_names=self.sources.exchange.industry_names,
+            instructions=f"{self.stock_page.brief.language.value}\n{self.prompts.company_card}",
         )
 
     def decision_sessions_rule(self) -> DecisionSessionsRule:

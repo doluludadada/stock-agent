@@ -14,11 +14,12 @@ from uuid import UUID
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, PositiveInt, SecretStr, StringConstraints
 
-from a_domain.model.analysis.stock_brief import StockBrief
+from a_domain.model.analysis.stock_brief import BriefSource, StockBrief
 from a_domain.model.analysis.technical_report import TechnicalReport
 from a_domain.model.fundamentals.eps import EpsUnavailable
 from a_domain.model.fundamentals.monthly_revenue import MonthlyRevenue
 from a_domain.model.fundamentals.quarter_financials import QuarterFinancials
+from a_domain.model.market.company_profile import CompanyProfile
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.trading.account import AccountOpening, BrokerFill, Settlement
 from a_domain.model.trading.backtest import BacktestInputs, BacktestTrade
@@ -590,6 +591,8 @@ class AudienceResponse(BaseModel):
     """The news sites' articles and the AI's web search."""
     mops: bool
     """The valuation, which reads MOPS's income statements."""
+    annual_reports: bool
+    """The companies' annual reports on the exchange's document site, whose sections a company card rests on."""
     order_pricing: OrderPricing
     """
     What prices an order, a follow's included: a realtime quote in continuous trading, or the official close of the
@@ -658,6 +661,30 @@ class StockBriefResponse(BaseModel):
 
     stocks_left: int
     """How many more stocks may get a new brief today (stock_page.brief.daily_stocks)."""
+
+
+class StockCompanyResponse(BaseModel):
+    """
+    What the site holds about a stock's company itself: its profile, the held items a company card rests on, and the
+    card. The card is the AI's wording of those items, each sentence naming the ones it rests on; it describes and
+    gives no advice. A profile's main business and a card's sentences are a third party's and the AI's text.
+    """
+
+    stock_id: str
+    profile: CompanyProfile | None
+    """The exchanges' open data of the company and, on a personal site, its main business as filed with MOPS. None while none."""
+
+    sources: list[BriefSource]
+    """
+    The held items about the company, each with its kind, date, title and the address of the page it is from: MOPS's
+    company basic information and the document site's page that lists the annual report.
+    """
+
+    today: StockBrief | None
+    """The card claimed today in Taipei: being written, written or failed. None when none was claimed today."""
+
+    previous: StockBrief | None
+    """The newest written card of an earlier day: the company's card while today holds none that is written."""
 
 
 class StockRankingResponse(Response):

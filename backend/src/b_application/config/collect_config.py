@@ -6,7 +6,7 @@ from a_domain.rules.ai.stock_brief import BriefContextRule, BriefReplyRule, Brie
 from a_domain.rules.collect.freshness import DataFreshnessRule, MissingSessionRule, RealtimeQuoteRule
 from a_domain.rules.collect.kept_article import KeptArticleRule
 from a_domain.rules.fundamentals.stock_analysis import ValuationStandingRule
-from a_domain.types.enums import BriefLanguage, EmbeddingPooling, SettingUnit
+from a_domain.types.enums import BriefKind, BriefLanguage, EmbeddingPooling, SettingUnit
 
 
 class FolderConfig(BaseModel):
@@ -104,11 +104,75 @@ class StockBriefConfig(BaseModel):
     def reply_rule(self, advice_phrases: frozenset[str]) -> BriefReplyRule:
         """The reply contract; `advice_phrases` are those of prompts.stock_brief_advice_phrases."""
         return BriefReplyRule(
+            kind=BriefKind.MOVEMENT,
             sentences=self.sentences,
             sentence_length=self.sentence_length,
             link_pattern=self.link_pattern,
             advice_phrases=advice_phrases,
         )
+
+
+class CompanyCardConfig(BaseModel):
+    """
+    The stock page's company card: what the company makes and sells, to whom, and its revenue structure and scale, in
+    the AI's wording of the company's profile and its annual report's sections, each sentence citing its source. It is
+    written once and kept: a new one is written only when what it rests on, its prompt or its language changed. Its
+    language is the brief's (stock_page.brief.language), and its prompt is company_card_prompt in
+    config/instructions.yaml; without the prompt no card is written.
+    """
+
+    model_config = ConfigDict(use_attribute_docstrings=True)
+
+    daily_stocks: int = Field(default=200, ge=1, le=5000, json_schema_extra={"operator_only": True})
+    """How many companies may get a new card per Taiwan calendar day at viewers' requests. The site's own writing takes none."""
+
+    sentences: int = Field(default=5, ge=1, le=10, json_schema_extra={"operator_only": True})
+    sentence_length: int = Field(default=400, ge=50, le=2000, json_schema_extra={"operator_only": True})
+    """The most sentences a card keeps, and the characters a sentence is cut at."""
+
+    section_length: int = Field(default=2500, ge=200, le=20_000, json_schema_extra={"operator_only": True})
+    """The characters of each kept annual-report section the card's prompt holds."""
+
+    def reply_rule(self, advice_phrases: frozenset[str], link_pattern: str) -> BriefReplyRule:
+        """The reply contract; the phrases and the link pattern are the brief's."""
+        return BriefReplyRule(
+            kind=BriefKind.COMPANY,
+            sentences=self.sentences,
+            sentence_length=self.sentence_length,
+            link_pattern=link_pattern,
+            advice_phrases=advice_phrases,
+        )
+
+
+class SystemWritingConfig(BaseModel):
+    """
+    The site's own writing: once a session's daily data is held, the Web API's timer makes sure each stock of the
+    monthly ranking's top (ranking.top) has its profile, its main business, its annual report's sections, its company
+    card and the day's brief, on the AI model ai.system_model. Its calls are counted apart from every user's allowance,
+    and its briefs and cards take none of the stocks viewers' requests may claim a day.
+    """
+
+    model_config = ConfigDict(use_attribute_docstrings=True)
+
+    daily_ai_calls: int = Field(
+        default=0,
+        ge=0,
+        le=10_000,
+        json_schema_extra={"operator_only": True, "without": "the site writes no company card and no brief by itself"},
+    )
+    """
+    The paid AI calls the site's own writing may make per Taiwan calendar day: a brief is one, and a card one more when
+    it is written. Past it the round stops and goes on the next day. 0, and a file that does not set it, turn the
+    site's own writing off: `without` says so at the start (settings_notices).
+    """
+
+    users_stocks: bool = Field(default=False, json_schema_extra={"operator_only": True})
+    """Whether a round also writes for the stocks users hold or watch, after the ranking's, within the same budget."""
+
+    @property
+    def enabled(self) -> bool:
+        """Whether the site writes by itself at all."""
+        return self.daily_ai_calls > 0
 
 
 class EmbeddingConfig(BaseModel):
@@ -212,6 +276,8 @@ class StockPageConfig(BaseModel):
     """How many of the latest quarters the page reads the EPS of from the MOPS pages a personal site holds."""
 
     brief: StockBriefConfig = Field(default_factory=StockBriefConfig)
+    card: CompanyCardConfig = Field(default_factory=CompanyCardConfig)
+    system_writing: SystemWritingConfig = Field(default_factory=SystemWritingConfig)
     article_store: ArticleStoreConfig = Field(default_factory=ArticleStoreConfig)
 
     def freshness(self) -> timedelta:

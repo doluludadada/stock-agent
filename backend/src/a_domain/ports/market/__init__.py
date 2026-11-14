@@ -1,6 +1,9 @@
+from a_domain.ports.market.annual_report_provider import IAnnualReportProvider
 from a_domain.ports.market.article_store import IArticleStore
 from a_domain.ports.market.broker_quote_provider import IBrokerQuoteProvider
 from a_domain.ports.market.cached_price_provider import ICachedPriceProvider
+from a_domain.ports.market.company_basics_provider import ICompanyBasicsProvider
+from a_domain.ports.market.company_profile_repository import ICompanyProfileRepository
 from a_domain.ports.market.daily_bar_matrix_provider import IDailyBarMatrixProvider
 from a_domain.ports.market.daily_close_archive import (
     ArchivedMonth,
@@ -26,9 +29,12 @@ __all__ = [
     "ArchivedMonth",
     "ArchivedQuarter",
     "ArchivedSession",
+    "IAnnualReportProvider",
     "IArticleStore",
     "IBrokerQuoteProvider",
     "ICachedPriceProvider",
+    "ICompanyBasicsProvider",
+    "ICompanyProfileRepository",
     "ExchangeNews",
     "FinancialReport",
     "IDailyBarMatrixProvider",

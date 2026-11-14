@@ -28,6 +28,7 @@ dependencies = [
     "anthropic>=2.4.0",
     "argon2-cffi>=25.1.0",
     "cryptography>=50.0.2",
+    "pypdf>=7.1.0",
 ]
 
 [dependency-groups]

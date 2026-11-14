@@ -332,6 +332,16 @@ class InformationSource(StrEnum):
     NEWS_MEDIA = auto()
     PTT_STOCK = auto()
     PTT_GOSSIPING = auto()
+    ANNUAL_REPORT = auto()
+    """A section of a company's shareholders'-meeting annual report on the exchange's document site, kept as its text."""
+
+    @property
+    def is_reference(self) -> bool:
+        """
+        A document of record the site reads once a year, not news of a day: it is kept whatever the stock's newer
+        articles, so a busy stock's news never pushes its annual report out of the article store.
+        """
+        return self is InformationSource.ANNUAL_REPORT
 
     @property
     def is_social(self) -> bool:
@@ -353,8 +363,28 @@ class InformationSource(StrEnum):
                 return "MOPS"
             case InformationSource.TWSE_NEWS:
                 return "TWSE news"
+            case InformationSource.ANNUAL_REPORT:
+                return "annual report"
             case _:
                 return self.value
+
+
+class AnnualReportSection(StrEnum):
+    """
+    A part of a shareholders'-meeting annual report the site keeps as text: the parts of its chapter on operations
+    that say what the company makes, for whom and with whom. The settings name each part's heading in the report's
+    language and what marks it in the text (sources.annual_reports).
+    """
+
+    BUSINESS_SCOPE = auto()
+    PRODUCT_MIX = auto()
+    """The main products with each one's share of revenue."""
+
+    MAJOR_CUSTOMERS = auto()
+    """The customers that took a tenth or more of sales in either of the last two years."""
+
+    INDUSTRY_OVERVIEW = auto()
+    EMPLOYEES = auto()
 
 
 class BriefStatus(StrEnum):
@@ -378,6 +408,34 @@ class BriefStatus(StrEnum):
                 return frozenset({BriefStatus.WRITING})
             case BriefStatus.WRITTEN:
                 return frozenset()
+
+
+class BriefKind(StrEnum):
+    """
+    Which of the site's two AI texts about a stock a text is. Its value is the part of the AI's reply that must hold a
+    sentence for the text to be kept.
+    """
+
+    MOVEMENT = auto()
+    """The daily brief: how the held facts of a recent window relate to the stock's move. One per stock and Taipei day."""
+
+    COMPANY = auto()
+    """
+    The company card: what the company makes and sells, to whom, and its scale. It is written once from the company's
+    profile and its annual report and kept: a new one is written only when what it was written from changed.
+    """
+
+    @property
+    def daily(self) -> bool:
+        """
+        Whether the text is written anew each Taipei day, whatever it rests on. A text that is not is written once and
+        kept until what it rests on changes, and not at all while its prompt is unset.
+        """
+        match self:
+            case BriefKind.MOVEMENT:
+                return True
+            case BriefKind.COMPANY:
+                return False
 
 
 class BriefLanguage(StrEnum):
@@ -410,7 +468,11 @@ class BriefSourceKind(StrEnum):
     """What kind of held item a brief's sentence cites, so the stock page can name it and link to where it shows it."""
 
     COMPANY = auto()
-    """The company's name, market and industry in the exchange's listing, and its revenue of the latest held months."""
+    """
+    What the company is: in a company card, the exchanges' open data of it, its names, market, industry, dates, capital
+    and people; in a daily brief, the company card's text, or its listing and its revenue of the latest held months
+    while it has no card.
+    """
 
     PRICE = auto()
     """The closes of the brief's window of sessions, from the site's daily history."""
@@ -435,6 +497,12 @@ class BriefSourceKind(StrEnum):
 
     POST = auto()
     """A stock board's post, by its title."""
+
+    ANNUAL_REPORT = auto()
+    """A section of the company's annual report, by its title, with the address of the document site's page that lists the report."""
+
+    PROFILE = auto()
+    """The company's main business as it filed it with MOPS, with the address of MOPS's page of the company's basic information."""
 
     @property
     def label(self) -> str:
@@ -710,7 +778,8 @@ class Audience(StrEnum):
     """
     A free public website: only open-licensed data, the TWSE and TPEX OpenAPI as the open-data archive keeps them (Open
     Government Data License v1), and the mock broker. Shioaji's market data comes with the owner's own broker login,
-    Yahoo's terms forbid automated collection, cnyes forbids reproduction without consent, MOPS disallows every robot
+    Yahoo's terms forbid automated collection, cnyes forbids reproduction without consent, MOPS and the exchange's
+    document site disallow every robot
     and TWSE's terms forbid the automated download of its site's reports, and nobody may trade in a visitor's account.
     """
 
@@ -749,6 +818,14 @@ class Audience(StrEnum):
     @property
     def mops(self) -> bool:
         """The MOPS income statements, whose EPS the valuation (menus 5 and 6) reads. Without them the valuation is refused."""
+        return not self.open_data_only
+
+    @property
+    def annual_reports(self) -> bool:
+        """
+        The companies' annual reports on the exchange's document site (doc.twse.com.tw), which disallows every robot
+        as MOPS does. Without them a company card rests on the exchanges' open data alone.
+        """
         return not self.open_data_only
 
     @property
@@ -1126,6 +1203,7 @@ class InstructionKey(StrEnum):
     STOCK_BRIEF_RISE_QUERY = "stock_brief_rise_query"
     STOCK_BRIEF_FALL_QUERY = "stock_brief_fall_query"
     STOCK_BRIEF_COMPANY_QUERY = "stock_brief_company_query"
+    COMPANY_CARD = "company_card_prompt"
 
     @property
     def settings_path(self) -> str:
@@ -1144,6 +1222,8 @@ class InstructionKey(StrEnum):
                 return "prompts.social_sentiment"
             case InstructionKey.STOCK_BRIEF:
                 return "prompts.stock_brief"
+            case InstructionKey.COMPANY_CARD:
+                return "prompts.company_card"
             case (
                 InstructionKey.STOCK_BRIEF_ADVICE_PHRASES
                 | InstructionKey.STOCK_BRIEF_RISE_QUERY

@@ -19,6 +19,7 @@ from c_infrastructure.feed.news.cnyes_news_provider import CnyesNewsProvider
 from c_infrastructure.feed.news.yahoo_tw_news_provider import YahooTwNewsProvider
 from c_infrastructure.feed.ptt_provider import PttProvider
 from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider
+from c_infrastructure.market.request_pace import RequestPace
 from c_infrastructure.market.twse_provider import TaiwanStockProvider
 from c_infrastructure.system.market_clock import TaiwanMarketClock
 
@@ -57,6 +58,7 @@ async def test_exchange_clients_keep_certificate_verification_on(clients: list[d
         listing=cast(Any, None),
         logger=SilentLogger(),
         write_lock=asyncio.Lock(),
+        pace=RequestPace(),
     )
 
     exchange = TaiwanStockProvider(

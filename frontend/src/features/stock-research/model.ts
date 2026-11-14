@@ -46,6 +46,7 @@ export const NEWS_SOURCES = {
   news_media: { dayOnly: false },
   ptt_stock: { dayOnly: true },
   ptt_gossiping: { dayOnly: true },
+  annual_report: { dayOnly: true },
 } as const satisfies Record<NewsItem['source'], { dayOnly: boolean }>
 
 /**

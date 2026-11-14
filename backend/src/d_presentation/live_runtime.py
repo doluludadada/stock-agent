@@ -9,6 +9,7 @@ import asyncio
 from collections.abc import AsyncGenerator, Callable, Generator, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager, contextmanager
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Self
 
@@ -18,7 +19,7 @@ from a_domain.model.system.user import GoogleConfirmation, User
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.settings_files import SettingChange, SettingsEdit, SettingsProblem
 from a_domain.types.enums import ExecutionProvider, SettingsFile
-from a_domain.types.errors import SettingsConflictError
+from a_domain.types.errors import AiAllowanceSpentError, SettingsConflictError
 from a_domain.types.ids import UserId
 from b_application.config.app_config import AppConfig
 from b_application.config.settings_loader import (
@@ -107,16 +108,34 @@ def startup_problems(error: Exception, logger: ILoggingProvider) -> list[Setting
     return [SettingsProblem(message=f"The app would not start: {type(error).__name__}. The server log has the details.")]
 
 
+class BriefTurns:
+    """
+    One writer at a time per stock, in one process, whichever runtime a request holds. Writing a stock's brief first
+    reads the company's main business and annual report where they are due and writes its card, which can take a
+    minute. A second request for the same stock, a viewer's or the timer's, waits for the first and then finds that
+    work done, so nothing is fetched or written twice.
+    """
+
+    def __init__(self) -> None:
+        self._turns: dict[str, asyncio.Lock] = {}
+
+    def of(self, stock_id: str) -> asyncio.Lock:
+        """The stock's turn: hold it from the request for the stock's brief to its answer."""
+        return self._turns.setdefault(stock_id, asyncio.Lock())
+
+
 class RuntimeSwitch:
     """
     The runtimes this process has open, oldest first; the last is current. New requests, runs and CLI options hold the
     current one. A reload opens a whole new runtime from the settings files first (the startup itself, the database and
     the broker login included), and only when it started appends it and retires the one before, which closes once
-    nothing holds it. One lock serializes the reloads; taking a hold never waits for it.
+    nothing holds it. One lock serializes the reloads; taking a hold never waits for it. It also keeps the turns of
+    the stocks whose brief is being written, which outlive any one runtime.
     """
 
     def __init__(self, opener: RuntimeOpener, project_root: Path, logger: ILoggingProvider) -> None:
         self.logger = logger
+        self.brief_turns = BriefTurns()
         self.opener = opener
         self.project_root = project_root
         self.lock = asyncio.Lock()
@@ -350,7 +369,9 @@ async def collect_daily_data(switch: RuntimeSwitch) -> None:
     settings, on the current runtime: first the TWSE and TPEX open data the OpenAPI serves only for its latest session,
     day, month or quarter (closes, material information, EPS statistics, valuation ratios, balance sheets, income
     statements, monthly revenue and TWSE news) into the archive, then, on a personal site, the exchanges' daily reports
-    of the sessions its history cache lacks, then the news of the stocks users hold or watch into the article store.
+    of the sessions its history cache lacks, then the news of the stocks users hold or watch into the article store,
+    then, on the runtime's system writer, the site's own writing for the monthly ranking's top stocks
+    (write_for_system_stocks).
     Before them, a Shioaji login that is down is made again
     (RuntimeSwitch.log_in_again). A step never stops it on an error of its own: it logs it, goes on to the next and
     tries again at the next interval. The lifespan cancels it at shutdown and waits until the step it stopped has ended.
@@ -366,6 +387,10 @@ async def collect_daily_data(switch: RuntimeSwitch) -> None:
                 (pipeline.archive_daily_closes, "The open data could not be archived"),
                 (pipeline.refresh_daily_history, "The exchanges' daily history could not be refreshed"),
                 (pipeline.refresh_article_store, "The article store could not be refreshed"),
+                (
+                    partial(write_for_system_stocks, opened.runtime.system_writer, switch.brief_turns, switch.logger),
+                    "The site's own writing could not go on",
+                ),
             ):
                 try:
                     await step()
@@ -373,6 +398,31 @@ async def collect_daily_data(switch: RuntimeSwitch) -> None:
                     switch.logger.error(f"{failure}: {type(error).__name__}: {error}")
 
         await asyncio.sleep(interval * 3600)
+
+
+async def write_for_system_stocks(pipeline: Pipeline | None, turns: BriefTurns, logger: ILoggingProvider) -> None:
+    """
+    The timer's last step, on the runtime's system writer (Runtime.system_writer), which is None, and the step
+    nothing, while the site's own writing is off: for each stock the site still writes for by itself now
+    (Pipeline.load_system_writing), one after another, each in the stock's turn, what a viewer's request for its brief
+    does (Pipeline.write_stock_brief): its main business and annual report read when due, its company card written
+    when it has none or what it rests on changed, and the day's brief, on the site's own AI budget and never on a
+    user's allowance. A stock that fails is logged and the next one goes on. A spent budget ends the step until the
+    next interval, where the round goes on with the stocks still without a brief. It sends no order: neither operation
+    has an order step.
+    """
+    if pipeline is None:
+        return
+
+    for stock_id in await pipeline.load_system_writing():
+        try:
+            async with turns.of(stock_id):
+                await pipeline.write_stock_brief(stock_id)
+        except AiAllowanceSpentError as error:
+            logger.info(f"The site's own writing stops for now at {stock_id}: {error}")
+            return
+        except Exception as error:
+            logger.error(f"The site's own writing failed for {stock_id}: {type(error).__name__}: {error}")
 
 
 def describe(reload: SettingsReloaded) -> str:

@@ -195,6 +195,212 @@
     ],
     "unique": []
   },
+  "company_cards": {
+    "columns": {
+      "claimed_at": {
+        "class": "UtcDateTime",
+        "nullable": false,
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
+      },
+      "company": {
+        "class": "Text",
+        "nullable": false,
+        "postgresql": "TEXT"
+      },
+      "day": {
+        "class": "Date",
+        "nullable": false,
+        "postgresql": "DATE"
+      },
+      "fingerprint": {
+        "class": "AutoString",
+        "nullable": true,
+        "postgresql": "VARCHAR"
+      },
+      "language": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR"
+      },
+      "model": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR"
+      },
+      "movement": {
+        "class": "Text",
+        "nullable": false,
+        "postgresql": "TEXT"
+      },
+      "price_change": {
+        "class": "Float",
+        "nullable": true,
+        "postgresql": "FLOAT"
+      },
+      "sources": {
+        "class": "Text",
+        "nullable": false,
+        "postgresql": "TEXT"
+      },
+      "status": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR"
+      },
+      "stock_id": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR"
+      },
+      "window_first": {
+        "class": "Date",
+        "nullable": true,
+        "postgresql": "DATE"
+      },
+      "window_last": {
+        "class": "Date",
+        "nullable": true,
+        "postgresql": "DATE"
+      },
+      "written_at": {
+        "class": "UtcDateTime",
+        "nullable": true,
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "primary_key": [
+      "stock_id",
+      "day"
+    ],
+    "unique": []
+  },
+  "company_profiles": {
+    "columns": {
+      "address": {
+        "class": "AutoString",
+        "nullable": true,
+        "postgresql": "VARCHAR"
+      },
+      "annual_report_checked_at": {
+        "class": "UtcDateTime",
+        "nullable": true,
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
+      },
+      "annual_report_file": {
+        "class": "AutoString",
+        "nullable": true,
+        "postgresql": "VARCHAR"
+      },
+      "annual_report_year": {
+        "class": "Integer",
+        "nullable": true,
+        "postgresql": "INTEGER"
+      },
+      "chairman": {
+        "class": "AutoString",
+        "nullable": true,
+        "postgresql": "VARCHAR"
+      },
+      "english_name": {
+        "class": "AutoString",
+        "nullable": true,
+        "postgresql": "VARCHAR"
+      },
+      "english_short_name": {
+        "class": "AutoString",
+        "nullable": true,
+        "postgresql": "VARCHAR"
+      },
+      "fetched_at": {
+        "class": "UtcDateTime",
+        "nullable": true,
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
+      },
+      "founded_on": {
+        "class": "Date",
+        "nullable": true,
+        "postgresql": "DATE"
+      },
+      "full_name": {
+        "class": "AutoString",
+        "nullable": true,
+        "postgresql": "VARCHAR"
+      },
+      "general_manager": {
+        "class": "AutoString",
+        "nullable": true,
+        "postgresql": "VARCHAR"
+      },
+      "industry_code": {
+        "class": "AutoString",
+        "nullable": true,
+        "postgresql": "VARCHAR"
+      },
+      "issued_shares": {
+        "class": "BigInteger",
+        "nullable": true,
+        "postgresql": "BIGINT"
+      },
+      "listed_on": {
+        "class": "Date",
+        "nullable": true,
+        "postgresql": "DATE"
+      },
+      "main_business": {
+        "class": "Text",
+        "nullable": true,
+        "postgresql": "TEXT"
+      },
+      "main_business_fetched_at": {
+        "class": "UtcDateTime",
+        "nullable": true,
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
+      },
+      "main_business_url": {
+        "class": "AutoString",
+        "nullable": true,
+        "postgresql": "VARCHAR"
+      },
+      "market": {
+        "class": "AutoString",
+        "nullable": true,
+        "postgresql": "VARCHAR"
+      },
+      "paid_in_capital": {
+        "class": "Float",
+        "nullable": true,
+        "postgresql": "FLOAT"
+      },
+      "reported_on": {
+        "class": "Date",
+        "nullable": true,
+        "postgresql": "DATE"
+      },
+      "short_name": {
+        "class": "AutoString",
+        "nullable": true,
+        "postgresql": "VARCHAR"
+      },
+      "stock_id": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR"
+      },
+      "website": {
+        "class": "AutoString",
+        "nullable": true,
+        "postgresql": "VARCHAR"
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "primary_key": [
+      "stock_id"
+    ],
+    "unique": []
+  },
   "daily_close_archive": {
     "columns": {
       "change": {
@@ -969,6 +1175,26 @@
     ],
     "unique": []
   },
+  "request_paces": {
+    "columns": {
+      "host": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR"
+      },
+      "next_at": {
+        "class": "UtcDateTime",
+        "nullable": false,
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "primary_key": [
+      "host"
+    ],
+    "unique": []
+  },
   "run_stock_reports": {
     "columns": {
       "owner_id": {
@@ -1167,6 +1393,78 @@
     "primary_key": [
       "stock_id",
       "key"
+    ],
+    "unique": []
+  },
+  "system_ai_calls": {
+    "columns": {
+      "calls": {
+        "class": "Integer",
+        "nullable": false,
+        "postgresql": "INTEGER"
+      },
+      "day": {
+        "class": "Date",
+        "nullable": false,
+        "postgresql": "DATE"
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "primary_key": [
+      "day"
+    ],
+    "unique": []
+  },
+  "system_texts": {
+    "columns": {
+      "day": {
+        "class": "Date",
+        "nullable": false,
+        "postgresql": "DATE"
+      },
+      "stock_id": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR"
+      },
+      "text_table": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR"
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "primary_key": [
+      "text_table",
+      "stock_id",
+      "day"
+    ],
+    "unique": []
+  },
+  "system_writings": {
+    "columns": {
+      "session_date": {
+        "class": "Date",
+        "nullable": false,
+        "postgresql": "DATE"
+      },
+      "started_on": {
+        "class": "Date",
+        "nullable": false,
+        "postgresql": "DATE"
+      },
+      "stock_ids": {
+        "class": "Text",
+        "nullable": false,
+        "postgresql": "TEXT"
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "primary_key": [
+      "session_date"
     ],
     "unique": []
   },

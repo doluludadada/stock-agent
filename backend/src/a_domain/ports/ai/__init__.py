@@ -4,6 +4,7 @@ from a_domain.ports.ai.knowledge_repository import IKnowledgeRepository
 from a_domain.ports.ai.sentiment_classifier import ISentimentClassifier
 from a_domain.ports.ai.sentiment_repository import ISentimentRepository
 from a_domain.ports.ai.stock_brief_repository import IStockBriefRepository
+from a_domain.ports.ai.system_writing_log import ISystemWritingLog
 from a_domain.ports.ai.text_embedder import ITextEmbedder
 
 __all__ = [
@@ -13,5 +14,6 @@ __all__ = [
     "ISentimentClassifier",
     "ISentimentRepository",
     "IStockBriefRepository",
+    "ISystemWritingLog",
     "ITextEmbedder",
 ]

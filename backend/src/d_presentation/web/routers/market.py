@@ -13,6 +13,7 @@ from d_presentation.web.schemas import (
     IndexHistoryResponse,
     ListedStockResponse,
     StockBriefResponse,
+    StockCompanyResponse,
     StockFinancialsResponse,
     StockHistoryResponse,
     StockId,
@@ -21,7 +22,15 @@ from d_presentation.web.schemas import (
     StockRankingResponse,
     StockTechnicalResponse,
 )
-from d_presentation.web.session import NotFound, PrivateAccess, RuntimeDependency, SignedOutPipeline, UserPipeline, shows
+from d_presentation.web.session import (
+    NotFound,
+    PrivateAccess,
+    RuntimeDependency,
+    RuntimeSwitchDependency,
+    SignedOutPipeline,
+    UserPipeline,
+    shows,
+)
 
 router = APIRouter(prefix="/market", tags=["Market data"])
 
@@ -105,6 +114,7 @@ async def get_audience(runtime: RuntimeDependency) -> AudienceResponse:
         realtime_quotes=audience.realtime_quotes and runtime.realtime_quotes,
         news_articles=audience.news_articles,
         mops=audience.mops,
+        annual_reports=audience.annual_reports,
         order_pricing=audience.order_pricing,
     )
 
@@ -187,13 +197,35 @@ async def get_stock_news(stock_id: StockIdPath, pipeline: SignedOutPipeline) -> 
     return StockNewsResponse(stock_id=stock_id, items=[StockNewsItemResponse.model_validate(article) for article in articles])
 
 
+@router.get("/stocks/{stock_id}/company", responses=NOT_LISTED | UNAVAILABLE, dependencies=[shows(Feature.STOCK_PAGES)])
+async def get_stock_company(stock_id: StockIdPath, pipeline: SignedOutPipeline) -> StockCompanyResponse:
+    """
+    What the site holds about one listed stock's company, with no fetch and no AI call: its `profile`, the names,
+    founding and listing dates, paid-in capital, chairman and website of the exchanges' open data and, on a personal
+    site, its main business as filed with MOPS with the page it is from; the `sources` a company card rests on, each
+    with its address; and the company card, `today` if one was claimed today in Taipei and `previous` the newest
+    written one of an earlier day. A card is written when a signed-in viewer asks for the stock's brief, or by the
+    site for the monthly ranking's stocks, and again only when what it rests on changed. Every text is the AI's or a
+    third party's: show it as text, never as markup. 404 for a code that is not listed. Public.
+    """
+    answer = await pipeline.load_company(stock_id)
+
+    if answer is None:
+        raise NotFound(f"{stock_id} is not a listed stock.")
+
+    profile, sources, today, previous = answer
+
+    return StockCompanyResponse(stock_id=stock_id, profile=profile, sources=sources, today=today, previous=previous)
+
+
 @router.get("/stocks/{stock_id}/brief", dependencies=[shows(Feature.STOCK_PAGES)])
 async def get_stock_brief(stock_id: StockIdPath, pipeline: SignedOutPipeline) -> StockBriefResponse:
     """
     The AI brief the site holds of one stock, with no AI call: `today` is the brief of today in Taipei if a viewer
     asked for one (`status` writing, written or failed), `previous` the newest written brief of an earlier day, and
-    `stocks_left` how many more stocks may get a new brief today. A written brief has two parts, `company` and
-    `movement`, each a list of sentences with the keys of the `sources` it rests on: the held figures and the
+    `stocks_left` how many more stocks may get a new brief today. A written brief has the part `movement`, and
+    `company` where it was written before the company card took that part over, each a list of sentences with the
+    keys of the `sources` it rests on: the held figures and the
     announcements, news and posts the page shows, by kind, date, title and address. It names the model that wrote it,
     when, in which language, and the window of sessions with the close's change over it. Every text is the AI's or a
     third party's: show it as text, never as markup. It describes and gives no advice. Public.
@@ -208,16 +240,24 @@ async def get_stock_brief(stock_id: StockIdPath, pipeline: SignedOutPipeline) ->
     responses=NOT_LISTED | UNAVAILABLE | BRIEF_REFUSED,
     dependencies=[PrivateAccess, shows(Feature.STOCK_PAGES)],
 )
-async def write_stock_brief(stock_id: StockIdPath, body: Confirmed, pipeline: UserPipeline) -> StockBriefResponse:
+async def write_stock_brief(
+    stock_id: StockIdPath, body: Confirmed, pipeline: UserPipeline, switch: RuntimeSwitchDependency
+) -> StockBriefResponse:
     """
     Asks for the stock's AI brief of today in Taipei, then answers what GET answers. The site writes one brief per
     stock and day for every viewer: the first request claims it and makes one paid AI call on the user's allowance,
     waiting for the reply; a request made meanwhile, or after it is written, calls nothing and answers what is held. A
-    failed brief may be asked again. 429 brief_limit_reached when the stock has none today and
-    stock_page.brief.daily_stocks stocks have one; 429 ai_allowance_spent when the user's or the site's paid AI calls of
-    the day are spent. It reads held data only, records no run and never orders. Private: a visitor never causes a call.
+    failed brief may be asked again. Before the brief, a personal site reads the company's main business and annual
+    report when they are due, which can take a minute the first time, and the company's card is written when it has
+    none or what it rests on changed, a second paid call. GET /stocks/{stock_id}/company answers each of them as it is
+    held, so a page that asks it meanwhile can say how far the request has come. One request at a time works for a
+    stock: a second one waits for the first and then answers what is held, with no second fetch and no second call. 429
+    brief_limit_reached when the stock has none today and stock_page.brief.daily_stocks stocks have one; 429
+    ai_allowance_spent when the user's or the site's paid AI calls of the day are spent. It reads held data only, records no run and
+    never orders. Private: a visitor never causes a call.
     """
-    answer = await pipeline.write_stock_brief(stock_id)
+    async with switch.brief_turns.of(stock_id):
+        answer = await pipeline.write_stock_brief(stock_id)
 
     if answer is None:
         raise NotFound(f"{stock_id} is not a listed stock.")

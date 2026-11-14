@@ -53,6 +53,14 @@ class AiConfig(BaseSettings):
     user_selectable: list[AiProvider] = Field(default_factory=list)
     """The AI models a user may choose for their own runs on My settings, besides active_model. Empty offers only it."""
 
+    system_model: AiProvider = Field(default=AiProvider.CLAUDE, json_schema_extra={"operator_only": True})
+    """
+    The AI model of the site's own writing, the company cards and daily briefs of the monthly ranking's stocks, by its
+    provider under available_models, whatever active_model is: Claude, whose listed model is the cheapest the app
+    reads. A start needs its model id and its key, as it needs active_model's, only while the site writes by itself
+    (stock_page.system_writing.daily_ai_calls above 0).
+    """
+
     openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     grok_api_key: str | None = Field(default=None, validation_alias="GROK_API_KEY")
     gemini_api_key: str | None = Field(default=None, validation_alias="GEMINI_API_KEY")
@@ -87,11 +95,13 @@ class AiConfig(BaseSettings):
 
         return choice
 
-    def missing_keys(self) -> dict[str, SettingsProblem]:
+    def missing_keys(self, system_writing: bool) -> dict[str, SettingsProblem]:
         """
         What each offered provider still needs before the app may start, by the setting that offers it (ai.active_model,
-        or ai.user_selectable.<index>): its model id under available_models (ai_model_id_missing) or its API key's
-        environment variable (ai_key_missing), by name only. Empty when every offered provider has both.
+        ai.system_model or ai.user_selectable.<index>): its model id under available_models (ai_model_id_missing) or its API key's
+        environment variable (ai_key_missing), by name only. Empty when every offered provider has both. The site's own
+        writing's provider is named only while the site writes by itself (`system_writing`) and no other setting
+        offers it, so one missing key is one problem and a site that writes nothing by itself needs none for it.
         """
         keys = {
             AiProvider.OPENAI: ("OPENAI_API_KEY", self.openai_api_key),
@@ -104,9 +114,11 @@ class AiConfig(BaseSettings):
         offered = {"ai.active_model": self.active_model} | {
             f"ai.user_selectable.{index}": provider for index, provider in enumerate(self.user_selectable)
         }
+        system = {"ai.system_model": self.system_model} if system_writing and self.system_model not in offered.values() else {}
+
         missing = {}
 
-        for path, provider in offered.items():
+        for path, provider in (offered | system).items():
             name, key = keys[provider]
 
             if provider not in self.available_models:
@@ -178,6 +190,12 @@ class PromptsConfig(BaseModel):
         str, placeholders({"facts", "language", "window", "price_change", "sentences"}, {"stock_id", "stock_name"})
     ] = ""
     """The held facts, the window and the reply's language must reach the AI, which only describes them. Empty, no brief is written."""
+
+    company_card: Annotated[str, placeholders({"facts", "language", "sentences"}, {"stock_id", "stock_name"})] = ""
+    """
+    The held facts about the company and the reply's language must reach the AI, which only describes them. Empty, no
+    company card is written, and a stock's brief says what the company is from its listing alone.
+    """
 
     stock_brief_advice_phrases: str = ""
     """

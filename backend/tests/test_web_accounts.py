@@ -352,6 +352,7 @@ PUBLIC_REQUESTS: dict[tuple[str, str], dict[str, object]] = {
     ("GET", "/v1/market/stocks/{stock_id}/financials"): {"path": {"stock_id": "2330"}},
     ("GET", "/v1/market/stocks/{stock_id}/analysis"): {"path": {"stock_id": "2330"}},
     ("GET", "/v1/market/stocks/{stock_id}/brief"): {"path": {"stock_id": "2330"}},
+    ("GET", "/v1/market/stocks/{stock_id}/company"): {"path": {"stock_id": "2330"}},
     ("GET", "/v1/market/stocks/{stock_id}/ranking"): {"path": {"stock_id": "2330"}},
     ("GET", "/v1/technical-settings/built-in-strategies"): {},
     ("POST", "/v1/webhook/line"): {"json": {"destination": "x", "events": []}},

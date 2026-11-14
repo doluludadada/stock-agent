@@ -6,7 +6,8 @@ from b_application.config.app_config import AppConfig
 
 class ArticleIndexer:
     """
-    Brings one stock's vectors in line with the articles the article store keeps of it, and says how many articles it
+    Brings one stock's vectors in line with the articles the article store keeps of it, its news and its documents of
+    record such as an annual report's sections, and says how many articles it
     embedded: only those that are new or whose text changed, so a stock whose articles did not change costs no
     embedding. The vectors are computed from the store alone, so an index that was lost fills again here. It never
     fails its operation: when the embedding model cannot be opened or the index refuses, it logs that and answers 0,
@@ -21,7 +22,8 @@ class ArticleIndexer:
 
     async def execute(self, stock_id: str) -> int:
         try:
-            return await self._index.sync(stock_id, await self._store.latest(stock_id, self._max_per_stock))
+            kept = [*await self._store.latest(stock_id, self._max_per_stock), *await self._store.references(stock_id)]
+            return await self._index.sync(stock_id, kept)
         except Exception as error:
             self._logger.warning(f"The article index of {stock_id} was not brought up to date: {type(error).__name__}: {error}")
             return 0

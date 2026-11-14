@@ -162,6 +162,19 @@ const research: DictionaryShape<typeof en> = {
     acceleration: '近 {{short}} 個月平均／近 {{long}} 個月平均',
     chart: '近 {{count}} 個月營收長條圖；下方月營收表列出每一筆數字。',
   },
+  company: {
+    title: '公司',
+    loadFailed: '無法載入公司資料。',
+    none: '還沒有這家公司的資料',
+    mainBusiness: '主要業務：',
+    founded: '成立',
+    listed: '上市櫃',
+    capital: '實收資本額',
+    twd: '{{value}} 元',
+    chairman: '董事長',
+    website: '網站',
+    sources: '資料來源：',
+  },
   brief: {
     title: 'AI 摘要',
     loadFailed: '無法載入摘要。',
@@ -190,6 +203,8 @@ const research: DictionaryShape<typeof en> = {
       exchange_news: '交易所新聞',
       news: '新聞',
       post: '討論文章',
+      annual_report: '股東會年報',
+      profile: '公開資訊觀測站 公司基本資料',
     },
     sources: {
       title: '引用的資料',
@@ -206,7 +221,18 @@ const research: DictionaryShape<typeof en> = {
     signIn: '登入後就能請 AI 寫今天的摘要。',
     writing: {
       title: '正在寫今天的摘要',
-      description: '通常半分鐘內完成。',
+      description: '通常半分鐘內完成；第一次為這檔股票寫摘要可能需要一分鐘。',
+      step: {
+        mainBusiness: '讀取公開資訊觀測站的公司主要業務',
+        annualReport: '讀取股東會年報',
+        card: '撰寫公司簡介',
+        brief: '撰寫今天的摘要',
+      },
+      state: {
+        done: '（完成）',
+        active: '（進行中）',
+        waiting: '（等待中）',
+      },
     },
     failed: {
       title: '今天的摘要沒有寫成',
@@ -232,6 +258,7 @@ const research: DictionaryShape<typeof en> = {
       news_media: '新聞',
       ptt_stock: 'PTT 股板',
       ptt_gossiping: 'PTT 八卦板',
+      annual_report: '股東會年報',
     },
     opens: '（在新分頁開啟來源）',
     showAll: '顯示全部 {{count}} 則',
