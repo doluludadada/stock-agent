@@ -49,7 +49,7 @@ function renderApp(path: string, viewer: 'user' | 'visitor' | 'administrator', s
 const texts = (elements: HTMLElement[]) => elements.map((element) => element.textContent)
 const asked = (fetch: ReturnType<typeof renderApp>['fetch'], prefix: string) => fetch.mock.calls.map(([url]) => url).filter((url) => url.startsWith(prefix))
 
-const TOOLS = ['Analysis runs', 'Mock account', 'Valuation', 'Strategy library', 'Backtest', 'Formula designer']
+const TOOLS = ['Analysis runs', 'Mock account', 'P/E valuation', 'Strategy library', 'Backtest', 'Formula designer']
 const CARDS = ['World', 'TAIEX', "This month's ranking", 'My holdings', 'Watchlist']
 /** The home page's cards by their titles, in reading order. */
 const cards = () =>
@@ -81,7 +81,7 @@ describe('the home page', { timeout: 20_000 }, () => {
 
     const nav = screen.getByRole('navigation', { name: 'Main navigation' })
     expect(texts(within(nav).getAllByText(/^(Today|Research|Mine|Supporting analysis tools)$/)), 'the home page stands alone, under no heading').toEqual(['Today', 'Research', 'Mine', 'Supporting analysis tools'])
-    expect(texts(within(nav).getAllByRole('link'))).toEqual(['Today', 'Revenue ranking', 'Market overview', 'World', 'My holdings', 'Watchlist', 'My settings'])
+    expect(texts(within(nav).getAllByRole('link'))).toEqual(['Today', 'Monthly ranking', 'Market overview', 'World', 'My holdings', 'Watchlist', 'My settings'])
     expect(within(nav).getByRole('link', { name: 'Today' })).toHaveAttribute('aria-current', 'page')
     const tabs = screen.getByRole('navigation', { name: 'Main pages' })
     expect(texts(within(tabs).getAllByRole('link'))).toEqual(['Today', 'Ranking', 'Holdings'])
@@ -100,13 +100,13 @@ describe('the home page', { timeout: 20_000 }, () => {
     expect(within(main).getAllByText(/^Sign in to /)).toHaveLength(1)
     const holds = within(within(main).getByText('Your account keeps').parentElement!).getAllByRole('listitem')
     expect(holds).toHaveLength(3)
-    for (const [index, name] of ['Revenue ranking', 'My holdings', 'Watchlist'].entries()) expect(within(holds[index]!).getByText(name)).toBeInTheDocument()
+    for (const [index, name] of ['Monthly ranking', 'My holdings', 'Watchlist'].entries()) expect(within(holds[index]!).getByText(name)).toBeInTheDocument()
     for (const owned of ['/v1/ranking', '/v1/holdings', '/v1/watchlist']) expect(asked(fetch, owned), owned).toEqual([])
   })
 
   it.each([
     ['/', 'Today'],
-    ['/ranking', 'Monthly revenue ranking'],
+    ['/ranking', 'Monthly ranking'],
     ['/market', 'Market overview'],
     ['/holdings', 'My holdings'],
   ])('names the browser tab on %s after the page', async (path, title) => {
@@ -180,7 +180,7 @@ describe('the home page', { timeout: 20_000 }, () => {
 
     const nav = await screen.findByRole('navigation', { name: 'Main navigation' })
     expect(await within(nav).findByRole('button', { name: 'Supporting analysis tools' })).toBeDisabled()
-    await waitFor(() => expect(texts(within(nav).getAllByRole('link', { current: 'page' }))).toEqual([path === '/account' ? 'Mock account' : 'Valuation']))
+    await waitFor(() => expect(texts(within(nav).getAllByRole('link', { current: 'page' }))).toEqual([path === '/account' ? 'Mock account' : 'P/E valuation']))
   })
 
   it('opens the market overview at its own address, with the research target a link named', async () => {
@@ -209,7 +209,7 @@ describe('the home page', { timeout: 20_000 }, () => {
     renderApp('/', 'user')
     fireEvent.click(within(await screen.findByRole('navigation', { name: 'Main pages' })).getByRole('button', { name: 'More' }))
     const sheet = await screen.findByRole('dialog', { name: 'All pages' })
-    expect(texts(within(sheet).getAllByRole('link')), 'the watchlist and the market, which the tab bar leaves out').toEqual(['Today', 'Revenue ranking', 'Market overview', 'World', 'My holdings', 'Watchlist', 'My settings'])
+    expect(texts(within(sheet).getAllByRole('link')), 'the watchlist and the market, which the tab bar leaves out').toEqual(['Today', 'Monthly ranking', 'Market overview', 'World', 'My holdings', 'Watchlist', 'My settings'])
 
     fireEvent.click(within(sheet).getByRole('button', { name: 'Supporting analysis tools' }))
 
@@ -254,7 +254,7 @@ describe('the home page', { timeout: 20_000 }, () => {
     expect(within(main).getByText('Two workflows; one of yours runs at a time')).toBeInTheDocument()
     expect((await within(main).findByRole('region', { name: 'Open-data archive' })).textContent).toContain('Data accumulating 3/61')
     const nav = screen.getByRole('navigation', { name: 'Main navigation' })
-    expect(texts(within(nav).getAllByRole('link'))).toEqual(['Today', 'Revenue ranking', 'Market overview', 'World', 'My holdings', 'Watchlist', 'My settings', ...TOOLS.filter((tool) => tool !== 'Valuation')])
+    expect(texts(within(nav).getAllByRole('link'))).toEqual(['Today', 'Monthly ranking', 'Market overview', 'World', 'My holdings', 'Watchlist', 'My settings', ...TOOLS.filter((tool) => tool !== 'P/E valuation')])
   })
 
   it('says why a public site has no valuation when a link opens it, and asks the server for none', async () => {
@@ -285,7 +285,7 @@ describe('the home page', { timeout: 20_000 }, () => {
   it('shows a feature kept for administrators to an administrator, and to nobody else', async () => {
     const status = siteShowing({ ranking: 'administrators' })
     const first = renderApp('/', 'administrator', PERSONAL_SITE, status)
-    expect(await within(await screen.findByRole('navigation', { name: 'Main navigation' })).findByRole('link', { name: 'Revenue ranking' })).toBeInTheDocument()
+    expect(await within(await screen.findByRole('navigation', { name: 'Main navigation' })).findByRole('link', { name: 'Monthly ranking' })).toBeInTheDocument()
     expect(await within(screen.getByRole('main')).findByRole('region', { name: "This month's ranking" })).toBeInTheDocument()
     first.unmount()
 
@@ -307,7 +307,7 @@ describe('the home page', { timeout: 20_000 }, () => {
     renderApp('/market', 'user', PERSONAL_SITE, siteShowing({ market_overview: 'off' }))
 
     expect(await screen.findByRole('heading', { level: 1, name: 'This page does not exist' })).toBeInTheDocument()
-    expect(texts(within(screen.getByRole('navigation', { name: 'Main navigation' })).getAllByRole('link')).slice(0, 2)).toEqual(['Today', 'Revenue ranking'])
+    expect(texts(within(screen.getByRole('navigation', { name: 'Main navigation' })).getAllByRole('link')).slice(0, 2)).toEqual(['Today', 'Monthly ranking'])
   })
 
   it('has no stock search and no stock page on a site that hides stock pages', async () => {

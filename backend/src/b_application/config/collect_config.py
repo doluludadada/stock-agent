@@ -7,7 +7,7 @@ from a_domain.rules.ai.world_brief import WorldBriefContextRule, WorldBriefDueRu
 from a_domain.rules.collect.freshness import DataFreshnessRule, MissingSessionRule, RealtimeQuoteRule
 from a_domain.rules.collect.kept_article import KeptArticleRule
 from a_domain.rules.fundamentals.stock_analysis import ValuationStandingRule
-from a_domain.types.enums import BriefKind, BriefLanguage, EmbeddingPooling, SettingUnit
+from a_domain.types.enums import BriefKind, BriefLanguage, EmbeddingPooling, SettingGroup, SettingUnit
 
 
 class FolderConfig(BaseModel):
@@ -24,11 +24,11 @@ class CollectRulesConfig(BaseModel):
     spam_keywords: set[str]
     financial_keywords: set[str]
 
-    buzz_min_mentions: int = Field(ge=0, le=10_000)
-    buzz_min_engagement: int = Field(ge=0, le=100_000)
-    social_article_limit: int = Field(ge=1, le=1000)
+    buzz_min_mentions: int = Field(ge=0, le=10_000, json_schema_extra={"steps": [5, 10, 20, 50, 100]})
+    buzz_min_engagement: int = Field(ge=0, le=100_000, json_schema_extra={"steps": [50, 100, 200, 500, 1000]})
+    social_article_limit: int = Field(ge=1, le=1000, json_schema_extra={"steps": [50, 100, 200, 500, 1000]})
 
-    ptt_lookback_days: int = Field(ge=1, le=30)
+    ptt_lookback_days: int = Field(ge=1, le=30, json_schema_extra={"unit": SettingUnit.DAYS})
     ptt_tags: list[str]
 
 
@@ -63,7 +63,7 @@ class StockBriefConfig(BaseModel):
     largest_moves: int = Field(default=3, ge=1, le=10, json_schema_extra={"operator_only": True})
     """How many of the window's largest daily moves the prompt names, so that a dated fact can be set beside one."""
 
-    sentences: int = Field(default=4, ge=1, le=10, json_schema_extra={"operator_only": True})
+    sentences: int = Field(default=4, ge=1, le=10)
     sentence_length: int = Field(default=400, ge=50, le=2000, json_schema_extra={"operator_only": True})
     """The most sentences each of a brief's two parts keeps, and the characters a sentence is cut at."""
 
@@ -124,10 +124,10 @@ class CompanyCardConfig(BaseModel):
 
     model_config = ConfigDict(use_attribute_docstrings=True)
 
-    daily_stocks: int = Field(default=200, ge=1, le=5000, json_schema_extra={"operator_only": True})
+    daily_stocks: int = Field(default=200, ge=1, le=5000, json_schema_extra={"steps": [10, 20, 50, 100, 200, 500, 1000]})
     """How many companies may get a new card per Taiwan calendar day at viewers' requests. The site's own writing takes none."""
 
-    sentences: int = Field(default=5, ge=1, le=10, json_schema_extra={"operator_only": True})
+    sentences: int = Field(default=5, ge=1, le=10)
     sentence_length: int = Field(default=400, ge=50, le=2000, json_schema_extra={"operator_only": True})
     """The most sentences a card keeps, and the characters a sentence is cut at."""
 
@@ -159,7 +159,10 @@ class SystemWritingConfig(BaseModel):
         default=0,
         ge=0,
         le=10_000,
-        json_schema_extra={"operator_only": True, "without": "the site writes no company card and no brief by itself"},
+        json_schema_extra={
+            "steps": [0, 10, 20, 30, 60, 100, 200, 500, 1000],
+            "without": "the site writes no company card and no brief by itself",
+        },
     )
     """
     The paid AI calls the site's own writing may make per Taiwan calendar day: a brief is one, and a card one more when
@@ -167,7 +170,7 @@ class SystemWritingConfig(BaseModel):
     site's own writing off: `without` says so at the start (settings_notices).
     """
 
-    users_stocks: bool = Field(default=False, json_schema_extra={"operator_only": True})
+    users_stocks: bool = False
     """Whether a round also writes for the stocks users hold or watch, after the ranking's, within the same budget."""
 
     @property
@@ -226,7 +229,7 @@ class ArticleStoreConfig(BaseModel):
     max_per_stock: int = Field(default=300, ge=10, le=5000, json_schema_extra={"steps": [50, 100, 200, 300, 500, 1000, 2000, 5000]})
     """The most articles the store keeps of one stock, the newest first."""
 
-    shown: int = Field(default=50, ge=1, le=500, json_schema_extra={"operator_only": True})
+    shown: int = Field(default=50, ge=1, le=500, json_schema_extra={"steps": [10, 20, 50, 100, 200, 500]})
     """The most kept articles a stock page lists, the newest first."""
 
     text_length: int = Field(default=4000, ge=0, le=100_000, json_schema_extra={"operator_only": True})
@@ -235,7 +238,7 @@ class ArticleStoreConfig(BaseModel):
     embedded_length: int = Field(default=300, ge=0, le=8000, json_schema_extra={"operator_only": True})
     """The characters of an article's kept text its vector reads after its title. Embedding time grows with them."""
 
-    refresh_stocks: int = Field(default=200, ge=0, le=5000, json_schema_extra={"operator_only": True})
+    refresh_stocks: int = Field(default=200, ge=0, le=5000, json_schema_extra={"steps": [0, 50, 100, 200, 500, 1000]})
     """
     The most stocks whose news the Web API's timer fetches each time, of the stocks users hold or watch. 0 fetches
     none, and stock pages alone fill the store.
@@ -276,9 +279,9 @@ class StockPageConfig(BaseModel):
     eps_quarters: int = Field(default=12, ge=1, le=40, json_schema_extra={"steps": [4, 8, 12, 16, 20, 40]})
     """How many of the latest quarters the page reads the EPS of from the MOPS pages a personal site holds."""
 
-    brief: StockBriefConfig = Field(default_factory=StockBriefConfig)
-    card: CompanyCardConfig = Field(default_factory=CompanyCardConfig)
-    system_writing: SystemWritingConfig = Field(default_factory=SystemWritingConfig)
+    brief: StockBriefConfig = Field(default_factory=StockBriefConfig, json_schema_extra={"group": SettingGroup.AI})
+    card: CompanyCardConfig = Field(default_factory=CompanyCardConfig, json_schema_extra={"group": SettingGroup.AI})
+    system_writing: SystemWritingConfig = Field(default_factory=SystemWritingConfig, json_schema_extra={"group": SettingGroup.AI})
     article_store: ArticleStoreConfig = Field(default_factory=ArticleStoreConfig)
 
     def freshness(self) -> timedelta:
@@ -316,14 +319,16 @@ class WorldBriefConfig(BaseModel):
     indicator_days: int = Field(default=5, ge=1, le=30, json_schema_extra={"operator_only": True})
     """An indicator whose newest held reading is older than this many days is left out of a brief."""
 
-    sentences: int = Field(default=8, ge=1, le=20, json_schema_extra={"operator_only": True})
+    sentences: int = Field(default=8, ge=1, le=20)
     sentence_length: int = Field(default=400, ge=50, le=2000, json_schema_extra={"operator_only": True})
     """The most sentences a brief keeps, and the characters a sentence is cut at."""
 
-    retry_minutes: int = Field(default=120, ge=5, le=1440, json_schema_extra={"operator_only": True})
+    retry_minutes: int = Field(
+        default=120, ge=5, le=1440, json_schema_extra={"steps": [30, 60, 120, 240, 480], "unit": SettingUnit.MINUTES}
+    )
     """How long after a failed brief was asked for the day's brief is asked for again, so a failure spends few AI calls."""
 
-    shown_days: int = Field(default=14, ge=1, le=90, json_schema_extra={"operator_only": True})
+    shown_days: int = Field(default=14, ge=1, le=90, json_schema_extra={"steps": [7, 14, 30, 60, 90], "unit": SettingUnit.DAYS})
     """The most past days' briefs the world page offers."""
 
     def context_rule(self) -> WorldBriefContextRule:
@@ -363,10 +368,10 @@ class WorldConfig(BaseModel):
     retention_days: int = Field(default=14, ge=1, le=365, json_schema_extra={"steps": [7, 14, 30, 60, 90], "unit": SettingUnit.DAYS})
     """A world news item published longer ago than this is dropped. The briefs keep the items they cite."""
 
-    max_items: int = Field(default=3000, ge=100, le=50_000, json_schema_extra={"operator_only": True})
+    max_items: int = Field(default=3000, ge=100, le=50_000, json_schema_extra={"steps": [500, 1000, 3000, 5000, 10000]})
     """The most world news items kept, the newest first."""
 
-    shown: int = Field(default=200, ge=1, le=1000, json_schema_extra={"operator_only": True})
+    shown: int = Field(default=200, ge=1, le=1000, json_schema_extra={"steps": [50, 100, 200, 500, 1000]})
     """The most kept items the world page lists, the newest first."""
 
     summary_length: int = Field(default=400, ge=0, le=4000, json_schema_extra={"operator_only": True})

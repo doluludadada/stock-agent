@@ -20,7 +20,8 @@ See `../../docs/web-integration.md` for scopes, the feature matrix and the revie
 src/
   app/            routes, layout shell, providers; composes features
   features/
-    auth/              first-time setup, sign-in, registration, the account menu, My settings (the user's AI model)
+    auth/              first-time setup, sign-in, registration, the account menu, My settings (who is signed in and
+                       how their password changes, the language and the theme, the user's AI model)
                        and the administrator's users page
     market-overview/   the research target's trend (the TAIEX unless `?target=` names a stock or ETF), the most
                        traded stocks, the session's breadth and industry moves, the strategy slot
@@ -344,6 +345,14 @@ secret: the server refuses one written into them, and its form shows none.
   label `admin:form.field.<path>` and help `admin:form.help.<path>` are all it needs, and `i18n.test.ts` fails while
   either is missing in a locale for a path of `shared/api/settings-fields.json`, which `export_openapi.py` writes; the
   same test requires every group, unit and option of that file.
+- My settings (`/settings`) holds everything that is one user's own, in one column: the account (name, email, role,
+  and that an administrator sets a new password on the users page, the only way the site changes one), the language
+  and the theme (the header's two menus again, kept by the browser), the AI model, then the mock account's panels the
+  route hands in. The schedule's control lists the user's saved time even when the administrator no longer offers it
+  (`offeredTimes`), as a row of buttons up to five choices and a list above, so no time is cut off on a phone.
+- A choice shows as a row of buttons only while its options' names fit the control's column side by side
+  (`SEGMENTED_CHARACTERS`); longer names, such as the ranking's formulas, are a list. An option the dictionaries
+  name is a plain word (`isNamedOption`); any other shows as it is, a time of day without its seconds.
 - My settings' mock account offers starting capitals to choose (`STARTING_CAPITALS` in `account/model.ts`) and keeps a
   capital that is none of them as the current one.
 - Price and volume are two synced charts (`shared/ui/price-volume-chart.tsx`), never one chart

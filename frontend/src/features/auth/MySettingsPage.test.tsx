@@ -1,13 +1,15 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor, within } from '@testing-library/react'
+import type { ReactNode } from 'react'
 import userEvent from '@testing-library/user-event'
 import { I18nextProvider } from 'react-i18next'
 import { MemoryRouter } from 'react-router'
 import { MockAccountPanel } from '@/features/account'
 import { initI18n } from '@/i18n'
 import { session, type Schemas } from '@/shared/api'
+import { ThemeProvider } from '@/shared/lib/theme'
 import { OPEN_SITE } from '@/test/features'
-import { TEST_USER } from '@/test/users'
+import { TEST_ADMIN, TEST_USER } from '@/test/users'
 import { MySettingsPage } from './MySettingsPage'
 
 type Offer = Schemas['AiModelResponse']
@@ -34,12 +36,14 @@ function serve(offer: Offer) {
   return saves
 }
 
-function open() {
+function open(mockAccount?: ReactNode) {
   render(
     <I18nextProvider i18n={initI18n('en')}>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <MemoryRouter>
-          <MySettingsPage />
+          <ThemeProvider>
+            <MySettingsPage mockAccount={mockAccount} />
+          </ThemeProvider>
         </MemoryRouter>
       </QueryClientProvider>
     </I18nextProvider>,
@@ -86,6 +90,40 @@ describe('My settings', () => {
     expect(await screen.findByText('Saved. Your next runs use Claude · claude-haiku-5-5.')).toBeVisible()
   })
 
+  it('says who is signed in and sends a user to an administrator for a new password', async () => {
+    serve(OFFER)
+    open()
+
+    const account = within(await screen.findByRole('region', { name: 'Account' }))
+    expect(account.getByText(TEST_USER.username)).toBeVisible()
+    expect(account.getByText(TEST_USER.email)).toBeVisible()
+    expect(account.getByText('To change your password, ask an administrator to set a new one for you.')).toBeVisible()
+    expect(account.queryByRole('link')).toBeNull()
+  })
+
+  it('sends an administrator to the users page for their own password, and says a Google account has none', async () => {
+    serve(OFFER)
+    session.signIn(TEST_ADMIN)
+    open()
+
+    expect(await screen.findByRole('link', { name: 'Open the users page' })).toHaveAttribute('href', '/admin/users')
+    session.signIn({ ...TEST_USER, has_password: false })
+    expect(await screen.findByText('You sign in with Google, so this account has no password here.')).toBeVisible()
+  })
+
+  it('changes the language and the theme where the user’s other settings are', async () => {
+    serve(OFFER)
+    const user = userEvent.setup()
+    open()
+
+    await user.click(within(await screen.findByRole('radiogroup', { name: 'Theme' })).getByRole('radio', { name: 'Dark' }))
+    expect(document.documentElement).toHaveClass('dark')
+    await user.click(within(screen.getByRole('radiogroup', { name: 'Language' })).getByRole('radio', { name: '繁體中文' }))
+    expect(await screen.findByRole('heading', { level: 1, name: '我的設定' })).toBeVisible()
+    await user.click(screen.getByRole('radio', { name: 'English' }))
+    expect(await screen.findByRole('heading', { level: 1, name: 'My settings' })).toBeVisible()
+  })
+
   it('links to the strategy library, where the active strategy is chosen', async () => {
     serve(OFFER)
     open()
@@ -130,17 +168,7 @@ function serveAccount(opening: History['opening'], refusal?: { status: number; d
   return resets
 }
 
-function openWithMockAccount() {
-  render(
-    <I18nextProvider i18n={initI18n('en')}>
-      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-        <MemoryRouter>
-          <MySettingsPage mockAccount={<MockAccountPanel />} />
-        </MemoryRouter>
-      </QueryClientProvider>
-    </I18nextProvider>,
-  )
-}
+const openWithMockAccount = () => open(<MockAccountPanel />)
 
 async function resetTo(amount: string) {
   const user = userEvent.setup()

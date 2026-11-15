@@ -252,6 +252,24 @@ def test_a_setting_only_an_operator_changes_is_a_setting_of_the_file_and_no_fiel
     assert {"api.valuation_cache_minutes", "market.fee_rate", "valuation.scenario_spread", "ai.available_models"} <= form
 
 
+def test_what_an_administrator_would_change_is_on_the_form_as_a_choice_with_the_bounds_of_its_class() -> None:
+    fields = {field.path: field for field in repository_fields()}
+    times = fields["ranking.follow_times"]
+
+    assert (fields["behavior.log_level"].kind, fields["behavior.log_level"].group) == (SettingKind.CHOICE, SettingGroup.SITE_ACCESS)
+    assert "DEBUG" in fields["behavior.log_level"].options and fields["ai.system_model"].kind == SettingKind.CHOICE
+    assert (times.kind, times.group) == (SettingKind.CHOICES, SettingGroup.RANKING) and set(times.value) <= set(times.options)
+    assert (fields["api.follow_schedule_poll_seconds"].kind, fields["api.follow_schedule_poll_seconds"].unit) == (
+        SettingKind.STEPS,
+        SettingUnit.SECONDS,
+    )
+    assert {fields[path].group for path in ("accounts.daily_ai_calls", "stock_page.system_writing.daily_ai_calls")} == {
+        SettingGroup.AI
+    }
+    assert (fields["world.brief.sentences"].minimum, fields["world.brief.sentences"].maximum) == (1, 20)
+    assert {"world.shown", "world.max_items", "stock_page.article_store.shown", "collect_rules.buzz_min_mentions"} <= fields.keys()
+
+
 def test_no_setting_of_the_form_is_a_typed_number_and_every_typed_setting_is_advanced() -> None:
     fields = repository_fields()
     unbounded = [

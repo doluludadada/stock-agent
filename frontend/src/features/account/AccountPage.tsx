@@ -2,7 +2,7 @@ import { ArrowRight, CopyCheck, FlaskConical, LineChart, Wallet } from 'lucide-r
 import { lazy, Suspense, useMemo, useState, type FormEvent } from 'react'
 import { Link } from 'react-router'
 import { useTranslation } from '@/i18n'
-import { useListedNames } from '@/shared/api'
+import { useListedNames, useShows } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
 import { directionOf } from '@/shared/lib/direction'
 import { useFormat } from '@/shared/lib/format'
@@ -306,19 +306,23 @@ function Positions({ value, liveStockIds, names, className }: PositionsProps) {
   )
 }
 
-/** What fills an empty mock account: following a finished analysis, with the way to the runs. */
+/**
+ * What fills an empty mock account, with the way there: a follow of the monthly ranking where the site shows the
+ * viewer the ranking, else a follow of a finished analysis.
+ */
 function GetStarted({ className }: { className?: string }) {
   const { t } = useTranslation('account')
+  const way = useShows('ranking') ? 'ranking' : 'runs'
   return (
     <Panel className={className}>
       <StateBlock
         icon={CopyCheck}
         title={t('start.title')}
-        description={t('start.description')}
+        description={t(`start.${way}.description`)}
         action={
           <Button asChild>
-            <Link to={paths.runs}>
-              {t('start.link')}
+            <Link to={paths[way]}>
+              {t(`start.${way}.link`)}
               <ArrowRight aria-hidden />
             </Link>
           </Button>

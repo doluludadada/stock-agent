@@ -1,6 +1,6 @@
 import { Check, Languages, Monitor, Moon, Sun } from 'lucide-react'
 import { changeLocale, SUPPORTED_LOCALES, useLocale, useTranslation } from '@/i18n'
-import { useTheme, type ThemePreference } from '@/shared/lib/theme'
+import { THEME_PREFERENCES, useTheme } from '@/shared/lib/theme'
 import { Button } from '@/shared/ui/button'
 import {
   DropdownMenu,
@@ -12,7 +12,6 @@ import {
 } from '@/shared/ui/dropdown-menu'
 import { Segmented } from '@/shared/ui/segmented'
 
-const THEMES: readonly ThemePreference[] = ['light', 'dark', 'system']
 const THEME_ICON = { dark: Moon, light: Sun, system: Monitor } as const
 
 /** The language and theme menus of the header. */
@@ -50,7 +49,7 @@ export function PreferenceMenu() {
         <DropdownMenuContent align="end" className="w-44">
           <DropdownMenuLabel>{t('preferences.theme')}</DropdownMenuLabel>
           <DropdownMenuSeparator />
-          {THEMES.map((item) => {
+          {THEME_PREFERENCES.map((item) => {
             const Icon = THEME_ICON[item]
             return (
               <DropdownMenuItem key={item} onSelect={() => setPreference(item)}>
@@ -79,7 +78,7 @@ export function PreferenceControls() {
         label={t('preferences.language')}
         options={SUPPORTED_LOCALES.map((item) => ({ value: item, label: t(`preferences.locale.${item}`) }))}
       />
-      <Segmented value={preference} onChange={setPreference} label={t('preferences.theme')} options={THEMES.map((item) => ({ value: item, label: t(`preferences.themes.${item}`) }))} />
+      <Segmented value={preference} onChange={setPreference} label={t('preferences.theme')} options={THEME_PREFERENCES.map((item) => ({ value: item, label: t(`preferences.themes.${item}`) }))} />
     </div>
   )
 }

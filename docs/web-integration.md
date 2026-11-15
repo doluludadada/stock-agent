@@ -259,7 +259,10 @@ a user, who stays signed in), and the save the `X-Requested-With: stock-agent` h
   ETFs), `strategy` (the built-in strategies on disk are the options) and `group` (on a section in `AppConfig`, or
   on one field). `operator_only`, on a section or on one field, keeps a setting off the form: the addresses and
   patterns of the data sources, the database, the folders, the exchange's hours and tick tables, the strategy
-  search's tuning, the hosts and the editor's limits. The form does not show one, and a change to one answers 422
+  search's tuning, the hosts and the editor's limits. It is for wiring and the exchange's facts only: what a person
+  would change (the log level, the AI's web search, the site's own writing and its daily AI calls, the times the
+  scheduled follow offers, how many items a page lists) is a field of the form. The form does not show an
+  `operator_only` setting, and a change to one answers 422
   `settings_edit_refused` like an unknown path; the file, the load and the start's notices read it as before. Without any of them a whole number with both bounds is a `range`, or `steps` of round numbers when
   the bounds lie more than 100 apart, an enum a `choice`, a bool a `switch` and a text typed under `advanced`.
   `tests/test_settings_form.py` fails for a number that has neither steps nor both bounds.

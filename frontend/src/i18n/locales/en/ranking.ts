@@ -1,7 +1,7 @@
 const ranking = {
-  signIn: 'Sign in to see the monthly revenue ranking',
+  signIn: 'Sign in to see the monthly ranking',
   page: {
-    title: 'Monthly revenue ranking',
+    title: 'Monthly ranking',
   },
   stocks: '{{count}} stocks',
   times: '{{value}}×',

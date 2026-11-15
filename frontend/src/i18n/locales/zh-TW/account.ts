@@ -18,7 +18,7 @@ const account: DictionaryShape<typeof en> = {
   curveLabel: '總權益',
   curve: { start: '起點', high: '最高', low: '最低' },
   noCurve: '還沒有成交，因此沒有權益曲線。',
-  noCurveHint: '跟單一次已完成的分析任務，就會開始這條曲線。',
+  noCurveHint: '第一次跟單到這個帳戶後，就會開始這條曲線。',
   allocation: {
     title: '資產配置',
     bar: '持股 {{stocks}}，現金 {{cash}}',
@@ -50,8 +50,14 @@ const account: DictionaryShape<typeof en> = {
   about: { title: '關於這個帳戶', broker: '券商' },
   start: {
     title: '模擬帳戶目前是空的',
-    description: '開啟一次已完成的分析任務，把它的決策跟單到這個帳戶。之後這裡會列出成交、持股與權益，讓你看看照分析操作的結果。',
-    link: '前往分析任務',
+    ranking: {
+      description: '到「每月排名」頁面，把這個月的排名跟單到這個帳戶。之後這裡會列出成交、持股與權益，讓你看看照排名操作的結果。',
+      link: '前往每月排名',
+    },
+    runs: {
+      description: '開啟一次已完成的分析任務，把它的決策跟單到這個帳戶。之後這裡會列出成交、持股與權益，讓你看看照分析操作的結果。',
+      link: '前往分析任務',
+    },
   },
   trades: {
     title: '成交紀錄',

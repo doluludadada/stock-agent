@@ -2,9 +2,9 @@ import type en from '../en/ranking'
 import type { DictionaryShape } from '../../types'
 
 const ranking: DictionaryShape<typeof en> = {
-  signIn: '登入後查看月營收排名',
+  signIn: '登入後查看每月排名',
   page: {
-    title: '月營收排名',
+    title: '每月排名',
   },
   stocks: '{{count}} 檔',
   times: '{{value}} 倍',
@@ -38,7 +38,7 @@ const ranking: DictionaryShape<typeof en> = {
   schedule: {
     title: '排程自動跟單',
     offChoice: '關閉',
-    help: '選了時間之後，每次月排行有新的決策，網站會在決策後的第一個交易日、從這個時間起，自動幫你的模擬帳戶跟單。只會動模擬帳戶，每次決策只跟一次；當天沒跟成，下一個交易日再試。',
+    help: '選了時間之後，每月排名每次有新的決策，網站會在決策後的第一個交易日、從這個時間起，自動幫你的模擬帳戶跟單。只會動模擬帳戶，每次決策只跟一次；當天沒跟成，下一個交易日再試。',
     failed: '排程沒有儲存：{{reason}}',
     off: '排程關閉。',
     pending: '排程開啟：下一個交易日 {{time}} 起跟單 {{date}} 的決策。',

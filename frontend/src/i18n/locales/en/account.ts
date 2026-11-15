@@ -15,7 +15,7 @@ const account = {
   curveLabel: 'Equity',
   curve: { start: 'Start', high: 'High', low: 'Low' },
   noCurve: 'No fill yet, so no equity curve.',
-  noCurveHint: 'Follow a finished analysis run to start it.',
+  noCurveHint: 'The first follow into this account starts it.',
   allocation: {
     title: 'Allocation',
     bar: 'Stocks {{stocks}}, cash {{cash}}',
@@ -47,9 +47,14 @@ const account = {
   about: { title: 'About this account', broker: 'Broker' },
   start: {
     title: 'Nothing in your mock account yet',
-    description:
-      'Open a finished analysis run and follow its decisions into this account. Its trades, positions and equity then show here, so you see how the analysis would have done.',
-    link: 'Open the analysis runs',
+    ranking: {
+      description: 'Follow this month’s ranking on the monthly ranking page. The trades, positions and equity then show here, so you see how the ranking would have done.',
+      link: 'Open the monthly ranking',
+    },
+    runs: {
+      description: 'Open a finished analysis run and follow its decisions into this account. Its trades, positions and equity then show here, so you see how the analysis would have done.',
+      link: 'Open the analysis runs',
+    },
   },
   trades: {
     title: 'Trades',

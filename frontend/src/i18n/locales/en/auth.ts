@@ -80,6 +80,16 @@ const auth = {
   settings: {
     title: 'My settings',
     signIn: 'Sign in to change your settings',
+    account: {
+      title: 'Account',
+      username: 'Username',
+      email: 'Email',
+      role: 'Role',
+      google: 'You sign in with Google, so this account has no password here.',
+      passwordOwn: 'To change your password, set a new one for your own account on the users page.',
+      passwordAsk: 'To change your password, ask an administrator to set a new one for you.',
+      users: 'Open the users page',
+    },
     aiModel: {
       title: 'AI model',
       label: 'Model for your runs',

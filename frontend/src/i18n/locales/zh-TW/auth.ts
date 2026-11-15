@@ -83,6 +83,16 @@ const auth: DictionaryShape<typeof en> = {
   settings: {
     title: '我的設定',
     signIn: '登入以變更你的設定',
+    account: {
+      title: '帳號',
+      username: '使用者名稱',
+      email: '電子郵件',
+      role: '角色',
+      google: '你使用 Google 登入，所以這個帳號在本站沒有密碼。',
+      passwordOwn: '要更改密碼，請到使用者管理頁面為自己的帳號設定新密碼。',
+      passwordAsk: '要更改密碼，請管理員為你設定新密碼。',
+      users: '前往使用者管理',
+    },
     aiModel: {
       title: 'AI 模型',
       label: '分析使用的模型',
@@ -104,7 +114,7 @@ const auth: DictionaryShape<typeof en> = {
   },
   role: { administrator: '管理員', user: '一般使用者' },
   users: {
-    title: '使用者',
+    title: '使用者管理',
     description: '誰可以使用這個網站，以及誰能管理它。',
     summary: '共 {{count}} 個帳號 · 管理員 {{admins}} 位 · 停用 {{deactivated}} 個',
     list: { title: '帳號', count: '顯示 {{count}} / {{total}} 個' },

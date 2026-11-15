@@ -542,7 +542,7 @@ describe('the ranking page', () => {
     const asked = serve()
     open()
 
-    expect(screen.getByText('Sign in to see the monthly revenue ranking')).toBeVisible()
+    expect(screen.getByText('Sign in to see the monthly ranking')).toBeVisible()
     expect(asked).toEqual([])
   })
 

@@ -10,6 +10,7 @@ const BY_CODE = {
   brief_limit_reached: 'refusal.brief_limit_reached',
   run_in_progress: 'refusal.run_in_progress',
   listing_unavailable: 'refusal.listing_unavailable',
+  ranking_unavailable: 'refusal.ranking_unavailable',
   realtime_quotes_unavailable: 'refusal.realtime_quotes_unavailable',
   mops_unavailable: 'refusal.mops_unavailable',
   broker_unavailable: 'refusal.broker_unavailable',

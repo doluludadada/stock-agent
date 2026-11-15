@@ -56,6 +56,20 @@
     "unit": null
   },
   {
+    "path": "ai.system_model",
+    "kind": "choice",
+    "group": "ai",
+    "options": [
+      "openai",
+      "grok",
+      "gemini",
+      "groq",
+      "nvidia",
+      "claude"
+    ],
+    "unit": null
+  },
+  {
     "path": "ai.connection_timeout",
     "kind": "steps",
     "group": "ai",
@@ -98,25 +112,68 @@
     "unit": null
   },
   {
-    "path": "api.valuation_cache_minutes",
-    "kind": "steps",
-    "group": "data_history",
-    "options": [],
-    "unit": "minutes"
+    "path": "behavior.log_level",
+    "kind": "choice",
+    "group": "site_access",
+    "options": [
+      "TRACE",
+      "DEBUG",
+      "INFO",
+      "SUCCESS",
+      "WARNING",
+      "ERROR",
+      "CRITICAL"
+    ],
+    "unit": null
   },
   {
-    "path": "api.world_interval_minutes",
-    "kind": "steps",
-    "group": "data_history",
+    "path": "behavior.enable_web_search",
+    "kind": "switch",
+    "group": "ai",
     "options": [],
-    "unit": "minutes"
+    "unit": null
   },
   {
-    "path": "api.archive_interval_hours",
-    "kind": "steps",
-    "group": "data_history",
+    "path": "behavior.enable_x_search",
+    "kind": "switch",
+    "group": "ai",
     "options": [],
-    "unit": "hours"
+    "unit": null
+  },
+  {
+    "path": "behavior.enable_inline_citations",
+    "kind": "switch",
+    "group": "ai",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "behavior.web_search_max_results",
+    "kind": "range",
+    "group": "ai",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "behavior.web_search_triggers",
+    "kind": "lines",
+    "group": "advanced",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "behavior.web_search_allowed_domains",
+    "kind": "lines",
+    "group": "advanced",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "behavior.web_search_excluded_domains",
+    "kind": "lines",
+    "group": "advanced",
+    "options": [],
+    "unit": null
   },
   {
     "path": "tavily.search_depth",
@@ -260,6 +317,22 @@
     "group": "ranking",
     "options": [],
     "unit": "twd"
+  },
+  {
+    "path": "ranking.follow_times",
+    "kind": "choices",
+    "group": "ranking",
+    "options": [
+      "09:05:00",
+      "09:15:00",
+      "09:30:00",
+      "10:00:00",
+      "10:30:00",
+      "11:00:00",
+      "12:00:00",
+      "13:00:00"
+    ],
+    "unit": null
   },
   {
     "path": "ranking.revenue_short_months",
@@ -419,6 +492,55 @@
     "unit": "percent"
   },
   {
+    "path": "collect_rules.spam_keywords",
+    "kind": "lines",
+    "group": "advanced",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "collect_rules.financial_keywords",
+    "kind": "lines",
+    "group": "advanced",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "collect_rules.buzz_min_mentions",
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "collect_rules.buzz_min_engagement",
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "collect_rules.social_article_limit",
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "collect_rules.ptt_lookback_days",
+    "kind": "range",
+    "group": "data_history",
+    "options": [],
+    "unit": "days"
+  },
+  {
+    "path": "collect_rules.ptt_tags",
+    "kind": "lines",
+    "group": "advanced",
+    "options": [],
+    "unit": null
+  },
+  {
     "path": "quality.min_chars_stock",
     "kind": "steps",
     "group": "data_history",
@@ -470,14 +592,14 @@
   {
     "path": "stock_page.brief.daily_stocks",
     "kind": "steps",
-    "group": "data_history",
+    "group": "ai",
     "options": [],
     "unit": null
   },
   {
     "path": "stock_page.brief.language",
     "kind": "choice",
-    "group": "data_history",
+    "group": "ai",
     "options": [
       "zh-TW",
       "en"
@@ -487,7 +609,42 @@
   {
     "path": "stock_page.brief.window_sessions",
     "kind": "steps",
-    "group": "data_history",
+    "group": "ai",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "stock_page.brief.sentences",
+    "kind": "range",
+    "group": "ai",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "stock_page.card.daily_stocks",
+    "kind": "steps",
+    "group": "ai",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "stock_page.card.sentences",
+    "kind": "range",
+    "group": "ai",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "stock_page.system_writing.daily_ai_calls",
+    "kind": "steps",
+    "group": "ai",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "stock_page.system_writing.users_stocks",
+    "kind": "switch",
+    "group": "ai",
     "options": [],
     "unit": null
   },
@@ -506,11 +663,39 @@
     "unit": null
   },
   {
+    "path": "stock_page.article_store.shown",
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "stock_page.article_store.refresh_stocks",
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": null
+  },
+  {
     "path": "world.retention_days",
     "kind": "steps",
     "group": "data_history",
     "options": [],
     "unit": "days"
+  },
+  {
+    "path": "world.max_items",
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "world.shown",
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": null
   },
   {
     "path": "world.brief.write_at",
@@ -525,6 +710,27 @@
     "group": "data_history",
     "options": [],
     "unit": "hours"
+  },
+  {
+    "path": "world.brief.sentences",
+    "kind": "range",
+    "group": "data_history",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "world.brief.retry_minutes",
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": "minutes"
+  },
+  {
+    "path": "world.brief.shown_days",
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": "days"
   },
   {
     "path": "market.fee_rate",
@@ -760,14 +966,14 @@
   {
     "path": "accounts.daily_ai_calls",
     "kind": "steps",
-    "group": "site_access",
+    "group": "ai",
     "options": [],
     "unit": null
   },
   {
     "path": "accounts.daily_ai_calls_total",
     "kind": "steps",
-    "group": "site_access",
+    "group": "ai",
     "options": [],
     "unit": null
   },
@@ -896,6 +1102,34 @@
     "group": "site_access",
     "options": [],
     "unit": "seconds"
+  },
+  {
+    "path": "api.follow_schedule_poll_seconds",
+    "kind": "steps",
+    "group": "ranking",
+    "options": [],
+    "unit": "seconds"
+  },
+  {
+    "path": "api.valuation_cache_minutes",
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": "minutes"
+  },
+  {
+    "path": "api.world_interval_minutes",
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": "minutes"
+  },
+  {
+    "path": "api.archive_interval_hours",
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": "hours"
   },
   {
     "path": "features.market_overview",

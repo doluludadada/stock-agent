@@ -5,6 +5,7 @@ import { I18nextProvider } from 'react-i18next'
 import { MemoryRouter } from 'react-router'
 import { initI18n } from '@/i18n'
 import { session, type Schemas } from '@/shared/api'
+import { siteShowing } from '@/test/features'
 import { TEST_USER } from '@/test/users'
 import { AccountPage } from './AccountPage'
 
@@ -63,7 +64,7 @@ const intraday = { run_id: INTRADAY, workflow: 'intraday', start_time: '2026-11-
  * The account endpoints and the listing, as the backend answers them; trades page by `limit` and `offset`. `pastDay`
  * answers a lookup of the account as of a day, null for a server error.
  */
-function serve(history: History, trades: Trade[], pastDay?: (day: string) => History | null | Promise<History | null>) {
+function serve(history: History, trades: Trade[], pastDay?: (day: string) => History | null | Promise<History | null>, site = siteShowing({ ranking: 'off' })) {
   const asked: string[] = []
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
   vi.stubGlobal(
@@ -71,6 +72,7 @@ function serve(history: History, trades: Trade[], pastDay?: (day: string) => His
     vi.fn(async (url: string) => {
       asked.push(url)
       const { pathname, searchParams } = new URL(url, 'http://localhost')
+      if (pathname === '/v1/auth/status') return json(site)
       if (pathname === '/v1/market/stocks') {
         const code = searchParams.get('query') ?? ''
         return json(LISTING[code] ? [{ stock_id: code, name: LISTING[code], market: 'twse', today: null }] : [])
@@ -171,7 +173,15 @@ describe('the mock account', () => {
     expect(screen.queryByRole('button', { name: 'Show more trades' })).not.toBeInTheDocument()
   })
 
-  it('with no position and no trade, tells how to fill it: follow a finished analysis run', async () => {
+  it('with no position and no trade, sends the reader to the monthly ranking to follow it where the site shows the ranking', async () => {
+    serve(EMPTY, [], undefined, siteShowing())
+    open()
+
+    expect(await screen.findByRole('link', { name: 'Open the monthly ranking' })).toHaveAttribute('href', '/ranking')
+    expect(screen.getByText(/^Follow this month’s ranking on the monthly ranking page\./)).toBeVisible()
+  })
+
+  it('with no position and no trade, tells how to fill it where the ranking is hidden: follow a finished analysis run', async () => {
     serve(EMPTY, [])
     open()
 

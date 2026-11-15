@@ -116,15 +116,14 @@ class AppConfig(BaseSettings):
 
     ai: AiConfig = Field(json_schema_extra={"group": SettingGroup.AI})
     line: LineConfig = Field(default_factory=LineConfig, json_schema_extra={"group": SettingGroup.ADVANCED})
-    api: ApiConfig = Field(default_factory=ApiConfig, json_schema_extra={"group": SettingGroup.ADVANCED})
-    behavior: BehaviorConfig = Field(json_schema_extra={"operator_only": True})
+    behavior: BehaviorConfig = Field(json_schema_extra={"group": SettingGroup.AI})
+    db: DbConfig = Field(json_schema_extra={"operator_only": True})
     """
     `operator_only` marks a setting, or every setting of a section, that only an operator who edits
     config/appsetting.yaml changes: the settings form neither shows it nor accepts a change to it. The file, the load
     and the start's notices read it like any other setting.
     """
 
-    db: DbConfig = Field(json_schema_extra={"operator_only": True})
     chat: ChatConfig = Field(json_schema_extra={"operator_only": True})
     folder: FolderConfig = Field(default_factory=FolderConfig, json_schema_extra={"operator_only": True})
     tavily: TavilyConfig = Field(default_factory=TavilyConfig, json_schema_extra={"group": SettingGroup.AI})
@@ -136,7 +135,7 @@ class AppConfig(BaseSettings):
     )
     prompts: PromptsConfig = Field(default_factory=PromptsConfig, json_schema_extra={"group": SettingGroup.AI})
     sentiment: SentimentConfig = Field(default_factory=SentimentConfig, json_schema_extra={"group": SettingGroup.DATA_HISTORY})
-    collect_rules: CollectRulesConfig = Field(json_schema_extra={"operator_only": True})
+    collect_rules: CollectRulesConfig = Field(json_schema_extra={"group": SettingGroup.DATA_HISTORY})
     quality: QualityFiltersConfig = Field(default_factory=QualityFiltersConfig, json_schema_extra={"group": SettingGroup.DATA_HISTORY})
     stock_page: StockPageConfig = Field(default_factory=StockPageConfig, json_schema_extra={"group": SettingGroup.DATA_HISTORY})
     world: WorldConfig = Field(default_factory=WorldConfig, json_schema_extra={"group": SettingGroup.DATA_HISTORY})
@@ -153,6 +152,7 @@ class AppConfig(BaseSettings):
     watchlist: WatchlistConfig = Field(default_factory=WatchlistConfig, json_schema_extra={"group": SettingGroup.DATA_HISTORY})
     valuation: ValuationConfig = Field(json_schema_extra={"group": SettingGroup.AI})
     accounts: AccountsConfig = Field(json_schema_extra={"group": SettingGroup.SITE_ACCESS})
+    api: ApiConfig = Field(default_factory=ApiConfig, json_schema_extra={"group": SettingGroup.ADVANCED})
     sources: SourcesConfig = Field(json_schema_extra={"operator_only": True})
     features: FeaturesConfig = Field(default_factory=FeaturesConfig, json_schema_extra={"group": SettingGroup.FEATURES})
 

@@ -24,7 +24,7 @@ test('the navigation and the runs page offer what the site’s audience allows, 
   for (const kind of ['社群熱度', '盤中檢查']) await expect(main.getByRole('heading', { name: new RegExp(`^${kind}`) })).toHaveCount(site.realtime_quotes ? 1 : 0)
   const nav = page.getByRole('navigation', { name: '主要導覽' })
   await expect(nav.getByRole('link', { name: '市場總覽' })).toBeVisible()
-  await expect(nav.getByRole('link', { name: '估值' })).toHaveCount(site.mops ? 1 : 0)
+  await expect(nav.getByRole('link', { name: '本益比估值' })).toHaveCount(site.mops ? 1 : 0)
   await page.screenshot({ path: `${SHOTS}/${site.audience}-navigation.png`, fullPage: true })
 
   await page.goto('/valuation')

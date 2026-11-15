@@ -114,6 +114,82 @@ test('a value the app would refuse is held at its field: JSON that does not pars
   await page.getByRole('button', { name: '放棄修改' }).click()
 })
 
+/** Picks one entry of a setting's list by its text. */
+async function pick(page: Page, setting: string, option: string) {
+  await row(page, setting).getByRole('combobox').click()
+  await page.getByRole('option', { name: option, exact: true }).click()
+}
+
+test('one setting of each group is chosen, saved in one go, kept in the file and run on at once; a value past its bound is refused at its setting', async ({ page, consoleErrors }) => {
+  void consoleErrors
+  await openForm(page)
+  const before = { level: await valueOf(page, 'behavior.log_level'), calls: await valueOf(page, 'stock_page.system_writing.daily_ai_calls') }
+  const level = before.level === 'WARNING' ? 'INFO' : 'WARNING'
+  const calls = before.calls === 30 ? 60 : 30
+  const quarter = row(page, 'ranking.follow_times').getByRole('checkbox', { name: '09:15', exact: true })
+  const offersQuarter = await quarter.isChecked()
+  const listed = (await valueOf(page, 'world.shown')) === 100 ? 50 : 100
+  const poll = (await valueOf(page, 'api.follow_schedule_poll_seconds')) === 30 ? 60 : 30
+
+  await pick(page, 'behavior.log_level', level === 'WARNING' ? 'WARNING（只記錄問題）' : 'INFO（一般）')
+  await pick(page, 'stock_page.system_writing.daily_ai_calls', String(calls))
+  await quarter.click()
+  await pick(page, 'api.follow_schedule_poll_seconds', `${poll} 秒`)
+  await pick(page, 'world.shown', String(listed))
+  await saveWithPassword(page)
+  await expect(page.getByText(SAVED)).toBeVisible({ timeout: 60_000 })
+
+  expect(await valueOf(page, 'behavior.log_level')).toBe(level)
+  expect(await valueOf(page, 'stock_page.system_writing.daily_ai_calls')).toBe(calls)
+  expect(await valueOf(page, 'api.follow_schedule_poll_seconds')).toBe(poll)
+  expect(await valueOf(page, 'world.shown')).toBe(listed)
+  const offered = (await valueOf(page, 'ranking.follow_times')) as string[]
+  expect(offered.includes('09:15:00'), 'the time was added to or taken from the offer').toBe(!offersQuarter)
+  const schedule = ((await apiGet(page, '/v1/rankings/follow')) as { schedule: { times: string[] } }).schedule
+  expect(schedule.times, 'My settings offers the saved times at once, in the day’s order').toEqual([...offered].sort())
+  const world = (await apiGet(page, '/v1/world')) as { news: unknown[] }
+  expect(world.news.length, 'the world page lists no more than the saved number').toBeLessThanOrEqual(listed)
+  if (SETTINGS_DIR) {
+    const text = readFileSync(onDisk(), 'utf8')
+    for (const line of [`log_level: ${level}`, `daily_ai_calls: ${calls}`, `follow_schedule_poll_seconds: ${poll}`, `shown: ${listed}`, 'follow_times:']) expect(text, line).toContain(line)
+  }
+
+  const refused = await page.request.put('/v1/admin/settings', {
+    headers: APP_HEADER,
+    data: { confirm: true, password: ADMIN.password, changes: [{ path: 'world.shown', value: 5000 }] },
+  })
+  const body = (await refused.json()) as { code: string; problems: { path: string; code: string }[] }
+  expect([refused.status(), body.code]).toEqual([422, 'settings_refused'])
+  expect(body.problems.map((problem) => [problem.path, problem.code])).toEqual([['world.shown', 'less_than_equal']])
+  expect(await valueOf(page, 'world.shown'), 'nothing was saved').toBe(listed)
+})
+
+test('My settings holds what is the user’s own: the account, the language and the theme, and the scheduled follow’s time', async ({ page, consoleErrors }) => {
+  void consoleErrors
+  await signIn(page)
+  await page.goto('/settings')
+
+  await expect(page.getByRole('region', { name: '帳號' })).toContainText(ADMIN.username)
+  await page.getByRole('radiogroup', { name: '主題' }).getByRole('radio', { name: '淺色' }).click()
+  await expect(page.locator('html')).not.toHaveClass(/dark/)
+  await page.getByRole('radiogroup', { name: '語言' }).getByRole('radio', { name: 'English' }).click()
+  await expect(page.getByRole('heading', { level: 1, name: 'My settings' })).toBeVisible()
+  await page.getByRole('radiogroup', { name: 'Language' }).getByRole('radio', { name: '繁體中文' }).click()
+
+  const panel = page.getByRole('region', { name: '排程自動跟單' })
+  const followTime = async () => ((await apiGet(page, '/v1/rankings/follow')) as { schedule: { time: string | null } }).schedule.time
+  /** A few times are buttons and more are a list: either way the reader picks by the time's text. */
+  const choose = async (name: string | RegExp) => {
+    if ((await panel.getByRole('radiogroup').count()) > 0) return panel.getByRole('radio', { name }).first().click()
+    await panel.getByRole('combobox').click()
+    await page.getByRole('option', { name }).first().click()
+  }
+  await choose(/^\d{2}:\d{2}$/)
+  await expect.poll(followTime).not.toBeNull()
+  await choose('關閉')
+  await expect.poll(followTime).toBeNull()
+})
+
 test('the environment and the audience show as text with why, and offer no control', async ({ page, consoleErrors }) => {
   void consoleErrors
   await openForm(page)

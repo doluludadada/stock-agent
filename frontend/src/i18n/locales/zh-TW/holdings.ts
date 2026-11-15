@@ -15,7 +15,7 @@ const holdings: DictionaryShape<typeof en> = {
     description: '輸入你在別處持有的股票。只是紀錄，不會下單。',
   },
   noDecision: {
-    title: '還沒有月排行的決策',
+    title: '還沒有每月排名的決策',
     description: '日線資料還沒有涵蓋決策日，暫時無法評分。仍可先輸入持股。',
   },
   action: { add: '輸入持股', change: '修改這筆紀錄', remove: '移除這筆紀錄', manage: '{{name}} 的紀錄' },

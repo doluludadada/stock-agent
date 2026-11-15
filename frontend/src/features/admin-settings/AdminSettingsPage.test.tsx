@@ -28,6 +28,8 @@ function fields(): SettingField[] {
     field('analysis.stop_loss_pct', 'steps', 'trading_limits', 0.07, { steps: [0.05, 0.08, 0.1], unit: 'percent' }),
     field('technical.initial_strategy_id', 'choice', 'trading_limits', 'balanced', { options: ['balanced', 'momentum'] }),
     field('ranking.decision_day', 'range', 'ranking', 10, { minimum: 1, step: 1 }),
+    field('ranking.active_formula', 'choice', 'ranking', 'revenue_and_high', { options: ['revenue_and_high', 'revenue_and_high_cash_60'] }),
+    field('ranking.follow_times', 'choices', 'ranking', ['09:05:00'], { options: ['09:05:00', '09:30:00'] }),
     field('market.bond_etf_tax_exempt_until', 'date', 'trading_limits', '2026-12-31'),
     field('mock_trading.max_fill_quantity', 'steps', 'trading_limits', null, { steps: [1000, 5000], nullable: true }),
     field('accounts.registration_open', 'switch', 'site_access', true),
@@ -135,6 +137,8 @@ describe('the settings page', { timeout: 30_000 }, () => {
     expect([temperature.getAttribute('min'), temperature.getAttribute('max'), temperature.getAttribute('step')]).toEqual(['0', '2', '0.1'])
     expect(screen.getByLabelText('Bond ETFs tax-free until')).toHaveAttribute('type', 'date')
     expect(screen.getByRole('radiogroup', { name: 'Initial strategy' }), 'an option the server names at runtime shows as it is').toHaveTextContent('balancedmomentum')
+    expect(screen.getByRole('combobox', { name: 'Formula in use' }), 'names too long to stand side by side are a list').toHaveTextContent('Revenue acceleration + near the high')
+    expect(within(screen.getByRole('group', { name: 'Times offered for the scheduled follow' })).getByRole('checkbox', { name: '09:05' }), 'a time reads without its seconds').toBeChecked()
     expect(screen.queryByRole('spinbutton'), 'no number is typed').not.toBeInTheDocument()
     expect(screen.queryByText(/appsetting\.yaml/)).not.toBeInTheDocument()
     expect(saveButton()).toBeDisabled()
@@ -148,7 +152,7 @@ describe('the settings page', { timeout: 30_000 }, () => {
     expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual(titles)
     expect(within(screen.getByRole('navigation', { name: 'Jump to a group' })).getAllByRole('button').map((button) => button.textContent)).toEqual(titles)
     const site = screen.getByRole('region', { name: 'Site and access' })
-    expect(within(site).getByText('Whom the site is for, who may register and sign in, and how much each user may use.')).toBeInTheDocument()
+    expect(within(site).getByText('Whom the site is for, who may register and sign in, how much each user may run at once, and how much the server logs.')).toBeInTheDocument()
     expect(within(site).getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent), 'a sub-heading per YAML section').toEqual(['Site', 'Accounts and usage'])
   })
 

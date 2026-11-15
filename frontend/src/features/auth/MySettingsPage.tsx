@@ -1,18 +1,21 @@
 import { ArrowRight } from 'lucide-react'
 import { useId, type ReactNode } from 'react'
 import { Link } from 'react-router'
-import { useTranslation } from '@/i18n'
-import { isApiError, useShows } from '@/shared/api'
+import { changeLocale, SUPPORTED_LOCALES, useLocale, useTranslation } from '@/i18n'
+import { isApiError, useHasPermission, useSession, useShows, type Schemas } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
 import { useErrorReason } from '@/shared/lib/error-reason'
+import { THEME_PREFERENCES, useTheme } from '@/shared/lib/theme'
 import { Button } from '@/shared/ui/button'
 import { ErrorState } from '@/shared/ui/error-state'
 import { Label } from '@/shared/ui/label'
 import { PageHeader } from '@/shared/ui/page-header'
 import { Panel } from '@/shared/ui/panel'
 import { RequireSignIn } from '@/shared/ui/require-sign-in'
+import { Segmented } from '@/shared/ui/segmented'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
 import { Skeleton } from '@/shared/ui/skeleton'
+import { Stat } from '@/shared/ui/stat'
 import { useAiModels, useChooseAiModel, type AiModels, type AiProvider } from './api'
 
 interface MySettingsPageProps {
@@ -20,15 +23,21 @@ interface MySettingsPageProps {
   mockAccount?: ReactNode
 }
 
-/** The signed-in user's own settings: the AI model of their runs, their mock account, and where their active strategy is chosen. */
+/**
+ * Everything that is the signed-in user's own: who they are and how their password changes, the language and the
+ * theme, the AI model of their runs, their mock account, and where their active strategy is chosen.
+ */
 export function MySettingsPage({ mockAccount }: MySettingsPageProps) {
   const { t } = useTranslation('auth')
   const library = useShows('strategy_library')
+  const session = useSession()
   return (
     <div className="page-stack">
       <PageHeader title={t('settings.title')} />
       <RequireSignIn layout="page" reason={t('settings.signIn')}>
         <div className="card-grid max-w-3xl">
+          {session.status === 'signedIn' && <AccountPanel user={session.user} />}
+          <DisplayPanel />
           <AiModelPanel />
           {mockAccount}
           {library && (
@@ -44,6 +53,74 @@ export function MySettingsPage({ mockAccount }: MySettingsPageProps) {
         </div>
       </RequireSignIn>
     </div>
+  )
+}
+
+/** Who is signed in, and the one way this site changes their password: an administrator sets a new one on the users page. */
+function AccountPanel({ user }: { user: Schemas['User'] }) {
+  const { t } = useTranslation('auth')
+  const managesUsers = useHasPermission('manage_users')
+  return (
+    <Panel title={t('settings.account.title')}>
+      <div className="space-y-3">
+        <dl className="grid grid-cols-1 gap-4 @md:grid-cols-3">
+          <Stat label={t('settings.account.username')}>{user.username}</Stat>
+          <Stat label={t('settings.account.email')}>
+            <span className="break-all">{user.email}</span>
+          </Stat>
+          <Stat label={t('settings.account.role')}>{t(`role.${user.role}`)}</Stat>
+        </dl>
+        <p className="text-sm text-pretty text-muted-foreground">
+          {!user.has_password ? t('settings.account.google') : managesUsers ? t('settings.account.passwordOwn') : t('settings.account.passwordAsk')}
+          {user.has_password && managesUsers && (
+            <>
+              {' '}
+              <Link to={paths.users} className="tap font-medium text-brand underline-offset-4 hover:underline">
+                {t('settings.account.users')}
+              </Link>
+            </>
+          )}
+        </p>
+      </div>
+    </Panel>
+  )
+}
+
+/** The language and the theme, which this browser keeps: the same two choices as the header's menus. */
+function DisplayPanel() {
+  const { t } = useTranslation('auth')
+  const locale = useLocale()
+  const { preference, setPreference } = useTheme()
+  return (
+    <Panel title={t('common:preferences.title')}>
+      <div className="grid gap-4 @md:grid-cols-2">
+        <div className="grid gap-1.5">
+          <p className="text-sm leading-none font-medium">
+            {t('common:preferences.language')}
+          </p>
+          <Segmented
+            value={locale}
+            onChange={(next) => void changeLocale(next)}
+            label={t('common:preferences.language')}
+            options={SUPPORTED_LOCALES.map((item) => ({ value: item, label: t(`common:preferences.locale.${item}`) }))}
+            className="md:w-full"
+          />
+        </div>
+        <div className="grid gap-1.5">
+          <p className="text-sm leading-none font-medium">
+            {t('common:preferences.theme')}
+          </p>
+          <Segmented
+            value={preference}
+            onChange={setPreference}
+            label={t('common:preferences.theme')}
+            options={THEME_PREFERENCES.map((item) => ({ value: item, label: t(`common:preferences.themes.${item}`) }))}
+            className="md:w-full"
+          />
+        </div>
+      </div>
+      <p className="mt-3 text-xs text-muted-foreground">{t('common:preferences.kept')}</p>
+    </Panel>
   )
 }
 

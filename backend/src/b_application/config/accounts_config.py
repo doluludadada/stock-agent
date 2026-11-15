@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from a_domain.rules.system.attempt_limit import AttemptLimitRule
 from a_domain.rules.system.google_sign_in import FlowReturnRule, GoogleAccessRule, IdTokenRule
-from a_domain.types.enums import SettingUnit
+from a_domain.types.enums import SettingGroup, SettingUnit
 from a_domain.types.values import EmailAddress, comparable_name
 
 GOOGLE_ADDRESS: dict[str, JsonValue] = {"without": "the site offers no sign-in with Google", "operator_only": True}
@@ -32,13 +32,20 @@ class AccountsConfig(BaseSettings):
     that reads the saved usernames and emails derives from the key: without the same key no one can sign in again.
     """
 
-    daily_ai_calls: Annotated[int, Field(gt=0, le=10_000)]
+    daily_ai_calls: Annotated[
+        int, Field(gt=0, le=10_000, json_schema_extra={"steps": [10, 20, 30, 60, 100, 200, 500, 1000], "group": SettingGroup.AI})
+    ]
     """
     Paid AI calls a user (not an administrator) may make per Taiwan calendar day: stock analyses, valuation
     explanations and Buzz sentiment, every workflow counted. Past it the call is refused like a vendor's limit.
     """
 
-    daily_ai_calls_total: Annotated[int, Field(gt=0, le=1_000_000)]
+    daily_ai_calls_total: Annotated[
+        int,
+        Field(
+            gt=0, le=1_000_000, json_schema_extra={"steps": [100, 200, 300, 600, 1000, 2000, 5000, 10000], "group": SettingGroup.AI}
+        ),
+    ]
     """
     Paid AI calls of every user together per Taiwan calendar day, so the limit above does not multiply with
     registrations. An administrator's calls count toward it and are never refused by it.

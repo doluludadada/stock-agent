@@ -11,6 +11,7 @@ import {
   monthHoldings,
   monthRows,
   nextDecision,
+  offeredTimes,
   parsePeriod,
   periodBefore,
   periodOf,
@@ -213,5 +214,14 @@ describe('past months', () => {
   it('names a stock from any ranking that carries its name', () => {
     expect(stockNames(BACKTEST.rankings).size).toBe(0)
     expect(stockNames([{ ...ranking('2026-10-13', []), stocks: [stock('2330', '台積電'), stock('2317')] }])).toEqual(new Map([['2330', '台積電']]))
+  })
+})
+
+describe('offeredTimes', () => {
+  it('lists the site’s times, and the user’s own in its place while the site no longer offers it', () => {
+    const times = ['09:05:00', '10:00:00']
+    expect(offeredTimes({ time: '10:00:00', times })).toEqual(times)
+    expect(offeredTimes({ time: null, times })).toEqual(times)
+    expect(offeredTimes({ time: '09:30:00', times })).toEqual(['09:05:00', '09:30:00', '10:00:00'])
   })
 })

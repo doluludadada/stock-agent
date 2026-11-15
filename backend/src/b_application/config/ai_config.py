@@ -5,7 +5,7 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from a_domain.ports.system.settings_files import SettingsProblem
-from a_domain.types.enums import AiProvider, SettingUnit
+from a_domain.types.enums import AiProvider, SettingGroup, SettingUnit
 
 
 def placeholders(required: set[str], optional: set[str] | None = None) -> AfterValidator:
@@ -53,7 +53,7 @@ class AiConfig(BaseSettings):
     user_selectable: list[AiProvider] = Field(default_factory=list)
     """The AI models a user may choose for their own runs on My settings, besides active_model. Empty offers only it."""
 
-    system_model: AiProvider = Field(default=AiProvider.CLAUDE, json_schema_extra={"operator_only": True})
+    system_model: AiProvider = AiProvider.CLAUDE
     """
     The AI model of the site's own writing, the company cards and daily briefs of the monthly ranking's stocks, by its
     provider under available_models, whatever active_model is: Claude, whose listed model is the cheapest the app
@@ -147,8 +147,10 @@ class BehaviorConfig(BaseModel):
 
     model_config = ConfigDict(json_schema_extra={"retired": ["x_search_allowed_handles", "x_search_excluded_handles"]})
 
-    log_level: Literal["TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"] | int
-    """A loguru level name or number: the logger refuses any other at startup."""
+    log_level: Literal["TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"] | int = Field(
+        json_schema_extra={"group": SettingGroup.SITE_ACCESS}
+    )
+    """A loguru level name or number: the logger refuses any other at startup. A save applies it at once."""
     enable_web_search: bool
     enable_x_search: bool
     enable_inline_citations: bool

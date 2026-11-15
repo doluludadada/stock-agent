@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { headingOf, sectionOf } from '@/features/admin-settings/form'
+import { headingOf, isNamedOption, sectionOf } from '@/features/admin-settings/form'
 import { BUILT_IN_IDS, builtInJson } from '@/features/strategies/model/built-ins.test-support'
 import { EMPTY_DRAFT } from '@/features/holdings/model'
 import { CAVEATS, PRESET_KEYS } from '@/features/ranking/model'
@@ -98,7 +98,7 @@ describe('translations', () => {
       ['admin', 'form.unit', openapi.components.schemas.SettingUnit.enum as string[]],
       ['admin', 'form.field', SETTING_PATHS],
       ['admin', 'form.help', SETTING_PATHS],
-      ['admin', 'form.option', [...new Set(settingsFields.flatMap((field) => field.options))]],
+      ['admin', 'form.option', [...new Set(settingsFields.flatMap((field) => field.options))].filter(isNamedOption)],
       ['common', 'broker.name', openapi.components.schemas.ExecutionProvider.enum as string[]],
       ['account', 'page', (openapi.components.schemas.ExecutionProvider.enum as string[]).map((broker) => `${broker}.title`)],
       ['account', 'brokerage.server', ['simulation', 'live']],

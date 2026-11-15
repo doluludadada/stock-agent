@@ -747,3 +747,35 @@ async def test_the_switch_is_what_the_settings_on_disk_say_at_each_ask_and_off_w
     assert on == (FeatureVisibility.ADMINISTRATORS, FeatureVisibility.ADMINISTRATORS)
     assert off == (FeatureVisibility.OFF, FeatureVisibility.OFF)
     assert (unset, not_loadable) == (FeatureVisibility.OFF, FeatureVisibility.OFF)
+
+
+async def test_a_saved_log_level_and_the_follow_times_apply_at_once_and_the_times_read_in_the_day_s_order(project: Path) -> None:
+    original, harness = text_of(project), admin_harness(project)
+
+    async with app_of(harness) as app, client_at(app) as client:
+        assert (await sign_in(client, ADMINISTRATOR.username, ADMINISTRATOR_PASSWORD)).status_code == 200
+        saved = await save(client, ("behavior.log_level", "WARNING"), ("ranking.follow_times", ["10:30:00", "09:15:00"]))
+
+        with app.state.runtime_switch.hold() as current:
+            offered = current.runtime.config.ranking.follow_times
+
+    assert "follow_times" not in original and values_of(saved)["behavior.log_level"] == "WARNING"
+    assert harness.logger.level == "WARNING" and "log_level: WARNING" in text_of(project)
+    assert [f"{offer:%H:%M}" for offer in offered] == ["09:15", "10:30"]
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [("behavior.log_level", "LOUD"), ("ranking.follow_times", []), ("stock_page.system_writing.daily_ai_calls", 10_001)],
+    ids=["log-level", "no-follow-time", "ai-calls"],
+)
+async def test_a_newly_shown_setting_out_of_its_range_is_refused_at_its_setting(project: Path, path: str, value: Any) -> None:
+    original = text_of(project)
+
+    async with serve(admin_harness(project)) as client:
+        response = await save(client, (path, value))
+
+    problems = response.json()["problems"]
+    assert (response.status_code, response.json()["code"]) == (422, "settings_refused")
+    assert problems and all(problem["path"] == path or problem["path"].startswith(f"{path}.") for problem in problems)
+    assert text_of(project) == original

@@ -3,6 +3,9 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 export type ThemePreference = 'dark' | 'light' | 'system'
 export type ResolvedTheme = 'dark' | 'light'
 
+/** The choices in the order every theme control lists them. */
+export const THEME_PREFERENCES: readonly ThemePreference[] = ['light', 'dark', 'system']
+
 /** Read by the inline script in index.html as well, so the first paint uses the saved theme. */
 export const THEME_STORAGE_KEY = 'stock-agent.theme'
 

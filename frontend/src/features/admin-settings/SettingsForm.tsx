@@ -29,10 +29,12 @@ import {
   groupsOf,
   inputOf,
   isLongText,
+  isNamedOption,
   onGrid,
   problemsAt,
   problemsElsewhere,
   shownAmount,
+  shownOption,
   stepped,
   type Entry,
   type Group,
@@ -344,7 +346,7 @@ function useWording() {
       return unit ? t(`form.unit.${unit}`, { value: text }) : text
     }
     // A built-in strategy's id is an option the server names at runtime, so it shows as it is.
-    const option = (value: string): string => (/^[\w-]+$/.test(value) ? t(`form.option.${value}`, { defaultValue: value }) : value)
+    const option = (value: string): string => (isNamedOption(value) ? t(`form.option.${value}`, { defaultValue: value }) : shownOption(value))
     const value = (field: SettingField, held: FieldInput): string => {
       if (held === null) return t('form.notSet')
       if (typeof held === 'number') return amount(held, field.unit)
@@ -355,8 +357,12 @@ function useWording() {
   }, [t, format])
 }
 
-/** Whether a choice shows as a row of buttons: a few options, none of them a long custom value. */
-const isSegmented = (field: SettingField, entries: readonly Entry[]) => field.kind === 'choice' && entries.length <= 4 && entries.every((entry) => !entry.custom)
+/** The most characters a row of buttons holds in the control's column before an option would be cut off. */
+const SEGMENTED_CHARACTERS = 36
+
+/** Whether a choice shows as a row of buttons: a few options whose names fit side by side, none of them a custom value. */
+const isSegmented = (field: SettingField, entries: readonly Entry[], labels: readonly string[]) =>
+  field.kind === 'choice' && entries.length <= 4 && entries.every((entry) => !entry.custom) && labels.join('').length <= SEGMENTED_CHARACTERS
 
 interface SettingRowProps {
   field: SettingField
@@ -380,7 +386,8 @@ function SettingRowView({ field, input, changed, problems, onChange }: SettingRo
   }
   const label = t(`form.field.${field.path}`)
   // A control made of several parts names itself; one control takes the label.
-  const grouped = field.kind === 'choices' || field.kind === 'range' || (field.kind === 'choice' && isSegmented(field, entriesOf(field)))
+  const entries = field.kind === 'choice' ? entriesOf(field) : []
+  const grouped = field.kind === 'choices' || field.kind === 'range' || isSegmented(field, entries, entries.map((entry) => wording.entry(field, entry)))
   return (
     <div id={rowId(field.path)} className={cn('grid gap-x-6 gap-y-2 py-3.5', !wide && 'md:grid-cols-[minmax(0,1fr)_minmax(12rem,18rem)] md:items-start')}>
       <div className="min-w-0 space-y-1">
@@ -503,7 +510,7 @@ function Pick({ field, input, label, described, onChange }: ControlProps) {
     const entry = entries.find((item) => item.key === key)
     if (entry) onChange(entry.value)
   }
-  if (isSegmented(field, entries)) {
+  if (isSegmented(field, entries, entries.map((entry) => wording.entry(field, entry)))) {
     return (
       <Segmented
         label={label}

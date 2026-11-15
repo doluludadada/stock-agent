@@ -86,6 +86,15 @@ export function clockTime(time: string): string {
   return time.slice(0, 5)
 }
 
+/**
+ * The times a schedule's control lists, in the day's order: the ones the site offers and the user's own while the
+ * administrator no longer offers it, so the control always shows what is saved.
+ */
+export function offeredTimes(schedule: { time: string | null; times: readonly string[] }): string[] {
+  const kept = schedule.time !== null && !schedule.times.includes(schedule.time) ? [schedule.time] : []
+  return [...schedule.times, ...kept].sort()
+}
+
 /** The first weekday after `date`: the earliest session a decision of that day can be followed on; a holiday moves the real one later. */
 export function weekdayAfter(date: string): string {
   const next = utc(date)

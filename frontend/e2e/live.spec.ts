@@ -159,7 +159,7 @@ test('the ranking shows this month’s 20 stocks, a five-year backtest kept in t
   void consoleErrors
   await signIn(page)
   await page.goto('/ranking')
-  await expect(page.getByRole('heading', { name: '月營收排名', level: 1 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '每月排名', level: 1 })).toBeVisible()
   // The first answer after a server start reads the whole history, which can take a minute.
   const latest = page.getByRole('table', { name: '這個月的排名' })
   await expect(latest).toBeVisible({ timeout: 180_000 })

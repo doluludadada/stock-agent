@@ -167,11 +167,16 @@ class RankingConfig(BaseModel):
     """The liquidity floor the ranking page's comparison replays every formula at a second time, in place of its own."""
 
     follow_times: tuple[time, ...] = Field(
-        default=(time(9, 5), time(9, 30), time(10, 0), time(13, 0)), min_length=1, json_schema_extra={"operator_only": True}
+        default=(time(9, 5), time(9, 30), time(10, 0), time(13, 0)),
+        min_length=1,
+        json_schema_extra={
+            "options": ["09:05:00", "09:15:00", "09:30:00", "10:00:00", "10:30:00", "11:00:00", "12:00:00", "13:00:00"]
+        },
     )
     """
     The times of day in Taipei a user may schedule the ranking follow into their mock account at, each inside
-    continuous trading. The first is the nearest to the open the backtest buys at.
+    continuous trading, read in the day's order. The first is the nearest to the open the backtest buys at. `options`
+    are the times the settings form offers.
     """
 
     kept_backtests: int = Field(default=24, ge=0, json_schema_extra={"operator_only": True})
@@ -189,6 +194,11 @@ class RankingConfig(BaseModel):
 
     sessions_per_year: float = Field(gt=0, allow_inf_nan=False, json_schema_extra={"steps": [240, 245, 250, 252]})
     """The sessions a year the annual returns count."""
+
+    @field_validator("follow_times")
+    @classmethod
+    def offer_each_time_once_in_the_order_of_the_day(cls, times: tuple[time, ...]) -> tuple[time, ...]:
+        return tuple(sorted(set(times)))
 
     @model_validator(mode="before")
     @classmethod
