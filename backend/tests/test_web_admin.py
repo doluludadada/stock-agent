@@ -509,7 +509,7 @@ async def test_a_log_level_changed_in_the_file_applies_at_the_reload(project: Pa
     harness = admin_harness(project)
 
     async with app_of(harness) as app:
-        write_by_hand(project, "log_level: DEBUG", "log_level: WARNING")
+        write_by_hand(project, "log_level: INFO", "log_level: WARNING")
         await app.state.runtime_switch.reload()
 
     assert harness.logger.level == "WARNING"

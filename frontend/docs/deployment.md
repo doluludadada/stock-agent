@@ -298,9 +298,9 @@ docker compose up -d --build
    diff -ru config /srv/stock-agent-state/config
    ```
 
-   The start says in one log line which settings your file does not set, such as the `features` section of a
-   file copied before it existed. Each of them runs on its default, and a save in the settings page writes it into
-   your file. An address has no default, so a line of its own says what the site goes without until your file sets
+   A setting your file does not set, such as the `features` section of a file copied before it existed, runs on
+   its default without a word in the log, and a save in the settings page writes it into your file. An address
+   has no default, so a log line at the start says what the site goes without until your file sets
    it: no sign-in with Google without Google's three addresses. Copy those from `config/appsetting.yaml`. A line
    of its own names the prompts your `instructions.yaml` does not set: what each feeds is off until the file sets it,
    so a stock page offers no AI brief without `stock_brief_prompt`. Copy them from `config/instructions.yaml`; the

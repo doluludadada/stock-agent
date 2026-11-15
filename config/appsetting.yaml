@@ -35,7 +35,7 @@ ai:
   article_content_length: 500
 
 behavior:
-  log_level: DEBUG
+  log_level: INFO
   enable_web_search: false
   enable_x_search: false
   enable_inline_citations: true

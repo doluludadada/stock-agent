@@ -270,10 +270,10 @@ def settings_notices(project_root: Path) -> list[str]:
     """
     What a start says about config/appsetting.yaml and config/instructions.yaml as they are on disk without refusing
     them, one line each: the retired settings appsetting.yaml still sets, which the app ignores, the settings it does
-    not set, as a deployment's older copy of the file does for every setting added since, and the prompts
-    instructions.yaml does not set. A setting with no default, such as an address, names what the site goes without
-    until the file sets it (`without` in its json_schema_extra); every other one runs on its default. Names only,
-    never a value.
+    does not set and the site goes without something for, as a deployment's older copy of the file does for an address
+    added since (`without` in its json_schema_extra), and the prompts instructions.yaml does not set. A setting the
+    file does not set that has a default runs on it and is not mentioned: that is every setting the shipped file
+    leaves to its default. Names only, never a value.
     """
     file = SettingsFile.APPSETTING
     document = parsed_document(file, settings_text(project_root, file))
@@ -292,9 +292,6 @@ def settings_notices(project_root: Path) -> list[str]:
     for lack in dict.fromkeys(without[path] for path in unset if path in without):
         missing = ", ".join(path for path in unset if without.get(path) == lack)
         notices.append(f"{file.file_name} does not set {missing}: {lack} until it does. The shipped {file.file_name} has them.")
-
-    if defaulted := [path for path in unset if path not in without]:
-        notices.append(f"{file.file_name} does not set {', '.join(defaulted)}: each runs on its default.")
 
     return notices + unnamed_profile_fields_notice(document) + unset_prompts_notice(project_root)
 

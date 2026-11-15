@@ -237,7 +237,7 @@ def test_no_setting_the_environment_owns_and_no_section_without_settings_is_a_fi
     assert "project_root" not in paths and "settings_revisions" not in paths
 
 
-def test_a_setting_only_an_operator_changes_is_a_setting_of_the_file_and_no_field_of_the_form(tmp_path: Path) -> None:
+def test_a_setting_only_an_operator_changes_is_a_setting_of_the_file_and_no_field_of_the_form() -> None:
     form = {field.path for field in settings_fields({})}
     every = {field.path for field in settings_fields({}, with_operator_only=True)}
     operator_only = {
@@ -247,13 +247,9 @@ def test_a_setting_only_an_operator_changes_is_a_setting_of_the_file_and_no_fiel
         "market.stock_ticks",
         "valuation.low_pe_caveat",
     }
-    document = yaml.safe_load(repository_texts()[SettingsFile.APPSETTING])
-    del document["market"]["stock_ticks"]
-    project = project_with(tmp_path, yaml.safe_dump(document, allow_unicode=True, sort_keys=False))
 
     assert form < every and operator_only <= every - form
     assert {"api.valuation_cache_minutes", "market.fee_rate", "valuation.scenario_spread", "ai.available_models"} <= form
-    assert [notice for notice in settings_notices(project) if "market.stock_ticks" in notice and "api.allowed_hosts" in notice]
 
 
 def test_no_setting_of_the_form_is_a_typed_number_and_every_typed_setting_is_advanced() -> None:
@@ -326,7 +322,7 @@ def test_a_value_on_disk_that_is_none_of_the_steps_shows_and_survives_a_save_of_
     assert after[SettingsFile.APPSETTING] == custom.replace("max_daily_buy_value: 300000", "max_daily_buy_value: 500000", 1)
 
 
-def test_a_file_without_a_setting_added_since_starts_on_its_default_and_the_start_names_it(tmp_path: Path) -> None:
+def test_a_file_without_a_setting_added_since_starts_on_its_default_and_the_start_says_nothing_of_it(tmp_path: Path) -> None:
     shipped = repository_texts()[SettingsFile.APPSETTING]
     older = shipped[: shipped.index("\n# Whom the site shows each feature to")]
     project = project_with(tmp_path, older)
@@ -334,10 +330,7 @@ def test_a_file_without_a_setting_added_since_starts_on_its_default_and_the_star
 
     assert "features:" in shipped and "features:" not in older
     assert load_settings(project).features == load_settings(PROJECT).features
-    assert [notice for notice in notices if "features.market_overview" in notice and "features.sinopac_ordering" in notice] == [
-        notices[-1]
-    ]
-    assert notices[-1].startswith("appsetting.yaml does not set ") and notices[-1].endswith(": each runs on its default.")
+    assert not [notice for notice in notices if "features." in notice]
 
 
 def test_a_file_that_still_sets_a_retired_setting_starts_and_the_start_names_it(tmp_path: Path) -> None:
@@ -460,7 +453,7 @@ def test_a_deployments_older_file_starts_on_the_defaults_and_the_start_says_what
     monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
     monkeypatch.delenv("GOOGLE_CLIENT_SECRET", raising=False)
     older, shipped = startup_settings(project), load_settings(PROJECT)
-    writing, google, defaulted = settings_notices(project)
+    writing, google = settings_notices(project)
     own_writing = shipped.stock_page.system_writing
 
     assert not older.accounts.google_sign_in
@@ -478,8 +471,6 @@ def test_a_deployments_older_file_starts_on_the_defaults_and_the_start_says_what
         "appsetting.yaml does not set accounts.google_issuer, accounts.google_authorization_endpoint, "
         "accounts.google_token_endpoint: the site offers no sign-in with Google until it does. The shipped appsetting.yaml has them."
     )
-    assert all(f"{section}.{name}" in google + defaulted for section, names in ADDED_SINCE.items() for name in names)
-    assert "features.stock_pages" in defaulted and defaulted.endswith(": each runs on its default.")
 
 
 def test_the_settings_of_google_and_the_stock_page_get_a_control_and_only_the_emails_are_typed() -> None:
