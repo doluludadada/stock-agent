@@ -8,12 +8,14 @@ option.
 
 ## Deploy with Docker Compose
 
-`compose.yml` runs three containers on one network:
+`compose.yml` runs three containers on one network, named `stock-agent-database`, `stock-agent-backend` and
+`stock-agent-frontend` after their services:
 
-- `postgres` is PostgreSQL 18. It publishes no port.
+- `database` is PostgreSQL 18. It publishes no port.
 - `backend` is the Web API, as a user without root rights, with one worker. It publishes no port. The image also holds
-  the project's commands, and `pg_dump` and `pg_restore` for the database commands.
-- `proxy` is Caddy with the production bundle of the web app. It forwards only `/v1/*` to the backend, so the API docs
+  the project's commands, and `pg_dump` and `pg_restore` for the database commands. It runs with a terminal, so its
+  log keeps its colours, and the log leaves out the answered status requests of the health check.
+- `frontend` is Caddy with the production bundle of the web app, the site's reverse proxy. It forwards only `/v1/*` to the backend, so the API docs
   (`/docs`, `/redoc`, `/openapi.json`) are not reachable. It is the only container that publishes a port.
 
 Everything the site saves lives in one folder on the host, the state folder: the settings in `config/`, the accounts
@@ -84,7 +86,7 @@ You need Docker Engine with the Compose plugin, Git, and Tailscale. Your user mu
    ```
 
    The first build takes several minutes. The first start creates every table of the empty database at the schema
-   version of the code, so no migration is needed. When the command returns, `docker compose ps` shows `postgres` and
+   version of the code, so no migration is needed. When the command returns, `docker compose ps` shows `database` and
    `backend` as `healthy`. If `backend` is `unhealthy`, `docker compose logs backend` names the setting to change.
 
 7. Read the one-time setup code. The backend prints it while no user exists, and makes a new one at each start.
@@ -108,7 +110,7 @@ After a restart of the server, Docker can start before Tailscale has its address
 
 1. Turn on HTTPS certificates for the tailnet, on the DNS page of the Tailscale admin console.
 
-2. Set `PROXY_BIND="127.0.0.1"` in `.env`, and restart the proxy on the loopback address.
+2. Set `PROXY_BIND="127.0.0.1"` in `.env`, and restart the `frontend` service on the loopback address.
 
    ```bash
    docker compose up -d

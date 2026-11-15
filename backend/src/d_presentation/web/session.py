@@ -36,6 +36,7 @@ APP_REQUEST_VALUE = "stock-agent"
 
 FLOW_COOKIE = "stock_agent_google_flow"
 FLOW_PATH = f"{API_PATH}/auth/google"
+STATUS_PATH = f"{API_PATH}/auth/status"
 FLOW_JSON = TypeAdapter(SignInFlow)
 APP_HOME = "/"
 APP_SIGN_IN = "/sign-in"

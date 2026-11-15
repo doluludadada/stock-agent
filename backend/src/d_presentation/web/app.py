@@ -48,6 +48,7 @@ from d_presentation.web.routers.api_v1 import router as api_v1_router
 from d_presentation.web.session import (
     API_PATH,
     FLOW_PATH,
+    STATUS_PATH,
     AdministratorsOnly,
     AppRequestRequired,
     FeatureHidden,
@@ -201,13 +202,22 @@ names its code here, once. 401 is the only answer that signs the web app out; 40
 type ErrorAnswer = Callable[[Request, Any], Coroutine[Any, Any, Response]]
 
 
-def hide_google_query(record: logging.LogRecord) -> bool:
+def tidy_access_line(record: logging.LogRecord) -> bool:
     """
-    uvicorn's access log writes each request's whole address, and Google's code and state arrive in the callback's
-    query. A request to a Google endpoint is logged by its path alone, so no log line holds either.
+    What uvicorn's access log leaves out. The container's health check and every open page ask for the site's status,
+    the check every ten seconds, so an answered status request is not logged; one that fails still is. Google's code
+    and state arrive in the callback's query, so a request to a Google endpoint is logged by its path alone.
     """
-    if isinstance(record.args, tuple) and len(record.args) == 5 and str(record.args[2]).startswith(FLOW_PATH):
-        record.args = (*record.args[:2], str(record.args[2]).split("?")[0], *record.args[3:])
+    args = record.args
+
+    if not isinstance(args, tuple) or len(args) != 5:
+        return True
+
+    if args[2] == STATUS_PATH and args[4] == status.HTTP_200_OK:
+        return False
+
+    if str(args[2]).startswith(FLOW_PATH):
+        record.args = (*args[:2], str(args[2]).split("?")[0], *args[3:])
 
     return True
 
@@ -322,5 +332,5 @@ def create_app(open_switch: Callable[[], AbstractAsyncContextManager[RuntimeSwit
     )
     app.include_router(api_v1_router)
     app.middleware("http")(add_security_headers)
-    logging.getLogger("uvicorn.access").addFilter(hide_google_query)
+    logging.getLogger("uvicorn.access").addFilter(tidy_access_line)
     return app

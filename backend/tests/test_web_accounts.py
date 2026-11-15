@@ -152,7 +152,7 @@ async def test_a_session_cookie_is_http_only_strict_and_secure_only_over_https()
 
 
 COMPOSE = yaml.safe_load((Path(__file__).resolve().parents[2] / "compose.yml").read_text(encoding="utf-8"))
-PROXY = COMPOSE["services"]["proxy"]["networks"]["site"]["ipv4_address"]
+PROXY = COMPOSE["services"]["frontend"]["networks"]["site"]["ipv4_address"]
 GATEWAY = COMPOSE["networks"]["site"]["ipam"]["config"][0]["gateway"]
 
 

@@ -446,6 +446,24 @@ async def test_the_access_log_keeps_the_path_of_a_google_endpoint_and_drops_its_
     ]
 
 
+async def test_the_access_log_leaves_out_an_answered_status_check_and_keeps_a_failed_one(caplog: pytest.LogCaptureFixture) -> None:
+    harness, _ = google_harness()
+    access = logging.getLogger("uvicorn.access")
+    line = '%s - "%s %s HTTP/%s" %d'
+
+    async with app_of(harness):
+        with caplog.at_level(logging.INFO, logger="uvicorn.access"):
+            access.info(line, "127.0.0.1:49154", "GET", "/v1/auth/status", "1.1", 200)
+            access.info(line, "100.64.0.9:1", "GET", "/v1/auth/status", "1.1", 200)
+            access.info(line, "127.0.0.1:49155", "GET", "/v1/auth/status", "1.1", 500)
+            access.info(line, "100.64.0.9:1", "GET", "/v1/auth/me", "1.1", 200)
+
+    assert [record.getMessage().split(" - ")[1] for record in caplog.records] == [
+        '"GET /v1/auth/status HTTP/1.1" 500',
+        '"GET /v1/auth/me HTTP/1.1" 200',
+    ]
+
+
 @pytest.fixture
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A copy of config/ that offers sign-in with Google at the test's origin, with the keys startup needs in the environment."""
