@@ -32,6 +32,11 @@ function dateFormat(locale: string, options: Intl.DateTimeFormatOptions): Intl.D
   return formatter as Intl.DateTimeFormat
 }
 
+/** A time of day as the server writes it, 09:05:00, to the minute; a text that is no time of day stays as it is. */
+export function clockTime(time: string): string {
+  return time.replace(/^(\d{2}:\d{2}):\d{2}$/, '$1')
+}
+
 const digits = (fractionDigits: number): Intl.NumberFormatOptions => ({ minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits })
 
 /** A bare trading date (YYYY-MM-DD) is noon in Taipei, so no time zone shifts it to another day. */

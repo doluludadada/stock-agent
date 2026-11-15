@@ -50,7 +50,7 @@ from a_domain.ports.trading.holding_repository import IHoldingRepository
 from a_domain.ports.trading.trading_journal import ITradingJournal
 from a_domain.ports.trading.users_stocks import IUsersStocks
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
-from a_domain.types.enums import AiProvider, BriefKind, ExecutionProvider, Feature, MarketScope, MarketType, Permission
+from a_domain.types.enums import AiProvider, BriefKind, ExecutionProvider, MarketScope, MarketType, Permission
 from a_domain.types.errors import BrokerUnavailable, RealBrokerRefused
 from a_domain.types.ids import UserId
 from b_application.config.api_config import FeaturesConfig
@@ -615,12 +615,10 @@ def create_world_feed(config: AppConfig, logger: ILoggingProvider, market_clock:
     tables = [
         feed.model_copy(update={"fields": fields}) for feed, fields in zip(sources.indicator_feeds, allowed, strict=True) if fields
     ]
-    shown = config.features.visibility(Feature.WORLD).shown_to(frozenset(Permission))
-
-    if not shown or not (news_feeds or tables):
+    if not config.world_shown or not (news_feeds or tables):
         return None
 
-    return WorldFeed(sources, news_feeds, tables, config.world.summary_length, market_clock, logger)
+    return WorldFeed(sources, news_feeds, tables, config.world.summary_length, market_clock, logger, RequestPace())
 
 
 def create_stock_feed(
@@ -1131,7 +1129,9 @@ def build_pipeline(
         ranking_follow_candidates=RankingFollowCandidates(owned.mock_broker, market_clock, config),
         ranking_follow_signals=RankingFollowSignals(journal, market_clock, config, logger),
         ranking_follow_return=RankingFollowReturn(journal, owned.mock_broker, market_clock, config),
-        ranking_follow_schedule=RankingFollowSchedule(journal, owned.mock_broker, market_clock, config),
+        ranking_follow_schedule=RankingFollowSchedule(
+            journal, owned.mock_broker, dependencies.bar_matrix_provider, market_clock, config
+        ),
         follow_time_choice=FollowTimeChoice(dependencies.user_store, market_clock, config, logger),
         scheduled_followers=ScheduledFollowers(dependencies.user_store, market_clock, config),
         mock_account_history=AccountHistory(owned.mock_broker, journal, stocks, prices, market_clock, config, logger),

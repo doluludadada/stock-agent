@@ -1,18 +1,17 @@
 import { ArrowRight } from 'lucide-react'
 import { useId, type ReactNode } from 'react'
 import { Link } from 'react-router'
-import { changeLocale, SUPPORTED_LOCALES, useLocale, useTranslation } from '@/i18n'
+import { useTranslation } from '@/i18n'
 import { isApiError, useHasPermission, useSession, useShows, type Schemas } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
 import { useErrorReason } from '@/shared/lib/error-reason'
-import { THEME_PREFERENCES, useTheme } from '@/shared/lib/theme'
 import { Button } from '@/shared/ui/button'
 import { ErrorState } from '@/shared/ui/error-state'
 import { Label } from '@/shared/ui/label'
 import { PageHeader } from '@/shared/ui/page-header'
 import { Panel } from '@/shared/ui/panel'
+import { PreferenceControls } from '@/shared/ui/preference-controls'
 import { RequireSignIn } from '@/shared/ui/require-sign-in'
-import { Segmented } from '@/shared/ui/segmented'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
 import { Skeleton } from '@/shared/ui/skeleton'
 import { Stat } from '@/shared/ui/stat'
@@ -89,36 +88,9 @@ function AccountPanel({ user }: { user: Schemas['User'] }) {
 /** The language and the theme, which this browser keeps: the same two choices as the header's menus. */
 function DisplayPanel() {
   const { t } = useTranslation('auth')
-  const locale = useLocale()
-  const { preference, setPreference } = useTheme()
   return (
     <Panel title={t('common:preferences.title')}>
-      <div className="grid gap-4 @md:grid-cols-2">
-        <div className="grid gap-1.5">
-          <p className="text-sm leading-none font-medium">
-            {t('common:preferences.language')}
-          </p>
-          <Segmented
-            value={locale}
-            onChange={(next) => void changeLocale(next)}
-            label={t('common:preferences.language')}
-            options={SUPPORTED_LOCALES.map((item) => ({ value: item, label: t(`common:preferences.locale.${item}`) }))}
-            className="md:w-full"
-          />
-        </div>
-        <div className="grid gap-1.5">
-          <p className="text-sm leading-none font-medium">
-            {t('common:preferences.theme')}
-          </p>
-          <Segmented
-            value={preference}
-            onChange={setPreference}
-            label={t('common:preferences.theme')}
-            options={THEME_PREFERENCES.map((item) => ({ value: item, label: t(`common:preferences.themes.${item}`) }))}
-            className="md:w-full"
-          />
-        </div>
-      </div>
+      <PreferenceControls labelled />
       <p className="mt-3 text-xs text-muted-foreground">{t('common:preferences.kept')}</p>
     </Panel>
   )

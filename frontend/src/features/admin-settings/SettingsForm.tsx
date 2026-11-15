@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import { useTranslation } from '@/i18n'
 import { useSession } from '@/shared/api'
 import { useErrorReason } from '@/shared/lib/error-reason'
-import { useFormat } from '@/shared/lib/format'
+import { clockTime, useFormat } from '@/shared/lib/format'
 import { useKeptDraft } from '@/shared/lib/kept-draft'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
@@ -14,7 +14,7 @@ import { ConfirmDialog } from '@/shared/ui/confirm-dialog'
 import { ErrorState } from '@/shared/ui/error-state'
 import { Input } from '@/shared/ui/input'
 import { Label } from '@/shared/ui/label'
-import { Segmented } from '@/shared/ui/segmented'
+import { fitsSegmented, Segmented } from '@/shared/ui/segmented'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
 import { Skeleton } from '@/shared/ui/skeleton'
 import { Switch } from '@/shared/ui/switch'
@@ -34,7 +34,6 @@ import {
   problemsAt,
   problemsElsewhere,
   shownAmount,
-  shownOption,
   stepped,
   type Entry,
   type Group,
@@ -345,8 +344,8 @@ function useWording() {
       const text = format.number(shown.value, shown.decimals)
       return unit ? t(`form.unit.${unit}`, { value: text }) : text
     }
-    // A built-in strategy's id is an option the server names at runtime, so it shows as it is.
-    const option = (value: string): string => (isNamedOption(value) ? t(`form.option.${value}`, { defaultValue: value }) : shownOption(value))
+    // A built-in strategy's id is an option the server names at runtime, so it shows as it is; a time of day shows to the minute.
+    const option = (value: string): string => (isNamedOption(value) ? t(`form.option.${value}`, { defaultValue: value }) : clockTime(value))
     const value = (field: SettingField, held: FieldInput): string => {
       if (held === null) return t('form.notSet')
       if (typeof held === 'number') return amount(held, field.unit)
@@ -357,12 +356,9 @@ function useWording() {
   }, [t, format])
 }
 
-/** The most characters a row of buttons holds in the control's column before an option would be cut off. */
-const SEGMENTED_CHARACTERS = 36
-
-/** Whether a choice shows as a row of buttons: a few options whose names fit side by side, none of them a custom value. */
+/** Whether a choice shows as a row of buttons: its options' names fit side by side, none of them a custom value. */
 const isSegmented = (field: SettingField, entries: readonly Entry[], labels: readonly string[]) =>
-  field.kind === 'choice' && entries.length <= 4 && entries.every((entry) => !entry.custom) && labels.join('').length <= SEGMENTED_CHARACTERS
+  field.kind === 'choice' && entries.every((entry) => !entry.custom) && fitsSegmented(labels)
 
 interface SettingRowProps {
   field: SettingField

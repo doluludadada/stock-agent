@@ -514,9 +514,11 @@ class Pipeline:
         holding is priced too, since the equal weight is a share of the account's value. A ranked
         stock the account already holds is left as it is, so a second follow of the same decision sends nothing but
         what the first could not fill. A follow that may not start (RankingFollowCandidates' refusal) records the
-        refusal and sends nothing. Every step that reads the account, gates or sends an order holds the user's mock
-        book (mock_account_loader, mock_order_preparation, mock_order_execution, mock_order_outcome), never the broker
-        the run chose, so no ranking follow reaches a real account whatever broker its Pipeline was built for.
+        refusal and sends nothing. After its orders it looks at the account once more, so its record says how many
+        stocks it left to trade: the schedule follows the decision again until a follow left none. Every step that
+        reads the account, gates or sends an order holds the user's mock book (mock_account_loader,
+        mock_order_preparation, mock_order_execution, mock_order_outcome), never the broker the run chose, so no
+        ranking follow reaches a real account whatever broker its Pipeline was built for.
         RankingUnavailable while the history holds no decision session.
         """
         async with self.run_history.execute(Workflow.RANKING_FOLLOW, run_id, scheduled=scheduled) as stats:
@@ -539,6 +541,7 @@ class Pipeline:
                     order = await self.mock_order_execution.execute(order, status.stats)
                     status.account = await self.mock_order_outcome.execute(order, status.account, status.stocks, status.stats)
                     status.orders.append(order)
+            await self.ranking_follow_candidates.execute(ranking, status.stats)
 
         return status
 
@@ -553,28 +556,31 @@ class Pipeline:
 
         return await self.ranking_follow_candidates.execute(ranking)
 
-    async def load_ranking_follow_return(self) -> tuple[FollowReturn | None, list[SystemStats]]:
+    async def load_ranking_follow_return(self, user: User) -> tuple[FollowReturn | None, list[SystemStats], FollowSchedule]:
         """
         The ranking page's block on the mock account: what the account made since it first followed the ranking, against
-        the ranking's benchmark over the same sessions, None while it never did; and its ranking follows since it
-        opened, each run with the formula it used. It reads the mock account's own history (mock_account_history).
+        the ranking's benchmark over the same sessions, None while it never did; its ranking follows since it opened
+        that took a decision, each run with the formula it used; and where the user's schedule of the follow stands,
+        from the same read of those runs. It reads the mock account's own history (mock_account_history).
         RankingUnavailable while the history holds no session.
         """
         history = await self.ranking_history_loader.execute()
         account, _, curve, _ = await self.mock_account_history.execute(None)
+        schedule, runs = await self.ranking_follow_schedule.execute(user)
+        performance, follows = await self.ranking_follow_return.execute(history, account, curve, runs)
 
-        return await self.ranking_follow_return.execute(history, account, curve)
+        return performance, follows, schedule
 
     async def load_follow_schedule(self, user: User) -> FollowSchedule:
         """
-        The ranking block's schedule line and the timer's question for one user: the time the user scheduled the
-        ranking follow at, the ranking's latest decision while no follow of their mock account took it, and whether the
-        schedule follows it now. It ranks nothing and never orders. RankingUnavailable while the history holds no
-        session.
+        My settings' schedule and the timer's question for one user: the time the user scheduled the ranking follow
+        at, the times the site offers, the ranking's latest decision while no follow of their mock account finished it,
+        and whether the schedule follows it now. It ranks nothing, never orders, and answers on a site whose history
+        holds no session yet: nothing is pending there.
         """
-        history = await self.ranking_history_loader.execute()
+        schedule, _ = await self.ranking_follow_schedule.execute(user)
 
-        return await self.ranking_follow_schedule.execute(history, user)
+        return schedule
 
     async def choose_follow_time(self, user: User, follow_time: time | None) -> User:
         """
@@ -586,8 +592,9 @@ class Pipeline:
     async def load_scheduled_followers(self) -> list[User]:
         """
         The Web API's timer: the users whose scheduled ranking follow may run now. Nobody outside the phase this site
-        places an order in. The timer then asks each one's own Pipeline whether a follow is due (load_follow_schedule)
-        and starts it there (follow_ranking), on that user's mock account.
+        places an order in. The timer then asks each one's own Pipeline whether a follow is due (load_follow_schedule),
+        asks this again so that the user's schedule is still on, and starts the follow there (follow_ranking), on that
+        user's mock account.
         """
         return await self.scheduled_followers.execute()
 

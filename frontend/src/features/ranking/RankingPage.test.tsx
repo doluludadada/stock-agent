@@ -61,7 +61,7 @@ interface Site {
 
 const HOLDINGS = { decided_on: LATEST.decided_on, held: [], lacking: LATEST.stocks.map((stock) => stock.stock_id), left: [] }
 const TIMES = ['09:05:00', '09:30:00', '10:00:00', '13:00:00']
-const NEVER_FOLLOWED: RankingFollow = { holdings: HOLDINGS, refusal: null, running: false, performance: null, follows: [], schedule: { time: null, times: TIMES, pending: LATEST.decided_on, due: false } }
+const NEVER_FOLLOWED: RankingFollow = { holdings: HOLDINGS, refusal: null, running: false, performance: null, follows: [], schedule: { time: null, times: TIMES, pending: LATEST.decided_on, unfinished: null, due: false } }
 /** A month after the first follow: 18 of the 20 held, the two that entered lacking and one that left still held. */
 const A_MONTH_IN: RankingFollow = {
   holdings: { ...HOLDINGS, held: HOLDINGS.lacking.slice(2), lacking: HOLDINGS.lacking.slice(0, 2), left: ['1101'] },
@@ -72,7 +72,7 @@ const A_MONTH_IN: RankingFollow = {
     { run_id: '00000000-0000-0000-0000-000000000011', start_time: '2026-09-15T01:05:00Z', ranking_formula: SHIPPED_FORMULA, ranking_decided_on: '2026-09-14', scheduled: false },
     { run_id: '00000000-0000-0000-0000-000000000012', start_time: '2026-10-14T01:05:00Z', ranking_formula: CASH_FORMULA, ranking_decided_on: '2026-10-13', scheduled: true },
   ],
-  schedule: { time: '09:05:00', times: TIMES, pending: null, due: false },
+  schedule: { time: '09:05:00', times: TIMES, pending: null, unfinished: null, due: false },
 }
 
 /** The ranking endpoints as the backend answers them; returns the replays asked, each as `first..last`. */
@@ -238,6 +238,38 @@ describe('the ranking page', () => {
     open('/ranking', 'en', true)
     const pending = await screen.findByRole('region', { name: 'The ranking in your mock account' })
     expect(await within(pending).findByTestId('follow-schedule')).toHaveTextContent('Schedule on: follows the 10/13 decision on the next trading day from 09:30. Change')
+  })
+
+  it('says a scheduled follow that did not finish, why, and that it tries again, with the run one tap away', async () => {
+    const tried = { run_id: '00000000-0000-0000-0000-000000000013', start_time: '2026-11-11T01:05:00Z', end_time: '2026-11-11T01:06:00Z', failure: null, ranking_open: 2 }
+    const partial = { ...A_MONTH_IN.follows[1]!, run_id: tried.run_id, start_time: tried.start_time }
+    const stuck: RankingFollow = { ...A_MONTH_IN, follows: [...A_MONTH_IN.follows, partial], schedule: { ...A_MONTH_IN.schedule, pending: LATEST.decided_on, unfinished: tried } }
+    serve({ follow: [stuck] })
+    open('/ranking', 'en', true)
+    const block = await screen.findByRole('region', { name: 'The ranking in your mock account' })
+    const line = await within(block).findByTestId('follow-schedule')
+    expect(line).toHaveTextContent(
+      'Schedule on. Its follow on 11/11 did not finish: 2 stocks were left to trade, as an order was refused or did not fill, or the cash was short of one lot. It tries again on the next trading day from 09:05. See the run Last followed 10/14 by the schedule. Change',
+    )
+    expect(within(line).getByRole('link', { name: 'See the run' })).toHaveAttribute('href', `/runs/${tried.run_id}`)
+    cleanup()
+
+    serve({ follow: [{ ...stuck, follows: A_MONTH_IN.follows, schedule: { ...stuck.schedule, unfinished: { ...tried, ranking_open: null } } }] })
+    open('/ranking', 'zh-TW', true)
+    expect(await screen.findByTestId('follow-schedule')).toHaveTextContent('排程開啟。11/11 的跟單沒有跟完：當時無法開始，因為不在交易時段，或排名沒有排出任何股票。下一個交易日 09:05 起會再試。 查看那次執行')
+  })
+
+  it('keeps the unfinished follow to itself while a follow runs, and while the schedule is off', async () => {
+    const tried = { run_id: '00000000-0000-0000-0000-000000000013', start_time: '2026-11-11T01:05:00Z', end_time: null, failure: null, ranking_open: null }
+    const schedule = { ...NEVER_FOLLOWED.schedule, time: '09:30:00', unfinished: tried }
+    serve({ follow: [{ ...NEVER_FOLLOWED, running: true, schedule }] })
+    open('/ranking', 'en', true)
+    expect(await screen.findByTestId('follow-schedule')).toHaveTextContent('Schedule on: follows the 10/13 decision on the next trading day from 09:30. Change')
+    cleanup()
+
+    serve({ follow: [{ ...NEVER_FOLLOWED, schedule: { ...schedule, time: null } }] })
+    open('/ranking', 'en', true)
+    expect(await screen.findByTestId('follow-schedule')).toHaveTextContent('Schedule off. Change')
   })
 
   it('offers a follow to cash that lists only sales while the formula holds cash', async () => {

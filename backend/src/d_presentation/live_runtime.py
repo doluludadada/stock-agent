@@ -6,7 +6,7 @@ settings a runtime was built from never change under the work that holds it.
 """
 
 import asyncio
-from collections.abc import AsyncGenerator, Callable, Generator, Mapping, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Generator, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from functools import partial
@@ -363,6 +363,21 @@ async def watch_settings(switch: RuntimeSwitch) -> None:
             switch.logger.info(f"Settings reloaded from disk: {describe(reload)}.")
 
 
+async def run_steps(logger: ILoggingProvider, *steps: tuple[Callable[[], Awaitable[object]], str]) -> None:
+    """
+    A timer's round: each step in order, given with the words that say it failed. A step never stops the round on an
+    error of its own: it is logged under those words and the next step goes on. A spent budget of AI calls is no
+    error: it is said once, and the step waits for the next round.
+    """
+    for step, failure in steps:
+        try:
+            await step()
+        except AiAllowanceSpentError as error:
+            logger.info(f"{failure} for now: {error}")
+        except Exception as error:
+            logger.error(f"{failure}: {type(error).__name__}: {error}")
+
+
 async def collect_daily_data(switch: RuntimeSwitch) -> None:
     """
     The Web API's collection of the daily data, at the start, then every api.archive_interval_hours of the current
@@ -383,7 +398,8 @@ async def collect_daily_data(switch: RuntimeSwitch) -> None:
             interval = opened.runtime.config.api.archive_interval_hours
             pipeline = opened.runtime.signed_out
 
-            for step, failure in (
+            await run_steps(
+                switch.logger,
                 (pipeline.archive_daily_closes, "The open data could not be archived"),
                 (pipeline.refresh_daily_history, "The exchanges' daily history could not be refreshed"),
                 (pipeline.refresh_article_store, "The article store could not be refreshed"),
@@ -391,11 +407,7 @@ async def collect_daily_data(switch: RuntimeSwitch) -> None:
                     partial(write_for_system_stocks, opened.runtime.system_writer, switch.brief_turns, switch.logger),
                     "The site's own writing could not go on",
                 ),
-            ):
-                try:
-                    await step()
-                except Exception as error:
-                    switch.logger.error(f"{failure}: {type(error).__name__}: {error}")
+            )
 
         await asyncio.sleep(interval * 3600)
 
@@ -417,13 +429,7 @@ async def collect_world(switch: RuntimeSwitch) -> None:
             steps = [(opened.runtime.signed_out.refresh_world, "The world could not be read")]
             steps += [(writer.write_world_brief, "The world brief could not be written")] if writer is not None else []
 
-            for step, failure in steps:
-                try:
-                    await step()
-                except AiAllowanceSpentError as error:
-                    switch.logger.info(f"The world brief waits: {error}")
-                except Exception as error:
-                    switch.logger.error(f"{failure}: {type(error).__name__}: {error}")
+            await run_steps(switch.logger, *steps)
 
         await asyncio.sleep(interval * 60)
 

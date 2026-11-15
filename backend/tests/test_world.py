@@ -8,6 +8,7 @@ import json
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
+from typing import override
 
 import httpx
 import pytest
@@ -45,6 +46,7 @@ from c_infrastructure.database.repositories.article_store import SqlArticleStore
 from c_infrastructure.database.repositories.stock_brief_repository import SqlStockBriefRepository
 from c_infrastructure.database.repositories.world_indicator_repository import SqlWorldIndicatorRepository
 from c_infrastructure.feed.world_feed import WorldFeed
+from c_infrastructure.market.request_pace import RequestPace
 from d_presentation.dependencies import compose_runtime, create_world_feed
 
 pytestmark = pytest.mark.asyncio
@@ -98,7 +100,7 @@ STATEMENT = item("Federal Reserve issues FOMC statement", "https://fed.example/3
 class Web:
     """The hosts behind the world feeds: what each address answers, and every address that was asked."""
 
-    def __init__(self, pages: dict[str, str | int | Exception]) -> None:
+    def __init__(self, pages: dict[str, str | int | Exception | httpx.Response]) -> None:
         self.pages = pages
         self.asked: list[str] = []
 
@@ -109,6 +111,9 @@ class Web:
         if isinstance(page, Exception):
             raise page
 
+        if isinstance(page, httpx.Response):
+            return page
+
         return httpx.Response(page) if isinstance(page, int) else httpx.Response(200, text=page)
 
 
@@ -116,7 +121,7 @@ def feed_over(monkeypatch: pytest.MonkeyPatch, web: Web, harness: CliHarness, so
     """The real adapter of every feed in `sources`, over `web` in place of the network."""
     real_client = httpx.AsyncClient
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: real_client(transport=httpx.MockTransport(web.answer), **kwargs))
-    return WorldFeed(sources, sources.news_feeds, sources.indicator_feeds, 400, harness.clock, harness.logger)
+    return WorldFeed(sources, sources.news_feeds, sources.indicator_feeds, 400, harness.clock, harness.logger, RequestPace())
 
 
 # ------------------------------------------------ the feeds ------------------------------------------------ #
@@ -168,10 +173,11 @@ async def test_markup_in_a_title_is_text_and_an_item_without_a_title_or_a_web_ad
             id="a feed that declares entities",
         ),
         pytest.param(rss(item("Too large", "https://cna.example/8", "x" * 3000)), id="more than the most bytes"),
+        pytest.param(httpx.Response(302, headers={"Location": BBC_BUSINESS}), id="the host redirects"),
     ],
 )
 async def test_a_feed_that_cannot_be_read_is_logged_and_the_others_are_still_answered(
-    monkeypatch: pytest.MonkeyPatch, broken: str | int | Exception
+    monkeypatch: pytest.MonkeyPatch, broken: str | int | Exception | httpx.Response
 ) -> None:
     harness = build_harness(now=MORNING)
     web = Web({CNA_WORLD: broken, BBC_BUSINESS: rss(RATE_CUT)})
@@ -182,6 +188,83 @@ async def test_a_feed_that_cannot_be_read_is_logged_and_the_others_are_still_ans
     assert [article.url for article in items] == ["https://bbc.example/2"]
     assert web.asked == [CNA_WORLD, CNA_FINANCE, BBC_BUSINESS, FED]
     assert any("World feed of CNA was not read" in line for _, line in harness.logger.records)
+
+
+async def test_a_feed_in_utf_16_is_read_and_one_that_declares_an_entity_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    harness = build_harness(now=MORNING)
+    channel = "<rss><channel>" + item("&a;聯準會降息", "https://bbc.example/12") + "</channel></rss>"
+    declared = '<?xml version="1.0" encoding="UTF-16"?><!DOCTYPE rss [<!ENTITY a "aaaa">]>' + channel
+    plain = '<?xml version="1.0" encoding="UTF-16"?>' + channel.replace("&a;", "")
+    web = Web(
+        {
+            CNA_WORLD: httpx.Response(200, content=declared.encode("utf-16")),
+            BBC_BUSINESS: httpx.Response(200, content=plain.encode("utf-16")),
+        }
+    )
+
+    items = await feed_over(monkeypatch, web, harness).fetch_news()
+
+    assert [article.title for article in items] == ["聯準會降息"]
+    assert any(
+        "World feed of CNA was not read: ValueError: the feed declares a document type" in line for _, line in harness.logger.records
+    )
+
+
+async def test_a_response_past_the_most_bytes_is_given_up_before_its_end(monkeypatch: pytest.MonkeyPatch) -> None:
+    harness = build_harness(now=MORNING)
+    served: list[int] = []
+
+    async def endless():
+        for _ in range(1000):
+            served.append(1000)
+            yield b"x" * 1000
+
+    web = Web({CNA_WORLD: httpx.Response(200, content=endless()), BBC_BUSINESS: rss(RATE_CUT)})
+    sources = SOURCES.model_copy(update={"max_bytes": 5000})
+
+    items = await feed_over(monkeypatch, web, harness, sources).fetch_news()
+
+    assert [article.url for article in items] == ["https://bbc.example/2"]
+    assert sum(served) < 1_000_000, "the body is not read to its end"
+    assert any("World feed of CNA was not read: ValueError" in line for _, line in harness.logger.records)
+
+
+async def test_an_item_dated_later_than_its_read_is_counted_in_one_debug_line_per_feed(monkeypatch: pytest.MonkeyPatch) -> None:
+    harness = build_harness(now=MORNING)
+    later = "Sun, 18 Oct 2099 22:30:00 GMT"
+    ahead = [
+        item("Tomorrow's news", "https://bbc.example/13", published=later),
+        item("And more", "https://bbc.example/14", published=later),
+    ]
+    web = Web({BBC_BUSINESS: rss(RATE_CUT, *ahead), FED: rss(STATEMENT)})
+
+    items = await feed_over(monkeypatch, web, harness).fetch_news()
+
+    assert [article.publication_known for article in items] == [True, False, False, True]
+    assert [line for level, line in harness.logger.records if level == "debug" and "dated later" in line] == [
+        "World feed of BBC: 2 items are dated later than their read."
+    ]
+
+
+async def test_requests_leave_on_the_pace_the_wiring_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+    harness = build_harness(now=MORNING)
+    waits: list[float] = []
+
+    class CountedPace(RequestPace):
+        @override
+        async def wait(self, interval_seconds: float) -> None:
+            waits.append(interval_seconds)
+
+    web = Web({FED: rss(STATEMENT)})
+    sources = SOURCES.model_copy(update={"request_pause_seconds": 7})
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: real_client(transport=httpx.MockTransport(web.answer), **kwargs))
+    feed = WorldFeed(sources, sources.news_feeds, sources.indicator_feeds, 400, harness.clock, harness.logger, CountedPace())
+
+    await feed.fetch_news()
+    await feed.fetch_indicators()
+
+    assert waits == [7] * len(web.asked) and len(web.asked) == 6
 
 
 async def test_an_item_two_feeds_list_is_answered_once(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -445,10 +528,12 @@ async def test_a_sentence_links_only_a_listed_stock_an_item_it_cites_names_itsel
 async def test_an_item_names_a_listed_stock_by_its_id_as_a_word_or_by_its_whole_name() -> None:
     listed = {"1303": "南亞", "2408": "南亞科", "2330": "台積電", "2030": "彰源", "6505": "台塑化"}
 
-    assert named_stocks("記憶體廠南亞科獲利創新高", listed) == {"2408"}, "the longer name is the one named"
-    assert named_stocks("台積電（2330）與 6505-TW 上漲，目標 2030 年", listed) == {"2330", "6505", "2030"}
-    assert named_stocks("東南亞各國領袖會議", listed) == {"1303"}, "a name inside another word still matches: the AI must name it too"
-    assert named_stocks("TSMC shares rose 12330 points", listed) == frozenset()
+    assert named_stocks("記憶體廠南亞科獲利創新高", listed, 2) == {"2408"}, "the longer name is the one named"
+    assert named_stocks("台積電（2330）與 6505-TW 上漲，目標 2030 年", listed, 2) == {"2330", "6505", "2030"}
+    assert named_stocks("東南亞各國領袖會議", listed, 2) == {"1303"}, (
+        "a name inside another word still matches: the AI must name it too"
+    )
+    assert named_stocks("TSMC shares rose 12330 points", listed, 2) == frozenset()
 
 
 async def test_a_reply_keeps_only_cited_sentences_without_links_or_advice() -> None:

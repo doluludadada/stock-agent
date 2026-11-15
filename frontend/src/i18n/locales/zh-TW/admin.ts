@@ -561,7 +561,6 @@ const admin: DictionaryShape<typeof en> = {
       '006208': '006208 富邦台50',
       revenue_and_high: '營收加速度＋接近高點',
       revenue_and_high_cash_60: '營收加速度＋接近高點，基準低於 60 日均線時持現金',
-      revenue_yoy_and_high_cash_120: '營收年增＋接近高點，基準低於 120 日均線時持現金',
       dev: '開發（dev）',
       test: '測試（test）',
       prod: '正式（prod）',

@@ -8,6 +8,8 @@ export const rankingKeys = {
   formulas: (period: Period) => ['owner', 'ranking', 'formulas', period.first, period.last] as const,
   /** Under the run results: a run's end and a reset of the mock account change what the account holds. */
   follow: [...runResultsKey, 'ranking-follow'] as const,
+  /** Under the run results too: a follow's end changes what the schedule still has to follow. */
+  schedule: [...runResultsKey, 'ranking-follow-schedule'] as const,
 }
 
 /**
@@ -77,12 +79,22 @@ export function useRankingFollow() {
   })
 }
 
-/** Saves when the site follows the ranking into the mock account by itself, or null for no schedule; the block's answer follows it. */
+/** The viewer's schedule of the follow alone, which the server answers even while no ranking can be made. */
+export function useFollowSchedule() {
+  const signedIn = useIsSignedIn()
+  return useQuery({
+    queryKey: rankingKeys.schedule,
+    queryFn: ({ signal }) => apiRequest('get', '/v1/rankings/follow/schedule', { signal }),
+    enabled: signedIn,
+  })
+}
+
+/** Saves when the site follows the ranking into the mock account by itself, or null for no schedule; the schedule and the block's answer follow it. */
 export function useScheduleFollow() {
   const client = useQueryClient()
   return useMutation({
     mutationFn: (time: string | null) => apiRequest('put', '/v1/rankings/follow/schedule', { body: { confirm: true, time } }),
-    onSettled: () => client.invalidateQueries({ queryKey: rankingKeys.follow }),
+    onSettled: () => Promise.all([rankingKeys.schedule, rankingKeys.follow].map((queryKey) => client.invalidateQueries({ queryKey }))),
   })
 }
 

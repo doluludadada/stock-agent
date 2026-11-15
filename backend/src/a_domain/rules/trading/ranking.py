@@ -211,6 +211,14 @@ class Ranking:
     stocks: list[RankedStock]
     """The `top` best scores, best first; equal scores in stock id order. None while it holds cash."""
 
+    @property
+    def decides(self) -> bool:
+        """
+        Whether it says what to hold: its stocks, or cash while the market filter is on. Any other ranking of no stock,
+        a month whose revenue the site does not hold, is no instruction: nothing is sold for it and no follow takes it.
+        """
+        return bool(self.stocks) or self.holds_cash
+
 
 def in_universe(
     bars: DailyBarMatrix,

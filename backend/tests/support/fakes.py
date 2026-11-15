@@ -717,8 +717,9 @@ class FakeSentimentClassifier:
 
 class RecordingExecutionProvider:
     """
-    Broker that records each place_order call and fills it in full at its limit, charging fees like the mock. Its
-    `link` says which broker it stands for: the mock account unless a test makes it SinoPac.
+    Broker that records each place_order call and fills it in full at its limit, charging fees like the mock, and
+    whose account then holds the fill where its cash or its position covers it, as a test set them. Its `link` says
+    which broker it stands for: the mock account unless a test makes it SinoPac.
     """
 
     def __init__(self, cash: float = 1_000_000.0, cost_rule: TradingCostRule | None = None, link: BrokerLink | None = None) -> None:
@@ -751,6 +752,14 @@ class RecordingExecutionProvider:
 
         order.submit(now=datetime.now(UTC))
         order.fill(order.quantity, order.limit_price, cost.fee, cost.tax, realized_pnl, now=datetime.now(UTC))
+        account = await self.get_account()
+
+        if order.action == TradeAction.BUY and account.can_afford(-cost.net):
+            account.buy(order.stock_id, order.quantity, price=order.limit_price, total_cost=-cost.net)
+        elif held is not None and held.can_cover(order.quantity):
+            account.sell(order.stock_id, order.quantity, cash_delta=cost.net)
+
+        self.cash, self.positions = account.cash, account.positions
         return order
 
     async def get_account(self) -> Account:

@@ -1,12 +1,12 @@
 """
 The ranking's formulas: each factor a formula can name, the market filter that holds cash, the registry the settings
-hold and what they refuse, an older settings file read as one formula, and a switch of the active formula from the
+hold and what they refuse, a settings file from before the formulas refused, and a switch of the active formula from the
 settings page, which changes the list, every score, the backtest and a follow together and answers nothing of the
 formula before.
 """
 
 import shutil
-from dataclasses import asdict, replace
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -14,8 +14,8 @@ from typing import Any
 import httpx
 import numpy as np
 import pytest
-import yaml
 from support.harness import ADMINISTRATOR, ADMINISTRATOR_PASSWORD, CliHarness, runtime_for
+from support.ranking_site import formulas_project
 from support.settings import small_formula
 from support.web import app_of, client_at, ended, sign_in, write
 from test_ranking_follow import FORMULA, SESSIONS, close_of, ranking_of, site
@@ -39,13 +39,7 @@ from a_domain.rules.trading.ranking_backtest import RankingBacktestRule, Ranking
 from a_domain.rules.trading.ranking_standing import RankingStandingRule
 from a_domain.types.enums import RankingExclusion, SettingsFile, TradeAction
 from a_domain.types.errors import RankingUnavailable, UnknownRankingFormula
-from b_application.config.settings_loader import (
-    InvalidSettingsError,
-    load_settings,
-    parsed_document,
-    settings_fields,
-    settings_notices,
-)
+from b_application.config.settings_loader import InvalidSettingsError, load_settings, parsed_document, settings_fields
 from c_infrastructure.market.daily_bar_matrix_provider import DailyBarMatrixProvider, KeptRankingHistory
 from d_presentation.cli import ranking as cli
 
@@ -227,25 +221,38 @@ def line_of(text: str, needle: str) -> int:
     return text[: text.index(needle)].count("\n") + 1
 
 
-def test_the_shipped_settings_name_three_formulas_and_the_shipped_one_is_first_and_active() -> None:
+def test_the_shipped_settings_name_two_formulas_and_the_shipped_one_is_first_and_active() -> None:
     ranking = load_settings(ROOT).ranking
 
-    assert [formula.name for formula in ranking.formulas] == [
-        "revenue_and_high",
-        "revenue_and_high_cash_60",
-        "revenue_yoy_and_high_cash_120",
-    ]
+    assert [formula.name for formula in ranking.formulas] == ["revenue_and_high", "revenue_and_high_cash_60"]
     assert (ranking.active_formula, ranking.formula()) == ("revenue_and_high", ranking.formulas[0])
-    assert [formula.cash_under_average_sessions for formula in ranking.formulas] == [None, 60, 120]
+    assert [formula.cash_under_average_sessions for formula in ranking.formulas] == [None, 60]
     assert [[factor.kind.value for factor in formula.factors] for formula in ranking.formulas] == [
         ["revenue_acceleration", "nearness_to_high"],
         ["revenue_acceleration", "nearness_to_high"],
-        ["revenue_yoy", "nearness_to_high"],
     ]
 
     with pytest.raises(UnknownRankingFormula, match="revenue_and_high, revenue_and_high_cash_60"):
         ranking.formula("best_lately")
 
+
+WITH_A_THIRD = SHIPPED.replace(
+    "  # The ranking page compares",
+    """    - name: revenue_yoy_and_high
+      top: 20
+      min_close: 10
+      min_traded_value: 30000000
+      traded_value_sessions: 20
+      cash_under_average_sessions: 120
+      factors:
+        - kind: revenue_yoy
+          months: 3
+        - kind: nearness_to_high
+          high_sessions: 250
+  # The ranking page compares""",
+    1,
+)
+"""The shipped settings with a formula of the other factors after the shipped two, so each refusal below has one place."""
 
 YOY = "        - kind: revenue_yoy\n"
 MONTHS = "          months: 3\n"
@@ -287,8 +294,8 @@ REFUSED = {
 def test_a_formula_the_ranking_cannot_express_is_refused_at_the_start_where_the_file_writes_it(
     old: str, new: str, path: str, words: str, at: str
 ) -> None:
-    assert SHIPPED.count(old) == 1
-    text = SHIPPED.replace(old, new)
+    assert WITH_A_THIRD.count(old) == 1
+    text = WITH_A_THIRD.replace(old, new)
 
     [(found, line, message)] = refused(text)
 
@@ -311,30 +318,26 @@ def project_of(tmp_path: Path, appsetting: str) -> Path:
     return tmp_path
 
 
-def test_a_settings_file_from_before_the_formulas_starts_as_the_shipped_formula_and_the_start_names_what_to_move(
+def test_a_settings_file_from_before_the_formulas_is_refused_and_the_refusal_names_each_setting_a_formula_holds_now(
     tmp_path: Path,
 ) -> None:
-    project = project_of(tmp_path, older_file())
+    text = older_file()
+    project = project_of(tmp_path, text)
 
-    ranking = load_settings(project).ranking
-    [notice] = [line for line in settings_notices(project) if "ranking." in line]
+    with pytest.raises(InvalidSettingsError) as error:
+        load_settings(project)
 
-    assert (ranking.active_formula, ranking.formulas) == ("revenue_and_high", (load_settings(ROOT).ranking.formulas[0],))
-    assert notice == (
-        "appsetting.yaml sets ranking.top, ranking.min_close, ranking.min_traded_value, ranking.traded_value_sessions, "
-        "ranking.high_sessions and no ranking.formulas: they are read as the ranking's one formula, so it cannot be "
-        "switched. Move them into ranking.formulas and set ranking.active_formula. The shipped appsetting.yaml has them."
-    )
-    assert not [line for line in settings_notices(ROOT) if "ranking." in line]
-
-
-def test_a_file_that_names_its_formulas_and_still_sets_a_moved_setting_starts_and_is_told_to_remove_it(tmp_path: Path) -> None:
-    project = project_of(tmp_path, SHIPPED.replace("  decision_day: 13\n", "  decision_day: 13\n  top: 5\n", 1))
-
-    assert load_settings(project).ranking.formula().top == 20
-    assert [line for line in settings_notices(project) if "ranking." in line] == [
-        "appsetting.yaml still sets ranking.top: ranking.formulas holds them now. Remove them from the file."
+    assert [(problem.path, problem.line, problem.message) for problem in error.value.problems] == [
+        (f"ranking.{key}", line_of(text, f"  {key}:"), "names no setting")
+        for key in ("top", "min_close", "min_traded_value", "traded_value_sessions", "high_sessions")
     ]
+    assert "appsetting.yaml" in str(error.value) and "ranking.top: names no setting" in str(error.value)
+
+
+def test_a_file_that_names_its_formulas_and_still_sets_a_setting_a_formula_holds_now_is_refused() -> None:
+    text = SHIPPED.replace("  decision_day: 13\n", "  decision_day: 13\n  top: 5\n", 1)
+
+    assert refused(text) == [("ranking.top", line_of(text, "  top: 5"), "names no setting")]
 
 
 def test_the_settings_form_offers_the_active_formula_as_a_choice_among_the_names_the_file_holds() -> None:
@@ -344,7 +347,7 @@ def test_the_settings_form_offers_the_active_formula_as_a_choice_among_the_names
 
     active = fields["ranking.active_formula"]
     assert (active.kind.value, active.group.value, active.value) == ("choice", "ranking", "revenue_and_high")
-    assert active.options == ("revenue_and_high", "revenue_and_high_cash_60", "revenue_yoy_and_high_cash_120")
+    assert active.options == ("revenue_and_high", "revenue_and_high_cash_60")
     assert (fields["ranking.formulas"].kind.value, fields["ranking.formulas"].group.value) == ("structure", "advanced")
     assert "ranking.kept_backtests" not in fields and "ranking.top" not in fields
 
@@ -434,18 +437,7 @@ async def test_a_replay_is_kept_by_its_formula_and_period_while_its_history_stan
 @pytest.fixture
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A copy of config/ whose ranking holds the follow tests' formula, a best-one variant and a cash variant."""
-    shutil.copytree(ROOT / "config", tmp_path / "config")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.setenv("ACCOUNTS_KEY", "A" * 43)
-    settings = tmp_path / "config" / "appsetting.yaml"
-    plain = [
-        {**asdict(formula), "factors": [{**asdict(factor), "kind": factor.kind.value} for factor in formula.factors]}
-        for formula in (FORMULA, ONE, CASH)
-    ]
-    start, end = SHIPPED.index("  formulas:\n"), SHIPPED.index("  # The ranking page compares")
-    listed = "".join(f"  {line}\n" for line in yaml.safe_dump({"formulas": plain}, sort_keys=False).splitlines())
-    settings.write_text(SHIPPED[:start] + listed + SHIPPED[end:], encoding="utf-8")
-    return tmp_path
+    return formulas_project(tmp_path, monkeypatch, FORMULA, ONE, CASH)
 
 
 def falling_site(project: Path) -> CliHarness:

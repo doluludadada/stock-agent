@@ -61,9 +61,6 @@ export function groupsOf(fields: readonly SettingField[]): Group[] {
 /** An option the dictionaries name (`admin:form.option.<option>`): a plain word, such as an enum's member. Any other shows as it is. */
 export const isNamedOption = (option: string): boolean => /^[\w-]+$/.test(option)
 
-/** An option as it shows when no dictionary names it: a time of day without its seconds, anything else as it is. */
-export const shownOption = (option: string): string => option.replace(/^(\d{2}:\d{2}):00$/, '$1')
-
 const isNumberList = (value: Value): boolean => Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === 'number')
 
 /** A text that reads better in a box than on one line: a prompt, a disclaimer. */

@@ -639,7 +639,7 @@ class WorldSources(BaseModel):
     indicator_feeds: list[WorldIndicatorFeed] = Field(
         default_factory=list, json_schema_extra={"without": "no world indicator is read"}
     )
-    indicator_days: int = Field(default=14, ge=2, le=366)
+    table_days: int = Field(default=14, ge=2, le=366)
     """The days back whose readings of a table are kept at each read."""
 
     user_agent: str = (
@@ -649,10 +649,13 @@ class WorldSources(BaseModel):
 
     timeout_seconds: float = Field(default=20, gt=0, le=600)
     request_pause_seconds: float = Field(default=2, ge=0, le=600)
-    """The least time between two requests of one read."""
+    """The least time between two requests the world feed makes, of one read or of two."""
 
     max_bytes: int = Field(default=2_000_000, ge=1, le=100_000_000)
-    """A response larger than this is not read."""
+    """
+    The most bytes of a response's body, decompressed, that are read. The body is read as it arrives, and a response
+    that passes this is given up there and left out.
+    """
 
 
 class AiSources(BaseModel):

@@ -230,13 +230,17 @@ class AppConfig(BaseSettings):
             case BriefKind.WORLD:
                 return self.prompts.world_brief, world.sentences, 1, world.reply_rule(advice, brief.link_pattern)
 
+    @property
+    def world_shown(self) -> bool:
+        """Whether features.world shows the world to somebody. While it shows it to nobody, nothing of it is read or written."""
+        return self.features.visibility(Feature.WORLD).shown_to(frozenset(Permission))
+
     def world_brief_due_rule(self) -> WorldBriefDueRule:
         """
         When the day's world brief is asked for. The site writes one only while its own writing is on
         (stock_page.system_writing), prompts.world_brief is set and features.world shows the world to somebody.
         """
-        shown = self.features.visibility(Feature.WORLD).shown_to(frozenset(Permission))
-        on = shown and self.stock_page.system_writing.enabled and bool(self.prompts.world_brief)
+        on = self.world_shown and self.stock_page.system_writing.enabled and bool(self.prompts.world_brief)
 
         return self.world.brief.due_rule(on, self.stock_page.brief.claim_minutes)
 
@@ -269,12 +273,20 @@ class AppConfig(BaseSettings):
             portfolio_rule=self.ranking_portfolio_rule(),
         )
 
+    def follow_time_rule(self) -> FollowTimeRule:
+        """When a schedule may follow: from its time, in the one phase this site's order pricing places an order in."""
+        return FollowTimeRule(pricing=self.audience.order_pricing)
+
     def follow_schedule_rule(self) -> FollowScheduleRule:
-        """Where a user's scheduled ranking follow stands: the ranking's decisions, this site's order window, the times offered."""
+        """
+        Where a user's scheduled ranking follow stands: the ranking's decisions, this site's order window, the times
+        offered, and the active formula, the one a follow must have finished a decision under.
+        """
         return FollowScheduleRule(
             decision_rule=self.decision_sessions_rule(),
-            time_rule=FollowTimeRule(pricing=self.audience.order_pricing),
+            time_rule=self.follow_time_rule(),
             times=self.ranking.follow_times,
+            formula=self.ranking.formula(),
         )
 
     def ranking_follow_rule(self) -> RankingFollowRule:

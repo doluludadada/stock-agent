@@ -36,7 +36,7 @@ class WorldBriefDueRule:
             case BriefStatus.WRITTEN:
                 return False
             case BriefStatus.WRITING:
-                return held.claimed_at < now - self.claim_time
+                return held.abandoned(now - self.claim_time)
             case BriefStatus.FAILED:
                 return held.claimed_at < now - self.retry
 
@@ -55,16 +55,16 @@ def indicator_line(reading: IndicatorReading) -> str:
     return f"{said}: {move} from {before} on {reading.previous_day.isoformat()}"
 
 
-def named_stocks(text: str, listed: Mapping[str, str]) -> frozenset[str]:
+def named_stocks(text: str, listed: Mapping[str, str], name_length: PositiveInt) -> frozenset[str]:
     """
     The listed stocks a text names itself: those whose id stands in it as a word of its own, and those whose name,
-    of two characters or more, it holds. A name that is part of a longer name the text holds too is not named:
+    of `name_length` characters or more, it holds. A name that is part of a longer name the text holds too is not named:
     Nanya Technology's name holds Nan Ya Plastics' and names only itself. A name can still be part of another word, as
     Nan Ya's is of the word for Southeast Asia, so this only bounds what a sentence may link: the AI names the stock,
     and it is linked when it is among these (BriefReplyRule).
     """
     words = set("".join(character if character.isascii() and character.isalnum() else " " for character in text).split())
-    held = {stock_id: name for stock_id, name in listed.items() if len(name) > 1 and name in text}
+    held = {stock_id: name for stock_id, name in listed.items() if len(name) >= name_length and name in text}
     whole = {stock_id for stock_id, name in held.items() if not any(name != longer and name in longer for longer in held.values())}
     return frozenset(whole | {stock_id for stock_id in listed if stock_id in words})
 
@@ -78,14 +78,15 @@ class WorldBriefContextRule:
     `retrieved`, what the brief's search found among the kept world news by meaning, or, while the search found
     nothing, of `articles`, the newest kept. An item is its publisher, its title and the feed's own summary, cut at
     `article_text_length`; what says the same in the same words is given once. Each item also carries the listed stocks
-    its own text names (`listed`: id to name), which alone a sentence citing it may link. Each fact gets a key the AI
-    cites, in this order.
+    its own text names (`listed`: id to name; a name shorter than `stock_name_length` names no stock), which alone a
+    sentence citing it may link. Each fact gets a key the AI cites, in this order.
     """
 
     window_hours: PositiveInt
     articles: PositiveInt
     article_text_length: PositiveInt
     indicator_days: PositiveInt
+    stock_name_length: PositiveInt
 
     def apply(
         self,
@@ -113,15 +114,26 @@ class WorldBriefContextRule:
             window_first=since.date(),
             window_last=now.date(),
             price_change=None,
-            facts=[world_fact(f"S{number}", kind, text, item, listed) for number, (text, (kind, item)) in enumerate(found.items(), 1)],
+            facts=world_facts(found, listed, self.stock_name_length),
         )
 
 
-def world_fact(key: str, kind: BriefSourceKind, text: str, item: Article | IndicatorReading, listed: Mapping[str, str]) -> BriefFact:
-    """The fact of one held reading or one held world news item, under `key`."""
-    if isinstance(item, IndicatorReading):
-        return BriefFact(source=BriefSource(key=key, kind=kind, dated=item.day), text=text)
+def world_facts(
+    found: Mapping[str, tuple[BriefSourceKind, Article | IndicatorReading]], listed: Mapping[str, str], name_length: PositiveInt
+) -> list[BriefFact]:
+    """
+    The held readings and world news items found, each under its text, as the facts S1, S2 and so on in their order. A
+    news item's fact carries the listed stocks its text names (named_stocks).
+    """
+    facts: list[BriefFact] = []
 
-    title = " ".join(item.title.split())
-    source = BriefSource(key=key, kind=kind, dated=item.published_at.date(), title=title, url=item.url, origin=item.source)
-    return BriefFact(source=source, text=text, stocks=named_stocks(text, listed))
+    for number, (text, (kind, item)) in enumerate(found.items(), 1):
+        if isinstance(item, IndicatorReading):
+            facts.append(BriefFact(source=BriefSource(key=f"S{number}", kind=kind, dated=item.day), text=text))
+            continue
+
+        title, dated = " ".join(item.title.split()), item.published_at.date()
+        source = BriefSource(key=f"S{number}", kind=kind, dated=dated, title=title, url=item.url, origin=item.source)
+        facts.append(BriefFact(source=source, text=text, stocks=named_stocks(text, listed, name_length)))
+
+    return facts

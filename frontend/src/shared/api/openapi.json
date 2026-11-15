@@ -2207,59 +2207,6 @@
         "title": "FollowReturn",
         "type": "object"
       },
-      "FollowSchedule": {
-        "description": "A user's schedule of the ranking follow into their mock account, and where it stands now.",
-        "properties": {
-          "due": {
-            "description": "The schedule follows `pending` now: it is on, its time has come today, and the market is in the phase orders are placed in.",
-            "title": "Due",
-            "type": "boolean"
-          },
-          "pending": {
-            "anyOf": [
-              {
-                "format": "date",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The ranking's latest decision while a session after it has come and no ranking follow of the account took it, by\nthe schedule or by hand. The schedule follows it on the first session it can. None once it is taken.",
-            "title": "Pending"
-          },
-          "time": {
-            "anyOf": [
-              {
-                "format": "time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The time of day in Taipei from which the site follows by itself. None: the schedule is off.",
-            "title": "Time"
-          },
-          "times": {
-            "description": "The times the site offers.",
-            "items": {
-              "format": "time",
-              "type": "string"
-            },
-            "title": "Times",
-            "type": "array"
-          }
-        },
-        "required": [
-          "time",
-          "times",
-          "pending",
-          "due"
-        ],
-        "title": "FollowSchedule",
-        "type": "object"
-      },
       "FollowScheduleRequest": {
         "properties": {
           "confirm": {
@@ -2285,6 +2232,66 @@
           "time"
         ],
         "title": "FollowScheduleRequest",
+        "type": "object"
+      },
+      "FollowScheduleResponse": {
+        "description": "The user's schedule of the ranking follow (FollowSchedule), its last unfinished follow without the record's own texts.",
+        "properties": {
+          "due": {
+            "title": "Due",
+            "type": "boolean"
+          },
+          "pending": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending"
+          },
+          "time": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time"
+          },
+          "times": {
+            "items": {
+              "format": "time",
+              "type": "string"
+            },
+            "title": "Times",
+            "type": "array"
+          },
+          "unfinished": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UnfinishedFollow"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "time",
+          "times",
+          "pending",
+          "unfinished",
+          "due"
+        ],
+        "title": "FollowScheduleResponse",
         "type": "object"
       },
       "FormulaEvidence": {
@@ -4612,7 +4619,7 @@
             "type": "boolean"
           },
           "schedule": {
-            "$ref": "#/components/schemas/FollowSchedule"
+            "$ref": "#/components/schemas/FollowScheduleResponse"
           }
         },
         "required": [
@@ -7013,6 +7020,63 @@
           "run"
         ],
         "title": "TradeResponse",
+        "type": "object"
+      },
+      "UnfinishedFollow": {
+        "description": "A scheduled ranking follow that left its decision pending (its run record), without the record's own texts but its failure.",
+        "properties": {
+          "end_time": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Time"
+          },
+          "failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicText"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ranking_open": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ranking Open"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "start_time": {
+            "format": "date-time",
+            "title": "Start Time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "start_time",
+          "end_time",
+          "failure",
+          "ranking_open"
+        ],
+        "title": "UnfinishedFollow",
         "type": "object"
       },
       "User": {
@@ -9795,8 +9859,33 @@
       }
     },
     "/v1/rankings/follow/schedule": {
+      "get": {
+        "description": "My settings: the user's schedule of the ranking follow as it stands, with the times the site offers. It answers on\na site that can make no ranking yet, where nothing is pending, and for a user the site hides the mock account\nfrom, who may still turn a schedule off. It ranks nothing, records nothing and never orders.",
+        "operationId": "get_follow_schedule_v1_rankings_follow_schedule_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FollowScheduleResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Get Follow Schedule",
+        "tags": [
+          "Rankings"
+        ]
+      },
       "put": {
-        "description": "My settings: schedules the user's ranking follow, or turns the schedule off with null. With a time, the site follows\neach new decision of the ranking into the user's mock account by itself on the first session after it, from that\ntime in Taipei and while this site places orders, as a run like the button's (`POST /v1/rankings/follow`): the\nsame sizing, order gates and journal, on the mock account only, recorded as started by the schedule. It follows a\ndecision once, and never one the user followed by hand; a day whose window it missed is tried again on the next\nsession until the next decision supersedes it. A user the site hides the ranking or the mock account from, or a\ndeactivated one, is followed for by nobody. `GET /v1/rankings/follow` answers the schedule as it stands.",
+        "description": "My settings: schedules the user's ranking follow, or turns the schedule off with null. With a time, the site follows\neach new decision of the ranking into the user's mock account by itself on the first session after it, from that\ntime in Taipei and while this site places orders, as a run like the button's (`POST /v1/rankings/follow`): the\nsame sizing, order gates and journal, on the mock account only, recorded as started by the schedule. It follows a\ndecision until a follow left the account nothing to trade for it under the active formula, and never one the user\nfinished by hand; a day whose window it missed, or whose follow ordered nothing or only a part, is tried again on\nthe next session, once a day, until the next decision supersedes it. A user the site hides the ranking or the mock\naccount from, or a deactivated one, is followed for by nobody. Setting a time needs the mock account shown;\nturning the schedule off does not. `GET /v1/rankings/follow/schedule` answers the schedule as it stands.",
         "operationId": "schedule_ranking_follow_v1_rankings_follow_schedule_put",
         "requestBody": {
           "content": {
@@ -9811,6 +9900,16 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "feature_hidden: a time was given and the site does not show the user the mock account; nothing saved."
           },
           "422": {
             "content": {

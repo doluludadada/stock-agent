@@ -6,7 +6,7 @@ import { useTranslation } from '@/i18n'
 import { isApiError, useAudience, type Audience } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
 import { useErrorReason } from '@/shared/lib/error-reason'
-import { DASH, useFormat } from '@/shared/lib/format'
+import { clockTime, DASH, useFormat } from '@/shared/lib/format'
 import { Button } from '@/shared/ui/button'
 import { ChangeValue } from '@/shared/ui/change-value'
 import { ConfirmDialog } from '@/shared/ui/confirm-dialog'
@@ -16,7 +16,7 @@ import { Panel, PanelLink } from '@/shared/ui/panel'
 import { Skeleton } from '@/shared/ui/skeleton'
 import { Stat } from '@/shared/ui/stat'
 import { useFollowRanking, useRankingFollow } from './api'
-import { clockTime, type Ranking, type RankingFollow } from './model'
+import { unfinishedReason, type Ranking, type RankingFollow } from './model'
 
 /** The ranking in the viewer's mock account: what it holds, lacks and still holds, its return against the benchmark, and the one action. */
 export function MockAccountFollow({ ranking, nextFollow, className }: { ranking: Ranking; nextFollow: string; className?: string }) {
@@ -77,21 +77,40 @@ function Standing({ follow, count }: { follow: RankingFollow; count: number }) {
   )
 }
 
-/** The schedule's state in one line, and who started the last follow; the way to change it is My settings. */
+/**
+ * The schedule's state in one line, and who started the last follow; the way to change it is My settings. A schedule
+ * that is on and whose last follow left the decision pending says so, with why and the run, in place of what it
+ * follows next.
+ */
 function Schedule({ follow, nextFollow }: { follow: RankingFollow; nextFollow: string }) {
   const { t } = useTranslation('ranking')
   const format = useFormat()
   const { schedule, follows } = follow
-  const last = follows.at(-1)
   const time = schedule.time && clockTime(schedule.time)
+  const unfinished = time && !follow.running ? schedule.unfinished : null
+  // A follow that left stocks to trade is listed among the follows too, and the line already says its day.
+  const last = follows.findLast((run) => run.run_id !== unfinished?.run_id)
   return (
     <p className="text-sm text-pretty text-muted-foreground" data-testid="follow-schedule">
-      {!time
-        ? t('schedule.off')
-        : schedule.pending
-          ? t('schedule.pending', { date: format.monthDay(schedule.pending), time })
-          : t('schedule.next', { date: format.monthDay(nextFollow), time })}{' '}
-      {last && `${t(last.scheduled ? 'schedule.lastScheduled' : 'schedule.lastByHand', { date: format.monthDay(last.start_time.slice(0, 10)) })} `}
+      {!time ? (
+        t('schedule.off')
+      ) : unfinished ? (
+        <>
+          {t('schedule.unfinished', {
+            date: format.monthDay(unfinished.start_time),
+            why: t(`schedule.why.${unfinishedReason(unfinished)}`, { count: unfinished.ranking_open ?? 0 }),
+            time,
+          })}{' '}
+          <Link to={paths.run(unfinished.run_id)} className="tap text-brand underline-offset-4 hover:underline">
+            {t('schedule.run')}
+          </Link>
+        </>
+      ) : schedule.pending ? (
+        t('schedule.pending', { date: format.monthDay(schedule.pending), time })
+      ) : (
+        t('schedule.next', { date: format.monthDay(nextFollow), time })
+      )}{' '}
+      {last && `${t(last.scheduled ? 'schedule.lastScheduled' : 'schedule.lastByHand', { date: format.monthDay(last.start_time) })} `}
       <Link to={paths.mySettings} className="tap text-brand underline-offset-4 hover:underline">
         {t('schedule.change')}
       </Link>

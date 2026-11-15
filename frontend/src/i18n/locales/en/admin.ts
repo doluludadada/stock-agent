@@ -567,7 +567,6 @@ const admin = {
       '006208': '006208 富邦台50',
       revenue_and_high: 'Revenue acceleration + near the high',
       revenue_and_high_cash_60: 'Revenue acceleration + near the high, cash under the 60-session average',
-      revenue_yoy_and_high_cash_120: 'Revenue on the year + near the high, cash under the 120-session average',
       dev: 'Development (dev)',
       test: 'Staging (test)',
       prod: 'Production (prod)',

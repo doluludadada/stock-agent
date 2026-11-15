@@ -147,6 +147,7 @@ async def test_turning_sinopac_ordering_off_stops_the_orders_of_a_sinopac_run_al
 
         edit(project, "sinopac_ordering: administrators", 'sinopac_ordering: "off"')
         reload = await switch.reload()
+        harness.real_broker.positions = [Position(stock_id="2317", quantity=1000, average_cost=100.0)]
         after_off = await pipeline.run_intraday()
 
     assert isinstance(reload, SettingsReloaded)
@@ -353,6 +354,7 @@ async def test_a_process_that_never_reloads_stops_ordering_once_the_settings_on_
     while_on = await pipeline.run_intraday()
     sent = list(harness.real_broker.placed)
     edit(project, "sinopac_ordering: administrators", 'sinopac_ordering: "off"')
+    harness.real_broker.positions = [Position(stock_id="2317", quantity=1000, average_cost=100.0)]
     after_off = await pipeline.run_intraday()
 
     assert [order.stock_id for order in sent] == ["2317"] and [order.status for order in while_on.orders] == [OrderStatus.FILLED]

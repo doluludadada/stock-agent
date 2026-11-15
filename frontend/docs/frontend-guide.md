@@ -324,7 +324,7 @@ secret: the server refuses one written into them, and its form shows none.
   the exchange's hours and ticks) is no field, and a save that names one is refused.
   Each field carries: its dotted path, its
   kind, its group, its value and what the control offers. The control comes from the kind alone, with no code per
-  setting: a switch; a choice as a row of buttons (`Segmented`) up to four options and a list above; checkboxes; a
+  setting: a switch; a choice as a row of buttons (`Segmented`) while its options fit one and a list otherwise; checkboxes; a
   list of steps, each said with its unit (`admin:form.unit.<unit>`, a `percent` fraction as a percentage); a range as
   a slider with minus and plus buttons and its value as text, the buttons alone where the range has no upper or lower
   end; a date; a time. Only `text`, `lines` (one item per line) and `structure` (JSON) are typed, and the server puts
@@ -347,12 +347,14 @@ secret: the server refuses one written into them, and its form shows none.
   same test requires every group, unit and option of that file.
 - My settings (`/settings`) holds everything that is one user's own, in one column: the account (name, email, role,
   and that an administrator sets a new password on the users page, the only way the site changes one), the language
-  and the theme (the header's two menus again, kept by the browser), the AI model, then the mock account's panels the
-  route hands in. The schedule's control lists the user's saved time even when the administrator no longer offers it
-  (`offeredTimes`), as a row of buttons up to five choices and a list above, so no time is cut off on a phone.
-- A choice shows as a row of buttons only while its options' names fit the control's column side by side
-  (`SEGMENTED_CHARACTERS`); longer names, such as the ranking's formulas, are a list. An option the dictionaries
-  name is a plain word (`isNamedOption`); any other shows as it is, a time of day without its seconds.
+  and the theme (`PreferenceControls` in `shared/ui`, the same two controls as the phone's "more" sheet, kept by the
+  browser), the AI model, then the mock account's panels the route hands in. The schedule's control asks the
+  schedule's own endpoint (`GET /v1/rankings/follow/schedule`), which answers while no ranking can be made, and lists
+  the user's saved time even when the administrator no longer offers it (`offeredTimes`).
+- One rule decides a row of buttons or a list, for a setting's choice and for the schedule's times: `fitsSegmented`
+  beside `Segmented` counts the options' names and each button's padding against a phone's row, so no option is cut
+  off; longer names, such as the ranking's formulas, are a list. An option the dictionaries name is a plain word
+  (`isNamedOption`); any other shows as it is, a time of day to the minute (`clockTime` in `shared/lib/format`).
 - My settings' mock account offers starting capitals to choose (`STARTING_CAPITALS` in `account/model.ts`) and keeps a
   capital that is none of them as the current one.
 - Price and volume are two synced charts (`shared/ui/price-volume-chart.tsx`), never one chart
@@ -398,6 +400,9 @@ tap away, and open at once when the address names a period or a month. Narrower,
   `Segmented`, and saves at once. The block says the schedule's state in one line: off; on with the decision it
   still has to follow; or on with the next follow's day, the first weekday after the next decision
   (`weekdayAfter`), said with "about"; then who started the last follow. Each listed follow says schedule or by hand.
+  While the schedule is on, no follow runs and its last follow left the decision pending (`schedule.unfinished`), the
+  line says instead the day it tried, why (`unfinishedReason`: an error, a run that never ended, a follow that could
+  not start, or the stocks left to trade), that it tries again on the next trading day, and links to that run.
 - The address holds the period (`?period=5Y`, or `?first=&last=`; none is the whole history) and the decision whose
   stocks are open (`?month=` with the decision's date), so both survive a reload. `ranking/model.ts` reads and writes them.
 - The first answer after a server start takes close to a minute and later ones seconds. The page asks for the latest

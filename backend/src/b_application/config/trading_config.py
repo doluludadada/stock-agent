@@ -1,9 +1,8 @@
-from collections.abc import Mapping
 from datetime import date, time
 from decimal import Decimal
 from functools import cached_property
 from math import ceil
-from typing import Annotated, Any, Self
+from typing import Annotated, Self
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -15,7 +14,7 @@ from a_domain.rules.trading.account_value import AccountValueRule, PositionValue
 from a_domain.rules.trading.cost import TradingCostRule
 from a_domain.rules.trading.ranking import MonthlyRankingRule, RankingHistoryRule
 from a_domain.rules.trading.tick import LimitPriceRule, TickSizeRule
-from a_domain.types.enums import RankingFactorKind, SettingUnit, ShioajiCredential, SystemEnvironment
+from a_domain.types.enums import SettingUnit, ShioajiCredential, SystemEnvironment
 from a_domain.types.errors import UnknownRankingFormula
 from a_domain.types.values import FormulaId
 
@@ -109,38 +108,15 @@ class TechnicalConfig(BaseModel):
         return max(strategy.required_bars for strategy in self.built_in_strategies)
 
 
-def formula_of_an_older_file(section: Mapping[str, Any]) -> dict[str, Any]:
-    """
-    The shipped formula as a `ranking` section from before the formulas sets it: the moved settings it holds, with its
-    revenue acceleration and its nearness to the high as the two factors. A setting the file lacks is refused by the
-    formula's own validation.
-    """
-    moved = {key: section[key] for key in ("top", "min_close", "min_traded_value", "traded_value_sessions") if key in section}
-    acceleration = {
-        "kind": RankingFactorKind.REVENUE_ACCELERATION,
-        "short_months": section.get("revenue_short_months"),
-        "long_months": section.get("revenue_long_months"),
-    }
-    nearness = {"kind": RankingFactorKind.NEARNESS_TO_HIGH, "high_sessions": section.get("high_sessions")}
-
-    return {"name": section.get("active_formula", "revenue_and_high"), "factors": [acceleration, nearness], **moved}
-
-
 class RankingConfig(BaseModel):
     """
     The monthly stock ranking, the formulas it can be made by, and its backtest. Every value comes from the `ranking`
     section of config/appsetting.yaml; the fees and the tax are the market's, the revenue deadline MOPS's.
-    `retired` names the settings this section once had and no longer reads, and `moved` the ones that are part of a
-    formula now: a file from before the formulas still starts, its values read as the one formula, and the start names
-    them (settings_notices).
+    `retired` names the settings this section once had and no longer reads.
     """
 
     model_config = ConfigDict(
-        use_attribute_docstrings=True,
-        json_schema_extra={
-            "retired": ["timestamp_calendars", "timestamp_timeout_seconds"],
-            "moved": ["top", "min_close", "min_traded_value", "traded_value_sessions", "high_sessions"],
-        },
+        use_attribute_docstrings=True, json_schema_extra={"retired": ["timestamp_calendars", "timestamp_timeout_seconds"]}
     )
 
     decision_day: int = Field(ge=1, le=28)
@@ -199,20 +175,6 @@ class RankingConfig(BaseModel):
     @classmethod
     def offer_each_time_once_in_the_order_of_the_day(cls, times: tuple[time, ...]) -> tuple[time, ...]:
         return tuple(sorted(set(times)))
-
-    @model_validator(mode="before")
-    @classmethod
-    def read_an_older_file_as_one_formula(cls, section: Any) -> Any:
-        """
-        A file from before the formulas sets the shipped formula's parameters as settings of the section. They are
-        read as the one formula, active, so the site ranks as it did until the file names its formulas.
-        """
-        if not isinstance(section, dict) or "formulas" in section:
-            return section
-
-        formula = formula_of_an_older_file(section)
-
-        return {**section, "formulas": [formula], "active_formula": formula["name"]}
 
     @model_validator(mode="after")
     def validate_formulas(self) -> Self:

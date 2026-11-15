@@ -2,7 +2,7 @@ import { act, renderHook } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import { changeLocale, initI18n } from '@/i18n'
-import { useFormat } from './format'
+import { clockTime, useFormat } from './format'
 
 describe('a stock volume in lots', () => {
   it('reads shares as 張 with no space in zh-TW and as lots in English', async () => {
@@ -26,5 +26,23 @@ describe('a stock volume in lots', () => {
     const wrapper = ({ children }: { children: ReactNode }) => <I18nextProvider i18n={i18n}>{children}</I18nextProvider>
     const { result } = renderHook(() => useFormat(), { wrapper })
     expect(result.current.closeOn('2026-11-02')).toBe('11/2 收盤')
+  })
+})
+
+describe('a time of day', () => {
+  it('reads to the minute, and a text that is no time stays as it is', () => {
+    expect(clockTime('07:30:00')).toBe('07:30')
+    expect(clockTime('07:30')).toBe('07:30')
+    expect(clockTime('revenue_and_high')).toBe('revenue_and_high')
+  })
+})
+
+describe('a moment as a day', () => {
+  it('reads a timestamp as its day in Taipei, not the day its text starts with', async () => {
+    const i18n = initI18n('en')
+    await act(() => changeLocale('en'))
+    const wrapper = ({ children }: { children: ReactNode }) => <I18nextProvider i18n={i18n}>{children}</I18nextProvider>
+    const { result } = renderHook(() => useFormat(), { wrapper })
+    expect(result.current.monthDay('2026-10-13T17:05:00Z')).toBe('10/14')
   })
 })

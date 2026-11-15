@@ -1,5 +1,6 @@
 import asyncio
 
+from a_domain.model.system.user import User
 from a_domain.types.enums import ExecutionProvider
 from a_domain.types.errors import RankingUnavailable
 from a_domain.types.ids import RunId
@@ -29,12 +30,10 @@ async def follow_rankings_on_schedule(switch: RuntimeSwitch, runs: WorkflowRuns)
 
 async def start_due_follows(opened: OpenedRuntime, runs: WorkflowRuns) -> list[RunId]:
     """
-    Starts the ranking follow of each user whose schedule is due now, as the button's route starts one: the same
-    operation (Pipeline.follow_ranking) on the user's own Pipeline, as a background run of the server, one at a time per
-    user, recorded as started by the schedule. The Pipeline is the user's on the mock account, whoever the user is: no
-    setting names the broker of a scheduled follow. Nothing starts while the site prices its orders on realtime quotes
-    and has none, as the route refuses then; the next look tries again. A user whose run is running, or whose follow
-    cannot start, is left to the next look. It answers the runs it started.
+    Starts the ranking follow of each user whose schedule is due now (start_follow_if_due). Nothing starts while the
+    site prices its orders on realtime quotes and has none, as the route refuses then; the next look tries again. One
+    user's error never keeps the users after them from their follow: a user whose run is running, or whose follow
+    cannot start, waits for the next look, and any other error is logged for that user. It answers the runs it started.
     """
     runtime = opened.runtime
     started: list[RunId] = []
@@ -43,23 +42,40 @@ async def start_due_follows(opened: OpenedRuntime, runs: WorkflowRuns) -> list[R
         return started
 
     for user in await runtime.signed_out.load_scheduled_followers():
-        if runs.running(user.user_id) is not None:
-            continue
-
-        pipeline = runtime.pipeline_for(user, ExecutionProvider.MOCK)
-
         try:
-            if not (await pipeline.load_follow_schedule(user)).due:
-                continue
-
-            cap = runtime.config.accounts.max_concurrent_runs
-            started.append(
-                runs.start(
-                    user, opened.hold(), lambda run_id, follow=pipeline.follow_ranking: follow(run_id=run_id, scheduled=True), cap
-                )
-            )
-            runtime.logger.info(f"The schedule of user {user.user_id} started the ranking follow {started[-1]}.")
+            if (run_id := await start_follow_if_due(opened, runs, user)) is not None:
+                started.append(run_id)
+                runtime.logger.info(f"The schedule of user {user.user_id} started the ranking follow {run_id}.")
         except (RankingUnavailable, RunInProgress, TooManyRuns) as error:
             runtime.logger.info(f"The scheduled ranking follow of user {user.user_id} waits: {error}")
+        except Exception as error:
+            runtime.logger.error(f"The scheduled ranking follow of user {user.user_id} did not start: {type(error).__name__}: {error}")
 
     return started
+
+
+async def start_follow_if_due(opened: OpenedRuntime, runs: WorkflowRuns, user: User) -> RunId | None:
+    """
+    Starts the ranking follow of a user whose schedule is due, as the button's route starts one: the same operation
+    (Pipeline.follow_ranking) on the user's own Pipeline, as a background run of the server, one at a time per user,
+    recorded as started by the schedule. The Pipeline is the user's on the mock account, whoever the user is: no
+    setting names the broker of a scheduled follow. Whether it is due may take a read of the whole history, so the
+    users whose schedule may run are asked for again right before the start: a user who turned the schedule off, was
+    deactivated or lost a feature meanwhile is not followed. None for a user whose follow does not start.
+    """
+    runtime = opened.runtime
+
+    if runs.running(user.user_id) is not None:
+        return None
+
+    pipeline = runtime.pipeline_for(user, ExecutionProvider.MOCK)
+
+    if not (await pipeline.load_follow_schedule(user)).due:
+        return None
+
+    if user.user_id not in {follower.user_id for follower in await runtime.signed_out.load_scheduled_followers()}:
+        return None
+
+    cap = runtime.config.accounts.max_concurrent_runs
+
+    return runs.start(user, opened.hold(), lambda run_id: pipeline.follow_ranking(run_id=run_id, scheduled=True), cap)

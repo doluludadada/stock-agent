@@ -105,5 +105,9 @@ class StockBrief:
         move_to(self, BriefStatus.WRITTEN)
         self.company, self.movement, self.sources, self.written_at = company, movement, sources, now
 
+    def abandoned(self, stale_before: datetime) -> bool:
+        """Whether its writer claimed it before `stale_before` and never wrote or failed it: a stopped server left it behind."""
+        return self.status == BriefStatus.WRITING and self.claimed_at < stale_before
+
     def fail(self) -> None:
         move_to(self, BriefStatus.FAILED)

@@ -973,16 +973,24 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Get Follow Schedule
+         * @description My settings: the user's schedule of the ranking follow as it stands, with the times the site offers. It answers on
+         *     a site that can make no ranking yet, where nothing is pending, and for a user the site hides the mock account
+         *     from, who may still turn a schedule off. It ranks nothing, records nothing and never orders.
+         */
+        get: operations["get_follow_schedule_v1_rankings_follow_schedule_get"];
         /**
          * Schedule Ranking Follow
          * @description My settings: schedules the user's ranking follow, or turns the schedule off with null. With a time, the site follows
          *     each new decision of the ranking into the user's mock account by itself on the first session after it, from that
          *     time in Taipei and while this site places orders, as a run like the button's (`POST /v1/rankings/follow`): the
          *     same sizing, order gates and journal, on the mock account only, recorded as started by the schedule. It follows a
-         *     decision once, and never one the user followed by hand; a day whose window it missed is tried again on the next
-         *     session until the next decision supersedes it. A user the site hides the ranking or the mock account from, or a
-         *     deactivated one, is followed for by nobody. `GET /v1/rankings/follow` answers the schedule as it stands.
+         *     decision until a follow left the account nothing to trade for it under the active formula, and never one the user
+         *     finished by hand; a day whose window it missed, or whose follow ordered nothing or only a part, is tried again on
+         *     the next session, once a day, until the next decision supersedes it. A user the site hides the ranking or the mock
+         *     account from, or a deactivated one, is followed for by nobody. Setting a time needs the mock account shown;
+         *     turning the schedule off does not. `GET /v1/rankings/follow/schedule` answers the schedule as it stands.
          */
         put: operations["schedule_ranking_follow_v1_rankings_follow_schedule_put"];
         post?: never;
@@ -2351,33 +2359,6 @@ export interface components {
              */
             until: string | null;
         };
-        /**
-         * FollowSchedule
-         * @description A user's schedule of the ranking follow into their mock account, and where it stands now.
-         */
-        FollowSchedule: {
-            /**
-             * Due
-             * @description The schedule follows `pending` now: it is on, its time has come today, and the market is in the phase orders are placed in.
-             */
-            due: boolean;
-            /**
-             * Pending
-             * @description The ranking's latest decision while a session after it has come and no ranking follow of the account took it, by
-             *     the schedule or by hand. The schedule follows it on the first session it can. None once it is taken.
-             */
-            pending: string | null;
-            /**
-             * Time
-             * @description The time of day in Taipei from which the site follows by itself. None: the schedule is off.
-             */
-            time: string | null;
-            /**
-             * Times
-             * @description The times the site offers.
-             */
-            times: string[];
-        };
         /** FollowScheduleRequest */
         FollowScheduleRequest: {
             /**
@@ -2387,6 +2368,21 @@ export interface components {
             confirm: true;
             /** Time */
             time: string | null;
+        };
+        /**
+         * FollowScheduleResponse
+         * @description The user's schedule of the ranking follow (FollowSchedule), its last unfinished follow without the record's own texts.
+         */
+        FollowScheduleResponse: {
+            /** Due */
+            due: boolean;
+            /** Pending */
+            pending: string | null;
+            /** Time */
+            time: string | null;
+            /** Times */
+            times: string[];
+            unfinished: components["schemas"]["UnfinishedFollow"] | null;
         };
         /**
          * FormulaEvidence
@@ -3264,7 +3260,7 @@ export interface components {
             refusal: components["schemas"]["FollowRefusal"] | null;
             /** Running */
             running: boolean;
-            schedule: components["schemas"]["FollowSchedule"];
+            schedule: components["schemas"]["FollowScheduleResponse"];
         };
         /**
          * RankingFollowRun
@@ -4183,6 +4179,27 @@ export interface components {
         TradeResponse: {
             order: components["schemas"]["Order"];
             run: components["schemas"]["RunReference"];
+        };
+        /**
+         * UnfinishedFollow
+         * @description A scheduled ranking follow that left its decision pending (its run record), without the record's own texts but its failure.
+         */
+        UnfinishedFollow: {
+            /** End Time */
+            end_time: string | null;
+            failure: components["schemas"]["PublicText"] | null;
+            /** Ranking Open */
+            ranking_open: number | null;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /**
+             * Start Time
+             * Format: date-time
+             */
+            start_time: string;
         };
         /**
          * User
@@ -5920,6 +5937,26 @@ export interface operations {
             };
         };
     };
+    get_follow_schedule_v1_rankings_follow_schedule_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FollowScheduleResponse"];
+                };
+            };
+        };
+    };
     schedule_ranking_follow_v1_rankings_follow_schedule_put: {
         parameters: {
             query?: never;
@@ -5939,6 +5976,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description feature_hidden: a time was given and the site does not show the user the mock account; nothing saved. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
             /** @description follow_time_not_offered: the site does not offer that time; nothing saved. */
             422: {

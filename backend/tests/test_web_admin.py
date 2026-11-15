@@ -766,8 +766,24 @@ async def test_a_saved_log_level_and_the_follow_times_apply_at_once_and_the_time
 
 @pytest.mark.parametrize(
     ("path", "value"),
-    [("behavior.log_level", "LOUD"), ("ranking.follow_times", []), ("stock_page.system_writing.daily_ai_calls", 10_001)],
-    ids=["log-level", "no-follow-time", "ai-calls"],
+    [
+        ("behavior.log_level", "LOUD"),
+        ("ranking.follow_times", []),
+        ("ranking.follow_times", ["08:59:00", "09:30:00"]),
+        ("ranking.follow_times", ["13:25:00"]),
+        ("api.follow_schedule_poll_seconds", 1),
+        ("api.world_interval_minutes", 1),
+        ("stock_page.system_writing.daily_ai_calls", 10_001),
+    ],
+    ids=[
+        "log-level",
+        "no-follow-time",
+        "follow-time-before-continuous-trading",
+        "follow-time-in-the-closing-auction",
+        "poll-too-often",
+        "world-too-often",
+        "ai-calls",
+    ],
 )
 async def test_a_newly_shown_setting_out_of_its_range_is_refused_at_its_setting(project: Path, path: str, value: Any) -> None:
     original = text_of(project)

@@ -6,6 +6,8 @@ export type RankedStock = Schemas['RankedStock']
 export type RankingBacktest = Schemas['RankingBacktest']
 export type RankingFollow = Schemas['RankingFollowResponse']
 export type FormulaEvidence = Schemas['FormulaEvidence']
+export type FollowSchedule = Schemas['FollowScheduleResponse']
+export type UnfinishedFollow = Schemas['UnfinishedFollow']
 
 export type { Period }
 
@@ -81,11 +83,6 @@ export function nextDecision(decidedOn: string, day: number, today: string): Nex
   return { on, due: on <= today }
 }
 
-/** A time of day as the server writes it, 09:05:00, without its seconds. */
-export function clockTime(time: string): string {
-  return time.slice(0, 5)
-}
-
 /**
  * The times a schedule's control lists, in the day's order: the ones the site offers and the user's own while the
  * administrator no longer offers it, so the control always shows what is saved.
@@ -93,6 +90,19 @@ export function clockTime(time: string): string {
 export function offeredTimes(schedule: { time: string | null; times: readonly string[] }): string[] {
   const kept = schedule.time !== null && !schedule.times.includes(schedule.time) ? [schedule.time] : []
   return [...schedule.times, ...kept].sort()
+}
+
+export type UnfinishedReason = 'failed' | 'neverEnded' | 'notStarted' | 'left'
+
+/**
+ * Why a scheduled follow that is not running left its decision pending, read from its record: an error stopped it, its
+ * process stopped before the end, it took nothing (the market was outside its window, or the ranking ranked no
+ * stock), or it left `ranking_open` stocks to trade.
+ */
+export function unfinishedReason(follow: Pick<UnfinishedFollow, 'failure' | 'end_time' | 'ranking_open'>): UnfinishedReason {
+  if (follow.failure !== null) return 'failed'
+  if (follow.end_time === null) return 'neverEnded'
+  return follow.ranking_open === null ? 'notStarted' : 'left'
 }
 
 /** The first weekday after `date`: the earliest session a decision of that day can be followed on; a holiday moves the real one later. */

@@ -9,6 +9,18 @@ export interface SegmentedOption<T extends string> {
   count?: number
 }
 
+/** The characters a phone's row holds at the control's text size, and what one button's padding takes of them. */
+const ROW_CHARACTERS = 40
+const BUTTON_CHARACTERS = 3
+
+/**
+ * Whether options show whole as one row of buttons on a phone, the narrowest place a control is in: a control whose
+ * options do not fit lists them instead, so none is cut off.
+ */
+export function fitsSegmented(labels: readonly string[]): boolean {
+  return labels.join('').length + labels.length * BUTTON_CHARACTERS <= ROW_CHARACTERS
+}
+
 interface SegmentedProps<T extends string> {
   value: T
   onChange: (value: T) => void

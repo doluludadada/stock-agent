@@ -1,7 +1,7 @@
 from bisect import bisect_left, bisect_right
 from collections.abc import Mapping, Sequence, Sized
 from dataclasses import replace
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 
 from pydantic import ConfigDict, Field, PositiveInt
 from pydantic.dataclasses import dataclass
@@ -10,6 +10,7 @@ from a_domain.model.market.stock import Stock
 from a_domain.model.system.stats import SystemStats
 from a_domain.model.trading.account import Account, AccountOpening, Position
 from a_domain.model.trading.order import Order
+from a_domain.model.trading.ranking_formula import RankingFormula
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.rules.trading.cost import AffordableQuantityRule
 from a_domain.rules.trading.ranking import DecisionSessionsRule, Ranking, RankingHistory
@@ -134,7 +135,7 @@ class RankingHoldingsRule:
     def apply(self, ranking: Ranking, account: Account) -> RankingHoldings:
         ranked = [stock.stock_id for stock in ranking.stocks]
 
-        if not ranked and not ranking.holds_cash:
+        if not ranking.decides:
             return RankingHoldings(decided_on=ranking.decided_on)
 
         return RankingHoldings(
@@ -157,8 +158,15 @@ class FollowSchedule:
 
     pending: date | None
     """
-    The ranking's latest decision while a session after it has come and no ranking follow of the account took it, by
-    the schedule or by hand. The schedule follows it on the first session it can. None once it is taken.
+    The ranking's latest decision while a session after it has come and no ranking follow of the account finished it
+    under the active formula, by the schedule or by hand. The schedule follows it on each session it can, once a day,
+    until a follow leaves nothing to trade. None once one did, and while the history holds no decision.
+    """
+
+    unfinished: SystemStats | None
+    """
+    The schedule's last follow of `pending` that left it pending, with why in its record: a `failure`, no
+    `ranking_open` when it could not start, or the stocks it left to trade. None while the schedule has not tried.
     """
 
     due: bool
@@ -179,34 +187,57 @@ class FollowTimeRule:
         return follow_time is not None and phase == self.pricing.trading_phase and now.time() >= follow_time
 
 
+def scheduled_since(follows: Sequence[SystemStats], day: date, now: datetime) -> list[SystemStats]:
+    """The follows the schedule started from `day` on, in the market's own days, as given: oldest first."""
+    return [follow for follow in follows if follow.scheduled and follow.start_time.astimezone(now.tzinfo).date() >= day]
+
+
+def unfinished_follow(follows: Sequence[SystemStats], pending: date | None, now: datetime) -> SystemStats | None:
+    """The schedule's last follow since the day after the `pending` decision that did not leave the account nothing to trade."""
+    if pending is None:
+        return None
+
+    tries = [follow for follow in scheduled_since(follows, pending + timedelta(days=1), now) if follow.ranking_open != 0]
+
+    return tries[-1] if tries else None
+
+
 @dataclass(frozen=True)
 class FollowScheduleRule:
     """
     Where a user's schedule of the ranking follow stands at `now`. The decision to follow is the ranking's latest one
     among `sessions` (DecisionSessionsRule) once a day after it has come: an older one is superseded and never
-    followed late. It is pending until one ranking follow of the account, among `follows`, took it, whoever started
-    that follow, so the schedule follows a decision at most once and never one the user followed by hand. It is due
-    when the schedule may follow now (FollowTimeRule) and has started no follow yet today: a scheduled follow that
-    failed, or that its window refused after all, is tried again on the next session, not every minute of this one.
+    followed late. It is pending until one ranking follow of the account, among `follows`, finished it under
+    `formula`, the active one: it took that decision by that formula as it is defined now and left nothing to trade,
+    whoever started it. So the schedule never repeats a finished follow or one the user finished by hand, it goes on
+    after a follow that ordered nothing or only a part, and it brings the account to a formula an administrator
+    switched to. It is due when the schedule may follow now (FollowTimeRule) and has started no follow yet today: a
+    scheduled follow that failed, was refused or left stocks to trade is tried again on the next session, not every
+    minute of this one.
     """
 
     decision_rule: DecisionSessionsRule
     time_rule: FollowTimeRule
     times: tuple[time, ...]
+    formula: RankingFormula
 
     def apply(
         self, follow_time: time | None, sessions: Sequence[date], follows: Sequence[SystemStats], now: datetime, phase: TradingPhase
     ) -> FollowSchedule:
         decisions = self.decision_rule.apply(sessions)
         decided_on = sessions[decisions[-1][0]] if decisions else None
-        taken = {follow.ranking_decided_on for follow in follows}
-        pending = decided_on if decided_on is not None and decided_on < now.date() and decided_on not in taken else None
-        tried_today = any(follow.scheduled and follow.start_time.astimezone(now.tzinfo).date() == now.date() for follow in follows)
+        finished = any(
+            follow.ranking_open == 0 and follow.ranking_decided_on == decided_on and follow.ranking_formula == self.formula
+            for follow in follows
+        )
+        pending = decided_on if decided_on is not None and decided_on < now.date() and not finished else None
+        tried_today = bool(scheduled_since(follows, now.date(), now))
 
         return FollowSchedule(
             time=follow_time,
             times=self.times,
             pending=pending,
+            unfinished=unfinished_follow(follows, pending, now),
             due=pending is not None and not tried_today and self.time_rule.apply(follow_time, now, phase),
         )
 

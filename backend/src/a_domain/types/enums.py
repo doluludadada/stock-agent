@@ -290,15 +290,6 @@ class FollowRefusal(StrEnum):
     answers each as its code.
     """
 
-    @property
-    def lifts_later(self) -> bool:
-        """Whether the same follow may start once the market's phase changes. Nothing to follow stays so."""
-        match self:
-            case FollowRefusal.NOTHING_TO_FOLLOW:
-                return False
-            case FollowRefusal.OUTSIDE_FOLLOW_WINDOW:
-                return True
-
     NOTHING_TO_FOLLOW = auto()
     """
     The run has no decision left to follow: it is not a finished Full Cycle, it decided no BUY and no SELL of a stock
@@ -308,6 +299,15 @@ class FollowRefusal(StrEnum):
 
     OUTSIDE_FOLLOW_WINDOW = auto()
     """The market is in a phase in which this site's order pricing places no order (OrderPricing.trading_phase)."""
+
+    @property
+    def lifts_later(self) -> bool:
+        """Whether the same follow may start once the market's phase changes. Nothing to follow stays so."""
+        match self:
+            case FollowRefusal.NOTHING_TO_FOLLOW:
+                return False
+            case FollowRefusal.OUTSIDE_FOLLOW_WINDOW:
+                return True
 
 
 class TimeInForce(StrEnum):

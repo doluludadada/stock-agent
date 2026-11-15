@@ -76,7 +76,10 @@ class WorkflowRunDTO(SQLModel, table=True):
 
     ranking_decided_on: date | None = None
     scheduled: bool = False
-    """The decision a ranking follow took, and whether the schedule started the run. Last, as the upgrade to version 11 added them."""
+    """The decision a ranking follow took, and whether the schedule started the run, as the upgrade to version 11 added them."""
+
+    ranking_open: int | None = None
+    """How many stocks a ranking follow still had to trade at its last look. Last, as the upgrade to version 12 added it."""
 
 
 class TradeSignalDTO(SQLModel, table=True):

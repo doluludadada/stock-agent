@@ -147,10 +147,10 @@ class BehaviorConfig(BaseModel):
 
     model_config = ConfigDict(json_schema_extra={"retired": ["x_search_allowed_handles", "x_search_excluded_handles"]})
 
-    log_level: Literal["TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"] | int = Field(
+    log_level: Literal["TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"] = Field(
         json_schema_extra={"group": SettingGroup.SITE_ACCESS}
     )
-    """A loguru level name or number: the logger refuses any other at startup. A save applies it at once."""
+    """One of loguru's level names. A save applies it at once."""
     enable_web_search: bool
     enable_x_search: bool
     enable_inline_citations: bool

@@ -2264,6 +2264,11 @@
         "nullable": true,
         "postgresql": "JSON"
       },
+      "ranking_open": {
+        "class": "Integer",
+        "nullable": true,
+        "postgresql": "INTEGER"
+      },
       "run_id": {
         "class": "Uuid",
         "nullable": false,

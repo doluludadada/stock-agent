@@ -1,4 +1,5 @@
 import type { Schemas } from '@/shared/api'
+import { clockTime } from '@/shared/lib/format'
 
 export type World = Schemas['WorldResponse']
 export type WorldBrief = World['briefs'][number]
@@ -41,11 +42,6 @@ export function eventSentences(brief: WorldBrief): Sentence[] {
   const sentences = brief.movement ?? []
   const events = sentences.filter((sentence) => citedSources(sentence, brief).some((source) => source.kind !== 'indicator'))
   return events.length > 0 ? events : sentences
-}
-
-/** The time of day the server names, to the minute: 07:30:00 reads 07:30. */
-export function clockTime(time: string): string {
-  return time.slice(0, 5)
 }
 
 export type BriefState = { kind: 'written'; brief: WorldBrief } | { kind: 'waiting'; writeAt: string } | { kind: 'off' }

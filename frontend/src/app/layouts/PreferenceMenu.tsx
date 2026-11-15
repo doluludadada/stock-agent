@@ -10,7 +10,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/shared/ui/dropdown-menu'
-import { Segmented } from '@/shared/ui/segmented'
 
 const THEME_ICON = { dark: Moon, light: Sun, system: Monitor } as const
 
@@ -61,24 +60,6 @@ export function PreferenceMenu() {
           })}
         </DropdownMenuContent>
       </DropdownMenu>
-    </div>
-  )
-}
-
-/** The same two choices as segmented controls, for the phone's "more" sheet. */
-export function PreferenceControls() {
-  const { t } = useTranslation()
-  const locale = useLocale()
-  const { preference, setPreference } = useTheme()
-  return (
-    <div className="grid gap-3">
-      <Segmented
-        value={locale}
-        onChange={(next) => void changeLocale(next)}
-        label={t('preferences.language')}
-        options={SUPPORTED_LOCALES.map((item) => ({ value: item, label: t(`preferences.locale.${item}`) }))}
-      />
-      <Segmented value={preference} onChange={setPreference} label={t('preferences.theme')} options={THEME_PREFERENCES.map((item) => ({ value: item, label: t(`preferences.themes.${item}`) }))} />
     </div>
   )
 }

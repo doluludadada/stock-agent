@@ -7,7 +7,7 @@ import { initI18n } from '@/i18n'
 import { session } from '@/shared/api'
 import openapi from '@/shared/api/openapi.json'
 import { TEST_USER } from '@/test/users'
-import { briefState, citedSources, clockTime, eventSentences, INDICATORS, newsSources, shownNews, type World, type WorldBrief, type WorldNews } from './model'
+import { briefState, citedSources, eventSentences, INDICATORS, newsSources, shownNews, type World, type WorldBrief, type WorldNews } from './model'
 import { WorldPage } from './WorldPage'
 import { WorldToday } from './WorldToday'
 
@@ -102,7 +102,6 @@ describe('the world as the site holds it', () => {
     expect(shownNews(HELD.news, 'bbc')).toEqual([RATE_CUT, MARKED_UP])
     expect(eventSentences(BRIEF), 'the sentence that cites only an indicator is the strip’s').toEqual([BRIEF.movement![1]])
     expect(eventSentences(THE_DAY_BEFORE)).toEqual(THE_DAY_BEFORE.movement)
-    expect(clockTime('07:30:00')).toBe('07:30')
     expect(briefState(HELD, 1)).toEqual({ kind: 'written', brief: THE_DAY_BEFORE })
     expect(briefState(NOTHING_HELD)).toEqual({ kind: 'waiting', writeAt: '07:30' })
     expect(briefState({ ...NOTHING_HELD, write_at: null })).toEqual({ kind: 'off' })

@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, NonNegativeInt
 from pydantic.dataclasses import dataclass
 
 from a_domain.model.trading.ranking_formula import RankingFormula
@@ -47,6 +47,14 @@ class SystemStats:
     """
     The decision session of the ranking a ranking follow took: it decided what to trade for it, or found the account
     held it already. None while its window refused it, so the decision is still to follow, and for every other workflow.
+    """
+
+    ranking_open: NonNegativeInt | None = None
+    """
+    How many stocks a ranking follow still had to trade when it last looked at the mock account: before its orders,
+    and again after them. 0: the account holds the ranking, so the follow finished the decision. More: an order was
+    refused or did not fill, a stock got no decision, or the run stopped before its last look. None for a ranking
+    that decides nothing, and for every other workflow.
     """
 
     scheduled: bool = False

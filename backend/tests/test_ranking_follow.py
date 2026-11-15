@@ -10,7 +10,7 @@ import asyncio
 from datetime import date, datetime, time, timedelta
 
 import pytest
-from support.harness import MARKET_CLOSED, MEMBER, MEMBER_PASSWORD, CliHarness, build_harness, harness_config
+from support.harness import ADMINISTRATOR, MARKET_CLOSED, MEMBER, MEMBER_PASSWORD, CliHarness, build_harness, harness_config
 from support.settings import small_formula, with_formulas
 from support.web import ended, serve, write
 from test_follow import RealBroker
@@ -163,15 +163,16 @@ async def test_a_follow_from_an_empty_account_buys_each_ranked_stock_at_an_equal
     stack = await market(tmp_path)
 
     before, refusal = await stack.pipeline.load_ranking_follow()
-    performance = await stack.pipeline.load_ranking_follow_return()
+    performance = (await stack.pipeline.load_ranking_follow_return(ADMINISTRATOR))[:2]
     status = await stack.pipeline.follow_ranking()
-    _, follows = await stack.pipeline.load_ranking_follow_return()
+    _, follows, schedule = await stack.pipeline.load_ranking_follow_return(ADMINISTRATOR)
 
     account = await stack.broker.get_account()
     decisions = await stack.journal.signals_of(status.stats.run_id)
     after, again = await stack.pipeline.load_ranking_follow()
     assert (before.held, before.lacking, before.left, refusal, performance) == ([], ["2330", "2317"], [], None, (None, []))
-    assert [(run.run_id, run.ranking_formula) for run in follows] == [(status.stats.run_id, FORMULA)]
+    assert [(run.run_id, run.ranking_formula, run.ranking_open) for run in follows] == [(status.stats.run_id, FORMULA, 0)]
+    assert (schedule.pending, schedule.unfinished) == (None, None)
     assert (status.stats.workflow, status.stats.execution_provider) == (Workflow.RANKING_FOLLOW, ExecutionProvider.MOCK)
     assert [(order.stock_id, order.action, order.status, order.limit_price, order.filled_quantity) for order in status.orders] == [
         ("2330", TradeAction.BUY, OrderStatus.FILLED, 100, affordable(500_000, 100)),
@@ -309,7 +310,7 @@ async def test_the_return_since_the_first_follow_is_read_against_the_benchmark_o
     stack = await market(tmp_path)
     status = await stack.pipeline.follow_ranking()
     monday, tuesday = date(2026, 10, 19), date(2026, 10, 20)
-    on_the_day, _ = await stack.pipeline.load_ranking_follow_return()
+    on_the_day, _, _ = await stack.pipeline.load_ranking_follow_return(ADMINISTRATOR)
     later = {"2330": (101.0, 110.0), "2317": (50.0, 51.0), "1101": (30.0, 30.0), "0050": (188.0, 190.0)}
 
     for stock_id, closes in later.items():
@@ -319,7 +320,7 @@ async def test_the_return_since_the_first_follow_is_read_against_the_benchmark_o
         ]
 
     stack.clock.current = datetime.combine(tuesday, time(15, 0), TAIWAN_TIMEZONE)
-    performance, _ = await stack.pipeline.load_ranking_follow_return()
+    performance, _, _ = await stack.pipeline.load_ranking_follow_return(ADMINISTRATOR)
 
     cash = (await stack.broker.get_account()).cash
     equity = cash + sum(order.filled_quantity * later[order.stock_id][1] for order in status.orders)
@@ -338,7 +339,7 @@ async def test_a_reset_account_has_never_followed(tmp_path) -> None:
     holdings, refusal = await stack.pipeline.load_ranking_follow()
 
     assert (holdings.held, holdings.lacking, refusal) == ([], ["2330", "2317"], None)
-    assert await stack.pipeline.load_ranking_follow_return() == (None, [])
+    assert (await stack.pipeline.load_ranking_follow_return(ADMINISTRATOR))[:2] == (None, [])
 
 
 async def test_a_follow_on_a_pipeline_built_for_sinopac_never_reaches_it_and_orders_nothing(tmp_path) -> None:
@@ -419,7 +420,13 @@ async def test_the_web_follow_orders_the_ranking_on_the_mock_account_as_a_run_an
         "running": False,
         "performance": None,
         "follows": [],
-        "schedule": {"time": None, "times": ["09:05:00", "09:30:00", "10:00:00", "13:00:00"], "pending": "2026-10-13", "due": False},
+        "schedule": {
+            "time": None,
+            "times": ["09:05:00", "09:30:00", "10:00:00", "13:00:00"],
+            "pending": "2026-10-13",
+            "unfinished": None,
+            "due": False,
+        },
     }
     assert (started.status_code, follow["state"]) == (202, "finished")
     assert [(run["run_id"], run["ranking_formula"]["name"]) for run in followed] == [(started.json()["run_id"], FORMULA.name)]

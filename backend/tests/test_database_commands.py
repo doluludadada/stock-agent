@@ -281,12 +281,13 @@ async def test_an_older_database_whose_table_changed_is_refused_and_the_upgrade_
     assert await database_snapshot() == before
 
 
-async def test_the_steps_from_version_9_give_a_run_its_ranking_formula_and_the_follow_its_schedule_and_keep_every_run(
+async def test_the_steps_from_version_9_give_a_run_its_ranking_follow_columns_and_the_follow_its_schedule_and_keep_every_run(
     tmp_path: Path, output: io.StringIO
 ) -> None:
     connector = await current_database(tmp_path)
     await execute(
-        "ALTER TABLE workflow_runs DROP COLUMN ranking_formula, DROP COLUMN ranking_decided_on, DROP COLUMN scheduled",
+        "ALTER TABLE workflow_runs DROP COLUMN ranking_formula, DROP COLUMN ranking_decided_on, DROP COLUMN scheduled, "
+        "DROP COLUMN ranking_open",
         "ALTER TABLE users DROP COLUMN ranking_follow_time",
         "INSERT INTO workflow_runs (run_id, workflow, execution_provider, start_time, total_scanned, buzz_scanned, buzz_qualified, "
         "sentiment_analysed, passed_technical, ai_analysed, signals_generated, orders_submitted, orders_filled, orders_refused, "
@@ -307,11 +308,13 @@ async def test_the_steps_from_version_9_give_a_run_its_ranking_formula_and_the_f
     after = await database_snapshot()
     assert "9 -> 10 add_the_ranking_formula_of_a_run" in output.getvalue()
     assert "10 -> 11 add_the_schedule_of_the_ranking_follow" in output.getvalue()
-    assert after["schema_version"][1] == [("11",)]
-    assert {"ranking_formula", "ranking_decided_on", "scheduled"} <= set(after["workflow_runs"][0])
+    assert "11 -> 12 add_what_a_ranking_follow_left_open" in output.getvalue()
+    assert after["schema_version"][1] == [("12",)]
+    assert {"ranking_formula", "ranking_decided_on", "scheduled", "ranking_open"} <= set(after["workflow_runs"][0])
     assert "ranking_follow_time" in after["users"][0]
     [run] = after["workflow_runs"][1]
     assert run[after["workflow_runs"][0].index("scheduled")] == "False"
+    assert run[after["workflow_runs"][0].index("ranking_open")] == "None"
 
 
 @pytest.mark.parametrize("stamp", [0, FIRST_SCHEMA_VERSION - 1, SCHEMA_VERSION + 1])

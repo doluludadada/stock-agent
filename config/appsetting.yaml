@@ -92,7 +92,7 @@ ranking:
   # min_traded_value NT$ a session on average over the last traded_value_sessions sessions. With
   # cash_under_average_sessions, the formula holds cash for the month when benchmark_id closed under its own average of
   # that many sessions at the decision. The research of 2026-11-15 on 2008 to 2026 found no formula that beats the first
-  # out of sample; the two with the cash filter fell less in 2008 to 2012 and returned less in every later span.
+  # out of sample; the one with the cash filter fell less in 2008 to 2012 and returned less in every later span.
   formulas:
     - name: revenue_and_high
       top: 20
@@ -115,17 +115,6 @@ ranking:
         - kind: revenue_acceleration
           short_months: 3
           long_months: 12
-        - kind: nearness_to_high
-          high_sessions: 250
-    - name: revenue_yoy_and_high_cash_120
-      top: 20
-      min_close: 10
-      min_traded_value: 30000000
-      traded_value_sessions: 20
-      cash_under_average_sessions: 120
-      factors:
-        - kind: revenue_yoy
-          months: 3
         - kind: nearness_to_high
           high_sessions: 250
   # The ranking page compares every formula over the same period, and a second time with this liquidity floor in place
@@ -275,8 +264,8 @@ stock_page:
 world:
   # The world outside Taiwan's exchanges: the items of the world news feeds named under sources.world, kept in the
   # article store with the title and the summary each feed gives, never an article's page; the world indicators' daily
-  # readings; and the day's world brief. The Web API's world timer reads the feeds every api.world_interval_minutes
-  # (30 unless the file sets it). features.world shows the world page; off, nothing is read or written.
+  # readings; and the day's world brief. The Web API's world timer reads the feeds every api.world_interval_minutes.
+  # features.world shows the world page; off, nothing is read or written.
   # A world news item published longer ago than this many days is dropped. A brief keeps the items it cites.
   retention_days: 14
   brief:

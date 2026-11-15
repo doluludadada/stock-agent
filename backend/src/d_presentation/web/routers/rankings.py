@@ -6,13 +6,13 @@ from fastapi import APIRouter, status
 from pydantic import BaseModel
 
 from a_domain.model.trading.ranking_formula import RankingFormula
-from a_domain.rules.trading.follow import FollowReturn, FollowSchedule, RankingHoldings
+from a_domain.rules.trading.follow import FollowReturn, RankingHoldings
 from a_domain.rules.trading.ranking import Ranking
 from a_domain.rules.trading.ranking_backtest import RankingBacktest
 from a_domain.types.enums import Feature, FollowRefusal
 from d_presentation.web.routers.backtests import BUSY
 from d_presentation.web.routers.runs import STARTED
-from d_presentation.web.schemas import Confirmed, ErrorResponse, Response, RunAccepted
+from d_presentation.web.schemas import Confirmed, ErrorResponse, PublicText, Response, RunAccepted
 from d_presentation.web.session import (
     BacktestTurn,
     CurrentUser,
@@ -21,8 +21,10 @@ from d_presentation.web.session import (
     PrivateAccess,
     QuoteLogin,
     RunStarter,
+    RuntimeDependency,
     UserPipeline,
     WorkflowRunsDependency,
+    require_shown,
     shows,
 )
 
@@ -131,6 +133,47 @@ class RankingFollowRun(Response):
     """Whether the user's schedule started it; the user's own click otherwise."""
 
 
+class UnfinishedFollow(Response):
+    """A scheduled ranking follow that left its decision pending (its run record), without the record's own texts but its failure."""
+
+    run_id: UUID
+    start_time: datetime
+    end_time: datetime | None
+    """Null while it runs, and for a run whose process stopped."""
+
+    failure: PublicText | None
+    """The exception that stopped it; null when it ran every step."""
+
+    ranking_open: int | None
+    """
+    How many stocks it still had to trade at its last look at the account: an order was refused or did not fill, or a
+    stock got no decision. Null when it took nothing: the market's phase refused it, or the ranking ranked no stock.
+    """
+
+
+class FollowScheduleResponse(Response):
+    """The user's schedule of the ranking follow (FollowSchedule), its last unfinished follow without the record's own texts."""
+
+    time: time | None
+    """The time of day in Taipei from which the site follows by itself. Null: the schedule is off."""
+
+    times: tuple[time, ...]
+    """The times the site offers."""
+
+    pending: date | None
+    """
+    The ranking's latest decision while a session after it has come and no ranking follow of the account finished it
+    under the active formula, by the schedule or by hand: the schedule follows it on each session it can, once a day,
+    until a follow leaves nothing to trade. Null once one did, and while the history holds no decision.
+    """
+
+    unfinished: UnfinishedFollow | None
+    """The schedule's last follow of `pending` that left it pending. Null while the schedule has not tried."""
+
+    due: bool
+    """The schedule follows `pending` now: it is on, its time has come today, and the market is in the phase orders are placed in."""
+
+
 class RankingFollowResponse(BaseModel):
     """The user's mock account against the ranking's latest decision, and what following the ranking did so far."""
 
@@ -151,7 +194,7 @@ class RankingFollowResponse(BaseModel):
     listed.
     """
 
-    schedule: FollowSchedule
+    schedule: FollowScheduleResponse
     """The user's schedule of the follow: its time, the decision it still has to follow, and whether it follows it now."""
 
 
@@ -186,15 +229,25 @@ async def get_ranking_follow(pipeline: UserPipeline, user: CurrentUser, runs: Wo
     records nothing and never orders.
     """
     holdings, refusal = await pipeline.load_ranking_follow()
-    performance, follows = await pipeline.load_ranking_follow_return()
+    performance, follows, schedule = await pipeline.load_ranking_follow_return(user)
     return RankingFollowResponse(
         holdings=holdings,
         refusal=refusal,
         running=runs.running(user.user_id) is not None,
         performance=performance,
         follows=[RankingFollowRun.model_validate(run) for run in follows],
-        schedule=await pipeline.load_follow_schedule(user),
+        schedule=FollowScheduleResponse.model_validate(schedule),
     )
+
+
+@router.get("/follow/schedule")
+async def get_follow_schedule(pipeline: UserPipeline, user: CurrentUser) -> FollowScheduleResponse:
+    """
+    My settings: the user's schedule of the ranking follow as it stands, with the times the site offers. It answers on
+    a site that can make no ranking yet, where nothing is pending, and for a user the site hides the mock account
+    from, who may still turn a schedule off. It ranks nothing, records nothing and never orders.
+    """
+    return FollowScheduleResponse.model_validate(await pipeline.load_follow_schedule(user))
 
 
 class FollowScheduleRequest(Confirmed):
@@ -205,24 +258,34 @@ class FollowScheduleRequest(Confirmed):
 @router.put(
     "/follow/schedule",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[shows(Feature.MOCK_ACCOUNT)],
     responses={
+        status.HTTP_403_FORBIDDEN: {
+            "model": ErrorResponse,
+            "description": "feature_hidden: a time was given and the site does not show the user the mock account; nothing saved.",
+        },
         status.HTTP_422_UNPROCESSABLE_CONTENT: {
             "model": ErrorResponse,
             "description": "follow_time_not_offered: the site does not offer that time; nothing saved.",
-        }
+        },
     },
 )
-async def schedule_ranking_follow(body: FollowScheduleRequest, pipeline: UserPipeline, user: CurrentUser) -> None:
+async def schedule_ranking_follow(
+    body: FollowScheduleRequest, pipeline: UserPipeline, user: CurrentUser, runtime: RuntimeDependency
+) -> None:
     """
     My settings: schedules the user's ranking follow, or turns the schedule off with null. With a time, the site follows
     each new decision of the ranking into the user's mock account by itself on the first session after it, from that
     time in Taipei and while this site places orders, as a run like the button's (`POST /v1/rankings/follow`): the
     same sizing, order gates and journal, on the mock account only, recorded as started by the schedule. It follows a
-    decision once, and never one the user followed by hand; a day whose window it missed is tried again on the next
-    session until the next decision supersedes it. A user the site hides the ranking or the mock account from, or a
-    deactivated one, is followed for by nobody. `GET /v1/rankings/follow` answers the schedule as it stands.
+    decision until a follow left the account nothing to trade for it under the active formula, and never one the user
+    finished by hand; a day whose window it missed, or whose follow ordered nothing or only a part, is tried again on
+    the next session, once a day, until the next decision supersedes it. A user the site hides the ranking or the mock
+    account from, or a deactivated one, is followed for by nobody. Setting a time needs the mock account shown;
+    turning the schedule off does not. `GET /v1/rankings/follow/schedule` answers the schedule as it stands.
     """
+    if body.time is not None:
+        require_shown(runtime, user, (Feature.MOCK_ACCOUNT,))
+
     await pipeline.choose_follow_time(user, body.time)
 
 

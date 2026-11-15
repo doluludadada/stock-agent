@@ -29,7 +29,6 @@ from a_domain.types.errors import SettingsEditError
 from a_domain.types.values import FormulaId
 from b_application.config.app_config import AppConfig
 from b_application.config.sources_config import CompanyProfileFeed
-from b_application.config.trading_config import RankingConfig
 
 
 def get_project_root() -> Path:
@@ -238,7 +237,7 @@ def unread_settings(node: Mapping[Any, Any], model: type[BaseModel], prefix: str
             yield path, "comes from the environment or .env, never from a settings file"
         elif path in prompts:
             yield path, f"is the prompt {prompts[path]} of instructions.yaml"
-        elif key in (*retired_keys(model), *moved_keys(model)):
+        elif key in retired_keys(model):
             continue
         elif key not in fields or fields[key].exclude:
             yield path, "names no setting"
@@ -251,21 +250,8 @@ def retired_keys(model: type[BaseModel]) -> tuple[str, ...]:
     The settings a section once had and no longer reads, which its class names in `retired` of its json_schema_extra.
     A file that still sets one starts: the key is skipped, and settings_notices names it.
     """
-    return named_keys(model, "retired")
-
-
-def moved_keys(model: type[BaseModel]) -> tuple[str, ...]:
-    """
-    The settings a section once had that are part of an entry of another setting now, which its class names in `moved`
-    of its json_schema_extra. A file that still sets one starts: the section reads it as its class says, and
-    settings_notices names it.
-    """
-    return named_keys(model, "moved")
-
-
-def named_keys(model: type[BaseModel], mark: str) -> tuple[str, ...]:
     extra = model.model_config.get("json_schema_extra")
-    named = extra.get(mark) if isinstance(extra, dict) else None
+    named = extra.get("retired") if isinstance(extra, dict) else None
     return tuple(str(key) for key in named) if isinstance(named, list) else ()
 
 
@@ -307,30 +293,7 @@ def settings_notices(project_root: Path) -> list[str]:
         missing = ", ".join(path for path in unset if without.get(path) == lack)
         notices.append(f"{file.file_name} does not set {missing}: {lack} until it does. The shipped {file.file_name} has them.")
 
-    return notices + moved_formula_notice(document) + unnamed_profile_fields_notice(document) + unset_prompts_notice(project_root)
-
-
-def moved_formula_notice(document: dict[str, Any]) -> list[str]:
-    """
-    One line that names the settings of the ranking's formula config/appsetting.yaml still sets in the `ranking`
-    section itself, as a deployment's copy from before the formulas does, or none: read as the one formula while the
-    file names no formulas, and not read at all once it does.
-    """
-    file = SettingsFile.APPSETTING
-    ranking = document.get("ranking")
-    moved = [f"ranking.{key}" for key in moved_keys(RankingConfig) if isinstance(ranking, dict) and key in ranking]
-
-    if not moved:
-        return []
-
-    if isinstance(ranking, dict) and "formulas" in ranking:
-        return [f"{file.file_name} still sets {', '.join(moved)}: ranking.formulas holds them now. Remove them from the file."]
-
-    return [
-        f"{file.file_name} sets {', '.join(moved)} and no ranking.formulas: they are read as the ranking's one formula, so "
-        f"it cannot be switched. Move them into ranking.formulas and set ranking.active_formula. The shipped "
-        f"{file.file_name} has them."
-    ]
+    return notices + unnamed_profile_fields_notice(document) + unset_prompts_notice(project_root)
 
 
 def unnamed_profile_fields_notice(document: dict[str, Any]) -> list[str]:
@@ -983,7 +946,7 @@ def startup_settings(
     anything: the load (each file parsed, every key the app would not read refused, every value validated), the trading
     setup, the environment and the audience the process started in (`environment` and `audience`, None at its first
     start), the accounts key, open registration beside the real account, sign-in with Google half set up or at an
-    address that is not safe, the AI's web and X search on an audience
+    address that is not safe, a scheduled follow's time outside continuous trading, the AI's web and X search on an audience
     without news articles, and every offered AI provider's model id and key. Raises one InvalidSettingsError with every
     refusal located once, never a value.
     """
@@ -996,6 +959,7 @@ def startup_settings(
         validate_accounts_environment(config)
         validate_registration(config)
         validate_google_sign_in(config)
+        validate_follow_times(config)
     except (TradingSetupError, AccountsSetupError) as error:
         raise InvalidSettingsError([locate(texts, error.path, str(error))]) from None
 
@@ -1134,6 +1098,22 @@ def validate_accounts_environment(config: AppConfig) -> SecretStr | None:
         )
 
     return None if config.accounts.key is None else validate_accounts_key(config.accounts.key, "ACCOUNTS_KEY")
+
+
+def validate_follow_times(config: AppConfig) -> None:
+    """
+    Refuses a time of ranking.follow_times outside continuous trading as market_hours defines it: a schedule at such a
+    time would never be due on a site that orders at a realtime quote.
+    """
+    hours = config.market_hours
+    outside = [offer for offer in config.ranking.follow_times if not hours.continuous_start <= offer < hours.closing_auction_start]
+
+    if outside:
+        raise TradingSetupError(
+            f"ranking.follow_times offers {', '.join(f'{offer:%H:%M}' for offer in outside)} outside continuous trading, which "
+            f"market_hours sets from {hours.continuous_start:%H:%M} to before {hours.closing_auction_start:%H:%M}",
+            "ranking.follow_times",
+        )
 
 
 def validate_registration(config: AppConfig) -> None:

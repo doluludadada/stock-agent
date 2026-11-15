@@ -19,6 +19,7 @@ import {
   spanOf,
   stockNames,
   turnover,
+  unfinishedReason,
   yearRows,
   type Ranking,
   type RankingBacktest,
@@ -223,5 +224,17 @@ describe('offeredTimes', () => {
     expect(offeredTimes({ time: '10:00:00', times })).toEqual(times)
     expect(offeredTimes({ time: null, times })).toEqual(times)
     expect(offeredTimes({ time: '09:30:00', times })).toEqual(['09:05:00', '09:30:00', '10:00:00'])
+  })
+})
+
+describe('unfinishedReason', () => {
+  const ended = { failure: null, end_time: '2026-11-11T01:06:00Z', ranking_open: 2 }
+
+  it('reads why a scheduled follow left its decision pending from the record, an error before anything else', () => {
+    expect(unfinishedReason(ended)).toBe('left')
+    expect(unfinishedReason({ ...ended, ranking_open: null })).toBe('notStarted')
+    expect(unfinishedReason({ ...ended, end_time: null, ranking_open: null })).toBe('neverEnded')
+    expect(unfinishedReason({ ...ended, failure: 'The broker did not answer.' })).toBe('failed')
+    expect(unfinishedReason({ failure: 'The broker did not answer.', end_time: null, ranking_open: null })).toBe('failed')
   })
 })

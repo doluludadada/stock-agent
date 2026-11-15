@@ -35,12 +35,15 @@ class ApiConfig(BaseSettings):
     follow_schedule_poll_seconds: Annotated[
         float,
         Field(
-            gt=0,
+            ge=5,
             le=3600,
             json_schema_extra={"steps": [15, 30, 60, 120, 300], "unit": SettingUnit.SECONDS, "group": SettingGroup.RANKING},
         ),
     ] = 60
-    """How often the Web API looks whether a user's scheduled ranking follow is due."""
+    """
+    How often the Web API looks whether a user's scheduled ranking follow is due. Each look reads the users, so it is
+    never more often than every 5 seconds.
+    """
 
     valuation_cache_minutes: Annotated[
         float,
@@ -55,14 +58,15 @@ class ApiConfig(BaseSettings):
     world_interval_minutes: Annotated[
         float,
         Field(
-            gt=0,
+            ge=5,
             le=1440,
             json_schema_extra={"steps": [15, 30, 60, 120, 180], "unit": SettingUnit.MINUTES, "group": SettingGroup.DATA_HISTORY},
         ),
     ] = 30
     """
     How often the Web API reads the world news feeds and the world indicators' tables, from its start on, and looks
-    whether the day's world brief is due. A wire service's feed lists only its last few hours.
+    whether the day's world brief is due. A wire service's feed lists only its last few hours. Each read asks every
+    publisher, so it is never more often than every 5 minutes.
     """
 
     archive_interval_hours: Annotated[

@@ -125,7 +125,7 @@ class DailyStockBrief:
         previous = await self._briefs.latest_written(stock_id, now.date())
         left = max(0, self._daily_stocks - await self._briefs.claimed_stocks(now.date()))
 
-        if today is not None and today.status == BriefStatus.WRITING and today.claimed_at < now - self._claim_time:
+        if today is not None and today.abandoned(now - self._claim_time):
             today.fail()
 
         return today, previous, left

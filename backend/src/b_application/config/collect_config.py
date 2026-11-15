@@ -57,7 +57,7 @@ class StockBriefConfig(BaseModel):
     articles: int = Field(default=12, ge=1, le=50, json_schema_extra={"operator_only": True})
     """The most held months of revenue, quarters with an EPS, and announcements, news items and posts a brief's prompt holds."""
 
-    article_text_length: int = Field(default=200, ge=0, le=2000, json_schema_extra={"operator_only": True})
+    article_text_length: int = Field(default=200, ge=1, le=2000, json_schema_extra={"operator_only": True})
     """The characters of an announcement's or an exchange news item's own text the prompt holds after its title."""
 
     largest_moves: int = Field(default=3, ge=1, le=10, json_schema_extra={"operator_only": True})
@@ -313,11 +313,17 @@ class WorldBriefConfig(BaseModel):
     articles: int = Field(default=60, ge=1, le=300, json_schema_extra={"operator_only": True})
     """The most world news items a brief's prompt holds: those its search finds closest to world_brief_query, newest first."""
 
-    article_text_length: int = Field(default=240, ge=0, le=2000, json_schema_extra={"operator_only": True})
+    article_text_length: int = Field(default=240, ge=1, le=2000, json_schema_extra={"operator_only": True})
     """The characters of a feed's own summary the prompt holds after an item's title."""
 
     indicator_days: int = Field(default=5, ge=1, le=30, json_schema_extra={"operator_only": True})
     """An indicator whose newest held reading is older than this many days is left out of a brief."""
+
+    stock_name_length: int = Field(default=2, ge=1, le=10, json_schema_extra={"operator_only": True})
+    """
+    The fewest characters of a listed stock's name a news item must hold to name that stock: a name of one character
+    stands in too many words.
+    """
 
     sentences: int = Field(default=8, ge=1, le=20)
     sentence_length: int = Field(default=400, ge=50, le=2000, json_schema_extra={"operator_only": True})
@@ -337,6 +343,7 @@ class WorldBriefConfig(BaseModel):
             articles=self.articles,
             article_text_length=self.article_text_length,
             indicator_days=self.indicator_days,
+            stock_name_length=self.stock_name_length,
         )
 
     def due_rule(self, on: bool, claim_minutes: int) -> WorldBriefDueRule:
