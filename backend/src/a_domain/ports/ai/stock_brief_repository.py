@@ -7,7 +7,8 @@ from a_domain.model.analysis.stock_brief import StockBrief
 class IStockBriefRepository(Protocol):
     """
     The site's AI briefs: one per stock and Taipei calendar day, shared by every viewer and kept across restarts, so a
-    day's brief of a stock is paid for once. Past days' briefs are kept.
+    day's brief of a stock is paid for once. Past days' briefs are kept. The world briefs are kept the same way, under
+    MarketScope.WORLD in place of a stock.
     """
 
     async def find(self, stock_id: str, day: date) -> StockBrief | None:
@@ -16,6 +17,10 @@ class IStockBriefRepository(Protocol):
 
     async def latest_written(self, stock_id: str, before: date) -> StockBrief | None:
         """The stock's newest written brief of a day before `before`."""
+        ...
+
+    async def recent(self, stock_id: str, limit: int) -> list[StockBrief]:
+        """The stock's written briefs, newest day first, at most limit."""
         ...
 
     async def claimed_stocks(self, day: date) -> int:

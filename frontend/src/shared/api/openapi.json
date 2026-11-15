@@ -972,6 +972,13 @@
             "title": "Sources",
             "type": "array"
           },
+          "stocks": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Stocks",
+            "type": "array"
+          },
           "text": {
             "$ref": "#/components/schemas/NonEmptyText"
           }
@@ -996,6 +1003,16 @@
           },
           "kind": {
             "$ref": "#/components/schemas/BriefSourceKind"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InformationSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "title": {
             "anyOf": [
@@ -1041,7 +1058,9 @@
           "news",
           "post",
           "annual_report",
-          "profile"
+          "profile",
+          "world_news",
+          "indicator"
         ],
         "title": "BriefSourceKind",
         "type": "string"
@@ -2027,7 +2046,8 @@
           "mock_account",
           "sinopac_account",
           "sinopac_ordering",
-          "holdings"
+          "holdings",
+          "world"
         ],
         "title": "Feature",
         "type": "string"
@@ -2686,6 +2706,67 @@
         "maximum": 500.0,
         "type": "integer"
       },
+      "IndicatorReading": {
+        "description": "One world indicator on one day, as its source served it, beside the reading the site holds of the day before it:\na source serves the first alone, and the site's store answers both.",
+        "properties": {
+          "change": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How far it moved from the reading before: for an indicator in percent, the difference in percentage points\n(0.05 is five hundredths of a point more); for any other, the share of the reading before (0.012 is 1.2% more).\nNone without a reading before, or one of 0.",
+            "readOnly": true,
+            "title": "Change"
+          },
+          "day": {
+            "format": "date",
+            "title": "Day",
+            "type": "string"
+          },
+          "indicator": {
+            "$ref": "#/components/schemas/WorldIndicator"
+          },
+          "previous": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous"
+          },
+          "previous_day": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Day"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "indicator",
+          "day",
+          "value",
+          "change"
+        ],
+        "title": "IndicatorReading",
+        "type": "object"
+      },
       "IndicatorValue": {
         "additionalProperties": false,
         "description": "One output of one of the strategy's indicators, `bars_ago` trading days before the latest daily bar.\n`{\"type\": \"indicator\", \"indicator_id\": \"ind_b\", \"output\": \"signal\"}` is the MACD signal line of indicator ind_b.",
@@ -2721,7 +2802,10 @@
           "news_media",
           "ptt_stock",
           "ptt_gossiping",
-          "annual_report"
+          "annual_report",
+          "cna",
+          "bbc",
+          "federal_reserve"
         ],
         "title": "InformationSource",
         "type": "string"
@@ -5384,7 +5468,7 @@
         "type": "object"
       },
       "StockBrief": {
-        "description": "The AI's short description of one stock on one Taipei calendar day, shared by every viewer of the site: what the\ncompany is, and how the held facts of a recent window of sessions relate to the stock's move over it. It describes\nand never advises. One exists per stock and day; its status says whether the AI is still asked. A company card is\none too (BriefKind): it holds the `company` part alone, under the day it was claimed on, and the newest written one\nis the company's card.",
+        "description": "The AI's short description of one stock on one Taipei calendar day, shared by every viewer of the site: what the\ncompany is, and how the held facts of a recent window of sessions relate to the stock's move over it. It describes\nand never advises. One exists per stock and day; its status says whether the AI is still asked. A company card is\none too (BriefKind): it holds the `company` part alone, under the day it was claimed on, and the newest written one\nis the company's card. So is the day's world brief, whose `stock_id` is MarketScope.WORLD: it holds the `movement`\npart alone, what moved in the held world indicators and which held world news may bear on Taiwan's market.",
         "properties": {
           "claimed_at": {
             "format": "date-time",
@@ -6965,6 +7049,65 @@
         ],
         "title": "Workflow",
         "type": "string"
+      },
+      "WorldIndicator": {
+        "description": "A figure of the world's markets the site holds one reading a day of, each from a public agency that serves it\nwithout a key: the Taiwan Futures Exchange's daily reference exchange rates and the United States Treasury's\ndaily yields.",
+        "enum": [
+          "usd_twd",
+          "usd_jpy",
+          "eur_usd",
+          "usd_cny",
+          "us_10y_yield",
+          "us_2y_yield"
+        ],
+        "title": "WorldIndicator",
+        "type": "string"
+      },
+      "WorldResponse": {
+        "description": "What the site holds of the world outside Taiwan's exchanges: the world indicators, the world briefs and the world\nnews. A brief's sentences are the AI's wording of held items, each naming those it rests on; it describes and gives\nno advice. A news item's title and summary are its publisher's.",
+        "properties": {
+          "briefs": {
+            "items": {
+              "$ref": "#/components/schemas/StockBrief"
+            },
+            "title": "Briefs",
+            "type": "array"
+          },
+          "indicators": {
+            "items": {
+              "$ref": "#/components/schemas/IndicatorReading"
+            },
+            "title": "Indicators",
+            "type": "array"
+          },
+          "news": {
+            "items": {
+              "$ref": "#/components/schemas/StockNewsItemResponse"
+            },
+            "title": "News",
+            "type": "array"
+          },
+          "write_at": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Write At"
+          }
+        },
+        "required": [
+          "indicators",
+          "briefs",
+          "news",
+          "write_at"
+        ],
+        "title": "WorldResponse",
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -10501,6 +10644,33 @@
         "summary": "Handle Line Webhook",
         "tags": [
           "LINE Webhook"
+        ]
+      }
+    },
+    "/v1/world": {
+      "get": {
+        "description": "What the site holds of the world outside Taiwan's exchanges, with no fetch and no AI call. `indicators`: each held\nworld indicator's newest reading, the one before it and its change. `briefs`: the written world briefs of the\nlatest world.brief.shown_days days that have one, newest first; the site writes one per Taipei day from\nworld.brief.write_at on, and each sentence is the AI's wording of held readings and held news items and names\nthose it rests on, with the listed stocks a cited item names itself. `news`: the newest world.shown kept items of\nthe world news feeds, each with its publisher, its time, its address and the feed's own summary. `write_at` is\nthe Taipei time from which the site writes the day's brief, null on a site that writes none. Every title and\nsummary is a third party's: show it as text, never as markup. Private.",
+        "operationId": "get_world_v1_world_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorldResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Get World",
+        "tags": [
+          "World"
         ]
       }
     }

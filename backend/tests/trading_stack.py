@@ -25,6 +25,7 @@ from support.fakes import (
     FakeUsersStocks,
     FakeUserStore,
     FakeWatchlistRepository,
+    FakeWorldIndicatorRepository,
 )
 from support.harness import ADMINISTRATOR, ADMINISTRATOR_PASSWORD, UNUSED_PROJECT_ROOT, harness_config, harness_settings
 from support.settings import shipped_config
@@ -209,6 +210,9 @@ async def open_stack(
         stock_brief_repository=FakeStockBriefRepository(),
         company_card_repository=FakeStockBriefRepository(),
         system_writing_log=FakeSystemWritingLog(),
+        world_brief_repository=FakeStockBriefRepository(),
+        world_indicator_repository=FakeWorldIndicatorRepository(),
+        world_feed=None,
         system_ai_provider=FakeAiProvider(),
         company_profile_repository=FakeCompanyProfileRepository(),
         article_store=FakeArticleStore(

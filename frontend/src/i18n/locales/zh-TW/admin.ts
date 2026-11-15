@@ -38,6 +38,7 @@ const admin: DictionaryShape<typeof en> = {
       sentiment: '社群熱度情緒',
       quality: '文章品質',
       stock_page: '個股頁面',
+      world: '國際新聞與摘要',
       market: '手續費、稅與升降單位',
       freshness: '資料新鮮度',
       market_data: '行情資料請求',
@@ -52,6 +53,7 @@ const admin: DictionaryShape<typeof en> = {
     },
     heading: {
       stock_page: { brief: 'AI 摘要', article_store: '保存的文章' },
+      world: { brief: '國際局勢摘要' },
     },
     group: {
       site_access: { title: '網站與存取', description: '網站給誰使用、誰能註冊與登入，以及每位使用者的用量上限。' },
@@ -96,6 +98,7 @@ const admin: DictionaryShape<typeof en> = {
         sinopac_account: '永豐金證券帳戶',
         sinopac_ordering: '永豐金下單',
         holdings: '我的持股',
+        world: '國際局勢',
       },
       holdings: {
         concentration_positions: '計算集中度的最大持股檔數',
@@ -115,6 +118,7 @@ const admin: DictionaryShape<typeof en> = {
       api: {
         valuation_cache_minutes: '市場估值資料保留（分鐘）',
         archive_interval_hours: '開放資料存檔間隔（小時）',
+        world_interval_minutes: '讀取國際新聞來源的間隔（分鐘）',
       },
       tavily: {
         search_depth: '搜尋深度',
@@ -153,6 +157,8 @@ const admin: DictionaryShape<typeof en> = {
         stock_brief_fall_query: '股價下跌時，AI 摘要在保存的文章中搜尋的內容',
         stock_brief_company_query: 'AI 摘要為了說明公司業務而搜尋的內容',
         company_card: '個股頁面公司簡介提示詞',
+        world_brief: '國際局勢摘要提示詞',
+        world_brief_query: '國際局勢摘要在保存的國際新聞中搜尋的內容',
       },
       sentiment: {
         min_confidence: '貼文最低信心度',
@@ -177,6 +183,13 @@ const admin: DictionaryShape<typeof en> = {
         article_store: {
           retention_days: '文章保存天數',
           max_per_stock: '每檔股票最多保存的文章數',
+        },
+      },
+      world: {
+        retention_days: '國際新聞保存天數',
+        brief: {
+          write_at: '每日國際局勢摘要的撰寫時間（台灣時間）',
+          window_hours: '摘要讀取的國際新聞時數',
         },
       },
       market: {
@@ -282,6 +295,7 @@ const admin: DictionaryShape<typeof en> = {
         sinopac_account: '永豐金證券帳戶頁面，只讀取券商回報的帳戶：銀行餘額、庫存、交割款與成交。也讓「我的持股」計入這個帳戶的庫存。隱藏後，頁面會消失，也不再讀取這個帳戶的庫存。這項功能不會下單。',
         sinopac_ordering: '本站是否可以在永豐金下單：分析任務下單或手動買進時可選擇永豐金。預設關閉，關閉時任何委託都不會送到永豐金。它不影響帳戶頁面是否顯示。伺服器對真實券商的其他規則照常適用。',
         holdings: '「我的持股」頁面：把使用者的持股當成一個投資組合來看，附上每檔股票的排行分數與營收，以及手動輸入的紀錄。隱藏後，頁面會從導覽消失，也不再讀取任何持股。',
+        world: '「國際局勢」頁面與首頁的國際局勢區塊：國際指標、每日 AI 國際局勢摘要與國際新聞。關閉後，網站也不再讀取國際新聞來源，也不寫摘要。',
       },
       holdings: {
         concentration_positions: '「我的持股」計算集中度時，加總市值最大的幾檔股票。',
@@ -301,6 +315,7 @@ const admin: DictionaryShape<typeof en> = {
       api: {
         valuation_cache_minutes: 'Web API 在多次估值請求之間，重複使用已載入的市場估值資料（上市櫃清單與公開資訊觀測站的 EPS）的時間。',
         archive_interval_hours: 'Web API 多久把證交所與櫃買中心開放資料的收盤資料存進存檔一次。OpenAPI 每個交易日的資料大約提供一天，所以伺服器運作期間，間隔幾小時不會漏掉任何一天。',
+        world_interval_minutes: 'Web API 多久讀一次國際新聞來源與國際指標，並檢查當天的國際局勢摘要是否該寫了。通訊社的來源只列出最近幾小時的新聞。',
       },
       tavily: {
         search_depth: 'Tavily 每次網路搜尋的深度。「基本」較快；「進階」讀得較多，費用也較高。',
@@ -342,6 +357,8 @@ const admin: DictionaryShape<typeof en> = {
         stock_brief_company_query:
           '這不是提示詞，不會送給 AI。摘要會取出意思最接近這些詞的保存文章，用來說明公司生產或銷售什麼。請用文章的語言填寫，不必寫公司名稱。留空時不搜尋。',
         company_card: 'AI 依公司基本資料與股東會年報寫一次公司簡介，資料或這段提示詞變動時才重寫。留空時不寫簡介。',
+        world_brief: 'AI 依網站保存的指標與國際新聞寫每日國際局勢摘要。提示詞必須包含 {facts}、{language} 與 {sentences}。留空時不寫摘要。',
+        world_brief_query: '這不是提示詞，不會送給 AI。摘要會取出意思最接近這些詞的保存國際新聞。留空時改讀最新的新聞。',
       },
       sentiment: {
         min_confidence: 'AI 判讀信心度低於這個值（0 到 1）的貼文算作「不明」。社群熱度報告的情緒只供參考，不會改變訊號或委託。',
@@ -367,6 +384,13 @@ const admin: DictionaryShape<typeof en> = {
           retention_days:
             '網站會保存讀過的每檔股票相關文章：重大訊息、證交所新聞，個人站台另外保存新聞文章與 PTT 文章標題。發布超過這個天數的文章會被刪除。個股頁面列出保存的文章，AI 摘要也從中搜尋。',
           max_per_stock: '每檔股票最多保存多少篇文章。超過時刪除最舊的。',
+        },
+      },
+      world: {
+        retention_days: '發布超過這個天數的國際新聞會被刪除。摘要引用的新聞會留在摘要裡。',
+        brief: {
+          write_at: '從這個時間起，網站下一次讀取新聞來源時撰寫當天的國際局勢摘要：美股收盤之後、台股開盤之前。',
+          window_hours: '摘要讀取撰寫前多少小時內的國際新聞。',
         },
       },
       market: {

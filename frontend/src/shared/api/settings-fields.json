@@ -105,6 +105,13 @@
     "unit": "minutes"
   },
   {
+    "path": "api.world_interval_minutes",
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": "minutes"
+  },
+  {
     "path": "api.archive_interval_hours",
     "kind": "steps",
     "group": "data_history",
@@ -391,6 +398,20 @@
     "unit": null
   },
   {
+    "path": "prompts.world_brief",
+    "kind": "text",
+    "group": "advanced",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "prompts.world_brief_query",
+    "kind": "text",
+    "group": "advanced",
+    "options": [],
+    "unit": null
+  },
+  {
     "path": "sentiment.min_confidence",
     "kind": "range",
     "group": "data_history",
@@ -497,6 +518,27 @@
     "group": "data_history",
     "options": [],
     "unit": null
+  },
+  {
+    "path": "world.retention_days",
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": "days"
+  },
+  {
+    "path": "world.brief.write_at",
+    "kind": "time",
+    "group": "data_history",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "world.brief.window_hours",
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": "hours"
   },
   {
     "path": "market.fee_rate",
@@ -1036,6 +1078,17 @@
   },
   {
     "path": "features.holdings",
+    "kind": "choice",
+    "group": "features",
+    "options": [
+      "off",
+      "administrators",
+      "everyone"
+    ],
+    "unit": null
+  },
+  {
+    "path": "features.world",
     "kind": "choice",
     "group": "features",
     "options": [

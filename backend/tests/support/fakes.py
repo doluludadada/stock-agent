@@ -10,7 +10,7 @@ import json
 import math
 import re
 import zlib
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
@@ -28,6 +28,7 @@ from a_domain.model.market.article import Article
 from a_domain.model.market.company_profile import CompanyProfile
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
+from a_domain.model.market.world_indicator import IndicatorReading
 from a_domain.model.system.stats import SystemStats
 from a_domain.model.system.user import User, UserSession
 from a_domain.model.trading.account import (
@@ -78,6 +79,7 @@ from a_domain.types.enums import (
     UserStatus,
     WatchlistType,
     Workflow,
+    WorldIndicator,
 )
 from a_domain.types.errors import (
     AlreadySetUpError,
@@ -874,6 +876,10 @@ class FakeStockBriefRepository:
         ]
         return max(written, key=lambda brief: brief.day, default=None)
 
+    async def recent(self, stock_id: str, limit: int) -> list[StockBrief]:
+        written = [brief for (held_id, _), brief in self.rows.items() if held_id == stock_id and brief.status == BriefStatus.WRITTEN]
+        return [replace(brief) for brief in sorted(written, key=lambda brief: brief.day, reverse=True)[:limit]]
+
     async def claimed_stocks(self, day: date) -> int:
         return sum(held_day == day for _, held_day in self.rows.keys() - self.by_system)
 
@@ -930,28 +936,46 @@ class FakeTextEmbedder:
 
 
 class FakeArticleStore:
-    """Like the SQL store: one article per stock and key, replaced only when its title or text changed, within retention."""
+    """
+    Like the SQL store: one article per stock and key, replaced only when its title or text changed, within retention.
+    A key of `own_bounds` is no stock's: it is no stock of stock_ids.
+    """
 
-    def __init__(self, clock: IMarketClock, retention: timedelta, max_per_stock: int) -> None:
+    def __init__(
+        self,
+        clock: IMarketClock,
+        retention: timedelta,
+        max_per_stock: int,
+        own_bounds: Mapping[str, tuple[timedelta, int]] | None = None,
+    ) -> None:
         self.clock = clock
         self.retention = retention
         self.max_per_stock = max_per_stock
+        self.own_bounds = own_bounds or {}
         self.rows: dict[tuple[str, str], Article] = {}
 
     async def save(self, articles: Sequence[Article]) -> int:
         now = self.clock.now()
         changed = 0
 
+        named = {article.stock_id for article in articles}
+        since = {stock_id: now - min(self.own_bounds.get(stock_id, (self.retention, 0))[0], self.retention) for stock_id in named}
+        most = {stock_id: self.own_bounds.get(stock_id, (self.retention, self.max_per_stock))[1] for stock_id in named}
+
         for article in articles:
             held = self.rows.get((article.stock_id, article.key))
 
-            if article.published_at >= now - self.retention and (
+            if article.published_at >= since[article.stock_id] and (
                 held is None or (held.title, held.content) != (article.title, article.content)
             ):
                 self.rows[(article.stock_id, article.key)] = replace(article, fetched_at=now)
                 changed += 1
 
-        kept = {place: article for place, article in self.rows.items() if article.published_at >= now - self.retention}
+        kept = {
+            place: article
+            for place, article in self.rows.items()
+            if article.published_at >= since.get(article.stock_id, now - self.retention)
+        }
         self.rows = {
             (article.stock_id, article.key): article
             for stock_id in {stock_id for stock_id, _ in kept}
@@ -959,7 +983,7 @@ class FakeArticleStore:
                 (article for article in kept.values() if article.stock_id == stock_id),
                 key=lambda article: article.published_at,
                 reverse=True,
-            )[: self.max_per_stock if any(given.stock_id == stock_id for given in articles) else None]
+            )[: most.get(stock_id)]
         }
         return changed
 
@@ -974,7 +998,7 @@ class FakeArticleStore:
         return [replace(article) for (held_id, key), article in self.rows.items() if held_id == stock_id and key in keys]
 
     async def stock_ids(self) -> list[str]:
-        return sorted({stock_id for stock_id, _ in self.rows})
+        return sorted({stock_id for stock_id, _ in self.rows} - set(self.own_bounds))
 
 
 class FakeArticleIndex:
@@ -1001,6 +1025,55 @@ class FakeArticleIndex:
             if held_id == stock_id and (first is None or day >= first) and (last is None or day < last)
         }
         return sorted(within, key=lambda key: within[key], reverse=True)[:limit]
+
+
+class FakeWorldFeed:
+    """The world's feeds as a test sets them: the items and the readings they list now, and how often each was asked."""
+
+    def __init__(self) -> None:
+        self.news: list[Article] = []
+        self.readings: list[IndicatorReading] = []
+        self.asked = 0
+
+    async def fetch_news(self) -> list[Article]:
+        self.asked += 1
+        return [replace(article) for article in self.news]
+
+    async def fetch_indicators(self) -> list[IndicatorReading]:
+        return list(self.readings)
+
+
+class FakeWorldIndicatorRepository:
+    """Like the SQL repository: one reading per indicator and day, and each indicator's newest beside the one before it."""
+
+    def __init__(self) -> None:
+        self.rows: dict[tuple[str, date], float] = {}
+
+    async def save(self, readings: Sequence[IndicatorReading]) -> int:
+        given = {(reading.indicator.value, reading.day): reading.value for reading in readings}
+        changed = {place: value for place, value in given.items() if self.rows.get(place) != value}
+        self.rows.update(changed)
+        return len(changed)
+
+    async def latest(self) -> list[IndicatorReading]:
+        answered = []
+
+        for indicator in WorldIndicator:
+            days = sorted((day for name, day in self.rows if name == indicator.value), reverse=True)[:2]
+
+            if days:
+                before = days[1] if len(days) > 1 else None
+                answered.append(
+                    IndicatorReading(
+                        indicator=indicator,
+                        day=days[0],
+                        value=self.rows[(indicator.value, days[0])],
+                        previous_day=before,
+                        previous=self.rows[(indicator.value, before)] if before is not None else None,
+                    )
+                )
+
+        return answered
 
 
 class FakeSystemWritingLog:

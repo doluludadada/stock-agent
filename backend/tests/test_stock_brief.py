@@ -354,7 +354,7 @@ async def test_a_visitor_reads_a_stored_brief_and_never_causes_a_call() -> None:
     today = seen.json()["today"]
     assert (today["status"], today["model"], today["language"], today["day"]) == ("written", "claude-haiku-5-5", "zh-TW", "2026-10-19")
     assert (today["window_first"], today["window_last"], today["price_change"]) == ("2026-10-09", "2026-10-18", pytest.approx(0.09))
-    assert today["movement"] == [{"text": "The close rose over the window; revenue grew.", "sources": ["S2", "S3"]}]
+    assert today["movement"] == [{"text": "The close rose over the window; revenue grew.", "sources": ["S2", "S3"], "stocks": []}]
     assert [(source["key"], source["kind"], source["dated"]) for source in today["sources"]] == [
         ("S1", "company", "2026-10-19"),
         ("S2", "price", "2026-10-18"),

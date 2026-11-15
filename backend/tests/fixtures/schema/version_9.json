@@ -2316,5 +2316,107 @@
       "run_id"
     ],
     "unique": []
+  },
+  "world_briefs": {
+    "columns": {
+      "claimed_at": {
+        "class": "UtcDateTime",
+        "nullable": false,
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
+      },
+      "company": {
+        "class": "Text",
+        "nullable": false,
+        "postgresql": "TEXT"
+      },
+      "day": {
+        "class": "Date",
+        "nullable": false,
+        "postgresql": "DATE"
+      },
+      "language": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR"
+      },
+      "model": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR"
+      },
+      "movement": {
+        "class": "Text",
+        "nullable": false,
+        "postgresql": "TEXT"
+      },
+      "price_change": {
+        "class": "Float",
+        "nullable": true,
+        "postgresql": "FLOAT"
+      },
+      "sources": {
+        "class": "Text",
+        "nullable": false,
+        "postgresql": "TEXT"
+      },
+      "status": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR"
+      },
+      "stock_id": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR"
+      },
+      "window_first": {
+        "class": "Date",
+        "nullable": true,
+        "postgresql": "DATE"
+      },
+      "window_last": {
+        "class": "Date",
+        "nullable": true,
+        "postgresql": "DATE"
+      },
+      "written_at": {
+        "class": "UtcDateTime",
+        "nullable": true,
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "primary_key": [
+      "stock_id",
+      "day"
+    ],
+    "unique": []
+  },
+  "world_indicator_readings": {
+    "columns": {
+      "day": {
+        "class": "Date",
+        "nullable": false,
+        "postgresql": "DATE"
+      },
+      "indicator": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR"
+      },
+      "value": {
+        "class": "Float",
+        "nullable": false,
+        "postgresql": "FLOAT"
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "primary_key": [
+      "indicator",
+      "day"
+    ],
+    "unique": []
   }
 }

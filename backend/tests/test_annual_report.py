@@ -462,7 +462,7 @@ async def test_a_site_that_reads_no_annual_report_reads_nothing() -> None:
 
 async def test_a_stock_s_news_never_pushes_its_annual_report_out_of_the_store(database: DatabaseConnector) -> None:
     clock = MovableClock(NOW)
-    store = SqlArticleStore(database, clock, timedelta(days=730), 3)
+    store = SqlArticleStore(database, clock, timedelta(days=730), 3, {})
     report = [section("5209", 2025, name) for name in ("business_scope", "product_mix")]
     news = [
         replace(

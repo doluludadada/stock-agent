@@ -1,8 +1,9 @@
-from datetime import timedelta
+from datetime import time, timedelta
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from a_domain.rules.ai.stock_brief import BriefContextRule, BriefReplyRule, BriefSearchRule
+from a_domain.rules.ai.world_brief import WorldBriefContextRule, WorldBriefDueRule
 from a_domain.rules.collect.freshness import DataFreshnessRule, MissingSessionRule, RealtimeQuoteRule
 from a_domain.rules.collect.kept_article import KeptArticleRule
 from a_domain.rules.fundamentals.stock_analysis import ValuationStandingRule
@@ -285,6 +286,96 @@ class StockPageConfig(BaseModel):
 
     def valuation_rule(self) -> ValuationStandingRule:
         return ValuationStandingRule(min_sessions=self.valuation_min_sessions)
+
+
+class WorldBriefConfig(BaseModel):
+    """
+    The day's world brief: what moved in the held world indicators and which held world news may bear on Taiwan's
+    market, written once per Taipei day by the site's own writing, on its AI model and its budget
+    (stock_page.system_writing). Its language is the stock brief's (stock_page.brief.language), and its prompt is
+    world_brief_prompt in config/instructions.yaml.
+    """
+
+    model_config = ConfigDict(use_attribute_docstrings=True)
+
+    write_at: time = time(7, 30)
+    """
+    The Taipei time from which the day's brief is written, at the world timer's next round: after the United States
+    session's close and its yields, before the Taiwan open.
+    """
+
+    window_hours: int = Field(default=24, ge=6, le=72, json_schema_extra={"steps": [12, 24, 36, 48, 72], "unit": SettingUnit.HOURS})
+    """The hours of world news before its writing a brief reads."""
+
+    articles: int = Field(default=60, ge=1, le=300, json_schema_extra={"operator_only": True})
+    """The most world news items a brief's prompt holds: those its search finds closest to world_brief_query, newest first."""
+
+    article_text_length: int = Field(default=240, ge=0, le=2000, json_schema_extra={"operator_only": True})
+    """The characters of a feed's own summary the prompt holds after an item's title."""
+
+    indicator_days: int = Field(default=5, ge=1, le=30, json_schema_extra={"operator_only": True})
+    """An indicator whose newest held reading is older than this many days is left out of a brief."""
+
+    sentences: int = Field(default=8, ge=1, le=20, json_schema_extra={"operator_only": True})
+    sentence_length: int = Field(default=400, ge=50, le=2000, json_schema_extra={"operator_only": True})
+    """The most sentences a brief keeps, and the characters a sentence is cut at."""
+
+    retry_minutes: int = Field(default=120, ge=5, le=1440, json_schema_extra={"operator_only": True})
+    """How long after a failed brief was asked for the day's brief is asked for again, so a failure spends few AI calls."""
+
+    shown_days: int = Field(default=14, ge=1, le=90, json_schema_extra={"operator_only": True})
+    """The most past days' briefs the world page offers."""
+
+    def context_rule(self) -> WorldBriefContextRule:
+        return WorldBriefContextRule(
+            window_hours=self.window_hours,
+            articles=self.articles,
+            article_text_length=self.article_text_length,
+            indicator_days=self.indicator_days,
+        )
+
+    def due_rule(self, on: bool, claim_minutes: int) -> WorldBriefDueRule:
+        """When the day's brief is asked for; `on` is whether the site writes one at all, `claim_minutes` the stock brief's."""
+        return WorldBriefDueRule(
+            on=on, write_at=self.write_at, retry=timedelta(minutes=self.retry_minutes), claim_time=timedelta(minutes=claim_minutes)
+        )
+
+    def reply_rule(self, advice_phrases: frozenset[str], link_pattern: str) -> BriefReplyRule:
+        """The reply contract; the phrases and the link pattern are the stock brief's."""
+        return BriefReplyRule(
+            kind=BriefKind.WORLD,
+            sentences=self.sentences,
+            sentence_length=self.sentence_length,
+            link_pattern=link_pattern,
+            advice_phrases=advice_phrases,
+        )
+
+
+class WorldConfig(BaseModel):
+    """
+    The world outside Taiwan's exchanges: the world news feeds' items, kept in the article store with a vector each,
+    the world indicators' daily readings, and the day's world brief. The Web API's world timer reads the feeds named
+    under sources.world every api.world_interval_minutes; a file that names none reads nothing.
+    """
+
+    model_config = ConfigDict(use_attribute_docstrings=True)
+
+    retention_days: int = Field(default=14, ge=1, le=365, json_schema_extra={"steps": [7, 14, 30, 60, 90], "unit": SettingUnit.DAYS})
+    """A world news item published longer ago than this is dropped. The briefs keep the items they cite."""
+
+    max_items: int = Field(default=3000, ge=100, le=50_000, json_schema_extra={"operator_only": True})
+    """The most world news items kept, the newest first."""
+
+    shown: int = Field(default=200, ge=1, le=1000, json_schema_extra={"operator_only": True})
+    """The most kept items the world page lists, the newest first."""
+
+    summary_length: int = Field(default=400, ge=0, le=4000, json_schema_extra={"operator_only": True})
+    """The characters of a feed's own summary of an item that are kept."""
+
+    brief: WorldBriefConfig = Field(default_factory=WorldBriefConfig)
+
+    def retention(self) -> timedelta:
+        return timedelta(days=self.retention_days)
 
 
 class QualityFiltersConfig(BaseModel):

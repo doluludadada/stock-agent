@@ -21,6 +21,7 @@ const common = {
     account: 'Mock account',
     brokerage: 'SinoPac account',
     holdings: 'My holdings',
+    world: 'World',
     settings: 'My settings',
     admin: 'System settings',
     users: 'Users',
@@ -92,6 +93,8 @@ const common = {
     themes: { dark: 'Dark', light: 'Light', system: 'Match system' },
   },
   direction: { up: 'Up', down: 'Down', flat: 'Unchanged' },
+  ai: { generated: 'AI-generated, may be wrong', writtenAt: '{{time}} Taipei' },
+  opensSource: '(opens the source in a new tab)',
   units: { lots: '{{value}} lots', closeOn: '{{date}} close' },
   range: { '1M': '1M', '3M': '3M', '6M': '6M', '1Y': '1Y' },
   trend: {

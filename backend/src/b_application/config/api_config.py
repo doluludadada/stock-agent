@@ -42,6 +42,19 @@ class ApiConfig(BaseSettings):
     ] = 15
     """How long the Web API reuses a loaded market valuation (listings, MOPS EPS) across valuation requests."""
 
+    world_interval_minutes: Annotated[
+        float,
+        Field(
+            gt=0,
+            le=1440,
+            json_schema_extra={"steps": [15, 30, 60, 120, 180], "unit": SettingUnit.MINUTES, "group": SettingGroup.DATA_HISTORY},
+        ),
+    ] = 30
+    """
+    How often the Web API reads the world news feeds and the world indicators' tables, from its start on, and looks
+    whether the day's world brief is due. A wire service's feed lists only its last few hours.
+    """
+
     archive_interval_hours: Annotated[
         float,
         Field(
@@ -88,6 +101,8 @@ class FeaturesConfig(BaseModel):
     """
 
     holdings: FeatureVisibility = FeatureVisibility.EVERYONE
+    world: FeatureVisibility = FeatureVisibility.EVERYONE
+    """The world page and the home page's world block. Off, the site also reads no world feed and writes no world brief."""
 
     def visibility(self, feature: Feature) -> FeatureVisibility:
         return getattr(self, feature.value)

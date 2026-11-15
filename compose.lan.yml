@@ -1,0 +1,8 @@
+# The site on the home network too, over plain http: `COMPOSE_FILE="compose.yml:compose.lan.yml"` in .env adds it.
+# Set LAN_NAME there to the server's address on that network, and list it in api.allowed_hosts. Every device of that
+# network then reaches the sign-in page, and nothing encrypts what a browser there sends: frontend/docs/deployment.md.
+
+services:
+  frontend:
+    ports:
+      - "${LAN_NAME:?Set LAN_NAME in .env to the server's address on the home network}:${PROXY_PORT:-8080}:8080"

@@ -400,6 +400,34 @@ async def collect_daily_data(switch: RuntimeSwitch) -> None:
         await asyncio.sleep(interval * 3600)
 
 
+async def collect_world(switch: RuntimeSwitch) -> None:
+    """
+    The Web API's world timer, at the start, then every api.world_interval_minutes of the current settings, on the current
+    runtime: the world news feeds and the world indicators' tables read into what the site holds
+    (Pipeline.refresh_world), at the feeds' own pace, since a wire service's feed lists only its last few hours; then,
+    on the runtime's system writer, the day's world brief once it is due (Pipeline.write_world_brief), which is no
+    step while the site's own writing is off. A step never stops it on an error of its own: it logs it and tries again
+    at the next round; a spent budget of the site's own AI calls is said once a round. The lifespan cancels it at
+    shutdown and waits until the step it stopped has ended. It sends no order: neither operation has an order step.
+    """
+    while True:
+        with switch.hold() as opened:
+            interval = opened.runtime.config.api.world_interval_minutes
+            writer = opened.runtime.system_writer
+            steps = [(opened.runtime.signed_out.refresh_world, "The world could not be read")]
+            steps += [(writer.write_world_brief, "The world brief could not be written")] if writer is not None else []
+
+            for step, failure in steps:
+                try:
+                    await step()
+                except AiAllowanceSpentError as error:
+                    switch.logger.info(f"The world brief waits: {error}")
+                except Exception as error:
+                    switch.logger.error(f"{failure}: {type(error).__name__}: {error}")
+
+        await asyncio.sleep(interval * 60)
+
+
 async def write_for_system_stocks(pipeline: Pipeline | None, turns: BriefTurns, logger: ILoggingProvider) -> None:
     """
     The timer's last step, on the runtime's system writer (Runtime.system_writer), which is None, and the step

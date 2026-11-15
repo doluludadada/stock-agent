@@ -2,10 +2,18 @@ import math
 from datetime import date
 from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, NonNegativeInt, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, NonNegativeInt, field_validator, model_validator
 
 from a_domain.rules.collect.company_background import AnnualReportDueRule, MainBusinessDueRule
-from a_domain.types.enums import AnnualReportSection, FinancialStatement, IndustryFormat, MarketType
+from a_domain.types.enums import (
+    AnnualReportSection,
+    FinancialStatement,
+    IndustryFormat,
+    InformationSource,
+    MarketType,
+    TableFormat,
+    WorldIndicator,
+)
 
 COMPANY_BASICS_ADDRESS: dict[str, JsonValue] = {"without": "no company's main business is read from MOPS", "operator_only": True}
 
@@ -583,6 +591,70 @@ class NewsSources(BaseModel):
     yahoo_user_agent: str
 
 
+class WorldNewsFeed(BaseModel):
+    """One publisher's feed of world news, as RSS 2.0."""
+
+    source: InformationSource
+    url: str
+
+    @field_validator("source")
+    @classmethod
+    def a_world_source(cls, source: InformationSource) -> InformationSource:
+        if not source.is_world:
+            raise ValueError(f"{source.value} publishes no world news feed")
+
+        return source
+
+
+class WorldIndicatorFeed(BaseModel):
+    """
+    One public agency's table of dated rows that holds world indicators: where it is served, in which format, which
+    field dates a row and how, and which field holds which indicator.
+    """
+
+    model_config = ConfigDict(use_attribute_docstrings=True)
+
+    url: str
+    """The table's address. `{year}` in it is the current year in Taipei."""
+
+    format: TableFormat
+    date_field: str
+    date_format: str
+    """How date_field writes a day, as strptime reads it: %Y%m%d for 20261113."""
+
+    fields: dict[str, WorldIndicator]
+
+
+class WorldSources(BaseModel):
+    """
+    The world news feeds and the world indicators' tables, how long each may take, how large it may be and the
+    User-Agent it gets. A file without them, such as a deployment's older copy, reads none (`without`).
+    """
+
+    model_config = ConfigDict(use_attribute_docstrings=True)
+
+    news_feeds: list[WorldNewsFeed] = Field(default_factory=list, json_schema_extra={"without": "no world news is read"})
+    """The feeds read, in order. A site reads only those of the sources its audience may read (Audience.world_sources)."""
+
+    indicator_feeds: list[WorldIndicatorFeed] = Field(
+        default_factory=list, json_schema_extra={"without": "no world indicator is read"}
+    )
+    indicator_days: int = Field(default=14, ge=2, le=366)
+    """The days back whose readings of a table are kept at each read."""
+
+    user_agent: str = (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+    )
+    """A browser's, with nothing of the site or its owner in it."""
+
+    timeout_seconds: float = Field(default=20, gt=0, le=600)
+    request_pause_seconds: float = Field(default=2, ge=0, le=600)
+    """The least time between two requests of one read."""
+
+    max_bytes: int = Field(default=2_000_000, ge=1, le=100_000_000)
+    """A response larger than this is not read."""
+
+
 class AiSources(BaseModel):
     """The OpenAI-compatible endpoints of Grok, Groq and NVIDIA, and Tavily search."""
 
@@ -635,5 +707,6 @@ class SourcesConfig(BaseModel):
     annual_reports: AnnualReportSources = Field(default_factory=AnnualReportSources)
     ptt: PttSources
     news: NewsSources
+    world: WorldSources = Field(default_factory=WorldSources)
     ai: AiSources
     line: LineSources

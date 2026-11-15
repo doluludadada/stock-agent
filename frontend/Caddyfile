@@ -10,7 +10,7 @@
 	}
 }
 
-http://{$SITE_NAME:localhost}:8080 {
+http://{$SITE_NAME:localhost}:8080, http://{$LAN_NAME:127.0.0.1}:8080 {
 	encode zstd gzip
 
 	request_body {

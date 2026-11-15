@@ -214,6 +214,18 @@ class PromptsConfig(BaseModel):
     stock_brief_company_query: str = ""
     """What a stock brief looks for among the stock's kept articles to say what the company makes and sells. Empty, none."""
 
+    world_brief: Annotated[str, placeholders({"facts", "language", "sentences"}, {"window"})] = ""
+    """
+    The held readings and world news and the reply's language must reach the AI, which only describes them. Empty, no
+    world brief is written.
+    """
+
+    world_brief_query: str = ""
+    """
+    What a world brief looks for, by meaning, among the kept world news of its window, in the news' language. It is no
+    prompt: no AI reads it. Empty, a brief reads the window's newest items instead.
+    """
+
     def advice_phrases(self) -> frozenset[str]:
         return frozenset(line.strip() for line in self.stock_brief_advice_phrases.splitlines() if line.strip())
 

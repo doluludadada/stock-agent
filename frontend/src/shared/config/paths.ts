@@ -11,6 +11,7 @@ const fill = (pattern: string, value: string) => pattern.replace(/:\w+/, () => e
 export const paths = {
   home: '/',
   market: '/market',
+  world: '/world',
   runs: '/runs',
   run: (id: string) => fill(patterns.run, id),
   strategies: '/strategies',

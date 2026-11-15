@@ -1,5 +1,5 @@
 import { isApiError, type Schemas, type Session } from '@/shared/api'
-import { outboundUrl } from './model'
+import { outboundUrl } from '@/shared/lib/outbound-url'
 
 export type StockBriefAnswer = Schemas['StockBriefResponse']
 export type StockBrief = Schemas['StockBrief']
@@ -125,6 +125,8 @@ export const SECTION_ANCHORS = {
   post: 'stock-news-panel',
   annual_report: null,
   profile: null,
+  world_news: null,
+  indicator: null,
 } as const satisfies Record<BriefSource['kind'], string | null>
 
 export type SourceLink = { to: 'outbound'; href: string } | { to: 'section'; anchor: string } | { to: 'nowhere' }

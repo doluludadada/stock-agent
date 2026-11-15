@@ -3,6 +3,7 @@ import { HoldingsToday } from '@/features/holdings'
 import { MarketToday } from '@/features/market-overview'
 import { RankingToday } from '@/features/ranking'
 import { WatchlistToday } from '@/features/watchlist'
+import { WorldToday } from '@/features/world'
 import { useTranslation } from '@/i18n'
 import { useSession, useShown, type Feature } from '@/shared/api'
 import { useFormat } from '@/shared/lib/format'
@@ -14,10 +15,12 @@ import { PageSkeleton } from '@/shared/ui/skeleton'
 type Place = 'top' | 'left' | 'right'
 
 /**
- * The home page's cards in reading order, each with the feature it belongs to: the market across the top, this
- * month's ranking, then what is the reader's own beside it. A card shows only where the site shows its feature.
+ * The home page's cards in reading order, each with the feature it belongs to: the world since the last session and
+ * the market across the top, this month's ranking, then what is the reader's own beside it. A card shows only where
+ * the site shows its feature.
  */
 const CARDS: readonly { feature: Feature; Card: ComponentType<{ className?: string }>; needsSignIn: boolean; place: Place }[] = [
+  { feature: 'world', Card: WorldToday, needsSignIn: true, place: 'top' },
   { feature: 'market_overview', Card: MarketToday, needsSignIn: false, place: 'top' },
   { feature: 'ranking', Card: RankingToday, needsSignIn: true, place: 'left' },
   { feature: 'holdings', Card: HoldingsToday, needsSignIn: true, place: 'right' },
@@ -25,7 +28,7 @@ const CARDS: readonly { feature: Feature; Card: ComponentType<{ className?: stri
 ]
 
 /**
- * "What should I look at today": the four things that change between visits, each card leading to its page. A visitor
+ * "What should I look at today": the things that change between visits, each card leading to its page. A visitor
  * gets the public cards and one invitation to sign in, not one per private card.
  */
 export function HomeRoute() {

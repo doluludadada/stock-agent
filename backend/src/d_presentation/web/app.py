@@ -2,7 +2,7 @@ import asyncio
 import logging
 import math
 import sys
-from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine
+from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import asdict
 from typing import Any
@@ -42,7 +42,7 @@ from a_domain.types.errors import (
 )
 from b_application.config.settings_loader import InvalidSettingsError
 from d_presentation.dependencies import Runtime
-from d_presentation.live_runtime import RuntimeSwitch, collect_daily_data, watch_settings
+from d_presentation.live_runtime import RuntimeSwitch, collect_daily_data, collect_world, watch_settings
 from d_presentation.web.backtest_replays import BacktestReplays, TooManyBacktests
 from d_presentation.web.routers.api_v1 import router as api_v1_router
 from d_presentation.web.session import (
@@ -296,13 +296,22 @@ def error_handlers() -> dict[int | type[Exception], ErrorAnswer]:
     return handlers | {StarletteHTTPException: answer_http_error, RequestValidationError: answer_invalid_request}
 
 
+async def stop_timers(timers: Sequence[asyncio.Task[None]]) -> None:
+    """Cancels the lifespan's timers and waits until each has ended."""
+    for timer in timers:
+        timer.cancel()
+
+    await asyncio.gather(*timers, return_exceptions=True)
+
+
 def create_app(open_switch: Callable[[], AbstractAsyncContextManager[RuntimeSwitch]]) -> FastAPI:
     """
     The FastAPI app. Its lifespan opens the process's runtimes through the startup checks the CLI runs, sets what the
     requests read from app.state, watches the settings files and collects the daily data on a timer: the open-data
     archive, the exchanges' daily history on a personal site, and the news of the stocks that matter into the article
-    store. At shutdown it stops the watch and the timer and waits
-    until both have ended, so a collection never outlives the runtime it holds, cancels every running workflow while its
+    store. A second timer reads the world news feeds and indicators and writes the day's world brief (collect_world).
+    At shutdown it stops the watch and the timers and waits
+    until they have ended, so a collection never outlives the runtime it holds, cancels every running workflow while its
     runtime is open, so its record ends as aborted, then closes every runtime.
     """
 
@@ -310,16 +319,13 @@ def create_app(open_switch: Callable[[], AbstractAsyncContextManager[RuntimeSwit
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         async with open_switch() as switch:
             workflow_runs = await open_app_state(app, switch)
-            watcher = asyncio.get_running_loop().create_task(watch_settings(switch))
-            archiver = asyncio.get_running_loop().create_task(collect_daily_data(switch))
+            timers = [asyncio.create_task(timer(switch)) for timer in (watch_settings, collect_daily_data, collect_world)]
 
             try:
                 yield
 
             finally:
-                watcher.cancel()
-                archiver.cancel()
-                await asyncio.gather(watcher, archiver, return_exceptions=True)
+                await stop_timers(timers)
                 await workflow_runs.stop()
 
     app = FastAPI(

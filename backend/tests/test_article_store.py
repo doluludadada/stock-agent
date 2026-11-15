@@ -51,7 +51,7 @@ PRODUCTS = "本公司主要產品為晶圓代工服務"
 
 
 def store_of(database: DatabaseConnector, clock: MovableClock, max_per_stock: int = 100) -> SqlArticleStore:
-    return SqlArticleStore(database, clock, RETENTION, max_per_stock)
+    return SqlArticleStore(database, clock, RETENTION, max_per_stock, {})
 
 
 def index_of(

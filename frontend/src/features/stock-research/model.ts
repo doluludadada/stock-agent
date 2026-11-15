@@ -47,21 +47,10 @@ export const NEWS_SOURCES = {
   ptt_stock: { dayOnly: true },
   ptt_gossiping: { dayOnly: true },
   annual_report: { dayOnly: true },
+  cna: { dayOnly: false },
+  bbc: { dayOnly: false },
+  federal_reserve: { dayOnly: false },
 } as const satisfies Record<NewsItem['source'], { dayOnly: boolean }>
-
-/**
- * A third party's address is a link only when it is plain http or https: anything else (`javascript:`, `data:`, a
- * relative path) gets no link.
- */
-export function outboundUrl(url: string | null): string | null {
-  if (!url) return null
-  try {
-    const parsed = new URL(url)
-    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.href : null
-  } catch {
-    return null
-  }
-}
 
 /** An open-data item's text, unless it only repeats the title, as TWSE's own news does. */
 export function newsText(item: NewsItem): string | null {

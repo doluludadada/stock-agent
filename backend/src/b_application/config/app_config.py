@@ -5,6 +5,8 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from a_domain.rules.ai.company_card import CompanyCardContextRule
+from a_domain.rules.ai.stock_brief import BriefReplyRule
+from a_domain.rules.ai.world_brief import WorldBriefDueRule
 from a_domain.rules.system.registration import RegistrationRule
 from a_domain.rules.trading.backtest import BacktestRule, OpenFillRule, SessionStopLossRule
 from a_domain.rules.trading.cost import AffordableQuantityRule
@@ -25,7 +27,7 @@ from a_domain.rules.trading.ranking import DecisionSessionsRule
 from a_domain.rules.trading.ranking_backtest import RankingBacktestRule, RankingPortfolioRule
 from a_domain.rules.trading.reason import AnalysisSummaryRule, EntryReasonRule, ExitReasonRule
 from a_domain.rules.trading.sizing import BuyCostRule, SizingRule
-from a_domain.types.enums import Audience, SettingGroup, SettingsFile, SystemEnvironment
+from a_domain.types.enums import Audience, BriefKind, Feature, Permission, SettingGroup, SettingsFile, SystemEnvironment
 from b_application.config.accounts_config import AccountsConfig
 from b_application.config.ai_config import AiConfig, BehaviorConfig, PromptsConfig, SentimentConfig, TavilyConfig
 from b_application.config.api_config import ApiConfig, FeaturesConfig
@@ -36,6 +38,7 @@ from b_application.config.collect_config import (
     FreshnessConfig,
     QualityFiltersConfig,
     StockPageConfig,
+    WorldConfig,
 )
 from b_application.config.market_data_config import MarketDataConfig, MarketHoursConfig
 from b_application.config.sources_config import SourcesConfig
@@ -135,6 +138,7 @@ class AppConfig(BaseSettings):
     collect_rules: CollectRulesConfig = Field(json_schema_extra={"operator_only": True})
     quality: QualityFiltersConfig = Field(default_factory=QualityFiltersConfig, json_schema_extra={"group": SettingGroup.DATA_HISTORY})
     stock_page: StockPageConfig = Field(default_factory=StockPageConfig, json_schema_extra={"group": SettingGroup.DATA_HISTORY})
+    world: WorldConfig = Field(default_factory=WorldConfig, json_schema_extra={"group": SettingGroup.DATA_HISTORY})
     market: MarketConfig = Field(json_schema_extra={"group": SettingGroup.TRADING_LIMITS})
     freshness: FreshnessConfig = Field(default_factory=FreshnessConfig, json_schema_extra={"group": SettingGroup.DATA_HISTORY})
     market_hours: MarketHoursConfig = Field(default_factory=MarketHoursConfig, json_schema_extra={"operator_only": True})
@@ -209,6 +213,31 @@ class AppConfig(BaseSettings):
             cost_rule=self.market.cost_rule(),
             position_value_rule=self.market.position_value_rule(),
         )
+
+    def brief_writing(self, kind: BriefKind) -> tuple[str, int, int, BriefReplyRule]:
+        """
+        What DailyStockBrief writes a kind of text from: its prompt, the most sentences it keeps, the stocks that may
+        get a new one a day at viewers' requests, and its reply contract. The world brief is one text a day.
+        """
+        brief, card, world, advice = self.stock_page.brief, self.stock_page.card, self.world.brief, self.prompts.advice_phrases()
+
+        match kind:
+            case BriefKind.MOVEMENT:
+                return self.prompts.stock_brief, brief.sentences, brief.daily_stocks, brief.reply_rule(advice)
+            case BriefKind.COMPANY:
+                return self.prompts.company_card, card.sentences, card.daily_stocks, card.reply_rule(advice, brief.link_pattern)
+            case BriefKind.WORLD:
+                return self.prompts.world_brief, world.sentences, 1, world.reply_rule(advice, brief.link_pattern)
+
+    def world_brief_due_rule(self) -> WorldBriefDueRule:
+        """
+        When the day's world brief is asked for. The site writes one only while its own writing is on
+        (stock_page.system_writing), prompts.world_brief is set and features.world shows the world to somebody.
+        """
+        shown = self.features.visibility(Feature.WORLD).shown_to(frozenset(Permission))
+        on = shown and self.stock_page.system_writing.enabled and bool(self.prompts.world_brief)
+
+        return self.world.brief.due_rule(on, self.stock_page.brief.claim_minutes)
 
     def company_card_context_rule(self) -> CompanyCardContextRule:
         """What a company card rests on; its prompt and language are part of what a card is written from."""

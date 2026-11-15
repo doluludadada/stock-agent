@@ -403,7 +403,8 @@ def test_an_instructions_file_without_a_prompt_added_since_starts_without_it_and
     assert prompts.social_sentiment == load_settings(PROJECT).prompts.social_sentiment != ""
     assert settings_notices(project)[-1] == (
         "instructions.yaml does not set stock_brief_prompt, stock_brief_advice_phrases, stock_brief_rise_query, "
-        "stock_brief_fall_query, stock_brief_company_query, company_card_prompt: what each feeds is off until it does. "
+        "stock_brief_fall_query, stock_brief_company_query, company_card_prompt, world_brief_prompt, world_brief_query: "
+        "what each feeds is off until it does. "
         "The shipped instructions.yaml has them."
     )
     assert "instructions.yaml" not in "".join(settings_notices(PROJECT))

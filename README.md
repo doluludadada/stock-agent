@@ -306,6 +306,43 @@ just backfill-company-background             # of every scored stock: about 20 s
 `just backfill-company-background` asks no AI. It saves each company as it comes, stops at the first request a site
 does not answer, and ends with exit code 2 while anything is still due, so run it again later.
 
+### World news and the day's world brief
+
+The site also holds what happened outside Taiwan's exchanges. The Web API's world timer runs at the start and then
+every `api.world_interval_minutes` (30):
+
+- It reads the world news feeds named under `sources.world.news_feeds`: CNA's international and finance feeds, the
+  BBC's business feed and the Federal Reserve's monetary policy press releases, each an RSS 2.0 feed its publisher
+  offers readers. An item is kept in the article store under the key `#world`, which no stock id can equal, with
+  its title, the summary the feed itself gives, its address and its publication time. No article's page is read.
+  An item is kept once whatever feed lists it, gets a vector like every other article, and is dropped
+  `world.retention_days` (14) after it was published.
+- It reads the world indicators named under `sources.world.indicator_feeds`, one reading a day each, into
+  `world_indicator_readings`: USD/TWD, USD/JPY, EUR/USD and USD/CNY from the Taiwan Futures Exchange's daily
+  reference rates, and the United States Treasury's 10-year and 2-year par yields. No keyless source whose terms
+  allow automated reading serves the US stock indices, the dollar index, crude oil, gold or an ADR on the day, so
+  the site holds none of them.
+- From `world.brief.write_at` (07:30 Taiwan time) on, it writes the day's world brief once, on the site's own
+  writing: one AI call on `ai.system_model`, counted against `stock_page.system_writing.daily_ai_calls`. The brief
+  says what moved in the held indicators and which held news of the last `world.brief.window_hours` (24) may bear on
+  Taiwan-listed sectors. Every sentence cites the held items it rests on; a sentence that cites none, words advice
+  or holds a link is dropped, as in a stock's brief. A sentence links a listed stock only when the AI names it and
+  an item the sentence cites holds that stock's id or name. A failed brief is asked for again after
+  `world.brief.retry_minutes` (120). The briefs of past days are kept in `world_briefs`.
+
+A personal site reads every feed. A public site reads only what is free to republish: the Federal Reserve's feed
+and the Treasury's yields (`Audience.world_sources`, `Audience.world_indicators`). CNA and the BBC offer their feeds
+for a reader's own, non-commercial use, and the Taiwan Futures Exchange reserves the republication of its data.
+
+`GET /v1/world` answers the indicators, the written briefs of the latest `world.brief.shown_days` (14) days and the
+newest `world.shown` (200) news items to a signed-in viewer the site shows `features.world` to. The web app shows
+them on `/world` and in the World block of the home page. Off (`features.world: "off"`), nothing is read or written.
+
+The prompt is `world_brief_prompt` in `config/instructions.yaml`, and `world_brief_query` is what the brief looks
+for among the kept world news by meaning. A deployment whose `appsetting.yaml` names no `sources.world` feed reads
+nothing, and one whose `instructions.yaml` lacks `world_brief_prompt` writes no brief. The start says each in one
+log line, and the app runs as before.
+
 ### Sign in with Google
 
 The site can sign users in with Google next to the password sign-in. It offers Google when `GOOGLE_CLIENT_ID` and

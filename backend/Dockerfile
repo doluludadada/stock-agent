@@ -38,6 +38,8 @@ ENV PATH="/app/.venv/bin:$PATH" \
     HF_HUB_DISABLE_TELEMETRY=1 \
     HOST=0.0.0.0
 WORKDIR /state
+# A name for user 1000, the default of APP_UID in compose.yml: SinoPac's SDK looks its user up by name at each login.
+RUN useradd --uid 1000 --no-create-home --home-dir /tmp --shell /usr/sbin/nologin stock-agent
 USER 1000:1000
 EXPOSE 8800
 

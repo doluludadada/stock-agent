@@ -335,6 +335,23 @@ class InformationSource(StrEnum):
     ANNUAL_REPORT = auto()
     """A section of a company's shareholders'-meeting annual report on the exchange's document site, kept as its text."""
 
+    CNA = auto()
+    """The Central News Agency's public feeds of international and financial news, in Chinese."""
+
+    BBC = auto()
+    """The BBC's public feed of business news, in English."""
+
+    FEDERAL_RESERVE = auto()
+    """The Federal Reserve Board's feed of its monetary policy press releases: a United States government work."""
+
+    @property
+    def is_world(self) -> bool:
+        """
+        A publisher's own feed of world news, about no one stock (MarketScope.WORLD). The site keeps of an item what
+        the feed itself gives a reader: its title, its summary and its address, never the article's page.
+        """
+        return self in {InformationSource.CNA, InformationSource.BBC, InformationSource.FEDERAL_RESERVE}
+
     @property
     def is_reference(self) -> bool:
         """
@@ -365,8 +382,79 @@ class InformationSource(StrEnum):
                 return "TWSE news"
             case InformationSource.ANNUAL_REPORT:
                 return "annual report"
+            case InformationSource.CNA:
+                return "CNA"
+            case InformationSource.BBC:
+                return "BBC"
+            case InformationSource.FEDERAL_RESERVE:
+                return "Federal Reserve"
             case _:
                 return self.value
+
+
+class MarketScope(StrEnum):
+    """
+    What an article or a brief is about when it is about no one stock. Its value stands where a stock id stands, in
+    the article store, the article index and the briefs, and no stock id can equal it.
+    """
+
+    WORLD = "#world"
+    """The world outside Taiwan's exchanges: the world news feeds' items and the day's world brief."""
+
+
+class WorldIndicator(StrEnum):
+    """
+    A figure of the world's markets the site holds one reading a day of, each from a public agency that serves it
+    without a key: the Taiwan Futures Exchange's daily reference exchange rates and the United States Treasury's
+    daily yields.
+    """
+
+    USD_TWD = auto()
+    """New Taiwan dollars per US dollar."""
+
+    USD_JPY = auto()
+    EUR_USD = auto()
+    USD_CNY = auto()
+    US_10Y_YIELD = auto()
+    """The United States Treasury's 10-year par yield, in percent."""
+
+    US_2Y_YIELD = auto()
+
+    @property
+    def in_percent(self) -> bool:
+        """Whether its reading is a percentage, whose move is said in percentage points and not as a share of itself."""
+        match self:
+            case WorldIndicator.US_10Y_YIELD | WorldIndicator.US_2Y_YIELD:
+                return True
+            case _:
+                return False
+
+    @property
+    def label(self) -> str:
+        """The indicator as the prompt names it to the AI."""
+        match self:
+            case WorldIndicator.USD_TWD:
+                return "USD/TWD exchange rate"
+            case WorldIndicator.USD_JPY:
+                return "USD/JPY exchange rate"
+            case WorldIndicator.EUR_USD:
+                return "EUR/USD exchange rate"
+            case WorldIndicator.USD_CNY:
+                return "USD/CNY exchange rate"
+            case WorldIndicator.US_10Y_YIELD:
+                return "US 10-year Treasury yield"
+            case WorldIndicator.US_2Y_YIELD:
+                return "US 2-year Treasury yield"
+
+
+class TableFormat(StrEnum):
+    """How a source serves a table of dated rows."""
+
+    JSON = auto()
+    """A JSON list of objects, one per day."""
+
+    CSV = auto()
+    """Comma-separated values under a header line, one line per day."""
 
 
 class AnnualReportSection(StrEnum):
@@ -412,8 +500,8 @@ class BriefStatus(StrEnum):
 
 class BriefKind(StrEnum):
     """
-    Which of the site's two AI texts about a stock a text is. Its value is the part of the AI's reply that must hold a
-    sentence for the text to be kept.
+    Which of the site's AI texts a text is: one of the two about a stock, or the world brief. Its value is the part of
+    the AI's reply that must hold a sentence for the text to be kept.
     """
 
     MOVEMENT = auto()
@@ -425,6 +513,12 @@ class BriefKind(StrEnum):
     profile and its annual report and kept: a new one is written only when what it was written from changed.
     """
 
+    WORLD = auto()
+    """
+    The world brief: what moved in the held world indicators and which held world news may bear on Taiwan's market.
+    One per Taipei day, under MarketScope.WORLD in place of a stock.
+    """
+
     @property
     def daily(self) -> bool:
         """
@@ -432,7 +526,7 @@ class BriefKind(StrEnum):
         kept until what it rests on changes, and not at all while its prompt is unset.
         """
         match self:
-            case BriefKind.MOVEMENT:
+            case BriefKind.MOVEMENT | BriefKind.WORLD:
                 return True
             case BriefKind.COMPANY:
                 return False
@@ -503,6 +597,12 @@ class BriefSourceKind(StrEnum):
 
     PROFILE = auto()
     """The company's main business as it filed it with MOPS, with the address of MOPS's page of the company's basic information."""
+
+    WORLD_NEWS = auto()
+    """An item of a world news feed, by its title, with its own address."""
+
+    INDICATOR = auto()
+    """A held world indicator's newest reading and its change from the reading before."""
 
     @property
     def label(self) -> str:
@@ -827,6 +927,32 @@ class Audience(StrEnum):
         as MOPS does. Without them a company card rests on the exchanges' open data alone.
         """
         return not self.open_data_only
+
+    @property
+    def world_sources(self) -> frozenset[InformationSource]:
+        """
+        The world news feeds it may read. A personal site reads every one, as a feed reader does. A public site shows
+        what it reads to anyone, so it reads only a feed whose text is free to republish: the Federal Reserve's, a
+        United States government work. CNA and the BBC offer their feeds for a reader's own use.
+        """
+        match self:
+            case Audience.PERSONAL:
+                return frozenset(source for source in InformationSource if source.is_world)
+            case Audience.PUBLIC:
+                return frozenset({InformationSource.FEDERAL_RESERVE})
+
+    @property
+    def world_indicators(self) -> frozenset[WorldIndicator]:
+        """
+        The world indicators it may read. A personal site reads every one. A public site shows what it reads to
+        anyone, so it reads only the United States Treasury's yields, a government work: the Taiwan Futures Exchange
+        offers its open API to connect to and reserves the republication of its data.
+        """
+        match self:
+            case Audience.PERSONAL:
+                return frozenset(WorldIndicator)
+            case Audience.PUBLIC:
+                return frozenset({WorldIndicator.US_10Y_YIELD, WorldIndicator.US_2Y_YIELD})
 
     @property
     def brokers(self) -> frozenset[ExecutionProvider]:
@@ -1204,6 +1330,8 @@ class InstructionKey(StrEnum):
     STOCK_BRIEF_FALL_QUERY = "stock_brief_fall_query"
     STOCK_BRIEF_COMPANY_QUERY = "stock_brief_company_query"
     COMPANY_CARD = "company_card_prompt"
+    WORLD_BRIEF = "world_brief_prompt"
+    WORLD_BRIEF_QUERY = "world_brief_query"
 
     @property
     def settings_path(self) -> str:
@@ -1220,12 +1348,11 @@ class InstructionKey(StrEnum):
                 return "prompts.valuation_explanation"
             case InstructionKey.SOCIAL_SENTIMENT:
                 return "prompts.social_sentiment"
-            case InstructionKey.STOCK_BRIEF:
-                return "prompts.stock_brief"
-            case InstructionKey.COMPANY_CARD:
-                return "prompts.company_card"
+            case InstructionKey.STOCK_BRIEF | InstructionKey.COMPANY_CARD | InstructionKey.WORLD_BRIEF:
+                return f"prompts.{self.value.removesuffix('_prompt')}"
             case (
-                InstructionKey.STOCK_BRIEF_ADVICE_PHRASES
+                InstructionKey.WORLD_BRIEF_QUERY
+                | InstructionKey.STOCK_BRIEF_ADVICE_PHRASES
                 | InstructionKey.STOCK_BRIEF_RISE_QUERY
                 | InstructionKey.STOCK_BRIEF_FALL_QUERY
                 | InstructionKey.STOCK_BRIEF_COMPANY_QUERY
@@ -1383,6 +1510,9 @@ class Feature(StrEnum):
 
     HOLDINGS = auto()
     """My holdings: the holdings a user enters by hand, analysed with those of the accounts the site shows the user."""
+
+    WORLD = auto()
+    """The world page and the home page's world block: the held world indicators, the day's world brief and the world news."""
 
     @property
     def run_start(self) -> bool:

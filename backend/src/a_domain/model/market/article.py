@@ -12,8 +12,9 @@ from a_domain.types.values import Fraction
 @dataclass(config=ConfigDict(validate_assignment=True), kw_only=True)
 class Article:
     """
-    A news article, a social post or a company's material information announcement about one stock. The two sentiment
-    fields change together, through `dataclasses.replace`.
+    A news article, a social post or a company's material information announcement about one stock, or an item of a
+    world news feed, whose `stock_id` is MarketScope.WORLD and whose `content` is the feed's own summary. The two
+    sentiment fields change together, through `dataclasses.replace`.
     """
 
     id: UUID = Field(default_factory=uuid4)
@@ -60,10 +61,11 @@ class Article:
     @property
     def open_text(self) -> str | None:
         """
-        The text a stock page may show beside the title: an open-data item's own text, as its license allows. None for a
-        news site's article or a board's post, which the page names by its title and links to.
+        The text a page may show beside the title and a brief's prompt may hold: an open-data item's own text, as its
+        license allows, and a world feed's own summary of its item, which the feed gives a reader. None for a news
+        site's article or a board's post, which the page names by its title and links to.
         """
-        return self.content if self.source.is_open_data else None
+        return self.content if self.source.is_open_data or self.source.is_world else None
 
     @model_validator(mode="after")
     def classified_with_a_confidence(self) -> Self:

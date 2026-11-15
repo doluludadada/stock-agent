@@ -229,6 +229,24 @@ stock_page:
     # The most articles kept of one stock, the newest first.
     max_per_stock: 300
 
+world:
+  # The world outside Taiwan's exchanges: the items of the world news feeds named under sources.world, kept in the
+  # article store with the title and the summary each feed gives, never an article's page; the world indicators' daily
+  # readings; and the day's world brief. The Web API's world timer reads the feeds every api.world_interval_minutes
+  # (30 unless the file sets it). features.world shows the world page; off, nothing is read or written.
+  # A world news item published longer ago than this many days is dropped. A brief keeps the items it cites.
+  retention_days: 14
+  brief:
+    # The day's world brief: what moved in the held indicators and which held world news may bear on Taiwan's market,
+    # one per Taiwan calendar day, written by the site's own writing on ai.system_model. It spends one of
+    # stock_page.system_writing.daily_ai_calls a day, so a budget of 0 writes none. Its prompt is world_brief_prompt in
+    # config/instructions.yaml, and its language stock_page.brief.language.
+    # The Taiwan time from which the day's brief is written: after the United States session's close and its yields,
+    # before the Taiwan open.
+    write_at: "07:30"
+    # The hours of world news before its writing a brief reads.
+    window_hours: 24
+
 market:
   fee_rate: 0.001425
   # Securities transaction tax on a SELL: stocks, and ETFs (codes starting with 00).
@@ -867,6 +885,33 @@ sources:
     yahoo_short_paragraph_length: 20
     cnyes_user_agent: "Mozilla/5.0"
     yahoo_user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  world:
+    # The world news feeds, each an RSS 2.0 feed its publisher offers readers, read in this order. A personal site
+    # reads all of them; a public site reads only the Federal Reserve's, a United States government work
+    # (Audience.world_sources). `source` is cna, bbc or federal_reserve. A file without news_feeds reads no world news.
+    news_feeds:
+      - { source: cna, url: "https://feeds.feedburner.com/rsscna/intworld" }
+      - { source: cna, url: "https://feeds.feedburner.com/rsscna/finance" }
+      - { source: bbc, url: "https://feeds.bbci.co.uk/news/business/rss.xml" }
+      - { source: federal_reserve, url: "https://www.federalreserve.gov/feeds/press_monetary.xml" }
+    # The world indicators' tables, each served without a key by a public agency: the Taiwan Futures Exchange's daily
+    # reference exchange rates on its open API, which invites programs to connect and reserves republication, so only
+    # a personal site reads it; and the United States Treasury's daily par yield curve, a United States government
+    # work any site may read (Audience.world_indicators). `{year}` is the current year. `fields` names the table's
+    # column of each indicator: usd_twd, usd_jpy, eur_usd, usd_cny, us_10y_yield, us_2y_yield. No keyless source whose
+    # terms allow automated reading serves the US stock indices, the dollar index, crude oil, gold or an ADR on the
+    # day, so the site holds none of them. A file without indicator_feeds reads no indicator.
+    indicator_feeds:
+      - url: "https://openapi.taifex.com.tw/v1/DailyForeignExchangeRates"
+        format: json
+        date_field: "Date"
+        date_format: "%Y%m%d"
+        fields: { "USD/NTD": usd_twd, "USD/JPY": usd_jpy, "EUR/USD": eur_usd, "USD/RMB": usd_cny }
+      - url: "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/{year}/all?type=daily_treasury_yield_curve&field_tdr_date_value={year}&page&_format=csv"
+        format: csv
+        date_field: "Date"
+        date_format: "%m/%d/%Y"
+        fields: { "10 Yr": us_10y_yield, "2 Yr": us_2y_yield }
   ai:
     grok_base_url: "https://api.x.ai/v1"
     groq_base_url: "https://api.groq.com/openai/v1"
@@ -907,3 +952,6 @@ features:
   sinopac_ordering: "off"
   # My holdings: the holdings a user enters by hand, analysed with those of the accounts the site shows the user.
   holdings: everyone
+  # The world page and the home page's world block: the world indicators, the day's world brief and the world news.
+  # Off, the site also reads no world feed and writes no world brief.
+  world: everyone

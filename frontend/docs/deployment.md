@@ -106,6 +106,26 @@ devices of the tailnet, but the browser treats the site as not secure, and the s
 After a restart of the server, Docker can start before Tailscale has its address. The proxy then fails to start: run
 `docker compose up -d` again. The HTTPS mode below does not have this problem.
 
+### Add the home network
+
+A person on the server's home network who has no Tailscale reaches the site at the server's address there, over plain
+http. Nothing encrypts what that browser sends, the password of the sign-in included, so do this only on a network
+whose every device you trust.
+
+1. Set both lines in `.env`, with the server's address on the home network. The command `ip -4 addr` prints it.
+
+   ```bash
+   COMPOSE_FILE="compose.yml:compose.lan.yml"
+   LAN_NAME="192.168.1.10"
+   ```
+
+2. Add the same address to `api.allowed_hosts` in `config/appsetting.yaml` of `STATE_DIR`.
+
+3. Start the site again with `docker compose up -d`, and open `http://<LAN_NAME>:8080` on a device of that network.
+
+The address must stay the same, so reserve it for the server in the router. Sign-in with Google does not work at
+this address, because `accounts.public_origin` names one address only.
+
 ### Change to HTTPS
 
 1. Turn on HTTPS certificates for the tailnet, on the DNS page of the Tailscale admin console.
@@ -317,6 +337,13 @@ docker compose up -d --build
    and the shipped `stock_brief_prompt`. [README.md](../../README.md#company-background-and-the-sites-own-writing)
    describes each.
 
+   The world news and the day's world brief are off on a file that lacks their settings, and the start names each:
+   `sources.world.news_feeds` and `sources.world.indicator_feeds` in `appsetting.yaml`, and the prompt
+   `world_brief_prompt` with `world_brief_query` in `instructions.yaml`. Copy the `sources.world` section and the two
+   prompts from the shipped files. The brief also needs the site's own writing
+   (`stock_page.system_writing.daily_ai_calls` above 0), since it spends one of its AI calls a day.
+   [README.md](../../README.md#world-news-and-the-days-world-brief) describes each.
+
 3. If `docker compose logs backend` names an older database schema, upgrade the database. The command dumps the
    database first.
 
@@ -362,9 +389,10 @@ Compose reads these variables from `.env`. `.env.example` describes each one.
 | `STATE_DIR` | none, required | The host folder that keeps everything the site saves. |
 | `DB_USER`, `DB_PASSWORD`, `DB_NAME` | none, required | The PostgreSQL user, its password, and the database. The first start creates them. |
 | `APP_UID`, `APP_GID` | `1000` | The user and the group that own `STATE_DIR`. The backend runs as them. |
-| `PROXY_BIND` | `127.0.0.1` | The host address the proxy listens on: the Tailscale address for plain http, or the loopback address behind `tailscale serve`. Never `0.0.0.0` or a LAN address. |
+| `PROXY_BIND` | `127.0.0.1` | The host address the proxy listens on: the Tailscale address for plain http, or the loopback address behind `tailscale serve`. Never `0.0.0.0`. For the home network, add `compose.lan.yml`. |
 | `PROXY_PORT` | `8080` | The host port the proxy listens on. |
-| `SITE_NAME` | `localhost` | The only host name the proxy answers. |
+| `SITE_NAME` | `localhost` | The host name the proxy answers. |
+| `LAN_NAME` | `127.0.0.1` | A second address the proxy answers, which `compose.lan.yml` publishes on the home network. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | none | The OAuth client for sign-in with Google. Set both, with `accounts.public_origin`, or neither. |
 
 The Compose network has a fixed subnet, `172.31.88.0/29`. The backend trusts forwarded headers only from the proxy,

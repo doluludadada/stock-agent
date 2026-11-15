@@ -33,7 +33,7 @@ def test_the_features_settings_are_the_feature_registry_and_the_shipped_file_set
 
 def test_the_shipped_site_shows_a_user_the_research_pages_and_an_administrator_everything() -> None:
     features = shipped_config().features
-    research = {Feature.MARKET_OVERVIEW, Feature.RANKING, Feature.STOCK_PAGES, Feature.WATCHLIST, Feature.HOLDINGS}
+    research = {Feature.MARKET_OVERVIEW, Feature.RANKING, Feature.STOCK_PAGES, Feature.WATCHLIST, Feature.HOLDINGS, Feature.WORLD}
 
     assert features.shown(Role.USER.permissions) == research
     assert features.shown(frozenset()) == research
@@ -145,6 +145,7 @@ GATED: dict[tuple[str, str], frozenset[Feature]] = {
     ("GET", "/v1/account/history?broker=shioaji"): frozenset({Feature.SINOPAC_ACCOUNT}),
     ("POST", "/v1/runs/intraday?broker=shioaji"): frozenset({Feature.SINOPAC_ORDERING}),
     ("GET", "/v1/holdings"): frozenset({Feature.HOLDINGS}),
+    ("GET", "/v1/world"): frozenset({Feature.WORLD}),
 }
 """A route of each feature, with the features that must all be off before it hides: a strategy save belongs to two."""
 

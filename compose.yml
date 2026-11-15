@@ -1,5 +1,5 @@
 # The whole site on one server: `docker compose up -d --build` from the repository root. frontend/docs/deployment.md
-# has the steps. Compose reads STATE_DIR, DB_USER, DB_PASSWORD, DB_NAME, PROXY_BIND, PROXY_PORT, SITE_NAME, APP_UID and
+# has the steps. Compose reads STATE_DIR, DB_USER, DB_PASSWORD, DB_NAME, PROXY_BIND, PROXY_PORT, SITE_NAME, LAN_NAME, APP_UID and
 # APP_GID from .env. Only the frontend service (Caddy) publishes a port. Each image names its version, so an update is a change to this file
 # or to a Dockerfile, never what a registry serves that day. No container gains a privilege it did not start with, and
 # each keeps only the capabilities it uses.
@@ -92,6 +92,8 @@ services:
     security_opt: ["no-new-privileges:true"]
     environment:
       SITE_NAME: ${SITE_NAME:-localhost}
+      # A second name the proxy answers, which compose.lan.yml publishes: the server's address on the home network.
+      LAN_NAME: ${LAN_NAME:-127.0.0.1}
     ports:
       - "${PROXY_BIND:-127.0.0.1}:${PROXY_PORT:-8080}:8080"
     networks:

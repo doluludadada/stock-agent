@@ -48,6 +48,9 @@ src/
                        reads from held data (the reading in sentences, the revenue and earnings trends, the valuation
                        against its own history), the related news and discussion, the archived financials, the
                        strategy's evaluation
+    world/             the world outside Taiwan's exchanges as the site holds it: the indicators as a strip, the day's AI
+                       brief with what each sentence cites and the past days' briefs, the news list by publisher; its
+                       card for the home page
     attribution/       the open data's providers, datasets and license, which every page's footer links to
   shared/         typed HTTP transport, session and public market data (api/), URL builders (config/), generic UI,
                   formatters, theme, stock id and chart range rules
@@ -59,7 +62,7 @@ src/
 - A feature never imports another feature. `app/router/routes/*` passes render slots between them; for example the
   run detail page receives `renderWatch` from the watchlist feature, My settings receives `mockAccount` from the
   account feature, and My holdings receives the `watched` stocks from the watchlist feature. The home page
-  (`app/router/routes/home.tsx`) is composed the same way: each feature exports its own card (`MarketToday`,
+  (`app/router/routes/home.tsx`) is composed the same way: each feature exports its own card (`WorldToday`, `MarketToday`,
   `RankingToday`, `HoldingsToday`, `WatchlistToday`), and the route lays them out. URL builders are shared config
   (`shared/config/paths.ts`): features link with them, and routes pass no hrefs.
 - Code outside a feature uses only its `index.ts`.
@@ -111,6 +114,7 @@ the contract by `catalog.test.ts`.
 | A stock's AI brief as the site holds it; a signed-in viewer's request to write today's | `stock-research/api.ts` | `/v1/market/stocks/{id}/brief` |
 | A stock's company as the site holds it: the profile's facts, the company card and the pages they come from | `stock-research/api.ts` | `/v1/market/stocks/{id}/company` |
 | The open data's providers, datasets and license | `attribution/api.ts` | `/v1/market/attribution` |
+| The world indicators, the written world briefs of the latest days and the kept world news | `world/api.ts` | `/v1/world` |
 | Built-in strategies, owner settings, saves with revisions | `strategies/api/queries.ts` | `/v1/technical-settings` |
 | Runs, decisions, orders; a start of Buzz or Intraday on the broker chosen | `runs/api.ts` | `/v1/runs` |
 | A manual BUY of a stock a specific-stock run reported, on the broker chosen | `runs/api.ts` | `/v1/runs/{run_id}/manual-buy` |
@@ -295,6 +299,7 @@ secret: the server refuses one written into them, and its form shows none.
   viewer's permission (`needs`), the site's audience (`requires`) and the features of its page (`app/pages.ts`); a tab
   of the bar whose page is hidden leaves the bar.
 - The home page (`/`, "Today") answers what to look at now, from what the other pages already ask the server: the
+  world since the last session (the indicators as a strip and the first sentences of the newest world brief), the
   index and the session's breadth in one row, this month's ranking (10 stocks beside the other cards, 5 in one
   column), the portfolio's figures and the watchlist's day. Each card is its feature's, leads to its page, and says
   its own loading, empty and failed state. The ranking decides once a month and the holdings may be empty, so neither
@@ -419,9 +424,20 @@ My holdings (`/holdings`) reads what the user holds as one portfolio. Its rules:
 - A table row carries on a phone what its hidden columns said: the source and the shares at their cost, the value and
   the weight, the close with its date and the revenue reading, then the score.
 
+The world page (`/world`) shows what `GET /v1/world` answers and derives nothing but the choice of what to show
+(`world/model.ts`): the indicators (`IndicatorStrip`), the brief of the day chosen among the held ones (`briefState`:
+written, waiting for the time the site writes it from, or a site that writes none), and the news by publisher. A
+brief's sentence is followed by the held items it cites, a news item as a link to its publisher's page under the
+publisher's name, and by the listed stocks the server kept for it (`StockChip`). The home page's card shows the
+indicators and the brief's first three sentences and leaves the citations to the page. Every title, summary and
+sentence is a third party's or the AI's: it renders as text, and an address is a link only when `outboundUrl`
+(`shared/lib/outbound-url.ts`) finds it plain http or https. `AiByline` (`shared/ui/ai-byline.tsx`) is the label every
+AI text carries, the stock page's brief and card too, and `NewsRow` (`shared/ui/news-row.tsx`) the one row of a
+third party's item, the stock page's news too.
+
 `shared/ui/` holds vendored shadcn/ui sources and the project's own primitives (`panel`, `data-table`, `stat`,
 `segmented`, `range-tabs`, `show-more`, `range-meter`, `breadth-bar`, `quote-headline`, `state-block`, `page-header`,
-`ranking-score`, `stock-name`, `error-state`,
+`ranking-score`, `stock-name`, `error-state`, `ai-byline`, `news-row`,
 `field`, `password-input`, `avatar`, `price-volume-chart`, `price-trend`, `comparison-chart`, `progress-note`,
 `stock-picker`, `confirm-dialog`, `stock-ids-problem`). Lint relaxes only fast-refresh and a few a11y role rules there, to stay close to upstream.
 

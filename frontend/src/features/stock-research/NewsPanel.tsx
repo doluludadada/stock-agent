@@ -1,17 +1,17 @@
-import { ExternalLink, Newspaper } from 'lucide-react'
+import { Newspaper } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from '@/i18n'
 import { useAllows } from '@/shared/api'
 import { useFormat } from '@/shared/lib/format'
-import { Badge } from '@/shared/ui/badge'
 import { ErrorState } from '@/shared/ui/error-state'
+import { NewsRow } from '@/shared/ui/news-row'
 import { Panel } from '@/shared/ui/panel'
 import { RequireSignIn } from '@/shared/ui/require-sign-in'
 import { ShowMore } from '@/shared/ui/show-more'
 import { Skeleton } from '@/shared/ui/skeleton'
 import { StateBlock } from '@/shared/ui/state-block'
 import { useStockNews } from './api'
-import { NEWS_SOURCES, newsText, outboundUrl, type NewsItem } from './model'
+import { NEWS_SOURCES, newsText, type NewsItem } from './model'
 
 /** The first items are enough to see what is being said; the rest open on request. */
 const ITEMS_SHOWN = 8
@@ -53,7 +53,7 @@ export function NewsPanel({ stockId }: { stockId: string }) {
         {items.length > 0 && (
           <ul id="stock-news" className="divide-y">
             {(expanded ? items : items.slice(0, ITEMS_SHOWN)).map((item, index) => (
-              <NewsRow key={`${item.source}-${item.published_at}-${index}`} item={item} />
+              <StockNewsRow key={`${item.source}-${item.published_at}-${index}`} item={item} />
             ))}
           </ul>
         )}
@@ -62,38 +62,11 @@ export function NewsPanel({ stockId }: { stockId: string }) {
   )
 }
 
-function NewsRow({ item }: { item: NewsItem }) {
+function StockNewsRow({ item }: { item: NewsItem }) {
   const { t } = useTranslation('research')
   const format = useFormat()
-  const url = outboundUrl(item.url)
-  const text = newsText(item)
   const time = NEWS_SOURCES[item.source].dayOnly ? format.date(item.published_at) : format.monthDayTime(item.published_at)
   return (
-    <li className="space-y-1.5 px-4 py-3 md:px-5">
-      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-        <Badge variant="outline" className="font-normal text-muted-foreground">
-          {t(`news.source.${item.source}`)}
-        </Badge>
-        <time dateTime={item.published_at} className="tabular">
-          {time}
-        </time>
-        {item.clause && <span>{item.clause}</span>}
-      </p>
-      {url ? (
-        <a
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer nofollow"
-          className="inline-flex min-h-11 items-start gap-1.5 py-1 text-sm font-medium text-pretty break-words hover:text-brand hover:underline md:min-h-0 md:py-0"
-        >
-          <span className="min-w-0">{item.title}</span>
-          <ExternalLink aria-hidden className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-          <span className="sr-only">{t('news.opens')}</span>
-        </a>
-      ) : (
-        <p className="text-sm font-medium text-pretty break-words">{item.title}</p>
-      )}
-      {text && <p className="line-clamp-3 text-sm text-pretty break-words whitespace-pre-line text-muted-foreground">{text}</p>}
-    </li>
+    <NewsRow source={t(`news.source.${item.source}`)} publishedAt={item.published_at} time={time} title={item.title} url={item.url} text={newsText(item)} note={item.clause} />
   )
 }

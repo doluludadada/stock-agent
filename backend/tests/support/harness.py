@@ -34,6 +34,7 @@ from a_domain.types.enums import (
     FeatureVisibility,
     IndicatorKind,
     InformationSource,
+    MarketScope,
     Role,
     RuleEffect,
     SystemEnvironment,
@@ -89,6 +90,8 @@ from support.fakes import (
     FakeUsersStocks,
     FakeUserStore,
     FakeWatchlistRepository,
+    FakeWorldFeed,
+    FakeWorldIndicatorRepository,
     RecordingChatPlatform,
     RecordingExecutionProvider,
     RecordingLogger,
@@ -190,6 +193,9 @@ class CliHarness:
     cards: FakeStockBriefRepository
     system_writings: FakeSystemWritingLog
     system_ai: FakeAiProvider
+    world_briefs: FakeStockBriefRepository
+    world_indicators: FakeWorldIndicatorRepository
+    world_feed: FakeWorldFeed
     profiles: FakeCompanyProfileRepository
     company_basics: FakeCompanyBasicsProvider
     annual_reports: FakeAnnualReportProvider
@@ -439,12 +445,16 @@ def build_harness(
     briefs = FakeStockBriefRepository()
     cards = FakeStockBriefRepository()
     system_writings = FakeSystemWritingLog()
+    world_briefs = FakeStockBriefRepository()
+    world_indicators = FakeWorldIndicatorRepository()
+    world_feed = FakeWorldFeed()
     system_ai = FakeAiProvider()
     profiles = FakeCompanyProfileRepository()
     company_basics = FakeCompanyBasicsProvider()
     annual_reports = FakeAnnualReportProvider()
     store_settings = config.stock_page.article_store
-    articles = FakeArticleStore(clock, store_settings.retention(), store_settings.max_per_stock)
+    world_bounds = {MarketScope.WORLD.value: (config.world.retention(), config.world.max_items)}
+    articles = FakeArticleStore(clock, store_settings.retention(), store_settings.max_per_stock, world_bounds)
     embedder = FakeTextEmbedder()
     article_index = FakeArticleIndex(embedder, store_settings.embedded_length)
     users_stocks = FakeUsersStocks()
@@ -482,6 +492,9 @@ def build_harness(
         stock_brief_repository=briefs,
         company_card_repository=cards,
         system_writing_log=system_writings,
+        world_brief_repository=world_briefs,
+        world_indicator_repository=world_indicators,
+        world_feed=world_feed,
         system_ai_provider=system_ai,
         company_profile_repository=profiles,
         article_store=articles,
@@ -517,6 +530,9 @@ def build_harness(
         briefs=briefs,
         cards=cards,
         system_writings=system_writings,
+        world_briefs=world_briefs,
+        world_indicators=world_indicators,
+        world_feed=world_feed,
         system_ai=system_ai,
         profiles=profiles,
         company_basics=company_basics,

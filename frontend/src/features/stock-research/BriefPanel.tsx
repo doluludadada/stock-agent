@@ -4,7 +4,7 @@ import { Link, useLocation } from 'react-router'
 import { useLocale, useTranslation } from '@/i18n'
 import { useAllows, useSession } from '@/shared/api'
 import { useFormat } from '@/shared/lib/format'
-import { Badge } from '@/shared/ui/badge'
+import { AiByline } from '@/shared/ui/ai-byline'
 import { Button } from '@/shared/ui/button'
 import { ChangeValue } from '@/shared/ui/change-value'
 import { ErrorState } from '@/shared/ui/error-state'
@@ -140,7 +140,7 @@ function ShownBrief({ brief }: { brief: StockBrief }) {
   return (
     <div className="space-y-4">
       <div className="space-y-1.5 text-xs text-pretty text-muted-foreground">
-        <Byline brief={brief} />
+        <AiByline model={brief.model} writtenAt={brief.written_at} />
         {brief.window_first && brief.window_last ? (
           <p>
             {t('brief.window', { first: format.date(brief.window_first), last: format.date(brief.window_last) })}
@@ -161,22 +161,6 @@ function ShownBrief({ brief }: { brief: StockBrief }) {
       <CitedSources sources={usedSources(brief)} />
       <NotAdviceNote className="border-t pt-3" />
     </div>
-  )
-}
-
-/** That a text is the AI's, which model wrote it and when: the label every AI text on the page carries. */
-export function Byline({ brief }: { brief: StockBrief }) {
-  const { t } = useTranslation('research')
-  const format = useFormat()
-  return (
-    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-pretty text-muted-foreground">
-      <Badge variant="secondary">
-        <Sparkles aria-hidden />
-        {t('brief.aiGenerated')}
-      </Badge>
-      <span className="font-mono break-all">{brief.model}</span>
-      {brief.written_at && <time dateTime={brief.written_at}>{t('brief.writtenAt', { time: format.monthDayTime(brief.written_at) })}</time>}
-    </p>
   )
 }
 
@@ -244,7 +228,7 @@ function CitedSources({ sources }: { sources: readonly BriefSource[] }) {
                 <a href={link.href} target="_blank" rel="noopener noreferrer nofollow" className="tap min-w-0 gap-1.5 font-medium text-pretty break-words hover:text-brand hover:underline">
                   <span className="min-w-0">{source.title || link.href}</span>
                   <ExternalLink aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-                  <span className="sr-only">{t('news.opens')}</span>
+                  <span className="sr-only">{t('common:opensSource')}</span>
                 </a>
               ) : (
                 source.title && <span className="min-w-0 text-pretty break-words">{source.title}</span>

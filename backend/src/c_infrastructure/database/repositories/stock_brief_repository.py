@@ -16,12 +16,12 @@ from c_infrastructure.database.models.system_writing_dto import SystemTextDTO
 class SqlStockBriefRepository(IStockBriefRepository):
     """
     One kind of AI text in its own table (`table`: stock_briefs for the daily briefs, company_cards for the company
-    cards), shared by every user. A claim is one transaction: an UPDATE that takes over a failed or an abandoned text
-    of the day, else an INSERT ... SELECT ... WHERE the day's stocks are under the limit ... ON CONFLICT DO NOTHING,
-    so the primary key lets one of the calls made together take a stock's day. The table is locked against other
-    claims until the commit, so the day's count is exact. A text the site's own writing claimed is named in
-    system_texts in the same transaction, and the day's count leaves it out; a viewer's claim that takes it over
-    removes the name, so it counts from then on.
+    cards, world_briefs for the world briefs), shared by every user. A claim is one transaction: an UPDATE that takes
+    over a failed or an abandoned text of the day, else an INSERT ... SELECT ... WHERE the day's stocks are under the
+    limit ... ON CONFLICT DO NOTHING, so the primary key lets one of the calls made together take a stock's day. The
+    table is locked against other claims until the commit, so the day's count is exact. A text the site's own writing
+    claimed is named in system_texts in the same transaction, and the day's count leaves it out; a viewer's claim that
+    takes it over removes the name, so it counts from then on.
     """
 
     def __init__(self, db: DatabaseConnector, table: type[BriefColumns]) -> None:
@@ -50,6 +50,21 @@ class SqlStockBriefRepository(IStockBriefRepository):
             row = (await session.execute(written)).scalar_one_or_none()
 
         return row.to_domain() if row is not None else None
+
+    @override
+    async def recent(self, stock_id: str, limit: int) -> list[StockBrief]:
+        table = self._table
+        written = (
+            select(table)
+            .where(col(table.stock_id) == stock_id, col(table.status) == BriefStatus.WRITTEN.value)
+            .order_by(col(table.day).desc())
+            .limit(limit)
+        )
+
+        async with self._db.get_session() as session:
+            rows = (await session.execute(written)).scalars().all()
+
+        return [row.to_domain() for row in rows]
 
     @override
     async def claimed_stocks(self, day: date) -> int:

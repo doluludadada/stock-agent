@@ -24,6 +24,8 @@ from a_domain.ports.market.social_media_provider import ISocialMediaProvider
 from a_domain.ports.market.stock_feed import IStockFeed
 from a_domain.ports.market.stock_provider import IStockProvider
 from a_domain.ports.market.taiwan_stock_provider import ITaiwanStockProvider
+from a_domain.ports.market.world_feed import IWorldFeed
+from a_domain.ports.market.world_indicator_repository import IWorldIndicatorRepository
 
 __all__ = [
     "ArchivedMonth",
@@ -48,6 +50,8 @@ __all__ = [
     "IRealtimeQuoteProvider",
     "ISocialMediaProvider",
     "IStockFeed",
+    "IWorldFeed",
+    "IWorldIndicatorRepository",
     "IStockProvider",
     "ITaiwanStockProvider",
     "OpenDataDownload",

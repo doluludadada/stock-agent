@@ -240,7 +240,7 @@ async def test_the_daily_brief_keeps_a_company_part_an_older_prompt_asks_for() -
 
 async def test_the_two_kinds_differ_in_when_they_are_written() -> None:
     assert (BriefKind.MOVEMENT.daily, BriefKind.COMPANY.daily) == (True, False)
-    assert {kind.value for kind in BriefKind} == {"movement", "company"}
+    assert {kind.value for kind in BriefKind} == {"movement", "company", "world"}
 
 
 # ---------------------------------------------------- the tables ---------------------------------------------------- #
@@ -283,7 +283,7 @@ async def test_asking_for_a_brief_writes_the_card_first_and_the_brief_reads_the_
     assert "listed on twse" not in brief_prompt.split("Facts:")[1]
     card = seen["today"]
     assert (card["status"], card["model"], card["language"], card["day"]) == ("written", "claude-haiku-5-5", "zh-TW", "2026-10-19")
-    assert card["company"] == [{"text": "It makes wafers for chip designers.", "sources": ["S1", "S2"]}]
+    assert card["company"] == [{"text": "It makes wafers for chip designers.", "sources": ["S1", "S2"], "stocks": []}]
     assert (card["movement"], seen["previous"]) == ([], None)
     assert [(source["key"], source["kind"], source["url"]) for source in card["sources"]] == [
         ("S1", "company", None),

@@ -4,7 +4,7 @@ from typing import Annotated
 from pydantic import ConfigDict, Field, FiniteFloat, validate_call
 from pydantic.dataclasses import dataclass
 
-from a_domain.types.enums import BriefLanguage, BriefSourceKind, BriefStatus
+from a_domain.types.enums import BriefLanguage, BriefSourceKind, BriefStatus, InformationSource
 from a_domain.types.errors import IllegalBriefTransition
 from a_domain.types.values import NonEmptyText
 
@@ -26,6 +26,9 @@ class BriefSource:
     url: str | None = None
     """The article's address as held. None for an item the stock page shows itself."""
 
+    origin: InformationSource | None = None
+    """The publisher of a world news item, which the page names beside its title. None for every other item."""
+
 
 @dataclass(frozen=True, kw_only=True)
 class BriefSentence:
@@ -34,6 +37,12 @@ class BriefSentence:
     text: NonEmptyText
     sources: Annotated[list[str], Field(min_length=1)]
     """Keys of the brief's sources."""
+
+    stocks: list[str] = Field(default_factory=list)
+    """
+    The listed stocks a world brief's sentence links to, by id: only those whose id or name one of the held items the
+    sentence cites holds itself (BriefReplyRule). Empty in a stock's brief and card.
+    """
 
 
 def move_to(brief: StockBrief, status: BriefStatus) -> None:
@@ -50,7 +59,8 @@ class StockBrief:
     company is, and how the held facts of a recent window of sessions relate to the stock's move over it. It describes
     and never advises. One exists per stock and day; its status says whether the AI is still asked. A company card is
     one too (BriefKind): it holds the `company` part alone, under the day it was claimed on, and the newest written one
-    is the company's card.
+    is the company's card. So is the day's world brief, whose `stock_id` is MarketScope.WORLD: it holds the `movement`
+    part alone, what moved in the held world indicators and which held world news may bear on Taiwan's market.
     """
 
     stock_id: NonEmptyText
@@ -79,7 +89,7 @@ class StockBrief:
     """What the company is."""
 
     movement: list[BriefSentence] = Field(default_factory=list)
-    """How the held facts of the window relate to the stock's move."""
+    """How the held facts of the window relate to the stock's move; in the world brief, what moved and happened in the world."""
 
     sources: list[BriefSource] = Field(default_factory=list)
     """The held items the sentences cite."""

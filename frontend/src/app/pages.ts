@@ -1,4 +1,4 @@
-import { Activity, Briefcase, Calculator, CandlestickChart, History, Home, Landmark, Layers, ListOrdered, Settings2, SlidersHorizontal, Sparkles, Star, UsersRound, Wallet, type LucideIcon } from 'lucide-react'
+import { Activity, Briefcase, Calculator, CandlestickChart, Globe, History, Home, Landmark, Layers, ListOrdered, Settings2, SlidersHorizontal, Sparkles, Star, UsersRound, Wallet, type LucideIcon } from 'lucide-react'
 import type { ComponentType } from 'react'
 import type { Capability, Feature, Permission } from '@/shared/api'
 import { paths, patterns } from '@/shared/config/paths'
@@ -34,6 +34,7 @@ export const PAGES = {
   home: { path: paths.home, features: [], load: () => import('./router/routes/home').then((m) => m.HomeRoute), nav: { section: 'today', icon: Home, tab: true } },
   ranking: { path: paths.ranking, features: ['ranking'], load: () => import('./router/routes/ranking').then((m) => m.RankingRoute), nav: { section: 'research', icon: ListOrdered, tab: true } },
   overview: { path: paths.market, features: ['market_overview'], load: () => import('@/features/market-overview').then((m) => m.MarketOverviewPage), nav: { section: 'research', icon: CandlestickChart } },
+  world: { path: paths.world, features: ['world'], load: () => import('@/features/world').then((m) => m.WorldPage), nav: { section: 'research', icon: Globe } },
   holdings: { path: paths.holdings, features: ['holdings'], load: () => import('./router/routes/holdings').then((m) => m.HoldingsRoute), nav: { section: 'mine', icon: Briefcase, tab: true } },
   watchlist: { path: paths.watchlist, features: ['watchlist'], load: () => import('@/features/watchlist').then((m) => m.WatchlistPage), nav: { section: 'mine', icon: Star } },
   brokerage: {

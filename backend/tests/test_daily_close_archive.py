@@ -642,10 +642,11 @@ async def test_a_report_whose_rows_none_can_be_read_is_an_error_and_one_that_ser
         f"Open data feed {ratios} served {len(payloads[ratios])} rows and none could be read",
     ]
     assert ("info", f"Open data feed {news} served no rows") in feeds
-    assert (
-        "info",
-        f"Open data feed {REPORTS[MarketType.TWSE][FinancialStatement.BALANCE_SHEET][IndustryFormat.BANK]} served no rows",
-    ) in feeds
+    empty_reports = [
+        message for level, message in logger.records if level == "info" and "financial report feeds served no rows" in message
+    ]
+    assert len(empty_reports) == 1
+    assert REPORTS[MarketType.TWSE][FinancialStatement.BALANCE_SHEET][IndustryFormat.BANK] in empty_reports[0]
 
 
 def split_download(missed: date | None) -> OpenDataDownload:

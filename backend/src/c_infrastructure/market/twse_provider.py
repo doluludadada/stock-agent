@@ -174,19 +174,27 @@ class TaiwanStockProvider(ITaiwanStockProvider):
         feeds = self._exchange.financial_reports
         reports: list[FinancialReport] = []
 
+        empty: list[str] = []
+
         for statement in FinancialStatement:
             for industry_format in IndustryFormat:
-                served = await read_reports(
-                    {market: urls[statement][industry_format] for market, urls in feeds.urls.items()},
-                    lambda rows, market, statement=statement, industry_format=industry_format: [
+                urls = {market: by_statement[statement][industry_format] for market, by_statement in feeds.urls.items()}
+
+                for market, rows in (await fetch_reports(urls, self._timeout_seconds, self._logger)).items():
+                    filed = [
                         report
                         for row in rows
                         if (report := parse_financial_report(row, market, statement, industry_format, self._exchange)) is not None
-                    ],
-                    self._timeout_seconds,
-                    self._logger,
-                )
-                reports.extend(report for filed in served.values() for report in filed)
+                    ]
+                    reports.extend(filed)
+
+                    if not filed and not served_rows(rows):
+                        empty.append(urls[market])
+                    else:
+                        log_unread(urls[market], rows, len(filed), self._logger)
+
+        if empty:
+            self._logger.info(f"{len(empty)} financial report feeds served no rows: {', '.join(empty)}")
 
         return reports
 
@@ -394,13 +402,18 @@ def log_unread(url: str, rows: list[dict[str, Any]], read: int, logger: ILogging
     if read:
         return
 
-    served = [row for row in rows if sum(1 for value in row.values() if str(value).strip()) > 1]
+    served = served_rows(rows)
 
     if not served:
         logger.info(f"Open data feed {url} served no rows")
         return
 
     logger.error(f"Open data feed {url} served {len(served)} rows and none could be read")
+
+
+def served_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The rows that hold more than the day they were served, which is all a row of an empty OpenAPI report holds."""
+    return [row for row in rows if sum(1 for value in row.values() if str(value).strip()) > 1]
 
 
 def parse_industries(rows: list[dict[str, Any]], market: MarketType, exchange: ExchangeSources) -> dict[str, str]:

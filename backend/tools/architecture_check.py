@@ -145,14 +145,15 @@ FACTORY_TARGETS = ("c_infrastructure", "b_application.use_cases", "b_application
 PRESENTATION_SETTINGS = {
     # The runtime switch compares the revisions a runtime was built from with the files on disk, bounds how long the
     # startup on new settings may take, and starts every new runtime in the environment and the audience the process
-    # started in. The Web API's timers look at the settings files and archive the open data at the current settings'
-    # intervals.
+    # started in. The Web API's timers look at the settings files, archive the open data and read the world's feeds
+    # at the current settings' intervals.
     "d_presentation/live_runtime.py": frozenset(
         {
             "settings_revisions",
             "api.settings_build_timeout_seconds",
             "api.settings_poll_seconds",
             "api.archive_interval_hours",
+            "api.world_interval_minutes",
             "environment",
             "audience",
         }

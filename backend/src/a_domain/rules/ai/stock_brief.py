@@ -24,6 +24,8 @@ class BriefFact:
 
     source: BriefSource
     text: NonEmptyText
+    stocks: frozenset[str] = frozenset()
+    """The listed stocks whose id or name a world news item's own text holds. Empty for every other fact."""
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -220,6 +222,8 @@ def article_fact(article: Article, article_text_length: PositiveInt) -> tuple[Br
             kind = BriefSourceKind.POST
         case InformationSource.ANNUAL_REPORT:
             kind = BriefSourceKind.ANNUAL_REPORT
+        case InformationSource.CNA | InformationSource.BBC | InformationSource.FEDERAL_RESERVE:
+            kind = BriefSourceKind.WORLD_NEWS
 
     body = " ".join((article.open_text or "").split())[:article_text_length]
     title = " ".join(article.title.split())
@@ -323,15 +327,19 @@ class BriefReply:
     sources: list[BriefSource]
 
 
-def allowed_sentences(rule: BriefReplyRule, part: object, known: dict[str, BriefSource]) -> list[BriefSentence]:
+def allowed_sentences(rule: BriefReplyRule, part: object, known: dict[str, BriefFact]) -> list[BriefSentence]:
     items = [item for item in (part if isinstance(part, list) else []) if isinstance(item, dict)]
     kept = [
-        sentence for item in items if (sentence := allowed_sentence(rule, item.get("text"), item.get("sources"), known)) is not None
+        sentence
+        for item in items
+        if (sentence := allowed_sentence(rule, item.get("text"), item.get("sources"), item.get("stocks"), known)) is not None
     ]
     return kept[: rule.sentences]
 
 
-def allowed_sentence(rule: BriefReplyRule, text: object, cited: object, known: dict[str, BriefSource]) -> BriefSentence | None:
+def allowed_sentence(
+    rule: BriefReplyRule, text: object, cited: object, linked: object, known: dict[str, BriefFact]
+) -> BriefSentence | None:
     keys = [key for key in (cited if isinstance(cited, list) else []) if isinstance(key, str) and key in known]
     said = " ".join(re.sub(rule.link_pattern, "", text if isinstance(text, str) else "").split())[: rule.sentence_length]
 
@@ -341,7 +349,9 @@ def allowed_sentence(rule: BriefReplyRule, text: object, cited: object, known: d
     if any(phrase.casefold() in said.casefold() for phrase in rule.advice_phrases):
         return None
 
-    return BriefSentence(text=said, sources=list(dict.fromkeys(keys)))
+    named = {stock_id for key in keys for stock_id in known[key].stocks}
+    stocks = [stock_id for stock_id in (linked if isinstance(linked, list) else []) if isinstance(stock_id, str) and stock_id in named]
+    return BriefSentence(text=said, sources=list(dict.fromkeys(keys)), stocks=list(dict.fromkeys(stocks)))
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -353,7 +363,9 @@ class BriefReplyRule:
     key, or that words advice (`advice_phrases`, compared without case), is dropped; a part keeps its first `sentences`
     sentences, each cut at `sentence_length`. None when the reply is no such object or the part the text's `kind` names
     ends up empty: the text failed. A daily brief keeps a company part the reply holds besides, as a prompt written
-    before the company card asks for; a company card keeps the company part alone.
+    before the company card asks for; a company card keeps the company part alone. A world brief's part is `world`,
+    kept as the brief's movement, with no company part. Of the stocks a sentence's `stocks` names, it keeps only those
+    a held item it cites names itself (BriefFact.stocks), so no stock is linked on the AI's word alone.
     """
 
     kind: BriefKind
@@ -371,14 +383,14 @@ class BriefReplyRule:
         if not isinstance(parsed, dict):
             return None
 
-        known = {fact.source.key: fact.source for fact in context.facts}
+        known = {fact.source.key: fact for fact in context.facts}
         parts = {part: allowed_sentences(self, parsed.get(part.value), known) for part in BriefKind}
 
         if not parts[self.kind]:
             return None
 
-        company = parts[BriefKind.COMPANY]
-        movement = parts[BriefKind.MOVEMENT] if self.kind == BriefKind.MOVEMENT else []
+        company = [] if self.kind == BriefKind.WORLD else parts[BriefKind.COMPANY]
+        movement = [] if self.kind == BriefKind.COMPANY else parts[self.kind]
 
         cited = {key for sentence in (*company, *movement) for key in sentence.sources}
-        return BriefReply(company=company, movement=movement, sources=[source for key, source in known.items() if key in cited])
+        return BriefReply(company=company, movement=movement, sources=[fact.source for key, fact in known.items() if key in cited])

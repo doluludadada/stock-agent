@@ -3,7 +3,7 @@
  * audit of each: horizontal page scroll, controls under 44 px on a phone, text cut off, the words on it, and page errors.
  *
  *   bun tools/capture-screens.ts <out-dir> [--url http://127.0.0.1:4173] [--user name --password pw]
- *     [--member name --member-password pw] [--only overview,watchlist] [--widths 375,1440] [--themes light]
+ *     [--member name --member-password pw] [--only overview,watchlist] [--widths 375,1440] [--themes light] [--locale en]
  *
  * Point --url at the dev server or `vite preview` of a build whose /v1 reaches a disposable backend that already has
  * accounts. It signs in through the API (the server sets the session cookie) and otherwise only reads: it starts no
@@ -24,6 +24,8 @@ interface Options {
   only: Set<string> | null
   widths: number[]
   themes: Theme[]
+  /** The language the pages are read in: zh-TW unless --locale names another. */
+  locale: string
 }
 
 type Theme = 'light' | 'dark'
@@ -70,6 +72,7 @@ function parseOptions(argv: string[]): Options {
     only: list('only') ? new Set(list('only')) : null,
     widths: (list('widths') ?? ['360', '768', '1440']).map(Number),
     themes: (list('themes') ?? ['light', 'dark']) as Theme[],
+    locale: flag('locale') ?? 'zh-TW',
   }
 }
 
@@ -91,6 +94,7 @@ function shots(runId: string | null, needsSetup: boolean): Shot[] {
     { name: 'holdings-signed-out', path: '/holdings', session: 'signedOut' },
     { name: 'home', path: '/', session: 'admin' },
     { name: 'market', path: '/market', session: 'admin' },
+    { name: 'world', path: '/world', session: 'admin' },
     { name: 'ranking', path: '/ranking', session: 'admin' },
     { name: 'ranking-5y', path: '/ranking?period=5Y', session: 'admin' },
     { name: 'stock-2330', path: '/stocks/2330', session: 'admin' },
@@ -202,15 +206,15 @@ async function signedInPage(browser: Browser, options: Options, width: number, t
   const context = await browser.newContext({
     baseURL: options.url,
     viewport: { width, height: HEIGHTS[width] ?? 900 },
-    locale: 'zh-TW',
+    locale: options.locale,
     timezoneId: 'Asia/Taipei',
     colorScheme: theme,
     reducedMotion: 'reduce',
   })
-  await context.addInitScript(([chosen]) => {
+  await context.addInitScript(([chosen, locale]) => {
     localStorage.setItem('stock-agent.theme', chosen!)
-    localStorage.setItem('stock-agent.locale', 'zh-TW')
-  }, [theme])
+    localStorage.setItem('stock-agent.locale', locale!)
+  }, [theme, options.locale])
   const account = session === 'admin' ? { identifier: options.user, password: options.password } : session === 'member' ? { identifier: options.member!, password: options.memberPassword! } : null
   if (account) {
     const answer = await context.request.post('/v1/auth/sign-in', { headers: { 'X-Requested-With': 'stock-agent' }, data: account })

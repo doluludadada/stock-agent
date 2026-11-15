@@ -2,6 +2,8 @@ import { Building2, ExternalLink } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useTranslation } from '@/i18n'
 import { useFormat } from '@/shared/lib/format'
+import { outboundUrl } from '@/shared/lib/outbound-url'
+import { AiByline } from '@/shared/ui/ai-byline'
 import { ErrorState } from '@/shared/ui/error-state'
 import { Panel } from '@/shared/ui/panel'
 import { Skeleton } from '@/shared/ui/skeleton'
@@ -9,8 +11,7 @@ import { Stat } from '@/shared/ui/stat'
 import { StateBlock } from '@/shared/ui/state-block'
 import { useStockCompany } from './api'
 import { companyCard, companyLinks, type CompanyProfile, type StockBrief, type StockCompanyAnswer } from './brief'
-import { Byline, Sentences } from './BriefPanel'
-import { outboundUrl } from './model'
+import { Sentences } from './BriefPanel'
 
 /**
  * What the company is, in one card: the AI's company card, which the site writes once and keeps, then the facts of
@@ -53,7 +54,7 @@ function Card({ card }: { card: StockBrief }) {
   return (
     <div className="space-y-2">
       <Sentences sentences={card.company ?? []} sources={card.sources ?? []} />
-      <Byline brief={card} />
+      <AiByline model={card.model} writtenAt={card.written_at} />
     </div>
   )
 }
@@ -74,7 +75,7 @@ function Facts({ profile, withMainBusiness }: { profile: CompanyProfile; withMai
         <a key="website" href={website} target="_blank" rel="noopener noreferrer nofollow" className="tap gap-1 break-all text-brand underline-offset-4 hover:underline">
           {new URL(website).hostname}
           <ExternalLink aria-hidden className="size-3.5 shrink-0" />
-          <span className="sr-only">{t('news.opens')}</span>
+          <span className="sr-only">{t('common:opensSource')}</span>
         </a>
       ),
     ]
@@ -112,7 +113,7 @@ function Sources({ answer }: { answer: StockCompanyAnswer }) {
         <a key={link.href} href={link.href} target="_blank" rel="noopener noreferrer nofollow" className="tap gap-1 font-medium text-brand underline-offset-4 hover:underline">
           {t(`brief.kind.${link.kind}`)}
           <ExternalLink aria-hidden className="size-3 shrink-0" />
-          <span className="sr-only">{t('news.opens')}</span>
+          <span className="sr-only">{t('common:opensSource')}</span>
         </a>
       ))}
     </p>

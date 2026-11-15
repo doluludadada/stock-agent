@@ -115,7 +115,7 @@ describe('translations', () => {
       ['auth', 'users.filter', ['all', 'administrator', 'user', 'deactivated']],
       ['auth', 'problem', ['required', 'usernameFormat', 'emailFormat', 'passwordShort', 'passwordLong', 'mismatch', 'wrongCode']],
       ['auth', 'alert', ['failed', 'closed', 'alreadySetUp', 'taken', 'rateLimited']],
-      ['common', 'nav', ['home', 'overview', 'valuation', 'watchlist', 'holdings', 'account', 'brokerage', 'settings', 'runs', 'strategies', 'backtest', 'ranking', 'builder', 'users', 'admin']],
+      ['common', 'nav', ['home', 'overview', 'world', 'valuation', 'watchlist', 'holdings', 'account', 'brokerage', 'settings', 'runs', 'strategies', 'backtest', 'ranking', 'builder', 'users', 'admin']],
       ['backtest', 'verdict.result', ['up', 'down', 'flat']],
       ['backtest', 'verdict.index', ['ahead', 'behind', 'level', 'none']],
       ['backtest', 'exit', ['stopLoss', 'score', 'open', 'other']],
@@ -141,6 +141,9 @@ describe('translations', () => {
       ['research', 'brief.kind', openapi.components.schemas.BriefSourceKind.enum as string[]],
       ['research', 'brief.writtenIn', openapi.components.schemas.BriefLanguage.enum as string[]],
       ['research', 'brief.part', ['company', 'movement']],
+      ['world', 'indicators.name', openapi.components.schemas.WorldIndicator.enum as string[]],
+      ['world', 'brief.writtenIn', openapi.components.schemas.BriefLanguage.enum as string[]],
+      ['world', 'brief', ['waiting.title', 'waiting.description', 'off.title', 'off.description']],
     ]
     for (const [namespace, family, values] of families) {
       for (const value of values) expect(lookup(namespace, `${family}.${value}`), `${namespace}:${family}.${value}`).toBeTypeOf('string')

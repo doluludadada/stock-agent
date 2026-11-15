@@ -35,6 +35,7 @@ const admin = {
       sentiment: 'Buzz sentiment',
       quality: 'Article quality',
       stock_page: 'Stock page',
+      world: 'World news and brief',
       market: 'Fees, tax and tick sizes',
       freshness: 'Data freshness',
       market_data: 'Market data requests',
@@ -49,6 +50,7 @@ const admin = {
     },
     heading: {
       stock_page: { brief: 'AI brief', article_store: 'Kept articles' },
+      world: { brief: 'World brief' },
     },
     group: {
       site_access: { title: 'Site and access', description: 'Whom the site is for, who may register and sign in, and how much each user may use.' },
@@ -93,6 +95,7 @@ const admin = {
         sinopac_account: 'SinoPac account',
         sinopac_ordering: 'SinoPac ordering',
         holdings: 'My holdings',
+        world: 'World',
       },
       holdings: {
         concentration_positions: 'Largest stocks in the concentration',
@@ -112,6 +115,7 @@ const admin = {
       api: {
         valuation_cache_minutes: 'Reuse market valuation for (minutes)',
         archive_interval_hours: 'Archive the open data every (hours)',
+        world_interval_minutes: 'Read the world feeds every (minutes)',
       },
       tavily: {
         search_depth: 'Search depth',
@@ -150,6 +154,8 @@ const admin = {
         stock_brief_fall_query: 'What an AI brief searches the kept articles for after a fall',
         stock_brief_company_query: 'What an AI brief searches the kept articles for about the company',
         company_card: 'Stock page company card prompt',
+        world_brief: 'World brief prompt',
+        world_brief_query: 'What a world brief searches the kept world news for',
       },
       sentiment: {
         min_confidence: 'Least confidence of a post',
@@ -174,6 +180,13 @@ const admin = {
         article_store: {
           retention_days: 'Days an article is kept',
           max_per_stock: 'Most articles kept per stock',
+        },
+      },
+      world: {
+        retention_days: 'Days a world news item is kept',
+        brief: {
+          write_at: 'Write the day’s world brief from (Taiwan time)',
+          window_hours: 'Hours of world news a brief reads',
         },
       },
       market: {
@@ -279,6 +292,8 @@ const admin = {
         sinopac_account: 'The SinoPac account page, which only reads the account as the broker reports it: the balance, the holdings, what is due and the deals. It also lets My holdings count the account’s holdings. Hidden, the page goes and no holding of the account is read. It never orders.',
         sinopac_ordering: 'Whether the site may place an order on SinoPac: SinoPac as a choice for a run’s orders or a BUY. It is off unless you turn it on, and while it is off no order can reach SinoPac. It does not show or hide the account page. The server’s other rules for a real broker apply either way.',
         holdings: 'The My holdings page: the user’s holdings read as one portfolio, with each stock’s ranking score and revenue, and the entries typed by hand. Hidden, the page leaves the navigation and nothing is read.',
+        world:
+          'The World page and the home page’s World block: the world indicators, the day’s AI brief of the world and the world news. Off, the site also reads no world feed and writes no world brief.',
       },
       holdings: {
         concentration_positions: 'How many of the largest stocks My holdings adds up for the concentration figure.',
@@ -298,6 +313,8 @@ const admin = {
       api: {
         valuation_cache_minutes: 'How long the Web API reuses a loaded market valuation, the listings and the MOPS EPS, across valuation requests.',
         archive_interval_hours: 'How often the Web API saves the TWSE and TPEX open-data closes into the archive. The OpenAPI serves a session for about a day, so a few hours never miss one while the server runs.',
+        world_interval_minutes:
+          'How often the Web API reads the world news feeds and the world indicators, and looks whether the day’s world brief is due. A wire service’s feed lists only its last few hours.',
       },
       tavily: {
         search_depth: 'How deep Tavily searches for each web search. Basic is quicker; Advanced reads more and costs more.',
@@ -342,6 +359,10 @@ const admin = {
           'Not a prompt: no AI reads it. A brief takes the kept articles whose meaning is closest to these words to say what the company makes and sells. Write them in the articles’ language, without a company name. Empty, a brief searches for none.',
         company_card:
           'The AI writes a company’s card from its profile and its annual report once, and again only when one of them or this prompt changes. Empty, no card is written.',
+        world_brief:
+          'The AI writes the day’s world brief from the indicators and the world news the site holds. It must name {facts}, {language} and {sentences}. Empty, no world brief is written.',
+        world_brief_query:
+          'Not a prompt: no AI reads it. A world brief takes the kept world news whose meaning is closest to these words. Empty, a brief reads the newest items instead.',
       },
       sentiment: {
         min_confidence: 'A post classified with less confidence than this, from 0 to 1, counts as unclear. The Buzz report’s sentiment never changes a signal or an order.',
@@ -368,6 +389,13 @@ const admin = {
           retention_days:
             'The site keeps what it read about each stock: announcements, exchange news and, on a personal site, news articles and PTT posts. An article published longer ago than this is dropped. The stock page lists the kept articles, and an AI brief searches them.',
           max_per_stock: 'The most articles the site keeps of one stock. When a stock has more, the oldest are dropped.',
+        },
+      },
+      world: {
+        retention_days: 'A world news item published longer ago than this is dropped. A brief keeps the items it cites.',
+        brief: {
+          write_at: 'The day’s world brief is written at the first reading of the feeds from this time on: after the United States session’s close, before the Taiwan open.',
+          window_hours: 'How many hours of world news before its writing a brief reads.',
         },
       },
       market: {

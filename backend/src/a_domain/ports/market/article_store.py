@@ -11,7 +11,8 @@ class IArticleStore(Protocol):
     It is the durable copy: the vectors that find an article by meaning (IArticleIndex) are rebuilt from it. It keeps
     what it is given, so the caller decides which text an article is kept with (KeptArticleRule). Retention bounds it:
     an article published longer ago than the retention window is dropped, and so is a stock's oldest beyond the most
-    one stock may keep, which a document of record such as an annual report's section does not count toward.
+    one stock may keep, which a document of record such as an annual report's section does not count toward. The world
+    news is kept here too, under MarketScope.WORLD in place of a stock, within a retention and a most of its own.
     """
 
     async def save(self, articles: Sequence[Article]) -> int:
@@ -38,5 +39,5 @@ class IArticleStore(Protocol):
         ...
 
     async def stock_ids(self) -> list[str]:
-        """Every stock with a kept article, in stock id order."""
+        """Every stock with a kept article, in stock id order. The world news is of no stock and is left out."""
         ...

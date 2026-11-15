@@ -14,6 +14,7 @@ from d_presentation.web.routers import (
     valuation,
     watchlist,
     webhook_router,
+    world,
 )
 from d_presentation.web.session import API_PATH, AppRequest, KnownHost
 
@@ -29,6 +30,7 @@ for module in (
     backtests,
     rankings,
     market,
+    world,
     valuation,
     admin,
     admin_users,

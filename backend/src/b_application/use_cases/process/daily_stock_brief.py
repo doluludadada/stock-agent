@@ -40,6 +40,10 @@ class DailyStockBrief:
     is today's card if one was claimed today, the newest written card of an earlier day, and how many more companies
     may get a card today (stock_page.card.daily_stocks).
 
+    The world brief (BriefKind.WORLD) is the day's one text about the world, kept under MarketScope.WORLD in place of
+    a stock in a repository of its own, from prompts.world_brief and within world.brief's limits. Only the site's own
+    writing asks for it, with the context WorldBriefContext gathers when one is due.
+
     `for_system` says the site writes by itself, on the provider that counts the system's own calls: no limit of
     stocks holds its claim, and its text takes none of the day's stocks, which are the viewers'.
     """
@@ -63,16 +67,7 @@ class DailyStockBrief:
         self._kind = kind
         self._language = config.stock_page.brief.language
         self._claim_time = timedelta(minutes=config.stock_page.brief.claim_minutes)
-        brief, card, advice = config.stock_page.brief, config.stock_page.card, config.prompts.advice_phrases()
-
-        match kind:
-            case BriefKind.MOVEMENT:
-                self._template, self._sentences, self._daily_stocks = config.prompts.stock_brief, brief.sentences, brief.daily_stocks
-                self._reply_rule = brief.reply_rule(advice)
-            case BriefKind.COMPANY:
-                self._template, self._sentences, self._daily_stocks = config.prompts.company_card, card.sentences, card.daily_stocks
-                self._reply_rule = card.reply_rule(advice, brief.link_pattern)
-
+        self._template, self._sentences, self._daily_stocks, self._reply_rule = config.brief_writing(kind)
         self._claim_limit = None if for_system else self._daily_stocks
 
     async def execute(self, stock_id: str, context: BriefContext | None = None) -> tuple[StockBrief | None, StockBrief | None, int]:

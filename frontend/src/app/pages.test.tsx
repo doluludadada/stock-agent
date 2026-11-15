@@ -38,8 +38,8 @@ describe('the pages and the features they belong to', () => {
   })
 
   it('lists a page in the navigation only for a viewer the site shows one of its features to', () => {
-    expect(keys(viewer({}))).toEqual(['home', 'ranking', 'overview', 'holdings', 'watchlist', 'settings', 'runs', 'account', 'valuation', 'strategies', 'backtest', 'builder'])
-    expect(keys(viewer({ ranking: 'off', watchlist: 'administrators', strategy_designer: 'off' }))).toEqual(['home', 'overview', 'holdings', 'settings', 'runs', 'account', 'valuation', 'strategies', 'backtest'])
+    expect(keys(viewer({}))).toEqual(['home', 'ranking', 'overview', 'world', 'holdings', 'watchlist', 'settings', 'runs', 'account', 'valuation', 'strategies', 'backtest', 'builder'])
+    expect(keys(viewer({ ranking: 'off', watchlist: 'administrators', strategy_designer: 'off' }))).toEqual(['home', 'overview', 'world', 'holdings', 'settings', 'runs', 'account', 'valuation', 'strategies', 'backtest'])
     expect(keys(viewer({ watchlist: 'administrators' }, ['see_administrator_features']))).toContain('watchlist')
     expect(keys({ ...viewer({}), visibilities: undefined }), 'nothing that names a feature until the server has said').toEqual(['home', 'settings'])
   })

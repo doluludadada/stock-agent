@@ -13,6 +13,7 @@ import enRuns from './locales/en/runs'
 import enValuation from './locales/en/valuation'
 import enStrategies from './locales/en/strategies'
 import enWatchlist from './locales/en/watchlist'
+import enWorld from './locales/en/world'
 import zhAccount from './locales/zh-TW/account'
 import zhAttribution from './locales/zh-TW/attribution'
 import zhAuth from './locales/zh-TW/auth'
@@ -28,6 +29,7 @@ import zhRuns from './locales/zh-TW/runs'
 import zhValuation from './locales/zh-TW/valuation'
 import zhStrategies from './locales/zh-TW/strategies'
 import zhWatchlist from './locales/zh-TW/watchlist'
+import zhWorld from './locales/zh-TW/world'
 
 /** The words every page may need. The settings form's are apart, in admin-resources.ts, and load with its page. */
 export const resources = {
@@ -45,6 +47,7 @@ export const resources = {
     valuation: enValuation,
     account: enAccount,
     holdings: enHoldings,
+    world: enWorld,
     auth: enAuth,
     attribution: enAttribution,
   },
@@ -62,6 +65,7 @@ export const resources = {
     valuation: zhValuation,
     account: zhAccount,
     holdings: zhHoldings,
+    world: zhWorld,
     auth: zhAuth,
     attribution: zhAttribution,
   },

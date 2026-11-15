@@ -34,6 +34,8 @@ from a_domain.ports.market.news_source import INewsSource
 from a_domain.ports.market.price_provider import IOhlcvProvider
 from a_domain.ports.market.social_media_provider import ISocialMediaProvider
 from a_domain.ports.market.stock_feed import IStockFeed
+from a_domain.ports.market.world_feed import IWorldFeed
+from a_domain.ports.market.world_indicator_repository import IWorldIndicatorRepository
 from a_domain.ports.system.attempt_log import IAttemptLog
 from a_domain.ports.system.identity_provider import IIdentityProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
@@ -48,7 +50,7 @@ from a_domain.ports.trading.holding_repository import IHoldingRepository
 from a_domain.ports.trading.trading_journal import ITradingJournal
 from a_domain.ports.trading.users_stocks import IUsersStocks
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
-from a_domain.types.enums import AiProvider, BriefKind, ExecutionProvider, MarketType, Permission
+from a_domain.types.enums import AiProvider, BriefKind, ExecutionProvider, Feature, MarketScope, MarketType, Permission
 from a_domain.types.errors import BrokerUnavailable, RealBrokerRefused
 from a_domain.types.ids import UserId
 from b_application.config.api_config import FeaturesConfig
@@ -96,6 +98,8 @@ from b_application.use_cases.collect.stock_analysis_lookup import StockAnalysisL
 from b_application.use_cases.collect.stock_lookup import StockLookup
 from b_application.use_cases.collect.stock_news_lookup import StockNewsLookup
 from b_application.use_cases.collect.stock_search import StockSearch
+from b_application.use_cases.collect.world_lookup import WorldLookup
+from b_application.use_cases.collect.world_refresh import WorldRefresh
 from b_application.use_cases.process.ai_analyser import AiAnalyser
 from b_application.use_cases.process.article_indexer import ArticleIndexer
 from b_application.use_cases.process.company_background import CompanyBackground
@@ -107,6 +111,7 @@ from b_application.use_cases.process.strategy_loader import StrategyLoader
 from b_application.use_cases.process.system_writing_stocks import SystemWritingStocks
 from b_application.use_cases.process.technical_filter import TechnicalFilter
 from b_application.use_cases.process.technical_settings_editor import TechnicalSettingsEditor
+from b_application.use_cases.process.world_brief_context import WorldBriefContext
 from b_application.use_cases.ranking.latest_ranking import LatestRanking
 from b_application.use_cases.ranking.ranking_history_loader import RankingHistoryLoader
 from b_application.use_cases.ranking.ranking_replay import RankingReplay
@@ -171,7 +176,7 @@ from c_infrastructure.database.chroma.conversation_repository import ChromaConve
 from c_infrastructure.database.chroma.knowledge_repository import ChromaKnowledgeRepository
 from c_infrastructure.database.chroma.schema import ChromaCollection
 from c_infrastructure.database.db_connector import DatabaseConnector, OutdatedDatabaseError
-from c_infrastructure.database.models.stock_brief_dto import CompanyCardDTO, StockBriefDTO
+from c_infrastructure.database.models.stock_brief_dto import CompanyCardDTO, StockBriefDTO, WorldBriefDTO
 from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID, load_accounts_key
 from c_infrastructure.database.repositories.article_store import SqlArticleStore
 from c_infrastructure.database.repositories.backtest_repository import SqlBacktestRepository
@@ -185,12 +190,14 @@ from c_infrastructure.database.repositories.trading_journal import TradingJourna
 from c_infrastructure.database.repositories.user_store import AccountsKeyError, SqlUserStore
 from c_infrastructure.database.repositories.users_stocks import SqlUsersStocks
 from c_infrastructure.database.repositories.watchlist_repository import WatchlistRepository
+from c_infrastructure.database.repositories.world_indicator_repository import SqlWorldIndicatorRepository
 from c_infrastructure.feed.news.cnyes_news_provider import CnyesNewsProvider
 from c_infrastructure.feed.news.yahoo_tw_news_provider import YahooTwNewsProvider
 from c_infrastructure.feed.news_provider import NewsProvider
 from c_infrastructure.feed.ptt_provider import PttProvider
 from c_infrastructure.feed.stock_feed import HeldStockFeed
 from c_infrastructure.feed.tavily_provider import TavilySearchAdapter
+from c_infrastructure.feed.world_feed import WorldFeed
 from c_infrastructure.identity.google_identity_provider import GoogleIdentityProvider
 from c_infrastructure.market.cached_price_provider import CachedPriceProvider
 from c_infrastructure.market.daily_bar_matrix_provider import DailyBarMatrixProvider
@@ -357,6 +364,15 @@ class ProviderDependencies:
     """The site's company cards, each under the day it was claimed on, in a table of their own, shared by every user."""
     system_writing_log: ISystemWritingLog
     """The rounds of the site's own writing, one per session, kept across restarts."""
+    world_brief_repository: IStockBriefRepository
+    """The site's world briefs, one per Taipei calendar day under MarketScope.WORLD, in a table of their own."""
+    world_indicator_repository: IWorldIndicatorRepository
+    """The world indicators' daily readings the site holds, shared by every user."""
+    world_feed: IWorldFeed | None
+    """
+    The world news feeds the audience may read and the world indicators' tables, or None while the settings name none
+    of either or the site shows the world feature to nobody: nothing is read then.
+    """
     system_ai_provider: IAiProvider | None
     """
     The provider of the site's own writing, on ai.system_model, its calls counted per day against
@@ -568,6 +584,30 @@ def create_news_provider(
     return NewsProvider(sources, config, logger, market_clock)
 
 
+def create_world_feed(config: AppConfig, logger: ILoggingProvider, market_clock: TaiwanMarketClock) -> IWorldFeed | None:
+    """
+    The world feed over the news feeds of the sources the audience may read (Audience.world_sources) and over the
+    tables' columns of the indicators it may read (Audience.world_indicators), so a public site's adapter holds no
+    feed and no table of a publisher that offers it for a reader's own use. None while that leaves no feed and no
+    table, as on a deployment's older settings file, and while features.world shows the world to nobody.
+    """
+    sources, audience = config.sources.world, config.audience
+    news_feeds = [feed for feed in sources.news_feeds if feed.source in audience.world_sources]
+    allowed = [
+        {field: indicator for field, indicator in feed.fields.items() if indicator in audience.world_indicators}
+        for feed in sources.indicator_feeds
+    ]
+    tables = [
+        feed.model_copy(update={"fields": fields}) for feed, fields in zip(sources.indicator_feeds, allowed, strict=True) if fields
+    ]
+    shown = config.features.visibility(Feature.WORLD).shown_to(frozenset(Permission))
+
+    if not shown or not (news_feeds or tables):
+        return None
+
+    return WorldFeed(sources, news_feeds, tables, config.world.summary_length, market_clock, logger)
+
+
 def create_stock_feed(
     config: AppConfig, logger: ILoggingProvider, market_clock: TaiwanMarketClock, dependencies: ProviderDependencies
 ) -> IStockFeed | None:
@@ -763,10 +803,17 @@ async def build_provider_dependencies(
         stock_brief_repository=SqlStockBriefRepository(db, StockBriefDTO),
         company_card_repository=SqlStockBriefRepository(db, CompanyCardDTO),
         system_writing_log=SqlSystemWritingLog(db),
+        world_brief_repository=SqlStockBriefRepository(db, WorldBriefDTO),
+        world_indicator_repository=SqlWorldIndicatorRepository(db),
+        world_feed=create_world_feed(config, logger, market_clock),
         system_ai_provider=create_system_ai_provider(config, db, ai_providers, market_clock, logger),
         company_profile_repository=SqlCompanyProfileRepository(db),
         article_store=SqlArticleStore(
-            db, market_clock, config.stock_page.article_store.retention(), config.stock_page.article_store.max_per_stock
+            db,
+            market_clock,
+            config.stock_page.article_store.retention(),
+            config.stock_page.article_store.max_per_stock,
+            {MarketScope.WORLD.value: (config.world.retention(), config.world.max_items)},
         ),
         article_index=ChromaArticleIndex(
             chroma_client,
@@ -1006,6 +1053,30 @@ def build_pipeline(
         company_card=DailyStockBrief(
             dependencies.company_card_repository, owned.ai_provider, market_clock, config, logger, ai_model, BriefKind.COMPANY
         ),
+        world_refresh=WorldRefresh(
+            dependencies.world_feed,
+            dependencies.article_store,
+            dependencies.article_index,
+            dependencies.world_indicator_repository,
+            config,
+            logger,
+        ),
+        world_lookup=WorldLookup(
+            dependencies.world_indicator_repository, dependencies.world_brief_repository, dependencies.article_store, config
+        ),
+        world_brief_context=WorldBriefContext(
+            dependencies.world_indicator_repository,
+            dependencies.article_store,
+            dependencies.article_index,
+            dependencies.world_brief_repository,
+            stocks,
+            market_clock,
+            config,
+            logger,
+        ),
+        world_brief=DailyStockBrief(
+            dependencies.world_brief_repository, owned.ai_provider, market_clock, config, logger, ai_model, BriefKind.WORLD
+        ),
         stock_brief_context=StockBriefContext(
             stocks, prices, dependencies.article_store, dependencies.article_index, market_clock, config, logger
         ),
@@ -1108,8 +1179,9 @@ def system_writer_pipeline(
     signed_out: Pipeline,
 ) -> Pipeline | None:
     """
-    The Pipeline of the site's own writing: `signed_out` with its two writers of AI texts, the company card's and the
-    daily brief's, on the system's counted provider and ai.system_model, their claims held by no limit of stocks.
+    The Pipeline of the site's own writing: `signed_out` with its three writers of AI texts, the company card's, the
+    daily brief's and the world brief's, on the system's counted provider and ai.system_model, their claims held by no
+    limit of stocks.
     Every other step is the signed-out graph's, so it holds nobody's data and the mock account of nobody. None while
     the site's own writing is off.
     """
@@ -1126,6 +1198,9 @@ def system_writer_pipeline(
         ),
         daily_stock_brief=DailyStockBrief(
             dependencies.stock_brief_repository, writer, market_clock, config, logger, model, for_system=True
+        ),
+        world_brief=DailyStockBrief(
+            dependencies.world_brief_repository, writer, market_clock, config, logger, model, BriefKind.WORLD, for_system=True
         ),
     )
 

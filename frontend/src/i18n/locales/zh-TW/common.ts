@@ -24,6 +24,7 @@ const common: DictionaryShape<typeof en> = {
     account: '模擬帳戶',
     brokerage: '永豐金證券帳戶',
     holdings: '我的持股',
+    world: '國際局勢',
     settings: '我的設定',
     admin: '系統設定',
     users: '使用者管理',
@@ -95,6 +96,8 @@ const common: DictionaryShape<typeof en> = {
     themes: { dark: '深色', light: '淺色', system: '跟隨系統' },
   },
   direction: { up: '上漲', down: '下跌', flat: '平盤' },
+  ai: { generated: 'AI 生成，可能有錯', writtenAt: '台北時間 {{time}}' },
+  opensSource: '（在新分頁開啟來源）',
   units: { lots: '{{value}}張', closeOn: '{{date}} 收盤' },
   range: { '1M': '1 個月', '3M': '3 個月', '6M': '6 個月', '1Y': '1 年' },
   trend: {

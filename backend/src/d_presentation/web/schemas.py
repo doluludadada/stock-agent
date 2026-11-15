@@ -7,7 +7,7 @@ thresholds, eligibility and run counters come from the use cases that produced t
 """
 
 import re
-from datetime import date, datetime
+from datetime import date, datetime, time
 from enum import StrEnum
 from typing import Annotated, Literal
 from uuid import UUID
@@ -21,6 +21,7 @@ from a_domain.model.fundamentals.monthly_revenue import MonthlyRevenue
 from a_domain.model.fundamentals.quarter_financials import QuarterFinancials
 from a_domain.model.market.company_profile import CompanyProfile
 from a_domain.model.market.ohlcv import Ohlcv
+from a_domain.model.market.world_indicator import IndicatorReading
 from a_domain.model.trading.account import AccountOpening, BrokerFill, Settlement
 from a_domain.model.trading.backtest import BacktestInputs, BacktestTrade
 from a_domain.model.trading.order import Order
@@ -661,6 +662,26 @@ class StockBriefResponse(BaseModel):
 
     stocks_left: int
     """How many more stocks may get a new brief today (stock_page.brief.daily_stocks)."""
+
+
+class WorldResponse(BaseModel):
+    """
+    What the site holds of the world outside Taiwan's exchanges: the world indicators, the world briefs and the world
+    news. A brief's sentences are the AI's wording of held items, each naming those it rests on; it describes and gives
+    no advice. A news item's title and summary are its publisher's.
+    """
+
+    indicators: list[IndicatorReading]
+    """Each held world indicator's newest reading beside the one before it. Empty while none is held."""
+
+    briefs: list[StockBrief]
+    """The written world briefs of the latest days, newest first. Empty while none is written."""
+
+    news: list[StockNewsItemResponse]
+    """The newest kept world news items; `open_text` is the feed's own summary of the item, None where it gave none."""
+
+    write_at: time | None
+    """The Taipei time from which the site writes the day's brief. None on a site that writes none."""
 
 
 class StockCompanyResponse(BaseModel):

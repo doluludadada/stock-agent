@@ -93,3 +93,9 @@ class CompanyCardDTO(BriefColumns, table=True):
     __tablename__: ClassVar[str] = "company_cards"
 
     fingerprint: str | None = None
+
+
+class WorldBriefDTO(BriefColumns, table=True):
+    """The AI's world brief of one Taipei calendar day, under MarketScope.WORLD in `stock_id`. The past days' are kept."""
+
+    __tablename__: ClassVar[str] = "world_briefs"

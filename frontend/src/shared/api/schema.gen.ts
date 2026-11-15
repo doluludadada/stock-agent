@@ -1404,6 +1404,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/world": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get World
+         * @description What the site holds of the world outside Taiwan's exchanges, with no fetch and no AI call. `indicators`: each held
+         *     world indicator's newest reading, the one before it and its change. `briefs`: the written world briefs of the
+         *     latest world.brief.shown_days days that have one, newest first; the site writes one per Taipei day from
+         *     world.brief.write_at on, and each sentence is the AI's wording of held readings and held news items and names
+         *     those it rests on, with the listed stocks a cited item names itself. `news`: the newest world.shown kept items of
+         *     the world news feeds, each with its publisher, its time, its address and the feed's own summary. `write_at` is
+         *     the Taipei time from which the site writes the day's brief, null on a site that writes none. Every title and
+         *     summary is a third party's: show it as text, never as markup. Private.
+         */
+        get: operations["get_world_v1_world_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1834,6 +1861,8 @@ export interface components {
         BriefSentence: {
             /** Sources */
             sources: string[];
+            /** Stocks */
+            stocks?: string[];
             text: components["schemas"]["NonEmptyText"];
         };
         /**
@@ -1848,6 +1877,7 @@ export interface components {
             dated: string;
             key: components["schemas"]["NonEmptyText"];
             kind: components["schemas"]["BriefSourceKind"];
+            origin?: components["schemas"]["InformationSource"] | null;
             /** Title */
             title?: string | null;
             /** Url */
@@ -1858,7 +1888,7 @@ export interface components {
          * @description What kind of held item a brief's sentence cites, so the stock page can name it and link to where it shows it.
          * @enum {string}
          */
-        BriefSourceKind: "company" | "price" | "revenue" | "earnings" | "ranking" | "announcement" | "exchange_news" | "news" | "post" | "annual_report" | "profile";
+        BriefSourceKind: "company" | "price" | "revenue" | "earnings" | "ranking" | "announcement" | "exchange_news" | "news" | "post" | "annual_report" | "profile" | "world_news" | "indicator";
         /**
          * BriefStatus
          * @description Where a stock's AI brief of one day stands. One brief exists per stock and Taipei calendar day, for the whole site.
@@ -2191,7 +2221,7 @@ export interface components {
          *     three never disagree about what a feature covers.
          * @enum {string}
          */
-        Feature: "market_overview" | "ranking" | "stock_pages" | "watchlist" | "valuation" | "full_cycle" | "specific_stock" | "buzz" | "intraday" | "strategy_library" | "strategy_designer" | "strategy_backtest" | "mock_account" | "sinopac_account" | "sinopac_ordering" | "holdings";
+        Feature: "market_overview" | "ranking" | "stock_pages" | "watchlist" | "valuation" | "full_cycle" | "specific_stock" | "buzz" | "intraday" | "strategy_library" | "strategy_designer" | "strategy_backtest" | "mock_account" | "sinopac_account" | "sinopac_ordering" | "holdings" | "world";
         /**
          * FeatureVisibility
          * @description Who the site shows a feature to. The Web API refuses the feature's routes to everyone else.
@@ -2402,6 +2432,32 @@ export interface components {
         "IndicatorParameters-Output": components["schemas"]["MovingAverageIndicator"] | components["schemas"]["PeriodIndicator"] | components["schemas"]["MacdIndicator"] | components["schemas"]["BollingerIndicator"] | components["schemas"]["StochasticIndicator"];
         IndicatorPeriod: number;
         /**
+         * IndicatorReading
+         * @description One world indicator on one day, as its source served it, beside the reading the site holds of the day before it:
+         *     a source serves the first alone, and the site's store answers both.
+         */
+        IndicatorReading: {
+            /**
+             * Change
+             * @description How far it moved from the reading before: for an indicator in percent, the difference in percentage points
+             *     (0.05 is five hundredths of a point more); for any other, the share of the reading before (0.012 is 1.2% more).
+             *     None without a reading before, or one of 0.
+             */
+            readonly change: number | null;
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            indicator: components["schemas"]["WorldIndicator"];
+            /** Previous */
+            previous?: number | null;
+            /** Previous Day */
+            previous_day?: string | null;
+            /** Value */
+            value: number;
+        };
+        /**
          * IndicatorValue
          * @description One output of one of the strategy's indicators, `bars_ago` trading days before the latest daily bar.
          *     `{"type": "indicator", "indicator_id": "ind_b", "output": "signal"}` is the MACD signal line of indicator ind_b.
@@ -2423,7 +2479,7 @@ export interface components {
          * InformationSource
          * @enum {string}
          */
-        InformationSource: "twse_mops" | "twse_news" | "news_media" | "ptt_stock" | "ptt_gossiping" | "annual_report";
+        InformationSource: "twse_mops" | "twse_news" | "news_media" | "ptt_stock" | "ptt_gossiping" | "annual_report" | "cna" | "bbc" | "federal_reserve";
         JsonValue: unknown;
         /**
          * LatestPrice
@@ -3487,7 +3543,8 @@ export interface components {
          *     company is, and how the held facts of a recent window of sessions relate to the stock's move over it. It describes
          *     and never advises. One exists per stock and day; its status says whether the AI is still asked. A company card is
          *     one too (BriefKind): it holds the `company` part alone, under the day it was claimed on, and the newest written one
-         *     is the company's card.
+         *     is the company's card. So is the day's world brief, whose `stock_id` is MarketScope.WORLD: it holds the `movement`
+         *     part alone, what moved in the held world indicators and which held world news may bear on Taiwan's market.
          */
         StockBrief: {
             /**
@@ -4044,6 +4101,30 @@ export interface components {
          * @enum {string}
          */
         Workflow: "full_cycle" | "buzz_scan" | "intraday" | "specific_stocks" | "manual_buy" | "follow" | "ranking_follow" | "valuation" | "research";
+        /**
+         * WorldIndicator
+         * @description A figure of the world's markets the site holds one reading a day of, each from a public agency that serves it
+         *     without a key: the Taiwan Futures Exchange's daily reference exchange rates and the United States Treasury's
+         *     daily yields.
+         * @enum {string}
+         */
+        WorldIndicator: "usd_twd" | "usd_jpy" | "eur_usd" | "usd_cny" | "us_10y_yield" | "us_2y_yield";
+        /**
+         * WorldResponse
+         * @description What the site holds of the world outside Taiwan's exchanges: the world indicators, the world briefs and the world
+         *     news. A brief's sentences are the AI's wording of held items, each naming those it rests on; it describes and gives
+         *     no advice. A news item's title and summary are its publisher's.
+         */
+        WorldResponse: {
+            /** Briefs */
+            briefs: components["schemas"]["StockBrief"][];
+            /** Indicators */
+            indicators: components["schemas"]["IndicatorReading"][];
+            /** News */
+            news: components["schemas"]["StockNewsItemResponse"][];
+            /** Write At */
+            write_at: string | null;
+        };
     };
     responses: never;
     parameters: never;
@@ -6497,6 +6578,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_world_v1_world_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorldResponse"];
                 };
             };
         };

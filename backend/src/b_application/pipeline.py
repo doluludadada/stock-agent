@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, time
 
 from pydantic import PositiveInt, SecretStr
 
@@ -11,6 +11,7 @@ from a_domain.model.market.article import Article
 from a_domain.model.market.company_profile import CompanyProfile
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
+from a_domain.model.market.world_indicator import IndicatorReading
 from a_domain.model.system.stats import SystemStats
 from a_domain.model.system.user import GoogleConfirmation, SignInFlow, User, UserSession
 from a_domain.model.trading.account import Account, BrokerageStatement, Position
@@ -36,6 +37,7 @@ from a_domain.types.enums import (
     FollowRefusal,
     HoldingSource,
     MarketIndex,
+    MarketScope,
     MarketType,
     Role,
     UserStatus,
@@ -79,6 +81,8 @@ from b_application.use_cases.collect.stock_analysis_lookup import StockAnalysisL
 from b_application.use_cases.collect.stock_lookup import StockLookup
 from b_application.use_cases.collect.stock_news_lookup import StockNewsLookup
 from b_application.use_cases.collect.stock_search import StockSearch
+from b_application.use_cases.collect.world_lookup import WorldLookup
+from b_application.use_cases.collect.world_refresh import WorldRefresh
 from b_application.use_cases.process.ai_analyser import AiAnalyser
 from b_application.use_cases.process.article_indexer import ArticleIndexer
 from b_application.use_cases.process.company_background import CompanyBackground
@@ -90,6 +94,7 @@ from b_application.use_cases.process.strategy_loader import StrategyLoader
 from b_application.use_cases.process.system_writing_stocks import SystemWritingStocks
 from b_application.use_cases.process.technical_filter import TechnicalFilter
 from b_application.use_cases.process.technical_settings_editor import TechnicalSettingsEditor
+from b_application.use_cases.process.world_brief_context import WorldBriefContext
 from b_application.use_cases.ranking.latest_ranking import LatestRanking
 from b_application.use_cases.ranking.ranking_history_loader import RankingHistoryLoader
 from b_application.use_cases.ranking.ranking_replay import RankingReplay
@@ -199,6 +204,10 @@ class Pipeline:
     main_business_refresh: MainBusinessRefresh
     annual_report_refresh: AnnualReportRefresh
     system_writing_stocks: SystemWritingStocks
+    world_refresh: WorldRefresh
+    world_lookup: WorldLookup
+    world_brief_context: WorldBriefContext
+    world_brief: DailyStockBrief
     company_background: CompanyBackground
     company_card: DailyStockBrief
     stock_brief_context: StockBriefContext
@@ -871,6 +880,38 @@ class Pipeline:
         market only at a round's first look.
         """
         return await self.system_writing_stocks.execute()
+
+    async def refresh_world(self) -> tuple[int, int, int]:
+        """
+        The Web API's world timer: the items the world news feeds list now read into the article store, their vectors
+        brought up to date, and the readings the world indicators' tables list kept. It answers the news items added or
+        replaced, those embedded and the readings that are new. A site that reads no world feed reads nothing.
+        """
+        return await self.world_refresh.execute()
+
+    async def write_world_brief(self) -> StockBrief | None:
+        """
+        The Web API's world timer, on the Pipeline of the site's own writing: the day's world brief written once it is
+        due, from world.brief.write_at of the Taipei day on, out of the held indicator readings and the kept world news
+        of its window, one AI call counted against stock_page.system_writing.daily_ai_calls. It answers the day's brief
+        as held then, or None while none is due.
+        """
+        context = await self.world_brief_context.execute()
+
+        if context is None:
+            return None
+
+        today, _, _ = await self.world_brief.execute(MarketScope.WORLD.value, context)
+
+        return today
+
+    async def load_world(self) -> tuple[list[IndicatorReading], list[StockBrief], list[Article], time | None]:
+        """
+        The world page and the home page's world block: each held world indicator's newest reading beside the one
+        before it, the written world briefs of the latest days, newest first, the newest kept world news items, and
+        the Taipei time from which the site writes the day's brief, None while it writes none.
+        """
+        return await self.world_lookup.execute()
 
     async def load_company(
         self, stock_id: str
