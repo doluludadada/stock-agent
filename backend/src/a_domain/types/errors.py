@@ -145,6 +145,14 @@ class RankingUnavailable(LookupError):
     """The daily history holds no decision session of the monthly ranking. The message says what it holds. 422."""
 
 
+class FollowTimeNotOffered(ValueError):
+    """A user chose a time for the scheduled ranking follow that ranking.follow_times does not offer. Nothing saved. 422."""
+
+
+class UnknownRankingFormula(LookupError):
+    """A ranking formula was named that ranking.formulas does not hold. The message names the ones it holds."""
+
+
 class AiAllowanceSpentError(RuntimeError):
     """
     Today's paid AI calls are spent, the user's or every user's together. Every AI caller of a run already treats a

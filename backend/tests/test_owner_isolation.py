@@ -549,6 +549,14 @@ async def first_fill(owners: Owners) -> None:
     assert await owners.alice.journal.first_fill(workflow, ExecutionProvider.MOCK, None) == filled.created_at
 
 
+async def runs_of(owners: Owners) -> None:
+    recorded = await alice_records_a_run(owners)
+    workflow = run_stats().workflow
+
+    assert await owners.bob.journal.runs_of(workflow, ExecutionProvider.MOCK, None) == []
+    assert [run.run_id for run in await owners.alice.journal.runs_of(workflow, ExecutionProvider.MOCK, None)] == [recorded.run_id]
+
+
 async def buy_orders(owners: Owners) -> None:
     recorded = await alice_records_a_run(owners)
 
@@ -573,6 +581,7 @@ CASES: dict[str, dict[str, Case]] = {
         "orders_of": orders_of,
         "follows_of": follows_of,
         "trades": trades,
+        "runs_of": runs_of,
         "first_fill": first_fill,
         "buy_orders": buy_orders,
     },

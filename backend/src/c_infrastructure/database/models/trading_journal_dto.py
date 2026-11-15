@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, ClassVar, Self
 from uuid import UUID
 
@@ -69,7 +69,14 @@ class WorkflowRunDTO(SQLModel, table=True):
     """
 
     followed_run_id: UUID | None = None
-    """A follow's run: the run whose decisions it followed. Last, as the upgrade to version 5 added it."""
+    """A follow's run: the run whose decisions it followed. After the owner, as the upgrade to version 5 added it."""
+
+    ranking_formula: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON, nullable=True))
+    """A ranking follow's formula (RankingFormula) as it was defined then, as the upgrade to version 10 added it."""
+
+    ranking_decided_on: date | None = None
+    scheduled: bool = False
+    """The decision a ranking follow took, and whether the schedule started the run. Last, as the upgrade to version 11 added them."""
 
 
 class TradeSignalDTO(SQLModel, table=True):

@@ -5,11 +5,11 @@ import {
   decisionDay,
   defaultScale,
   growthCurve,
+  cashDecisions,
   idleDecisions,
   logAxis,
   monthHoldings,
   monthRows,
-  nearnessOf,
   nextDecision,
   parsePeriod,
   periodBefore,
@@ -22,25 +22,32 @@ import {
   type Ranking,
   type RankingBacktest,
 } from './model'
+import { SHIPPED_FORMULA } from '@/test/ranking'
 import recordedBacktest from './test-support/backtest-2023-2024.json'
-import recordedLatest from './test-support/latest.json'
 
 /** What the backend answered on the real history for 2023-01-01 to 2024-10-31, and its latest ranking. */
 const BACKTEST = recordedBacktest as RankingBacktest
-const LATEST = recordedLatest as Ranking
 
 const TODAY = '2026-11-12'
 
 const stock = (stock_id: string, stock_name: string | null = null) => ({
   stock_id,
   stock_name,
-  revenue_acceleration: 1.2,
-  nearness_to_high: 1,
-  acceleration_rank: 0.9,
-  nearness_rank: 0.9,
+  factors: [
+    { value: 1.2, rank: 0.9 },
+    { value: 1, rank: 0.9 },
+  ],
   score: 1.8,
 })
-const ranking = (decided_on: string, ids: string[]): Ranking => ({ decided_on, revenue_month: '2026-01-01', universe: 700, scored: ids.length ? 690 : 0, stocks: ids.map((id) => stock(id)) })
+const ranking = (decided_on: string, ids: string[]): Ranking => ({
+  formula: SHIPPED_FORMULA,
+  decided_on,
+  revenue_month: '2026-01-01',
+  universe: 700,
+  scored: ids.length ? 690 : 0,
+  holds_cash: false,
+  stocks: ids.map((id) => stock(id)),
+})
 
 describe('the period', () => {
   it('asks for the whole history from before any the site can hold, and a quick period back from today', () => {
@@ -74,13 +81,6 @@ describe('the period', () => {
 })
 
 describe('the latest ranking', () => {
-  it('reads a stock at its high and one below it', () => {
-    expect(nearnessOf(LATEST.stocks[0]!)).toEqual({ atHigh: true })
-    const below = nearnessOf(LATEST.stocks[10]!)
-    expect(below.atHigh).toBe(false)
-    expect(!below.atHigh && below.below).toBeCloseTo(0.020936, 6)
-  })
-
   it('finds the decision day as the earliest day of the month any decision fell on', () => {
     expect(decisionDay(BACKTEST.rankings.map((item) => item.decided_on))).toBe(13)
     expect(decisionDay(['2026-10-14'])).toBe(14)
@@ -170,6 +170,8 @@ describe('the record', () => {
   it('counts the decisions that ranked nothing', () => {
     expect(idleDecisions(BACKTEST)).toBe(0)
     expect(idleDecisions({ rankings: [ranking('2017-07-13', []), ranking('2017-08-14', []), ranking('2018-01-15', ['1'])] })).toBe(2)
+    const cash = { ...ranking('2018-02-21', []), holds_cash: true }
+    expect([idleDecisions({ rankings: [cash, ranking('2018-03-13', [])] }), cashDecisions({ rankings: [cash, ranking('2018-03-13', [])] })]).toEqual([1, 1])
   })
 })
 

@@ -2034,6 +2034,11 @@
         "nullable": false,
         "postgresql": "VARCHAR"
       },
+      "ranking_follow_time": {
+        "class": "Time",
+        "nullable": true,
+        "postgresql": "TIME WITHOUT TIME ZONE"
+      },
       "role": {
         "class": "Enum",
         "members": [
@@ -2249,10 +2254,25 @@
         "nullable": false,
         "postgresql": "INTEGER"
       },
+      "ranking_decided_on": {
+        "class": "Date",
+        "nullable": true,
+        "postgresql": "DATE"
+      },
+      "ranking_formula": {
+        "class": "JSON",
+        "nullable": true,
+        "postgresql": "JSON"
+      },
       "run_id": {
         "class": "Uuid",
         "nullable": false,
         "postgresql": "UUID"
+      },
+      "scheduled": {
+        "class": "Boolean",
+        "nullable": false,
+        "postgresql": "BOOLEAN"
       },
       "sentiment_analysed": {
         "class": "Integer",

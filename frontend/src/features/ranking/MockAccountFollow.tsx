@@ -1,5 +1,6 @@
 import { CopyCheck } from 'lucide-react'
 import { useId, useState } from 'react'
+import { Link } from 'react-router'
 import { toast } from 'sonner'
 import { useTranslation } from '@/i18n'
 import { isApiError, useAudience, type Audience } from '@/shared/api'
@@ -10,14 +11,15 @@ import { Button } from '@/shared/ui/button'
 import { ChangeValue } from '@/shared/ui/change-value'
 import { ConfirmDialog } from '@/shared/ui/confirm-dialog'
 import { ErrorState } from '@/shared/ui/error-state'
+import { FormulaLine } from '@/shared/ui/formula-line'
 import { Panel, PanelLink } from '@/shared/ui/panel'
 import { Skeleton } from '@/shared/ui/skeleton'
 import { Stat } from '@/shared/ui/stat'
 import { useFollowRanking, useRankingFollow } from './api'
-import type { Ranking, RankingFollow } from './model'
+import { clockTime, type Ranking, type RankingFollow } from './model'
 
 /** The ranking in the viewer's mock account: what it holds, lacks and still holds, its return against the benchmark, and the one action. */
-export function MockAccountFollow({ ranking, className }: { ranking: Ranking; className?: string }) {
+export function MockAccountFollow({ ranking, nextFollow, className }: { ranking: Ranking; nextFollow: string; className?: string }) {
   const { t } = useTranslation('ranking')
   const follow = useRankingFollow()
   const audience = useAudience()
@@ -32,7 +34,9 @@ export function MockAccountFollow({ ranking, className }: { ranking: Ranking; cl
       ) : (
         <div className="flex flex-col gap-3">
           {(follow.data.performance || follow.data.holdings.held.length > 0) && <Standing follow={follow.data} count={ranking.stocks.length} />}
-          <Action follow={follow.data} ranked={ranking.stocks} audience={audience.data} />
+          <Schedule follow={follow.data} nextFollow={nextFollow} />
+          <Follows follows={follow.data.follows} />
+          <Action follow={follow.data} ranking={ranking} audience={audience.data} />
         </div>
       )}
     </Panel>
@@ -50,9 +54,11 @@ function Standing({ follow, count }: { follow: RankingFollow; count: number }) {
   return (
     <>
       <dl className="grid grid-cols-3 gap-3">
-        <Stat label={t('follow.holds')} size="lg">
-          {t('follow.heldOf', { held: holdings.held.length, count })}
-        </Stat>
+        {count > 0 && (
+          <Stat label={t('follow.holds')} size="lg">
+            {t('follow.heldOf', { held: holdings.held.length, count })}
+          </Stat>
+        )}
         {/* An account that holds the ranking's stocks without a follow since it opened has no return to compare. */}
         {performance && (
           <>
@@ -68,6 +74,53 @@ function Standing({ follow, count }: { follow: RankingFollow; count: number }) {
       {holdings.lacking.length > 0 && <StockLine label={t('follow.lacking')} stockIds={holdings.lacking} />}
       {holdings.left.length > 0 && <StockLine label={t('follow.left')} stockIds={holdings.left} />}
     </>
+  )
+}
+
+/** The schedule's state in one line, and who started the last follow; the way to change it is My settings. */
+function Schedule({ follow, nextFollow }: { follow: RankingFollow; nextFollow: string }) {
+  const { t } = useTranslation('ranking')
+  const format = useFormat()
+  const { schedule, follows } = follow
+  const last = follows.at(-1)
+  const time = schedule.time && clockTime(schedule.time)
+  return (
+    <p className="text-sm text-pretty text-muted-foreground" data-testid="follow-schedule">
+      {!time
+        ? t('schedule.off')
+        : schedule.pending
+          ? t('schedule.pending', { date: format.monthDay(schedule.pending), time })
+          : t('schedule.next', { date: format.monthDay(nextFollow), time })}{' '}
+      {last && `${t(last.scheduled ? 'schedule.lastScheduled' : 'schedule.lastByHand', { date: format.monthDay(last.start_time.slice(0, 10)) })} `}
+      <Link to={paths.mySettings} className="tap text-brand underline-offset-4 hover:underline">
+        {t('schedule.change')}
+      </Link>
+    </p>
+  )
+}
+
+/** How many of the account's follows the block lists; the rest are counted. */
+const FOLLOWS_SHOWN = 3
+
+/** The formula each follow used, newest first, so the return above is never read as one formula's when several made it. */
+function Follows({ follows }: { follows: RankingFollow['follows'] }) {
+  const { t } = useTranslation('ranking')
+  const format = useFormat()
+  if (follows.length === 0) return null
+  const newest = follows.toReversed()
+  return (
+    <div className="text-xs text-pretty text-muted-foreground">
+      <p>{t('follow.used')}</p>
+      <ul aria-label={t('follow.used')}>
+        {newest.slice(0, FOLLOWS_SHOWN).map((run) => (
+          <li key={run.run_id}>
+            <span className="tabular">{format.date(run.start_time)}</span> {t(run.scheduled ? 'schedule.byScheduleMark' : 'schedule.byHandMark')}{' '}
+            <FormulaLine formula={run.ranking_formula} />
+          </li>
+        ))}
+      </ul>
+      {newest.length > FOLLOWS_SHOWN && <p>{t('follow.earlier', { count: newest.length - FOLLOWS_SHOWN })}</p>}
+    </div>
   )
 }
 
@@ -88,18 +141,19 @@ const REFUSALS: Record<string, 'follow.upToDate' | 'runs:follow.refused.window' 
 
 interface ActionProps {
   follow: RankingFollow
-  ranked: Ranking['stocks']
+  ranking: Ranking
   audience: Audience
 }
 
 /** Why the account cannot follow now, or the button; an account that holds the ranking shows neither. */
-function Action({ follow, ranked, audience }: ActionProps) {
+function Action({ follow, ranking, audience }: ActionProps) {
   const { t } = useTranslation('ranking')
   const reason = useErrorReason()
   const start = useFollowRanking()
   const [confirming, setConfirming] = useState(false)
   const leadId = useId()
   const { holdings, refusal } = follow
+  const ranked = ranking.stocks
   const pricing = audience.order_pricing
   // A site that follows at a realtime quote needs its Shioaji login for the price.
   const quoted = pricing !== 'realtime_quote' || audience.realtime_quotes
@@ -110,14 +164,16 @@ function Action({ follow, ranked, audience }: ActionProps) {
     : upToDate
       ? ranked.length > 0
         ? null
-        : t('follow.nothing')
+        : t(ranking.holds_cash ? 'follow.inCash' : 'follow.nothing')
       : !quoted
         ? t('runs:follow.noQuotes')
         : refusal === 'outside_follow_window'
           ? t(`runs:follow.window.${pricing}`)
-          : holdings.held.length > 0
-            ? t('follow.behind', { sells: holdings.left.length, buys: holdings.lacking.length })
-            : t('follow.never')
+          : ranking.holds_cash
+            ? t('follow.toCash', { sells: holdings.left.length })
+            : holdings.held.length > 0
+              ? t('follow.behind', { sells: holdings.left.length, buys: holdings.lacking.length })
+              : t('follow.never')
   const names = new Map(ranked.map((stock) => [stock.stock_id, stock.stock_name]))
   const trades = [...holdings.left.map((stockId) => ({ stockId, action: 'sell' as const })), ...holdings.lacking.map((stockId) => ({ stockId, action: 'buy' as const }))]
 

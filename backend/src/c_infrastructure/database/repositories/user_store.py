@@ -1,6 +1,6 @@
 import asyncio
 import secrets
-from datetime import datetime
+from datetime import datetime, time
 from typing import override
 
 from argon2 import PasswordHasher
@@ -204,6 +204,14 @@ class SqlUserStore(IUserStore):
             if not (await session.execute(administrators)).first():
                 raise LastAdministratorError("At least one active administrator must remain. Nothing was saved.")
 
+            await session.commit()
+
+    @override
+    async def save_ranking_follow_time(self, user_id: UserId, follow_time: time | None, now: datetime) -> None:
+        changed = update(UserDTO).where(col(UserDTO.user_id) == user_id).values(ranking_follow_time=follow_time, updated_at=now)
+
+        async with self._db.get_session() as session:
+            await session.execute(changed)
             await session.commit()
 
     @override

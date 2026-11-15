@@ -3,7 +3,7 @@ import hashlib
 import hmac
 import os
 import secrets
-from datetime import datetime
+from datetime import datetime, time
 from pathlib import Path
 from typing import ClassVar, Self
 
@@ -132,6 +132,8 @@ class UserDTO(SQLModel, table=True):
     created_at: datetime = Field(sa_type=UtcDateTime)
     updated_at: datetime = Field(sa_type=UtcDateTime)
     ai_model: AiProvider | None = None
+    ranking_follow_time: time | None = None
+    """The time of the user's scheduled ranking follow. Last, as the upgrade to version 11 added it."""
 
     @classmethod
     def from_domain(cls, user: User, password_hash: str, keys: UserKeys) -> Self:
@@ -147,6 +149,7 @@ class UserDTO(SQLModel, table=True):
             created_at=user.created_at,
             updated_at=user.created_at,
             ai_model=user.ai_model,
+            ranking_follow_time=user.ranking_follow_time,
         )
 
     @classmethod
@@ -163,6 +166,7 @@ class UserDTO(SQLModel, table=True):
             status=self.status,
             created_at=self.created_at,
             ai_model=self.ai_model,
+            ranking_follow_time=self.ranking_follow_time,
             has_password=self.password_hash != NO_PASSWORD,
         )
 

@@ -187,7 +187,7 @@ def require_quote_login(runtime: RuntimeDependency) -> None:
     or while the login is down, every such order could only be refused as STALE_PRICE, so Buzz, Intraday and a follow
     are refused with 403 before any run starts. A site that prices orders at the official close (public) needs none.
     """
-    if runtime.config.audience.realtime_quotes and not runtime.realtime_quotes:
+    if runtime.quotes_missing:
         raise RealtimeQuotesUnavailable(
             "This site has no Shioaji login now, so it has no realtime quote to price an order on. Without the environment's "
             "Shioaji key pair, set it and restart; a login that went down is made again at the next daily data collection."

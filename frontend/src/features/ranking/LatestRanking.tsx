@@ -1,9 +1,10 @@
-import { ChevronDown, ListX } from 'lucide-react'
+import { ChevronDown, ListX, Wallet } from 'lucide-react'
 import { useId, useState } from 'react'
 import { useTranslation } from '@/i18n'
 import { useHasPermission } from '@/shared/api'
 import { useFormat } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
+import { FormulaLine } from '@/shared/ui/formula-line'
 import { NotAdviceNote } from '@/shared/ui/not-advice-note'
 import { Panel } from '@/shared/ui/panel'
 import { StateBlock } from '@/shared/ui/state-block'
@@ -38,9 +39,10 @@ export function LatestRanking({ ranking, previous, decisionDay, today, className
       flush
       className={className}
       title={t('latest.title')}
+      description={<FormulaLine formula={ranking.formula} />}
       aside={<span className="tabular">{t('latest.decided', { date: format.date(ranking.decided_on), month: revenueMonth })}</span>}
       footer={
-        ranking.stocks.length > 0 && (
+        (ranking.stocks.length > 0 || ranking.holds_cash) && (
           <div className="space-y-1 px-2.5 py-1.5 text-xs text-muted-foreground">
             <div className="flex flex-wrap items-center justify-between gap-x-4">
               <span>{next.due ? t('latest.nextDue') : t('latest.nextAbout', { date: format.monthDay(next.on) })}</span>
@@ -51,12 +53,26 @@ export function LatestRanking({ ranking, previous, decisionDay, today, className
         )
       }
     >
-      {ranking.stocks.length === 0 ? (
+      {ranking.holds_cash ? (
+        <HoldsCash ranking={ranking} />
+      ) : ranking.stocks.length === 0 ? (
         <StateBlock icon={ListX} title={t('latest.none.title')} description={t('latest.none.description', { month: revenueMonth })} action={<BackfillCommand />} />
       ) : (
-        <RankedStocksTable label={t('latest.title')} rows={ranking.stocks.map((stock) => ({ stock, mark: entered.has(stock.stock_id) ? ('entered' as const) : undefined }))} />
+        <RankedStocksTable
+          label={t('latest.title')}
+          formula={ranking.formula}
+          rows={ranking.stocks.map((stock) => ({ stock, mark: entered.has(stock.stock_id) ? ('entered' as const) : undefined }))}
+        />
       )}
     </Panel>
+  )
+}
+
+/** The formula's market filter is on: it holds no stock this month, said plainly where the list would be. */
+export function HoldsCash({ ranking }: { ranking: Ranking }) {
+  const { t } = useTranslation('ranking')
+  return (
+    <StateBlock icon={Wallet} title={t('latest.cash.title')} description={t('latest.cash.description', { sessions: ranking.formula.cash_under_average_sessions, scored: ranking.scored })} />
   )
 }
 

@@ -9,17 +9,11 @@ from typing import Any
 
 import numpy as np
 import pytest
+from support.settings import small_ranking_rule
 
 from a_domain.model.fundamentals.monthly_revenue import MonthlyRevenue
 from a_domain.model.market.ohlcv import Ohlcv
-from a_domain.rules.trading.ranking import (
-    DecisionSessionsRule,
-    ListedHistoryRule,
-    MonthlyRankingRule,
-    RankingHistory,
-    RankingHistoryRule,
-    ranks,
-)
+from a_domain.rules.trading.ranking import DecisionSessionsRule, ListedHistoryRule, RankingHistory, RankingHistoryRule, ranks
 from a_domain.rules.trading.ranking_backtest import RankingBacktestRule, RankingPortfolioRule
 from a_domain.types.enums import MarketType
 from a_domain.types.errors import BacktestPeriodUnavailable
@@ -118,7 +112,7 @@ def test_the_revenue_of_each_stock_is_in_its_row_by_month_and_a_month_without_on
     np.testing.assert_allclose(history.revenue, [[np.nan, np.nan, 7.0], [10.0, np.nan, np.nan]])
 
 
-RULE = MonthlyRankingRule(
+RULE = small_ranking_rule(
     top=2, min_close=10, min_traded_value=1_000_000, traded_value_sessions=2, high_sessions=3, short_months=1, long_months=2
 )
 
@@ -161,9 +155,10 @@ def test_the_ranking_ranks_its_universe_by_revenue_acceleration_and_nearness_to_
     assert (ranking.decided_on, ranking.revenue_month, ranking.universe, ranking.scored) == (D[2], date(2026, 2, 1), 4, 3)
     assert [stock.stock_id for stock in ranking.stocks] == ["2330", "1101"]
     best = ranking.stocks[0]
-    assert (best.stock_name, best.revenue_acceleration, best.nearness_to_high) == ("TSMC", 200 / 150, 1.0)
-    assert (best.acceleration_rank, best.nearness_rank, best.score) == (1.0, pytest.approx(2 / 3), pytest.approx(5 / 3))
-    assert (ranking.stocks[1].acceleration_rank, ranking.stocks[1].nearness_rank) == (0.0, pytest.approx(2 / 3))
+    assert (best.stock_name, [factor.value for factor in best.factors]) == ("TSMC", [200 / 150, 1.0])
+    assert ([factor.rank for factor in best.factors], best.score) == ([1.0, pytest.approx(2 / 3)], pytest.approx(5 / 3))
+    assert [factor.rank for factor in ranking.stocks[1].factors] == [0.0, pytest.approx(2 / 3)]
+    assert (ranking.formula, ranking.holds_cash) == (RULE.formula, False)
 
 
 def test_a_stock_listed_after_the_first_session_of_the_high_window_has_no_nearness_and_is_not_ranked() -> None:
@@ -180,9 +175,7 @@ def test_a_history_too_short_for_a_factor_ranks_nothing() -> None:
 
 REPLAY_RULE = RankingBacktestRule(
     decision_rule=DecisionSessionsRule(decision_day=3, deadline_day=1),
-    ranking_rule=MonthlyRankingRule(
-        top=2, min_close=0, min_traded_value=0, traded_value_sessions=1, high_sessions=1, short_months=1, long_months=2
-    ),
+    ranking_rule=small_ranking_rule(top=2, traded_value_sessions=1, high_sessions=1, short_months=1, long_months=2),
     portfolio_rule=RankingPortfolioRule(fee_rate=0.001, tax_rate=0.003, benchmark_id="0050", sessions_per_year=245),
 )
 M = [date(2026, 3, 3), date(2026, 3, 4), date(2026, 3, 5), date(2026, 4, 3), date(2026, 4, 6), date(2026, 4, 7)]

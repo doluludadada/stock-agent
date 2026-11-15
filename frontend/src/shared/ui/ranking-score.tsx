@@ -5,6 +5,7 @@ import { useTranslation } from '@/i18n'
 import type { Schemas } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
 import { DASH, useFormat } from '@/shared/lib/format'
+import { useFormulaWords } from '@/shared/lib/ranking-formula'
 import { cn } from '@/shared/lib/utils'
 
 /** A stock's standing in the monthly ranking, as the stock page and a holding both carry it. */
@@ -27,18 +28,19 @@ function TopMark({ standing, className }: { standing: RankingStanding; className
   const { t } = useTranslation()
   return (
     <span className={cn('rounded-full px-2.5 py-1 text-xs font-medium', standing.in_top ? 'bg-brand-soft text-brand' : 'bg-muted text-muted-foreground', className)}>
-      {t(standing.in_top ? 'score.inTop' : 'score.notInTop', { top: standing.top })}
+      {standing.holds_cash ? t('score.holdsCash') : t(standing.in_top ? 'score.inTop' : 'score.notInTop', { top: standing.formula.top })}
     </span>
   )
 }
 
 /**
  * The score as a card's content: 0 to 100, whether the ranking holds the stock now, its place among the scored stocks
- * and each factor's percentile as a bar; or why the ranking gives it no score.
+ * and each factor of the formula's percentile as a bar; or why the ranking gives it no score.
  */
 export function RankingScore({ standing }: { standing: RankingStanding }) {
   const { t } = useTranslation()
   const format = useFormat()
+  const words = useFormulaWords()
   const scored = scoredOf(standing)
   if (!scored) {
     return (
@@ -65,14 +67,16 @@ export function RankingScore({ standing }: { standing: RankingStanding }) {
       </div>
       <p className="text-sm text-muted-foreground">{t('score.place', { place: format.number(place), scored: format.number(standing.scored) })}</p>
       <dl className="grid gap-3">
-        <Factor label={t('score.acceleration')} percentile={stock.acceleration_rank * 100} value={`×${format.number(stock.revenue_acceleration, 2)}`} />
-        <Factor label={t('score.nearness')} percentile={stock.nearness_rank * 100} value={format.percent(stock.nearness_to_high)} />
+        {standing.formula.factors.map((factor, index) => (
+          <Factor key={index} label={words.label(factor)} percentile={stock.factors[index]!.rank * 100} value={words.value(factor, stock.factors[index]!.value)} />
+        ))}
       </dl>
+      {standing.holds_cash && <p className="text-sm text-pretty text-muted-foreground">{t('score.cashNow')}</p>}
     </div>
   )
 }
 
-/** One of the ranking's two factors: where it ranks among the scored stocks, as a bar and a number, and its own value. */
+/** One of the formula's factors: where it ranks among the scored stocks, as a bar and a number, and its own value. */
 function Factor({ label, percentile, value }: { label: string; percentile: number; value: ReactNode }) {
   const { t } = useTranslation()
   const format = useFormat()
@@ -93,12 +97,13 @@ function Factor({ label, percentile, value }: { label: string; percentile: numbe
 }
 
 /**
- * The same score in a table row: the figure with its place, the two factors' percentiles in one line (left out when
- * `brief`, on a phone), and a mark only while the ranking holds the stock; or the reason it has no score.
+ * The same score in a table row: the figure with its place, the factors' percentiles in one line (left out when
+ * `brief`, on a phone), and a mark only while the ranking holds the stock or holds cash; or the reason it has no score.
  */
 export function RankingScoreLine({ standing, brief = false, className }: { standing: RankingStanding; brief?: boolean; className?: string }) {
   const { t } = useTranslation()
   const format = useFormat()
+  const words = useFormulaWords()
   const scored = scoredOf(standing)
   if (!scored) {
     return (
@@ -116,11 +121,11 @@ export function RankingScoreLine({ standing, brief = false, className }: { stand
           <span className="font-semibold">{standing.score === null ? DASH : format.number(standing.score)}</span>
           <span className="ml-1 text-xs text-muted-foreground">{t('score.placeShort', { place: format.number(place), scored: format.number(standing.scored) })}</span>
         </span>
-        {standing.in_top && <TopMark standing={standing} className="px-2 py-0.5" />}
+        {(standing.in_top || standing.holds_cash) && <TopMark standing={standing} className="px-2 py-0.5" />}
       </span>
       {!brief && (
         <span className="tabular text-xs whitespace-normal text-muted-foreground">
-          {t('score.factors', { acceleration: format.number(stock.acceleration_rank * 100), nearness: format.number(stock.nearness_rank * 100) })}
+          {standing.formula.factors.map((factor, index) => t('score.factor', { factor: words.short(factor), value: format.number(stock.factors[index]!.rank * 100) })).join(' · ')}
         </span>
       )}
     </span>

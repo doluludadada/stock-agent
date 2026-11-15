@@ -1,14 +1,24 @@
 from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime
-from typing import Annotated, Self
+from functools import reduce
+from typing import Annotated
 
 import numpy as np
-from pydantic import ConfigDict, Field, FiniteFloat, NonNegativeFloat, NonNegativeInt, PositiveInt, model_validator
+from pydantic import ConfigDict, Field, FiniteFloat, NonNegativeFloat, NonNegativeInt, PositiveInt
 from pydantic.dataclasses import dataclass
 
 from a_domain.model.market.ohlcv import Ohlcv
+from a_domain.model.trading.ranking_formula import (
+    NearnessToHigh,
+    PriceMomentum,
+    RankingFactor,
+    RankingFormula,
+    RevenueAcceleration,
+    RevenueYoy,
+)
 from a_domain.rules.technical.matrix import DailyBarMatrix, DailyBarMatrixRule, Flags, Floats, last_closes
 from a_domain.types.enums import SecurityKind
+from a_domain.types.errors import RankingUnavailable
 from a_domain.types.values import Fraction, NonEmptyText, ProperFraction, month_index, month_start
 
 type DayOfMonth = Annotated[int, Field(ge=1, le=28)]
@@ -157,34 +167,33 @@ class DecisionSessionsRule:
         return list(decisions.values())
 
 
+@dataclass(frozen=True, kw_only=True)
+class RankedFactor:
+    """One factor of a ranked stock: its value, and its place among the universe's stocks that have it, 0 lowest to 1."""
+
+    value: FiniteFloat
+    rank: Fraction
+
+
 @dataclass(
     frozen=True, kw_only=True, config=ConfigDict(json_schema_serialization_defaults_required=True, use_attribute_docstrings=True)
 )
 class RankedStock:
-    """One stock of a ranking: its two factors, the rank of each among the universe's stocks that have it, and its score."""
+    """One stock of a ranking: each factor of the ranking's formula, in the formula's order, and its score."""
 
     stock_id: NonEmptyText
     stock_name: str | None = None
-    revenue_acceleration: FiniteFloat
-    """The mean revenue of the latest short months over the mean of the latest long months, up to the month read."""
-
-    nearness_to_high: FiniteFloat
-    """
-    The total-return level at the decision's close over its highest of the last high_sessions sessions: 1 at a high. A
-    stock listed after the first of those sessions has none.
-    """
-
-    acceleration_rank: Fraction
-    nearness_rank: Fraction
-    """Each factor's place among the universe's stocks that have it, from 0 for the lowest to 1 for the highest."""
-
-    score: Annotated[float, Field(ge=0, le=2)]
-    """The sum of the two ranks."""
+    factors: list[RankedFactor]
+    score: NonNegativeFloat
+    """The sum of the factors' ranks."""
 
 
 @dataclass(frozen=True, kw_only=True, config=ConfigDict(use_attribute_docstrings=True))
 class Ranking:
     """The monthly ranking at one decision session's close: the stocks to hold from the next session's open."""
+
+    formula: RankingFormula
+    """The formula that made it."""
 
     decided_on: date
     revenue_month: date
@@ -194,10 +203,13 @@ class Ranking:
     """The stocks that passed the universe at the close: traded, liquid enough and priced at least min_close."""
 
     scored: NonNegativeInt
-    """The universe's stocks with both factors, each of which has a score."""
+    """The universe's stocks with every factor, each of which has a score."""
+
+    holds_cash: bool = False
+    """The formula's market filter is on: it holds no stock until the next decision, though the factors are measured."""
 
     stocks: list[RankedStock]
-    """The `top` best scores, best first; equal scores in stock id order."""
+    """The `top` best scores, best first; equal scores in stock id order. None while it holds cash."""
 
 
 def in_universe(
@@ -242,6 +254,26 @@ def revenue_acceleration(revenue: Floats, month: int, short_months: PositiveInt,
     return np.where(np.isfinite(acceleration), acceleration, np.nan)
 
 
+def revenue_yoy(revenue: Floats, month: int, months: PositiveInt) -> Floats:
+    """
+    Each row's revenue of the `months` months to column `month` over its revenue of the same months a year before,
+    less 1. NaN where a month of either window is not held or the year before's revenue is not above 0.
+    """
+    first = month + 1 - months
+    year_before = first - 12
+
+    if year_before < 0 or month >= revenue.shape[1]:
+        return np.full(revenue.shape[0], np.nan)
+
+    latest = revenue[:, first : first + months].sum(axis=1)
+    before = revenue[:, year_before : year_before + months].sum(axis=1)
+
+    with np.errstate(all="ignore"):
+        growth = np.where(before > 0, latest / before - 1, np.nan)
+
+    return np.where(np.isfinite(growth), growth, np.nan)
+
+
 def nearness_to_high(history: RankingHistory, column: int, high_sessions: PositiveInt) -> Floats:
     first = column + 1 - high_sessions
 
@@ -252,61 +284,110 @@ def nearness_to_high(history: RankingHistory, column: int, high_sessions: Positi
     return np.where(listed, history.level[:, column] / history.level[:, first : column + 1].max(axis=1), np.nan)
 
 
+def price_momentum(history: RankingHistory, column: int, sessions: PositiveInt, skip_sessions: NonNegativeInt) -> Floats:
+    """
+    Each row's total-return level `skip_sessions` sessions before column `column` over its level `sessions` sessions
+    before it, less 1. NaN while the stock's first bar is later than the older of the two.
+    """
+    first = column - sessions
+
+    if first < 0:
+        return np.full(len(history.bars.stock_ids), np.nan)
+
+    listed = ~np.isnan(history.bars.close[:, : first + 1]).all(axis=1)
+    return np.where(listed, history.level[:, column - skip_sessions] / history.level[:, first] - 1, np.nan)
+
+
+def factor_values(factor: RankingFactor, history: RankingHistory, column: int, month: int) -> Floats:
+    """Every stock's value of one factor at the session of `column`, reading the revenue to column `month`. NaN where it has none."""
+    match factor:
+        case RevenueAcceleration():
+            return revenue_acceleration(history.revenue, month, factor.short_months, factor.long_months)
+        case RevenueYoy():
+            return revenue_yoy(history.revenue, month, factor.months)
+        case NearnessToHigh():
+            return nearness_to_high(history, column, factor.high_sessions)
+        case PriceMomentum():
+            return price_momentum(history, column, factor.sessions, factor.skip_sessions)
+
+
+def measured_factors(
+    formula: RankingFormula, history: RankingHistory, column: int, revenue_month: date
+) -> tuple[Flags, list[Floats], list[Floats]]:
+    """
+    The formula's universe at the session, and each of its factors in order: every stock's value, NaN outside the
+    universe, and its rank among the universe's stocks that have the factor (`ranks`).
+    """
+    universe = in_universe(history.bars, column, formula.min_close, formula.min_traded_value, formula.traded_value_sessions)
+    month = revenue_column(history, revenue_month)
+    values = [np.where(universe, factor_values(factor, history, column, month), np.nan) for factor in formula.factors]
+
+    return universe, values, [ranks(factor) for factor in values]
+
+
+def holds_cash(formula: RankingFormula, benchmark_id: NonEmptyText, history: RankingHistory, column: int) -> bool:
+    """
+    Whether the formula's market filter is on at the session: the benchmark's total-return level at its close is under
+    the level's average of the last cash_under_average_sessions sessions, that close among them. A formula without the
+    filter never holds cash, and neither does one whose average the history is still too short for. RankingUnavailable
+    when the history holds no bar of the benchmark, since the filter cannot be read.
+    """
+    sessions = formula.cash_under_average_sessions
+
+    if sessions is None or column + 1 < sessions:
+        return False
+
+    if benchmark_id not in history.bars.stock_ids:
+        raise RankingUnavailable(
+            f"The formula {formula.name} holds cash while {benchmark_id} is under its {sessions}-session average, and the "
+            f"daily history holds no bar of {benchmark_id}."
+        )
+
+    level = history.level[history.bars.stock_ids.index(benchmark_id), column + 1 - sessions : column + 1]
+
+    return bool(level[-1] < level.mean())
+
+
 @dataclass(frozen=True)
 class MonthlyRankingRule:
     """
-    The ranking at a decision session's close. The universe is every stock (no ETF) that traded that session, closed at
-    `min_close` or more, and traded `min_traded_value` a session on average over the last `traded_value_sessions`
-    sessions, a session without a trade counting 0. Each of its stocks has a revenue acceleration, the mean revenue of
-    the latest `short_months` over that of the latest `long_months` up to the month read, none if any of them is
-    missing, and a nearness to its high, its total-return level over the highest of the last `high_sessions` sessions,
-    none while its first bar is later than the first of them: a few sessions since a listing hold no such high.
-    Each factor is ranked among the stocks that have it (`ranks`), the score is the sum of the two ranks, and the `top`
-    best scores are the ranking. Prices are as listed, so a past close is the price it traded at.
+    The ranking a formula makes at a decision session's close. The universe is every stock (no ETF) that traded that
+    session, closed at the formula's `min_close` or more, and traded `min_traded_value` a session on average over the
+    last `traded_value_sessions` sessions, a session without a trade counting 0. Each factor of the formula is measured
+    for the universe's stocks (factor_values) and ranked among those that have it (`ranks`); a stock's score is the sum
+    of its ranks, none while it lacks a factor, and the `top` best scores are the ranking. While the formula's market
+    filter is on (holds_cash, against `benchmark_id`), the ranking holds no stock; its universe and its scored stocks
+    are counted all the same. Prices are as listed, so a past close is the price it traded at.
     """
 
-    top: PositiveInt
-    min_close: NonNegativeFloat
-    min_traded_value: NonNegativeFloat
-    traded_value_sessions: PositiveInt
-    high_sessions: PositiveInt
-    short_months: PositiveInt
-    long_months: PositiveInt
-
-    @model_validator(mode="after")
-    def the_short_months_are_among_the_long(self) -> Self:
-        if self.short_months > self.long_months:
-            raise ValueError("short_months must not be more than long_months")
-
-        return self
+    formula: RankingFormula
+    benchmark_id: NonEmptyText
 
     def apply(self, history: RankingHistory, column: int, revenue_month: date, names: Mapping[str, str | None]) -> Ranking:
-        universe = in_universe(history.bars, column, self.min_close, self.min_traded_value, self.traded_value_sessions)
-        month = revenue_column(history, revenue_month)
-        acceleration = np.where(universe, revenue_acceleration(history.revenue, month, self.short_months, self.long_months), np.nan)
-        nearness = np.where(universe, nearness_to_high(history, column, self.high_sessions), np.nan)
-        acceleration_rank, nearness_rank = ranks(acceleration), ranks(nearness)
-        score = acceleration_rank + nearness_rank
+        universe, values, placed = measured_factors(self.formula, history, column, revenue_month)
+        score = reduce(np.add, placed)
         scored = np.flatnonzero(~np.isnan(score))
-        best = scored[np.argsort(-score[scored], kind="stable")][: self.top]
+        cash = holds_cash(self.formula, self.benchmark_id, history, column)
+        best = [] if cash else scored[np.argsort(-score[scored], kind="stable")][: self.formula.top].tolist()
         stocks = [
             RankedStock(
                 stock_id=history.bars.stock_ids[row],
                 stock_name=names.get(history.bars.stock_ids[row]),
-                revenue_acceleration=float(acceleration[row]),
-                nearness_to_high=float(nearness[row]),
-                acceleration_rank=float(acceleration_rank[row]),
-                nearness_rank=float(nearness_rank[row]),
+                factors=[
+                    RankedFactor(value=float(value[row]), rank=float(rank[row])) for value, rank in zip(values, placed, strict=True)
+                ],
                 score=float(score[row]),
             )
-            for row in best.tolist()
+            for row in best
         ]
 
         return Ranking(
+            formula=self.formula,
             decided_on=history.bars.sessions[column],
             revenue_month=revenue_month,
             universe=int(universe.sum()),
             scored=len(scored),
+            holds_cash=cash,
             stocks=stocks,
         )
 

@@ -16,7 +16,7 @@ import c_infrastructure.database.models.quarter_eps_dto
 import c_infrastructure.database.models.trading_journal_dto
 import c_infrastructure.database.models.watchlist_dto  # noqa: F401  (each import registers its tables on SQLModel.metadata)
 from c_infrastructure.database.db_connector import OutdatedDatabaseError
-from c_infrastructure.database.models.schema_version_dto import SCHEMA_VERSION
+from c_infrastructure.database.models.schema_version_dto import FIRST_SCHEMA_VERSION, SCHEMA_VERSION
 
 pytestmark = pytest.mark.asyncio
 
@@ -147,7 +147,7 @@ async def test_a_database_without_a_schema_version_stops_startup_and_stays_untou
     assert await database_snapshot() == before
 
 
-@pytest.mark.parametrize("schema_version", [0, SCHEMA_VERSION - 1, SCHEMA_VERSION + 1])
+@pytest.mark.parametrize("schema_version", [0, FIRST_SCHEMA_VERSION - 1, SCHEMA_VERSION + 1])
 async def test_a_database_with_a_schema_version_no_upgrade_reaches_stops_startup_and_stays_untouched(
     tmp_path: Path, schema_version: int
 ) -> None:

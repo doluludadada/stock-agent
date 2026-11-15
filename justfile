@@ -71,8 +71,9 @@ backfill-company-background *options:
 backfill-company-background *options:
     cd backend; $env:PYTHONPATH="src"; uv run python -m d_presentation.cli.company_background {{options}}
 
-# The monthly stock ranking by revenue acceleration and nearness to the high at the latest decision session the held
-# history holds. It reads only the held daily history and monthly revenue, orders nothing and asks no AI.
+# The monthly stock ranking by the active formula (ranking.active_formula) at the latest decision session the held
+# history holds. It reads only the held daily history and monthly revenue, orders nothing and asks no AI. The module
+# itself takes `--formula <name>` for another of ranking.formulas.
 [unix]
 ranking:
     cd backend && PYTHONPATH=src uv run python -m d_presentation.cli.ranking latest

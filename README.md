@@ -284,7 +284,7 @@ at a time works for a stock: a second one waits for the first and then answers w
 
 The site's own writing is off until `stock_page.system_writing.daily_ai_calls` is above 0 (the shipped file sets 60).
 Then the Web API's timer, once the daily bars of a new session are held, begins one round for the stocks of the
-monthly ranking's top (`ranking.top`), and for the stocks users hold or watch too where
+monthly ranking's top (the active formula's `top`), and for the stocks users hold or watch too where
 `stock_page.system_writing.users_stocks` is on. For each stock it does what a viewer's request does. A round goes on
 after a restart, a spent budget or a failed stock. Its AI calls go to `ai.system_model` (Claude unless set), are
 counted per Taiwan calendar day in `system_ai_calls`, and are never taken from a user's allowance. Its briefs and

@@ -1,7 +1,10 @@
+from collections.abc import Mapping
+from datetime import date
 from typing import Protocol
 
 from a_domain.rules.technical.matrix import DailyBarMatrix
 from a_domain.rules.trading.ranking import RankingHistory
+from a_domain.rules.trading.ranking_backtest import RankingBacktest, RankingBacktestRule
 
 
 class IDailyBarMatrixProvider(Protocol):
@@ -25,5 +28,16 @@ class IDailyBarMatrixProvider(Protocol):
         (ListedHistoryRule, RankingHistoryRule), or None while the source holds no bar. It is built again whenever the
         source's bars, its ex-right references or the archived revenue changed (listed_fingerprint,
         revenue_fingerprint), so it is never older than they are. Its arrays are shared: a caller never writes them.
+        """
+        ...
+
+    async def ranking_backtest(
+        self, history: RankingHistory, rule: RankingBacktestRule, names: Mapping[str, str | None], first: date, last: date
+    ) -> RankingBacktest:
+        """
+        `rule`'s replay of `history` from `first` to `last` (RankingBacktestRule.apply), worked out off the event loop.
+        A replay of the history load_ranking_history answers now is kept under its rule, which holds its formula, its
+        names and its period, and answered again while that history stands, so no replay of another formula, or of a
+        history since built again, is ever answered. BacktestPeriodUnavailable as the rule raises it.
         """
         ...

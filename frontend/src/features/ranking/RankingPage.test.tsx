@@ -6,8 +6,9 @@ import { MemoryRouter } from 'react-router'
 import { initI18n } from '@/i18n'
 import { session } from '@/shared/api'
 import { PERSONAL_SITE } from '@/test/audiences'
+import { CASH_FORMULA, SHIPPED_FORMULA } from '@/test/ranking'
 import { TEST_ADMIN, TEST_USER } from '@/test/users'
-import type { Ranking, RankingBacktest, RankingFollow } from './model'
+import type { FormulaEvidence, Ranking, RankingBacktest, RankingFollow } from './model'
 import { RankingPage } from './RankingPage'
 import recordedBacktest from './test-support/backtest-2023-2024.json'
 import recordedLatest from './test-support/latest.json'
@@ -28,6 +29,28 @@ const LAST_TWO: RankingBacktest = { ...BACKTEST, first: '2026-09-01', last: '202
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 const refusal = (code: string, detail: string) => () => json({ detail, code }, 422)
 
+const RECORD = {
+  benchmark_id: '0050',
+  annual_return: 0.583,
+  benchmark_annual_return: 0.226,
+  max_drawdown: 0.345,
+  benchmark_max_drawdown: 0.34,
+  years_ahead: 8,
+  yearly_returns: Object.fromEntries(Array.from({ length: 10 }, (_, index) => [2017 + index, 0.1])),
+  turnover: 0.686,
+}
+/** The shipped formula in use beside its cash variant, each as defined and at the comparison's floor. */
+const EVIDENCE: FormulaEvidence[] = [
+  { formula: SHIPPED_FORMULA, active: true, record: RECORD, liquid_floor: 200_000_000, liquid_record: { ...RECORD, annual_return: 0.418, max_drawdown: 0.379, years_ahead: 7, turnover: 0.62 } },
+  {
+    formula: CASH_FORMULA,
+    active: false,
+    record: { ...RECORD, annual_return: 0.41, max_drawdown: 0.298, years_ahead: 6, turnover: 0.553 },
+    liquid_floor: 200_000_000,
+    liquid_record: { ...RECORD, annual_return: 0.265, max_drawdown: 0.367, years_ahead: 5, turnover: 0.521 },
+  },
+]
+
 interface Site {
   latest?: () => Response | Promise<Response>
   /** What a replay of a period other than the last two decisions answers. */
@@ -37,13 +60,19 @@ interface Site {
 }
 
 const HOLDINGS = { decided_on: LATEST.decided_on, held: [], lacking: LATEST.stocks.map((stock) => stock.stock_id), left: [] }
-const NEVER_FOLLOWED: RankingFollow = { holdings: HOLDINGS, refusal: null, running: false, performance: null }
+const TIMES = ['09:05:00', '09:30:00', '10:00:00', '13:00:00']
+const NEVER_FOLLOWED: RankingFollow = { holdings: HOLDINGS, refusal: null, running: false, performance: null, follows: [], schedule: { time: null, times: TIMES, pending: LATEST.decided_on, due: false } }
 /** A month after the first follow: 18 of the 20 held, the two that entered lacking and one that left still held. */
 const A_MONTH_IN: RankingFollow = {
   holdings: { ...HOLDINGS, held: HOLDINGS.lacking.slice(2), lacking: HOLDINGS.lacking.slice(0, 2), left: ['1101'] },
   refusal: null,
   running: false,
   performance: { since: '2026-09-15', until: '2026-10-13', account_return: 0.0312, benchmark_id: '0050', benchmark_return: 0.021 },
+  follows: [
+    { run_id: '00000000-0000-0000-0000-000000000011', start_time: '2026-09-15T01:05:00Z', ranking_formula: SHIPPED_FORMULA, ranking_decided_on: '2026-09-14', scheduled: false },
+    { run_id: '00000000-0000-0000-0000-000000000012', start_time: '2026-10-14T01:05:00Z', ranking_formula: CASH_FORMULA, ranking_decided_on: '2026-10-13', scheduled: true },
+  ],
+  schedule: { time: '09:05:00', times: TIMES, pending: null, due: false },
 }
 
 /** The ranking endpoints as the backend answers them; returns the replays asked, each as `first..last`. */
@@ -62,6 +91,10 @@ function serve({ latest = () => json(LATEST), backtest = () => json(BACKTEST), f
       if (pathname === '/v1/rankings/latest') {
         asked.push('latest')
         return latest()
+      }
+      if (pathname === '/v1/rankings/formulas') {
+        asked.push(`formulas ${searchParams.get('first')}..${searchParams.get('last')}`)
+        return json(EVIDENCE)
       }
       if (pathname === '/v1/rankings/backtest') {
         const [first, last] = [searchParams.get('first')!, searchParams.get('last')!]
@@ -129,7 +162,7 @@ describe('the ranking page', () => {
     open()
 
     const compared = await screen.findByRole('table', { name: 'The ranking against 0050' })
-    expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual(["This month's ranking", 'BacktestSimulated'])
+    expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual(["This month's ranking", 'BacktestSimulated', 'Formulas comparedSimulated'])
     expect(within(compared).getAllByRole('row').slice(1)).toHaveLength(3)
     expect(screen.getByText('01/13/2023 to 10/30/2024')).toBeVisible()
     for (const name of ['Every year', 'Backtest: every past decision']) expect(screen.queryByRole('table', { name })).not.toBeInTheDocument()
@@ -139,6 +172,85 @@ describe('the ranking page', () => {
     await openDetail()
     expect(screen.getByRole('table', { name: 'Every year' })).toBeVisible()
     expect(screen.getByRole('button', { name: 'Last 3 years' })).toBeVisible()
+  })
+
+  it('names the formula at the list and the backtest, with its factors as the list’s columns', async () => {
+    serve()
+    open()
+
+    const table = await screen.findByRole('table', { name: "This month's ranking" })
+    expect(within(table).getAllByRole('columnheader').map((header) => header.textContent)).toEqual(['Place', 'Stock', 'Revenue, 3 mo ÷ 12 mo', 'Vs 250-session high', 'Score'])
+    await screen.findByRole('table', { name: 'The ranking against 0050' })
+    expect(screen.getAllByText('Revenue, 3 mo ÷ 12 mo + Vs 250-session high').length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('says plainly that the formula holds cash where the list would be, and still when the next decision is due', async () => {
+    serve({ latest: () => json({ ...LATEST, formula: CASH_FORMULA, holds_cash: true, stocks: [] }) })
+    open()
+
+    expect(await screen.findByText('The formula holds cash this month')).toBeVisible()
+    expect(screen.getByText(`The benchmark closed under its 60-session average at the decision, so it holds no stock until the next one. ${LATEST.scored} stocks still have a score.`)).toBeVisible()
+    expect(screen.getByText('Revenue, 3 mo ÷ 12 mo + Vs 250-session high · Cash while the benchmark is under its 60-session average')).toBeVisible()
+    expect(screen.queryByRole('table', { name: "This month's ranking" })).not.toBeInTheDocument()
+    expect(screen.queryByText('Nothing could be ranked this month')).not.toBeInTheDocument()
+    expect(screen.getByText('Next decision about 11/13')).toBeVisible()
+  })
+
+  it('compares every formula over the backtest’s period, as defined and at the liquidity floor, and marks the one in use', async () => {
+    const asked = serve()
+    open()
+
+    const table = await screen.findByRole('table', { name: 'Formulas compared' })
+    const rows = within(table).getAllByRole('row').slice(1)
+    expect(rows.map((row) => row.textContent)).toEqual([
+      'Revenue, 3 mo ÷ 12 mo + Vs 250-session highIn useahead 8 of 10 years · buys 69% a month+58.3%-34.5%8 of 1069%',
+      'Only stocks trading NT$200M a day · ahead 7 of 10 years · buys 62% a month+41.8%-37.9%7 of 1062%',
+      'Revenue, 3 mo ÷ 12 mo + Vs 250-session high · Cash while the benchmark is under its 60-session averageahead 6 of 10 years · buys 55% a month+41.0%-29.8%6 of 1055%',
+      'Only stocks trading NT$200M a day · ahead 5 of 10 years · buys 52% a month+26.5%-36.7%5 of 1052%',
+    ])
+    expect(screen.getByText('0050 over the same sessions: +22.6% a year, deepest fall -34.0%. The formula that did best over a past period is not thereby the best next.')).toBeVisible()
+    expect(asked.filter((request) => request.startsWith('formulas'))).toEqual(['formulas 2000-01-01..2026-11-12'])
+    expect(asked.indexOf('formulas 2000-01-01..2026-11-12')).toBeGreaterThan(asked.indexOf('2000-01-01..2026-11-12'))
+  })
+
+  it('lists the formula each follow of the mock account used, newest first', async () => {
+    serve({ follow: [A_MONTH_IN] })
+    open('/ranking', 'en', true)
+
+    const block = await screen.findByRole('region', { name: 'The ranking in your mock account' })
+    const follows = within(await within(block).findByRole('list', { name: 'Followed with' })).getAllByRole('listitem')
+    expect(follows.map((item) => item.textContent)).toEqual([
+      '10/14/2026 schedule Revenue, 3 mo ÷ 12 mo + Vs 250-session high · Cash while the benchmark is under its 60-session average',
+      '09/15/2026 by hand Revenue, 3 mo ÷ 12 mo + Vs 250-session high',
+    ])
+    expect(within(block).getByTestId('follow-schedule')).toHaveTextContent('Schedule on: next follow about 11/16 09:05. Last followed 10/14 by the schedule. Change')
+    expect(within(block).getByRole('link', { name: 'Change' })).toHaveAttribute('href', '/settings')
+  })
+
+  it('says the schedule is off, and which decision a schedule that is on still has to follow', async () => {
+    serve({ follow: [NEVER_FOLLOWED] })
+    open('/ranking', 'en', true)
+    const block = await screen.findByRole('region', { name: 'The ranking in your mock account' })
+    expect(await within(block).findByTestId('follow-schedule')).toHaveTextContent('Schedule off. Change')
+    cleanup()
+
+    serve({ follow: [{ ...NEVER_FOLLOWED, schedule: { ...NEVER_FOLLOWED.schedule, time: '09:30:00' } }] })
+    open('/ranking', 'en', true)
+    const pending = await screen.findByRole('region', { name: 'The ranking in your mock account' })
+    expect(await within(pending).findByTestId('follow-schedule')).toHaveTextContent('Schedule on: follows the 10/13 decision on the next trading day from 09:30. Change')
+  })
+
+  it('offers a follow to cash that lists only sales while the formula holds cash', async () => {
+    const cash = { ...LATEST, formula: CASH_FORMULA, holds_cash: true, stocks: [] }
+    serve({ latest: () => json(cash), follow: [{ ...NEVER_FOLLOWED, holdings: { decided_on: LATEST.decided_on, held: [], lacking: [], left: ['1101', '2317'] } }] })
+    const user = userEvent.setup()
+    open('/ranking', 'en', true)
+
+    const block = await screen.findByRole('region', { name: 'The ranking in your mock account' })
+    expect(await within(block).findByText('The formula holds cash now. To follow: sell 2.')).toBeVisible()
+    await user.click(within(block).getByRole('button', { name: 'Follow this month’s ranking' }))
+    const listed = within(await screen.findByRole('alertdialog')).getAllByRole('listitem').map((item) => item.textContent)
+    expect(listed).toEqual(['1101 SELL', '2317 SELL'])
   })
 
   it('asks nothing about the mock account where the site does not show it', async () => {
@@ -255,7 +367,7 @@ describe('the ranking page', () => {
     expect(within(years).getByRole('row', { name: /2023/ })).toHaveTextContent('from 1/13')
 
     expect(asked[0]).toBe('latest')
-    expect(asked.slice(1).sort()).toEqual(['2000-01-01..2026-11-12', '2026-09-01..2026-10-13'])
+    expect(asked.slice(1).filter((request) => !request.startsWith('formulas')).sort()).toEqual(['2000-01-01..2026-11-12', '2026-09-01..2026-10-13'])
   })
 
   it('marks a year the ranking lost money in and one it fell behind the benchmark in', async () => {
@@ -281,8 +393,8 @@ describe('the ranking page', () => {
     await openDetail()
     expect(await screen.findByText('This is a backtest, not a track record.')).toBeVisible()
     expect(screen.getByText(/In 2018, 40 of the 521 liquid stocks had no revenue data, and 37 of them later delisted\./)).toBeVisible()
-    expect(screen.getByText('The formula was the best of about 60 tried.')).toBeVisible()
-    expect(screen.getByText(/It fell about 25% in 2022, and its deepest fall from a high was about 36%\./)).toBeVisible()
+    expect(screen.getByText('Every formula here was picked from many tried.')).toBeVisible()
+    expect(screen.getByText(/The deepest fall above happened once and can happen again\./)).toBeVisible()
     expect(screen.getByText('Buying a few days late cut the result sharply.')).toBeVisible()
   })
 
@@ -290,7 +402,7 @@ describe('the ranking page', () => {
     const asked = serve()
     open()
     await openDetail()
-    const replays = () => asked.filter((item) => item !== 'latest' && !item.startsWith('2026-09-01'))
+    const replays = () => asked.filter((item) => item !== 'latest' && !item.startsWith('2026-09-01') && !item.startsWith('formulas'))
     expect(replays()).toEqual(['2000-01-01..2026-11-12'])
     expect(screen.getByRole('button', { name: 'Whole history' })).toHaveAttribute('aria-pressed', 'true')
 
@@ -442,7 +554,7 @@ describe('the ranking page', () => {
     expect(screen.getByRole('heading', { name: /回測.*模擬/ })).toBeVisible()
     const rows = within(screen.getByRole('table', { name: '這個月的排名' })).getAllByRole('row').slice(1)
     expect(rows[0]).toHaveTextContent('2.09 倍')
-    expect(rows[0]).toHaveTextContent('創一年新高')
+    expect(rows[0]).toHaveTextContent('創新高')
     expect(screen.getByRole('button', { name: '新進 2 · 移出 2' })).toBeVisible()
     expect(screen.getByText('下次決策約 11/13')).toBeVisible()
   })

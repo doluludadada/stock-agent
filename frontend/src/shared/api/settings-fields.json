@@ -241,39 +241,25 @@
     "unit": null
   },
   {
-    "path": "ranking.top",
-    "kind": "steps",
+    "path": "ranking.formulas",
+    "kind": "structure",
+    "group": "advanced",
+    "options": [],
+    "unit": null
+  },
+  {
+    "path": "ranking.active_formula",
+    "kind": "choice",
     "group": "ranking",
     "options": [],
     "unit": null
   },
   {
-    "path": "ranking.min_close",
+    "path": "ranking.evidence_min_traded_value",
     "kind": "steps",
     "group": "ranking",
     "options": [],
     "unit": "twd"
-  },
-  {
-    "path": "ranking.min_traded_value",
-    "kind": "steps",
-    "group": "ranking",
-    "options": [],
-    "unit": "twd"
-  },
-  {
-    "path": "ranking.traded_value_sessions",
-    "kind": "steps",
-    "group": "ranking",
-    "options": [],
-    "unit": null
-  },
-  {
-    "path": "ranking.high_sessions",
-    "kind": "steps",
-    "group": "ranking",
-    "options": [],
-    "unit": null
   },
   {
     "path": "ranking.revenue_short_months",

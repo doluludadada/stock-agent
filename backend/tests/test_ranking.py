@@ -14,19 +14,20 @@ import numpy as np
 import pytest
 from support.fake_daily_history import FakeDailyHistory
 from support.harness import CliHarness, build_harness, harness_config
-from support.settings import shipped_config
+from support.settings import shipped_config, small_formula, with_formulas
 from support.web import serve
 from test_cached_price_provider import cache_over
 from test_ranking_rule import revenue
 from trading_stack import MovableClock, SilentLogger, StockDirectory
 
 from a_domain.model.market.ohlcv import Ohlcv
+from a_domain.model.trading.ranking_formula import RankingFormula
 from a_domain.ports.market.daily_close_archive import OpenDataDownload
 from a_domain.rules.trading.ranking import ListedHistory, ListedHistoryRule, RankingHistoryRule
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.repositories.daily_close_archive import SqlDailyCloseArchive
 from c_infrastructure.market.cached_price_provider import held_ex_right_references, save_bars, save_references
-from c_infrastructure.market.daily_bar_matrix_provider import DailyBarMatrixProvider
+from c_infrastructure.market.daily_bar_matrix_provider import DailyBarMatrixProvider, KeptRankingHistory
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 
 pytestmark = pytest.mark.asyncio
@@ -49,14 +50,23 @@ def bars(closes: list[float]) -> list[Ohlcv]:
     ]
 
 
-def market() -> CliHarness:
+def market(*formulas: RankingFormula) -> CliHarness:
     """
     Three stocks at their highs over the last three sessions, so revenue orders them: 2330 doubled its revenue in
     February, 2317 held it, 1101 halved it. The ranking holds two and reads three sessions for the high.
     """
     config = harness_config()
-    windows = {"top": 2, "high_sessions": 3, "traded_value_sessions": 2, "revenue_short_months": 1, "revenue_long_months": 2}
-    harness = build_harness(config=config.model_copy(update={"ranking": config.ranking.model_copy(update=windows)}))
+    shipped = config.ranking.formula()
+    formula = small_formula(
+        top=2,
+        high_sessions=3,
+        traded_value_sessions=2,
+        short_months=1,
+        long_months=2,
+        min_close=shipped.min_close,
+        min_traded_value=shipped.min_traded_value,
+    )
+    harness = build_harness(config=config.model_copy(update={"ranking": with_formulas(config.ranking, formula, *formulas)}))
 
     for stock_id, closes in {"2330": [100, 101, 102, 103, 104], "2317": [50, 51, 52, 53, 54], "1101": [30, 31, 32, 33, 34]}.items():
         harness.list_stock(stock_id, bars(closes))
@@ -259,7 +269,9 @@ async def test_the_ranking_history_is_never_older_than_the_bars_the_references_a
     clock = MovableClock(datetime(2026, 3, 17, 16, 0, tzinfo=TAIWAN_TIMEZONE))
     cache = cache_over(FakeDailyHistory(), database, clock)
     archive = SqlDailyCloseArchive(database, clock, shipped_config().sources.exchange, 7, SilentLogger())
-    provider = DailyBarMatrixProvider(StockDirectory(), cache, archive, clock, RankingHistoryRule(daily_limit=0.105), SilentLogger())
+    provider = DailyBarMatrixProvider(
+        StockDirectory(), cache, archive, clock, RankingHistoryRule(daily_limit=0.105), SilentLogger(), KeptRankingHistory(), 2
+    )
     await save_bars({"2330": bars([100, 100, 90, 90, 90])}, database)
     first = await provider.load_ranking_history()
     again = await provider.load_ranking_history()

@@ -11,6 +11,7 @@ import { ChangeValue } from '@/shared/ui/change-value'
 import { DataTable, type Column } from '@/shared/ui/data-table'
 import { ErrorState } from '@/shared/ui/error-state'
 import { Field } from '@/shared/ui/field'
+import { FormulaLine } from '@/shared/ui/formula-line'
 import { Input } from '@/shared/ui/input'
 import { Panel } from '@/shared/ui/panel'
 import { ProgressNote } from '@/shared/ui/progress-note'
@@ -72,6 +73,7 @@ export function RankingRecord({ choice, today, onChoose, query, detailAtFirst }:
             </Badge>
           </>
         }
+        description={backtest && <FormulaLine formula={backtest.formula} />}
         aside={span && <span className="tabular">{t('span', { first: format.date(span.first), last: format.date(span.last) })}</span>}
         footer={backtest && <ShowMore expanded={detailed} onToggle={() => setDetailed(!detailed)} controls={detailId} moreLabel={t('record.more')} lessLabel={t('record.less')} />}
       >

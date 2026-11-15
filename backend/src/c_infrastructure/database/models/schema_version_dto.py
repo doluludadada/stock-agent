@@ -1,7 +1,7 @@
 from collections.abc import Awaitable, Callable, Sequence
 from typing import ClassVar
 
-from sqlalchemy import Connection, inspect, select, update
+from sqlalchemy import Connection, inspect, select, text, update
 from sqlalchemy.ext.asyncio import AsyncConnection
 from sqlmodel import Field, SQLModel
 
@@ -32,7 +32,24 @@ The schema version of the first tables an upgrade starts from: the ones the firs
 version created an earlier layout, so no step reaches below it and a database stamped lower is refused.
 """
 
-UPGRADES: tuple[UpgradeStep, ...] = ()
+
+async def add_the_ranking_formula_of_a_run(connection: AsyncConnection) -> None:
+    """Version 9 to 10: a workflow run keeps the ranking formula a ranking follow used. Every run before it has none."""
+    await connection.execute(text("ALTER TABLE workflow_runs ADD COLUMN ranking_formula JSON"))
+
+
+async def add_the_schedule_of_the_ranking_follow(connection: AsyncConnection) -> None:
+    """
+    Version 10 to 11: a user keeps the time of their scheduled ranking follow, none for every user before it, and a
+    workflow run the decision a ranking follow took and whether the schedule started it, which no run before it did.
+    """
+    await connection.execute(text("ALTER TABLE users ADD COLUMN ranking_follow_time TIME"))
+    await connection.execute(text("ALTER TABLE workflow_runs ADD COLUMN ranking_decided_on DATE"))
+    await connection.execute(text("ALTER TABLE workflow_runs ADD COLUMN scheduled BOOLEAN NOT NULL DEFAULT false"))
+    await connection.execute(text("ALTER TABLE workflow_runs ALTER COLUMN scheduled DROP DEFAULT"))
+
+
+UPGRADES: tuple[UpgradeStep, ...] = (add_the_ranking_formula_of_a_run, add_the_schedule_of_the_ranking_follow)
 """
 The steps that upgrade an older database in place, oldest first: UPGRADES[n] turns version FIRST_SCHEMA_VERSION + n
 into the next. A step names the tables and columns it reads as they were at its version, never through today's SQLModel

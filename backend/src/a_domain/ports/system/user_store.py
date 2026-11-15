@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, time
 from typing import Protocol
 
 from pydantic import SecretStr
@@ -67,6 +67,10 @@ class IUserStore(Protocol):
         Raises LastAdministratorError, writing nothing, when the save would leave no active administrator: the active
         administrators are locked first, so two administrators demoting each other at once cannot both succeed.
         """
+        ...
+
+    async def save_ranking_follow_time(self, user_id: UserId, follow_time: time | None, now: datetime) -> None:
+        """Writes only the time of the user's scheduled ranking follow, None for no schedule, changed at `now`."""
         ...
 
     async def save_ai_model(self, user_id: UserId, ai_model: AiProvider | None, now: datetime) -> None:

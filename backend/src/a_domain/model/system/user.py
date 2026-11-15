@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, time
 
 from pydantic import ConfigDict, computed_field
 from pydantic.dataclasses import dataclass
@@ -26,6 +26,11 @@ class User:
     """
     The AI model the user chose for their own runs on My settings, None for the site's default. A choice the site stopped
     offering stays saved, and the user's runs use the site's default until it is offered again.
+    """
+    ranking_follow_time: time | None = None
+    """
+    The time of day in Taipei from which the site follows each new decision of the monthly ranking into the user's mock
+    account by itself, on the first session after it. None: only the user's own click follows.
     """
     has_password: bool = True
     """

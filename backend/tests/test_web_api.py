@@ -59,6 +59,7 @@ VALUATION_WRITES = [
 
 WRITES = [
     ("POST", "/v1/runs/full-cycle", {}),
+    ("PUT", "/v1/rankings/follow/schedule", {"time": "09:05"}),
     ("POST", "/v1/runs/specific-stocks", {"stock_ids": ["2330"]}),
     ("POST", "/v1/watchlist/manual", {"stock_ids": ["2330"]}),
     ("POST", "/v1/watchlist/manual/remove", {"stock_ids": ["2330"]}),

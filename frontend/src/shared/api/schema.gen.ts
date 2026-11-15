@@ -869,14 +869,15 @@ export interface paths {
         /**
          * Get Stock Ranking
          * @description One stock's score: where it stands in the monthly ranking at the latest decision session the site's daily history
-         *     holds, from the same ranking /v1/rankings/latest answers, with no cut at ranking.top. `score` is its place among
-         *     the scored stocks as a percentile, 100 for the best combined rank; `stock` holds its two factors (revenue
-         *     acceleration, nearness to the high) with each one's rank from 0 to 1; `in_top` says whether the ranking holds it. A
-         *     stock the ranking leaves out has no score and `exclusion` says why: no held history, an ETF, no trade that session,
-         *     a close under ranking.min_close, too little traded value, a month of revenue not held, or a price history shorter
-         *     than the high needs. The score ranks two measured factors; it is no forecast. One stock's standing, not the
-         *     ranking's list: it needs no sign-in, and a viewer sees it only where the site shows them both the stock pages and
-         *     the ranking (403 feature_hidden otherwise).
+         *     holds, from the same ranking /v1/rankings/latest answers, by the active formula (`formula`), with no cut at its
+         *     `top`. `score` is its place among the scored stocks as a percentile, 100 for the best combined rank; `stock` holds
+         *     the formula's factors in order, each with its rank from 0 to 1; `in_top` says whether the ranking holds it. While
+         *     the formula holds cash (`holds_cash`) the score is measured all the same and no stock is in the top. A stock the
+         *     ranking leaves out has no score and `exclusion` says why: no held history, an ETF, no trade that session, a close
+         *     under the formula's min_close, too little traded value, a month of revenue a factor reads not held, or a price
+         *     history shorter than a factor reads. The score ranks measured factors; it is no forecast. One stock's standing,
+         *     not the ranking's list: it needs no sign-in, and a viewer sees it only where the site shows them both the stock
+         *     pages and the ranking (403 feature_hidden otherwise).
          */
         get: operations["get_stock_ranking_v1_market_stocks__stock_id__ranking_get"];
         put?: never;
@@ -917,10 +918,11 @@ export interface paths {
         };
         /**
          * Get Ranking Backtest
-         * @description The monthly ranking replayed over the decision sessions from `first` to `last`: bought at each next open in equal
-         *     weights, at the site's fee and tax, against ranking.benchmark_id held over the same sessions by its total return.
-         *     It answers the value of both at every session, their total, annual and yearly returns and drawdowns, the costs, and
-         *     each decision's ranking and the stocks it held. It saves nothing, asks no AI and never orders.
+         * @description The active formula's ranking replayed over the decision sessions from `first` to `last`: bought at each next open
+         *     in equal weights, at the site's fee and tax, against ranking.benchmark_id held over the same sessions by its total
+         *     return. It answers the value of both at every session, their total, annual and yearly returns and drawdowns, the
+         *     costs, the turnover, and each decision's ranking and the stocks it held; a decision at which the formula held cash
+         *     holds none. It saves nothing, asks no AI and never orders.
          */
         get: operations["get_ranking_backtest_v1_rankings_backtest_get"];
         put?: never;
@@ -941,20 +943,74 @@ export interface paths {
         /**
          * Get Ranking Follow
          * @description The ranking in the user's mock account: which of the latest decision's stocks it holds and lacks, which of its
-         *     holdings left the ranking, whether a follow may start now, and its return since it first followed the ranking
-         *     against ranking.benchmark_id over the same sessions. It records nothing and never orders.
+         *     holdings left the ranking (every holding while the active formula holds cash), whether a follow may start now, its
+         *     return since it first followed the ranking against ranking.benchmark_id over the same sessions, its follows so
+         *     far with the formula each used and whether the schedule or the user started it, and the user's schedule. It
+         *     records nothing and never orders.
          */
         get: operations["get_ranking_follow_v1_rankings_follow_get"];
         put?: never;
         /**
          * Follow Ranking
-         * @description Brings the user's mock account to the ranking's latest decision, as a run of its own: it sells each holding the
-         *     ranking left and buys each ranked stock the account lacks, at an equal weight of the account in whole lots of
-         *     analysis.lot_size, priced as this site prices an order now, through the same order gates and journal as every
-         *     order. It orders on the mock account only. A second follow of a decision the account already holds answers
+         * @description Brings the user's mock account to the ranking's latest decision by the active formula, as a run of its own, which
+         *     keeps that formula: it sells each holding the ranking left and buys each ranked stock the account lacks, at an
+         *     equal weight of the account in whole lots of analysis.lot_size, priced as this site prices an order now, through
+         *     the same order gates and journal as every order. While the formula holds cash it sells every holding and buys
+         *     nothing. It orders on the mock account only. A second follow of a decision the account already holds answers
          *     nothing_to_follow.
          */
         post: operations["follow_ranking_v1_rankings_follow_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/rankings/follow/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Schedule Ranking Follow
+         * @description My settings: schedules the user's ranking follow, or turns the schedule off with null. With a time, the site follows
+         *     each new decision of the ranking into the user's mock account by itself on the first session after it, from that
+         *     time in Taipei and while this site places orders, as a run like the button's (`POST /v1/rankings/follow`): the
+         *     same sizing, order gates and journal, on the mock account only, recorded as started by the schedule. It follows a
+         *     decision once, and never one the user followed by hand; a day whose window it missed is tried again on the next
+         *     session until the next decision supersedes it. A user the site hides the ranking or the mock account from, or a
+         *     deactivated one, is followed for by nobody. `GET /v1/rankings/follow` answers the schedule as it stands.
+         */
+        put: operations["schedule_ranking_follow_v1_rankings_follow_schedule_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/rankings/formulas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Ranking Formulas
+         * @description The evidence beside the choice of a formula: every formula of ranking.formulas replayed over the decision sessions
+         *     from `first` to `last` on the same history, fee and tax, in the settings' order, and again at the liquidity floor
+         *     ranking.evidence_min_traded_value. Each row answers the annual return against the benchmark's, the deepest
+         *     drawdown, the years ahead of the benchmark and the turnover. The replays run one after another inside one of the
+         *     server's replay turns, and each is kept while the history stands. A formula that did best over a past period is not
+         *     thereby the best over the next. It saves nothing, asks no AI and never orders.
+         */
+        get: operations["get_ranking_formulas_v1_rankings_formulas_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -970,11 +1026,13 @@ export interface paths {
         };
         /**
          * Get Latest Ranking
-         * @description The monthly stock ranking by revenue acceleration and nearness to the 250-session high at the latest decision session
-         *     the site's daily history holds: the stocks to hold from the next session's open, best first, each with its two
-         *     factors, their ranks and its score, and the revenue month it read. It reads only the held history and the archived
+         * @description The monthly stock ranking by the active formula (ranking.active_formula, `formula` in the answer) at the latest
+         *     decision session the site's daily history holds: the stocks to hold from the next session's open, best first, each
+         *     with the formula's factors in order, their ranks and its score, and the revenue month it read. While the formula's
+         *     market filter is on, `holds_cash` is true and it holds no stock. It reads only the held history and the archived
          *     monthly revenue; a month without revenue ranks nothing and says so in `scored`. The first answer after a start reads
-         *     every held bar, which takes seconds; later ones reuse it until the history holds another session.
+         *     every held bar, which takes seconds; later ones reuse it until the history holds another session, whatever
+         *     formula is active by then.
          */
         get: operations["get_latest_ranking_v1_rankings_latest_get"];
         put?: never;
@@ -2175,7 +2233,7 @@ export interface components {
          *     refused file, a user who is not an administrator and an installation on a real broker.
          * @enum {string}
          */
-        ErrorCode: "sign_in_required" | "sign_in_refused" | "sign_in_throttled" | "registration_closed" | "setup_code_refused" | "already_set_up" | "user_exists" | "last_administrator" | "unknown_host" | "app_request_required" | "administrators_only" | "feature_hidden" | "real_broker_refused" | "broker_unavailable" | "realtime_quotes_unavailable" | "mops_unavailable" | "password_required" | "password_refused" | "google_confirmation_required" | "settings_file_refused" | "settings_file_missing" | "settings_conflict" | "settings_edit_refused" | "settings_refused" | "technical_settings_conflict" | "ai_model_not_offered" | "run_in_progress" | "too_many_runs" | "nothing_to_follow" | "outside_follow_window" | "backtest_period_unavailable" | "ranking_unavailable" | "too_many_backtests" | "ai_allowance_spent" | "brief_limit_reached" | "listing_unavailable" | "not_found" | "invalid_request" | "body_too_large" | "request_refused";
+        ErrorCode: "sign_in_required" | "sign_in_refused" | "sign_in_throttled" | "registration_closed" | "setup_code_refused" | "already_set_up" | "user_exists" | "last_administrator" | "unknown_host" | "app_request_required" | "administrators_only" | "feature_hidden" | "real_broker_refused" | "broker_unavailable" | "realtime_quotes_unavailable" | "mops_unavailable" | "password_required" | "password_refused" | "google_confirmation_required" | "settings_file_refused" | "settings_file_missing" | "settings_conflict" | "settings_edit_refused" | "settings_refused" | "technical_settings_conflict" | "ai_model_not_offered" | "follow_time_not_offered" | "run_in_progress" | "too_many_runs" | "nothing_to_follow" | "outside_follow_window" | "backtest_period_unavailable" | "ranking_unavailable" | "too_many_backtests" | "ai_allowance_spent" | "brief_limit_reached" | "listing_unavailable" | "not_found" | "invalid_request" | "body_too_large" | "request_refused";
         /**
          * ErrorResponse
          * @description Every refusal: `detail` in words for a person, `code` for the client to switch on.
@@ -2293,7 +2351,81 @@ export interface components {
              */
             until: string | null;
         };
+        /**
+         * FollowSchedule
+         * @description A user's schedule of the ranking follow into their mock account, and where it stands now.
+         */
+        FollowSchedule: {
+            /**
+             * Due
+             * @description The schedule follows `pending` now: it is on, its time has come today, and the market is in the phase orders are placed in.
+             */
+            due: boolean;
+            /**
+             * Pending
+             * @description The ranking's latest decision while a session after it has come and no ranking follow of the account took it, by
+             *     the schedule or by hand. The schedule follows it on the first session it can. None once it is taken.
+             */
+            pending: string | null;
+            /**
+             * Time
+             * @description The time of day in Taipei from which the site follows by itself. None: the schedule is off.
+             */
+            time: string | null;
+            /**
+             * Times
+             * @description The times the site offers.
+             */
+            times: string[];
+        };
+        /** FollowScheduleRequest */
+        FollowScheduleRequest: {
+            /**
+             * Confirm
+             * @constant
+             */
+            confirm: true;
+            /** Time */
+            time: string | null;
+        };
+        /**
+         * FormulaEvidence
+         * @description One formula of ranking.formulas with what holding it would have done over the period. Every figure is simulated.
+         */
+        FormulaEvidence: {
+            /** Active */
+            active: boolean;
+            formula: components["schemas"]["RankingFormula"];
+            /** Liquid Floor */
+            liquid_floor: number;
+            liquid_record: components["schemas"]["FormulaRecord"];
+            record: components["schemas"]["FormulaRecord"];
+        };
         FormulaId: string;
+        /**
+         * FormulaRecord
+         * @description One simulated replay of a formula (RankingBacktest) as the comparison shows it, without its curves and rankings.
+         */
+        FormulaRecord: {
+            /** Annual Return */
+            annual_return: number | null;
+            /** Benchmark Annual Return */
+            benchmark_annual_return: number | null;
+            /** Benchmark Id */
+            benchmark_id: string;
+            /** Benchmark Max Drawdown */
+            benchmark_max_drawdown: number | null;
+            /** Max Drawdown */
+            max_drawdown: number;
+            /** Turnover */
+            turnover: number | null;
+            /** Yearly Returns */
+            yearly_returns: {
+                [key: string]: number;
+            };
+            /** Years Ahead */
+            years_ahead: number | null;
+        };
         Fraction: number;
         /**
          * GroupOperator
@@ -2645,6 +2777,19 @@ export interface components {
             kind: "sma" | "volume_sma";
             period: components["schemas"]["IndicatorPeriod"];
         };
+        /** NearnessToHigh */
+        NearnessToHigh: {
+            /**
+             * High Sessions
+             * @description The sessions whose highest total-return level the level at the decision is compared with.
+             */
+            high_sessions: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "nearness_to_high";
+        };
         /** Format: password */
         NewPassword: string;
         NonEmptyText: string;
@@ -2864,6 +3009,21 @@ export interface components {
             weight: number | null;
         };
         PositiveFiniteFloat: number;
+        /** PriceMomentum */
+        PriceMomentum: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "price_momentum";
+            /** Sessions */
+            sessions: number;
+            /**
+             * Skip Sessions
+             * @description The latest sessions left out, so the newest move does not count.
+             */
+            skip_sessions: number;
+        };
         /**
          * ProblemsResponse
          * @description Settings the app would not start with (`settings_refused`): nothing was saved; the problems say where and why.
@@ -2928,27 +3088,24 @@ export interface components {
             quarter_eps: number | null;
         };
         /**
+         * RankedFactor
+         * @description One factor of a ranked stock: its value, and its place among the universe's stocks that have it, 0 lowest to 1.
+         */
+        RankedFactor: {
+            rank: components["schemas"]["Fraction"];
+            /** Value */
+            value: number;
+        };
+        /**
          * RankedStock
-         * @description One stock of a ranking: its two factors, the rank of each among the universe's stocks that have it, and its score.
+         * @description One stock of a ranking: each factor of the ranking's formula, in the formula's order, and its score.
          */
         RankedStock: {
-            acceleration_rank: components["schemas"]["Fraction"];
-            /** @description Each factor's place among the universe's stocks that have it, from 0 for the lowest to 1 for the highest. */
-            nearness_rank: components["schemas"]["Fraction"];
-            /**
-             * Nearness To High
-             * @description The total-return level at the decision's close over its highest of the last high_sessions sessions: 1 at a high. A
-             *     stock listed after the first of those sessions has none.
-             */
-            nearness_to_high: number;
-            /**
-             * Revenue Acceleration
-             * @description The mean revenue of the latest short months over the mean of the latest long months, up to the month read.
-             */
-            revenue_acceleration: number;
+            /** Factors */
+            factors: components["schemas"]["RankedFactor"][];
             /**
              * Score
-             * @description The sum of the two ranks.
+             * @description The sum of the factors' ranks.
              */
             score: number;
             stock_id: components["schemas"]["NonEmptyText"];
@@ -2965,6 +3122,14 @@ export interface components {
              * Format: date
              */
             decided_on: string;
+            /** @description The formula that made it. */
+            formula: components["schemas"]["RankingFormula"];
+            /**
+             * Holds Cash
+             * @description The formula's market filter is on: it holds no stock until the next decision, though the factors are measured.
+             * @default false
+             */
+            holds_cash: boolean;
             /**
              * Revenue Month
              * Format: date
@@ -2973,12 +3138,12 @@ export interface components {
             revenue_month: string;
             /**
              * Scored
-             * @description The universe's stocks with both factors, each of which has a score.
+             * @description The universe's stocks with every factor, each of which has a score.
              */
             scored: number;
             /**
              * Stocks
-             * @description The `top` best scores, best first; equal scores in stock id order.
+             * @description The `top` best scores, best first; equal scores in stock id order. None while it holds cash.
              */
             stocks: components["schemas"]["RankedStock"][];
             /**
@@ -3031,6 +3196,8 @@ export interface components {
              * Format: date
              */
             first: string;
+            /** @description The formula whose rankings it held. */
+            formula: components["schemas"]["RankingFormula"];
             /**
              * Holdings
              * @description The stocks held from the open of each session after a decision, best first, then those that could not be sold.
@@ -3061,12 +3228,22 @@ export interface components {
             /** Total Return */
             readonly total_return: number;
             /**
+             * Turnover
+             * @description The share of the portfolio bought at a rebalance, on average over them. None when it never rebalanced.
+             */
+            turnover: number | null;
+            /**
              * Yearly Returns
              * @description Each calendar year's return, from the last close before it, or the start, to its last close.
              */
             readonly yearly_returns: {
                 [key: string]: number;
             };
+            /**
+             * Years Ahead
+             * @description The calendar years of yearly_returns it returned more than the benchmark. None when the history lacks the benchmark.
+             */
+            readonly years_ahead: number | null;
         };
         /**
          * RankingExclusion
@@ -3074,16 +3251,79 @@ export interface components {
          * @enum {string}
          */
         RankingExclusion: "no_history" | "not_a_stock" | "not_traded" | "price_under_floor" | "illiquid" | "no_revenue_history" | "short_price_history";
+        RankingFactor: components["schemas"]["RevenueAcceleration"] | components["schemas"]["RevenueYoy"] | components["schemas"]["NearnessToHigh"] | components["schemas"]["PriceMomentum"];
         /**
          * RankingFollowResponse
          * @description The user's mock account against the ranking's latest decision, and what following the ranking did so far.
          */
         RankingFollowResponse: {
+            /** Follows */
+            follows: components["schemas"]["RankingFollowRun"][];
             holdings: components["schemas"]["RankingHoldings"];
             performance: components["schemas"]["FollowReturn"] | null;
             refusal: components["schemas"]["FollowRefusal"] | null;
             /** Running */
             running: boolean;
+            schedule: components["schemas"]["FollowSchedule"];
+        };
+        /**
+         * RankingFollowRun
+         * @description One ranking follow of the mock account (its run record) with the formula it used, as the settings defined it then.
+         */
+        RankingFollowRun: {
+            /**
+             * Ranking Decided On
+             * Format: date
+             */
+            ranking_decided_on: string;
+            ranking_formula: components["schemas"]["RankingFormula"];
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Scheduled */
+            scheduled: boolean;
+            /**
+             * Start Time
+             * Format: date-time
+             */
+            start_time: string;
+        };
+        /**
+         * RankingFormula
+         * @description One way to make the monthly ranking, as the settings name it: the factors whose ranks it sums, the universe it
+         *     ranks, how many of the best scores it holds, and when it holds cash instead. It is data alone: the one ranking rule,
+         *     its backtest and a stock's standing all read it, and a run that followed a ranking keeps the formula it used.
+         */
+        RankingFormula: {
+            /**
+             * Cash Under Average Sessions
+             * @description The market filter: the formula holds cash for the month when the benchmark's total-return level at the decision's
+             *     close is under its own average of this many sessions. None holds the ranking whatever the benchmark does.
+             */
+            cash_under_average_sessions?: number | null;
+            /**
+             * Factors
+             * @description Each is ranked among the universe's stocks that have it, and a stock's score is the sum of its ranks.
+             */
+            factors: components["schemas"]["RankingFactor"][];
+            /** Min Close */
+            min_close: number;
+            /** Min Traded Value */
+            min_traded_value: number;
+            name: components["schemas"]["FormulaId"];
+            /**
+             * Top
+             * @description How many of the best scores it holds, in equal weights.
+             */
+            top: number;
+            /**
+             * Traded Value Sessions
+             * @description The universe: the stocks (no ETF) that traded at the decision, closed at min_close or more, and traded
+             *     min_traded_value NT$ a session on average over the last traded_value_sessions sessions.
+             */
+            traded_value_sessions: number;
         };
         /**
          * RankingHoldings
@@ -3161,6 +3401,18 @@ export interface components {
             confirm: true;
             initial_cash: components["schemas"]["PositiveFiniteFloat"];
         };
+        /** RevenueAcceleration */
+        RevenueAcceleration: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "revenue_acceleration";
+            /** Long Months */
+            long_months: number;
+            /** Short Months */
+            short_months: number;
+        };
         /**
          * RevenueMonth
          * @description One held month of a company's revenue as the stock page reads it. Revenue is in thousands of TWD; changes are ratios.
@@ -3198,6 +3450,16 @@ export interface components {
             /** Short Months */
             short_months: number;
         };
+        /** RevenueYoy */
+        RevenueYoy: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "revenue_yoy";
+            /** Months */
+            months: number;
+        };
         /**
          * Role
          * @enum {string}
@@ -3221,6 +3483,7 @@ export interface components {
          * @description Which run a trade came from, as the account page names it.
          */
         RunReference: {
+            ranking_formula?: components["schemas"]["RankingFormula"] | null;
             /**
              * Run Id
              * Format: uuid
@@ -3277,6 +3540,7 @@ export interface components {
             orders_submitted: number;
             /** Passed Technical */
             passed_technical: number;
+            ranking_formula?: components["schemas"]["RankingFormula"] | null;
             /** Signals Generated */
             signals_generated: number;
             /** Stale Market Data Count */
@@ -3683,6 +3947,9 @@ export interface components {
              */
             decided_on: string;
             exclusion: components["schemas"]["RankingExclusion"] | null;
+            formula: components["schemas"]["RankingFormula"];
+            /** Holds Cash */
+            holds_cash: boolean;
             /** In Top */
             in_top: boolean;
             /** Place */
@@ -3697,8 +3964,6 @@ export interface components {
             /** Scored */
             scored: number;
             stock: components["schemas"]["RankedStock"] | null;
-            /** Top */
-            top: number;
             /** Universe */
             universe: number;
         };
@@ -3943,6 +4208,8 @@ export interface components {
              * @description What the user's role allows beyond their own data: the web app shows the administration pages from it.
              */
             readonly permissions: components["schemas"]["Permission"][];
+            /** Ranking Follow Time */
+            ranking_follow_time?: string | null;
             role: components["schemas"]["Role"];
             /** @default active */
             status: components["schemas"]["UserStatus"];
@@ -5643,6 +5910,78 @@ export interface operations {
                 };
             };
             /** @description The server runs its most workflows at once; start yours later. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    schedule_ranking_follow_v1_rankings_follow_schedule_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FollowScheduleRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description follow_time_not_offered: the site does not offer that time; nothing saved. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_ranking_formulas_v1_rankings_formulas_get: {
+        parameters: {
+            query: {
+                first: string;
+                last: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormulaEvidence"][];
+                };
+            };
+            /** @description ranking_unavailable: the site's daily history holds no decision session yet; `detail` says what it holds. backtest_period_unavailable: the period holds no decision session the history holds; `detail` says which sessions it holds. invalid_request: a query parameter does not validate. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description too_many_backtests: accounts.max_backtests_per_user of the user's strategy backtests and ranking backtests replay or wait already. */
             429: {
                 headers: {
                     [name: string]: unknown;

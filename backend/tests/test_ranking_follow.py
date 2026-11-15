@@ -11,6 +11,7 @@ from datetime import date, datetime, time, timedelta
 
 import pytest
 from support.harness import MARKET_CLOSED, MEMBER, MEMBER_PASSWORD, CliHarness, build_harness, harness_config
+from support.settings import small_formula, with_formulas
 from support.web import ended, serve, write
 from test_follow import RealBroker
 from test_ranking_rule import revenue
@@ -20,7 +21,7 @@ from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.account import Account, AccountOpening, Position
 from a_domain.rules.trading.follow import FollowReturn, RankingFollowReturnRule, RankingHoldings, RankingHoldingsRule
-from a_domain.rules.trading.ranking import ListedHistoryRule, RankedStock, Ranking, RankingHistoryRule
+from a_domain.rules.trading.ranking import ListedHistoryRule, RankedFactor, RankedStock, Ranking, RankingHistoryRule
 from a_domain.types.enums import (
     Audience,
     ExecutionProvider,
@@ -47,15 +48,7 @@ CLOSES = {"2330": 100.0, "2317": 50.0, "1101": 30.0, "0050": 186.0}
 REVENUES = {"2330": (100.0, 200.0), "2317": (100.0, 100.0), "1101": (100.0, 50.0)}
 """August's and September's revenue: 2330 doubled it, 2317 held it, 1101 halved it. The ranking holds the best two."""
 
-RANKING_WINDOWS = {
-    "top": 2,
-    "high_sessions": 3,
-    "traded_value_sessions": 2,
-    "revenue_short_months": 1,
-    "revenue_long_months": 2,
-    "min_traded_value": 0,
-    "min_close": 0,
-}
+FORMULA = small_formula(top=2, high_sessions=3, traded_value_sessions=2, short_months=1, long_months=2)
 FEE_RATE = 0.001425
 
 
@@ -71,7 +64,7 @@ def daily_history() -> dict[str, list[Ohlcv]]:
 
 
 def small_ranking(config: AppConfig) -> None:
-    config.ranking = config.ranking.model_copy(update=RANKING_WINDOWS)
+    config.ranking = with_formulas(config.ranking, FORMULA)
 
 
 def public_site(config: AppConfig) -> None:
@@ -111,10 +104,10 @@ def affordable(budget: float, price: float) -> int:
 
 def ranking_of(*stock_ids: str) -> Ranking:
     stocks = [
-        RankedStock(stock_id=stock_id, revenue_acceleration=1, nearness_to_high=1, acceleration_rank=1, nearness_rank=1, score=2)
+        RankedStock(stock_id=stock_id, factors=[RankedFactor(value=1, rank=1), RankedFactor(value=1, rank=1)], score=2)
         for stock_id in stock_ids
     ]
-    return Ranking(decided_on=SESSIONS[3], revenue_month=date(2026, 9, 1), universe=3, scored=3, stocks=stocks)
+    return Ranking(formula=FORMULA, decided_on=SESSIONS[3], revenue_month=date(2026, 9, 1), universe=3, scored=3, stocks=stocks)
 
 
 # ----------------------------------- Rules ------------------------------------ #
@@ -172,11 +165,13 @@ async def test_a_follow_from_an_empty_account_buys_each_ranked_stock_at_an_equal
     before, refusal = await stack.pipeline.load_ranking_follow()
     performance = await stack.pipeline.load_ranking_follow_return()
     status = await stack.pipeline.follow_ranking()
+    _, follows = await stack.pipeline.load_ranking_follow_return()
 
     account = await stack.broker.get_account()
     decisions = await stack.journal.signals_of(status.stats.run_id)
     after, again = await stack.pipeline.load_ranking_follow()
-    assert (before.held, before.lacking, before.left, refusal, performance) == ([], ["2330", "2317"], [], None, None)
+    assert (before.held, before.lacking, before.left, refusal, performance) == ([], ["2330", "2317"], [], None, (None, []))
+    assert [(run.run_id, run.ranking_formula) for run in follows] == [(status.stats.run_id, FORMULA)]
     assert (status.stats.workflow, status.stats.execution_provider) == (Workflow.RANKING_FOLLOW, ExecutionProvider.MOCK)
     assert [(order.stock_id, order.action, order.status, order.limit_price, order.filled_quantity) for order in status.orders] == [
         ("2330", TradeAction.BUY, OrderStatus.FILLED, 100, affordable(500_000, 100)),
@@ -184,7 +179,7 @@ async def test_a_follow_from_an_empty_account_buys_each_ranked_stock_at_an_equal
     ]
     assert affordable(500_000, 100) == 4992
     assert {decision.source for decision in decisions} == {SignalSource.RANKING}
-    assert decisions[0].reason == "Place 1 of the monthly ranking decided at the close of 2026-10-13"
+    assert decisions[0].reason == "Place 1 of the monthly ranking revenue_and_high decided at the close of 2026-10-13"
     assert all(order.fee > 0 and order.tax == 0 for order in status.orders)
     assert 0 <= account.cash < 300 and account.stock_ids == {"2330", "2317"}
     assert (after.held, after.lacking, after.left, again) == (["2330", "2317"], [], [], FollowRefusal.NOTHING_TO_FOLLOW)
@@ -314,7 +309,7 @@ async def test_the_return_since_the_first_follow_is_read_against_the_benchmark_o
     stack = await market(tmp_path)
     status = await stack.pipeline.follow_ranking()
     monday, tuesday = date(2026, 10, 19), date(2026, 10, 20)
-    on_the_day = await stack.pipeline.load_ranking_follow_return()
+    on_the_day, _ = await stack.pipeline.load_ranking_follow_return()
     later = {"2330": (101.0, 110.0), "2317": (50.0, 51.0), "1101": (30.0, 30.0), "0050": (188.0, 190.0)}
 
     for stock_id, closes in later.items():
@@ -324,7 +319,7 @@ async def test_the_return_since_the_first_follow_is_read_against_the_benchmark_o
         ]
 
     stack.clock.current = datetime.combine(tuesday, time(15, 0), TAIWAN_TIMEZONE)
-    performance = await stack.pipeline.load_ranking_follow_return()
+    performance, _ = await stack.pipeline.load_ranking_follow_return()
 
     cash = (await stack.broker.get_account()).cash
     equity = cash + sum(order.filled_quantity * later[order.stock_id][1] for order in status.orders)
@@ -343,7 +338,7 @@ async def test_a_reset_account_has_never_followed(tmp_path) -> None:
     holdings, refusal = await stack.pipeline.load_ranking_follow()
 
     assert (holdings.held, holdings.lacking, refusal) == ([], ["2330", "2317"], None)
-    assert await stack.pipeline.load_ranking_follow_return() is None
+    assert await stack.pipeline.load_ranking_follow_return() == (None, [])
 
 
 async def test_a_follow_on_a_pipeline_built_for_sinopac_never_reaches_it_and_orders_nothing(tmp_path) -> None:
@@ -393,7 +388,7 @@ def site(**options) -> CliHarness:
     """The harness's site with the history, the revenue and the quotes above, a member beside the administrator."""
     config = harness_config()
     features = config.features.model_copy(update=options.pop("features", {}))
-    ranking = config.ranking.model_copy(update=RANKING_WINDOWS)
+    ranking = with_formulas(config.ranking, *options.pop("formulas", (FORMULA,)))
     harness = build_harness(config=config.model_copy(update={"ranking": ranking, "features": features}), **options)
     harness.users.add(MEMBER, MEMBER_PASSWORD)
 
@@ -416,14 +411,19 @@ async def test_the_web_follow_orders_the_ranking_on_the_mock_account_as_a_run_an
         started = await write(client, "POST", "/v1/rankings/follow?broker=shioaji", {})
         follow = await ended(client, started.json()["run_id"])
         orders = (await client.get(f"/v1/runs/{started.json()['run_id']}/orders")).json()
+        followed = (await client.get("/v1/rankings/follow")).json()["follows"]
 
     assert offered == {
         "holdings": {"decided_on": "2026-10-13", "held": [], "lacking": ["2330", "2317"], "left": ["1101"]},
         "refusal": None,
         "running": False,
         "performance": None,
+        "follows": [],
+        "schedule": {"time": None, "times": ["09:05:00", "09:30:00", "10:00:00", "13:00:00"], "pending": "2026-10-13", "due": False},
     }
     assert (started.status_code, follow["state"]) == (202, "finished")
+    assert [(run["run_id"], run["ranking_formula"]["name"]) for run in followed] == [(started.json()["run_id"], FORMULA.name)]
+    assert follow["summary"]["ranking_formula"]["factors"][1] == {"kind": "nearness_to_high", "high_sessions": 3}
     assert (follow["summary"]["workflow"], follow["summary"]["execution_provider"]) == ("ranking_follow", "mock")
     assert [(order.stock_id, order.action) for order in harness.broker.placed] == [
         ("1101", TradeAction.SELL),

@@ -273,14 +273,15 @@ async def write_stock_brief(
 async def get_stock_ranking(stock_id: StockIdPath, pipeline: SignedOutPipeline) -> StockRankingResponse:
     """
     One stock's score: where it stands in the monthly ranking at the latest decision session the site's daily history
-    holds, from the same ranking /v1/rankings/latest answers, with no cut at ranking.top. `score` is its place among
-    the scored stocks as a percentile, 100 for the best combined rank; `stock` holds its two factors (revenue
-    acceleration, nearness to the high) with each one's rank from 0 to 1; `in_top` says whether the ranking holds it. A
-    stock the ranking leaves out has no score and `exclusion` says why: no held history, an ETF, no trade that session,
-    a close under ranking.min_close, too little traded value, a month of revenue not held, or a price history shorter
-    than the high needs. The score ranks two measured factors; it is no forecast. One stock's standing, not the
-    ranking's list: it needs no sign-in, and a viewer sees it only where the site shows them both the stock pages and
-    the ranking (403 feature_hidden otherwise).
+    holds, from the same ranking /v1/rankings/latest answers, by the active formula (`formula`), with no cut at its
+    `top`. `score` is its place among the scored stocks as a percentile, 100 for the best combined rank; `stock` holds
+    the formula's factors in order, each with its rank from 0 to 1; `in_top` says whether the ranking holds it. While
+    the formula holds cash (`holds_cash`) the score is measured all the same and no stock is in the top. A stock the
+    ranking leaves out has no score and `exclusion` says why: no held history, an ETF, no trade that session, a close
+    under the formula's min_close, too little traded value, a month of revenue a factor reads not held, or a price
+    history shorter than a factor reads. The score ranks measured factors; it is no forecast. One stock's standing,
+    not the ranking's list: it needs no sign-in, and a viewer sees it only where the site shows them both the stock
+    pages and the ranking (403 feature_hidden otherwise).
     """
     return StockRankingResponse.model_validate(await pipeline.load_ranking_standing(stock_id))
 

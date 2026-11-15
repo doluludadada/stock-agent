@@ -5,6 +5,7 @@ import { I18nextProvider } from 'react-i18next'
 import { MemoryRouter } from 'react-router'
 import { initI18n } from '@/i18n'
 import { session, type Schemas } from '@/shared/api'
+import { SHIPPED_FORMULA } from '@/test/ranking'
 import { TEST_USER } from '@/test/users'
 import { HoldingsPage } from './HoldingsPage'
 import type { Holding, Holdings, WatchedStock } from './model'
@@ -16,12 +17,21 @@ const SCORED: Standing = {
   revenue_month: '2026-10-01',
   universe: 1800,
   scored: 987,
-  top: 20,
+  formula: SHIPPED_FORMULA,
+  holds_cash: false,
   place: 12,
   score: 98.88,
   in_top: true,
   exclusion: null,
-  stock: { stock_id: '2330', stock_name: null, revenue_acceleration: 1.253, nearness_to_high: 0.982, acceleration_rank: 0.92, nearness_rank: 0.78, score: 1.7 },
+  stock: {
+    stock_id: '2330',
+    stock_name: null,
+    factors: [
+      { value: 1.253, rank: 0.92 },
+      { value: 0.982, rank: 0.78 },
+    ],
+    score: 1.7,
+  },
 }
 const AN_ETF: Standing = { ...SCORED, place: null, score: null, stock: null, in_top: false, exclusion: 'not_a_stock' }
 
@@ -169,7 +179,7 @@ describe('My holdings', () => {
     const [broker, etf] = await rows()
     expect(broker).toHaveTextContent('99')
     expect(broker).toHaveTextContent('place 12 of 987')
-    expect(broker).toHaveTextContent('Revenue acceleration PR 92 · nearness to high PR 78')
+    expect(broker).toHaveTextContent('Revenue acceleration PR 92 · Nearness to high PR 78')
     expect(within(broker!).getAllByText('In the top 20')[0]).toBeVisible()
     expect(broker).toHaveTextContent('×1.25')
     expect(broker).toHaveTextContent('above 1 for 3 months in a row')

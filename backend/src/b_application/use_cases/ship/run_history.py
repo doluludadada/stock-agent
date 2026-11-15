@@ -19,7 +19,7 @@ class RunHistory:
     from its broker's account and from the day's total of BUYs on it. A failed last save is logged in the run.
 
     A caller that must name the run before it starts (the Web API answers with the run id at once) passes that id. A
-    follow names the run it follows.
+    follow names the run it follows, and a run the site's schedule started says so.
     `ai_model` is the AI model the Pipeline's AI provider runs on, so the record names the model the run used, and
     `broker` the broker its ordering steps hold, the run's choice, which the record keeps for the run's whole life.
     """
@@ -41,12 +41,13 @@ class RunHistory:
 
     @asynccontextmanager
     async def execute(
-        self, workflow: Workflow, run_id: RunId | None = None, followed_run_id: RunId | None = None
+        self, workflow: Workflow, run_id: RunId | None = None, followed_run_id: RunId | None = None, *, scheduled: bool = False
     ) -> AsyncGenerator[SystemStats]:
         stats = SystemStats(
             run_id=run_id or new_run_id(),
             workflow=workflow,
             followed_run_id=followed_run_id,
+            scheduled=scheduled,
             execution_provider=self._broker,
             ai_model=self._ai_model,
             start_time=self._market_clock.now(),

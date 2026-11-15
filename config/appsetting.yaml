@@ -74,31 +74,74 @@ technical:
   initial_strategy_id: balanced
 
 ranking:
-  # A monthly stock ranking by revenue acceleration and nearness to the high, which research on 2018 to 2026 found to beat
-  # 0050 after costs: `just ranking` prints the latest one and `just ranking-backtest` replays it. It reads only the held
-  # daily history and monthly revenue (`just backfill-history` brings them back), never orders and asks no AI.
+  # A monthly stock ranking: `just ranking` prints the latest one and `just ranking-backtest` replays it. It reads only
+  # the held daily history and monthly revenue (`just backfill-history` brings them back), never orders and asks no AI.
   # Each month decides at the close of its first session on this day of the month or later, which reads the newest month
   # of revenue due before it (sources.mops.revenue_deadline_day), and holds the ranking from the next session's open.
   decision_day: 13
-  # How many of the best scores it holds, in equal weights.
-  top: 20
-  # The universe: the stocks (no ETF) that traded at the decision, closed at min_close or more, and traded
-  # min_traded_value NT$ a session on average over the last traded_value_sessions sessions, a session without a trade
-  # counting 0.
-  min_close: 10
-  min_traded_value: 30000000
-  traded_value_sessions: 20
-  # Nearness to the high: the total-return level at the decision over its highest of the last high_sessions sessions.
-  high_sessions: 250
-  # Revenue acceleration: the mean revenue of the latest revenue_short_months over that of the latest revenue_long_months,
-  # up to the month read; none if any of them is missing.
+  # The formula the ranking, every stock's score, the backtest shown and a follow use now: one of the names below. The
+  # settings page switches it, and the switch applies at once.
+  active_formula: revenue_and_high
+  # The formulas the ranking can be made by. Each ranks its factors among its universe's stocks and holds the `top` best
+  # sums of ranks in equal weights. Adding one is an entry here, of these factors:
+  #   revenue_acceleration  the mean revenue of the latest short_months over that of the latest long_months
+  #   revenue_yoy           the revenue of the latest `months` months over the same months a year before
+  #   nearness_to_high      the total-return level at the decision over its highest of the last high_sessions sessions
+  #   price_momentum        the total-return level skip_sessions sessions ago over the level `sessions` sessions ago
+  # The universe is the stocks (no ETF) that traded at the decision, closed at min_close or more, and traded
+  # min_traded_value NT$ a session on average over the last traded_value_sessions sessions. With
+  # cash_under_average_sessions, the formula holds cash for the month when benchmark_id closed under its own average of
+  # that many sessions at the decision. The research of 2026-11-15 on 2008 to 2026 found no formula that beats the first
+  # out of sample; the two with the cash filter fell less in 2008 to 2012 and returned less in every later span.
+  formulas:
+    - name: revenue_and_high
+      top: 20
+      min_close: 10
+      min_traded_value: 30000000
+      traded_value_sessions: 20
+      factors:
+        - kind: revenue_acceleration
+          short_months: 3
+          long_months: 12
+        - kind: nearness_to_high
+          high_sessions: 250
+    - name: revenue_and_high_cash_60
+      top: 20
+      min_close: 10
+      min_traded_value: 30000000
+      traded_value_sessions: 20
+      cash_under_average_sessions: 60
+      factors:
+        - kind: revenue_acceleration
+          short_months: 3
+          long_months: 12
+        - kind: nearness_to_high
+          high_sessions: 250
+    - name: revenue_yoy_and_high_cash_120
+      top: 20
+      min_close: 10
+      min_traded_value: 30000000
+      traded_value_sessions: 20
+      cash_under_average_sessions: 120
+      factors:
+        - kind: revenue_yoy
+          months: 3
+        - kind: nearness_to_high
+          high_sessions: 250
+  # The ranking page compares every formula over the same period, and a second time with this liquidity floor in place
+  # of its own min_traded_value.
+  evidence_min_traded_value: 200000000
+  # How many replays of the ranking the site keeps in memory while the history they read stays the same.
+  kept_backtests: 24
+  # The revenue trend of the stock page and of My holdings: the mean revenue of the latest revenue_short_months over that
+  # of the latest revenue_long_months.
   revenue_short_months: 3
   revenue_long_months: 12
   # A day's move beyond this on a bar the exchange named no reference price for is a corporate action, not a return, and
   # counts as 0 in the total-return level.
   daily_limit: 0.105
-  # The backtest's benchmark, held over the same sessions by its total return, and the sessions a year its annual return
-  # counts.
+  # The backtest's benchmark, held over the same sessions by its total return, which a formula's cash filter reads too,
+  # and the sessions a year its annual return counts.
   benchmark_id: "0050"
   sessions_per_year: 245
 

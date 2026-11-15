@@ -29,7 +29,7 @@ src/
                        the mock account, and each decision marked followed or open
     backtest/          the active strategy replayed over a past period: the form from the server's options, the verdict
                        against the TAIEX, both curves as returns on one chart, the trades, and the saved backtests
-    ranking/           the monthly ranking by revenue acceleration and nearness to the high: the stocks it picks now and
+    ranking/           the monthly ranking by the formula the settings make active: the stocks it picks now, or that it holds cash, and
                        what changed since the month before, its backtest against the benchmark over a chosen period (the
                        answer in a sentence, both curves, every year), the caveats the research measured, and every past
                        decision with what it held; the ranking followed into the mock account
@@ -120,7 +120,7 @@ the contract by `catalog.test.ts`.
 | A manual BUY of a stock a specific-stock run reported, on the broker chosen | `runs/api.ts` | `/v1/runs/{run_id}/manual-buy` |
 | A run's follow into the mock account: what is open, the refusal, the follows so far; starting one | `runs/api.ts` | `/v1/runs/{run_id}/follow` |
 | A backtest's options, a run that is saved, the saved backtests, one of them, a delete | `backtest/api.ts` | `/v1/backtests` |
-| The latest monthly ranking; its replay over a period against the benchmark, with each decision's ranking and holdings; the ranking in the mock account, and the start of its follow | `ranking/api.ts` | `/v1/rankings/latest`, `/v1/rankings/backtest`, `/v1/rankings/follow` |
+| The latest monthly ranking; its replay over a period against the benchmark, with each decision's ranking and holdings; every formula of the settings replayed over the same period; the ranking in the mock account, and the start of its follow | `ranking/api.ts` | `/v1/rankings/latest`, `/v1/rankings/backtest`, `/v1/rankings/formulas`, `/v1/rankings/follow`, `/v1/rankings/follow/schedule` |
 | Watchlist | `watchlist/api.ts` | `/v1/watchlist` |
 | Valuation | `valuation/api.ts` | `/v1/valuation` |
 | The mock account: now, the curve, the opening and the total P&L | `account/api.ts` | `/v1/account/history` |
@@ -174,7 +174,7 @@ The stock page reads in one order: the price, the score and the revenue (`StockS
 the chart with the day and the year's range, then the tables (`AnalysisPanel`, `FinancialsPanel`), which start closed
 under 768 px, and last the viewer's technical evaluation, closed until asked for. A viewer the site does not show the
 `ranking` feature gets no score block, and the page never asks for the score. `StockSummary` leads, right under the price: the ranking
-score (0 to 100, the place among the scored stocks, the two factors' percentiles as bars, whether it is in the top, the
+score (0 to 100, the place among the scored stocks, the percentile of each factor of the active formula as a bar, whether it is in the top, the
 decision day, or the reason a stock has no score, and one line that the score measures and does not predict) and the
 monthly revenue (the latest month, its change from a year before, the acceleration, and up to 36 months as bars that
 resize with the card). On a phone the score comes first and both read at 360 px with no sideways scroll. `AnalysisPanel` shows the backend's analysis as it
@@ -374,6 +374,21 @@ tap away, and open at once when the address names a period or a month. Narrower,
   `['owner', 'run-results']`, and polls while the server says a run of the user runs. The window and price wording is
   the follow panel's (`runs:follow.*`).
 
+- The formula is the server's: every ranking, standing and backtest carries the `formula` that made it, and the
+  page words it from that definition alone (`shared/lib/ranking-formula.ts`, `FormulaLine`, `common:formula.*`), so a
+  formula the settings add needs no frontend change. A formula that holds cash says so where the list would be
+  (`HoldsCash`); scores still show, with one line that the formula holds cash. The switch is the settings page's
+  `ranking.active_formula`; a save reloads every answer the tab holds that is not the form's.
+- `FormulaComparison.tsx` is the evidence beside that choice (`/v1/rankings/formulas`): every formula over the
+  backtest's period, as defined and at the comparison's liquidity floor, marked simulated, the one in use marked,
+  and one line that the best of a past period is not thereby the best next. It is asked once the backtest answered.
+- The mock account's block lists the formula each follow used, newest first, and the account page's trades name it
+  at a ranking follow's run, so a result is never read as one formula's when several made it.
+- The scheduled follow is the user's own setting: `FollowSchedulePanel` on My settings (the route hands it in beside
+  the mock account's panel, where the site shows both features) offers off and the server's times as one
+  `Segmented`, and saves at once. The block says the schedule's state in one line: off; on with the decision it
+  still has to follow; or on with the next follow's day, the first weekday after the next decision
+  (`weekdayAfter`), said with "about"; then who started the last follow. Each listed follow says schedule or by hand.
 - The address holds the period (`?period=5Y`, or `?first=&last=`; none is the whole history) and the decision whose
   stocks are open (`?month=` with the decision's date), so both survive a reload. `ranking/model.ts` reads and writes them.
 - The first answer after a server start takes close to a minute and later ones seconds. The page asks for the latest
@@ -437,7 +452,7 @@ third party's item, the stock page's news too.
 
 `shared/ui/` holds vendored shadcn/ui sources and the project's own primitives (`panel`, `data-table`, `stat`,
 `segmented`, `range-tabs`, `show-more`, `range-meter`, `breadth-bar`, `quote-headline`, `state-block`, `page-header`,
-`ranking-score`, `stock-name`, `error-state`, `ai-byline`, `news-row`,
+`ranking-score`, `formula-line`, `stock-name`, `error-state`, `ai-byline`, `news-row`,
 `field`, `password-input`, `avatar`, `price-volume-chart`, `price-trend`, `comparison-chart`, `progress-note`,
 `stock-picker`, `confirm-dialog`, `stock-ids-problem`). Lint relaxes only fast-refresh and a few a11y role rules there, to stay close to upstream.
 

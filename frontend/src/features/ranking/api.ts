@@ -5,6 +5,7 @@ import type { Period } from './model'
 export const rankingKeys = {
   latest: ['owner', 'ranking', 'latest'] as const,
   backtest: (period: Period) => ['owner', 'ranking', 'backtest', period.first, period.last] as const,
+  formulas: (period: Period) => ['owner', 'ranking', 'formulas', period.first, period.last] as const,
   /** Under the run results: a run's end and a reset of the mock account change what the account holds. */
   follow: [...runResultsKey, 'ranking-follow'] as const,
 }
@@ -44,6 +45,22 @@ export function useRankingBacktest(period: Period | null, { keepShown = false }:
   })
 }
 
+/**
+ * Every formula of the settings replayed over a period, as the evidence beside the choice. The server replays them one
+ * after another and keeps each, so it is asked once the period's backtest has answered. Null asks nothing.
+ */
+export function useRankingFormulas(period: Period | null) {
+  const signedIn = useIsSignedIn()
+  return useQuery({
+    queryKey: rankingKeys.formulas(period ?? { first: '', last: '' }),
+    queryFn: ({ signal }) => apiRequest('get', '/v1/rankings/formulas', { query: period!, signal }),
+    enabled: signedIn && period !== null,
+    staleTime: FRESH_MS,
+    gcTime: KEPT_MS,
+    placeholderData: keepPreviousData,
+  })
+}
+
 /** A follow takes seconds; polling every few seconds shows its end soon without loading the server. */
 const RUN_POLL_MS = 4000
 /** A follow refused outside its window is asked again each minute, so the button opens with the window. */
@@ -57,6 +74,15 @@ export function useRankingFollow() {
     queryFn: ({ signal }) => apiRequest('get', '/v1/rankings/follow', { signal }),
     enabled: signedIn,
     refetchInterval: (query) => (query.state.data?.running ? RUN_POLL_MS : query.state.data?.refusal === 'outside_follow_window' ? WINDOW_POLL_MS : false),
+  })
+}
+
+/** Saves when the site follows the ranking into the mock account by itself, or null for no schedule; the block's answer follows it. */
+export function useScheduleFollow() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (time: string | null) => apiRequest('put', '/v1/rankings/follow/schedule', { body: { confirm: true, time } }),
+    onSettled: () => client.invalidateQueries({ queryKey: rankingKeys.follow }),
   })
 }
 

@@ -10,8 +10,8 @@ class StockRankingStanding:
     """
     Where each of `stock_ids` stands in the monthly ranking at the latest decision session the history holds
     (DecisionSessionsRule, RankingStandingRule, which ranks the market once for all of them): its place, its score from
-    0 to 100 and its two factors, or why the ranking leaves it out. It is the ranking LatestRanking answers, with no cut
-    at ranking.top. RankingUnavailable when a stock is asked for and the history holds no decision session.
+    0 to 100 and its formula's factors, or why the ranking leaves it out. It is the ranking LatestRanking answers, with no cut
+    at the active formula's top. RankingUnavailable when a stock is asked for and the history holds no decision session.
     """
 
     def __init__(self, config: AppConfig) -> None:

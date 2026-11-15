@@ -113,6 +113,7 @@ from b_application.use_cases.process.technical_filter import TechnicalFilter
 from b_application.use_cases.process.technical_settings_editor import TechnicalSettingsEditor
 from b_application.use_cases.process.world_brief_context import WorldBriefContext
 from b_application.use_cases.ranking.latest_ranking import LatestRanking
+from b_application.use_cases.ranking.ranking_evidence import RankingEvidence
 from b_application.use_cases.ranking.ranking_history_loader import RankingHistoryLoader
 from b_application.use_cases.ranking.ranking_replay import RankingReplay
 from b_application.use_cases.ranking.ranking_standing import StockRankingStanding
@@ -140,6 +141,7 @@ from b_application.use_cases.trade.order_outcome import OrderOutcome
 from b_application.use_cases.trade.order_preparation import OrderPreparation
 from b_application.use_cases.trade.ranking_follow_candidates import RankingFollowCandidates
 from b_application.use_cases.trade.ranking_follow_return import RankingFollowReturn
+from b_application.use_cases.trade.ranking_follow_schedule import RankingFollowSchedule
 from b_application.use_cases.trade.ranking_follow_signals import RankingFollowSignals
 from b_application.use_cases.trade.trade_history import TradeHistory
 from b_application.use_cases.trade.unwatch_stocks import UnwatchStocks
@@ -147,10 +149,12 @@ from b_application.use_cases.trade.watch_stocks import WatchStocks
 from b_application.use_cases.users.ai_model_choice import AiModelChoice
 from b_application.use_cases.users.ai_model_lookup import AiModelLookup
 from b_application.use_cases.users.first_administrator_setup import FirstAdministratorSetup
+from b_application.use_cases.users.follow_time_choice import FollowTimeChoice
 from b_application.use_cases.users.google_account import GoogleAccount
 from b_application.use_cases.users.google_identity_check import GoogleIdentityCheck
 from b_application.use_cases.users.google_sign_in_start import GoogleSignInStart
 from b_application.use_cases.users.password_reset import PasswordReset
+from b_application.use_cases.users.scheduled_followers import ScheduledFollowers
 from b_application.use_cases.users.session_start import SessionStart
 from b_application.use_cases.users.sign_in_attempt import SignInAttempt
 from b_application.use_cases.users.sign_in_options import SignInOptions
@@ -200,7 +204,7 @@ from c_infrastructure.feed.tavily_provider import TavilySearchAdapter
 from c_infrastructure.feed.world_feed import WorldFeed
 from c_infrastructure.identity.google_identity_provider import GoogleIdentityProvider
 from c_infrastructure.market.cached_price_provider import CachedPriceProvider
-from c_infrastructure.market.daily_bar_matrix_provider import DailyBarMatrixProvider
+from c_infrastructure.market.daily_bar_matrix_provider import DailyBarMatrixProvider, KeptRankingHistory
 from c_infrastructure.market.exchange_daily_reports import ExchangeDailyReports
 from c_infrastructure.market.mops_company_basics import MopsCompanyBasicsProvider
 from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider
@@ -281,6 +285,11 @@ class Runtime:
         return self.broker_market_data and self.shioaji is not None and self.shioaji.up
 
     @property
+    def quotes_missing(self) -> bool:
+        """Whether this site prices its orders on realtime quotes and has none now, so a run that orders could only be refused."""
+        return self.config.audience.realtime_quotes and not self.realtime_quotes
+
+    @property
     def login_down(self) -> bool:
         """Whether the site's Shioaji login failed or went down, which the Web API's timer opens a runtime to make again."""
         return self.shioaji is not None and not self.shioaji.up
@@ -317,6 +326,11 @@ class ProcessState:
     """
     settings_confirmations: ISettingsConfirmations = field(default_factory=MemorySettingsConfirmations)
     """The fresh Google authentications granted for a settings save, which a reload of the settings must not forget."""
+    ranking_history: KeptRankingHistory = field(default_factory=KeptRankingHistory)
+    """
+    The monthly ranking's history and the replays made of it, which every runtime's matrix provider shares: a settings
+    save, such as a switch of the ranking's formula, opens a new runtime without reading every bar again.
+    """
 
 
 @dataclass(slots=True)
@@ -355,8 +369,9 @@ class ProviderDependencies:
     bar_matrix_provider: IDailyBarMatrixProvider
     """
     price_provider's held history of every listed stock as one matrix, which the backtests of every user read, and the
-    monthly ranking's history. It lives with the runtime: each is built at its first read, again when the source holds
-    other bars, and anew on new settings.
+    monthly ranking's history. The matrix lives with the runtime: it is built at its first read, again when the source
+    holds other bars, and anew on new settings. The ranking's history and its replays are the process's
+    (ProcessState.ranking_history), built again only when the source holds other bars or revenue.
     """
     stock_brief_repository: IStockBriefRepository
     """The site's AI briefs of stocks, one per stock and Taipei calendar day, shared by every user."""
@@ -798,7 +813,14 @@ async def build_provider_dependencies(
         price_provider=price_provider,
         history_cache=history_cache,
         bar_matrix_provider=DailyBarMatrixProvider(
-            stock_provider, price_provider, archive, market_clock, config.ranking.history_rule(), logger
+            stock_provider,
+            price_provider,
+            archive,
+            market_clock,
+            config.ranking.history_rule(),
+            logger,
+            process.ranking_history,
+            config.ranking.kept_backtests,
         ),
         stock_brief_repository=SqlStockBriefRepository(db, StockBriefDTO),
         company_card_repository=SqlStockBriefRepository(db, CompanyCardDTO),
@@ -1109,6 +1131,9 @@ def build_pipeline(
         ranking_follow_candidates=RankingFollowCandidates(owned.mock_broker, market_clock, config),
         ranking_follow_signals=RankingFollowSignals(journal, market_clock, config, logger),
         ranking_follow_return=RankingFollowReturn(journal, owned.mock_broker, market_clock, config),
+        ranking_follow_schedule=RankingFollowSchedule(journal, owned.mock_broker, market_clock, config),
+        follow_time_choice=FollowTimeChoice(dependencies.user_store, market_clock, config, logger),
+        scheduled_followers=ScheduledFollowers(dependencies.user_store, market_clock, config),
         mock_account_history=AccountHistory(owned.mock_broker, journal, stocks, prices, market_clock, config, logger),
         trade_history=TradeHistory(broker, journal),
         mock_account_reset=MockAccountReset(owned.mock_broker, market_clock),
@@ -1130,7 +1155,8 @@ def build_pipeline(
         ranking_history_loader=RankingHistoryLoader(dependencies.bar_matrix_provider, logger),
         latest_ranking=LatestRanking(stocks, config),
         ranking_standing=StockRankingStanding(config),
-        ranking_replay=RankingReplay(stocks, config, logger),
+        ranking_replay=RankingReplay(dependencies.bar_matrix_provider, stocks, config, logger),
+        ranking_evidence=RankingEvidence(dependencies.bar_matrix_provider, stocks, config, logger),
         fundamentals_feed=FundamentalsFeed(dependencies.fundamentals_provider, stocks, market_clock, logger),
         market_valuation_loader=MarketValuationLoader(stocks, market_clock, config),
         valuation_appraiser=ValuationAppraiser(config),

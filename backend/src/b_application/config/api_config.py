@@ -32,6 +32,9 @@ class ApiConfig(BaseSettings):
     settings_poll_seconds: Annotated[float, Field(gt=0, le=3600, json_schema_extra={"operator_only": True})] = 2
     """How often the Web API looks at the settings files on disk, to reload an edit made outside the app."""
 
+    follow_schedule_poll_seconds: Annotated[float, Field(gt=0, le=3600, json_schema_extra={"operator_only": True})] = 60
+    """How often the Web API looks whether a user's scheduled ranking follow is due."""
+
     valuation_cache_minutes: Annotated[
         float,
         Field(

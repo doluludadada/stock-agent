@@ -148,7 +148,7 @@ class CompanyCardConfig(BaseModel):
 class SystemWritingConfig(BaseModel):
     """
     The site's own writing: once a session's daily data is held, the Web API's timer makes sure each stock of the
-    monthly ranking's top (ranking.top) has its profile, its main business, its annual report's sections, its company
+    monthly ranking's top (the active formula's `top`) has its profile, its main business, its annual report's sections, its company
     card and the day's brief, on the AI model ai.system_model. Its calls are counted apart from every user's allowance,
     and its briefs and cards take none of the stocks viewers' requests may claim a day.
     """

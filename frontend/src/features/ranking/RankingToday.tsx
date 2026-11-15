@@ -9,7 +9,7 @@ import { Panel, PanelLink } from '@/shared/ui/panel'
 import { RequireSignIn } from '@/shared/ui/require-sign-in'
 import { StateBlock } from '@/shared/ui/state-block'
 import { useLatestRanking } from './api'
-import { BackfillCommand } from './LatestRanking'
+import { BackfillCommand, HoldsCash } from './LatestRanking'
 import { RankedStocksTable } from './RankedStocksTable'
 import { NoHistory, Waiting } from './RankingRecord'
 
@@ -43,10 +43,12 @@ export function RankingToday({ className }: { className?: string }) {
           ) : (
             <ErrorState error={latest.error} title={t('latest.loadFailed')} onRetry={() => void latest.refetch()} />
           )
+        ) : latest.data.holds_cash ? (
+          <HoldsCash ranking={latest.data} />
         ) : latest.data.stocks.length === 0 ? (
           <StateBlock icon={ListX} title={t('latest.none.title')} description={t('latest.none.description', { month: format.yearMonth(year, month) })} action={<BackfillCommand />} />
         ) : (
-          <RankedStocksTable label={t('latest.title')} rows={latest.data.stocks.slice(0, SHOWN.wide).map((stock, index) => ({ stock, className: index < SHOWN.narrow ? undefined : 'max-xl:hidden' }))} />
+          <RankedStocksTable label={t('latest.title')} formula={latest.data.formula} rows={latest.data.stocks.slice(0, SHOWN.wide).map((stock, index) => ({ stock, className: index < SHOWN.narrow ? undefined : 'max-xl:hidden' }))} />
         )}
       </RequireSignIn>
     </Panel>

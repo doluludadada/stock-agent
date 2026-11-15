@@ -180,6 +180,9 @@ PRESENTATION_SETTINGS = {
             "accounts.max_backtests_per_user",
         }
     ),
+    # The Web API's timer of the scheduled ranking follows looks at the current settings' interval, and starts each
+    # follow under the cap of background runs of the runtime it starts on, as a request's run starts.
+    "d_presentation/web/scheduled_follows.py": frozenset({"api.follow_schedule_poll_seconds", "accounts.max_concurrent_runs"}),
     # The app serves the API docs only where the environment it started in allows them.
     "d_presentation/web/app.py": frozenset({"environment.api_docs"}),
     # The open data's attribution, which the license requires next to whatever a page shows from it, and the audience,
@@ -263,9 +266,12 @@ INFRASTRUCTURE_RULES = {
     "c_infrastructure/database/repositories/daily_close_archive.py": frozenset({"HistoryAdjustmentRule", "ListedHistoryRule"}),
     # The same promise as the archive's, over the cached sessions: the adjusted history and the listed history.
     "c_infrastructure/market/cached_price_provider.py": frozenset({"HistoryAdjustmentRule", "ex_right_matrix"}),
-    # The port promises the bars as one matrix and the ranking's history, each built once from what the stores hold
-    # and kept until the stores change. The rules build them, and this adapter is where they are kept.
-    "c_infrastructure/market/daily_bar_matrix_provider.py": frozenset({"DailyBarMatrixRule", "RankingHistoryRule"}),
+    # The port promises the bars as one matrix, the ranking's history and a formula's replay of that history, each
+    # built once from what the stores hold and kept until the stores change. The rules build them, and this adapter is
+    # where they are kept.
+    "c_infrastructure/market/daily_bar_matrix_provider.py": frozenset(
+        {"DailyBarMatrixRule", "RankingHistoryRule", "RankingBacktestRule"}
+    ),
     # The port promises a quarter's EPS page, fetched again only while it may still change. Whether a held page is
     # final is the rule's answer, asked here, where the page is held.
     "c_infrastructure/market/mops_fundamentals_provider.py": frozenset({"FilingDeadlineRule", "FinalFilingsRule"}),

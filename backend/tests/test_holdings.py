@@ -225,7 +225,8 @@ async def test_the_holdings_rank_the_market_three_times_however_many_stocks_are_
         "3008": "price_under_floor",
         "2454": "no_revenue_history",
     }
-    assert [(rule.min_traded_value > 0, rule.min_close > 0) for rule in ranked] == [(True, True), (False, True), (False, False)]
+    floors = [(rule.formula.min_traded_value > 0, rule.formula.min_close > 0) for rule in ranked]
+    assert floors == [(True, True), (False, True), (False, False)]
 
 
 async def test_a_stock_the_site_holds_no_close_of_counts_at_its_cost_and_says_it_has_no_price() -> None:

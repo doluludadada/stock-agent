@@ -184,10 +184,10 @@ def standing_facts(standing: RankingStanding | None) -> list[tuple[BriefSourceKi
     if standing is None or standing.place is None:
         return []
 
-    text = (
-        f"place {standing.place} of {standing.scored} stocks scored by revenue acceleration and nearness to the high, "
-        f"{'inside' if standing.in_top else 'outside'} the top {standing.top}"
-    )
+    factors = " and ".join(factor.kind.label.lower() for factor in standing.formula.factors)
+    held = f"{'inside' if standing.in_top else 'outside'} the top {standing.formula.top}"
+    text = f"place {standing.place} of {standing.scored} stocks scored by {factors}, "
+    text += "while the ranking holds cash" if standing.holds_cash else held
     return [(BriefSourceKind.RANKING, standing.decided_on, text, None, None)]
 
 

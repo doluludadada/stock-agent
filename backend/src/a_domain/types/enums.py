@@ -290,6 +290,15 @@ class FollowRefusal(StrEnum):
     answers each as its code.
     """
 
+    @property
+    def lifts_later(self) -> bool:
+        """Whether the same follow may start once the market's phase changes. Nothing to follow stays so."""
+        match self:
+            case FollowRefusal.NOTHING_TO_FOLLOW:
+                return False
+            case FollowRefusal.OUTSIDE_FOLLOW_WINDOW:
+                return True
+
     NOTHING_TO_FOLLOW = auto()
     """
     The run has no decision left to follow: it is not a finished Full Cycle, it decided no BUY and no SELL of a stock
@@ -671,16 +680,53 @@ class RankingExclusion(StrEnum):
     """It did not trade at the decision session."""
 
     PRICE_UNDER_FLOOR = auto()
-    """It closed under ranking.min_close."""
+    """It closed under the formula's min_close."""
 
     ILLIQUID = auto()
-    """Its average traded value over ranking.traded_value_sessions is under ranking.min_traded_value."""
+    """Its average traded value over the formula's traded_value_sessions is under its min_traded_value."""
 
     NO_REVENUE_HISTORY = auto()
-    """The revenue of one of the ranking.revenue_long_months months the acceleration reads is not held."""
+    """The revenue of one of the months a revenue factor of the formula reads is not held."""
 
     SHORT_PRICE_HISTORY = auto()
-    """The held history is shorter than the ranking.high_sessions sessions the nearness to the high reads."""
+    """The held history is shorter than the sessions a price factor of the formula reads."""
+
+
+class RankingFactorKind(StrEnum):
+    """What a factor of a ranking formula measures of a stock. A formula ranks each of its factors and sums the ranks."""
+
+    REVENUE_ACCELERATION = auto()
+    """The mean revenue of the latest short_months over the mean of the latest long_months, up to the month read."""
+
+    REVENUE_YOY = auto()
+    """The revenue of the latest `months` months over that of the same months a year before, less 1."""
+
+    NEARNESS_TO_HIGH = auto()
+    """The total-return level at the decision's close over its highest of the last high_sessions sessions: 1 at a high."""
+
+    PRICE_MOMENTUM = auto()
+    """The total-return level `skip_sessions` sessions ago over the level `sessions` sessions ago, less 1."""
+
+    @property
+    def label(self) -> str:
+        match self:
+            case RankingFactorKind.REVENUE_ACCELERATION:
+                return "Revenue acceleration"
+            case RankingFactorKind.REVENUE_YOY:
+                return "Revenue YoY"
+            case RankingFactorKind.NEARNESS_TO_HIGH:
+                return "Near high"
+            case RankingFactorKind.PRICE_MOMENTUM:
+                return "Momentum"
+
+    @property
+    def missing_history(self) -> RankingExclusion:
+        """Why a stock of the universe has no value of a factor of this kind: the history it reads is not held."""
+        match self:
+            case RankingFactorKind.REVENUE_ACCELERATION | RankingFactorKind.REVENUE_YOY:
+                return RankingExclusion.NO_REVENUE_HISTORY
+            case RankingFactorKind.NEARNESS_TO_HIGH | RankingFactorKind.PRICE_MOMENTUM:
+                return RankingExclusion.SHORT_PRICE_HISTORY
 
 
 class SentimentLabel(StrEnum):
@@ -1625,6 +1671,9 @@ class ErrorCode(StrEnum):
 
     TECHNICAL_SETTINGS_CONFLICT = auto()
     AI_MODEL_NOT_OFFERED = auto()
+
+    FOLLOW_TIME_NOT_OFFERED = auto()
+    """The site does not offer that time for the scheduled ranking follow: `detail` names the ones it offers. Nothing saved."""
     RUN_IN_PROGRESS = auto()
     TOO_MANY_RUNS = auto()
     NOTHING_TO_FOLLOW = auto()

@@ -20,6 +20,7 @@ from a_domain.types.errors import (
     BacktestPeriodUnavailable,
     BriefLimitReached,
     BrokerUnavailable,
+    FollowTimeNotOffered,
     GoogleConfirmationRequired,
     LastAdministratorError,
     ListingUnavailableError,
@@ -45,6 +46,7 @@ from d_presentation.dependencies import Runtime
 from d_presentation.live_runtime import RuntimeSwitch, collect_daily_data, collect_world, watch_settings
 from d_presentation.web.backtest_replays import BacktestReplays, TooManyBacktests
 from d_presentation.web.routers.api_v1 import router as api_v1_router
+from d_presentation.web.scheduled_follows import follow_rankings_on_schedule
 from d_presentation.web.session import (
     API_PATH,
     FLOW_PATH,
@@ -100,13 +102,19 @@ holds, with the live trading rules on the technical score alone, and saves the r
 /v1/backtests`, `GET /v1/backtests/{backtest_id}`). `GET /v1/backtests/options` names the period it may cover. A
 backtest asks no AI, touches no account, watchlist or run record, and never orders.
 
-Rankings. `GET /v1/rankings/latest` answers the monthly stock ranking by revenue acceleration and nearness to the high at
-the latest decision session the site's daily history holds, and `GET /v1/rankings/backtest?first=&last=` replays it over
-a period against the ranking.benchmark_id held over the same sessions. Both read only the held history and the archived
-monthly revenue, which `just backfill-history` brings back; they ask no AI, touch no account and never order. `GET
-/v1/rankings/follow` answers the user's mock account against that ranking, and its return since it first followed it
-against the benchmark; `POST /v1/rankings/follow` brings the mock account to the ranking, as a run that orders on the
-mock account only.
+Rankings. The settings hold the formulas the ranking can be made by (`ranking.formulas`) and which one is active
+(`ranking.active_formula`); a save that switches it applies at once, to the ranking, every stock's score, the backtest
+and a follow alike. `GET /v1/rankings/latest` answers the monthly stock ranking by the active formula at the latest
+decision session the site's daily history holds, and `GET /v1/rankings/backtest?first=&last=` replays it over a period
+against the ranking.benchmark_id held over the same sessions. `GET /v1/rankings/formulas?first=&last=` replays every
+formula over the same period and costs, and again at a liquidity floor, as the evidence beside the choice. All read only
+the held history and the archived monthly revenue, which `just backfill-history` brings back; they ask no AI, touch no
+account and never order. `GET /v1/rankings/follow` answers the user's mock account against that ranking, its return
+since it first followed it against the benchmark, and its follows with the formula each used; `POST
+/v1/rankings/follow` brings the mock account to the ranking, as a run that orders on the mock account only and keeps
+the formula it used. `PUT /v1/rankings/follow/schedule` lets the user schedule that follow: from the time they choose,
+on the first session after each new decision, the server starts the same run by itself, once per decision, on the
+user's mock account only, and its record says the schedule started it. No other run starts without a request.
 
 The server replays `accounts.max_concurrent_backtests` strategy backtests and ranking backtests at once, and one more
 waits its turn. A user's request past `accounts.max_backtests_per_user` replaying or waiting answers 429
@@ -182,6 +190,7 @@ ERROR_ANSWERS: dict[type[Exception], tuple[int, ErrorCode]] = {
     OutsideFollowWindow: (status.HTTP_409_CONFLICT, ErrorCode.OUTSIDE_FOLLOW_WINDOW),
     SettingsEditError: (status.HTTP_422_UNPROCESSABLE_CONTENT, ErrorCode.SETTINGS_EDIT_REFUSED),
     AiModelNotOffered: (status.HTTP_422_UNPROCESSABLE_CONTENT, ErrorCode.AI_MODEL_NOT_OFFERED),
+    FollowTimeNotOffered: (status.HTTP_422_UNPROCESSABLE_CONTENT, ErrorCode.FOLLOW_TIME_NOT_OFFERED),
     InvalidSettingsError: (status.HTTP_422_UNPROCESSABLE_CONTENT, ErrorCode.SETTINGS_REFUSED),
     BacktestPeriodUnavailable: (status.HTTP_422_UNPROCESSABLE_CONTENT, ErrorCode.BACKTEST_PERIOD_UNAVAILABLE),
     RankingUnavailable: (status.HTTP_422_UNPROCESSABLE_CONTENT, ErrorCode.RANKING_UNAVAILABLE),
@@ -296,6 +305,17 @@ def error_handlers() -> dict[int | type[Exception], ErrorAnswer]:
     return handlers | {StarletteHTTPException: answer_http_error, RequestValidationError: answer_invalid_request}
 
 
+def start_timers(switch: RuntimeSwitch, workflow_runs: WorkflowRuns) -> list[asyncio.Task[None]]:
+    """The lifespan's timers, each started: the settings watch, the daily data, the world, and the scheduled ranking follows."""
+    timers = (
+        watch_settings(switch),
+        collect_daily_data(switch),
+        collect_world(switch),
+        follow_rankings_on_schedule(switch, workflow_runs),
+    )
+    return [asyncio.create_task(timer) for timer in timers]
+
+
 async def stop_timers(timers: Sequence[asyncio.Task[None]]) -> None:
     """Cancels the lifespan's timers and waits until each has ended."""
     for timer in timers:
@@ -307,19 +327,18 @@ async def stop_timers(timers: Sequence[asyncio.Task[None]]) -> None:
 def create_app(open_switch: Callable[[], AbstractAsyncContextManager[RuntimeSwitch]]) -> FastAPI:
     """
     The FastAPI app. Its lifespan opens the process's runtimes through the startup checks the CLI runs, sets what the
-    requests read from app.state, watches the settings files and collects the daily data on a timer: the open-data
-    archive, the exchanges' daily history on a personal site, and the news of the stocks that matter into the article
-    store. A second timer reads the world news feeds and indicators and writes the day's world brief (collect_world).
-    At shutdown it stops the watch and the timers and waits
-    until they have ended, so a collection never outlives the runtime it holds, cancels every running workflow while its
-    runtime is open, so its record ends as aborted, then closes every runtime.
+    requests read from app.state, watches the settings files and runs three timers: the daily data (collect_daily_data),
+    the world news, indicators and the day's world brief (collect_world), and the scheduled ranking follows that are due
+    (follow_rankings_on_schedule). At shutdown it stops the watch and the timers and waits until each has ended, so a
+    collection never outlives the runtime it holds, cancels every running workflow while its runtime is open, so its
+    record ends as aborted, then closes every runtime.
     """
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         async with open_switch() as switch:
             workflow_runs = await open_app_state(app, switch)
-            timers = [asyncio.create_task(timer(switch)) for timer in (watch_settings, collect_daily_data, collect_world)]
+            timers = start_timers(switch, workflow_runs)
 
             try:
                 yield

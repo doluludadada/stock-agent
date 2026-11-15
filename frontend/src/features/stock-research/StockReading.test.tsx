@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router'
 import { initI18n } from '@/i18n'
 import { session, type Visibilities } from '@/shared/api'
 import { siteShowing } from '@/test/features'
+import { CASH_FORMULA, SHIPPED_FORMULA } from '@/test/ranking'
 import { TEST_USER } from '@/test/users'
 import { AnalysisPanel } from './AnalysisPanel'
 import type { StockAnalysis, StockNews, StockRanking } from './api'
@@ -97,12 +98,21 @@ const scored: StockRanking = {
   revenue_month: '2026-10-01',
   universe: 1010,
   scored: 987,
-  top: 20,
+  formula: SHIPPED_FORMULA,
+  holds_cash: false,
   place: 12,
   score: 98.88,
   in_top: true,
   exclusion: null,
-  stock: { stock_id: '2330', stock_name: null, revenue_acceleration: 1.253, nearness_to_high: 0.982, acceleration_rank: 0.92, nearness_rank: 0.78, score: 1.7 },
+  stock: {
+    stock_id: '2330',
+    stock_name: null,
+    factors: [
+      { value: 1.253, rank: 0.92 },
+      { value: 0.982, rank: 0.78 },
+    ],
+    score: 1.7,
+  },
 }
 
 /** Answers the summary's requests: whom the site shows what, the analysis, and the ranking standing or its refusal. */
@@ -149,9 +159,20 @@ describe('the summary at the top of the page', () => {
     expect(score.getByText('Place 12 of the 987 stocks scored')).toBeTruthy()
     expect(score.getByText('In the top 20')).toBeTruthy()
     expect(score.getByText('Decided 11/13/2026 on revenue of October 2026')).toBeTruthy()
-    expect(score.getByText('PR 92').textContent).toBe('PR 92×1.25')
-    expect(score.getByText('PR 78').textContent).toBe('PR 7898.2%')
+    expect(score.getByText('Revenue, 3 mo ÷ 12 mo')).toBeVisible()
+    expect(score.getByText('PR 92').textContent).toBe('PR 921.25×')
+    expect(score.getByText('Vs 250-session high')).toBeVisible()
+    expect(score.getByText('PR 78').textContent).toMatch(/^PR 78[-−]1\.8%$/)
     expect(score.getByText(/It is no forecast\./)).toBeTruthy()
+  })
+
+  it('keeps the score and says the formula holds cash now, with no stock in the top', async () => {
+    renderSummary({ ...scored, formula: CASH_FORMULA, holds_cash: true, in_top: false })
+    const score = within(await screen.findByRole('region', { name: 'Ranking score' }))
+    expect(await score.findByText('99')).toBeTruthy()
+    expect(score.getByText('Formula holds cash')).toBeVisible()
+    expect(score.getByText('The formula holds cash now, so the ranking holds no stock. The score is measured all the same.')).toBeVisible()
+    expect(score.queryByText(/the top 20/)).toBeNull()
   })
 
   it('shows the revenue alone, and never asks for the score, where the site does not show the viewer the ranking', async () => {

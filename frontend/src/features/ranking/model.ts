@@ -5,6 +5,7 @@ export type Ranking = Schemas['Ranking']
 export type RankedStock = Schemas['RankedStock']
 export type RankingBacktest = Schemas['RankingBacktest']
 export type RankingFollow = Schemas['RankingFollowResponse']
+export type FormulaEvidence = Schemas['FormulaEvidence']
 
 export type { Period }
 
@@ -55,13 +56,6 @@ export function parsePeriod(draft: Period, today: string): ParsedPeriod {
   return Object.keys(problems).length === 0 ? { ok: true, period: { first: draft.first, last: draft.last } } : { ok: false, problems }
 }
 
-/** How far a stock closed from its highest total-return level of the last year of sessions. */
-export type Nearness = { atHigh: true } | { atHigh: false; below: number }
-
-export function nearnessOf(stock: Pick<RankedStock, 'nearness_to_high'>): Nearness {
-  return stock.nearness_to_high >= 1 ? { atHigh: true } : { atHigh: false, below: 1 - stock.nearness_to_high }
-}
-
 /**
  * The day of the month the ranking decides on or after, read from the decisions seen: every decision falls on that day
  * or later, so the earliest day among them is it once enough months are seen. Null without a decision.
@@ -85,6 +79,19 @@ export function nextDecision(decidedOn: string, day: number, today: string): Nex
   while (next.getUTCDay() % 6 === 0) next.setUTCDate(next.getUTCDate() + 1)
   const on = iso(next)
   return { on, due: on <= today }
+}
+
+/** A time of day as the server writes it, 09:05:00, without its seconds. */
+export function clockTime(time: string): string {
+  return time.slice(0, 5)
+}
+
+/** The first weekday after `date`: the earliest session a decision of that day can be followed on; a holiday moves the real one later. */
+export function weekdayAfter(date: string): string {
+  const next = utc(date)
+  do next.setUTCDate(next.getUTCDate() + 1)
+  while (next.getUTCDay() % 6 === 0)
+  return iso(next)
 }
 
 /** The period that holds the decision of `decidedOn` and the one of the month before, and nothing older. */
@@ -124,9 +131,14 @@ export function spanOf(backtest: Pick<RankingBacktest, 'equity_curve'>): Period 
   return { first: sessions[0]!, last: sessions.at(-1)! }
 }
 
-/** The decisions that ranked nothing, which the backtest sat through in cash: months before the revenue archive begins. */
+/** The decisions that ranked nothing for lack of data, which the backtest sat through in cash: months before the revenue archive begins. */
 export function idleDecisions(backtest: Pick<RankingBacktest, 'rankings'>): number {
-  return backtest.rankings.filter((ranking) => ranking.stocks.length === 0).length
+  return backtest.rankings.filter((ranking) => ranking.stocks.length === 0 && !ranking.holds_cash).length
+}
+
+/** The decisions at which the formula's market filter held cash. */
+export function cashDecisions(backtest: Pick<RankingBacktest, 'rankings'>): number {
+  return backtest.rankings.filter((ranking) => ranking.holds_cash).length
 }
 
 /** One session of both curves as what 1 put in at the first decision is worth. */

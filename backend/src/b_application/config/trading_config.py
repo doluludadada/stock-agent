@@ -1,19 +1,22 @@
-from datetime import date
+from collections.abc import Mapping
+from datetime import date, time
 from decimal import Decimal
 from functools import cached_property
 from math import ceil
-from typing import Annotated, Self
+from typing import Annotated, Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from a_domain.model.trading.ranking_formula import RankingFormula
 from a_domain.rules.fundamentals.stock_analysis import RevenueTrendRule
 from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
 from a_domain.rules.trading.account_value import AccountValueRule, PositionValueRule
 from a_domain.rules.trading.cost import TradingCostRule
 from a_domain.rules.trading.ranking import MonthlyRankingRule, RankingHistoryRule
 from a_domain.rules.trading.tick import LimitPriceRule, TickSizeRule
-from a_domain.types.enums import SettingUnit, ShioajiCredential, SystemEnvironment
+from a_domain.types.enums import RankingFactorKind, SettingUnit, ShioajiCredential, SystemEnvironment
+from a_domain.types.errors import UnknownRankingFormula
 from a_domain.types.values import FormulaId
 
 
@@ -106,55 +109,130 @@ class TechnicalConfig(BaseModel):
         return max(strategy.required_bars for strategy in self.built_in_strategies)
 
 
+def formula_of_an_older_file(section: Mapping[str, Any]) -> dict[str, Any]:
+    """
+    The shipped formula as a `ranking` section from before the formulas sets it: the moved settings it holds, with its
+    revenue acceleration and its nearness to the high as the two factors. A setting the file lacks is refused by the
+    formula's own validation.
+    """
+    moved = {key: section[key] for key in ("top", "min_close", "min_traded_value", "traded_value_sessions") if key in section}
+    acceleration = {
+        "kind": RankingFactorKind.REVENUE_ACCELERATION,
+        "short_months": section.get("revenue_short_months"),
+        "long_months": section.get("revenue_long_months"),
+    }
+    nearness = {"kind": RankingFactorKind.NEARNESS_TO_HIGH, "high_sessions": section.get("high_sessions")}
+
+    return {"name": section.get("active_formula", "revenue_and_high"), "factors": [acceleration, nearness], **moved}
+
+
 class RankingConfig(BaseModel):
     """
-    The monthly stock ranking by revenue acceleration and nearness to the high, and its backtest. Every value comes from
-    the `ranking` section of config/appsetting.yaml; the fees and the tax are the market's, the revenue deadline MOPS's.
-    `retired` names the settings this section once had and no longer reads (settings_notices).
+    The monthly stock ranking, the formulas it can be made by, and its backtest. Every value comes from the `ranking`
+    section of config/appsetting.yaml; the fees and the tax are the market's, the revenue deadline MOPS's.
+    `retired` names the settings this section once had and no longer reads, and `moved` the ones that are part of a
+    formula now: a file from before the formulas still starts, its values read as the one formula, and the start names
+    them (settings_notices).
     """
 
     model_config = ConfigDict(
-        use_attribute_docstrings=True, json_schema_extra={"retired": ["timestamp_calendars", "timestamp_timeout_seconds"]}
+        use_attribute_docstrings=True,
+        json_schema_extra={
+            "retired": ["timestamp_calendars", "timestamp_timeout_seconds"],
+            "moved": ["top", "min_close", "min_traded_value", "traded_value_sessions", "high_sessions"],
+        },
     )
 
     decision_day: int = Field(ge=1, le=28)
     """Each month decides at the close of its first session on this day of the month or later."""
 
-    top: int = Field(ge=1, json_schema_extra={"steps": [10, 15, 20, 30, 50]})
-    """How many of the best scores it holds, in equal weights."""
+    formulas: tuple[RankingFormula, ...] = Field(min_length=1)
+    """
+    The formulas the ranking can be made by, in the order the ranking page compares them. Adding one is an entry here,
+    of the factors RankingFactorKind names; a formula the ranking cannot express is refused at the start.
+    """
 
-    min_close: float = Field(ge=0, allow_inf_nan=False, json_schema_extra={"steps": [0, 5, 10, 20, 50], "unit": SettingUnit.TWD})
-    min_traded_value: float = Field(
-        ge=0, allow_inf_nan=False, json_schema_extra={"steps": [0, 10000000, 30000000, 50000000, 100000000], "unit": SettingUnit.TWD}
+    active_formula: FormulaId = Field(json_schema_extra={"names_of": "ranking.formulas"})
+    """
+    The formula the ranking, every stock's score, the backtest shown and a follow use now. `names_of` marks a setting
+    that chooses among the names of the entries the settings file sets at that path.
+    """
+
+    evidence_min_traded_value: float = Field(
+        default=200_000_000,
+        ge=0,
+        allow_inf_nan=False,
+        json_schema_extra={"steps": [100000000, 200000000, 500000000], "unit": SettingUnit.TWD},
     )
-    """NT$ a session on average over the last traded_value_sessions, a session without a trade counting 0."""
+    """The liquidity floor the ranking page's comparison replays every formula at a second time, in place of its own."""
 
-    traded_value_sessions: int = Field(ge=1, json_schema_extra={"steps": [5, 10, 20, 60]})
-    high_sessions: int = Field(ge=1, json_schema_extra={"steps": [60, 120, 250, 500]})
-    """The sessions whose highest total-return level the level at the decision is compared with."""
+    follow_times: tuple[time, ...] = Field(
+        default=(time(9, 5), time(9, 30), time(10, 0), time(13, 0)), min_length=1, json_schema_extra={"operator_only": True}
+    )
+    """
+    The times of day in Taipei a user may schedule the ranking follow into their mock account at, each inside
+    continuous trading. The first is the nearest to the open the backtest buys at.
+    """
+
+    kept_backtests: int = Field(default=24, ge=0, json_schema_extra={"operator_only": True})
+    """How many replays of the ranking the site keeps in memory while the history they read stays the same."""
 
     revenue_short_months: int = Field(ge=1, json_schema_extra={"steps": [1, 2, 3, 6]})
     revenue_long_months: int = Field(ge=1, json_schema_extra={"steps": [6, 12, 24]})
+    """The stock page's and the holdings page's revenue trend: the mean of the latest short months over the long ones."""
+
     daily_limit: float = Field(gt=0, lt=1, json_schema_extra={"steps": [0.1, 0.105, 0.11, 0.15], "unit": SettingUnit.PERCENT})
     """A move beyond it on a bar without a reference price counts as 0 in the total-return level."""
 
     benchmark_id: str = Field(min_length=1, json_schema_extra={"options": ["0050", "006208"]})
+    """The backtest's benchmark, and the one a formula's market filter reads."""
+
     sessions_per_year: float = Field(gt=0, allow_inf_nan=False, json_schema_extra={"steps": [240, 245, 250, 252]})
     """The sessions a year the annual returns count."""
 
-    def ranking_rule(self) -> MonthlyRankingRule:
-        return MonthlyRankingRule(
-            top=self.top,
-            min_close=self.min_close,
-            min_traded_value=self.min_traded_value,
-            traded_value_sessions=self.traded_value_sessions,
-            high_sessions=self.high_sessions,
-            short_months=self.revenue_short_months,
-            long_months=self.revenue_long_months,
-        )
+    @model_validator(mode="before")
+    @classmethod
+    def read_an_older_file_as_one_formula(cls, section: Any) -> Any:
+        """
+        A file from before the formulas sets the shipped formula's parameters as settings of the section. They are
+        read as the one formula, active, so the site ranks as it did until the file names its formulas.
+        """
+        if not isinstance(section, dict) or "formulas" in section:
+            return section
+
+        formula = formula_of_an_older_file(section)
+
+        return {**section, "formulas": [formula], "active_formula": formula["name"]}
+
+    @model_validator(mode="after")
+    def validate_formulas(self) -> Self:
+        names = [formula.name for formula in self.formulas]
+
+        if len(set(names)) != len(names):
+            raise ValueError("two formulas of ranking.formulas have the same name")
+
+        if self.active_formula not in names:
+            raise ValueError(f"active_formula names none of ranking.formulas: {', '.join(names)}")
+
+        return self
+
+    def formula(self, name: FormulaId | None = None) -> RankingFormula:
+        """The formula of that name, the active one when none is named. UnknownRankingFormula for a name the settings lack."""
+        chosen = self.active_formula if name is None else name
+        found = next((formula for formula in self.formulas if formula.name == chosen), None)
+
+        if found is None:
+            raise UnknownRankingFormula(
+                f"The settings name no formula {chosen}. They name: {', '.join(formula.name for formula in self.formulas)}."
+            )
+
+        return found
+
+    def ranking_rule(self, name: FormulaId | None = None) -> MonthlyRankingRule:
+        return MonthlyRankingRule(formula=self.formula(name), benchmark_id=self.benchmark_id)
 
     def revenue_trend_rule(self) -> RevenueTrendRule:
-        """The stock page's and the holdings page's revenue trend, whose acceleration is the ranking's own measure."""
+        """The stock page's and the holdings page's revenue trend, the acceleration the shipped formula ranks by."""
         return RevenueTrendRule(short_months=self.revenue_short_months, long_months=self.revenue_long_months)
 
     def history_rule(self) -> RankingHistoryRule:

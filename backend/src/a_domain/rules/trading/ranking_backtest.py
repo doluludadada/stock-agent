@@ -1,12 +1,14 @@
 from bisect import bisect_right
 from collections.abc import Mapping
 from datetime import date
+from statistics import fmean
 from typing import Annotated, Self
 
 import numpy as np
 from pydantic import ConfigDict, Field, NonNegativeFloat, PositiveFloat, computed_field, model_validator
 from pydantic.dataclasses import dataclass
 
+from a_domain.model.trading.ranking_formula import RankingFormula
 from a_domain.rules.technical.matrix import Flags, Floats
 from a_domain.rules.trading.ranking import DecisionSessionsRule, MonthlyRankingRule, Ranking, RankingHistory
 from a_domain.types.errors import BacktestPeriodUnavailable
@@ -22,6 +24,9 @@ class RankingBacktest:
     the benchmark held over the same sessions. It placed no order and touched no account. Every *_return and drawdown is
     a fraction: 0.1 is 10%.
     """
+
+    formula: RankingFormula
+    """The formula whose rankings it held."""
 
     first: date
     last: date
@@ -47,6 +52,9 @@ class RankingBacktest:
 
     costs: NonNegativeFloat
     """The fees and the tax paid, each as a fraction of the value it was paid from, summed."""
+
+    turnover: NonNegativeFloat | None
+    """The share of the portfolio bought at a rebalance, on average over them. None when it never rebalanced."""
 
     @model_validator(mode="after")
     def the_benchmark_covers_the_same_sessions(self) -> Self:
@@ -97,6 +105,14 @@ class RankingBacktest:
     def benchmark_yearly_returns(self) -> dict[int, float]:
         return yearly(self.benchmark_curve) if self.benchmark_curve else {}
 
+    @computed_field
+    @property
+    def years_ahead(self) -> int | None:
+        """The calendar years of yearly_returns it returned more than the benchmark. None when the history lacks the benchmark."""
+        benchmark = self.benchmark_yearly_returns
+
+        return sum(value > benchmark[year] for year, value in self.yearly_returns.items()) if benchmark else None
+
 
 def curve_return(curve: dict[date, float]) -> float:
     return curve[next(reversed(curve))] / curve[next(iter(curve))] - 1
@@ -122,6 +138,9 @@ class RankingBook:
     rankings: list[Ranking]
     curve: dict[date, float]
     holdings: dict[date, list[str]] = Field(default_factory=dict)
+    bought: list[float] = Field(default_factory=list)
+    """The share of the portfolio each rebalance bought."""
+
     equity: float = 1.0
     costs: float = 0.0
 
@@ -171,9 +190,11 @@ def rebalance(
         free *= (1 - target[stuck].sum()) / free.sum()
 
     target = np.where(stuck, target, free)
-    charge = np.clip(drift - target, 0, None).sum() * (fee_rate + tax_rate) + np.clip(target - drift, 0, None).sum() * fee_rate
+    bought = np.clip(target - drift, 0, None).sum()
+    charge = np.clip(drift - target, 0, None).sum() * (fee_rate + tax_rate) + bought * fee_rate
     book.equity *= 1 - charge
     book.costs += charge
+    book.bought.append(float(bought))
     book.weights = target
     hold(book, intraday)
     held = [row for row in rows if target[row] > 0] + [row for row in np.flatnonzero(stuck).tolist() if row not in rows]
@@ -226,6 +247,7 @@ class RankingPortfolioRule:
         replay(book, history, decisions, range(start + 1, end + 1), self.fee_rate, self.tax_rate)
 
         return RankingBacktest(
+            formula=decisions[start].formula,
             first=first,
             last=last,
             benchmark_id=self.benchmark_id,
@@ -237,6 +259,7 @@ class RankingPortfolioRule:
             rankings=book.rankings,
             holdings=book.holdings,
             costs=book.costs,
+            turnover=fmean(book.bought) if book.bought else None,
         )
 
 

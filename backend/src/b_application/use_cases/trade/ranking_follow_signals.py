@@ -15,8 +15,8 @@ class RankingFollowSignals:
     """
     Use Case: Decide what brings the mock account to the ranking (RankingFollowRule), on the account valued at the
     run's latest prices (AccountValueRule) and against one reading of the clock, and record the decisions as this run's,
-    so each order that follows has its decision saved first. A stock that gets no decision now is logged in the run and
-    stays open. When the decisions cannot be saved, none is returned, so nothing is sent.
+    so each order that follows has its decision saved first. A stock that gets no decision now is logged in the run
+    and stays open. When the decisions cannot be saved, none is returned, so nothing is sent.
     """
 
     def __init__(self, journal: ITradingJournal, market_clock: IMarketClock, config: AppConfig, logger: ILoggingProvider) -> None:

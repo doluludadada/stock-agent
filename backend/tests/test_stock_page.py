@@ -307,19 +307,21 @@ async def test_a_stocks_score_is_its_place_in_the_rankings_own_order_as_a_percen
         "1101": (3, 0.0, False),
     }
     best = answers["2330"]
-    assert (best["decided_on"], best["revenue_month"], best["universe"], best["scored"], best["top"]) == (
+    assert (best["decided_on"], best["revenue_month"], best["universe"], best["scored"], best["formula"]["top"]) == (
         "2026-03-13",
         "2026-02-01",
         3,
         3,
         2,
     )
-    assert (best["stock"]["revenue_acceleration"], best["stock"]["acceleration_rank"], best["exclusion"]) == (
-        pytest.approx(4 / 3),
-        1.0,
+    assert (best["stock"]["factors"][0], best["exclusion"], best["holds_cash"]) == (
+        {"value": pytest.approx(4 / 3), "rank": 1.0},
         None,
+        False,
     )
-    assert best["stock"] == {**ranking.stocks[0].__dict__, "stock_name": None}
+    assert [factor["kind"] for factor in best["formula"]["factors"]] == ["revenue_acceleration", "nearness_to_high"]
+    assert best["stock"]["stock_id"] == ranking.stocks[0].stock_id
+    assert best["stock"]["score"] == ranking.stocks[0].score
 
 
 async def test_a_stock_the_ranking_leaves_out_has_no_score_and_says_why() -> None:

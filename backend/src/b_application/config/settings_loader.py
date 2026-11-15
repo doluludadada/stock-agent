@@ -29,6 +29,7 @@ from a_domain.types.errors import SettingsEditError
 from a_domain.types.values import FormulaId
 from b_application.config.app_config import AppConfig
 from b_application.config.sources_config import CompanyProfileFeed
+from b_application.config.trading_config import RankingConfig
 
 
 def get_project_root() -> Path:
@@ -237,7 +238,7 @@ def unread_settings(node: Mapping[Any, Any], model: type[BaseModel], prefix: str
             yield path, "comes from the environment or .env, never from a settings file"
         elif path in prompts:
             yield path, f"is the prompt {prompts[path]} of instructions.yaml"
-        elif key in retired_keys(model):
+        elif key in (*retired_keys(model), *moved_keys(model)):
             continue
         elif key not in fields or fields[key].exclude:
             yield path, "names no setting"
@@ -250,9 +251,22 @@ def retired_keys(model: type[BaseModel]) -> tuple[str, ...]:
     The settings a section once had and no longer reads, which its class names in `retired` of its json_schema_extra.
     A file that still sets one starts: the key is skipped, and settings_notices names it.
     """
+    return named_keys(model, "retired")
+
+
+def moved_keys(model: type[BaseModel]) -> tuple[str, ...]:
+    """
+    The settings a section once had that are part of an entry of another setting now, which its class names in `moved`
+    of its json_schema_extra. A file that still sets one starts: the section reads it as its class says, and
+    settings_notices names it.
+    """
+    return named_keys(model, "moved")
+
+
+def named_keys(model: type[BaseModel], mark: str) -> tuple[str, ...]:
     extra = model.model_config.get("json_schema_extra")
-    retired = extra.get("retired") if isinstance(extra, dict) else None
-    return tuple(str(key) for key in retired) if isinstance(retired, list) else ()
+    named = extra.get(mark) if isinstance(extra, dict) else None
+    return tuple(str(key) for key in named) if isinstance(named, list) else ()
 
 
 def retired_settings(node: Mapping[Any, Any], model: type[BaseModel], prefix: str) -> Iterator[str]:
@@ -293,7 +307,30 @@ def settings_notices(project_root: Path) -> list[str]:
         missing = ", ".join(path for path in unset if without.get(path) == lack)
         notices.append(f"{file.file_name} does not set {missing}: {lack} until it does. The shipped {file.file_name} has them.")
 
-    return notices + unnamed_profile_fields_notice(document) + unset_prompts_notice(project_root)
+    return notices + moved_formula_notice(document) + unnamed_profile_fields_notice(document) + unset_prompts_notice(project_root)
+
+
+def moved_formula_notice(document: dict[str, Any]) -> list[str]:
+    """
+    One line that names the settings of the ranking's formula config/appsetting.yaml still sets in the `ranking`
+    section itself, as a deployment's copy from before the formulas does, or none: read as the one formula while the
+    file names no formulas, and not read at all once it does.
+    """
+    file = SettingsFile.APPSETTING
+    ranking = document.get("ranking")
+    moved = [f"ranking.{key}" for key in moved_keys(RankingConfig) if isinstance(ranking, dict) and key in ranking]
+
+    if not moved:
+        return []
+
+    if isinstance(ranking, dict) and "formulas" in ranking:
+        return [f"{file.file_name} still sets {', '.join(moved)}: ranking.formulas holds them now. Remove them from the file."]
+
+    return [
+        f"{file.file_name} sets {', '.join(moved)} and no ranking.formulas: they are read as the ranking's one formula, so "
+        f"it cannot be switched. Move them into ranking.formulas and set ranking.active_formula. The shipped "
+        f"{file.file_name} has them."
+    ]
 
 
 def unnamed_profile_fields_notice(document: dict[str, Any]) -> list[str]:
@@ -505,17 +542,21 @@ def section_fields(
             unit=resolved.get("unit"),
             nullable=any(branch.get("type") == "null" for branch in node.get("anyOf", ())),
             restart_only=resolved.get("restart_only", False),
-            **control_offer(schema, resolved, kind, strategy_ids),
+            **control_offer(schema, resolved, kind, strategy_ids, documents),
         )
 
 
 def control_offer(
-    schema: Mapping[str, Any], node: Mapping[str, Any], kind: SettingKind, strategy_ids: Sequence[str]
+    schema: Mapping[str, Any],
+    node: Mapping[str, Any],
+    kind: SettingKind,
+    strategy_ids: Sequence[str],
+    documents: Mapping[SettingsFile, Mapping[str, Any]],
 ) -> dict[str, Any]:
     """What a setting's control offers, as SettingField names it: a choice's options, the steps, or a range's bounds and step."""
     match kind:
         case SettingKind.CHOICE | SettingKind.CHOICES:
-            return {"options": setting_options(schema, node, strategy_ids)}
+            return {"options": setting_options(schema, node, strategy_ids, documents)}
         case SettingKind.STEPS:
             return {"steps": number_steps(node)}
         case SettingKind.RANGE:
@@ -575,7 +616,7 @@ def setting_kind(schema: Mapping[str, Any], node: Mapping[str, Any], value: Json
     if node.get("type") == "array":
         return list_kind(schema_node(schema, node.get("items", {}), None), node, value)
 
-    if "enum" in node or "options" in node or node.get("strategy"):
+    if "enum" in node or "options" in node or node.get("strategy") or "names_of" in node:
         return SettingKind.CHOICE
 
     match node.get("type"), node.get("format"):
@@ -608,10 +649,26 @@ def list_kind(items: Mapping[str, Any], node: Mapping[str, Any], value: JsonValu
     return SettingKind.LINES if written_as_scalars else SettingKind.STRUCTURE
 
 
-def setting_options(schema: Mapping[str, Any], node: Mapping[str, Any], strategy_ids: Sequence[str]) -> tuple[str, ...]:
-    """What a CHOICE or CHOICES offers: the built-in strategies, the options its class offers, or its enum's members."""
+def setting_options(
+    schema: Mapping[str, Any],
+    node: Mapping[str, Any],
+    strategy_ids: Sequence[str],
+    documents: Mapping[SettingsFile, Mapping[str, Any]],
+) -> tuple[str, ...]:
+    """
+    What a CHOICE or CHOICES offers: the built-in strategies, the names of the entries the file sets at the path its
+    class names (`names_of`), the options its class offers, or its enum's members.
+    """
     if node.get("strategy"):
         return tuple(strategy_ids)
+
+    if (path := node.get("names_of")) is not None:
+        entries = setting_value(documents, str(path), {})
+        return (
+            tuple(str(entry["name"]) for entry in entries if isinstance(entry, dict) and "name" in entry)
+            if isinstance(entries, list)
+            else ()
+        )
 
     options = node.get("options") or node.get("enum") or schema_node(schema, node.get("items", {}), None).get("enum", ())
     return tuple(str(option) for option in options)

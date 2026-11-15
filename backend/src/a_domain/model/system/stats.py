@@ -1,8 +1,9 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import ConfigDict, Field
 from pydantic.dataclasses import dataclass
 
+from a_domain.model.trading.ranking_formula import RankingFormula
 from a_domain.types.enums import ExecutionProvider, Workflow
 from a_domain.types.ids import RunId, new_run_id
 from a_domain.types.values import FormulaId
@@ -34,6 +35,22 @@ class SystemStats:
 
     technical_strategy_id: FormulaId | None = None
     """The technical strategy the run applied. None until TechnicalFilter applies one."""
+
+    ranking_formula: RankingFormula | None = None
+    """
+    The formula whose ranking a ranking follow brought the mock account to, as the settings defined it then, so its
+    orders are never credited to a formula chosen later. None for every other workflow, and until the follow takes
+    the decision.
+    """
+
+    ranking_decided_on: date | None = None
+    """
+    The decision session of the ranking a ranking follow took: it decided what to trade for it, or found the account
+    held it already. None while its window refused it, so the decision is still to follow, and for every other workflow.
+    """
+
+    scheduled: bool = False
+    """The site's own schedule started the run, not a user's request."""
 
     ai_model: str | None = None
     """

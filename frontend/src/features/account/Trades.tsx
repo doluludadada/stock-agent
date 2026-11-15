@@ -9,6 +9,7 @@ import { Button } from '@/shared/ui/button'
 import { ChangeValue } from '@/shared/ui/change-value'
 import { DataTable, type Column } from '@/shared/ui/data-table'
 import { ErrorState } from '@/shared/ui/error-state'
+import { FormulaLine } from '@/shared/ui/formula-line'
 import { Panel } from '@/shared/ui/panel'
 import { Skeleton } from '@/shared/ui/skeleton'
 import { StateBlock } from '@/shared/ui/state-block'
@@ -92,6 +93,7 @@ function SourceRun({ trade }: { trade: Trade }) {
           {t('trades.followed')}
         </Badge>
       )}
+      {trade.run.ranking_formula && <FormulaLine formula={trade.run.ranking_formula} className="text-xs text-pretty whitespace-normal text-muted-foreground" />}
     </span>
   )
 }

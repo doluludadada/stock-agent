@@ -171,6 +171,22 @@ class TradingJournal(ITradingJournal):
         return [(order, followed.get(run.followed_run_id, run) if run.followed_run_id else run) for order, run in pairs]
 
     @override
+    async def runs_of(self, workflow: Workflow, broker: ExecutionProvider, since: datetime | None) -> list[SystemStats]:
+        statement = (
+            select(WorkflowRunDTO)
+            .where(col(WorkflowRunDTO.workflow) == workflow, col(WorkflowRunDTO.execution_provider) == broker)
+            .order_by(col(WorkflowRunDTO.start_time))
+        )
+
+        if since is not None:
+            statement = statement.where(col(WorkflowRunDTO.start_time) >= since)
+
+        async with self._db.owner_session() as session:
+            rows = (await session.execute(statement)).scalars().all()
+
+        return [SystemStats(**row.model_dump()) for row in rows]
+
+    @override
     async def first_fill(self, workflow: Workflow, broker: ExecutionProvider, since: datetime | None) -> datetime | None:
         statement = (
             select(OrderDTO.created_at)

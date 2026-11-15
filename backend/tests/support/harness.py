@@ -51,7 +51,7 @@ from b_application.config.settings_loader import settings_revision, settings_tex
 from b_application.pipeline import Pipeline
 from b_application.schemas.pipeline_status import PipelineStatus
 from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
-from c_infrastructure.market.daily_bar_matrix_provider import DailyBarMatrixProvider
+from c_infrastructure.market.daily_bar_matrix_provider import DailyBarMatrixProvider, KeptRankingHistory
 from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection
 from c_infrastructure.system.attempt_log import MemoryAttemptLog
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
@@ -488,7 +488,9 @@ def build_harness(
         stock_provider=stocks,
         price_provider=prices,
         history_cache=None,
-        bar_matrix_provider=DailyBarMatrixProvider(stocks, prices, archive, clock, config.ranking.history_rule(), logger),
+        bar_matrix_provider=DailyBarMatrixProvider(
+            stocks, prices, archive, clock, config.ranking.history_rule(), logger, KeptRankingHistory(), config.ranking.kept_backtests
+        ),
         stock_brief_repository=briefs,
         company_card_repository=cards,
         system_writing_log=system_writings,

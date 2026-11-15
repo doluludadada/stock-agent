@@ -13,7 +13,10 @@ export function useSettingsForm() {
   })
 }
 
-/** Writes the changes into the settings files and runs on them at once; the answer is the form after the save. */
+/**
+ * Writes the changes into the settings files and runs on them at once; the answer is the form after the save. A save
+ * can change what any page shows, the ranking's formula for one, so every other answer the tab holds is asked again.
+ */
 export function useSaveSettings() {
   const client = useQueryClient()
   return useMutation({
@@ -22,6 +25,7 @@ export function useSaveSettings() {
     onMutate: sentInSession,
     onSuccess: (fields, _, sent) => {
       if (isSameSession(sent)) client.setQueryData(FORM_KEY, fields)
+      void client.invalidateQueries({ predicate: (query) => query.queryKey[0] !== 'admin' })
     },
   })
 }

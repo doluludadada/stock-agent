@@ -25,6 +25,7 @@ from a_domain.model.market.world_indicator import IndicatorReading
 from a_domain.model.trading.account import AccountOpening, BrokerFill, Settlement
 from a_domain.model.trading.backtest import BacktestInputs, BacktestTrade
 from a_domain.model.trading.order import Order
+from a_domain.model.trading.ranking_formula import RankingFormula
 from a_domain.model.valuation.scan import ScanCriteria
 from a_domain.model.valuation.valuation import PeMedian, ReportSection
 from a_domain.ports.system.settings_files import SettingChange, SettingsProblem
@@ -174,6 +175,9 @@ class RunSummary(Response):
     stale_market_data_count: int
     technical_strategy_id: str | None
     """The technical strategy the run applied, by its id; None for a run that applied none."""
+
+    ranking_formula: RankingFormula | None = None
+    """The formula a ranking follow used, as the settings defined it then; None for every other run."""
 
     errors: list[PublicText]
     execution_log: list[PublicText]
@@ -381,6 +385,8 @@ class RunReference(Response):
     run_id: UUID
     workflow: Workflow
     start_time: datetime
+    ranking_formula: RankingFormula | None = None
+    """The formula a ranking follow used, so its trades are never read as another formula's."""
 
 
 class TradeResponse(BaseModel):
@@ -711,19 +717,24 @@ class StockCompanyResponse(BaseModel):
 class StockRankingResponse(Response):
     """A stock's standing in the monthly ranking (RankingStanding), with whether the ranking holds it."""
 
+    formula: RankingFormula
+    """The active formula, which ranked it: its factors name those of `stock`, in order, and its `top` is the ranking's size."""
+
     decided_on: date
     revenue_month: date
     universe: int
     scored: int
-    top: int
+    holds_cash: bool
+    """The formula's market filter is on: the ranking holds no stock now, and the score is measured all the same."""
+
     place: int | None
     score: float | None
-    """The place as a percentile from 0 to 100, 100 for the best combined rank. It ranks two measured factors and forecasts nothing."""
+    """The place as a percentile from 0 to 100, 100 for the best combined rank. It ranks measured factors and forecasts nothing."""
 
     stock: RankedStock | None
     exclusion: RankingExclusion | None
     in_top: bool
-    """Whether the place is within the ranking's `top`."""
+    """Whether the place is within the formula's `top` while it holds stocks."""
 
 
 class StockTechnicalResponse(BaseModel):

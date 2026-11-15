@@ -13,7 +13,7 @@ from b_application.config.app_config import AppConfig
 class SystemWritingStocks:
     """
     The stocks the site still writes for by itself now: once the daily bars of a new session are held, a round begins
-    for the monthly ranking's top stocks at its latest decision session (ranking.top), and, where
+    for the monthly ranking's top stocks at its latest decision session (the active formula's `top`), and, where
     stock_page.system_writing.users_stocks is on, the stocks users hold or watch after them. A stock of the round is
     done once it has a written brief of the day the round began or a later one, since its profile, its annual report
     and its card come before its brief; it answers the others, in the round's order. So a round that a restart, a

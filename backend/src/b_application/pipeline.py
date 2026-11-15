@@ -25,7 +25,7 @@ from a_domain.rules.fundamentals.stock_analysis import StockAnalysis
 from a_domain.rules.market.breadth import MarketBreadth
 from a_domain.rules.system.registration import SignInOffer
 from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
-from a_domain.rules.trading.follow import FollowReturn, RankingHoldings
+from a_domain.rules.trading.follow import FollowReturn, FollowSchedule, RankingHoldings
 from a_domain.rules.trading.holdings import PortfolioAnalysis
 from a_domain.rules.trading.ranking import Ranking
 from a_domain.rules.trading.ranking_backtest import RankingBacktest
@@ -45,7 +45,7 @@ from a_domain.types.enums import (
     Workflow,
 )
 from a_domain.types.ids import BacktestId, RunId, SessionToken, UserId
-from a_domain.types.values import EmailAddress, NewPassword, PositiveFiniteFloat, Username
+from a_domain.types.values import EmailAddress, FormulaId, NewPassword, PositiveFiniteFloat, Username
 from b_application.schemas.pipeline_status import PipelineStatus
 from b_application.use_cases.admin.editor_access import EditorAccess
 from b_application.use_cases.admin.settings_confirmation import SettingsConfirmation
@@ -96,6 +96,7 @@ from b_application.use_cases.process.technical_filter import TechnicalFilter
 from b_application.use_cases.process.technical_settings_editor import TechnicalSettingsEditor
 from b_application.use_cases.process.world_brief_context import WorldBriefContext
 from b_application.use_cases.ranking.latest_ranking import LatestRanking
+from b_application.use_cases.ranking.ranking_evidence import RankingEvidence
 from b_application.use_cases.ranking.ranking_history_loader import RankingHistoryLoader
 from b_application.use_cases.ranking.ranking_replay import RankingReplay
 from b_application.use_cases.ranking.ranking_standing import StockRankingStanding
@@ -123,6 +124,7 @@ from b_application.use_cases.trade.order_outcome import OrderOutcome
 from b_application.use_cases.trade.order_preparation import OrderPreparation
 from b_application.use_cases.trade.ranking_follow_candidates import RankingFollowCandidates
 from b_application.use_cases.trade.ranking_follow_return import RankingFollowReturn
+from b_application.use_cases.trade.ranking_follow_schedule import RankingFollowSchedule
 from b_application.use_cases.trade.ranking_follow_signals import RankingFollowSignals
 from b_application.use_cases.trade.trade_history import TradeHistory
 from b_application.use_cases.trade.unwatch_stocks import UnwatchStocks
@@ -130,10 +132,12 @@ from b_application.use_cases.trade.watch_stocks import WatchStocks
 from b_application.use_cases.users.ai_model_choice import AiModelChoice
 from b_application.use_cases.users.ai_model_lookup import AiModelLookup
 from b_application.use_cases.users.first_administrator_setup import FirstAdministratorSetup
+from b_application.use_cases.users.follow_time_choice import FollowTimeChoice
 from b_application.use_cases.users.google_account import GoogleAccount
 from b_application.use_cases.users.google_identity_check import GoogleIdentityCheck
 from b_application.use_cases.users.google_sign_in_start import GoogleSignInStart
 from b_application.use_cases.users.password_reset import PasswordReset
+from b_application.use_cases.users.scheduled_followers import ScheduledFollowers
 from b_application.use_cases.users.session_start import SessionStart
 from b_application.use_cases.users.sign_in_attempt import SignInAttempt
 from b_application.use_cases.users.sign_in_options import SignInOptions
@@ -236,6 +240,9 @@ class Pipeline:
     ranking_follow_candidates: RankingFollowCandidates
     ranking_follow_signals: RankingFollowSignals
     ranking_follow_return: RankingFollowReturn
+    ranking_follow_schedule: RankingFollowSchedule
+    follow_time_choice: FollowTimeChoice
+    scheduled_followers: ScheduledFollowers
     mock_account_history: AccountHistory
     trade_history: TradeHistory
     mock_account_reset: MockAccountReset
@@ -258,6 +265,7 @@ class Pipeline:
     latest_ranking: LatestRanking
     ranking_standing: StockRankingStanding
     ranking_replay: RankingReplay
+    ranking_evidence: RankingEvidence
     fundamentals_feed: FundamentalsFeed
     market_valuation_loader: MarketValuationLoader
     valuation_appraiser: ValuationAppraiser
@@ -497,9 +505,10 @@ class Pipeline:
 
         return status
 
-    async def follow_ranking(self, run_id: RunId | None = None) -> PipelineStatus:
+    async def follow_ranking(self, run_id: RunId | None = None, *, scheduled: bool = False) -> PipelineStatus:
         """
-        The user's follow of the monthly ranking's latest decision into their mock account, as its own recorded run: a
+        The user's follow of the monthly ranking's latest decision into their mock account, as its own recorded run,
+        started by the user or, `scheduled`, by the site's schedule of that user, which the run's record says: a
         SELL of each holding the ranking left, then a BUY of each ranked stock the account lacks at an equal weight of
         the account (RankingFollowRule), each priced as this site prices an order now, like a follow of a run; every
         holding is priced too, since the equal weight is a share of the account's value. A ranked
@@ -510,11 +519,11 @@ class Pipeline:
         the run chose, so no ranking follow reaches a real account whatever broker its Pipeline was built for.
         RankingUnavailable while the history holds no decision session.
         """
-        async with self.run_history.execute(Workflow.RANKING_FOLLOW, run_id) as stats:
+        async with self.run_history.execute(Workflow.RANKING_FOLLOW, run_id, scheduled=scheduled) as stats:
             status = PipelineStatus(stats=stats)
             history = await self.ranking_history_loader.execute()
             ranking = await self.latest_ranking.execute(history)
-            holdings, status.follow_refusal = await self.ranking_follow_candidates.execute(ranking)
+            holdings, status.follow_refusal = await self.ranking_follow_candidates.execute(ranking, status.stats)
 
             if status.follow_refusal is not None:
                 return status
@@ -544,16 +553,43 @@ class Pipeline:
 
         return await self.ranking_follow_candidates.execute(ranking)
 
-    async def load_ranking_follow_return(self) -> FollowReturn | None:
+    async def load_ranking_follow_return(self) -> tuple[FollowReturn | None, list[SystemStats]]:
         """
         The ranking page's block on the mock account: what the account made since it first followed the ranking, against
-        the ranking's benchmark over the same sessions; None while it never did. It reads the mock account's own history
-        (mock_account_history). RankingUnavailable while the history holds no session.
+        the ranking's benchmark over the same sessions, None while it never did; and its ranking follows since it
+        opened, each run with the formula it used. It reads the mock account's own history (mock_account_history).
+        RankingUnavailable while the history holds no session.
         """
         history = await self.ranking_history_loader.execute()
         account, _, curve, _ = await self.mock_account_history.execute(None)
 
         return await self.ranking_follow_return.execute(history, account, curve)
+
+    async def load_follow_schedule(self, user: User) -> FollowSchedule:
+        """
+        The ranking block's schedule line and the timer's question for one user: the time the user scheduled the
+        ranking follow at, the ranking's latest decision while no follow of their mock account took it, and whether the
+        schedule follows it now. It ranks nothing and never orders. RankingUnavailable while the history holds no
+        session.
+        """
+        history = await self.ranking_history_loader.execute()
+
+        return await self.ranking_follow_schedule.execute(history, user)
+
+    async def choose_follow_time(self, user: User, follow_time: time | None) -> User:
+        """
+        My settings: saves when the site follows the ranking into the user's mock account by itself, or None for no
+        schedule, and answers the user with it. FollowTimeNotOffered, saving nothing, for a time the site does not offer.
+        """
+        return await self.follow_time_choice.execute(user, follow_time)
+
+    async def load_scheduled_followers(self) -> list[User]:
+        """
+        The Web API's timer: the users whose scheduled ranking follow may run now. Nobody outside the phase this site
+        places an order in. The timer then asks each one's own Pipeline whether a follow is due (load_follow_schedule)
+        and starts it there (follow_ranking), on that user's mock account.
+        """
+        return await self.scheduled_followers.execute()
 
     async def load_trades(self, limit: int, offset: int) -> list[tuple[Order, SystemStats]]:
         """The account page's trades since the mock account opened, newest first, each with the run whose decision it carried out."""
@@ -677,21 +713,21 @@ class Pipeline:
 
         return await self.backtest_replay.execute(strategy, inputs, bars, scores)
 
-    async def load_ranking(self) -> Ranking:
+    async def load_ranking(self, formula_name: FormulaId | None = None) -> Ranking:
         """
-        The monthly stock ranking by revenue acceleration and nearness to the high at the latest decision session the
-        held daily history holds: its stocks with their two factors, two ranks and score, the session and the revenue
-        month it read. It reads only the held history and the archived revenue. RankingUnavailable while the history
-        holds no decision session.
+        The monthly stock ranking at the latest decision session the held daily history holds, by the formula named,
+        the active one when none is: its stocks with each factor, its rank and the score, the session and the revenue
+        month it read, or that the formula holds cash. It reads only the held history and the archived revenue.
+        RankingUnavailable while the history holds no decision session.
         """
         history = await self.ranking_history_loader.execute()
 
-        return await self.latest_ranking.execute(history)
+        return await self.latest_ranking.execute(history, formula_name=formula_name)
 
     async def load_ranking_standing(self, stock_id: str) -> RankingStanding:
         """
         The stock page: where the stock stands in the monthly ranking at the latest decision session the held history
-        holds, its place among the scored stocks, its score from 0 to 100 and its two factors, or why the ranking leaves
+        holds, its place among the scored stocks, its score from 0 to 100 and its formula's factors, or why the ranking leaves
         it out. It reads what load_ranking reads, from the same held history. RankingUnavailable while the history holds
         no decision session.
         """
@@ -701,16 +737,29 @@ class Pipeline:
 
         return standings[stock_id]
 
-    async def run_ranking_backtest(self, first: date, last: date) -> RankingBacktest:
+    async def run_ranking_backtest(self, first: date, last: date, formula_name: FormulaId | None = None) -> RankingBacktest:
         """
         The monthly ranking replayed over the decision sessions from `first` to `last` against its benchmark held over
-        the same sessions, at the live fee and tax: its value at every session, each decision's ranking and holdings. It
-        reads only the held history and the archived revenue and saves nothing. BacktestPeriodUnavailable for a period
-        without a decision session.
+        the same sessions, at the live fee and tax, by the formula named, the active one when none is: its value at
+        every session, each decision's ranking and holdings. It reads only the held history and the archived revenue
+        and saves nothing. BacktestPeriodUnavailable for a period without a decision session.
         """
         history = await self.ranking_history_loader.execute()
 
-        return await self.ranking_replay.execute(history, first, last)
+        return await self.ranking_replay.execute(history, first, last, formula_name)
+
+    async def compare_ranking_formulas(
+        self, first: date, last: date
+    ) -> tuple[FormulaId, list[tuple[RankingBacktest, RankingBacktest]]]:
+        """
+        The ranking page's evidence beside the choice of a formula: the active formula's name, and every formula of the
+        settings replayed over the same period on the same history and costs, and again at the comparison's liquidity
+        floor, one replay at a time.
+        BacktestPeriodUnavailable for a period without a decision session.
+        """
+        history = await self.ranking_history_loader.execute()
+
+        return await self.ranking_evidence.execute(history, first, last)
 
     async def load_backtests(self) -> list[Backtest]:
         """The user's saved backtests, newest first."""

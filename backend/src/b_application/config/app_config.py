@@ -4,6 +4,7 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from a_domain.model.trading.ranking_formula import RankingFormula
 from a_domain.rules.ai.company_card import CompanyCardContextRule
 from a_domain.rules.ai.stock_brief import BriefReplyRule
 from a_domain.rules.ai.world_brief import WorldBriefDueRule
@@ -13,7 +14,7 @@ from a_domain.rules.trading.cost import AffordableQuantityRule
 from a_domain.rules.trading.decision import DecisionRule, RunDecisionsRule
 from a_domain.rules.trading.entry import EntryRule, ManualEntryRule
 from a_domain.rules.trading.exit import ExitRule, StopLossRule
-from a_domain.rules.trading.follow import RankingFollowRule
+from a_domain.rules.trading.follow import FollowScheduleRule, FollowTimeRule, RankingFollowRule
 from a_domain.rules.trading.order_rule import (
     BrokerAccessRule,
     BrokerLoginRule,
@@ -23,7 +24,7 @@ from a_domain.rules.trading.order_rule import (
     OrderRule,
     RealBrokerOrdererRule,
 )
-from a_domain.rules.trading.ranking import DecisionSessionsRule
+from a_domain.rules.trading.ranking import DecisionSessionsRule, MonthlyRankingRule
 from a_domain.rules.trading.ranking_backtest import RankingBacktestRule, RankingPortfolioRule
 from a_domain.rules.trading.reason import AnalysisSummaryRule, EntryReasonRule, ExitReasonRule
 from a_domain.rules.trading.sizing import BuyCostRule, SizingRule
@@ -260,12 +261,20 @@ class AppConfig(BaseSettings):
             sessions_per_year=self.ranking.sessions_per_year,
         )
 
-    def ranking_backtest_rule(self) -> RankingBacktestRule:
-        """The ranking's replay: each decision session's ranking, held as ranking_portfolio_rule holds them."""
+    def ranking_backtest_rule(self, formula: RankingFormula) -> RankingBacktestRule:
+        """A formula's replay: its ranking at each decision session, held as ranking_portfolio_rule holds them."""
         return RankingBacktestRule(
             decision_rule=self.decision_sessions_rule(),
-            ranking_rule=self.ranking.ranking_rule(),
+            ranking_rule=MonthlyRankingRule(formula=formula, benchmark_id=self.ranking.benchmark_id),
             portfolio_rule=self.ranking_portfolio_rule(),
+        )
+
+    def follow_schedule_rule(self) -> FollowScheduleRule:
+        """Where a user's scheduled ranking follow stands: the ranking's decisions, this site's order window, the times offered."""
+        return FollowScheduleRule(
+            decision_rule=self.decision_sessions_rule(),
+            time_rule=FollowTimeRule(pricing=self.audience.order_pricing),
+            times=self.ranking.follow_times,
         )
 
     def ranking_follow_rule(self) -> RankingFollowRule:

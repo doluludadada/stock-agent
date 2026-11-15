@@ -1935,6 +1935,7 @@
           "settings_refused",
           "technical_settings_conflict",
           "ai_model_not_offered",
+          "follow_time_not_offered",
           "run_in_progress",
           "too_many_runs",
           "nothing_to_follow",
@@ -2206,9 +2207,207 @@
         "title": "FollowReturn",
         "type": "object"
       },
+      "FollowSchedule": {
+        "description": "A user's schedule of the ranking follow into their mock account, and where it stands now.",
+        "properties": {
+          "due": {
+            "description": "The schedule follows `pending` now: it is on, its time has come today, and the market is in the phase orders are placed in.",
+            "title": "Due",
+            "type": "boolean"
+          },
+          "pending": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The ranking's latest decision while a session after it has come and no ranking follow of the account took it, by\nthe schedule or by hand. The schedule follows it on the first session it can. None once it is taken.",
+            "title": "Pending"
+          },
+          "time": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The time of day in Taipei from which the site follows by itself. None: the schedule is off.",
+            "title": "Time"
+          },
+          "times": {
+            "description": "The times the site offers.",
+            "items": {
+              "format": "time",
+              "type": "string"
+            },
+            "title": "Times",
+            "type": "array"
+          }
+        },
+        "required": [
+          "time",
+          "times",
+          "pending",
+          "due"
+        ],
+        "title": "FollowSchedule",
+        "type": "object"
+      },
+      "FollowScheduleRequest": {
+        "properties": {
+          "confirm": {
+            "const": true,
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "time": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time"
+          }
+        },
+        "required": [
+          "confirm",
+          "time"
+        ],
+        "title": "FollowScheduleRequest",
+        "type": "object"
+      },
+      "FormulaEvidence": {
+        "description": "One formula of ranking.formulas with what holding it would have done over the period. Every figure is simulated.",
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "formula": {
+            "$ref": "#/components/schemas/RankingFormula"
+          },
+          "liquid_floor": {
+            "title": "Liquid Floor",
+            "type": "number"
+          },
+          "liquid_record": {
+            "$ref": "#/components/schemas/FormulaRecord"
+          },
+          "record": {
+            "$ref": "#/components/schemas/FormulaRecord"
+          }
+        },
+        "required": [
+          "formula",
+          "active",
+          "record",
+          "liquid_floor",
+          "liquid_record"
+        ],
+        "title": "FormulaEvidence",
+        "type": "object"
+      },
       "FormulaId": {
         "pattern": "^[a-z][a-z0-9_]{0,39}$",
         "type": "string"
+      },
+      "FormulaRecord": {
+        "description": "One simulated replay of a formula (RankingBacktest) as the comparison shows it, without its curves and rankings.",
+        "properties": {
+          "annual_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Annual Return"
+          },
+          "benchmark_annual_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Annual Return"
+          },
+          "benchmark_id": {
+            "title": "Benchmark Id",
+            "type": "string"
+          },
+          "benchmark_max_drawdown": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Max Drawdown"
+          },
+          "max_drawdown": {
+            "title": "Max Drawdown",
+            "type": "number"
+          },
+          "turnover": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Turnover"
+          },
+          "yearly_returns": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Yearly Returns",
+            "type": "object"
+          },
+          "years_ahead": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Years Ahead"
+          }
+        },
+        "required": [
+          "benchmark_id",
+          "annual_return",
+          "benchmark_annual_return",
+          "max_drawdown",
+          "benchmark_max_drawdown",
+          "years_ahead",
+          "yearly_returns",
+          "turnover"
+        ],
+        "title": "FormulaRecord",
+        "type": "object"
       },
       "Fraction": {
         "maximum": 1.0,
@@ -3206,6 +3405,28 @@
         "title": "MovingAverageIndicator",
         "type": "object"
       },
+      "NearnessToHigh": {
+        "additionalProperties": false,
+        "properties": {
+          "high_sessions": {
+            "description": "The sessions whose highest total-return level the level at the decision is compared with.",
+            "exclusiveMinimum": 0.0,
+            "title": "High Sessions",
+            "type": "integer"
+          },
+          "kind": {
+            "const": "nearness_to_high",
+            "default": "nearness_to_high",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "high_sessions"
+        ],
+        "title": "NearnessToHigh",
+        "type": "object"
+      },
       "NewPassword": {
         "format": "password",
         "maxLength": 256,
@@ -3724,6 +3945,34 @@
         "exclusiveMinimum": 0.0,
         "type": "number"
       },
+      "PriceMomentum": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "price_momentum",
+            "default": "price_momentum",
+            "title": "Kind",
+            "type": "string"
+          },
+          "sessions": {
+            "exclusiveMinimum": 0.0,
+            "title": "Sessions",
+            "type": "integer"
+          },
+          "skip_sessions": {
+            "description": "The latest sessions left out, so the newest move does not count.",
+            "minimum": 0.0,
+            "title": "Skip Sessions",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sessions",
+          "skip_sessions"
+        ],
+        "title": "PriceMomentum",
+        "type": "object"
+      },
       "ProblemsResponse": {
         "description": "Settings the app would not start with (`settings_refused`): nothing was saved; the problems say where and why.",
         "properties": {
@@ -3962,29 +4211,36 @@
         "title": "QuarterResult",
         "type": "object"
       },
-      "RankedStock": {
-        "description": "One stock of a ranking: its two factors, the rank of each among the universe's stocks that have it, and its score.",
+      "RankedFactor": {
+        "description": "One factor of a ranked stock: its value, and its place among the universe's stocks that have it, 0 lowest to 1.",
         "properties": {
-          "acceleration_rank": {
+          "rank": {
             "$ref": "#/components/schemas/Fraction"
           },
-          "nearness_rank": {
-            "$ref": "#/components/schemas/Fraction",
-            "description": "Each factor's place among the universe's stocks that have it, from 0 for the lowest to 1 for the highest."
-          },
-          "nearness_to_high": {
-            "description": "The total-return level at the decision's close over its highest of the last high_sessions sessions: 1 at a high. A\nstock listed after the first of those sessions has none.",
-            "title": "Nearness To High",
+          "value": {
+            "title": "Value",
             "type": "number"
-          },
-          "revenue_acceleration": {
-            "description": "The mean revenue of the latest short months over the mean of the latest long months, up to the month read.",
-            "title": "Revenue Acceleration",
-            "type": "number"
+          }
+        },
+        "required": [
+          "value",
+          "rank"
+        ],
+        "title": "RankedFactor",
+        "type": "object"
+      },
+      "RankedStock": {
+        "description": "One stock of a ranking: each factor of the ranking's formula, in the formula's order, and its score.",
+        "properties": {
+          "factors": {
+            "items": {
+              "$ref": "#/components/schemas/RankedFactor"
+            },
+            "title": "Factors",
+            "type": "array"
           },
           "score": {
-            "description": "The sum of the two ranks.",
-            "maximum": 2.0,
+            "description": "The sum of the factors' ranks.",
             "minimum": 0.0,
             "title": "Score",
             "type": "number"
@@ -4007,10 +4263,7 @@
         "required": [
           "stock_id",
           "stock_name",
-          "revenue_acceleration",
-          "nearness_to_high",
-          "acceleration_rank",
-          "nearness_rank",
+          "factors",
           "score"
         ],
         "title": "RankedStock",
@@ -4024,6 +4277,16 @@
             "title": "Decided On",
             "type": "string"
           },
+          "formula": {
+            "$ref": "#/components/schemas/RankingFormula",
+            "description": "The formula that made it."
+          },
+          "holds_cash": {
+            "default": false,
+            "description": "The formula's market filter is on: it holds no stock until the next decision, though the factors are measured.",
+            "title": "Holds Cash",
+            "type": "boolean"
+          },
           "revenue_month": {
             "description": "The first day of the month of revenue it read.",
             "format": "date",
@@ -4031,13 +4294,13 @@
             "type": "string"
           },
           "scored": {
-            "description": "The universe's stocks with both factors, each of which has a score.",
+            "description": "The universe's stocks with every factor, each of which has a score.",
             "minimum": 0.0,
             "title": "Scored",
             "type": "integer"
           },
           "stocks": {
-            "description": "The `top` best scores, best first; equal scores in stock id order.",
+            "description": "The `top` best scores, best first; equal scores in stock id order. None while it holds cash.",
             "items": {
               "$ref": "#/components/schemas/RankedStock"
             },
@@ -4052,6 +4315,7 @@
           }
         },
         "required": [
+          "formula",
           "decided_on",
           "revenue_month",
           "universe",
@@ -4155,6 +4419,10 @@
             "title": "First",
             "type": "string"
           },
+          "formula": {
+            "$ref": "#/components/schemas/RankingFormula",
+            "description": "The formula whose rankings it held."
+          },
           "holdings": {
             "additionalProperties": {
               "items": {
@@ -4204,6 +4472,19 @@
             "title": "Total Return",
             "type": "number"
           },
+          "turnover": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The share of the portfolio bought at a rebalance, on average over them. None when it never rebalanced.",
+            "title": "Turnover"
+          },
           "yearly_returns": {
             "additionalProperties": {
               "type": "number"
@@ -4212,9 +4493,23 @@
             "readOnly": true,
             "title": "Yearly Returns",
             "type": "object"
+          },
+          "years_ahead": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The calendar years of yearly_returns it returned more than the benchmark. None when the history lacks the benchmark.",
+            "readOnly": true,
+            "title": "Years Ahead"
           }
         },
         "required": [
+          "formula",
           "first",
           "last",
           "benchmark_id",
@@ -4226,6 +4521,7 @@
           "rankings",
           "holdings",
           "costs",
+          "turnover",
           "total_return",
           "annual_return",
           "max_drawdown",
@@ -4233,7 +4529,8 @@
           "benchmark_total_return",
           "benchmark_annual_return",
           "benchmark_max_drawdown",
-          "benchmark_yearly_returns"
+          "benchmark_yearly_returns",
+          "years_ahead"
         ],
         "title": "RankingBacktest",
         "type": "object"
@@ -4252,9 +4549,41 @@
         "title": "RankingExclusion",
         "type": "string"
       },
+      "RankingFactor": {
+        "discriminator": {
+          "mapping": {
+            "nearness_to_high": "#/components/schemas/NearnessToHigh",
+            "price_momentum": "#/components/schemas/PriceMomentum",
+            "revenue_acceleration": "#/components/schemas/RevenueAcceleration",
+            "revenue_yoy": "#/components/schemas/RevenueYoy"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/RevenueAcceleration"
+          },
+          {
+            "$ref": "#/components/schemas/RevenueYoy"
+          },
+          {
+            "$ref": "#/components/schemas/NearnessToHigh"
+          },
+          {
+            "$ref": "#/components/schemas/PriceMomentum"
+          }
+        ]
+      },
       "RankingFollowResponse": {
         "description": "The user's mock account against the ranking's latest decision, and what following the ranking did so far.",
         "properties": {
+          "follows": {
+            "items": {
+              "$ref": "#/components/schemas/RankingFollowRun"
+            },
+            "title": "Follows",
+            "type": "array"
+          },
           "holdings": {
             "$ref": "#/components/schemas/RankingHoldings"
           },
@@ -4281,15 +4610,118 @@
           "running": {
             "title": "Running",
             "type": "boolean"
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/FollowSchedule"
           }
         },
         "required": [
           "holdings",
           "refusal",
           "running",
-          "performance"
+          "performance",
+          "follows",
+          "schedule"
         ],
         "title": "RankingFollowResponse",
+        "type": "object"
+      },
+      "RankingFollowRun": {
+        "description": "One ranking follow of the mock account (its run record) with the formula it used, as the settings defined it then.",
+        "properties": {
+          "ranking_decided_on": {
+            "format": "date",
+            "title": "Ranking Decided On",
+            "type": "string"
+          },
+          "ranking_formula": {
+            "$ref": "#/components/schemas/RankingFormula"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "scheduled": {
+            "title": "Scheduled",
+            "type": "boolean"
+          },
+          "start_time": {
+            "format": "date-time",
+            "title": "Start Time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "start_time",
+          "ranking_formula",
+          "ranking_decided_on",
+          "scheduled"
+        ],
+        "title": "RankingFollowRun",
+        "type": "object"
+      },
+      "RankingFormula": {
+        "additionalProperties": false,
+        "description": "One way to make the monthly ranking, as the settings name it: the factors whose ranks it sums, the universe it\nranks, how many of the best scores it holds, and when it holds cash instead. It is data alone: the one ranking rule,\nits backtest and a stock's standing all read it, and a run that followed a ranking keeps the formula it used.",
+        "properties": {
+          "cash_under_average_sessions": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The market filter: the formula holds cash for the month when the benchmark's total-return level at the decision's\nclose is under its own average of this many sessions. None holds the ranking whatever the benchmark does.",
+            "title": "Cash Under Average Sessions"
+          },
+          "factors": {
+            "description": "Each is ranked among the universe's stocks that have it, and a stock's score is the sum of its ranks.",
+            "items": {
+              "$ref": "#/components/schemas/RankingFactor"
+            },
+            "title": "Factors",
+            "type": "array"
+          },
+          "min_close": {
+            "minimum": 0.0,
+            "title": "Min Close",
+            "type": "number"
+          },
+          "min_traded_value": {
+            "minimum": 0.0,
+            "title": "Min Traded Value",
+            "type": "number"
+          },
+          "name": {
+            "$ref": "#/components/schemas/FormulaId"
+          },
+          "top": {
+            "description": "How many of the best scores it holds, in equal weights.",
+            "exclusiveMinimum": 0.0,
+            "title": "Top",
+            "type": "integer"
+          },
+          "traded_value_sessions": {
+            "description": "The universe: the stocks (no ETF) that traded at the decision, closed at min_close or more, and traded\nmin_traded_value NT$ a session on average over the last traded_value_sessions sessions.",
+            "exclusiveMinimum": 0.0,
+            "title": "Traded Value Sessions",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "factors",
+          "top",
+          "min_close",
+          "min_traded_value",
+          "traded_value_sessions"
+        ],
+        "title": "RankingFormula",
         "type": "object"
       },
       "RankingHoldings": {
@@ -4488,6 +4920,33 @@
         "title": "ResetRequest",
         "type": "object"
       },
+      "RevenueAcceleration": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "revenue_acceleration",
+            "default": "revenue_acceleration",
+            "title": "Kind",
+            "type": "string"
+          },
+          "long_months": {
+            "exclusiveMinimum": 0.0,
+            "title": "Long Months",
+            "type": "integer"
+          },
+          "short_months": {
+            "exclusiveMinimum": 0.0,
+            "title": "Short Months",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "short_months",
+          "long_months"
+        ],
+        "title": "RevenueAcceleration",
+        "type": "object"
+      },
       "RevenueMonth": {
         "description": "One held month of a company's revenue as the stock page reads it. Revenue is in thousands of TWD; changes are ratios.",
         "properties": {
@@ -4602,6 +5061,27 @@
         "title": "RevenueTrend",
         "type": "object"
       },
+      "RevenueYoy": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "revenue_yoy",
+            "default": "revenue_yoy",
+            "title": "Kind",
+            "type": "string"
+          },
+          "months": {
+            "exclusiveMinimum": 0.0,
+            "title": "Months",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "months"
+        ],
+        "title": "RevenueYoy",
+        "type": "object"
+      },
       "Role": {
         "enum": [
           "administrator",
@@ -4636,6 +5116,16 @@
       "RunReference": {
         "description": "Which run a trade came from, as the account page names it.",
         "properties": {
+          "ranking_formula": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RankingFormula"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "run_id": {
             "format": "uuid",
             "title": "Run Id",
@@ -4781,6 +5271,16 @@
           "passed_technical": {
             "title": "Passed Technical",
             "type": "integer"
+          },
+          "ranking_formula": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RankingFormula"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "signals_generated": {
             "title": "Signals Generated",
@@ -5877,6 +6377,13 @@
               }
             ]
           },
+          "formula": {
+            "$ref": "#/components/schemas/RankingFormula"
+          },
+          "holds_cash": {
+            "title": "Holds Cash",
+            "type": "boolean"
+          },
           "in_top": {
             "title": "In Top",
             "type": "boolean"
@@ -5922,21 +6429,18 @@
               }
             ]
           },
-          "top": {
-            "title": "Top",
-            "type": "integer"
-          },
           "universe": {
             "title": "Universe",
             "type": "integer"
           }
         },
         "required": [
+          "formula",
           "decided_on",
           "revenue_month",
           "universe",
           "scored",
-          "top",
+          "holds_cash",
           "place",
           "score",
           "stock",
@@ -6547,6 +7051,18 @@
             "type": "array",
             "uniqueItems": true
           },
+          "ranking_follow_time": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ranking Follow Time"
+          },
           "role": {
             "$ref": "#/components/schemas/Role"
           },
@@ -7120,7 +7636,7 @@
     }
   },
   "info": {
-    "description": "\nRuns the stock-agent workflows and reads what they recorded, on the same runtime as the CLI.\n\nUsers. Anyone may register (`POST /v1/auth/register`) while registration is open, and signs in with a username or an\nemail (`POST /v1/auth/sign-in`), which sets the HttpOnly session cookie `stock_agent_session`. A site with a Google\nclient also signs in with Google: the browser goes to `GET /v1/auth/google/start`, and Google sends it back to `GET\n/v1/auth/google/callback`, which sets the same cookie and sends the browser to the app. Public: sign-in,\nregistration, the first-time setup, the built-in strategies and market data (`/v1/market`). Signed in: every other\nread and write, each on the user's own runs, decisions, orders, watchlist, mock account and saved technical settings.\nAdministrator: the users (`/v1/admin/users`) and the settings form (`/v1/admin/settings`). 401 means sign in: the\nsession is missing, expired or ended. 403 means signed in but not allowed, and never ends the session. Every write\nsends the header `X-Requested-With: stock-agent`, and every write but sign-in, sign-out, registration and setup\nrepeats `\"confirm\": true` in its body.\n\nOrders. Full Cycle, specific-stock analysis, valuation and market data never order. Buzz, Intraday and a manual BUY\nof a stock a specific-stock run reported (`POST /v1/runs/{run_id}/manual-buy`) send orders through the same gates and\ntrading journal as the CLI, on the broker their `broker` query names for the whole run: the user's mock account by\ndefault, or SinoPac (`shioaji`) for an administrator while the site's Shioaji login is up, on its simulation server\nin dev and test and on the real account in prod, each BUY within trading.max_order_value and the day's within\ntrading.max_daily_buy_value (`GET /v1/account/brokers` names them). A follow (`POST /v1/runs/{run_id}/follow`) places a\nfinished Full Cycle's open decisions in the user's mock account only, priced again: at a fresh realtime quote in\ncontinuous trading, or on a site without realtime quotes at the last session's official close while no session\ntrades. A ranking follow (`POST /v1/rankings/follow`) brings that mock account to the monthly ranking's latest decision,\npriced the same way, on the mock account only. No endpoint cancels or modifies an order.\n\nOpen data. A public site (`audience: public`) uses only the TWSE and TPEX OpenAPI data the server archives: daily\nhistory and the index trend come from that archive, it has no realtime quote, so Buzz and Intraday answer 403\n`realtime_quotes_unavailable`, and it trades on the mock broker only. A personal site reads its daily history and\nindex trend from the exchanges' own daily reports; without a Shioaji login it has no realtime quote either, so it\nanswers Buzz and Intraday the same way. A public site reads no news site and no MOPS: the AI step\nreads the archived material information, the TWSE news naming the stock and its archived financials, a stock with none\nof them is decided on its technical score alone, and every valuation endpoint answers 403 `mops_unavailable`. `GET\n/v1/market/audience` answers the site's audience and what it allows, so the web app offers only that.\n\nBacktests. `POST /v1/backtests` replays the user's active technical strategy over past sessions the site already\nholds, with the live trading rules on the technical score alone, and saves the result for the user (`GET\n/v1/backtests`, `GET /v1/backtests/{backtest_id}`). `GET /v1/backtests/options` names the period it may cover. A\nbacktest asks no AI, touches no account, watchlist or run record, and never orders.\n\nRankings. `GET /v1/rankings/latest` answers the monthly stock ranking by revenue acceleration and nearness to the high at\nthe latest decision session the site's daily history holds, and `GET /v1/rankings/backtest?first=&last=` replays it over\na period against the ranking.benchmark_id held over the same sessions. Both read only the held history and the archived\nmonthly revenue, which `just backfill-history` brings back; they ask no AI, touch no account and never order. `GET\n/v1/rankings/follow` answers the user's mock account against that ranking, and its return since it first followed it\nagainst the benchmark; `POST /v1/rankings/follow` brings the mock account to the ranking, as a run that orders on the\nmock account only.\n\nThe server replays `accounts.max_concurrent_backtests` strategy backtests and ranking backtests at once, and one more\nwaits its turn. A user's request past `accounts.max_backtests_per_user` replaying or waiting answers 429\n`too_many_backtests`.\n\nWorkflows run in the background, one at a time per user and a few at a time per server: a start answers 202 with the\nrun id, and GET /v1/runs/{run_id} reports the run's state and its record; another user's run id answers 404. Run the\nserver with one worker process.\n",
+    "description": "\nRuns the stock-agent workflows and reads what they recorded, on the same runtime as the CLI.\n\nUsers. Anyone may register (`POST /v1/auth/register`) while registration is open, and signs in with a username or an\nemail (`POST /v1/auth/sign-in`), which sets the HttpOnly session cookie `stock_agent_session`. A site with a Google\nclient also signs in with Google: the browser goes to `GET /v1/auth/google/start`, and Google sends it back to `GET\n/v1/auth/google/callback`, which sets the same cookie and sends the browser to the app. Public: sign-in,\nregistration, the first-time setup, the built-in strategies and market data (`/v1/market`). Signed in: every other\nread and write, each on the user's own runs, decisions, orders, watchlist, mock account and saved technical settings.\nAdministrator: the users (`/v1/admin/users`) and the settings form (`/v1/admin/settings`). 401 means sign in: the\nsession is missing, expired or ended. 403 means signed in but not allowed, and never ends the session. Every write\nsends the header `X-Requested-With: stock-agent`, and every write but sign-in, sign-out, registration and setup\nrepeats `\"confirm\": true` in its body.\n\nOrders. Full Cycle, specific-stock analysis, valuation and market data never order. Buzz, Intraday and a manual BUY\nof a stock a specific-stock run reported (`POST /v1/runs/{run_id}/manual-buy`) send orders through the same gates and\ntrading journal as the CLI, on the broker their `broker` query names for the whole run: the user's mock account by\ndefault, or SinoPac (`shioaji`) for an administrator while the site's Shioaji login is up, on its simulation server\nin dev and test and on the real account in prod, each BUY within trading.max_order_value and the day's within\ntrading.max_daily_buy_value (`GET /v1/account/brokers` names them). A follow (`POST /v1/runs/{run_id}/follow`) places a\nfinished Full Cycle's open decisions in the user's mock account only, priced again: at a fresh realtime quote in\ncontinuous trading, or on a site without realtime quotes at the last session's official close while no session\ntrades. A ranking follow (`POST /v1/rankings/follow`) brings that mock account to the monthly ranking's latest decision,\npriced the same way, on the mock account only. No endpoint cancels or modifies an order.\n\nOpen data. A public site (`audience: public`) uses only the TWSE and TPEX OpenAPI data the server archives: daily\nhistory and the index trend come from that archive, it has no realtime quote, so Buzz and Intraday answer 403\n`realtime_quotes_unavailable`, and it trades on the mock broker only. A personal site reads its daily history and\nindex trend from the exchanges' own daily reports; without a Shioaji login it has no realtime quote either, so it\nanswers Buzz and Intraday the same way. A public site reads no news site and no MOPS: the AI step\nreads the archived material information, the TWSE news naming the stock and its archived financials, a stock with none\nof them is decided on its technical score alone, and every valuation endpoint answers 403 `mops_unavailable`. `GET\n/v1/market/audience` answers the site's audience and what it allows, so the web app offers only that.\n\nBacktests. `POST /v1/backtests` replays the user's active technical strategy over past sessions the site already\nholds, with the live trading rules on the technical score alone, and saves the result for the user (`GET\n/v1/backtests`, `GET /v1/backtests/{backtest_id}`). `GET /v1/backtests/options` names the period it may cover. A\nbacktest asks no AI, touches no account, watchlist or run record, and never orders.\n\nRankings. The settings hold the formulas the ranking can be made by (`ranking.formulas`) and which one is active\n(`ranking.active_formula`); a save that switches it applies at once, to the ranking, every stock's score, the backtest\nand a follow alike. `GET /v1/rankings/latest` answers the monthly stock ranking by the active formula at the latest\ndecision session the site's daily history holds, and `GET /v1/rankings/backtest?first=&last=` replays it over a period\nagainst the ranking.benchmark_id held over the same sessions. `GET /v1/rankings/formulas?first=&last=` replays every\nformula over the same period and costs, and again at a liquidity floor, as the evidence beside the choice. All read only\nthe held history and the archived monthly revenue, which `just backfill-history` brings back; they ask no AI, touch no\naccount and never order. `GET /v1/rankings/follow` answers the user's mock account against that ranking, its return\nsince it first followed it against the benchmark, and its follows with the formula each used; `POST\n/v1/rankings/follow` brings the mock account to the ranking, as a run that orders on the mock account only and keeps\nthe formula it used. `PUT /v1/rankings/follow/schedule` lets the user schedule that follow: from the time they choose,\non the first session after each new decision, the server starts the same run by itself, once per decision, on the\nuser's mock account only, and its record says the schedule started it. No other run starts without a request.\n\nThe server replays `accounts.max_concurrent_backtests` strategy backtests and ranking backtests at once, and one more\nwaits its turn. A user's request past `accounts.max_backtests_per_user` replaying or waiting answers 429\n`too_many_backtests`.\n\nWorkflows run in the background, one at a time per user and a few at a time per server: a start answers 202 with the\nrun id, and GET /v1/runs/{run_id} reports the run's state and its record; another user's run id answers 404. Run the\nserver with one worker process.\n",
     "title": "TW-Stock-Alpha-Agent",
     "version": "0.2.0"
   },
@@ -9005,7 +9521,7 @@
     },
     "/v1/market/stocks/{stock_id}/ranking": {
       "get": {
-        "description": "One stock's score: where it stands in the monthly ranking at the latest decision session the site's daily history\nholds, from the same ranking /v1/rankings/latest answers, with no cut at ranking.top. `score` is its place among\nthe scored stocks as a percentile, 100 for the best combined rank; `stock` holds its two factors (revenue\nacceleration, nearness to the high) with each one's rank from 0 to 1; `in_top` says whether the ranking holds it. A\nstock the ranking leaves out has no score and `exclusion` says why: no held history, an ETF, no trade that session,\na close under ranking.min_close, too little traded value, a month of revenue not held, or a price history shorter\nthan the high needs. The score ranks two measured factors; it is no forecast. One stock's standing, not the\nranking's list: it needs no sign-in, and a viewer sees it only where the site shows them both the stock pages and\nthe ranking (403 feature_hidden otherwise).",
+        "description": "One stock's score: where it stands in the monthly ranking at the latest decision session the site's daily history\nholds, from the same ranking /v1/rankings/latest answers, by the active formula (`formula`), with no cut at its\n`top`. `score` is its place among the scored stocks as a percentile, 100 for the best combined rank; `stock` holds\nthe formula's factors in order, each with its rank from 0 to 1; `in_top` says whether the ranking holds it. While\nthe formula holds cash (`holds_cash`) the score is measured all the same and no stock is in the top. A stock the\nranking leaves out has no score and `exclusion` says why: no held history, an ETF, no trade that session, a close\nunder the formula's min_close, too little traded value, a month of revenue a factor reads not held, or a price\nhistory shorter than a factor reads. The score ranks measured factors; it is no forecast. One stock's standing,\nnot the ranking's list: it needs no sign-in, and a viewer sees it only where the site shows them both the stock\npages and the ranking (403 feature_hidden otherwise).",
         "operationId": "get_stock_ranking_v1_market_stocks__stock_id__ranking_get",
         "parameters": [
           {
@@ -9099,7 +9615,7 @@
     },
     "/v1/rankings/backtest": {
       "get": {
-        "description": "The monthly ranking replayed over the decision sessions from `first` to `last`: bought at each next open in equal\nweights, at the site's fee and tax, against ranking.benchmark_id held over the same sessions by its total return.\nIt answers the value of both at every session, their total, annual and yearly returns and drawdowns, the costs, and\neach decision's ranking and the stocks it held. It saves nothing, asks no AI and never orders.",
+        "description": "The active formula's ranking replayed over the decision sessions from `first` to `last`: bought at each next open\nin equal weights, at the site's fee and tax, against ranking.benchmark_id held over the same sessions by its total\nreturn. It answers the value of both at every session, their total, annual and yearly returns and drawdowns, the\ncosts, the turnover, and each decision's ranking and the stocks it held; a decision at which the formula held cash\nholds none. It saves nothing, asks no AI and never orders.",
         "operationId": "get_ranking_backtest_v1_rankings_backtest_get",
         "parameters": [
           {
@@ -9168,7 +9684,7 @@
     },
     "/v1/rankings/follow": {
       "get": {
-        "description": "The ranking in the user's mock account: which of the latest decision's stocks it holds and lacks, which of its\nholdings left the ranking, whether a follow may start now, and its return since it first followed the ranking\nagainst ranking.benchmark_id over the same sessions. It records nothing and never orders.",
+        "description": "The ranking in the user's mock account: which of the latest decision's stocks it holds and lacks, which of its\nholdings left the ranking (every holding while the active formula holds cash), whether a follow may start now, its\nreturn since it first followed the ranking against ranking.benchmark_id over the same sessions, its follows so\nfar with the formula each used and whether the schedule or the user started it, and the user's schedule. It\nrecords nothing and never orders.",
         "operationId": "get_ranking_follow_v1_rankings_follow_get",
         "responses": {
           "200": {
@@ -9203,7 +9719,7 @@
         ]
       },
       "post": {
-        "description": "Brings the user's mock account to the ranking's latest decision, as a run of its own: it sells each holding the\nranking left and buys each ranked stock the account lacks, at an equal weight of the account in whole lots of\nanalysis.lot_size, priced as this site prices an order now, through the same order gates and journal as every\norder. It orders on the mock account only. A second follow of a decision the account already holds answers\nnothing_to_follow.",
+        "description": "Brings the user's mock account to the ranking's latest decision by the active formula, as a run of its own, which\nkeeps that formula: it sells each holding the ranking left and buys each ranked stock the account lacks, at an\nequal weight of the account in whole lots of analysis.lot_size, priced as this site prices an order now, through\nthe same order gates and journal as every order. While the formula holds cash it sells every holding and buys\nnothing. It orders on the mock account only. A second follow of a decision the account already holds answers\nnothing_to_follow.",
         "operationId": "follow_ranking_v1_rankings_follow_post",
         "requestBody": {
           "content": {
@@ -9278,9 +9794,122 @@
         ]
       }
     },
+    "/v1/rankings/follow/schedule": {
+      "put": {
+        "description": "My settings: schedules the user's ranking follow, or turns the schedule off with null. With a time, the site follows\neach new decision of the ranking into the user's mock account by itself on the first session after it, from that\ntime in Taipei and while this site places orders, as a run like the button's (`POST /v1/rankings/follow`): the\nsame sizing, order gates and journal, on the mock account only, recorded as started by the schedule. It follows a\ndecision once, and never one the user followed by hand; a day whose window it missed is tried again on the next\nsession until the next decision supersedes it. A user the site hides the ranking or the mock account from, or a\ndeactivated one, is followed for by nobody. `GET /v1/rankings/follow` answers the schedule as it stands.",
+        "operationId": "schedule_ranking_follow_v1_rankings_follow_schedule_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FollowScheduleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "follow_time_not_offered: the site does not offer that time; nothing saved."
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Schedule Ranking Follow",
+        "tags": [
+          "Rankings"
+        ]
+      }
+    },
+    "/v1/rankings/formulas": {
+      "get": {
+        "description": "The evidence beside the choice of a formula: every formula of ranking.formulas replayed over the decision sessions\nfrom `first` to `last` on the same history, fee and tax, in the settings' order, and again at the liquidity floor\nranking.evidence_min_traded_value. Each row answers the annual return against the benchmark's, the deepest\ndrawdown, the years ahead of the benchmark and the turnover. The replays run one after another inside one of the\nserver's replay turns, and each is kept while the history stands. A formula that did best over a past period is not\nthereby the best over the next. It saves nothing, asks no AI and never orders.",
+        "operationId": "get_ranking_formulas_v1_rankings_formulas_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "first",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "First",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "last",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Last",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/FormulaEvidence"
+                  },
+                  "title": "Response Get Ranking Formulas V1 Rankings Formulas Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "ranking_unavailable: the site's daily history holds no decision session yet; `detail` says what it holds. backtest_period_unavailable: the period holds no decision session the history holds; `detail` says which sessions it holds. invalid_request: a query parameter does not validate."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "too_many_backtests: accounts.max_backtests_per_user of the user's strategy backtests and ranking backtests replay or wait already."
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Get Ranking Formulas",
+        "tags": [
+          "Rankings"
+        ]
+      }
+    },
     "/v1/rankings/latest": {
       "get": {
-        "description": "The monthly stock ranking by revenue acceleration and nearness to the 250-session high at the latest decision session\nthe site's daily history holds: the stocks to hold from the next session's open, best first, each with its two\nfactors, their ranks and its score, and the revenue month it read. It reads only the held history and the archived\nmonthly revenue; a month without revenue ranks nothing and says so in `scored`. The first answer after a start reads\nevery held bar, which takes seconds; later ones reuse it until the history holds another session.",
+        "description": "The monthly stock ranking by the active formula (ranking.active_formula, `formula` in the answer) at the latest\ndecision session the site's daily history holds: the stocks to hold from the next session's open, best first, each\nwith the formula's factors in order, their ranks and its score, and the revenue month it read. While the formula's\nmarket filter is on, `holds_cash` is true and it holds no stock. It reads only the held history and the archived\nmonthly revenue; a month without revenue ranks nothing and says so in `scored`. The first answer after a start reads\nevery held bar, which takes seconds; later ones reuse it until the history holds another session, whatever\nformula is active by then.",
         "operationId": "get_latest_ranking_v1_rankings_latest_get",
         "responses": {
           "200": {

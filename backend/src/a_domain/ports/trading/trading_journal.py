@@ -77,6 +77,10 @@ class ITradingJournal(Protocol):
         """
         ...
 
+    async def runs_of(self, workflow: Workflow, broker: ExecutionProvider, since: datetime | None) -> list[SystemStats]:
+        """The runs of `workflow` on `broker` that started at or after `since` (ever for None), oldest first."""
+        ...
+
     async def first_fill(self, workflow: Workflow, broker: ExecutionProvider, since: datetime | None) -> datetime | None:
         """
         When the first order of a run of `workflow` on `broker` that filled at least one share was created, at or after

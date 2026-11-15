@@ -49,7 +49,7 @@ from b_application.use_cases.trade.order_execution import OrderExecution
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
 from c_infrastructure.database.repositories.trading_journal import TradingJournal
-from c_infrastructure.market.daily_bar_matrix_provider import DailyBarMatrixProvider
+from c_infrastructure.market.daily_bar_matrix_provider import DailyBarMatrixProvider, KeptRankingHistory
 from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection
 from c_infrastructure.system.attempt_log import MemoryAttemptLog
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
@@ -206,7 +206,9 @@ async def open_stack(
         stock_provider=stocks,
         price_provider=quotes,
         history_cache=None,
-        bar_matrix_provider=DailyBarMatrixProvider(stocks, quotes, archive, clock, config.ranking.history_rule(), logger),
+        bar_matrix_provider=DailyBarMatrixProvider(
+            stocks, quotes, archive, clock, config.ranking.history_rule(), logger, KeptRankingHistory(), config.ranking.kept_backtests
+        ),
         stock_brief_repository=FakeStockBriefRepository(),
         company_card_repository=FakeStockBriefRepository(),
         system_writing_log=FakeSystemWritingLog(),

@@ -16,7 +16,7 @@ import { Skeleton } from '@/shared/ui/skeleton'
 import { useAiModels, useChooseAiModel, type AiModels, type AiProvider } from './api'
 
 interface MySettingsPageProps {
-  /** The account feature's mock account panel: its starting capital and the reset. */
+  /** The mock account's panels: the account feature's starting capital and reset, and the ranking feature's scheduled follow. */
   mockAccount?: ReactNode
 }
 

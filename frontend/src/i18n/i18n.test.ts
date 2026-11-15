@@ -136,6 +136,7 @@ describe('translations', () => {
       ['research', 'analysis.reading.kind', Object.keys(READING_TONE).flatMap((kind) => [`${kind}_one`, `${kind}_other`])],
       ['research', 'analysis.valuation.ratio', ['pe', 'pb', 'yield']],
       ['common', 'score.exclusion', openapi.components.schemas.RankingExclusion.enum as string[]],
+      ...['factor', 'short', 'phrase'].map((family): [string, string, string[]] => ['common', `formula.${family}`, Object.keys(openapi.components.schemas.RankingFactor.discriminator.mapping)]),
       ['research', 'news.source', Object.keys(NEWS_SOURCES)],
       ['research', 'news.none', ['articles', 'openData']],
       ['research', 'brief.kind', openapi.components.schemas.BriefSourceKind.enum as string[]],

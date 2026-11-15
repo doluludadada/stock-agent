@@ -8,7 +8,7 @@ import base64
 import secrets
 import threading
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 
 import pytest
@@ -238,6 +238,20 @@ async def test_a_users_ai_model_and_an_administrators_change_of_their_role_never
 
     assert chosen is not None and (chosen.role, chosen.ai_model) == (Role.ADMINISTRATOR, AiProvider.OPENAI)
     assert cleared is not None and (cleared.role, cleared.ai_model) == (Role.USER, None)
+
+
+@pytest.mark.asyncio
+async def test_the_time_of_a_users_scheduled_ranking_follow_is_saved_alone_and_cleared(store: SqlUserStore) -> None:
+    before = await store.find(UserId("u-2"))
+    await store.save_ranking_follow_time(UserId("u-2"), time(9, 5), NOW)
+    scheduled = await store.find(UserId("u-2"))
+    others = [user.ranking_follow_time for user in await store.users() if user.user_id != UserId("u-2")]
+    await store.save_ranking_follow_time(UserId("u-2"), None, NOW)
+    cleared = await store.find(UserId("u-2"))
+
+    assert before is not None and scheduled is not None and cleared is not None
+    assert (before.ranking_follow_time, scheduled.ranking_follow_time, cleared.ranking_follow_time) == (None, time(9, 5), None)
+    assert replace(scheduled, ranking_follow_time=None) == before and set(others) == {None}
 
 
 @pytest.mark.asyncio

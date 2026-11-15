@@ -66,6 +66,7 @@ const ERROR_CODES = {
   settings_refused: true,
   technical_settings_conflict: true,
   ai_model_not_offered: true,
+  follow_time_not_offered: true,
   run_in_progress: true,
   too_many_runs: true,
   nothing_to_follow: true,
