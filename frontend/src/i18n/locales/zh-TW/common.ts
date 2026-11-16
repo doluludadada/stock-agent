@@ -101,6 +101,7 @@ const common: DictionaryShape<typeof en> = {
   ai: { generated: 'AI 生成，可能有錯', writtenAt: '台北時間 {{time}}' },
   opensSource: '（在新分頁開啟來源）',
   units: { lots: '{{value}}張', closeOn: '{{date}} 收盤' },
+  quote: { live: '即時 {{time}}', lastTrade: '{{time}} 成交' },
   range: { '1M': '1 個月', '3M': '3 個月', '6M': '6 個月', '1Y': '1 年' },
   trend: {
     range: '區間',

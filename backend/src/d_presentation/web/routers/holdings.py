@@ -39,8 +39,9 @@ async def get_holdings(
     them now (where the site shows the user features.sinopac_account, the user is an administrator and the login is
     up), the mock account's (features.mock_account) and the holdings entered by hand. `sources` narrows them; a source
     the site does not show the user is never read. Each holding stays under its source and counts once: the same stock
-    at the broker and entered by hand is two holdings. Each is valued at its stock's last close the site holds, net of
-    the SELL fee and tax, and carries its standing in the monthly ranking as /v1/market/stocks/{id}/ranking answers it,
+    at the broker and entered by hand is two holdings. Each is valued at its stock's last close the site holds, or at
+    today's realtime quote where the board of GET /v1/market/quotes holds a newer one (`live_stock_ids`), net of the
+    SELL fee and tax, and carries its standing in the monthly ranking as /v1/market/stocks/{id}/ranking answers it,
     or why the ranking leaves it out, and its latest month of revenue with the ranking's acceleration. The portfolio
     says its concentration in the holdings.concentration_positions largest stocks, the share of its value the ranking
     holds now, and the value-weighted score over the scored holdings with their share. The score figures are None for a

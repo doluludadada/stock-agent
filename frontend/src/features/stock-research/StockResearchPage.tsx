@@ -3,7 +3,7 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { useTranslation } from '@/i18n'
 import { usePageTitle } from '@/shared/lib/page-title'
-import { isApiError, useStockHistory, type StockHistory } from '@/shared/api'
+import { isApiError, latestQuote, useLiveQuotes, useStockHistory, type StockHistory } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
 import { HISTORY_BARS, summarize } from '@/shared/lib/chart-range'
 import { DASH, useFormat } from '@/shared/lib/format'
@@ -17,6 +17,7 @@ import { Panel } from '@/shared/ui/panel'
 import { PriceTrend } from '@/shared/ui/price-trend'
 import { PriceValue } from '@/shared/ui/price-value'
 import { QuoteHeadline } from '@/shared/ui/quote-headline'
+import { QuoteTime } from '@/shared/ui/quote-time'
 import { RangeMeter } from '@/shared/ui/range-meter'
 import { RequireSignIn } from '@/shared/ui/require-sign-in'
 import { ShowMore } from '@/shared/ui/show-more'
@@ -95,6 +96,9 @@ function StockHeader({ history, actions }: { history: StockHistory; actions: Sto
   const { t } = useTranslation('research')
   const format = useFormat()
   const summary = useMemo(() => summarize(history.bars, '1M'), [history.bars])
+  const { bars: quoted, live } = useLiveQuotes([history.stock.stock_id])
+  const settled = summary && { close: summary.close, change: summary.dayChange?.value ?? null, changeRatio: summary.dayChange?.ratio ?? null, session: summary.date, tradedAt: null }
+  const quote = latestQuote(settled, quoted.get(history.stock.stock_id))
   const name = history.stock.name ?? history.stock.stock_id
   usePageTitle(history.stock.name ? `${history.stock.name} ${history.stock.stock_id}` : history.stock.stock_id)
   return (
@@ -112,14 +116,7 @@ function StockHeader({ history, actions }: { history: StockHistory; actions: Sto
               {t(`market.${history.stock.market}`)}
             </Badge>
           </div>
-          {summary && (
-            <QuoteHeadline
-              value={format.price(summary.close)}
-              change={summary.dayChange?.value ?? null}
-              changeRatio={summary.dayChange?.ratio ?? null}
-              asOf={format.closeOn(summary.date)}
-            />
-          )}
+          {quote && <QuoteHeadline value={format.price(quote.close)} change={quote.change} changeRatio={quote.changeRatio} asOf={<QuoteTime session={quote.session} tradedAt={quote.tradedAt} live={live} />} />}
         </div>
         {actions && <div className="flex flex-wrap gap-2">{actions({ code: history.stock.stock_id, name })}</div>}
       </div>

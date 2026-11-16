@@ -23,6 +23,7 @@ from a_domain.ports.market.daily_close_archive import ArchivedMonth, ArchivedQua
 from a_domain.ports.system.settings_files import SettingChange, SettingField, SettingsEdit
 from a_domain.rules.fundamentals.stock_analysis import StockAnalysis
 from a_domain.rules.market.breadth import MarketBreadth
+from a_domain.rules.market.quote_refresh import QuoteRefresh
 from a_domain.rules.system.registration import SignInOffer
 from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
 from a_domain.rules.trading.follow import FollowReturn, FollowSchedule, RankingHoldings
@@ -76,6 +77,7 @@ from b_application.use_cases.collect.market_breadth_loader import MarketBreadthL
 from b_application.use_cases.collect.market_data_collector import MarketDataCollector
 from b_application.use_cases.collect.most_traded import MostTraded
 from b_application.use_cases.collect.news_feed import NewsFeed
+from b_application.use_cases.collect.page_quotes import PageQuotes
 from b_application.use_cases.collect.realtime_quote_feed import RealtimeQuoteFeed
 from b_application.use_cases.collect.stock_analysis_lookup import StockAnalysisLookup
 from b_application.use_cases.collect.stock_lookup import StockLookup
@@ -191,6 +193,7 @@ class Pipeline:
     stock_lookup: StockLookup
     stock_search: StockSearch
     most_traded: MostTraded
+    page_quotes: PageQuotes
     market_breadth_loader: MarketBreadthLoader
     index_history_loader: IndexHistoryLoader
     buzz_scanner: BuzzScanner
@@ -565,7 +568,7 @@ class Pipeline:
         RankingUnavailable while the history holds no session.
         """
         history = await self.ranking_history_loader.execute()
-        account, _, curve, _ = await self.mock_account_history.execute(None)
+        account, _, curve, _ = await self.mock_account_history.execute(None, None)
         schedule, runs = await self.ranking_follow_schedule.execute(user)
         performance, follows = await self.ranking_follow_return.execute(history, account, curve, runs)
 
@@ -585,7 +588,8 @@ class Pipeline:
     async def choose_follow_time(self, user: User, follow_time: time | None) -> User:
         """
         My settings: saves when the site follows the ranking into the user's mock account by itself, or None for no
-        schedule, and answers the user with it. FollowTimeNotOffered, saving nothing, for a time the site does not offer.
+        schedule, and answers the user with it. Saving nothing: FeatureHidden for a time where the site does not show
+        the user the mock account, FollowTimeNotOffered for a time the site does not offer.
         """
         return await self.follow_time_choice.execute(user, follow_time)
 
@@ -691,10 +695,15 @@ class Pipeline:
 
         return PipelineStatus(stats=records[0], manual_stocks=reports, signals=signals, orders=orders)
 
-    async def load_account_history(self, as_of: date | None) -> PipelineStatus:
-        """Menu 7 and the account endpoint: the account now, its equity curve and the account as of a date."""
+    async def load_account_history(self, as_of: date | None, since: date | None = None) -> PipelineStatus:
+        """
+        Menu 7 and the account endpoint: the account now, its equity curve, from `since` on where a day is given, and
+        the account as of a date.
+        """
         status = PipelineStatus.read_only(Workflow.RESEARCH)
-        status.account, status.held_stocks, status.equity_curve, status.account_as_of = await self.account_history.execute(as_of)
+        status.account, status.held_stocks, status.equity_curve, status.account_as_of = await self.account_history.execute(
+            as_of, since
+        )
 
         return status
 
@@ -824,6 +833,13 @@ class Pipeline:
     async def load_most_traded(self) -> list[Stock]:
         """The market overview: the latest session's most traded stocks in the exchange listing."""
         return await self.most_traded.execute()
+
+    async def load_page_quotes(self, stock_ids: list[str]) -> tuple[dict[str, Ohlcv], QuoteRefresh]:
+        """
+        The pages' realtime quotes: today's quote of each of these stocks that traded today, from the board every page
+        shares, and when a page asks again. It reads quotes alone.
+        """
+        return await self.page_quotes.execute(stock_ids)
 
     async def archive_daily_closes(self) -> tuple[list[ArchivedSession], list[ArchivedQuarter], list[ArchivedMonth]]:
         """

@@ -824,6 +824,34 @@
     "unit": "seconds"
   },
   {
+    "path": "market_data.page_quote_refresh_seconds",
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": "seconds"
+  },
+  {
+    "path": "market_data.page_quote_first_seconds",
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": "seconds"
+  },
+  {
+    "path": "market_data.page_quote_idle_seconds",
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": "seconds"
+  },
+  {
+    "path": "market_data.page_quote_recheck_seconds",
+    "kind": "steps",
+    "group": "data_history",
+    "options": [],
+    "unit": "seconds"
+  },
+  {
     "path": "market_data.history_request_interval_seconds",
     "kind": "steps",
     "group": "data_history",

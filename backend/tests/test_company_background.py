@@ -19,10 +19,10 @@ from a_domain.model.market.company_profile import CompanyProfile
 from a_domain.ports.market.company_basics_provider import CompanyBasics
 from a_domain.types.enums import Audience, MarketType
 from b_application.use_cases.collect.main_business_refresh import MainBusinessRefresh
+from c_infrastructure import request_pace
 from c_infrastructure.database.db_connector import DatabaseConnector
-from c_infrastructure.market import request_pace
 from c_infrastructure.market.mops_company_basics import MopsCompanyBasicsProvider
-from c_infrastructure.market.request_pace import PacedHost, RequestPace, SharedRequestPace
+from c_infrastructure.request_pace import PacedHost, RequestPace, SharedRequestPace
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 from d_presentation.dependencies import create_company_basics_provider
 

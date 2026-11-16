@@ -106,6 +106,7 @@ the contract by `catalog.test.ts`.
 | Data | Owner | Source |
 | --- | --- | --- |
 | Listing search, most traded, breadth, stock and index bars, many stocks' quotes and names | `shared/api/market.ts` | `/v1/market` |
+| Today's realtime quotes of many stocks, for a signed-in viewer of a site that has them | `shared/api/market.ts` (`useLiveQuotes`) | `/v1/market/quotes` |
 | The site's audience and what it allows; the open-data archive's warm-up | `shared/api/audience.ts`, `shared/api/market.ts` | `/v1/market/audience`, `/v1/market/archive-status` |
 | Whether the site needs its first administrator and takes registrations; whom it shows each feature to | `shared/api/features.ts` | `/v1/auth/status` |
 | The brokers the user may choose now, the mock account first, a real one with its server and BUY limits | `shared/api/brokers.ts` | `/v1/account/brokers` |
@@ -156,6 +157,34 @@ Many stocks at once (the watchlist's quotes, the mock account's names) come from
 each code's listing answers at once, and each daily history is asked under the stock page's own key, one after
 another, because a burst of cold histories reaches Yahoo, which answers it with empty bars. A quote is the newer of
 the listing's day and the history's last bar, and keeps its session, so a page never mixes sessions without saying so.
+
+## Prices during a session
+
+Every page's own request answers the last settled close. Where the site has realtime quotes (`realtime_quotes` of
+`/v1/market/audience`) a signed-in viewer's pages also read today's quotes from `GET /v1/market/quotes`
+(`useLiveQuotes`), which the server keeps once for every page and user. Its rules:
+
+- One rule picks the price to show, `latestQuote`: today's quote where the settled close is of an earlier session,
+  else the settled close, so a session's close replaces its last quote once it is settled. `useStockQuotes` applies
+  it, so the watchlist and the ranking list need nothing more, and the stock page's headline applies it to its history.
+- The tab asks again after the time the server answers (`refresh.seconds`): its interval while the quotes change
+  (`refresh.changing`), a longer one once they stopped, which costs the broker nothing and sees the next session
+  start. It asks only while it is visible, and at once when it comes back into view. A site without quotes now
+  answers no time, and the tab asks again when it comes back into view. No interval is written in the page, and no
+  websocket.
+- A price says when it is from, with `QuoteTime`: a settled close its session ("11/13 收盤"), today's quote its last
+  trade's time, with the live mark (the brand's dot and "即時") while the session trades. A failed or refused request
+  leaves the page on its settled closes.
+- My holdings and the mock account never value a position in the page. Their own endpoints (`/v1/holdings`,
+  `/v1/account/history`) value every position at the quote the server's board holds, by the server's own rules, fee,
+  tax, weights and equity included, and say which stocks are at a quote (`live_stock_ids`). The page asks the quotes
+  for its stocks, which makes the board read them, and asks its own endpoint again each time a held stock has a newer
+  trade: My holdings the whole portfolio (`useQuotesThenRefetch`), the mock account only the account now and the
+  equity curve from the quotes' session on (`?since=`, `useAccountAtQuotes`), which `withLatest` lays over the whole
+  history it already holds, because the server values every day of the curve and a year of days is slow and large.
+  From the quotes themselves a page takes only today's move, the sum of each quote's own `change` (`dayMove`), which
+  is no figure the server computes.
+- The index and the breadth on Today stay at the settled session: the site's quote source serves stocks only.
 
 ## What the site's audience allows
 
@@ -434,8 +463,9 @@ My holdings (`/holdings`) reads what the user holds as one portfolio. Its rules:
 
 - It shows figures and scores and never an instruction: no wording, color or icon says what to do with a holding.
   `HoldingsPage.test.tsx` fails on such a word. Red and green stay on the gains and losses only.
-- Every figure is the server's: the value at the last close held, the weights, the concentration, the share in the
-  ranking's top, the weighted score. The page derives one thing, the unscored share, `1 - scored_share`.
+- Every figure is the server's: the value at the last close held, or at today's quote while the site has one (Prices
+  during a session), the weights, the concentration, the share in the ranking's top, the weighted score. The page
+  derives the unscored share, `1 - scored_share`, and today's move from the quotes' own changes.
 - A holding is counted under its one source, so the same stock at the broker and entered by hand is two rows, each
   with its source's badge. The mock account's badge says it is play money.
 - The sources to choose from are the `asked` of a first answer asked with no filter (`offeredSources`), as checkboxes
@@ -465,7 +495,7 @@ AI text carries, the stock page's brief and card too, and `NewsRow` (`shared/ui/
 third party's item, the stock page's news too.
 
 `shared/ui/` holds vendored shadcn/ui sources and the project's own primitives (`panel`, `data-table`, `stat`,
-`segmented`, `range-tabs`, `show-more`, `range-meter`, `breadth-bar`, `quote-headline`, `state-block`, `page-header`,
+`segmented`, `range-tabs`, `show-more`, `range-meter`, `breadth-bar`, `quote-headline`, `quote-time`, `state-block`, `page-header`,
 `ranking-score`, `formula-line`, `stock-name`, `error-state`, `ai-byline`, `news-row`,
 `field`, `password-input`, `avatar`, `price-volume-chart`, `price-trend`, `comparison-chart`, `progress-note`,
 `stock-picker`, `confirm-dialog`, `stock-ids-problem`). Lint relaxes only fast-refresh and a few a11y role rules there, to stay close to upstream.

@@ -5,10 +5,14 @@ export { allows, useAllows, useAudience, type Audience, type Capability } from '
 export { authStatusKey, shows, useAuthStatus, useShown, useShows, type Feature, type FeatureVisibility, type Visibilities } from './features'
 export { brokersKey, chosenOffer, useBrokerOffers, useBrokers, type Broker, type BrokerOffer } from './brokers'
 export {
+  latestQuote,
   marketKeys,
+  quotesPollMs,
   useArchiveStatus,
   useIndexHistory,
   useListedNames,
+  useLiveQuotes,
+  useQuotesThenRefetch,
   useMarketBreadth,
   useMostTraded,
   useStockHistory,
@@ -18,9 +22,11 @@ export {
   type DailyBar,
   type IndexHistory,
   type ListedStock,
+  type LiveQuotes,
   type Loadable,
   type MarketBreadth,
   type MarketIndex,
+  type PageQuotes,
   type SearchState,
   type StockHistory,
   type StockQuote,

@@ -60,3 +60,25 @@ export const STARTING_CAPITALS: readonly number[] = [100_000, 500_000, 1_000_000
 export function startingCapitalChoices(current: number): number[] {
   return [...new Set([...STARTING_CAPITALS, current])].sort((a, b) => a - b)
 }
+
+/** When the newest of the quotes the server priced the account at was traded; null while it priced no position at today's quote. */
+export function quotedAt(history: AccountHistory): string | null {
+  const live = new Set(history.live_stock_ids)
+  const trades = history.current.positions.flatMap((position) => (live.has(position.stock_id) && position.marked_at ? [position.marked_at] : []))
+  return trades.sort().at(-1) ?? null
+}
+
+/**
+ * The whole history with a newer answer of the same endpoint over it: the account now and the days of the curve that
+ * answer holds, which the server valued at today's quotes. It places the server's figures and computes none.
+ */
+export function withLatest(history: AccountHistory, latest: AccountHistory | undefined): AccountHistory {
+  if (!latest) return history
+  return {
+    ...history,
+    current: latest.current,
+    live_stock_ids: latest.live_stock_ids,
+    profit: latest.profit,
+    equity_curve: { ...history.equity_curve, ...latest.equity_curve },
+  }
+}

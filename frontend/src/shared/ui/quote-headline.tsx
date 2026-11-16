@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { directionOf, PRICE_TONE } from '@/shared/lib/direction'
 import { cn } from '@/shared/lib/utils'
 import { ChangeValue } from './change-value'
@@ -8,12 +9,12 @@ interface QuoteHeadlineProps {
   /** Against the session before; null when the history has one session. */
   change: number | null
   changeRatio: number | null
-  /** The session the value closed, such as "11/3 close". */
-  asOf: string
+  /** When the value is from: the session it closed, such as "11/3 close", or a quote's time. */
+  asOf: ReactNode
   className?: string
 }
 
-/** A page's hero number: the close in its market color, the change with its sign and arrow, and its session. */
+/** A page's hero number: the price in its market color, the change with its sign and arrow, and when it is from. */
 export function QuoteHeadline({ value, change, changeRatio, asOf, className }: QuoteHeadlineProps) {
   return (
     <div className={cn('flex flex-wrap items-baseline gap-x-3 gap-y-1.5', className)}>

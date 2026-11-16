@@ -12,6 +12,7 @@ from d_presentation.web.schemas import (
     Confirmed,
     IndexHistoryResponse,
     ListedStockResponse,
+    PageQuotesResponse,
     StockBriefResponse,
     StockCompanyResponse,
     StockFinancialsResponse,
@@ -36,6 +37,7 @@ router = APIRouter(prefix="/market", tags=["Market data"])
 
 StockIdPath = Annotated[StockId, Path()]
 BarCount = Annotated[int, Query(ge=20, le=500)]
+QuotedStockIds = Annotated[list[StockId], Query(min_length=1)]
 
 UNAVAILABLE: dict[int | str, dict[str, Any]] = {
     status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "The exchange listing could not be loaded."}
@@ -86,6 +88,30 @@ async def get_index_history(index: MarketIndex, pipeline: SignedOutPipeline, bar
     history = await pipeline.load_index_history(index, bars)
 
     return IndexHistoryResponse(index=index, bars=history)
+
+
+@router.get(
+    "/quotes",
+    dependencies=[
+        PrivateAccess,
+        shows(Feature.HOLDINGS, Feature.MOCK_ACCOUNT, Feature.RANKING, Feature.STOCK_PAGES, Feature.WATCHLIST),
+    ],
+)
+async def get_page_quotes(runtime: RuntimeDependency, pipeline: SignedOutPipeline, ids: QuotedStockIds) -> PageQuotesResponse:
+    """
+    The realtime quotes the ranking, the watchlist and a stock's page show beside their settled closes, and the ones
+    My holdings and the mock account are valued at by their own endpoints. Every page and user read one board, which
+    asks Shioaji once for all of them at most every market_data.page_quote_refresh_seconds while a session trades, and
+    after the close until one request was answered; outside that it only answers what it holds of today. `refresh`
+    says when a page asks again. Of a request that names more stocks than market_data.quote_batch_size, what the board
+    reads at once, the first ones are read and the rest are answered null. A site without a Shioaji login now answers
+    so and asks nothing. Private: a visitor never makes the site ask the broker. It reads quotes alone, on nobody's
+    Pipeline: it holds no account and prices no order.
+    """
+    available = runtime.realtime_quotes
+    quotes, refresh = await pipeline.load_page_quotes(ids) if available else ({}, None)
+
+    return PageQuotesResponse(realtime_quotes=available, refresh=refresh, quotes={stock_id: quotes.get(stock_id) for stock_id in ids})
 
 
 @router.get("/archive-status")

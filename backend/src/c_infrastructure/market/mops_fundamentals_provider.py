@@ -22,7 +22,7 @@ from b_application.config.sources_config import MopsSources
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.quarter_eps_dto import QuarterEpsDTO
 from c_infrastructure.market.exchange_text import ROC_YEAR_OFFSET, parse_number
-from c_infrastructure.market.request_pace import HostPace
+from c_infrastructure.request_pace import HostPace
 
 
 class MopsFundamentalsProvider(IFundamentalsProvider):

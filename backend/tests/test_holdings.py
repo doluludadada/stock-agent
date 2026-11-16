@@ -7,7 +7,7 @@ at the send.
 
 import math
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +29,7 @@ from support.web import app_of, client_at, ended, serve, sign_in, write
 from test_ranking import SESSIONS, bars, market, revenue
 from test_web_api import FOLLOWED_RUN, SINOPAC_STARTS, reported_run
 
+from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.account import BrokerFill, Position, Settlement
 from a_domain.rules.trading.ranking import MonthlyRankingRule, Ranking
@@ -80,6 +81,10 @@ def portfolio_site(**visibilities: FeatureVisibility) -> CliHarness:
     harness.hold("2317", quantity=1000, average_cost=60.0)
     harness.real_broker.positions = [Position(stock_id="2330", quantity=500, average_cost=95.0)]
     return harness
+
+
+def quote_at(at: datetime, price: float) -> Ohlcv:
+    return Ohlcv(ts=at, open=price, high=price, low=price, close=price, volume=5_000, change=1.0)
 
 
 async def enter(client: Any, stock_id: str, quantity: int, average_cost: float, **more: Any) -> Any:
@@ -159,6 +164,39 @@ async def test_a_holding_is_valued_at_the_last_close_held_net_of_the_costs_of_se
     assert (odd_lot["position"]["quantity"], odd_lot["position"]["market_value"]) == (37, 37 * 34)
     assert body["unrealized_pnl"] == pytest.approx(math.fsum(holding["position"]["unrealized_pnl"] for holding in body["holdings"]))
     assert body["unrealized_return"] == pytest.approx(body["unrealized_pnl"] / body["cost"])
+
+
+async def test_a_holding_whose_stock_the_quote_board_holds_is_valued_at_todays_quote_by_the_same_rule_and_the_rest_at_the_close() -> (
+    None
+):
+    harness = portfolio_site()
+    traded_at = harness.clock.now() - timedelta(seconds=5)
+    harness.prices.realtime |= {"2330": quote_at(traded_at, 108.0), "1101": quote_at(traded_at, 35.0)}
+    rule = harness.config.market.position_value_rule()
+
+    async with serve(harness) as client:
+        await enter_all(client)
+        unasked = (await client.get("/v1/holdings", params={"sources": ["manual"]})).json()
+        await client.get("/v1/market/quotes", params={"ids": ["2330", "1101"]})
+        body = (await client.get("/v1/holdings", params={"sources": ["manual"]})).json()
+
+    held = {holding["position"]["stock_id"]: holding for holding in body["holdings"]}
+    lot = rule.apply(Position(stock_id="2330", quantity=1000, average_cost=100.0), 108.0, traded_at)
+    odd_lot = rule.apply(Position(stock_id="1101", quantity=37, average_cost=40.0), 35.0, traded_at)
+
+    assert unasked["live_stock_ids"] == [] and harness.prices.realtime_requests == ["2330", "1101"]
+    assert body["live_stock_ids"] == ["1101", "2330"]
+    assert (held["2330"]["position"]["mark_price"], held["2330"]["position"]["marked_at"]) == (108.0, traded_at.isoformat())
+    assert held["2330"]["position"]["unrealized_pnl"] == pytest.approx(lot.unrealized_pnl)
+    assert held["1101"]["position"]["unrealized_pnl"] == pytest.approx(odd_lot.unrealized_pnl)
+    assert (
+        odd_lot.unrealized_pnl
+        == 37 * 35.0 - harness.config.market.min_fee - int(37 * 35.0 * harness.config.market.tax_rate) - 37 * 40.0
+    )
+    assert held["0050"]["position"]["marked_at"][:10] == LAST_SESSION.isoformat()
+    assert body["market_value"] == pytest.approx(math.fsum(holding["position"]["market_value"] for holding in body["holdings"]))
+    assert held["2330"]["weight"] == pytest.approx(108_000 / body["market_value"])
+    assert body["unrealized_pnl"] == pytest.approx(math.fsum(holding["position"]["unrealized_pnl"] for holding in body["holdings"]))
 
 
 async def test_each_holding_carries_the_stock_pages_own_standing_or_why_it_has_no_score() -> None:

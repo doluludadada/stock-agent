@@ -2670,7 +2670,7 @@
         "type": "string"
       },
       "HoldingsResponse": {
-        "description": "The My holdings page (PortfolioAnalysis): the holdings of each source read, each counted once under its source, and\nthe portfolio they make at the last closes the site holds. The score ranks two measured factors and forecasts\nnothing. The score figures are None where the site does not show the viewer the ranking.",
+        "description": "The My holdings page (PortfolioAnalysis): the holdings of each source read, each counted once under its source, and\nthe portfolio they make at the last closes the site holds, or at today's quotes where the quote board holds newer\nones. The score ranks two measured factors and forecasts nothing. The score figures are None where the site does\nnot show the viewer the ranking.",
         "properties": {
           "asked": {
             "items": {
@@ -2706,6 +2706,13 @@
               "$ref": "#/components/schemas/HoldingResponse"
             },
             "title": "Holdings",
+            "type": "array"
+          },
+          "live_stock_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Live Stock Ids",
             "type": "array"
           },
           "lowest": {
@@ -2782,6 +2789,7 @@
           "asked",
           "sources",
           "holdings",
+          "live_stock_ids",
           "market_value",
           "cost",
           "unrealized_pnl",
@@ -3763,6 +3771,46 @@
         "title": "OrderType",
         "type": "string"
       },
+      "PageQuotesResponse": {
+        "description": "The realtime quotes a page shows beside its settled closes, from the board every page and user share.",
+        "properties": {
+          "quotes": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Ohlcv"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Quotes",
+            "type": "object"
+          },
+          "realtime_quotes": {
+            "title": "Realtime Quotes",
+            "type": "boolean"
+          },
+          "refresh": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QuoteRefresh"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "realtime_quotes",
+          "refresh",
+          "quotes"
+        ],
+        "title": "PageQuotesResponse",
+        "type": "object"
+      },
       "PeMedian": {
         "properties": {
           "sample_size": {
@@ -4216,6 +4264,26 @@
           "debt_ratio"
         ],
         "title": "QuarterResult",
+        "type": "object"
+      },
+      "QuoteRefresh": {
+        "description": "What a page that shows the quote board's quotes is told about asking again.",
+        "properties": {
+          "changing": {
+            "title": "Changing",
+            "type": "boolean"
+          },
+          "seconds": {
+            "exclusiveMinimum": 0.0,
+            "title": "Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "changing",
+          "seconds"
+        ],
+        "title": "QuoteRefresh",
         "type": "object"
       },
       "RankedFactor": {
@@ -7766,7 +7834,7 @@
     },
     "/v1/account/history": {
       "get": {
-        "description": "Menu 7 on the `broker` account, the mock account by default: the account now, its equity curve, and the account at\nthe end of `as_of`. It never orders and records no run.",
+        "description": "Menu 7 on the `broker` account, the mock account by default: the account now, its equity curve, and the account at\nthe end of `as_of`. A held stock is priced at today's realtime quote where the board of GET /v1/market/quotes holds\none (`live_stock_ids`), which then ends the equity curve too, else at its last daily close. With `since` the\nequity curve holds the days from it on only: a page that holds the curve asks for today alone when a quote moved,\nsince the whole curve of an old account is large and slow to value. It asks the broker for no quote, never orders\nand records no run.",
         "operationId": "get_account_history_v1_account_history_get",
         "parameters": [
           {
@@ -7793,6 +7861,23 @@
                 }
               ],
               "title": "As Of"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
             }
           }
         ],
@@ -8812,7 +8897,7 @@
     },
     "/v1/holdings": {
       "get": {
-        "description": "The user's holdings as one portfolio, from held data alone: the SinoPac account's positions as the broker lists\nthem now (where the site shows the user features.sinopac_account, the user is an administrator and the login is\nup), the mock account's (features.mock_account) and the holdings entered by hand. `sources` narrows them; a source\nthe site does not show the user is never read. Each holding stays under its source and counts once: the same stock\nat the broker and entered by hand is two holdings. Each is valued at its stock's last close the site holds, net of\nthe SELL fee and tax, and carries its standing in the monthly ranking as /v1/market/stocks/{id}/ranking answers it,\nor why the ranking leaves it out, and its latest month of revenue with the ranking's acceleration. The portfolio\nsays its concentration in the holdings.concentration_positions largest stocks, the share of its value the ranking\nholds now, and the value-weighted score over the scored holdings with their share. The score figures are None for a\nviewer the site does not show the ranking. It is analysis, not advice: nothing here says to buy or sell.",
+        "description": "The user's holdings as one portfolio, from held data alone: the SinoPac account's positions as the broker lists\nthem now (where the site shows the user features.sinopac_account, the user is an administrator and the login is\nup), the mock account's (features.mock_account) and the holdings entered by hand. `sources` narrows them; a source\nthe site does not show the user is never read. Each holding stays under its source and counts once: the same stock\nat the broker and entered by hand is two holdings. Each is valued at its stock's last close the site holds, or at\ntoday's realtime quote where the board of GET /v1/market/quotes holds a newer one (`live_stock_ids`), net of the\nSELL fee and tax, and carries its standing in the monthly ranking as /v1/market/stocks/{id}/ranking answers it,\nor why the ranking leaves it out, and its latest month of revenue with the ranking's acceleration. The portfolio\nsays its concentration in the holdings.concentration_positions largest stocks, the share of its value the ranking\nholds now, and the value-weighted score over the scored holdings with their share. The score figures are None for a\nviewer the site does not show the ranking. It is analysis, not advice: nothing here says to buy or sell.",
         "operationId": "get_holdings_v1_holdings_get",
         "parameters": [
           {
@@ -9144,6 +9229,59 @@
           }
         ],
         "summary": "Get Most Traded",
+        "tags": [
+          "Market data"
+        ]
+      }
+    },
+    "/v1/market/quotes": {
+      "get": {
+        "description": "The realtime quotes the ranking, the watchlist and a stock's page show beside their settled closes, and the ones\nMy holdings and the mock account are valued at by their own endpoints. Every page and user read one board, which\nasks Shioaji once for all of them at most every market_data.page_quote_refresh_seconds while a session trades, and\nafter the close until one request was answered; outside that it only answers what it holds of today. `refresh`\nsays when a page asks again. Of a request that names more stocks than market_data.quote_batch_size, what the board\nreads at once, the first ones are read and the rest are answered null. A site without a Shioaji login now answers\nso and asks nothing. Private: a visitor never makes the site ask the broker. It reads quotes alone, on nobody's\nPipeline: it holds no account and prices no order.",
+        "operationId": "get_page_quotes_v1_market_quotes_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "ids",
+            "required": true,
+            "schema": {
+              "items": {
+                "pattern": "^[0-9A-Za-z]{1,10}$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "title": "Ids",
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageQuotesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Get Page Quotes",
         "tags": [
           "Market data"
         ]

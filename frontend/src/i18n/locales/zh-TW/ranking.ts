@@ -84,6 +84,7 @@ const ranking: DictionaryShape<typeof en> = {
   table: {
     place: '名次',
     stock: '股票',
+    price: '股價',
     score: '分數',
   },
   formulas: {

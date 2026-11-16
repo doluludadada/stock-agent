@@ -19,7 +19,7 @@ from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.types.enums import ContentType, InformationSource, MarketScope, TableFormat
 from b_application.config.sources_config import WorldIndicatorFeed, WorldNewsFeed, WorldSources
-from c_infrastructure.market.request_pace import HostPace
+from c_infrastructure.request_pace import HostPace
 
 
 class WorldFeed(IWorldFeed):

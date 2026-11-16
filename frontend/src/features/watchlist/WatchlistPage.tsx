@@ -21,6 +21,7 @@ import { Panel } from '@/shared/ui/panel'
 import { RequireSignIn } from '@/shared/ui/require-sign-in'
 import { Segmented } from '@/shared/ui/segmented'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
+import { QuoteTime } from '@/shared/ui/quote-time'
 import { PageSkeleton, Skeleton } from '@/shared/ui/skeleton'
 import { Sparkline } from '@/shared/ui/sparkline'
 import { Stat } from '@/shared/ui/stat'
@@ -70,10 +71,10 @@ export function WatchlistPage() {
 /** The list, then how it did in the latest session, beside it from 1280 px. */
 function Watchlist({ rows }: { rows: WatchRow[] }) {
   const codes = useMemo(() => rows.map((row) => row.stockId), [rows])
-  const { quotes, trends } = useStockQuotes(codes)
+  const { quotes, trends, live } = useStockQuotes(codes)
   return (
     <div className="card-grid xl:grid-cols-[minmax(0,1fr)_22rem]">
-      <StockList rows={rows} quotes={quotes} trends={trends} />
+      <StockList rows={rows} quotes={quotes} trends={trends} live={live} />
       <DayPanel rows={rows} quotes={quotes} />
     </div>
   )
@@ -142,10 +143,12 @@ interface StockListProps {
   rows: WatchRow[]
   quotes: Quotes
   trends: ReadonlyMap<string, Loadable<readonly number[]>>
+  /** A session trades, so today's quotes among them still change. */
+  live: boolean
   className?: string
 }
 
-function StockList({ rows, quotes, trends, className }: StockListProps) {
+function StockList({ rows, quotes, trends, live, className }: StockListProps) {
   const { t } = useTranslation('watchlist')
   const reason = useErrorReason()
   const format = useFormat()
@@ -181,7 +184,7 @@ function StockList({ rows, quotes, trends, className }: StockListProps) {
       ),
     },
     { key: 'trend', header: t('column.trend'), from: 'md', cell: (row) => <Trend state={trends.get(row.stockId)} /> },
-    { key: 'close', header: t('column.close'), numeric: true, cell: (row) => <Close state={quotes.get(row.stockId)} latest={latest} /> },
+    { key: 'close', header: t('column.close'), numeric: true, cell: (row) => <Close state={quotes.get(row.stockId)} latest={latest} live={live} /> },
     {
       key: 'change',
       header: t('column.change'),
@@ -288,8 +291,8 @@ function Trend({ state }: { state: Loadable<readonly number[]> | undefined }) {
   return <Sparkline values={state.value} direction={directionOf((state.value.at(-1) ?? 0) - (state.value[0] ?? 0))} width={96} height={28} className="h-7 w-24" />
 }
 
-/** The close, with its session when it is older than the list's latest one. */
-function Close({ state, latest }: { state: Loadable<StockQuote> | undefined; latest: string | null }) {
+/** The close, with its session when it is older than the list's latest one, or today's quote with its last trade's time. */
+function Close({ state, latest, live }: { state: Loadable<StockQuote> | undefined; latest: string | null; live: boolean }) {
   const format = useFormat()
   if (!state || state.status === 'loading') return <Skeleton className="ml-auto h-4 w-14" />
   if (state.status === 'failed') return <span className="text-muted-foreground">—</span>
@@ -298,6 +301,7 @@ function Close({ state, latest }: { state: Loadable<StockQuote> | undefined; lat
     <span className="inline-flex flex-col items-end">
       <span className="font-semibold">{format.price(state.value.close)}</span>
       {older && <span className="text-xs font-normal text-gold">{format.closeOn(state.value.session)}</span>}
+      {state.value.tradedAt && <QuoteTime tradedAt={state.value.tradedAt} live={live} className="text-xs font-normal text-muted-foreground" />}
     </span>
   )
 }

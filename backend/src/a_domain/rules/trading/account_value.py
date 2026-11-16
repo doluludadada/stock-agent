@@ -4,6 +4,7 @@ from datetime import date, datetime, time, timedelta
 
 from pydantic.dataclasses import dataclass
 
+from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.account import Account, AccountSnapshot, Mark, Position
 from a_domain.model.trading.order import Order
@@ -52,12 +53,17 @@ class AccountValueRule:
         return replace(account, positions=[replace(position, weight=position.market_value / equity) for position in positions])
 
 
+def priced_bars(stock: Stock) -> list[Ohlcv]:
+    """The stock's daily bars and, where it has one, its realtime quote: the session under way, priced so far."""
+    return [*stock.ohlcv, stock.realtime_bar] if stock.realtime_bar else stock.ohlcv
+
+
 @dataclass(frozen=True)
 class SnapshotValueRule:
     """
-    A snapshot's account valued at the end of `day`: each position at its stock's last daily close on or before that
-    day, else at its snapshot price (Position.mark_price) stamped at the snapshot's time. A position whose stock was
-    not found keeps its snapshot price.
+    A snapshot's account valued at the end of `day`: each position at its stock's last price on or before that day, a
+    daily close or the realtime quote of a session under way (priced_bars), else at its snapshot price
+    (Position.mark_price) stamped at the snapshot's time. A position whose stock was not found keeps its snapshot price.
     """
 
     position_value_rule: PositionValueRule
@@ -65,7 +71,7 @@ class SnapshotValueRule:
     def apply(
         self, snapshot: AccountSnapshot, stocks: Sequence[Stock], day: date, trading_date: Callable[[datetime], date]
     ) -> Account:
-        history = {stock.stock_id: stock.ohlcv for stock in stocks}
+        history = {stock.stock_id: priced_bars(stock) for stock in stocks}
         positions = []
 
         for position in snapshot.account.positions:
@@ -127,21 +133,27 @@ class AccountAsOfRule:
 class EquityCurveRule:
     """
     The account at the end of each trading day from the first snapshot on, in day order, as AccountAsOfRule gives it
-    for that day. The trading days come from the stocks' daily history, so no holiday calendar is needed.
+    for that day. The trading days come from the stocks' daily history, so no holiday calendar is needed, and from
+    their realtime quotes: while a session trades, its day ends the curve with the account at the quotes so far.
+    With `since`, only the days from it on: what a reader that holds the earlier days asks for.
     """
 
     as_of_rule: AccountAsOfRule
 
     def apply(
-        self, snapshots: Sequence[AccountSnapshot], stocks: Sequence[Stock], trading_date: Callable[[datetime], date]
+        self,
+        snapshots: Sequence[AccountSnapshot],
+        stocks: Sequence[Stock],
+        since: date | None,
+        trading_date: Callable[[datetime], date],
     ) -> dict[date, Account]:
         if not snapshots:
             return {}
 
         snapshot_days = {trading_date(snapshot.taken_at) for snapshot in snapshots}
-        first_day = trading_date(snapshots[0].taken_at)
-        price_days = {trading_date(bar.ts) for stock in stocks for bar in stock.ohlcv}
-        days = sorted({day for day in price_days if day >= first_day} | snapshot_days)
+        first_day = max(trading_date(snapshots[0].taken_at), since or date.min)
+        price_days = {trading_date(bar.ts) for stock in stocks for bar in priced_bars(stock)}
+        days = sorted(day for day in price_days | snapshot_days if day >= first_day)
 
         return {
             day: as_of.account for day in days if (as_of := self.as_of_rule.apply(snapshots, stocks, day, trading_date)) is not None
@@ -152,15 +164,18 @@ class EquityCurveRule:
 class PriceHistoryStartRule:
     """
     Where the daily prices the account history needs start: midnight, in `now`'s zone, of the day `history_days`
-    before the trading day of `now`, or of the first snapshot's day if earlier.
+    before the trading day of `now`, or of the first day its equity curve shows if earlier: the first snapshot's day,
+    or `since` where the curve is asked from that day on.
     """
 
     history_days: int
 
-    def apply(self, now: datetime, snapshots: Sequence[AccountSnapshot], trading_date: Callable[[datetime], date]) -> datetime:
+    def apply(
+        self, now: datetime, snapshots: Sequence[AccountSnapshot], since: date | None, trading_date: Callable[[datetime], date]
+    ) -> datetime:
         first_day = trading_date(now) - timedelta(days=self.history_days)
 
         if snapshots:
-            first_day = min(first_day, trading_date(snapshots[0].taken_at))
+            first_day = min(first_day, max(trading_date(snapshots[0].taken_at), since or date.min))
 
         return datetime.combine(first_day, time.min, tzinfo=now.tzinfo)

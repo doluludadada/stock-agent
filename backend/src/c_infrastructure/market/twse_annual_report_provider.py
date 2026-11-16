@@ -19,7 +19,7 @@ from a_domain.types.enums import AnnualReportSection, ContentType, InformationSo
 from b_application.config.sources_config import AnnualReportSources
 from c_infrastructure.market import annual_report_text
 from c_infrastructure.market.exchange_text import ROC_YEAR_OFFSET
-from c_infrastructure.market.request_pace import HostPace
+from c_infrastructure.request_pace import HostPace
 
 
 class TwseAnnualReportProvider(IAnnualReportProvider):

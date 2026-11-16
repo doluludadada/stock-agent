@@ -70,7 +70,7 @@ def google_harness(
         timeout_seconds=5,
         transport=httpx.ASGITransport(app=google.app),
     )
-    harness.runtime = compose_runtime(config, harness.logger, harness.clock, harness.dependencies)
+    harness.runtime = compose_runtime(harness.config, harness.logger, harness.clock, harness.dependencies)
     return harness, google
 
 

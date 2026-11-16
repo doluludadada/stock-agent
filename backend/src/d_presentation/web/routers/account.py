@@ -90,13 +90,17 @@ async def get_brokerage_account(runtime: RuntimeDependency, user: CurrentUser, p
 
 @router.get("/history", responses=BROKER_READ, dependencies=[AccountShown])
 async def get_account_history(
-    pipeline: BrokerPipeline, broker: ExecutionProvider = ExecutionProvider.MOCK, as_of: date | None = None
+    pipeline: BrokerPipeline, broker: ExecutionProvider = ExecutionProvider.MOCK, as_of: date | None = None, since: date | None = None
 ) -> AccountHistoryResponse:
     """
     Menu 7 on the `broker` account, the mock account by default: the account now, its equity curve, and the account at
-    the end of `as_of`. It never orders and records no run.
+    the end of `as_of`. A held stock is priced at today's realtime quote where the board of GET /v1/market/quotes holds
+    one (`live_stock_ids`), which then ends the equity curve too, else at its last daily close. With `since` the
+    equity curve holds the days from it on only: a page that holds the curve asks for today alone when a quote moved,
+    since the whole curve of an old account is large and slow to value. It asks the broker for no quote, never orders
+    and records no run.
     """
-    status = await pipeline.load_account_history(as_of)
+    status = await pipeline.load_account_history(as_of, since)
     snapshot = status.account_as_of
 
     return AccountHistoryResponse(

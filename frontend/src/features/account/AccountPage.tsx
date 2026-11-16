@@ -1,5 +1,5 @@
 import { ArrowRight, CopyCheck, FlaskConical, LineChart, Wallet } from 'lucide-react'
-import { lazy, Suspense, useMemo, useState, type FormEvent } from 'react'
+import { lazy, Suspense, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { useTranslation } from '@/i18n'
 import { useListedNames, useShows } from '@/shared/api'
@@ -15,14 +15,15 @@ import { ErrorState } from '@/shared/ui/error-state'
 import { Input } from '@/shared/ui/input'
 import { PageHeader } from '@/shared/ui/page-header'
 import { Panel } from '@/shared/ui/panel'
+import { QuoteTime } from '@/shared/ui/quote-time'
 import { RequireSignIn } from '@/shared/ui/require-sign-in'
 import { PageSkeleton, Skeleton } from '@/shared/ui/skeleton'
 import { StackedBar } from '@/shared/ui/stacked-bar'
 import { Stat } from '@/shared/ui/stat'
 import { StateBlock } from '@/shared/ui/state-block'
-import { useAccountHistory, useTrades, type AccountHistory } from './api'
+import { useAccountAtQuotes, useAccountHistory, useTrades, type AccountHistory } from './api'
 import { TradesPanel } from './Trades'
-import { equityPoints, holdings, moveBetween, totalReturn, unrealizedRatio, type AccountValue, type EquityPoint, type Position } from './model'
+import { equityPoints, holdings, moveBetween, quotedAt, totalReturn, unrealizedRatio, withLatest, type AccountValue, type EquityPoint, type Position } from './model'
 
 const ValueChart = lazy(() => import('@/shared/ui/value-chart').then((module) => ({ default: module.ValueChart })))
 
@@ -55,13 +56,16 @@ function Account() {
     [positions, tradeRows],
   )
   const names = useListedNames(codes)
+  const held = useMemo(() => (positions ?? []).map((position) => position.stock_id), [positions])
+  const { latest, live } = useAccountAtQuotes(held)
   if (history.isPending) return <PageSkeleton />
   if (history.isError) return <ErrorState error={history.error} title={t('loadFailed')} onRetry={() => void history.refetch()} framed />
-  const { data } = history
+  const data = withLatest(history.data, latest)
+  const tradedAt = quotedAt(data)
   const empty = data.current.positions.length === 0 && tradeRows?.length === 0
   return (
     <div className="card-grid md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_24rem]">
-      <Summary history={data} className="md:col-span-2" />
+      <Summary history={data} quoted={tradedAt && <QuoteTime tradedAt={tradedAt} live={live} />} className="md:col-span-2" />
       {empty && <GetStarted className="md:col-span-2" />}
       <EquityPanel history={data} className="md:col-span-2 xl:col-span-1" />
       <AllocationPanel value={data.current} names={names} className="md:col-span-2 xl:col-span-1" />
@@ -75,7 +79,7 @@ function Account() {
   )
 }
 
-function Summary({ history, className }: { history: AccountHistory; className?: string }) {
+function Summary({ history, quoted, className }: { history: AccountHistory; quoted: ReactNode; className?: string }) {
   const { t } = useTranslation('account')
   const format = useFormat()
   const value = history.current
@@ -104,6 +108,7 @@ function Summary({ history, className }: { history: AccountHistory; className?: 
                 <ChangeValue value={today.ratio} format="percent" pill />
               </span>
             )}
+            {quoted}
             {!total && since && points[0] && (
               <span className="flex items-center gap-1.5">
                 {t('summary.since', { date: format.monthDay(points[0].date) })}

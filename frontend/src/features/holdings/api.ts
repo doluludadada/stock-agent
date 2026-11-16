@@ -1,6 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiRequest, isApiError, runResultsKey, useIsSignedIn } from '@/shared/api'
-import type { HoldingEntry, HoldingSource } from './model'
+import { useMemo } from 'react'
+import { apiRequest, isApiError, runResultsKey, useIsSignedIn, useQuotesThenRefetch } from '@/shared/api'
+import { quotedHoldings, type HoldingEntry, type Holdings, type HoldingSource, type QuotedHoldings } from './model'
 
 /** The holdings read the mock account, which a run's end changes, so they reload with everything a run leaves. */
 export const holdingsKeys = {
@@ -22,6 +23,16 @@ export function useHoldings(sources: readonly HoldingSource[] | null) {
     placeholderData: keepPreviousData,
     retry: false,
   })
+}
+
+/**
+ * What the server valued at today's quotes in the portfolio, and whether a session trades. While the site has quotes
+ * the portfolio is asked again (`refetch`) each time the board holds a newer trade of a held stock.
+ */
+export function useQuotedHoldings(holdings: Holdings, refetch: () => unknown): QuotedHoldings & { live: boolean } {
+  const codes = useMemo(() => holdings.holdings.map((row) => row.position.stock_id), [holdings])
+  const { bars, live } = useQuotesThenRefetch(codes, refetch)
+  return { ...quotedHoldings(holdings, bars), live }
 }
 
 /** Keeps a hand-entered holding, replacing the user's earlier entry of the same stock. It orders nothing. */

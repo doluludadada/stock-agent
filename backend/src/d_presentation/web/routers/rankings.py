@@ -21,10 +21,8 @@ from d_presentation.web.session import (
     PrivateAccess,
     QuoteLogin,
     RunStarter,
-    RuntimeDependency,
     UserPipeline,
     WorkflowRunsDependency,
-    require_shown,
     shows,
 )
 
@@ -269,9 +267,7 @@ class FollowScheduleRequest(Confirmed):
         },
     },
 )
-async def schedule_ranking_follow(
-    body: FollowScheduleRequest, pipeline: UserPipeline, user: CurrentUser, runtime: RuntimeDependency
-) -> None:
+async def schedule_ranking_follow(body: FollowScheduleRequest, pipeline: UserPipeline, user: CurrentUser) -> None:
     """
     My settings: schedules the user's ranking follow, or turns the schedule off with null. With a time, the site follows
     each new decision of the ranking into the user's mock account by itself on the first session after it, from that
@@ -283,9 +279,6 @@ async def schedule_ranking_follow(
     account from, or a deactivated one, is followed for by nobody. Setting a time needs the mock account shown;
     turning the schedule off does not. `GET /v1/rankings/follow/schedule` answers the schedule as it stands.
     """
-    if body.time is not None:
-        require_shown(runtime, user, (Feature.MOCK_ACCOUNT,))
-
     await pipeline.choose_follow_time(user, body.time)
 
 

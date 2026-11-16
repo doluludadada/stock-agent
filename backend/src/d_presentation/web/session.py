@@ -18,7 +18,7 @@ from pydantic import SecretStr, TypeAdapter
 
 from a_domain.model.system.user import SignInFlow, User, UserSession
 from a_domain.types.enums import ExecutionProvider, Feature, FeatureVisibility, HoldingSource, Permission
-from a_domain.types.errors import MopsUnavailable, RealtimeQuotesUnavailable, SignInRequired
+from a_domain.types.errors import FeatureHidden, MopsUnavailable, RealtimeQuotesUnavailable, SignInRequired
 from a_domain.types.ids import RunId, SessionToken
 from b_application.pipeline import Pipeline
 from b_application.schemas.pipeline_status import PipelineStatus
@@ -65,10 +65,6 @@ class AppRequestRequired(PermissionError):
 
 class AdministratorsOnly(PermissionError):
     """A signed-in user without the permission the route needs. 403: the session stays."""
-
-
-class FeatureHidden(PermissionError):
-    """The site does not show the route's feature to this viewer (features.* in appsetting.yaml). 403: the session stays."""
 
 
 class NothingToFollow(Exception):

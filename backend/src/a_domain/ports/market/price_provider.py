@@ -1,3 +1,4 @@
+from collections.abc import Collection
 from datetime import date, datetime
 from typing import Protocol
 
@@ -49,3 +50,30 @@ class IRealtimeQuoteProvider(Protocol):
 
 class IOhlcvProvider(IPriceHistoryProvider, IRealtimeQuoteProvider, Protocol):
     """Daily history for analysis and realtime quotes for orders: what the workflows read."""
+
+
+class IQuoteBoard(Protocol):
+    """
+    The realtime quotes the pages show, held once for every page and user of a runtime, so the number of requests the
+    quote source gets does not grow with the tabs that are open. It prices no order: an order's quote is asked of the
+    source itself (IRealtimeQuoteProvider), never read here.
+    """
+
+    async def follow(self, stock_ids: Collection[str]) -> None:
+        """
+        Notes that a page asks for these stocks now, and asks the source once for the stocks pages asked for lately
+        when its last request is old enough. A request that fails keeps the quotes held. Of more stocks than one
+        request of the source reads, the first ones are followed.
+        """
+        ...
+
+    def quotes(self, stock_ids: Collection[str], session: date) -> dict[str, Ohlcv]:
+        """
+        The quote held of each of these stocks whose last trade was in `session`, as IRealtimeQuoteProvider answered
+        it. A stock without one is left out. It asks the source nothing.
+        """
+        ...
+
+    def read_at(self) -> datetime | None:
+        """When the board made its last request that the source answered; None until one was. A request that failed does not count."""
+        ...

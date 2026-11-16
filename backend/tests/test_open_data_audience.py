@@ -57,9 +57,9 @@ from c_infrastructure.market.cached_price_provider import CachedPriceProvider
 from c_infrastructure.market.exchange_daily_reports import ExchangeDailyReports
 from c_infrastructure.market.mops_company_basics import MopsCompanyBasicsProvider
 from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider
-from c_infrastructure.market.request_pace import SharedRequestPace
 from c_infrastructure.market.shioaji_quote_provider import ShioajiQuoteProvider
 from c_infrastructure.market.twse_annual_report_provider import TwseAnnualReportProvider
+from c_infrastructure.request_pace import SharedRequestPace
 from c_infrastructure.system.attempt_log import MemoryAttemptLog
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
 from d_presentation import dependencies

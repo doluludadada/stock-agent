@@ -19,7 +19,7 @@ from a_domain.ports.market.daily_history_source import IDailyHistorySource
 from a_domain.ports.market.fundamentals_provider import IFundamentalsProvider
 from a_domain.ports.market.news_provider import INewsProvider
 from a_domain.ports.market.news_source import INewsSource
-from a_domain.ports.market.price_provider import IOhlcvProvider, IPriceHistoryProvider, IRealtimeQuoteProvider
+from a_domain.ports.market.price_provider import IOhlcvProvider, IPriceHistoryProvider, IQuoteBoard, IRealtimeQuoteProvider
 from a_domain.ports.market.social_media_provider import ISocialMediaProvider
 from a_domain.ports.market.stock_feed import IStockFeed
 from a_domain.ports.market.stock_provider import IStockProvider
@@ -47,6 +47,7 @@ __all__ = [
     "INewsSource",
     "IOhlcvProvider",
     "IPriceHistoryProvider",
+    "IQuoteBoard",
     "IRealtimeQuoteProvider",
     "ISocialMediaProvider",
     "IStockFeed",

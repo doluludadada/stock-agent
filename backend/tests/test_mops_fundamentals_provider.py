@@ -13,7 +13,7 @@ from a_domain.types.values import FiscalQuarter
 from b_application.config.market_data_config import MarketHoursConfig
 from c_infrastructure.market import mops_fundamentals_provider
 from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider, parse_cumulative_eps
-from c_infrastructure.market.request_pace import RequestPace
+from c_infrastructure.request_pace import RequestPace
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
 
 SOURCES = shipped_config().sources

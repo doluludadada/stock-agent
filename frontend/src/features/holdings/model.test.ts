@@ -6,6 +6,7 @@ import {
   holdingKey,
   offeredSources,
   parseEntry,
+  quotedHoldings,
   QUANTITY_MAX,
   SOURCE_ORDER,
   sourcesToAsk,
@@ -14,6 +15,7 @@ import {
   watchedWithoutEntry,
   type EntryDraft,
   type Holding,
+  type Holdings,
 } from './model'
 
 const TODAY = '2026-11-14'
@@ -124,5 +126,44 @@ describe('holdings and what is entered by hand', () => {
   it('opens a change on the entry as it is held, its day in Taipei', () => {
     expect(draftOf(holding('manual', '00878', '2026-03-01T16:30:00Z'))).toEqual({ stockId: '00878', quantity: '250', averageCost: '98.7', openedOn: '2026-03-02' })
     expect(draftOf(holding('manual', '00878')).openedOn).toBe('')
+  })
+})
+
+describe('the portfolio at today’s quotes', () => {
+  const quote = (close: number, change: number | null = 5) => ({ ts: '2026-11-16T10:32:00+08:00', open: close, high: close, low: close, close, volume: 1_000, change })
+  const settled = (stockId: string): Holding => {
+    const row = holding('manual', stockId)
+    return { ...row, weight: 0.5, position: { ...row.position, marked_at: '2026-11-13T13:30:00+08:00', unrealized_pnl: 225, unrealized_return: 225 / 24_675 } }
+  }
+  const portfolio: Holdings = {
+    asked: ['manual'],
+    sources: ['manual'],
+    holdings: [settled('2330'), settled('2317')],
+    live_stock_ids: [],
+    market_value: 50_000,
+    cost: 49_350,
+    unrealized_pnl: 450,
+    unrealized_return: 450 / 49_350,
+    concentration: 1,
+    concentration_positions: 5,
+    top_share: 0.5,
+    scored_share: 1,
+    weighted_score: 70,
+    highest: null,
+    lowest: null,
+  }
+
+  it('marks nothing while the server valued no holding at today’s quote, whatever quotes the page holds', () => {
+    expect(quotedHoldings(portfolio, new Map())).toEqual({ quoted: new Set(), day: null, tradedAt: null })
+    expect(quotedHoldings(portfolio, new Map([['2330', quote(105)]]))).toEqual({ quoted: new Set(), day: null, tradedAt: null })
+  })
+
+  it('marks the holdings the server valued at a quote, with their newest trade and today’s move from the quotes’ own changes', () => {
+    const live = { ...settled('2330'), position: { ...settled('2330').position, marked_at: '2026-11-16T10:32:00+08:00' } }
+    const valued: Holdings = { ...portfolio, holdings: [live, settled('2317')], live_stock_ids: ['2330'] }
+    const { quoted, day, tradedAt } = quotedHoldings(valued, new Map([['2330', quote(105)], ['2317', quote(50)]]))
+    expect([...quoted]).toEqual(['manual:2330'])
+    expect(day).toEqual({ change: 250 * 5, ratio: 5 / 100 })
+    expect(tradedAt).toBe('2026-11-16T10:32:00+08:00')
   })
 })

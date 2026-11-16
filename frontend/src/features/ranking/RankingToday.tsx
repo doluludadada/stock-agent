@@ -1,6 +1,7 @@
 import { ListX } from 'lucide-react'
+import { useMemo } from 'react'
 import { useTranslation } from '@/i18n'
-import { isApiError } from '@/shared/api'
+import { isApiError, useStockQuotes } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
 import { useFormat } from '@/shared/lib/format'
 import { ErrorState } from '@/shared/ui/error-state'
@@ -23,6 +24,8 @@ export function RankingToday({ className }: { className?: string }) {
   const latest = useLatestRanking()
   const ranking = latest.data
   const [year, month] = (ranking?.revenue_month ?? '').split('-').map(Number) as [number, number]
+  const codes = useMemo(() => (ranking?.stocks ?? []).slice(0, SHOWN.wide).map((stock) => stock.stock_id), [ranking])
+  const { quotes, live } = useStockQuotes(codes, { trends: false })
   return (
     <Panel
       flush
@@ -48,7 +51,7 @@ export function RankingToday({ className }: { className?: string }) {
         ) : latest.data.stocks.length === 0 ? (
           <StateBlock icon={ListX} title={t('latest.none.title')} description={t('latest.none.description', { month: format.yearMonth(year, month) })} action={<BackfillCommand />} />
         ) : (
-          <RankedStocksTable label={t('latest.title')} formula={latest.data.formula} rows={latest.data.stocks.slice(0, SHOWN.wide).map((stock, index) => ({ stock, className: index < SHOWN.narrow ? undefined : 'max-xl:hidden' }))} />
+          <RankedStocksTable label={t('latest.title')} formula={latest.data.formula} quotes={quotes} live={live} rows={latest.data.stocks.slice(0, SHOWN.wide).map((stock, index) => ({ stock, className: index < SHOWN.narrow ? undefined : 'max-xl:hidden' }))} />
         )}
       </RequireSignIn>
     </Panel>

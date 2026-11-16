@@ -21,10 +21,11 @@ import { PageHeader } from '@/shared/ui/page-header'
 import { Panel } from '@/shared/ui/panel'
 import { RankingScoreLine, RankingScoreNote } from '@/shared/ui/ranking-score'
 import { RequireSignIn } from '@/shared/ui/require-sign-in'
+import { QuoteTime } from '@/shared/ui/quote-time'
 import { PageSkeleton } from '@/shared/ui/skeleton'
 import { Stat } from '@/shared/ui/stat'
 import { StateBlock } from '@/shared/ui/state-block'
-import { useHoldings, useRemoveHolding } from './api'
+import { useHoldings, useQuotedHoldings, useRemoveHolding } from './api'
 import { HoldingDialog, type EntrySeed } from './HoldingDialog'
 import {
   draftOf,
@@ -38,6 +39,7 @@ import {
   type Holding,
   type Holdings,
   type HoldingSource,
+  type QuotedHoldings,
   type WatchedStock,
 } from './model'
 
@@ -128,10 +130,7 @@ function Portfolio({ watched, onEnter }: { watched: readonly WatchedStock[] | un
   return (
     <div className="card-stack">
       <div className={cn('card-stack', shown.isPlaceholderData && 'opacity-60')} aria-busy={shown.isPlaceholderData}>
-        <Panel>
-          <PortfolioFigures holdings={data} />
-        </Panel>
-        <HoldingsPanel holdings={data} filter={filter} onEnter={onEnter} />
+        <QuotedPortfolio holdings={data} refetch={shown.refetch} filter={filter} onEnter={onEnter} />
       </div>
       {watchedPanel}
       <footer className="space-y-2">
@@ -141,6 +140,22 @@ function Portfolio({ watched, onEnter }: { watched: readonly WatchedStock[] | un
     </div>
   )
 }
+
+/** The figures and the list, which the server values at today's quotes while the site has them. */
+function QuotedPortfolio({ holdings, refetch, filter, onEnter }: HoldingsPanelProps & { refetch: () => unknown }) {
+  const quoted = useQuotedHoldings(holdings, refetch)
+  return (
+    <>
+      <Panel>
+        <PortfolioFigures holdings={holdings} quoted={quoted} />
+      </Panel>
+      <HoldingsPanel holdings={holdings} quoted={quoted} filter={filter} onEnter={onEnter} />
+    </>
+  )
+}
+
+/** What the server valued at today's quotes in a portfolio, and whether a session trades. */
+type Quoted = QuotedHoldings & { live: boolean }
 
 /** Said once where the brokerage was asked and could not be read: the portfolio on screen goes without it. */
 function UnreadNote({ holdings, className }: { holdings: Holdings; className?: string }) {
@@ -183,7 +198,7 @@ function SourceFilter({ offered, chosen, onToggle }: { offered: readonly Holding
  * it stands in the ranking. The ranking's figures leave where the site hides the ranking from the viewer. `brief`
  * keeps the worth, the gain or loss and the score: the home page's card.
  */
-export function PortfolioFigures({ holdings, brief = false }: { holdings: Holdings; brief?: boolean }) {
+export function PortfolioFigures({ holdings, quoted, brief = false }: { holdings: Holdings; quoted?: Quoted; brief?: boolean }) {
   const { t } = useTranslation('holdings')
   const format = useFormat()
   const share = (ratio: number) => format.percent(ratio)
@@ -197,6 +212,18 @@ export function PortfolioFigures({ holdings, brief = false }: { holdings: Holdin
             <ChangeValue value={holdings.unrealized_pnl} format="absolute" fractionDigits={0} arrow />
             {holdings.unrealized_return !== null && <ChangeValue value={holdings.unrealized_return} format="percent" pill />}
           </p>
+          {quoted?.tradedAt && (
+            <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground" data-testid="portfolio-quoted">
+              {quoted.day && (
+                <span className="flex items-center gap-1.5">
+                  {t('summary.today')}
+                  <ChangeValue value={quoted.day.change} format="absolute" fractionDigits={0} arrow />
+                  <ChangeValue value={quoted.day.ratio} format="percent" pill />
+                </span>
+              )}
+              <QuoteTime tradedAt={quoted.tradedAt} live={quoted.live} />
+            </p>
+          )}
         </div>
         <dl className="grid grid-cols-2 gap-x-6 gap-y-4 @xl:grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] @4xl:border-l @4xl:pl-8">
           {!brief && (
@@ -231,7 +258,7 @@ interface HoldingsPanelProps {
   onEnter: (seed: EntrySeed) => void
 }
 
-function HoldingsPanel({ holdings, filter, onEnter }: HoldingsPanelProps) {
+function HoldingsPanel({ holdings, quoted, filter, onEnter }: HoldingsPanelProps & { quoted: Quoted }) {
   const { t } = useTranslation('holdings')
   const format = useFormat()
   const remove = useRemoveHolding()
@@ -241,7 +268,11 @@ function HoldingsPanel({ holdings, filter, onEnter }: HoldingsPanelProps) {
   const name = (row: Holding) => row.stock_name ?? t('unknownName')
   const shares = (row: Holding) => format.number(row.position.quantity)
   const weight = (row: Holding) => format.percent(row.weight)
-  const closed = (row: Holding) => (row.position.marked_at ? format.closeOn(row.position.marked_at) : t('noClose'))
+  const closed = (row: Holding) => {
+    const at = row.position.marked_at
+    if (!at) return t('noClose')
+    return quoted.quoted.has(holdingKey(row)) ? <QuoteTime tradedAt={at} live={quoted.live} /> : format.closeOn(at)
+  }
   const revenue = (row: Holding) => {
     const { figure, line } = revenueReading(row, t, format)
     return line ? t('row.revenueRun', { figure, line }) : t('row.revenue', { figure })
@@ -278,7 +309,7 @@ function HoldingsPanel({ holdings, filter, onEnter }: HoldingsPanelProps) {
             {row.position.unrealized_return !== null && <ChangeValue value={row.position.unrealized_return} format="percent" />}
           </p>
           <p className="tabular text-xs text-pretty whitespace-normal text-muted-foreground max-md:hidden xl:hidden">
-            {t('row.closed', { price: format.price(row.position.mark_price), close: closed(row) })} · {revenue(row)}
+            {format.price(row.position.mark_price)}, {closed(row)} · {revenue(row)}
           </p>
           {row.standing && <RankingScoreLine standing={row.standing} brief className="text-xs md:hidden" />}
         </div>

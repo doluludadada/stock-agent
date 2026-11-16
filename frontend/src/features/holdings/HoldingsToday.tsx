@@ -9,7 +9,8 @@ import { Panel, PanelLink } from '@/shared/ui/panel'
 import { RequireSignIn } from '@/shared/ui/require-sign-in'
 import { Skeleton } from '@/shared/ui/skeleton'
 import { StateBlock } from '@/shared/ui/state-block'
-import { useHoldings } from './api'
+import { useHoldings, useQuotedHoldings } from './api'
+import type { Holdings } from './model'
 import { PortfolioFigures } from './HoldingsPage'
 
 /** The portfolio's figures for the home page, the same ones My holdings leads with, and the way to the page. */
@@ -35,9 +36,14 @@ export function HoldingsToday({ className }: { className?: string }) {
         ) : holdings.data.holdings.length === 0 ? (
           <StateBlock icon={Briefcase} title={t('empty.title')} description={t('today.empty')} action={enter} />
         ) : (
-          <PortfolioFigures holdings={holdings.data} brief />
+          <QuotedFigures holdings={holdings.data} refetch={holdings.refetch} />
         )}
       </RequireSignIn>
     </Panel>
   )
+}
+
+function QuotedFigures({ holdings, refetch }: { holdings: Holdings; refetch: () => unknown }) {
+  const quoted = useQuotedHoldings(holdings, refetch)
+  return <PortfolioFigures holdings={holdings} quoted={quoted} brief />
 }

@@ -5,7 +5,7 @@ import httpx
 from a_domain.ports.market.company_basics_provider import CompanyBasics, ICompanyBasicsProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from b_application.config.sources_config import MopsSources
-from c_infrastructure.market.request_pace import HostPace
+from c_infrastructure.request_pace import HostPace
 
 
 class MopsCompanyBasicsProvider(ICompanyBasicsProvider):

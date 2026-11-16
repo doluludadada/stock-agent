@@ -25,12 +25,13 @@ from a_domain.ports.market.annual_report_provider import AnnualReport
 from a_domain.rules.collect.company_background import AnnualReportDueRule
 from a_domain.types.enums import AnnualReportSection, Audience, ContentType, InformationSource
 from b_application.use_cases.collect.annual_report_refresh import AnnualReportRefresh
+from c_infrastructure import request_pace
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.repositories.article_store import SqlArticleStore
-from c_infrastructure.market import annual_report_text, request_pace
+from c_infrastructure.market import annual_report_text
 from c_infrastructure.market.annual_report_text import readable_text, report_sections, section_windows
-from c_infrastructure.market.request_pace import RequestPace
 from c_infrastructure.market.twse_annual_report_provider import TwseAnnualReportProvider
+from c_infrastructure.request_pace import RequestPace
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 from d_presentation.dependencies import create_annual_report_provider
 

@@ -8,7 +8,7 @@ const entry = (stockId: string, type: 'manual' | 'technical' = 'manual', created
   created_at: created,
   expires_at: null,
 })
-const ready = (changeRatio: number, session = '2026-11-03'): Loadable<StockQuote> => ({ status: 'ready', value: { close: 100, changeRatio, session } })
+const ready = (changeRatio: number, session = '2026-11-03'): Loadable<StockQuote> => ({ status: 'ready', value: { close: 100, change: 100 * changeRatio, changeRatio, session, tradedAt: null } })
 
 describe('the watchlist’s session summary', () => {
   it('counts only the stocks that closed in the latest session and says how many closed earlier', () => {

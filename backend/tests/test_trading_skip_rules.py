@@ -59,17 +59,30 @@ def snapshot_taken(day: date) -> AccountSnapshot:
 
 
 @pytest.mark.parametrize(
-    ("snapshots", "start"),
+    ("snapshots", "since", "start"),
     [
-        ([], date(2026, 10, 9)),
-        ([snapshot_taken(date(2026, 10, 12))], date(2026, 10, 9)),
-        ([snapshot_taken(date(2026, 9, 1))], date(2026, 9, 1)),
+        ([], None, date(2026, 10, 9)),
+        ([snapshot_taken(date(2026, 10, 12))], None, date(2026, 10, 9)),
+        ([snapshot_taken(date(2026, 9, 1))], None, date(2026, 9, 1)),
+        ([snapshot_taken(date(2026, 9, 1))], date(2026, 9, 20), date(2026, 9, 20)),
+        ([snapshot_taken(date(2026, 9, 1))], date(2026, 10, 19), date(2026, 10, 9)),
+        ([snapshot_taken(date(2026, 9, 1))], date(2026, 8, 1), date(2026, 9, 1)),
+    ],
+    ids=[
+        "no fill",
+        "a fill inside the window",
+        "a fill before it",
+        "a curve asked from a later day",
+        "from today",
+        "from before the first fill",
     ],
 )
-def test_daily_prices_reach_back_to_the_history_window_or_the_first_fill(snapshots: list[AccountSnapshot], start: date) -> None:
+def test_daily_prices_reach_back_to_the_history_window_or_the_first_day_of_the_curve(
+    snapshots: list[AccountSnapshot], since: date | None, start: date
+) -> None:
     rule = PriceHistoryStartRule(history_days=10)
 
-    assert rule.apply(NOW, snapshots, lambda moment: moment.astimezone(TAIWAN_TIMEZONE).date()) == datetime.combine(
+    assert rule.apply(NOW, snapshots, since, lambda moment: moment.astimezone(TAIWAN_TIMEZONE).date()) == datetime.combine(
         start, time.min, tzinfo=TAIWAN_TIMEZONE
     )
 

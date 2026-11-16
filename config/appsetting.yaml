@@ -330,6 +330,17 @@ market_data:
   quote_batch_size: 500
   quote_request_interval_seconds: 0.2
   quote_timeout_seconds: 10.0
+  # The quotes the pages show while a session trades (GET /v1/market/quotes) are held once for every page and user:
+  # one snapshots request, of at most quote_batch_size stocks, at most every page_quote_refresh_seconds, for the stocks
+  # a page asked for in the last page_quote_idle_seconds. A stock that has no quote yet may bring the next request
+  # forward to page_quote_first_seconds after the last. So the pages cost Shioaji 1 query per 10 s as shipped, and 5
+  # at the most, of the 50 it allows; an order's quote is asked for itself and waits for no page. Once a session is
+  # over and its last quotes are read, an open page asks again every page_quote_recheck_seconds, which costs Shioaji
+  # nothing. One request of a page names at most quote_batch_size stocks.
+  page_quote_refresh_seconds: 10
+  page_quote_first_seconds: 2
+  page_quote_idle_seconds: 60
+  page_quote_recheck_seconds: 300
   # Daily history on a personal site, from the exchanges' own reports of each date (sources.exchange.daily_reports):
   # one request per exchange and session for every listed stock, and two per exchange and month for its index. TWSE
   # refuses an address for minutes after more than about 3 requests in 5 seconds, so each site is asked at most once

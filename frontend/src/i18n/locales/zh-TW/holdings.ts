@@ -25,6 +25,7 @@ const holdings: DictionaryShape<typeof en> = {
     empty: '輸入持股後，這裡顯示市值與損益。',
   },
   summary: {
+    today: '今日',
     marketValue: '持股市值',
     unrealized: '未實現損益',
     cost: '成本',
@@ -47,7 +48,6 @@ const holdings: DictionaryShape<typeof en> = {
   row: {
     held: '{{shares}} 股 @ {{cost}}',
     valued: '市值 {{value}} · 占比 {{weight}}',
-    closed: '{{price}}，{{close}}',
     revenue: '營收加速度 {{figure}}',
     revenueRun: '營收加速度 {{figure}}，{{line}}',
   },

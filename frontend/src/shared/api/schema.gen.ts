@@ -61,7 +61,11 @@ export interface paths {
         /**
          * Get Account History
          * @description Menu 7 on the `broker` account, the mock account by default: the account now, its equity curve, and the account at
-         *     the end of `as_of`. It never orders and records no run.
+         *     the end of `as_of`. A held stock is priced at today's realtime quote where the board of GET /v1/market/quotes holds
+         *     one (`live_stock_ids`), which then ends the equity curve too, else at its last daily close. With `since` the
+         *     equity curve holds the days from it on only: a page that holds the curve asks for today alone when a quote moved,
+         *     since the whole curve of an old account is large and slow to value. It asks the broker for no quote, never orders
+         *     and records no run.
          */
         get: operations["get_account_history_v1_account_history_get"];
         put?: never;
@@ -486,8 +490,9 @@ export interface paths {
          *     them now (where the site shows the user features.sinopac_account, the user is an administrator and the login is
          *     up), the mock account's (features.mock_account) and the holdings entered by hand. `sources` narrows them; a source
          *     the site does not show the user is never read. Each holding stays under its source and counts once: the same stock
-         *     at the broker and entered by hand is two holdings. Each is valued at its stock's last close the site holds, net of
-         *     the SELL fee and tax, and carries its standing in the monthly ranking as /v1/market/stocks/{id}/ranking answers it,
+         *     at the broker and entered by hand is two holdings. Each is valued at its stock's last close the site holds, or at
+         *     today's realtime quote where the board of GET /v1/market/quotes holds a newer one (`live_stock_ids`), net of the
+         *     SELL fee and tax, and carries its standing in the monthly ranking as /v1/market/stocks/{id}/ranking answers it,
          *     or why the ranking leaves it out, and its latest month of revenue with the ranking's acceleration. The portfolio
          *     says its concentration in the holdings.concentration_positions largest stocks, the share of its value the ranking
          *     holds now, and the value-weighted score over the scored holdings with their share. The score figures are None for a
@@ -664,6 +669,33 @@ export interface paths {
          * @description The latest session's most traded stocks in the TWSE and TPEX daily listings, with that session's bar. Public.
          */
         get: operations["get_most_traded_v1_market_most_traded_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/market/quotes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Page Quotes
+         * @description The realtime quotes the ranking, the watchlist and a stock's page show beside their settled closes, and the ones
+         *     My holdings and the mock account are valued at by their own endpoints. Every page and user read one board, which
+         *     asks Shioaji once for all of them at most every market_data.page_quote_refresh_seconds while a session trades, and
+         *     after the close until one request was answered; outside that it only answers what it holds of today. `refresh`
+         *     says when a page asks again. Of a request that names more stocks than market_data.quote_batch_size, what the board
+         *     reads at once, the first ones are read and the rest are answered null. A site without a Shioaji login now answers
+         *     so and asks nothing. Private: a visitor never makes the site ask the broker. It reads quotes alone, on nobody's
+         *     Pipeline: it holds no account and prices no order.
+         */
+        get: operations["get_page_quotes_v1_market_quotes_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2513,8 +2545,9 @@ export interface components {
         /**
          * HoldingsResponse
          * @description The My holdings page (PortfolioAnalysis): the holdings of each source read, each counted once under its source, and
-         *     the portfolio they make at the last closes the site holds. The score ranks two measured factors and forecasts
-         *     nothing. The score figures are None where the site does not show the viewer the ranking.
+         *     the portfolio they make at the last closes the site holds, or at today's quotes where the quote board holds newer
+         *     ones. The score ranks two measured factors and forecasts nothing. The score figures are None where the site does
+         *     not show the viewer the ranking.
          */
         HoldingsResponse: {
             /** Asked */
@@ -2528,6 +2561,8 @@ export interface components {
             highest: components["schemas"]["HoldingResponse"] | null;
             /** Holdings */
             holdings: components["schemas"]["HoldingResponse"][];
+            /** Live Stock Ids */
+            live_stock_ids: string[];
             lowest: components["schemas"]["HoldingResponse"] | null;
             /** Market Value */
             market_value: number;
@@ -2938,6 +2973,19 @@ export interface components {
          * @enum {string}
          */
         OrderType: "market" | "limit";
+        /**
+         * PageQuotesResponse
+         * @description The realtime quotes a page shows beside its settled closes, from the board every page and user share.
+         */
+        PageQuotesResponse: {
+            /** Quotes */
+            quotes: {
+                [key: string]: components["schemas"]["Ohlcv"] | null;
+            };
+            /** Realtime Quotes */
+            realtime_quotes: boolean;
+            refresh: components["schemas"]["QuoteRefresh"] | null;
+        };
         /** PeMedian */
         PeMedian: {
             /** Sample Size */
@@ -3082,6 +3130,16 @@ export interface components {
             quarter: components["schemas"]["FiscalQuarter"];
             /** Quarter Eps */
             quarter_eps: number | null;
+        };
+        /**
+         * QuoteRefresh
+         * @description What a page that shows the quote board's quotes is told about asking again.
+         */
+        QuoteRefresh: {
+            /** Changing */
+            changing: boolean;
+            /** Seconds */
+            seconds: number;
         };
         /**
          * RankedFactor
@@ -4463,6 +4521,7 @@ export interface operations {
             query?: {
                 broker?: components["schemas"]["ExecutionProvider"];
                 as_of?: string | null;
+                since?: string | null;
             };
             header?: never;
             path?: never;
@@ -5420,6 +5479,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_page_quotes_v1_market_quotes_get: {
+        parameters: {
+            query: {
+                ids: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PageQuotesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

@@ -240,6 +240,11 @@ class TradingPhase(StrEnum):
     CLOSING_AUCTION = auto()
     """Orders queue for the closing call auction, which takes limit ROD orders only."""
 
+    @property
+    def in_session(self) -> bool:
+        """Whether the day's session is under way, from the opening call auction to the close: a stock's quote may still change."""
+        return self is not TradingPhase.CLOSED
+
 
 class OrderPricing(StrEnum):
     """

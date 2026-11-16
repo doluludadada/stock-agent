@@ -27,7 +27,7 @@ The server checks every request. Hiding a menu is never the protection.
 | Access | Credential | Opens |
 | --- | --- | --- |
 | Public | none | `/v1/auth/status`, `/setup` (with the console's setup code), `/register`, `/sign-in`, `/sign-out`, `/google/start`, `/google/callback`; `GET /v1/technical-settings/built-in-strategies`, `/v1/market/stocks?query`, `/v1/market/most-traded`, `/v1/market/breadth`, `/v1/market/stocks/{id}`, `/v1/market/indexes/{index}` |
-| Signed in | the session cookie | `/v1/auth/me`, every other write, and the user's own runs, decisions, orders, watchlist, mock account, saved strategies, `/v1/market/stocks/{id}/technical`, valuation |
+| Signed in | the session cookie | `/v1/auth/me`, every other write, and the user's own runs, decisions, orders, watchlist, mock account, saved strategies, `/v1/market/stocks/{id}/technical`, `/v1/market/quotes`, valuation |
 | Administrator | the session cookie of an administrator | `/v1/admin/users*` and `/v1/admin/settings` |
 
 - Each feature of the site has a visibility under `features` in `config/appsetting.yaml`: `off`, `administrators`
@@ -44,6 +44,7 @@ The server checks every request. Hiding a menu is never the protection.
   | `ranking` | `/v1/rankings/*` | everyone |
   | `stock_pages` | `/v1/market/stocks/{id}/financials`, `/analysis`, `/news`, `/technical`, and `/ranking`, the stock's score, which needs `ranking` shown to the viewer too | everyone |
   | `watchlist` | `/v1/watchlist/*` | everyone |
+  | any one of `holdings`, `mock_account`, `ranking`, `stock_pages`, `watchlist` | `/v1/market/quotes`, the realtime quotes those pages show | as each of them |
   | `valuation` | `/v1/valuation/*` | administrators |
   | `full_cycle`, `specific_stock`, `buzz`, `intraday` | each one's start under `/v1/runs`; `specific_stock` also the manual BUY. A run's own pages (`GET /v1/runs*`) need any one of the four | administrators |
   | `strategy_library`, `strategy_designer` | `PUT /v1/technical-settings` (either one) | administrators |

@@ -17,7 +17,7 @@ from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from b_application.config.market_data_config import MarketDataConfig
 from b_application.config.trading_config import ShioajiLogin
-from c_infrastructure.market.request_pace import RequestPace
+from c_infrastructure.request_pace import RequestPace
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
 
 

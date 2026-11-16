@@ -145,6 +145,10 @@ class RankingUnavailable(LookupError):
     """The daily history holds no decision session of the monthly ranking. The message says what it holds. 422."""
 
 
+class FeatureHidden(PermissionError):
+    """The site does not show this viewer a feature the request needs (features.* in appsetting.yaml). 403: the session stays."""
+
+
 class FollowTimeNotOffered(ValueError):
     """A user chose a time for the scheduled ranking follow that ranking.follow_times does not offer. Nothing saved. 422."""
 

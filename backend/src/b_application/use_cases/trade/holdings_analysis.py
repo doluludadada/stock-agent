@@ -2,6 +2,7 @@ from collections.abc import Mapping, Sequence
 
 from a_domain.model.trading.account import Position
 from a_domain.ports.market.daily_close_archive import IDailyCloseArchive
+from a_domain.ports.market.price_provider import IQuoteBoard
 from a_domain.ports.market.stock_provider import IStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
@@ -15,21 +16,25 @@ from b_application.config.app_config import AppConfig
 class HoldingsAnalysis:
     """
     Use Case: Read the holdings as one portfolio from held data alone (PortfolioAnalysisRule): each stock's last close
-    in the ranking's daily history, its name in the listing, its standing in the monthly ranking as `standings` holds
-    it, and its revenue trend from the archived months by the stock page's own rule. It fetches no price. A listing
-    outage leaves the holdings unnamed.
+    in the ranking's daily history, today's quote of it as the board the pages share holds it, its name in the
+    listing, its standing in the monthly ranking as `standings` holds it, and its revenue trend from the archived
+    months by the stock page's own rule. It fetches no price and asks the quote source nothing: a holding is valued at
+    a quote only once a page's own request made the board read it (PageQuotes). A listing outage leaves the holdings
+    unnamed.
     """
 
     def __init__(
         self,
         stock_provider: IStockProvider,
         archive: IDailyCloseArchive,
+        quote_board: IQuoteBoard,
         market_clock: IMarketClock,
         config: AppConfig,
         logger: ILoggingProvider,
     ) -> None:
         self._stock_provider = stock_provider
         self._archive = archive
+        self._quote_board = quote_board
         self._market_clock = market_clock
         self._last_close_rule = LastCloseRule()
         self._revenue_rule = config.ranking.revenue_trend_rule()
@@ -57,4 +62,6 @@ class HoldingsAnalysis:
         months = {stock_id: (await self._archive.financials(stock_id))[1] for stock_id in stock_ids}
         revenues = {stock_id: self._revenue_rule.apply(held_months) for stock_id, held_months in months.items() if held_months}
 
-        return self._analysis_rule.apply(held, closes, names, standings, revenues)
+        quotes = self._quote_board.quotes(stock_ids, self._market_clock.today())
+
+        return self._analysis_rule.apply(held, closes, quotes, names, standings, revenues)

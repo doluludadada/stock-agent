@@ -1,7 +1,7 @@
 import { ChevronDown, ListX, Wallet } from 'lucide-react'
-import { useId, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { useTranslation } from '@/i18n'
-import { useHasPermission } from '@/shared/api'
+import { useHasPermission, useStockQuotes } from '@/shared/api'
 import { useFormat } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { FormulaLine } from '@/shared/ui/formula-line'
@@ -33,6 +33,8 @@ export function LatestRanking({ ranking, previous, decisionDay, today, className
   const entered = new Set(changed?.entered.map((stock) => stock.stock_id))
   const [year, month] = ranking.revenue_month.split('-').map(Number) as [number, number]
   const revenueMonth = format.yearMonth(year, month)
+  const codes = useMemo(() => ranking.stocks.map((stock) => stock.stock_id), [ranking.stocks])
+  const { quotes, live } = useStockQuotes(codes, { trends: false })
 
   return (
     <Panel
@@ -61,6 +63,8 @@ export function LatestRanking({ ranking, previous, decisionDay, today, className
         <RankedStocksTable
           label={t('latest.title')}
           formula={ranking.formula}
+          quotes={quotes}
+          live={live}
           rows={ranking.stocks.map((stock) => ({ stock, mark: entered.has(stock.stock_id) ? ('entered' as const) : undefined }))}
         />
       )}

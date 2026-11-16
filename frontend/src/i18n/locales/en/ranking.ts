@@ -81,6 +81,7 @@ const ranking = {
   table: {
     place: 'Place',
     stock: 'Stock',
+    price: 'Price',
     score: 'Score',
   },
   formulas: {

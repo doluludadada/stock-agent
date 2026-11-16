@@ -31,7 +31,7 @@ from a_domain.ports.market.daily_close_archive import IDailyCloseArchive
 from a_domain.ports.market.fundamentals_provider import IFundamentalsProvider
 from a_domain.ports.market.news_provider import INewsProvider
 from a_domain.ports.market.news_source import INewsSource
-from a_domain.ports.market.price_provider import IOhlcvProvider
+from a_domain.ports.market.price_provider import IOhlcvProvider, IQuoteBoard
 from a_domain.ports.market.social_media_provider import ISocialMediaProvider
 from a_domain.ports.market.stock_feed import IStockFeed
 from a_domain.ports.market.world_feed import IWorldFeed
@@ -93,6 +93,7 @@ from b_application.use_cases.collect.market_breadth_loader import MarketBreadthL
 from b_application.use_cases.collect.market_data_collector import MarketDataCollector
 from b_application.use_cases.collect.most_traded import MostTraded
 from b_application.use_cases.collect.news_feed import NewsFeed
+from b_application.use_cases.collect.page_quotes import PageQuotes
 from b_application.use_cases.collect.realtime_quote_feed import RealtimeQuoteFeed
 from b_application.use_cases.collect.stock_analysis_lookup import StockAnalysisLookup
 from b_application.use_cases.collect.stock_lookup import StockLookup
@@ -208,11 +209,12 @@ from c_infrastructure.market.daily_bar_matrix_provider import DailyBarMatrixProv
 from c_infrastructure.market.exchange_daily_reports import ExchangeDailyReports
 from c_infrastructure.market.mops_company_basics import MopsCompanyBasicsProvider
 from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider
-from c_infrastructure.market.request_pace import PacedHost, RequestPace, SharedRequestPace
+from c_infrastructure.market.quote_board import QuoteBoard
 from c_infrastructure.market.twse_annual_report_provider import TwseAnnualReportProvider
 from c_infrastructure.market.twse_provider import TaiwanStockProvider
 from c_infrastructure.platforms.line.line_adapter import LinePlatformAdapter
 from c_infrastructure.platforms.line.line_notification_adapter import LineNotificationAdapter
+from c_infrastructure.request_pace import PacedHost, RequestPace, SharedRequestPace
 from c_infrastructure.system.attempt_log import MemoryAttemptLog
 from c_infrastructure.system.chat_styler_service import ChatStylerService
 from c_infrastructure.system.logger_service import LoggerService
@@ -993,6 +995,7 @@ def build_pipeline(
     user: User | None,
     chosen: ExecutionProvider,
     stock_feed: IStockFeed | None,
+    quote_board: IQuoteBoard,
 ) -> Pipeline:
     """
     Every use case once, over the shared ports and the user's own ports, or nobody's for None, on the broker the run
@@ -1024,6 +1027,7 @@ def build_pipeline(
         stock_lookup=StockLookup(stocks, logger),
         stock_search=StockSearch(stocks, config),
         most_traded=MostTraded(stocks, config),
+        page_quotes=PageQuotes(quote_board, market_clock, config),
         market_breadth_loader=MarketBreadthLoader(stocks),
         index_history_loader=IndexHistoryLoader(prices, market_clock, config),
         buzz_scanner=BuzzScanner(dependencies.social_media_provider, stocks, logger, config),
@@ -1134,19 +1138,19 @@ def build_pipeline(
         ),
         follow_time_choice=FollowTimeChoice(dependencies.user_store, market_clock, config, logger),
         scheduled_followers=ScheduledFollowers(dependencies.user_store, market_clock, config),
-        mock_account_history=AccountHistory(owned.mock_broker, journal, stocks, prices, market_clock, config, logger),
+        mock_account_history=AccountHistory(owned.mock_broker, journal, stocks, prices, quote_board, market_clock, config, logger),
         trade_history=TradeHistory(broker, journal),
         mock_account_reset=MockAccountReset(owned.mock_broker, market_clock),
         brokerage_statement=BrokerageStatementReader(brokerage, market_clock, config),
         held_positions=HeldPositions(owned.holding_repository, owned.mock_broker, brokerage, logger),
-        holdings_analysis=HoldingsAnalysis(stocks, dependencies.daily_close_archive, market_clock, config, logger),
+        holdings_analysis=HoldingsAnalysis(stocks, dependencies.daily_close_archive, quote_board, market_clock, config, logger),
         holding_entry=HoldingEntry(owned.holding_repository, market_clock),
         holding_removal=HoldingRemoval(owned.holding_repository),
         reporting=Reporting(notifications, config, logger),
         run_reports=RunReports(journal, logger),
         run_lookup=RunLookup(journal),
         active_watchlist=ActiveWatchlist(owned.watchlist_repository),
-        account_history=AccountHistory(broker, journal, stocks, prices, market_clock, config, logger),
+        account_history=AccountHistory(broker, journal, stocks, prices, quote_board, market_clock, config, logger),
         backtest_options=BacktestOptions(prices, config),
         backtest_scores=BacktestScores(dependencies.bar_matrix_provider, config, logger),
         backtest_replay=BacktestReplay(stocks, prices, owned.backtest_repository, market_clock, config, logger),
@@ -1235,9 +1239,12 @@ def compose_runtime(
     config: AppConfig, logger: ILoggingProvider, market_clock: TaiwanMarketClock, dependencies: ProviderDependencies
 ) -> Runtime:
     stock_feed = create_stock_feed(config, logger, market_clock, dependencies)
-    signed_out = build_pipeline(config, logger, market_clock, dependencies, None, ExecutionProvider.MOCK, stock_feed)
+    quote_board = QuoteBoard(dependencies.price_provider, market_clock, config.market_data, logger)
+    signed_out = build_pipeline(config, logger, market_clock, dependencies, None, ExecutionProvider.MOCK, stock_feed, quote_board)
     return Runtime(
-        pipeline_for=lambda user, broker: build_pipeline(config, logger, market_clock, dependencies, user, broker, stock_feed),
+        pipeline_for=lambda user, broker: build_pipeline(
+            config, logger, market_clock, dependencies, user, broker, stock_feed, quote_board
+        ),
         signed_out=signed_out,
         system_writer=system_writer_pipeline(config, logger, market_clock, dependencies, signed_out),
         market_valuation_cache=MarketValuationCache(signed_out.load_market_valuation, config.api.valuation_cache_minutes * 60),

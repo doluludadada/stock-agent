@@ -3,6 +3,7 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from a_domain.rules.market.quote_refresh import QuoteRefreshRule
 from a_domain.types.enums import SettingUnit
 
 
@@ -51,6 +52,35 @@ class MarketDataConfig(BaseModel):
 
     quote_timeout_seconds: float = Field(default=10.0, gt=0, json_schema_extra={"steps": [5, 10, 20, 30], "unit": SettingUnit.SECONDS})
 
+    page_quote_refresh_seconds: float = Field(
+        default=10, ge=5, le=60, json_schema_extra={"steps": [5, 10, 15, 30, 60], "unit": SettingUnit.SECONDS}
+    )
+    """
+    How often, at most, the quotes the pages show are asked of Shioaji while a session trades: one snapshots request for
+    every stock a page asked for lately, whatever the number of open tabs. An open page asks again this often.
+    """
+
+    page_quote_first_seconds: float = Field(
+        default=2, ge=1, le=10, json_schema_extra={"steps": [1, 2, 5], "unit": SettingUnit.SECONDS}
+    )
+    """
+    Least time after such a request before the next one that a page's stock without a quote yet may cause, so a page
+    just opened does not wait page_quote_refresh_seconds for its first quote.
+    """
+
+    page_quote_idle_seconds: float = Field(
+        default=60, ge=10, le=600, json_schema_extra={"steps": [30, 60, 120, 300], "unit": SettingUnit.SECONDS}
+    )
+    """A stock no page asked for in this long is no longer asked of Shioaji."""
+
+    page_quote_recheck_seconds: float = Field(
+        default=300, ge=60, le=3600, json_schema_extra={"steps": [60, 300, 600, 1800], "unit": SettingUnit.SECONDS}
+    )
+    """
+    How often an open page asks whether the quotes change again once they no longer do: the session is over and its
+    last quotes are read. Such a request costs Shioaji nothing, and it sees the next session start.
+    """
+
     history_request_interval_seconds: float = Field(
         default=3.0, ge=0, json_schema_extra={"steps": [2, 3, 5, 10], "unit": SettingUnit.SECONDS}
     )
@@ -89,3 +119,6 @@ class MarketDataConfig(BaseModel):
 
     most_traded_count: int = Field(default=10, gt=0, le=50, json_schema_extra={"steps": [5, 10, 20, 50]})
     """How many of the latest session's most traded stocks the market overview lists."""
+
+    def quote_refresh_rule(self) -> QuoteRefreshRule:
+        return QuoteRefreshRule(refresh_seconds=self.page_quote_refresh_seconds, recheck_seconds=self.page_quote_recheck_seconds)

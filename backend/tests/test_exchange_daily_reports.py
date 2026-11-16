@@ -22,7 +22,7 @@ from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.types.enums import MarketType
 from b_application.config.market_data_config import MarketDataConfig, MarketHoursConfig
 from c_infrastructure.market.exchange_daily_reports import ExchangeDailyReports
-from c_infrastructure.market.request_pace import RequestPace
+from c_infrastructure.request_pace import RequestPace
 from c_infrastructure.system.market_clock import TaiwanMarketClock
 
 pytestmark = pytest.mark.asyncio

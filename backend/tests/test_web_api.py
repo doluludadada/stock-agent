@@ -438,8 +438,11 @@ async def test_account_history_values_positions_at_their_latest_quote() -> None:
     harness.hold("2317", quantity=1000, average_cost=40.0)
 
     async with serve(harness) as client:
+        unasked = (await client.get("/v1/account/history")).json()
+        await client.get("/v1/market/quotes", params={"ids": ["2330", "2317"]})
         history = (await client.get("/v1/account/history", params={"as_of": "2026-10-19"})).json()
 
+    assert unasked["live_stock_ids"] == [] and harness.prices.realtime_requests == ["2330", "2317"]
     tsmc, hon_hai = history["current"]["positions"]
     assert (tsmc["stock_id"], tsmc["mark_price"], tsmc["market_value"]) == ("2330", 112.0, 112_000.0)
     assert (hon_hai["stock_id"], hon_hai["mark_price"]) == ("2317", 50.0)

@@ -8,6 +8,7 @@ import numpy as np
 from pydantic import Field, FiniteFloat, NonNegativeFloat, PositiveInt
 from pydantic.dataclasses import dataclass
 
+from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.trading.account import Position
 from a_domain.rules.fundamentals.stock_analysis import RevenueMonth, RevenueTrend
 from a_domain.rules.technical.matrix import DailyBarMatrix
@@ -43,7 +44,10 @@ class AnalysedHolding:
 
     source: HoldingSource
     position: Position
-    """Marked at the stock's last close the site holds, net of the SELL fee and tax; without a mark where it holds none."""
+    """
+    Marked at the stock's last close the site holds, or at today's quote where that is newer, net of the SELL fee and
+    tax; without a mark where the site holds neither.
+    """
 
     stock_name: str | None
     weight: Fraction
@@ -66,8 +70,9 @@ class AnalysedHolding:
 @dataclass(frozen=True, kw_only=True)
 class PortfolioAnalysis:
     """
-    The holdings read together, each counted once under its source: what they are worth at the last closes held, how
-    concentrated they are, how much of their value the monthly ranking holds, and their value-weighted score.
+    The holdings read together, each counted once under its source: what they are worth at the last closes held, or
+    at today's quotes where those are newer, how concentrated they are, how much of their value the monthly ranking
+    holds, and their value-weighted score.
     """
 
     sources: list[HoldingSource]
@@ -75,6 +80,9 @@ class PortfolioAnalysis:
 
     holdings: list[AnalysedHolding]
     """Largest market value first."""
+
+    live_stock_ids: list[str]
+    """The held stocks valued at today's realtime quote, in order. Every other holding is at its last close, or unpriced."""
 
     market_value: NonNegativeFloat
     cost: NonNegativeFloat
@@ -106,7 +114,7 @@ class PortfolioAnalysis:
 
 
 def portfolio_analysis(
-    sources: list[HoldingSource], holdings: list[AnalysedHolding], total: float, concentration_positions: PositiveInt
+    sources: list[HoldingSource], holdings: list[AnalysedHolding], live: list[str], total: float, concentration_positions: PositiveInt
 ) -> PortfolioAnalysis:
     by_stock: defaultdict[str, float] = defaultdict(float)
 
@@ -122,6 +130,7 @@ def portfolio_analysis(
     return PortfolioAnalysis(
         sources=sources,
         holdings=holdings,
+        live_stock_ids=live,
         market_value=total,
         cost=math.fsum(holding.position.cost_basis for holding in holdings),
         unrealized_pnl=math.fsum(holding.position.unrealized_pnl for holding in holdings),
@@ -135,12 +144,23 @@ def portfolio_analysis(
     )
 
 
+def quoted_after(closes: Mapping[str, tuple[float, datetime]], quotes: Mapping[str, Ohlcv]) -> dict[str, tuple[float, datetime]]:
+    """The price and time of each quote traded after its stock's last close held, or of a stock with no close held."""
+    return {
+        stock_id: (quote.close, quote.ts)
+        for stock_id, quote in quotes.items()
+        if stock_id not in closes or quote.ts > closes[stock_id][1]
+    }
+
+
 @dataclass(frozen=True)
 class PortfolioAnalysisRule:
     """
-    The portfolio the holdings of every source make. Each position is valued at its stock's last close held
-    (PositionValueRule), one without a close at its cost. A holding stays under its source: the same stock held at the
-    broker and entered by hand is two holdings, each counted once, and one stock for the concentration.
+    The portfolio the holdings of every source make. Each position is valued (PositionValueRule) at its stock's last
+    close held, or at today's quote where one of `quotes`, the held stocks' own, was traded after that close, so a
+    session's settled close replaces its last quote; one with neither counts at its cost. A holding stays under its
+    source: the same stock held at the broker and entered by hand is two holdings, each counted once, and one stock for
+    the concentration.
     """
 
     position_value_rule: PositionValueRule
@@ -150,12 +170,15 @@ class PortfolioAnalysisRule:
         self,
         held: Mapping[HoldingSource, Sequence[Position]],
         closes: Mapping[str, tuple[float, datetime]],
+        quotes: Mapping[str, Ohlcv],
         names: Mapping[str, str],
         standings: Mapping[str, RankingStanding],
         revenues: Mapping[str, RevenueTrend],
     ) -> PortfolioAnalysis:
+        live = quoted_after(closes, quotes)
+        prices = {**closes, **live}
         valued = [
-            (source, self.position_value_rule.apply(position, *closes[position.stock_id]) if position.stock_id in closes else position)
+            (source, self.position_value_rule.apply(position, *prices[position.stock_id]) if position.stock_id in prices else position)
             for source, positions in held.items()
             for position in positions
         ]
@@ -172,5 +195,4 @@ class PortfolioAnalysisRule:
             )
             for source, position in sorted(valued, key=lambda pair: (-pair[1].market_value, pair[1].stock_id, pair[0]))
         ]
-
-        return portfolio_analysis(sorted(held), holdings, total, self.concentration_positions)
+        return portfolio_analysis(sorted(held), holdings, sorted(live), total, self.concentration_positions)

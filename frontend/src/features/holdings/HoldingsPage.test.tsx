@@ -5,6 +5,7 @@ import { I18nextProvider } from 'react-i18next'
 import { MemoryRouter } from 'react-router'
 import { initI18n } from '@/i18n'
 import { session, type Schemas } from '@/shared/api'
+import { PERSONAL_SITE } from '@/test/audiences'
 import { SHIPPED_FORMULA } from '@/test/ranking'
 import { TEST_USER } from '@/test/users'
 import { HoldingsPage } from './HoldingsPage'
@@ -69,6 +70,7 @@ const MIXED: Holdings = {
   asked: ['brokerage', 'manual', 'mock'],
   sources: ['brokerage', 'manual', 'mock'],
   holdings: [AT_THE_BROKER, AN_ETF_IN_THE_MOCK_ACCOUNT, AN_ODD_LOT_BY_HAND],
+  live_stock_ids: [],
   market_value: 815_646,
   cost: 716_550,
   unrealized_pnl: 99_096,
@@ -106,8 +108,8 @@ interface Sent {
   body: unknown
 }
 
-/** The holdings endpoints and the listing as the backend answers them; `entry` answers a save. */
-function serve(holdings: () => Response, entry: () => Response = () => json(AN_ODD_LOT_BY_HAND.position)) {
+/** The holdings endpoints and the listing as the backend answers them; `entry` answers a save, `quotes` makes the site one with realtime quotes. */
+function serve(holdings: () => Response, entry: () => Response = () => json(AN_ODD_LOT_BY_HAND.position), quotes?: () => Response) {
   const asked: string[] = []
   const sent: Sent[] = []
   vi.stubGlobal(
@@ -121,6 +123,8 @@ function serve(holdings: () => Response, entry: () => Response = () => json(AN_O
       }
       asked.push(url)
       if (pathname === '/v1/holdings') return holdings()
+      if (quotes && pathname === '/v1/market/audience') return json(PERSONAL_SITE)
+      if (quotes && pathname === '/v1/market/quotes') return quotes()
       if (pathname === '/v1/market/stocks') {
         const code = searchParams.get('query') ?? ''
         return json(LISTING[code] ? [{ stock_id: code, name: LISTING[code], market: 'twse', today: null }] : [])
@@ -150,6 +154,33 @@ describe('My holdings', () => {
   afterEach(() => {
     session.signOut()
     vi.unstubAllGlobals()
+  })
+
+  it('asks the server again once the board holds the quotes and shows the figures it valued at them, with today’s move from the quotes’ own changes', async () => {
+    const TRADED_AT = '2026-11-16T10:32:05+08:00'
+    const atQuote = (row: Holding): Holding => ({ ...row, position: { ...row.position, mark_price: 612, marked_at: TRADED_AT, market_value: row.position.quantity * 612, unrealized_pnl: 109_300, unrealized_return: 0.2186 } })
+    const AT_QUOTES: Holdings = { ...MIXED, holdings: [atQuote(AT_THE_BROKER), AN_ETF_IN_THE_MOCK_ACCOUNT, AN_ODD_LOT_BY_HAND], live_stock_ids: ['2330'], market_value: 827_646, unrealized_pnl: 111_051 }
+    const bar = { ts: TRADED_AT, open: 600, high: 612, low: 600, close: 612, volume: 9_000, change: 12 }
+    let boardRead = false
+    const { asked } = serve(
+      () => json(boardRead ? AT_QUOTES : MIXED),
+      undefined,
+      () => {
+        boardRead = true
+        return json({ realtime_quotes: true, refresh: { changing: true, seconds: 10 }, quotes: { '2330': bar, '0050': null } })
+      },
+    )
+    open()
+
+    await waitFor(() => expect(asked.filter((url) => url.startsWith('/v1/holdings'))).toHaveLength(2))
+    const [broker] = await rows()
+    await waitFor(() => expect(broker).toHaveTextContent('612.00'))
+    expect(broker).toHaveTextContent('+109,300')
+    expect(within(broker!).getAllByTestId('quote-time')[0]).toHaveTextContent('Live 10:32')
+    const summary = screen.getByTestId('portfolio-quoted')
+    expect(summary).toHaveTextContent('Live 10:32')
+    expect(summary).toHaveTextContent(`+${((AT_THE_BROKER.position.quantity + AN_ODD_LOT_BY_HAND.position.quantity) * 12).toLocaleString('en-US')}`)
+    expect(screen.getByText('827,646')).toBeVisible()
   })
 
   it('keeps the same stock at the broker and entered by hand as two rows, each under its source, largest first', async () => {

@@ -78,6 +78,8 @@ export function useFormat() {
       dateTime: (isoDateTime: string) => dateFormat(locale, { ...DATE_STYLES.short, ...TIME }).format(new Date(isoDateTime)),
       /** A moment's day and time in Taipei, short: 11/4 13:30. */
       monthDayTime: (isoDateTime: string) => dateFormat(locale, { month: 'numeric', day: 'numeric', ...TIME }).format(new Date(isoDateTime)),
+      /** A moment's time of day in Taipei: 10:32. */
+      time: (isoDateTime: string) => dateFormat(locale, TIME).format(new Date(isoDateTime)),
       /** A calendar month: 2026年9月, September 2026. */
       yearMonth: (year: number, month: number) => dateFormat(locale, { year: 'numeric', month: 'long' }).format(new Date(Date.UTC(year, month - 1, 15, 4))),
       /** The session a price closed, said where it is not the latest: "11/2 收盤". */

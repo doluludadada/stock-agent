@@ -1,5 +1,6 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiRequest, runResultsKey, useIsSignedIn, type Broker, type Schemas } from '@/shared/api'
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { apiRequest, runResultsKey, useIsSignedIn, useLiveQuotes, type Broker, type Schemas } from '@/shared/api'
+import { sessionDate } from '@/shared/lib/chart-range'
 
 export type AccountHistory = Schemas['AccountHistoryResponse']
 export type AccountOpening = Schemas['AccountOpening']
@@ -14,6 +15,8 @@ export const TRADES_PAGE_SIZE = 20
 
 export const accountKeys = {
   history: (asOf: string | null) => [...runResultsKey, 'account', 'mock', 'history', asOf] as const,
+  /** The account from one session on, as it stood at the trades named: a newer trade is another answer. */
+  atQuotes: (since: string | null, trades: string) => [...runResultsKey, 'account', 'mock', 'at-quotes', since, trades] as const,
   brokerage: [...runResultsKey, 'account', 'brokerage'] as const,
   trades: (broker: Broker) => [...runResultsKey, 'account', broker, 'trades'] as const,
 }
@@ -29,6 +32,25 @@ export function useAccountHistory(asOf: string | null, enabled = true) {
     queryFn: ({ signal }) => apiRequest('get', '/v1/account/history', { query: asOf ? { broker: 'mock', as_of: asOf } : { broker: 'mock' }, signal }),
     enabled: signedIn && enabled,
   })
+}
+
+/**
+ * The mock account as the server values it at today's quotes of the held stocks: the account now, and its equity
+ * curve from the quotes' session on, asked again each time the board holds a newer trade of one of them. The whole
+ * curve is not asked again: the server values every day of it, which for an old account is slow and large. Nothing
+ * while the site has no quote of a held stock today; `live` says a session trades.
+ */
+export function useAccountAtQuotes(held: readonly string[]): { latest: AccountHistory | undefined; live: boolean } {
+  const signedIn = useIsSignedIn()
+  const { bars, live, trades } = useLiveQuotes(held)
+  const since = [...bars.values()].map((bar) => sessionDate(bar.ts)).sort().at(-1) ?? null
+  const latest = useQuery({
+    queryKey: accountKeys.atQuotes(since, trades),
+    queryFn: ({ signal }) => apiRequest('get', '/v1/account/history', { query: { broker: 'mock', ...(since ? { since } : {}) }, signal }),
+    enabled: signedIn && since !== null,
+    placeholderData: keepPreviousData,
+  })
+  return { latest: since ? latest.data : undefined, live }
 }
 
 /** The site's SinoPac login goes down and comes back while a tab stays open, so the account is asked again like the brokers. */

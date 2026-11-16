@@ -1,7 +1,10 @@
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect } from 'react'
 import { CHART_RANGES, HISTORY_BARS, sessionDate } from '@/shared/lib/chart-range'
 import { useDebouncedValue } from '@/shared/lib/use-debounced-value'
+import { useAllows } from './audience'
 import { apiRequest } from './http'
+import { useIsSignedIn } from './session'
 import type { components } from './schema.gen'
 
 type Schemas = components['schemas']
@@ -12,6 +15,7 @@ export type IndexHistory = Schemas['IndexHistoryResponse']
 export type MarketIndex = Schemas['MarketIndex']
 export type MarketBreadth = Schemas['MarketBreadth']
 export type ArchiveStatus = Schemas['ArchiveStatusResponse']
+export type PageQuotes = Schemas['PageQuotesResponse']
 
 const SEARCH_DEBOUNCE_MS = 250
 /** The listing changes once per session close; the backend caches it for hours. */
@@ -27,6 +31,8 @@ export const marketKeys = {
   history: (stockId: string, bars: number) => ['public', 'market', 'history', stockId, bars] as const,
   index: (index: MarketIndex, bars: number) => ['public', 'market', 'index', index, bars] as const,
   archiveStatus: ['public', 'market', 'archive-status'] as const,
+  /** Private, so it leaves with the session: only a signed-in viewer makes the site ask the broker. */
+  quotes: (codes: readonly string[]) => ['owner', 'market', 'quotes', ...codes] as const,
 }
 
 export interface SearchState {
@@ -124,13 +130,16 @@ export function useListedNames(codes: readonly string[]): ReadonlyMap<string, st
   }))
 }
 
-/** A stock's latest close as the listing reports it, with the session it closed. */
+/** A stock's latest price: its close as the listing reports it with the session it closed, or today's quote so far. */
 export interface StockQuote {
   close: number
   /** Against the exchange's reference price; against the close before when the listing gave no change. */
+  change: number | null
   changeRatio: number | null
   /** The session, YYYY-MM-DD in Taipei. */
   session: string
+  /** When its last trade was, for a quote of a session whose close is not settled yet; null for a settled close. */
+  tradedAt: string | null
 }
 
 export type Loadable<T> = { status: 'loading' } | { status: 'failed' } | { status: 'ready'; value: T }
@@ -138,7 +147,73 @@ export type Loadable<T> = { status: 'loading' } | { status: 'failed' } | { statu
 function quoteOf(bar: DailyBar | null | undefined, previous?: DailyBar): StockQuote | null {
   if (!bar) return null
   const reference = bar.change !== null ? bar.close - bar.change : previous?.close
-  return { close: bar.close, changeRatio: reference ? (bar.close - reference) / reference : null, session: sessionDate(bar.ts) }
+  const change = reference ? bar.close - reference : null
+  return { close: bar.close, change, changeRatio: change !== null && reference ? change / reference : null, session: sessionDate(bar.ts), tradedAt: null }
+}
+
+/**
+ * The price to show: today's quote where the settled close is of an earlier session or there is none, else the
+ * settled close. Once a session's close is settled it replaces that session's last quote.
+ */
+export function latestQuote(settled: StockQuote | null, quoted: DailyBar | null | undefined): StockQuote | null {
+  const quote = quoteOf(quoted)
+  if (!quote || !quoted || (settled && settled.session >= quote.session)) return settled
+  return { ...quote, tradedAt: quoted.ts }
+}
+
+/** How long a tab waits before it asks for the quotes again: what the server answered, and no timer on a site without quotes now. */
+export function quotesPollMs(answer: PageQuotes | undefined): number | false {
+  return answer?.refresh ? answer.refresh.seconds * 1000 : false
+}
+
+export interface LiveQuotes {
+  /** Today's quote of each stock that traded today. */
+  bars: ReadonlyMap<string, DailyBar>
+  /** A session trades: the quotes change and the tab asks again. */
+  live: boolean
+  /** Names each stock's last trade, so it differs exactly when the board holds a newer trade of one of them; empty without a quote. */
+  trades: string
+}
+
+/**
+ * Today's realtime quotes of these stocks, from the board every page and user of the site share. Only a signed-in
+ * viewer of a site with realtime quotes asks. The tab asks again after the time the server answers, its interval
+ * while the quotes change and a longer one once they stopped, which costs the broker nothing and sees the next
+ * session start; only while it is visible, and at once when it comes back into view. A failed or refused request
+ * leaves the pages on their settled closes.
+ */
+export function useLiveQuotes(codes: readonly string[]): LiveQuotes {
+  const signedIn = useIsSignedIn()
+  const offered = useAllows('realtime_quotes')
+  const ids = [...new Set(codes)].sort()
+  const answer = useQuery({
+    queryKey: marketKeys.quotes(ids),
+    queryFn: ({ signal }) => apiRequest('get', '/v1/market/quotes', { query: { ids }, signal }),
+    enabled: signedIn && offered && ids.length > 0,
+    retry: false,
+    // Whatever the app's default freshness: a tab that comes back into view shows the price of now.
+    refetchOnWindowFocus: 'always',
+    refetchIntervalInBackground: false,
+    refetchInterval: (query) => quotesPollMs(query.state.data),
+  })
+  const bars = new Map<string, DailyBar>()
+  for (const [code, bar] of Object.entries(answer.data?.quotes ?? {})) if (bar) bars.set(code, bar)
+  const trades = [...bars].map(([code, bar]) => `${code}@${bar.ts}`).sort().join()
+  return { bars, live: answer.data?.refresh?.changing === true, trades }
+}
+
+/**
+ * The quotes of a page whose own answer the server values at them (My holdings): each time the board holds a newer
+ * trade of one of these stocks, the page's own endpoint is asked again, so every figure on screen is the server's at
+ * that quote. The page computes none of them.
+ */
+export function useQuotesThenRefetch(codes: readonly string[], refetch: () => unknown): LiveQuotes {
+  const quotes = useLiveQuotes(codes)
+  const { trades } = quotes
+  useEffect(() => {
+    if (trades) void refetch()
+  }, [trades, refetch])
+  return quotes
 }
 
 /**
@@ -148,11 +223,14 @@ function quoteOf(bar: DailyBar | null | undefined, previous?: DailyBar): StockQu
  * under the same key as the stock page, so a stock opened from the list is already loaded. Histories are asked one after
  * another: a cold one goes to Yahoo, which answers a burst of them with empty bars, and the backend then waits hours
  * before asking again. A history already in the cache is read at once; of the others, only the first that has not
- * answered is asked, and its answer re-renders the list, which asks the next.
+ * answered is asked, and its answer re-renders the list, which asks the next. Without `trends` no history is asked:
+ * the quote is the listing's. Either way today's realtime quote replaces a close of an earlier session (latestQuote),
+ * and `live` says a session trades.
  */
-export function useStockQuotes(codes: readonly string[]) {
+export function useStockQuotes(codes: readonly string[], { trends: withTrends = true }: { trends?: boolean } = {}) {
   const client = useQueryClient()
   const listings = useListings(codes)
+  const { bars: quoted, live } = useLiveQuotes(codes)
   const answered = codes.map((code) => client.getQueryState(marketKeys.history(code, HISTORY_BARS))?.status)
   const next = answered.findIndex((status) => status !== 'success' && status !== 'error')
   const histories = useQueries({
@@ -160,7 +238,7 @@ export function useStockQuotes(codes: readonly string[]) {
       queryKey: marketKeys.history(code, HISTORY_BARS),
       queryFn: ({ signal }: { signal: AbortSignal }) => apiRequest('get', '/v1/market/stocks/{stock_id}', { params: { stock_id: code }, query: { bars: HISTORY_BARS }, signal }),
       staleTime: HISTORY_STALE_MS,
-      enabled: index === next || answered[index] === 'success' || answered[index] === 'error',
+      enabled: withTrends && (index === next || answered[index] === 'success' || answered[index] === 'error'),
     })),
   })
 
@@ -172,9 +250,11 @@ export function useStockQuotes(codes: readonly string[]) {
     const bars = history.data?.bars
     const listed = quoteOf(listing.data?.find((stock) => stock.stock_id === code)?.today)
     const charted = bars ? quoteOf(bars.at(-1), bars.at(-2)) : null
-    const quote = listed && charted ? (charted.session > listed.session ? charted : listed) : (listed ?? charted)
-    quotes.set(code, quote ? { status: 'ready', value: quote } : listing.isPending || history.isPending ? { status: 'loading' } : { status: 'failed' })
+    const settled = listed && charted ? (charted.session > listed.session ? charted : listed) : (listed ?? charted)
+    const quote = latestQuote(settled, quoted.get(code))
+    const waiting = listing.isPending || (withTrends && history.isPending)
+    quotes.set(code, quote ? { status: 'ready', value: quote } : waiting ? { status: 'loading' } : { status: 'failed' })
     trends.set(code, bars ? { status: 'ready', value: bars.slice(-CHART_RANGES['1M']).map((bar) => bar.close) } : history.isError ? { status: 'failed' } : { status: 'loading' })
   })
-  return { quotes, trends }
+  return { quotes, trends, live }
 }

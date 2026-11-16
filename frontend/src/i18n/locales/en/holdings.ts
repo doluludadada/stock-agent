@@ -22,6 +22,7 @@ const holdings = {
     empty: 'Enter what you hold to see its value and gain here.',
   },
   summary: {
+    today: 'Today',
     marketValue: 'Market value',
     unrealized: 'Unrealized P&L',
     cost: 'Cost',
@@ -44,7 +45,6 @@ const holdings = {
   row: {
     held: '{{shares}} shares @ {{cost}}',
     valued: 'value {{value}} · weight {{weight}}',
-    closed: '{{price}}, {{close}}',
     revenue: 'revenue acceleration {{figure}}',
     revenueRun: 'revenue acceleration {{figure}}, {{line}}',
   },

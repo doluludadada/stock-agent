@@ -98,6 +98,7 @@ const common = {
   ai: { generated: 'AI-generated, may be wrong', writtenAt: '{{time}} Taipei' },
   opensSource: '(opens the source in a new tab)',
   units: { lots: '{{value}} lots', closeOn: '{{date}} close' },
+  quote: { live: 'Live {{time}}', lastTrade: 'Last trade {{time}}' },
   range: { '1M': '1M', '3M': '3M', '6M': '6M', '1Y': '1Y' },
   trend: {
     range: 'Range',

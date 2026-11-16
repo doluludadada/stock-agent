@@ -1,5 +1,6 @@
-import type { Schemas } from '@/shared/api'
+import type { DailyBar, Schemas } from '@/shared/api'
 import { sessionDate } from '@/shared/lib/chart-range'
+import { dayMove, type DayMove } from '@/shared/lib/day-move'
 
 export type Holdings = Schemas['HoldingsResponse']
 export type Holding = Schemas['HoldingResponse']
@@ -91,5 +92,30 @@ export function draftOf({ position }: Holding): EntryDraft {
     quantity: String(position.quantity),
     averageCost: String(position.average_cost),
     openedOn: position.opened_at ? sessionDate(position.opened_at) : '',
+  }
+}
+
+/** What the server valued at today's quotes in a portfolio. */
+export interface QuotedHoldings {
+  /** The rows valued at a quote, by holdingKey. */
+  quoted: ReadonlySet<string>
+  /** Today's move of those rows, from the exchange's change each quote carries; null when none is valued at a quote. */
+  day: DayMove | null
+  /** The latest trade among the quotes the server used. */
+  tradedAt: string | null
+}
+
+/**
+ * Which holdings the server valued at today's quote (`live_stock_ids`), when the newest of those quotes was traded,
+ * and today's move of them. Every figure of the portfolio stays the server's: the worth, the gain or loss, the
+ * weights, the concentration and the ranking's shares are all computed there, at those quotes.
+ */
+export function quotedHoldings(holdings: Holdings, quotes: ReadonlyMap<string, DailyBar>): QuotedHoldings {
+  const live = new Set(holdings.live_stock_ids)
+  const rows = holdings.holdings.filter((row) => live.has(row.position.stock_id))
+  return {
+    quoted: new Set(rows.map(holdingKey)),
+    day: dayMove(rows.map((row) => ({ quantity: row.position.quantity, quoted: quotes.get(row.position.stock_id) }))),
+    tradedAt: rows.flatMap((row) => row.position.marked_at ?? []).sort().at(-1) ?? null,
   }
 }

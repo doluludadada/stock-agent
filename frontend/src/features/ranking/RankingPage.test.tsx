@@ -179,7 +179,7 @@ describe('the ranking page', () => {
     open()
 
     const table = await screen.findByRole('table', { name: "This month's ranking" })
-    expect(within(table).getAllByRole('columnheader').map((header) => header.textContent)).toEqual(['Place', 'Stock', 'Revenue, 3 mo ÷ 12 mo', 'Vs 250-session high', 'Score'])
+    expect(within(table).getAllByRole('columnheader').map((header) => header.textContent)).toEqual(['Place', 'Stock', 'Price', 'Revenue, 3 mo ÷ 12 mo', 'Vs 250-session high', 'Score'])
     await screen.findByRole('table', { name: 'The ranking against 0050' })
     expect(screen.getAllByText('Revenue, 3 mo ÷ 12 mo + Vs 250-session high').length).toBeGreaterThanOrEqual(2)
   })

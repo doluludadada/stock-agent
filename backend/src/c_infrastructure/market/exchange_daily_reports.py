@@ -13,8 +13,8 @@ from a_domain.types.enums import MarketType
 from b_application.config.market_data_config import MarketDataConfig
 from b_application.config.sources_config import DailyReportFeed, ExRightReferenceFeed, QuoteFields
 from c_infrastructure.market.exchange_text import ROC_YEAR_OFFSET, parse_change, parse_number
-from c_infrastructure.market.request_pace import RequestPace
 from c_infrastructure.market.twse_provider import STOCK_CODE_LENGTH
+from c_infrastructure.request_pace import RequestPace
 
 
 class ExchangeDailyReports(IDailyHistorySource):

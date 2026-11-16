@@ -30,6 +30,7 @@ from a_domain.model.valuation.scan import ScanCriteria
 from a_domain.model.valuation.valuation import PeMedian, ReportSection
 from a_domain.ports.system.settings_files import SettingChange, SettingsProblem
 from a_domain.rules.fundamentals.stock_analysis import RevenueMonth
+from a_domain.rules.market.quote_refresh import QuoteRefresh
 from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
 from a_domain.rules.trading.ranking import RankedStock
 from a_domain.types.enums import (
@@ -417,10 +418,13 @@ class AccountAsOfResponse(BaseModel):
 class AccountHistoryResponse(BaseModel):
     current: AccountValueResponse
     live_stock_ids: list[str]
-    """The held stocks `current` prices at a live quote. Any other position is at its last daily close, or unpriced."""
+    """The held stocks `current` prices at today's realtime quote. Any other position is at its last daily close, or unpriced."""
 
     equity_curve: dict[date, AccountValueResponse]
-    """The account at the end of each trading day since the first fill, in day order."""
+    """
+    The account at the end of each trading day since the first fill, in day order. While `current` is priced at
+    today's quotes, today ends the curve with the account at those quotes.
+    """
 
     as_of: AccountAsOfResponse | None
     """None when as_of was not asked for, or no fill happened on or before it."""
@@ -515,8 +519,9 @@ class HoldingResponse(Response):
 class HoldingsResponse(Response):
     """
     The My holdings page (PortfolioAnalysis): the holdings of each source read, each counted once under its source, and
-    the portfolio they make at the last closes the site holds. The score ranks two measured factors and forecasts
-    nothing. The score figures are None where the site does not show the viewer the ranking.
+    the portfolio they make at the last closes the site holds, or at today's quotes where the quote board holds newer
+    ones. The score ranks two measured factors and forecasts nothing. The score figures are None where the site does
+    not show the viewer the ranking.
     """
 
     asked: list[HoldingSource]
@@ -526,6 +531,9 @@ class HoldingsResponse(Response):
     """The sources read. One asked for and absent here could not be read now: SinoPac's login is down."""
 
     holdings: list[HoldingResponse]
+    live_stock_ids: list[str]
+    """The held stocks valued at today's realtime quote. Any other holding is at its last close, or unpriced."""
+
     market_value: float
     cost: float
     unrealized_pnl: float
@@ -578,6 +586,24 @@ class ArchiveStatusResponse(BaseModel):
     """The sessions of TWSE and TPEX stock closes the archive holds: the most daily bars it can serve one stock."""
     needed: int
     """The daily bars the built-in strategies need: the most any of them reads."""
+
+
+class PageQuotesResponse(BaseModel):
+    """The realtime quotes a page shows beside its settled closes, from the board every page and user share."""
+
+    realtime_quotes: bool
+    """Whether the site has realtime quotes now. Without them `quotes` is empty and nothing was asked of the broker."""
+    refresh: QuoteRefresh | None
+    """
+    When a page asks again, and whether the quotes may still change meanwhile. Null on a site without realtime quotes
+    now, which a page asks again when it comes back into view.
+    """
+    quotes: dict[str, Ohlcv | None]
+    """
+    Each stock asked for. Its quote is today's session so far: `close` the last trade's price, `ts` that trade's time,
+    `change` against the session's reference price, `volume` in shares. Null for a stock with no trade yet today, one
+    the board has not read yet, one the broker does not list, and one past the stocks the board reads at once.
+    """
 
 
 class AudienceResponse(BaseModel):

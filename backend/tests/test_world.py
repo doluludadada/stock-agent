@@ -46,7 +46,7 @@ from c_infrastructure.database.repositories.article_store import SqlArticleStore
 from c_infrastructure.database.repositories.stock_brief_repository import SqlStockBriefRepository
 from c_infrastructure.database.repositories.world_indicator_repository import SqlWorldIndicatorRepository
 from c_infrastructure.feed.world_feed import WorldFeed
-from c_infrastructure.market.request_pace import RequestPace
+from c_infrastructure.request_pace import RequestPace
 from d_presentation.dependencies import compose_runtime, create_world_feed
 
 pytestmark = pytest.mark.asyncio

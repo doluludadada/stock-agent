@@ -192,12 +192,17 @@ def scheduled_since(follows: Sequence[SystemStats], day: date, now: datetime) ->
     return [follow for follow in follows if follow.scheduled and follow.start_time.astimezone(now.tzinfo).date() >= day]
 
 
+def left_nothing_to_trade(follow: SystemStats) -> bool:
+    """Whether a ranking follow left the account nothing to trade for the decision it took: the account holds that ranking."""
+    return follow.ranking_open == 0
+
+
 def unfinished_follow(follows: Sequence[SystemStats], pending: date | None, now: datetime) -> SystemStats | None:
     """The schedule's last follow since the day after the `pending` decision that did not leave the account nothing to trade."""
     if pending is None:
         return None
 
-    tries = [follow for follow in scheduled_since(follows, pending + timedelta(days=1), now) if follow.ranking_open != 0]
+    tries = [follow for follow in scheduled_since(follows, pending + timedelta(days=1), now) if not left_nothing_to_trade(follow)]
 
     return tries[-1] if tries else None
 
@@ -227,7 +232,7 @@ class FollowScheduleRule:
         decisions = self.decision_rule.apply(sessions)
         decided_on = sessions[decisions[-1][0]] if decisions else None
         finished = any(
-            follow.ranking_open == 0 and follow.ranking_decided_on == decided_on and follow.ranking_formula == self.formula
+            left_nothing_to_trade(follow) and follow.ranking_decided_on == decided_on and follow.ranking_formula == self.formula
             for follow in follows
         )
         pending = decided_on if decided_on is not None and decided_on < now.date() and not finished else None

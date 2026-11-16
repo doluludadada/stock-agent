@@ -30,8 +30,8 @@ from b_application.config.market_data_config import MarketDataConfig, MarketHour
 from b_application.use_cases.collect.fundamentals_history_backfill import FundamentalsHistoryBackfill
 from c_infrastructure.database.repositories.daily_close_archive import SqlDailyCloseArchive
 from c_infrastructure.market.mops_fundamentals_provider import MopsFundamentalsProvider
-from c_infrastructure.market.request_pace import RequestPace
 from c_infrastructure.market.twse_provider import TaiwanStockProvider
+from c_infrastructure.request_pace import RequestPace
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE, TaiwanMarketClock
 
 CONFIG = shipped_config()

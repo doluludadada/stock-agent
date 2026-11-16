@@ -50,7 +50,8 @@ async def test_account_history_shows_positions_and_never_places_an_order(screen:
 
     output = screen.getvalue()
     assert harness.broker.placed == []
-    assert "Account Now" in output and "2330" in output and "112.00" in output
+    assert "Account Now" in output and "2330" in output and "110.00" in output
+    assert harness.prices.realtime_requests == []
     assert "No fills recorded yet, so there is no equity curve." in output
     assert "No fill recorded on or before 2026-10-19." in output
 
@@ -75,9 +76,11 @@ async def test_account_history_warns_about_each_position_whose_price_is_not_a_li
     harness.hold("2317", quantity=1000, average_cost=40.0)
     harness.hold("2603", quantity=1000, average_cost=30.0)
 
+    await harness.pipeline.load_page_quotes(["2330", "2317", "2603"])
     await harness.show_account_history()
 
     output = screen.getvalue()
+    assert "112.00" in output
     assert "Warning: no live quote for 2317. Its price is the daily close of 2026-10-18 13:30, not the current price." in output
     assert "Warning: no price for 2603. It is valued at its average cost, with no unrealized PnL." in output
     assert "for 2330." not in output
