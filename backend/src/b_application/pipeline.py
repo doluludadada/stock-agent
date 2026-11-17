@@ -848,12 +848,14 @@ class Pipeline:
         """The market overview: the latest session's most traded stocks in the exchange listing."""
         return await self.most_traded.execute()
 
-    async def load_page_quotes(self, stock_ids: list[str]) -> tuple[dict[str, Ohlcv], QuoteRefresh]:
+    async def load_page_quotes(
+        self, stock_ids: list[str], indexes: list[MarketIndex]
+    ) -> tuple[dict[str, Ohlcv], dict[MarketIndex, Ohlcv], QuoteRefresh]:
         """
-        The pages' realtime quotes: today's quote of each of these stocks that traded today, from the board every page
-        shares, and when a page asks again. It reads quotes alone.
+        The pages' realtime quotes: today's quote of each of these stocks and market indexes that has one, from the
+        board every page shares, and when a page asks again. It reads quotes alone.
         """
-        return await self.page_quotes.execute(stock_ids)
+        return await self.page_quotes.execute(stock_ids, indexes)
 
     async def archive_daily_closes(self) -> tuple[list[ArchivedSession], list[ArchivedQuarter], list[ArchivedMonth]]:
         """

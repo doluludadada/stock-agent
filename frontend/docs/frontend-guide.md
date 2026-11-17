@@ -107,6 +107,7 @@ the contract by `catalog.test.ts`.
 | --- | --- | --- |
 | Listing search, most traded, breadth, stock and index bars, many stocks' quotes and names | `shared/api/market.ts` | `/v1/market` |
 | Today's realtime quotes of many stocks, for a signed-in viewer of a site that has them | `shared/api/market.ts` (`useLiveQuotes`) | `/v1/market/quotes` |
+| Today's realtime quote of the market index, for the same viewer once a session opened | `shared/api/market.ts` (`useIndexQuote`) | `/v1/market/index-quotes` |
 | The site's audience and what it allows; the open-data archive's warm-up | `shared/api/audience.ts`, `shared/api/market.ts` | `/v1/market/audience`, `/v1/market/archive-status` |
 | Whether the site needs its first administrator and takes registrations; whom it shows each feature to | `shared/api/features.ts` | `/v1/auth/status` |
 | The brokers the user may choose now, the mock account first, a real one with its server and BUY limits | `shared/api/brokers.ts` | `/v1/account/brokers` |
@@ -185,7 +186,13 @@ Every page's own request answers the last settled close. Where the site has real
   history it already holds, because the server values every day of the curve and a year of days is slow and large.
   From the quotes themselves a page takes only today's move, the sum of each quote's own `change` (`dayMove`), which
   is no figure the server computes.
-- The index and the breadth on Today stay at the settled session: the site's quote source serves stocks only.
+- The home page's row and the market overview's trend ask for the index's quote (`useIndexQuote`), one request for
+  both; the overview asks only while its trend shows the index. The quote is one more bar: `withQuote` ends the daily history with it by `latestQuote`'s rule, so the
+  headline, the sparkline and the trend read the server's value and change. The server gives an index quote no volume (0), and
+  the trend shows a dash for the last volume of such a quote. Before the session's first trade the server answers no index, and a visitor, a public site
+  and a site without a login never ask: all of them see the settled close.
+- The breadth, the industries and the most traded stocks stay at the settled session: the site reads no quote of the
+  whole market.
 
 ## What the site's audience allows
 

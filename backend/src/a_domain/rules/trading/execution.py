@@ -1,13 +1,15 @@
-from collections.abc import Sequence
+import math
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 
 from pydantic import PositiveInt, validate_call
 from pydantic.dataclasses import dataclass
 
-from a_domain.model.trading.account import Account, Position
+from a_domain.model.trading.account import Account, BrokerFill, Position
 from a_domain.model.trading.order import ExchangeOrder, Order
 from a_domain.rules.trading.cost import TradeCost, TradingCostRule
 from a_domain.types.enums import LotKind, OrderStatus, OrderType, RejectReason, TimeInForce, TradeAction
+from a_domain.types.values import PositiveFiniteFloat
 
 
 @dataclass(frozen=True)
@@ -46,6 +48,55 @@ class OrderAcceptanceRule:
             return RejectReason.INSUFFICIENT_POSITION, f"holds {position.quantity}, selling {order.quantity}"
 
         return None
+
+
+@dataclass(frozen=True)
+class SimulationCashRule:
+    """
+    The cash of a real broker's account on its simulation server, which reports no balance: the cash the account
+    started with, minus what its stocks cost, plus the profit and loss its sales realized. `simulation_initial_cash` is
+    a setting; every other figure is the broker's own record of the account, so the positions are held once, at the
+    broker.
+
+    A stock's position does not list the BUYs of it dealt today yet while it holds no more shares than the broker says
+    the account held at yesterday's close (`held_yesterday`), so the stock costs its position and those BUYs. Once the
+    position holds more it lists them, and the stock costs the larger of the two: a BUY listed both ways counts once,
+    and a stock bought new today whose position lists only part of the day's BUYs still counts them whole. Two BUYs in
+    a row then never spend the same cash. A stock also sold today can count a listed BUY twice, which understates the
+    cash; one topped up today whose position lists only part of the day's BUYs counts the larger of the two, which can
+    overstate it. `sales` are every sale the broker lists, each with the profit or loss the broker says it realized,
+    taken as what the sale brought after both trades' fees and its tax. A position's cost is taken as what the broker
+    says the shares cost.
+
+    The answer is below zero when the records say the account spent more than it started with: the setting was lowered
+    under what the account holds, or the broker's figures are not what this rule takes them for.
+    """
+
+    simulation_initial_cash: PositiveFiniteFloat
+
+    def apply(
+        self,
+        positions: Sequence[Position],
+        held_yesterday: Mapping[str, int],
+        bought_today: Mapping[str, float],
+        sales: Sequence[BrokerFill],
+    ) -> float:
+        shares: dict[str, int] = {}
+        held: dict[str, float] = {}
+
+        for position in positions:
+            shares[position.stock_id] = shares.get(position.stock_id, 0) + position.quantity
+            held[position.stock_id] = held.get(position.stock_id, 0.0) + position.cost_basis
+
+        stocks_cost = math.fsum(
+            max(held.get(stock_id, 0.0), bought_today.get(stock_id, 0.0))
+            if shares.get(stock_id, 0) > held_yesterday.get(stock_id, 0)
+            else held.get(stock_id, 0.0) + bought_today.get(stock_id, 0.0)
+            for stock_id in held.keys() | bought_today.keys()
+        )
+        realized_pnl = math.fsum(sale.realized_pnl or 0.0 for sale in sales)
+
+        return self.simulation_initial_cash - stocks_cost + realized_pnl
 
 
 @dataclass(frozen=True)

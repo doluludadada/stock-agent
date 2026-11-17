@@ -222,7 +222,7 @@ async def open_stack(
         ),
         article_index=FakeArticleIndex(FakeTextEmbedder()),
         users_stocks=FakeUsersStocks(),
-        broker_market_data=True,
+        broker_quotes=quotes,
         shioaji=ShioajiConnection(client=FakeShioaji(), up=True),
         daily_close_archive=archive,
         fundamentals_provider=FakeFundamentalsProvider(),

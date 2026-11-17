@@ -71,8 +71,9 @@ async def get_brokers(runtime: RuntimeDependency, user: CurrentUser) -> list[Bro
 async def get_brokerage_account(runtime: RuntimeDependency, user: CurrentUser, pipeline: UserPipeline) -> BrokerageAccountResponse:
     """
     The SinoPac account as the broker reports it now, for an administrator the site shows features.sinopac_account:
-    the bank balance, the settlements due, the positions with the broker's last prices and its own unrealized PnL,
-    today's deals and the sales of the last holdings.realized_days days with the PnL the broker says each realized.
+    the bank balance (the site's figure on the simulation server: `statement.simulation`), the settlements due, the
+    positions with the broker's last prices and its own unrealized PnL, today's deals and the sales of the last
+    holdings.realized_days days with the PnL the broker says each realized.
     `simulation` says which server this environment logs in to, `login_up` whether the login is up (`statement` is None
     while it is down), and `ordering` whether the site lets the user order there (features.sinopac_ordering, off by
     default). It only reads: it sends no order, whatever `ordering` says, and it answers no account number.

@@ -99,7 +99,6 @@ class TaiwanStockProvider(ITaiwanStockProvider):
         async with self._listing_lock:
             now = self._clock.now()
             if self._cache and now < self._cache_expiry:
-                self._logger.debug(f"Returning cached stock list ({len(self._cache)} stocks)")
                 return self._cache
 
             self._cache, self._closes = await fetch_listings(self._exchange, self._clock, self._timeout_seconds, self._logger)

@@ -333,7 +333,7 @@ market_data:
   # The quotes the pages show while a session trades (GET /v1/market/quotes) are held once for every page and user:
   # one snapshots request, of at most quote_batch_size stocks, at most every page_quote_refresh_seconds, for the stocks
   # a page asked for in the last page_quote_idle_seconds. A stock that has no quote yet may bring the next request
-  # forward to page_quote_first_seconds after the last. So the pages cost Shioaji 1 query per 10 s as shipped, and 5
+  # forward to page_quote_first_seconds after the last. So the stocks cost Shioaji 1 query per 10 s as shipped, and 5
   # at the most, of the 50 it allows; an order's quote is asked for itself and waits for no page. Once a session is
   # over and its last quotes are read, an open page asks again every page_quote_recheck_seconds, which costs Shioaji
   # nothing. One request of a page names at most quote_batch_size stocks.
@@ -341,6 +341,17 @@ market_data:
   page_quote_first_seconds: 2
   page_quote_idle_seconds: 60
   page_quote_recheck_seconds: 300
+  # The market overview's index while a session trades (GET /v1/market/index-quotes), for a signed-in viewer: one more
+  # snapshots request, of the index contracts alone, in the round that reads the pages' stocks, so at most every
+  # page_quote_refresh_seconds whatever the number of open tabs, and only while a tab asks. With it the pages cost
+  # Shioaji 2 queries per 10 s as shipped (1 while only the market overview is open) and 10 at the most, of the 50 it
+  # allows. One tab left on the home page for a whole session asks 1,621 times, each for one contract: 1,620 in the
+  # 4.5 hours from 09:00 to 13:30 and once after the close. Nothing is asked for an index before 09:00, when it still
+  # stands at the previous close. Each index is read from Shioaji's Contracts.Indexs[exchange][symbol].
+  quote_index_contracts:
+    taiex:
+      exchange: TSE
+      symbol: TSE001
   # Daily history on a personal site, from the exchanges' own reports of each date (sources.exchange.daily_reports):
   # one request per exchange and session for every listed stock, and two per exchange and month for its index. TWSE
   # refuses an address for minutes after more than about 3 requests in 5 seconds, so each site is asked at most once
@@ -441,6 +452,9 @@ shioaji:
   poll_interval_seconds: 0.5
   # Reads of an order's status before a working order is cancelled, and again after the cancel request.
   max_polls: 10
+  # The cash SinoPac's simulation account started with. That server reports no balance, so the site figures the
+  # account's cash from this and SinoPac's records (SimulationCashRule).
+  simulation_initial_cash: 1000000
 
 holdings:
   # The largest stocks whose share of the holdings' value the My holdings page shows as the concentration.

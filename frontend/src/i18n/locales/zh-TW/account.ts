@@ -83,7 +83,12 @@ const account: DictionaryShape<typeof en> = {
       title: '本站的永豐金連線中斷',
       description: '本站會自動重新連線。',
     },
-    summary: { balance: '銀行餘額', realized: '已實現損益（自 {{date}} 起）' },
+    summary: {
+      balance: '銀行餘額',
+      figuredCash: '現金（本站推算）',
+      figuredNote: '永豐金模擬環境不回報現金餘額，所以這裡的現金是本站推算的數字：永豐金模擬帳戶的起始資金（設定值），減去庫存與今日買進的成本，加上永豐金列出的每筆賣出損益（視為已扣手續費與稅）。',
+      realized: '已實現損益（自 {{date}} 起）',
+    },
     positions: {
       title: '庫存',
       none: '帳戶目前沒有庫存。',

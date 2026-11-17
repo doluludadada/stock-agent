@@ -16,7 +16,7 @@ async def bought_2000_on_monday(tmp_path):
     stack.clock.current = MONDAY_10_00 + timedelta(days=1, hours=1)
     stack.quotes.daily["2330"] = [bar(MONDAY_CLOSE, 100), bar(TUESDAY_CLOSE, 110)]
     stack.quotes.realtime["2330"] = bar(stack.clock.current - timedelta(minutes=1), 112)
-    await stack.pipeline.load_page_quotes(["2330"])
+    await stack.pipeline.load_page_quotes(["2330"], [])
     return stack
 
 

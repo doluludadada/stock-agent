@@ -80,7 +80,13 @@ const account = {
       title: 'The site’s SinoPac login is down',
       description: 'The site reconnects by itself.',
     },
-    summary: { balance: 'Bank balance', realized: 'Realized P&L since {{date}}' },
+    summary: {
+      balance: 'Bank balance',
+      figuredCash: 'Cash (the site’s figure)',
+      figuredNote:
+        'SinoPac’s simulation server reports no cash balance, so the cash here is the site’s figure: the simulation account’s starting cash (a setting), less what the holdings and today’s purchases cost, plus the profit and loss of every sale SinoPac lists, taken as after fees and tax.',
+      realized: 'Realized P&L since {{date}}',
+    },
     positions: {
       title: 'Holdings',
       none: 'The account holds no stock.',

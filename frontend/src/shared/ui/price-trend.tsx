@@ -4,12 +4,13 @@ import { useTranslation } from '@/i18n'
 import type { DailyBar } from '@/shared/api'
 import { DEFAULT_RANGE, pricePoints, summarize, type ChartRange } from '@/shared/lib/chart-range'
 import { directionOf, type Direction } from '@/shared/lib/direction'
-import { useFormat } from '@/shared/lib/format'
+import { DASH, useFormat } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { ArchiveWarmUp } from './archive-warm-up'
 import { ChangeValue } from './change-value'
 import type { ChartOverlay } from './price-volume-chart'
 import { QuoteHeadline } from './quote-headline'
+import { QuoteTime } from './quote-time'
 import { RangeTabs } from './range-tabs'
 import { Skeleton } from './skeleton'
 import { Stat } from './stat'
@@ -32,6 +33,13 @@ interface PriceTrendProps {
   /** The close and its change above the chart; a page that shows them in its header turns them off. */
   quote?: boolean
   /**
+   * When the last bar is today's quote and not a settled close: the time of its latest trade or value, shown in place
+   * of the session it closed. A quote the server gives no volume, as an index's, shows a dash for its last volume.
+   */
+  tradedAt?: string | null
+  /** A session trades, so the quote at `tradedAt` still changes. */
+  live?: boolean
+  /**
    * While there are too few sessions to draw, the charts' place says how far a public site's archive has come; a page
    * that says so above it, as the market overview does, turns this off.
    */
@@ -43,7 +51,7 @@ interface PriceTrendProps {
  * A line needs two sessions, so with one the charts' place says why there is none yet: how far a public site's archive
  * has come, or that the chart starts at the second session.
  */
-export function PriceTrend({ bars, name, kind, overlays = [], quote = true, warmUp = true }: PriceTrendProps) {
+export function PriceTrend({ bars, name, kind, overlays = [], quote = true, tradedAt = null, live = false, warmUp = true }: PriceTrendProps) {
   const { t } = useTranslation()
   const format = useFormat()
   const [range, setRange] = useState<ChartRange>(DEFAULT_RANGE)
@@ -63,7 +71,7 @@ export function PriceTrend({ bars, name, kind, overlays = [], quote = true, warm
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         {quote ? (
-          <QuoteHeadline value={level(summary.close)} change={summary.dayChange?.value ?? null} changeRatio={summary.dayChange?.ratio ?? null} asOf={asOf} />
+          <QuoteHeadline value={level(summary.close)} change={summary.dayChange?.value ?? null} changeRatio={summary.dayChange?.ratio ?? null} asOf={tradedAt ? <QuoteTime tradedAt={tradedAt} live={live} /> : asOf} />
         ) : (
           <Legend direction={direction} close={t('trend.close', { name })} overlays={overlays} />
         )}
@@ -101,7 +109,7 @@ export function PriceTrend({ bars, name, kind, overlays = [], quote = true, warm
         </Stat>
         <Stat label={t('trend.rangeHigh')}>{level(summary.rangeHigh)}</Stat>
         <Stat label={t('trend.rangeLow')}>{level(summary.rangeLow)}</Stat>
-        <Stat label={t('trend.lastVolume')}>{volume(summary.volume)}</Stat>
+        <Stat label={t('trend.lastVolume')}>{tradedAt && summary.volume === 0 ? DASH : volume(summary.volume)}</Stat>
       </dl>
     </div>
   )

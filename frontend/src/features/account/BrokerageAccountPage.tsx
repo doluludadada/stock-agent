@@ -124,7 +124,7 @@ function SummaryPanel({ statement, className }: { statement: BrokerageStatement;
   return (
     <Panel className={className}>
       <dl className="grid grid-cols-2 gap-x-6 gap-y-4 @xl:grid-cols-4">
-        <Stat size="lg" label={t('brokerage.summary.balance')}>
+        <Stat size="lg" label={t(statement.simulation ? 'brokerage.summary.figuredCash' : 'brokerage.summary.balance')}>
           {format.number(statement.balance)}
         </Stat>
         <Stat size="lg" label={t('value.marketValue')}>
@@ -137,6 +137,7 @@ function SummaryPanel({ statement, className }: { statement: BrokerageStatement;
           <ChangeValue value={statement.realized_pnl} format="absolute" fractionDigits={0} />
         </Stat>
       </dl>
+      {statement.simulation && <p className="mt-4 text-sm text-pretty text-muted-foreground">{t('brokerage.summary.figuredNote')}</p>}
     </Panel>
   )
 }

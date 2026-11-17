@@ -16,7 +16,7 @@ import c_infrastructure.trading.shioaji.sdk_reporting  # noqa: F401
 # isort: split
 from shioaji.account import Account, StockAccount
 from shioaji.constant import Action, ChangeType, Exchange, Status, StockOrderCond, StockOrderLot, TickType, Unit
-from shioaji.contracts import Contract, Stock
+from shioaji.contracts import Contract, Index, Stock
 from shioaji.data import Snapshot
 from shioaji.order import Deal, Order, OrderStatus, Trade
 from shioaji.position import AccountBalance, SettlementV1, StockPosition, StockProfitLoss
@@ -49,7 +49,15 @@ def stock(code: str, reference: float = 100.0) -> Stock:
     )
 
 
-def position(code: str, shares: int, price: float, direction: Action = Action.Buy, cond: StockOrderCond = StockOrderCond.Cash):
+def position(
+    code: str,
+    shares: int,
+    price: float,
+    direction: Action = Action.Buy,
+    cond: StockOrderCond = StockOrderCond.Cash,
+    held_yesterday: int | None = None,
+):
+    """A row of list_positions. `held_yesterday` is its yd_quantity, the shares at yesterday's close: unset, all of them."""
     return StockPosition(
         id=0,
         code=code,
@@ -58,7 +66,7 @@ def position(code: str, shares: int, price: float, direction: Action = Action.Bu
         price=price,
         last_price=price,
         pnl=0.0,
-        yd_quantity=shares,
+        yd_quantity=shares if held_yesterday is None else held_yesterday,
         cond=cond,
         margin_purchase_amount=0,
         collateral=0,
@@ -119,21 +127,40 @@ def snapshot(code: str, traded_at: datetime.datetime, close: float, total_volume
 class FakeStocks:
     """Contracts.Stocks: indexing by code returns the contract, or None for an unknown code like the library."""
 
-    def __init__(self, contracts: dict[str, Stock]) -> None:
+    def __init__(self, contracts: dict[str, Stock] | dict[str, Index]) -> None:
         self._contracts = contracts
 
-    def __getitem__(self, code: str) -> Stock | None:
+    def __getitem__(self, code: str) -> Stock | Index | None:
         return self._contracts.get(code)
+
+
+class FakeIndexs:
+    """
+    Contracts.Indexs: indexing by exchange returns that exchange's indexes, which index by symbol or code, and None for
+    an unknown one like the library. As Shioaji 1.3.1 lists them: the TAIEX is TSE001, code 001, on TSE.
+    """
+
+    def __init__(self, contracts: dict[str, dict[str, Index]] | None = None) -> None:
+        taiex = Index(exchange=Exchange.TSE, code="001", symbol="TSE001", name="加權指數")
+        self._contracts = {"TSE": {"TSE001": taiex, "001": taiex}} if contracts is None else contracts
+
+    def __getitem__(self, exchange: str) -> FakeStocks | None:
+        return FakeStocks(self._contracts[exchange]) if exchange in self._contracts else None
 
 
 @dataclass
 class FakeContracts:
     Stocks: FakeStocks
+    Indexs: FakeIndexs = field(default_factory=FakeIndexs)
 
 
 @dataclass
 class FakeShioaji:
     simulation: bool = True
+    """
+    True: the simulation server, which answers the balance with 0 and no error and lists no settlement, as measured on
+    2026-11-17, whatever `balance` and `settlement_amounts` say. False: the production server, which reports both.
+    """
 
     account_at_login: StockAccount | None = field(
         default_factory=lambda: StockAccount(
@@ -168,6 +195,8 @@ class FakeShioaji:
 
     market_data_error: Exception | None = None
     """What snapshots raises instead of answering, as the SDK does for a server's refusal."""
+    refused_codes: frozenset[str] = frozenset()
+    """A snapshots request that names one of these codes raises after it is counted, as a server that refuses a contract would."""
     session_down_callback: Callable[[], None] | None = None
     """The one callback the SDK keeps: a second registration replaces the first."""
     snapshot_answers: dict[str, Snapshot] = field(default_factory=dict)
@@ -182,6 +211,8 @@ class FakeShioaji:
     cancelled: list[Trade] = field(default_factory=list)
     position_units: list[Unit] = field(default_factory=list)
     profit_loss_requests: list[tuple[str, str, Unit]] = field(default_factory=list)
+    bank_reads: list[str] = field(default_factory=list)
+    """Each read of the bank balance and of the settlements, which only a production account has."""
     _queued: dict[str, list[Report]] = field(default_factory=dict)
 
     def login(
@@ -221,6 +252,10 @@ class FakeShioaji:
         if self.market_data_error is not None:
             raise self.market_data_error
         self.snapshot_requests.append([contract.code for contract in contracts])
+
+        if self.refused_codes & {contract.code for contract in contracts}:
+            raise TimeoutError("the server did not answer a contract of this request")
+
         return [self.snapshot_answers[contract.code] for contract in contracts if contract.code in self.snapshot_answers]
 
     def logout(self) -> bool:
@@ -293,10 +328,16 @@ class FakeShioaji:
 
     def account_balance(self, timeout: int = 5000, cb=None) -> AccountBalance:
         self._fail_if_told("account_balance")
-        return self.balance
+        self.bank_reads.append("account_balance")
+        return self.balance.model_copy(update={"acc_balance": 0.0}) if self.simulation else self.balance
 
     def settlements(self, account: Account = None, timeout: int = 5000, cb=None) -> list[SettlementV1]:
         self._fail_if_told("settlements")
+        self.bank_reads.append("settlements")
+
+        if self.simulation:
+            return []
+
         today = datetime.date(2026, 10, 19)
         return [
             SettlementV1(date=today + datetime.timedelta(days=offset), amount=amount, T=offset)

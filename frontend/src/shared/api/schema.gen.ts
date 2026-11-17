@@ -14,8 +14,9 @@ export interface paths {
         /**
          * Get Brokerage Account
          * @description The SinoPac account as the broker reports it now, for an administrator the site shows features.sinopac_account:
-         *     the bank balance, the settlements due, the positions with the broker's last prices and its own unrealized PnL,
-         *     today's deals and the sales of the last holdings.realized_days days with the PnL the broker says each realized.
+         *     the bank balance (the site's figure on the simulation server: `statement.simulation`), the settlements due, the
+         *     positions with the broker's last prices and its own unrealized PnL, today's deals and the sales of the last
+         *     holdings.realized_days days with the PnL the broker says each realized.
          *     `simulation` says which server this environment logs in to, `login_up` whether the login is up (`statement` is None
          *     while it is down), and `ordering` whether the site lets the user order there (features.sinopac_ordering, off by
          *     default). It only reads: it sends no order, whatever `ordering` says, and it answers no account number.
@@ -627,6 +628,31 @@ export interface paths {
          *     exchange's own change, and the same per industry with the average change in percent. Public.
          */
         get: operations["get_market_breadth_v1_market_breadth_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/market/index-quotes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Index Quotes
+         * @description The realtime quote of each market index named, which the market overview shows in place of the settled close once
+         *     a session opened: from the same board and by the same pace as /v1/market/quotes, in one Shioaji request of its own
+         *     beside the stocks', so at most one per market_data.page_quote_refresh_seconds for every tab together. Before the
+         *     session opens an index has no value of today and is answered null. A site without a Shioaji login now answers so
+         *     and asks nothing. Private: a visitor never makes the site ask the broker. It reads quotes alone, on nobody's
+         *     Pipeline.
+         */
+        get: operations["get_index_quotes_v1_market_index_quotes_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2050,7 +2076,8 @@ export interface components {
         };
         /**
          * BrokerageStatementResponse
-         * @description A real broker's account as the broker reports it (BrokerageStatement): every figure is the broker's own.
+         * @description A real broker's account as the broker reports it (BrokerageStatement): every figure is the broker's own, but the
+         *     balance on the simulation server.
          */
         BrokerageStatementResponse: {
             /** Balance */
@@ -2077,6 +2104,8 @@ export interface components {
             sales_from: string;
             /** Settlements */
             settlements: components["schemas"]["Settlement"][];
+            /** Simulation */
+            simulation: boolean;
             /** Unrealized Pnl */
             unrealized_pnl: number;
         };
@@ -2993,6 +3022,10 @@ export interface components {
          * @description The realtime quotes a page shows beside its settled closes, from the board every page and user share.
          */
         PageQuotesResponse: {
+            /** Indexes */
+            indexes: {
+                [key: string]: components["schemas"]["Ohlcv"] | null;
+            };
             /** Quotes */
             quotes: {
                 [key: string]: components["schemas"]["Ohlcv"] | null;
@@ -5437,6 +5470,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_index_quotes_v1_market_index_quotes_get: {
+        parameters: {
+            query: {
+                indexes: components["schemas"]["MarketIndex"][];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PageQuotesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

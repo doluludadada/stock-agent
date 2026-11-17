@@ -502,7 +502,7 @@ def build_harness(
         article_store=articles,
         article_index=article_index,
         users_stocks=users_stocks,
-        broker_market_data=login,
+        broker_quotes=prices if login else None,
         shioaji=ShioajiConnection(client=FakeShioaji(), up=True) if login else None,
         daily_close_archive=archive,
         fundamentals_provider=fundamentals if config.audience.mops else None,

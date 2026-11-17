@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 
 import pytest
 import shioaji
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 from shioaji.error import TokenError
 from support.fake_shioaji import FakeContracts, FakeShioaji, FakeStocks, snapshot, stock
 from support.fakes import RecordingLogger
@@ -20,10 +20,11 @@ from trading_stack import MONDAY_10_00, SilentLogger, analysed_stock, open_stack
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.order import Order
-from a_domain.types.enums import Audience, OrderStatus, SystemEnvironment
+from a_domain.ports.system.logging_provider import ILoggingProvider
+from a_domain.types.enums import Audience, MarketIndex, OrderStatus, SystemEnvironment
 from a_domain.types.errors import RealtimeQuotesUnavailable
 from b_application.config.app_config import AppConfig
-from b_application.config.market_data_config import MarketDataConfig, MarketHoursConfig
+from b_application.config.market_data_config import IndexQuoteContract, MarketDataConfig, MarketHoursConfig
 from b_application.config.trading_config import ShioajiConfig, ShioajiLogin
 from c_infrastructure.database.repositories.daily_close_archive import SqlDailyCloseArchive
 from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection, ShioajiQuoteProvider
@@ -56,7 +57,9 @@ def logged_in_client(**answers: datetime | None) -> FakeShioaji:
 CLOCK = TaiwanMarketClock(MarketHoursConfig())
 
 
-def quote_provider(client: FakeShioaji, market_data: MarketDataConfig | None = None) -> ShioajiQuoteProvider:
+def quote_provider(
+    client: FakeShioaji, market_data: MarketDataConfig | None = None, logger: ILoggingProvider | None = None
+) -> ShioajiQuoteProvider:
     return ShioajiQuoteProvider(
         connection=ShioajiConnection(client=client, up=True),
         new_client=FakeShioaji,
@@ -64,7 +67,7 @@ def quote_provider(client: FakeShioaji, market_data: MarketDataConfig | None = N
         market_clock=CLOCK,
         market_data=market_data or MarketDataConfig(quote_request_interval_seconds=0),
         board_lot_shares=1000,
-        logger=SilentLogger(),
+        logger=logger or SilentLogger(),
     )
 
 
@@ -94,6 +97,75 @@ async def test_each_request_asks_for_at_most_a_batch_of_stocks_one_at_a_time_and
     assert client.snapshot_requests == [codes[0:2], codes[2:4], codes[4:5]]
     assert sorted(quotes) == codes
     assert asyncio.get_running_loop().time() - started >= 0.1
+
+
+async def test_an_index_is_read_from_the_contract_the_settings_name_in_a_request_of_its_own() -> None:
+    client = logged_in_client(**{"2330": MONDAY_10_00})
+    client.snapshot_answers["001"] = snapshot("001", MONDAY_10_00, 41_040.08, 14_456_731, change=-2_635.04)
+    provider = quote_provider(client)
+
+    indexes = await provider.fetch_index_quotes(list(MarketIndex))
+    quotes = await provider.fetch_realtime_bars([Stock(stock_id="2330")])
+
+    assert client.snapshot_requests == [["001"], ["2330"]] and sorted(quotes) == ["2330"]
+    assert indexes == {
+        MarketIndex.TAIEX: Ohlcv(ts=MONDAY_10_00, open=41_040.08, high=41_040.08, low=41_040.08, close=41_040.08, change=-2_635.04)
+    }
+    assert await provider.fetch_index_quotes([]) == {} and len(client.snapshot_requests) == 2
+    assert shipped_config().market_data.quote_index_contracts == {
+        MarketIndex.TAIEX: IndexQuoteContract(exchange="TSE", symbol="TSE001")
+    }
+
+
+@pytest.mark.parametrize(
+    ("contract", "total_volume", "requests", "warnings"),
+    [
+        (IndexQuoteContract(exchange="TSE", symbol="TSE001"), 0, 2, 0),
+        (IndexQuoteContract(exchange="TSE", symbol="TSE999"), 14_456_731, 0, 1),
+        (IndexQuoteContract(exchange="TWSE", symbol="TSE001"), 14_456_731, 0, 1),
+        (None, 14_456_731, 0, 1),
+    ],
+    ids=[
+        "no trade of the session yet",
+        "a symbol Shioaji does not list",
+        "an exchange Shioaji does not list",
+        "no contract in the settings",
+    ],
+)
+async def test_an_index_without_a_value_of_the_session_or_a_contract_gets_no_quote_and_is_warned_of_once(
+    contract: IndexQuoteContract | None, total_volume: int, requests: int, warnings: int
+) -> None:
+    client = logged_in_client()
+    client.snapshot_answers["001"] = snapshot("001", MONDAY_10_00, 41_040.08, total_volume)
+    contracts = {} if contract is None else {MarketIndex.TAIEX: contract}
+    logger = RecordingLogger()
+    provider = quote_provider(client, MarketDataConfig(quote_request_interval_seconds=0, quote_index_contracts=contracts), logger)
+
+    answers = [await provider.fetch_index_quotes([MarketIndex.TAIEX]) for _ in ("first round", "second round")]
+
+    assert answers == [{}, {}] and len(client.snapshot_requests) == requests
+    assert [message for level, message in logger.records if level == "warning"] == [
+        "Shioaji quotes: no index contract for taiex, which gets no quote"
+    ] * warnings
+
+
+@pytest.mark.parametrize("name", ["keys", "_name", "tse", "TSE-001", ""])
+async def test_an_index_contract_that_is_not_capitals_and_digits_is_refused_when_the_settings_load(name: str) -> None:
+    for contract in ({"exchange": name, "symbol": "TSE001"}, {"exchange": "TSE", "symbol": name}):
+        with pytest.raises(ValidationError):
+            MarketDataConfig(quote_index_contracts={MarketIndex.TAIEX: contract})
+
+
+async def test_an_index_request_shioaji_refuses_raises_its_type_alone_and_the_stocks_are_still_quoted() -> None:
+    client = logged_in_client(**{"2330": MONDAY_10_00})
+    client.refused_codes = frozenset({"001"})
+    provider = quote_provider(client)
+
+    with pytest.raises(RuntimeError, match="TimeoutError"):
+        await provider.fetch_index_quotes([MarketIndex.TAIEX])
+
+    assert sorted(await provider.fetch_realtime_bars([Stock(stock_id="2330")])) == ["2330"]
+    assert client.snapshot_requests == [["001"], ["2330"]]
 
 
 @pytest.mark.parametrize(

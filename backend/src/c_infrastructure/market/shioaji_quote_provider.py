@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import override
@@ -8,6 +8,7 @@ import c_infrastructure.trading.shioaji.sdk_reporting  # noqa: F401
 
 # isort: split
 from shioaji import Shioaji
+from shioaji.contracts import Index
 from shioaji.data import Snapshot
 
 from a_domain.model.market.ohlcv import Ohlcv
@@ -15,7 +16,8 @@ from a_domain.model.market.stock import Stock
 from a_domain.ports.market.broker_quote_provider import IBrokerQuoteProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
-from b_application.config.market_data_config import MarketDataConfig
+from a_domain.types.enums import MarketIndex
+from b_application.config.market_data_config import IndexQuoteContract, MarketDataConfig
 from b_application.config.trading_config import ShioajiLogin
 from c_infrastructure.request_pace import RequestPace
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
@@ -54,7 +56,9 @@ class ShioajiQuoteProvider(IBrokerQuoteProvider):
     Shioaji allows 50 market-data queries per 10 seconds, snapshots, ticks and kbars together, and stops answering
     for a minute after one more. So requests on one login go one at a time, from every runtime: a snapshots request, of
     at most market_data.quote_batch_size stocks, at least market_data.quote_request_interval_seconds after the request
-    before it.
+    before it. The market indexes are one more snapshots request in the same pace, of the contracts
+    market_data.quote_index_contracts names; an index whose contract Shioaji does not list gets no quote, which is
+    logged once.
     """
 
     def __init__(
@@ -73,6 +77,8 @@ class ShioajiQuoteProvider(IBrokerQuoteProvider):
         self._clock = market_clock
         self._epoch = datetime(1970, 1, 1, tzinfo=TAIWAN_TIMEZONE)
         self._batch_size = market_data.quote_batch_size
+        self._index_contracts = market_data.quote_index_contracts
+        self._unlisted_indexes: set[MarketIndex] = set()
         self._timeout_milliseconds = round(market_data.quote_timeout_seconds * 1000)
         self._quote_interval_seconds = market_data.quote_request_interval_seconds
         self._board_lot_shares = board_lot_shares
@@ -139,6 +145,64 @@ class ShioajiQuoteProvider(IBrokerQuoteProvider):
 
         self._logger.info(f"Shioaji quotes: {len(quotes)}/{len(requested)} stocks with a trade this session")
         return quotes
+
+    @override
+    async def fetch_index_quotes(self, indexes: Collection[MarketIndex]) -> dict[MarketIndex, Ohlcv]:
+        """
+        An index is read from the contract the settings name. One without a contract there or in Shioaji's list gets no
+        quote, which is logged the first time. A snapshot is matched to its index by the contract's code.
+        """
+        named = {index: self._index_contracts[index] for index in indexes if index in self._index_contracts}
+        contracts = await asyncio.to_thread(index_contracts_of, self._connection.client, named)
+        unlisted = set(indexes) - set(contracts) - self._unlisted_indexes
+        self._unlisted_indexes |= unlisted
+
+        if unlisted:
+            self._logger.warning(f"Shioaji quotes: no index contract for {', '.join(sorted(unlisted))}, which gets no quote")
+
+        if not contracts:
+            return {}
+
+        await self._connection.pace.wait(self._quote_interval_seconds)
+        snapshots: list[Snapshot] = await sdk_request(
+            self._connection.client.snapshots, list(contracts.values()), timeout=self._timeout_milliseconds
+        )
+        index_of = {contract.code: index for index, contract in contracts.items()}
+        return {
+            index_of[snapshot.code]: quote
+            for snapshot in snapshots
+            if snapshot.code in index_of and (quote := index_quote_of(snapshot, self._epoch)) is not None
+        }
+
+
+def index_contracts_of(client: Shioaji, named: Mapping[MarketIndex, IndexQuoteContract]) -> dict[MarketIndex, Index]:
+    """Shioaji's contract of each index it lists where the settings say it keeps it. The lookup waits for the login's contracts."""
+    listed = client.Contracts.Indexs
+    exchanges = {index: listed[at.exchange] for index, at in named.items()}
+    found = {index: exchanges[index][at.symbol] for index, at in named.items() if exchanges[index] is not None}
+    return {index: contract for index, contract in found.items() if isinstance(contract, Index)}
+
+
+def index_quote_of(snapshot: Snapshot, epoch: datetime) -> Ohlcv | None:
+    """
+    An index's session so far, closing at its latest value and stamped with the exchange's time of it, with its change
+    from the previous close. As of a stock (quote_of), a snapshot with no volume of the session has no quote: before the
+    session's first trade an index still stands at the previous close. The bar has no volume of its own.
+
+    Measured on 2026-11-17 after the session on the simulation login: TSE001 at 13:33, 40092.11, a total volume of
+    14,456,731.
+    """
+    if snapshot.total_volume <= 0:
+        return None
+
+    return Ohlcv(
+        ts=epoch + timedelta(microseconds=snapshot.ts // 1000),
+        open=snapshot.open,
+        high=snapshot.high,
+        low=snapshot.low,
+        close=snapshot.close,
+        change=snapshot.change_price,
+    )
 
 
 def quote_of(snapshot: Snapshot, epoch: datetime, board_lot_shares: int) -> Ohlcv | None:

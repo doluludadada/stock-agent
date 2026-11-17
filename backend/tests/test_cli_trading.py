@@ -76,7 +76,7 @@ async def test_account_history_warns_about_each_position_whose_price_is_not_a_li
     harness.hold("2317", quantity=1000, average_cost=40.0)
     harness.hold("2603", quantity=1000, average_cost=30.0)
 
-    await harness.pipeline.load_page_quotes(["2330", "2317", "2603"])
+    await harness.pipeline.load_page_quotes(["2330", "2317", "2603"], [])
     await harness.show_account_history()
 
     output = screen.getvalue()

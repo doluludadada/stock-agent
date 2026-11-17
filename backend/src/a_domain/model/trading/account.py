@@ -271,7 +271,7 @@ class BrokerFill:
 class BrokerageStatement:
     """
     A real broker's account as the broker itself reports it at `read_at`: every figure is the broker's, none computed
-    by the app's cost rules. It carries no account number, person id or token.
+    by the app's cost rules, but the balance on the simulation server. It carries no account number, person id or token.
     """
 
     read_at: datetime
@@ -279,7 +279,7 @@ class BrokerageStatement:
     """Whether the login that answered is on the broker's simulation server, which holds no real money."""
 
     balance: FiniteFloat
-    """The bank balance of the account's settlement account."""
+    """The bank balance of the account's settlement account. On the simulation server, SimulationCashRule's figure."""
 
     settlements: list[Settlement]
     positions: list[Position]

@@ -457,9 +457,15 @@ class BrokerResponse(BaseModel):
 
 
 class BrokerageStatementResponse(Response):
-    """A real broker's account as the broker reports it (BrokerageStatement): every figure is the broker's own."""
+    """
+    A real broker's account as the broker reports it (BrokerageStatement): every figure is the broker's own, but the
+    balance on the simulation server.
+    """
 
     read_at: datetime
+    simulation: bool
+    """The login that answered is on the broker's simulation server, so `balance` is the site's figure (SimulationCashRule)."""
+
     balance: float
     settlements: list[Settlement]
     positions: list[HeldPositionResponse]
@@ -592,7 +598,7 @@ class PageQuotesResponse(BaseModel):
     """The realtime quotes a page shows beside its settled closes, from the board every page and user share."""
 
     realtime_quotes: bool
-    """Whether the site has realtime quotes now. Without them `quotes` is empty and nothing was asked of the broker."""
+    """Whether the site has realtime quotes now. Without them every quote is null and nothing was asked of the broker."""
     refresh: QuoteRefresh | None
     """
     When a page asks again, and whether the quotes may still change meanwhile. Null on a site without realtime quotes
@@ -603,6 +609,13 @@ class PageQuotesResponse(BaseModel):
     Each stock asked for. Its quote is today's session so far: `close` the last trade's price, `ts` that trade's time,
     `change` against the session's reference price, `volume` in shares. Null for a stock with no trade yet today, one
     the board has not read yet, one the broker does not list, and one past the stocks the board reads at once.
+    """
+    indexes: dict[MarketIndex, Ohlcv | None]
+    """
+    Each market index asked for. Its quote is today's session so far: `close` its latest value, `ts` that value's time,
+    `change` against the previous close; an index trades nothing, so its `volume` is 0. Null for an index without a
+    value of today, which none has before the session opens, one the board has not read yet and one the broker does not
+    list.
     """
 
 

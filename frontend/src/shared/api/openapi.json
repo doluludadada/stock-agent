@@ -1204,7 +1204,7 @@
         "type": "object"
       },
       "BrokerageStatementResponse": {
-        "description": "A real broker's account as the broker reports it (BrokerageStatement): every figure is the broker's own.",
+        "description": "A real broker's account as the broker reports it (BrokerageStatement): every figure is the broker's own, but the\nbalance on the simulation server.",
         "properties": {
           "balance": {
             "title": "Balance",
@@ -1256,6 +1256,10 @@
             "title": "Settlements",
             "type": "array"
           },
+          "simulation": {
+            "title": "Simulation",
+            "type": "boolean"
+          },
           "unrealized_pnl": {
             "title": "Unrealized Pnl",
             "type": "number"
@@ -1263,6 +1267,7 @@
         },
         "required": [
           "read_at",
+          "simulation",
           "balance",
           "settlements",
           "positions",
@@ -3798,6 +3803,23 @@
       "PageQuotesResponse": {
         "description": "The realtime quotes a page shows beside its settled closes, from the board every page and user share.",
         "properties": {
+          "indexes": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Ohlcv"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "propertyNames": {
+              "$ref": "#/components/schemas/MarketIndex"
+            },
+            "title": "Indexes",
+            "type": "object"
+          },
           "quotes": {
             "additionalProperties": {
               "anyOf": [
@@ -3830,7 +3852,8 @@
         "required": [
           "realtime_quotes",
           "refresh",
-          "quotes"
+          "quotes",
+          "indexes"
         ],
         "title": "PageQuotesResponse",
         "type": "object"
@@ -7808,7 +7831,7 @@
   "paths": {
     "/v1/account/brokerage": {
       "get": {
-        "description": "The SinoPac account as the broker reports it now, for an administrator the site shows features.sinopac_account:\nthe bank balance, the settlements due, the positions with the broker's last prices and its own unrealized PnL,\ntoday's deals and the sales of the last holdings.realized_days days with the PnL the broker says each realized.\n`simulation` says which server this environment logs in to, `login_up` whether the login is up (`statement` is None\nwhile it is down), and `ordering` whether the site lets the user order there (features.sinopac_ordering, off by\ndefault). It only reads: it sends no order, whatever `ordering` says, and it answers no account number.",
+        "description": "The SinoPac account as the broker reports it now, for an administrator the site shows features.sinopac_account:\nthe bank balance (the site's figure on the simulation server: `statement.simulation`), the settlements due, the\npositions with the broker's last prices and its own unrealized PnL, today's deals and the sales of the last\nholdings.realized_days days with the PnL the broker says each realized.\n`simulation` says which server this environment logs in to, `login_up` whether the login is up (`statement` is None\nwhile it is down), and `ordering` whether the site lets the user order there (features.sinopac_ordering, off by\ndefault). It only reads: it sends no order, whatever `ordering` says, and it answers no account number.",
         "operationId": "get_brokerage_account_v1_account_brokerage_get",
         "responses": {
           "200": {
@@ -9173,6 +9196,58 @@
           }
         ],
         "summary": "Get Market Breadth",
+        "tags": [
+          "Market data"
+        ]
+      }
+    },
+    "/v1/market/index-quotes": {
+      "get": {
+        "description": "The realtime quote of each market index named, which the market overview shows in place of the settled close once\na session opened: from the same board and by the same pace as /v1/market/quotes, in one Shioaji request of its own\nbeside the stocks', so at most one per market_data.page_quote_refresh_seconds for every tab together. Before the\nsession opens an index has no value of today and is answered null. A site without a Shioaji login now answers so\nand asks nothing. Private: a visitor never makes the site ask the broker. It reads quotes alone, on nobody's\nPipeline.",
+        "operationId": "get_index_quotes_v1_market_index_quotes_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "indexes",
+            "required": true,
+            "schema": {
+              "items": {
+                "$ref": "#/components/schemas/MarketIndex"
+              },
+              "minItems": 1,
+              "title": "Indexes",
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageQuotesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "summary": "Get Index Quotes",
         "tags": [
           "Market data"
         ]

@@ -13,6 +13,7 @@ const HOLDER: User = { ...TEST_ADMIN, permissions: [...TEST_ADMIN.permissions, '
 
 const STATEMENT: BrokerageStatement = {
   read_at: '2026-11-13T06:00:00Z',
+  simulation: false,
   balance: 405_000,
   settlements: [
     { settles_on: '2026-11-16', amount: -51_273 },
@@ -26,7 +27,7 @@ const STATEMENT: BrokerageStatement = {
   unrealized_pnl: 100_500,
   realized_pnl: 7_250,
 }
-const SIMULATION: BrokerageAccount = { simulation: true, login_up: true, ordering: false, statement: STATEMENT }
+const SIMULATION: BrokerageAccount = { simulation: true, login_up: true, ordering: false, statement: { ...STATEMENT, simulation: true } }
 
 const LISTING: Record<string, string> = { '2330': '台積電', '2317': '鴻海' }
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -84,10 +85,12 @@ describe('the SinoPac account', () => {
   })
 
   it('says it shows the real account, and that a run started on SinoPac can order within the BUY limits', async () => {
-    serve(() => json({ ...SIMULATION, simulation: false, ordering: true }))
+    serve(() => json({ ...SIMULATION, simulation: false, ordering: true, statement: STATEMENT }))
     open()
 
     expect(await screen.findByText('Real account')).toBeVisible()
+    expect((await screen.findByText('Bank balance')).parentElement).toHaveTextContent('405,000')
+    expect(screen.queryByText(/the cash here is the site’s figure/)).not.toBeInTheDocument()
     expect(screen.queryByText('Simulation server, no real money')).not.toBeInTheDocument()
     expect(screen.getByText('Ordering on')).toBeVisible()
     expect(screen.queryByText(ORDERING_OFF)).not.toBeInTheDocument()
@@ -97,7 +100,13 @@ describe('the SinoPac account', () => {
     const asked = serve(() => json(SIMULATION))
     open()
 
-    expect((await screen.findByText('Bank balance')).parentElement).toHaveTextContent('405,000')
+    expect((await screen.findByText('Cash (the site’s figure)')).parentElement).toHaveTextContent('405,000')
+    expect(screen.queryByText('Bank balance')).not.toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'SinoPac’s simulation server reports no cash balance, so the cash here is the site’s figure: the simulation account’s starting cash (a setting), less what the holdings and today’s purchases cost, plus the profit and loss of every sale SinoPac lists, taken as after fees and tax.',
+      ),
+    ).toBeVisible()
     expect(screen.getByText('Realized P&L since 8/15').parentElement).toHaveTextContent('+7,250')
 
     const [held] = within(screen.getByRole('table', { name: 'Holdings' })).getAllByRole('row').slice(1)

@@ -957,6 +957,13 @@
     "unit": null
   },
   {
+    "path": "shioaji.simulation_initial_cash",
+    "kind": "steps",
+    "group": "trading_limits",
+    "options": [],
+    "unit": "twd"
+  },
+  {
     "path": "holdings.concentration_positions",
     "kind": "steps",
     "group": "trading_limits",

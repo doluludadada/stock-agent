@@ -38,6 +38,7 @@ router = APIRouter(prefix="/market", tags=["Market data"])
 StockIdPath = Annotated[StockId, Path()]
 BarCount = Annotated[int, Query(ge=20, le=500)]
 QuotedStockIds = Annotated[list[StockId], Query(min_length=1)]
+QuotedIndexes = Annotated[list[MarketIndex], Query(min_length=1)]
 
 UNAVAILABLE: dict[int | str, dict[str, Any]] = {
     status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "The exchange listing could not be loaded."}
@@ -109,9 +110,29 @@ async def get_page_quotes(runtime: RuntimeDependency, pipeline: SignedOutPipelin
     Pipeline: it holds no account and prices no order.
     """
     available = runtime.realtime_quotes
-    quotes, refresh = await pipeline.load_page_quotes(ids) if available else ({}, None)
+    quotes, _, refresh = await pipeline.load_page_quotes(ids, []) if available else ({}, {}, None)
 
-    return PageQuotesResponse(realtime_quotes=available, refresh=refresh, quotes={stock_id: quotes.get(stock_id) for stock_id in ids})
+    return PageQuotesResponse(
+        realtime_quotes=available, refresh=refresh, quotes={stock_id: quotes.get(stock_id) for stock_id in ids}, indexes={}
+    )
+
+
+@router.get("/index-quotes", dependencies=[PrivateAccess, shows(Feature.MARKET_OVERVIEW)])
+async def get_index_quotes(runtime: RuntimeDependency, pipeline: SignedOutPipeline, indexes: QuotedIndexes) -> PageQuotesResponse:
+    """
+    The realtime quote of each market index named, which the market overview shows in place of the settled close once
+    a session opened: from the same board and by the same pace as /v1/market/quotes, in one Shioaji request of its own
+    beside the stocks', so at most one per market_data.page_quote_refresh_seconds for every tab together. Before the
+    session opens an index has no value of today and is answered null. A site without a Shioaji login now answers so
+    and asks nothing. Private: a visitor never makes the site ask the broker. It reads quotes alone, on nobody's
+    Pipeline.
+    """
+    available = runtime.realtime_quotes
+    _, quotes, refresh = await pipeline.load_page_quotes([], indexes) if available else ({}, {}, None)
+
+    return PageQuotesResponse(
+        realtime_quotes=available, refresh=refresh, quotes={}, indexes={index: quotes.get(index) for index in indexes}
+    )
 
 
 @router.get("/archive-status")

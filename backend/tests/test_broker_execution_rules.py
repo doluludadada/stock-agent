@@ -3,10 +3,10 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from a_domain.model.trading.account import Account, Position
+from a_domain.model.trading.account import Account, BrokerFill, Position
 from a_domain.model.trading.order import ExchangeOrder, Order
 from a_domain.rules.trading.cost import TradingCostRule
-from a_domain.rules.trading.execution import BrokerOutcomeRule, FillRule, LotSplitRule, OrderAcceptanceRule
+from a_domain.rules.trading.execution import BrokerOutcomeRule, FillRule, LotSplitRule, OrderAcceptanceRule, SimulationCashRule
 from a_domain.types.enums import LotKind, OrderStatus, OrderType, RejectReason, TimeInForce, TradeAction
 from a_domain.types.ids import new_decision_id, new_run_id
 
@@ -202,3 +202,51 @@ def test_a_partly_filled_order_is_cancelled_with_what_filled() -> None:
         1000,
         "IOC unfilled: filled 1000 of 1500; filled 1000; rejected 500",
     )
+
+
+SIMULATION_CASH = SimulationCashRule(simulation_initial_cash=1_000_000)
+
+
+def held(stock_id: str, quantity: int, average_cost: float) -> Position:
+    return Position(stock_id=stock_id, quantity=quantity, average_cost=average_cost)
+
+
+def sold(realized_pnl: float) -> BrokerFill:
+    return BrokerFill(
+        stock_id="2317", action=TradeAction.SELL, quantity=1000, price=58.0, filled_on=date(2026, 10, 9), realized_pnl=realized_pnl
+    )
+
+
+@pytest.mark.parametrize(
+    ("positions", "held_yesterday", "bought_today", "sales", "cash"),
+    [
+        ([], {}, {}, [], 1_000_000),
+        ([held("2330", 1000, 100.0), held("2603", 2000, 50.0)], {"2330": 1000, "2603": 2000}, {}, [], 800_000),
+        ([held("2330", 1000, 100.0)], {"2330": 1000}, {}, [sold(-2_300.0), sold(5_000.0)], 902_700),
+        ([], {}, {}, [sold(-2_300.0)], 997_700),
+        ([held("2330", 1000, 100.0)], {}, {"2330": 100_142.0}, [], 899_858),
+        ([held("2330", 1000, 100.0)], {}, {"2330": 150_213.0}, [], 849_787),
+        ([held("2330", 3000, 100.0)], {"2330": 2000}, {"2330": 100_142.0}, [], 700_000),
+        ([held("2330", 3000, 100.0)], {"2330": 3000}, {"2330": 100_142.0}, [], 599_858),
+        ([held("2603", 2000, 50.0)], {"2603": 2000}, {"2330": 100_142.0}, [], 799_858),
+        ([held("2330", 600, 100.0), held("2330", 400, 100.0)], {"2330": 1000}, {"2330": 100_142.0}, [], 799_858),
+        ([held("2330", 11_000, 100.0)], {"2330": 11_000}, {}, [], -100_000),
+    ],
+    ids=[
+        "an account that never traded has the starting cash",
+        "what the open positions cost is spent",
+        "the profit and loss of the sales is added",
+        "a stock sold whole leaves its profit or loss",
+        "a stock bought new today whose position lists the BUY counts it once",
+        "a stock bought new today whose position lists part of the BUYs counts them whole",
+        "a stock held since yesterday whose position lists today's BUY counts it once",
+        "a stock held since yesterday whose position does not list today's BUY yet counts both",
+        "a BUY of a stock the positions do not list yet still counts",
+        "two rows of one stock are one position",
+        "records that spent more than the starting cash give a figure below zero",
+    ],
+)
+def test_the_simulation_cash_is_the_starting_cash_less_what_the_stocks_cost_plus_what_the_sales_realized(
+    positions: list[Position], held_yesterday: dict[str, int], bought_today: dict[str, float], sales: list[BrokerFill], cash: float
+) -> None:
+    assert SIMULATION_CASH.apply(positions, held_yesterday, bought_today, sales) == cash

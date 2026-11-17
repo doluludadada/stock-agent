@@ -1,6 +1,6 @@
 import asyncio
 import math
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from typing import override
@@ -20,7 +20,7 @@ from a_domain.model.trading.order import ExchangeOrder, Order
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.trading.execution_provider import IBrokerExecutionProvider, SendRefusal
 from a_domain.rules.trading.cost import TradingCostRule
-from a_domain.rules.trading.execution import BrokerOutcomeRule, FillRule, LotSplitRule, OrderAcceptanceRule
+from a_domain.rules.trading.execution import BrokerOutcomeRule, FillRule, LotSplitRule, OrderAcceptanceRule, SimulationCashRule
 from a_domain.rules.trading.order_rule import BrokerLink
 from a_domain.types.enums import ExecutionProvider, LotKind, OrderStatus, RejectReason, TimeInForce, TradeAction
 from b_application.config.app_config import AppConfig
@@ -87,7 +87,10 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockContract, Trade]):
     the whole quantity.
 
     Before sending, the order must be one the app sends and the account must cover it (OrderAcceptanceRule, with the
-    cash that `available_cash` reads). A stock Shioaji has no contract for is refused first.
+    cash of `get_account`). A stock Shioaji has no contract for is refused first.
+
+    The account's cash is `account_cash`'s: the broker's on a production login, SimulationCashRule's figure while the
+    client is on the simulation server. No setting puts that figure on a production login.
 
     After sending, the adapter refreshes each broker order until ORDER_STATUS says it is done. One still
     working after the polls is cancelled and refreshed again; BrokerOutcomeRule then gives the domain order
@@ -115,6 +118,7 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockContract, Trade]):
         self._lot_split_rule = LotSplitRule(board_lot_shares=config.market.board_lot_shares)
         self._outcome_rule = BrokerOutcomeRule(broker=BROKER)
         self._acceptance_rule = OrderAcceptanceRule(cost_rule=self._cost_rule)
+        self._simulation_cash_rule = SimulationCashRule(simulation_initial_cash=config.shioaji.simulation_initial_cash)
         # The shares in one unit of an order's quantity, by its lot. The app sends Common and IntradayOdd only (BROKER_LOT);
         # the others are orders the account's holder placed elsewhere, read for the day's fills: after-hours fixed-price
         # trading counts board lots, after-hours odd lots count shares. BlockTrade is left out on purpose: the SDK does
@@ -170,36 +174,46 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockContract, Trade]):
 
     @override
     async def get_account(self) -> Account:
-        stock_account = self._client.stock_account
-
-        if stock_account is None:
-            raise RuntimeError("Shioaji has no stock account: ShioajiQuoteProvider.connect() logs in first")
-
-        cash = await available_cash(stock_account, self._client, self._shares_per_unit, self._cost_rule)
-        positions = [replace(position, mark=None) for position in await self.open_positions()]
+        stock_account = login_stock_account(self._client)
+        rows = await long_cash_rows(self._client, self._logger)
+        cash = await account_cash(
+            lambda: available_cash(stock_account, self._client, self._shares_per_unit, self._cost_rule),
+            rows,
+            self._client,
+            self._shares_per_unit,
+            self._cost_rule,
+            self._simulation_cash_rule,
+            self._logger,
+        )
+        positions = [replace(position, mark=None) for position in positions_of(rows)]
 
         return Account(account_id=stock_account.account_id, cash=cash, positions=positions)
 
     @override
     async def statement(self, sales_from: date, today: date) -> BrokerageStatement:
         stock_account = login_stock_account(self._client)
-        balance = await sdk_request(self._client.account_balance)
-
-        if balance.errmsg:
-            raise RuntimeError("Shioaji answered the account balance with an error message")
-
+        rows = await long_cash_rows(self._client, self._logger)
+        balance = await account_cash(
+            lambda: bank_balance(self._client),
+            rows,
+            self._client,
+            self._shares_per_unit,
+            self._cost_rule,
+            self._simulation_cash_rule,
+            self._logger,
+        )
         settlements = await sdk_request(self._client.settlements, stock_account)
 
         return BrokerageStatement(
             read_at=datetime.now(UTC),
             simulation=self._client.simulation,
-            balance=balance.acc_balance,
+            balance=balance,
             settlements=[
                 Settlement(settles_on=settlement.date, amount=settlement.amount)
                 for settlement in settlements
                 if isinstance(settlement, SettlementV1)
             ],
-            positions=await self.open_positions(),
+            positions=positions_of(rows),
             fills=await todays_fills(today, self._client, self._shares_per_unit, self._logger),
             sales=await settled_sales(sales_from, today, self._client),
             sales_from=sales_from,
@@ -207,26 +221,7 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockContract, Trade]):
 
     @override
     async def open_positions(self) -> list[Position]:
-        rows = await sdk_request(self._client.list_positions, login_stock_account(self._client), unit=Unit.Share)
-        stock_rows = [row for row in rows if isinstance(row, StockPosition)]
-
-        if len(stock_rows) < len(rows):
-            raise RuntimeError("Shioaji listed a futures position for the stock account")
-
-        positions, now = [], datetime.now(UTC)
-
-        for row in stock_rows:
-            if row.quantity <= 0 or row.price <= 0 or row.direction != Action.Buy or row.cond != StockOrderCond.Cash:
-                self._logger.warning(
-                    f"Ignored Shioaji position {row.code}: {row.direction.value} {row.cond.value} x {row.quantity} at {row.price}. "
-                    "The app manages long cash positions with a cost only."
-                )
-                continue
-
-            mark = Mark(price=row.last_price, at=now, unrealized_pnl=row.pnl) if row.last_price > 0 else None
-            positions.append(Position(stock_id=row.code, quantity=row.quantity, average_cost=row.price, mark=mark))
-
-        return positions
+        return positions_of(await long_cash_rows(self._client, self._logger))
 
     @override
     async def place_order(self, order: Order, refusal_now: SendRefusal) -> Order:
@@ -392,7 +387,7 @@ async def settled_sales(first: date, last: date, client: Shioaji) -> list[Broker
 
 async def available_cash(broker_account: StockAccount, client: Shioaji, unit_shares: UnitShares, cost_rule: TradingCostRule) -> float:
     """
-    The cash the account can still pay for a BUY with. Never more than the broker will settle.
+    The cash the account can still pay for a BUY with on a production login. Never more than the broker will settle.
 
     The broker checks a BUY against the trading limit, not the cash, so without this a BUY could exceed the cash and
     default at settlement. Cash is the bank balance, minus the settlement payments still due (T to T+2), minus every
@@ -400,17 +395,32 @@ async def available_cash(broker_account: StockAccount, client: Shioaji, unit_sha
     subtracted twice, and pending receipts from sales are not counted, so cash can be understated, never overstated,
     as long as the broker reports payments as negative settlement amounts.
     """
-    balance = await sdk_request(client.account_balance)
-
-    if balance.errmsg:
-        raise RuntimeError("Shioaji answered the account balance with an error message")
-
+    balance = await bank_balance(client)
     settlements = await sdk_request(client.settlements, broker_account)
     payments_due = [min(settlement.amount, 0) for settlement in settlements if isinstance(settlement, SettlementV1)]
 
     if len(payments_due) < len(settlements):
         raise RuntimeError("Shioaji listed a settlement without an amount")
 
+    bought = await bought_today(broker_account, client, unit_shares, cost_rule)
+
+    return max(balance + math.fsum(payments_due) - math.fsum(bought.values()), 0)
+
+
+async def bank_balance(client: Shioaji) -> float:
+    """The bank balance of the account's settlement account. Raises where the broker answers it with an error message."""
+    balance = await sdk_request(client.account_balance)
+
+    if balance.errmsg:
+        raise RuntimeError("Shioaji answered the account balance with an error message")
+
+    return balance.acc_balance
+
+
+async def bought_today(
+    broker_account: StockAccount, client: Shioaji, unit_shares: UnitShares, cost_rule: TradingCostRule
+) -> dict[str, float]:
+    """What the BUYs of each stock the broker lists as dealt today cost, with TradingCostRule's fee, by stock."""
     await sdk_request(client.update_status, account=broker_account)
     trades = await sdk_request(client.list_trades)
     dealt_buys = [
@@ -420,14 +430,89 @@ async def available_cash(broker_account: StockAccount, client: Shioaji, unit_sha
         and trade.order.action == Action.Buy
         and sum(deal.quantity for deal in trade.status.deals or []) > 0
     ]
-    now = datetime.now(UTC)
-    bought_today = math.fsum(
-        -cost_rule.apply(TradeAction.BUY, part.stock_id, part.fill_price, part.dealt_shares, now=now).net
-        for part in dealt_buys
-        if part.fill_price is not None
-    )
+    now, costs = datetime.now(UTC), dict[str, float]()
 
-    return max(balance.acc_balance + math.fsum(payments_due) - bought_today, 0)
+    for part in dealt_buys:
+        if part.fill_price is not None:
+            cost = -cost_rule.apply(TradeAction.BUY, part.stock_id, part.fill_price, part.dealt_shares, now=now).net
+            costs[part.stock_id] = costs.get(part.stock_id, 0.0) + cost
+
+    return costs
+
+
+async def long_cash_rows(client: Shioaji, logger: ILoggingProvider) -> list[StockPosition]:
+    """The account's long cash positions as Shioaji lists them, in shares. Any other row is logged and left out."""
+    rows = await sdk_request(client.list_positions, login_stock_account(client), unit=Unit.Share)
+    stock_rows = [row for row in rows if isinstance(row, StockPosition)]
+
+    if len(stock_rows) < len(rows):
+        raise RuntimeError("Shioaji listed a futures position for the stock account")
+
+    long_rows = []
+
+    for row in stock_rows:
+        if row.quantity <= 0 or row.price <= 0 or row.direction != Action.Buy or row.cond != StockOrderCond.Cash:
+            logger.warning(
+                f"Ignored Shioaji position {row.code}: {row.direction.value} {row.cond.value} x {row.quantity} at {row.price}. "
+                "The app manages long cash positions with a cost only."
+            )
+            continue
+
+        long_rows.append(row)
+
+    return long_rows
+
+
+def positions_of(rows: Sequence[StockPosition]) -> list[Position]:
+    """Shioaji's position rows as the domain's, each marked at the broker's last price and PnL when it reports one."""
+    now = datetime.now(UTC)
+
+    return [
+        Position(
+            stock_id=row.code,
+            quantity=row.quantity,
+            average_cost=row.price,
+            mark=Mark(price=row.last_price, at=now, unrealized_pnl=row.pnl) if row.last_price > 0 else None,
+        )
+        for row in rows
+    ]
+
+
+async def account_cash(
+    production_cash: Callable[[], Awaitable[float]],
+    rows: Sequence[StockPosition],
+    client: Shioaji,
+    unit_shares: UnitShares,
+    cost_rule: TradingCostRule,
+    cash_rule: SimulationCashRule,
+    logger: ILoggingProvider,
+) -> float:
+    """
+    The account's cash: `production_cash` on a production login. The simulation server answers the balance with 0 and
+    lists no settlement, so there it is SimulationCashRule's figure from `rows`, each with the shares it held at
+    yesterday's close (`yd_quantity`), the BUYs the broker lists as dealt today and every sale it lists. No record says
+    when the account began, so the sales are asked from the Unix epoch, a day every date library names. A figure below
+    zero counts as no cash and is logged, because it means the records and the setting do not fit.
+    """
+    if not client.simulation:
+        return await production_cash()
+
+    held_yesterday: dict[str, int] = {}
+
+    for row in rows:
+        held_yesterday[row.code] = held_yesterday.get(row.code, 0) + row.yd_quantity
+
+    bought = await bought_today(login_stock_account(client), client, unit_shares, cost_rule)
+    sales = await settled_sales(datetime.fromtimestamp(0, UTC).date(), datetime.now(UTC).date(), client)
+    cash = cash_rule.apply(positions_of(rows), held_yesterday, bought, sales)
+
+    if cash < 0:
+        logger.warning(
+            f"Shioaji simulation cash is {cash:,.0f} by the broker's records and shioaji.simulation_initial_cash "
+            f"{cash_rule.simulation_initial_cash:,.0f}: counted as no cash. The setting is under what the account spent."
+        )
+
+    return max(cash, 0)
 
 
 async def refreshed(trade: Trade, client: Shioaji, unit_shares: UnitShares, polling: ShioajiConfig, logger: ILoggingProvider) -> Trade:

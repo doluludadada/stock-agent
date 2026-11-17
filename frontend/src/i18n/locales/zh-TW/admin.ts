@@ -255,6 +255,7 @@ const admin: DictionaryShape<typeof en> = {
       shioaji: {
         poll_interval_seconds: '委託狀態查詢間隔（秒）',
         max_polls: '取消前的查詢次數',
+        simulation_initial_cash: '永豐金模擬帳戶起始資金',
       },
       watchlist: {
         automatic_expiry_sessions: '自動加入的項目保留交易日數',
@@ -496,6 +497,7 @@ const admin: DictionaryShape<typeof en> = {
       shioaji: {
         poll_interval_seconds: '兩次向券商查詢委託狀態之間的等待時間。',
         max_polls: '委託仍未完成時，取消前查詢委託狀態的次數；送出取消後會再查詢同樣次數。',
+        simulation_initial_cash: '永豐金模擬帳戶的起始資金。模擬環境不回報現金，永豐金帳戶頁面顯示的是本站由此推算的現金。',
       },
       watchlist: {
         automatic_expiry_sessions: '技術面或社群熱度自動加入的項目，在分析任務最後一次選中後，保留到這麼多個交易日收盤：1 會讓週五晚上全市場分析加入的項目保留到週一收盤。',

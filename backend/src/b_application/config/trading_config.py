@@ -346,6 +346,14 @@ class ShioajiConfig(BaseSettings):
     max_polls: int = Field(gt=0, json_schema_extra={"steps": [5, 10, 20, 30]})
     """Reads of an order's status before the adapter cancels it, and again after the cancel request."""
 
+    simulation_initial_cash: float = Field(
+        default=1_000_000,
+        gt=0,
+        allow_inf_nan=False,
+        json_schema_extra={"steps": [100000, 500000, 1000000, 3000000, 10000000], "unit": SettingUnit.TWD},
+    )
+    """The cash SinoPac's simulation account started with, which that server does not report (SimulationCashRule)."""
+
     api_key: SecretStr | None = Field(default=None, validation_alias=ShioajiCredential.API_KEY.value)
     secret_key: SecretStr | None = Field(default=None, validation_alias=ShioajiCredential.SECRET_KEY.value)
     ca_path: str | None = Field(default=None, validation_alias=ShioajiCredential.CA_PATH.value)

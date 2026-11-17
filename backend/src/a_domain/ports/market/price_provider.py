@@ -59,11 +59,12 @@ class IQuoteBoard(Protocol):
     source itself (IRealtimeQuoteProvider), never read here.
     """
 
-    async def follow(self, stock_ids: Collection[str]) -> None:
+    async def follow(self, stock_ids: Collection[str], indexes: Collection[MarketIndex]) -> None:
         """
-        Notes that a page asks for these stocks now, and asks the source once for the stocks pages asked for lately
-        when its last request is old enough. A request that fails keeps the quotes held. Of more stocks than one
-        request of the source reads, the first ones are followed.
+        Notes that a page asks for these stocks and indexes now, and asks the source once for the ones pages asked for
+        lately when the last request of their kind is old enough: the stocks in one request and the indexes in another,
+        each paced on its own and neither waiting for the other. A request that fails keeps the quotes held and costs
+        the other kind nothing. Of more stocks than one request of the source reads, the first ones are followed.
         """
         ...
 
@@ -74,6 +75,14 @@ class IQuoteBoard(Protocol):
         """
         ...
 
-    def read_at(self) -> datetime | None:
-        """When the board made its last request that the source answered; None until one was. A request that failed does not count."""
+    def index_quotes(self, indexes: Collection[MarketIndex], session: date) -> dict[MarketIndex, Ohlcv]:
+        """The quote held of each of these indexes whose latest value is of `session`. It asks the source nothing."""
+        ...
+
+    def read_at(self, stock_ids: Collection[str], indexes: Collection[MarketIndex]) -> datetime | None:
+        """
+        When the source last answered the board's request of the kind named: of the stocks when a stock is named, of
+        the indexes when an index is, the earlier of the two when both are; None until each was answered. A request
+        that failed does not count, and one kind's answer never counts for the other.
+        """
         ...

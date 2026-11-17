@@ -252,6 +252,7 @@ const admin = {
       shioaji: {
         poll_interval_seconds: 'Order status check interval (seconds)',
         max_polls: 'Status checks before a cancel',
+        simulation_initial_cash: 'Starting cash of the SinoPac simulation account',
       },
       watchlist: {
         automatic_expiry_sessions: 'Sessions an automatic entry stays',
@@ -501,6 +502,7 @@ const admin = {
       shioaji: {
         poll_interval_seconds: 'The wait between two reads of an order’s status at the broker.',
         max_polls: 'Reads of an order’s status before a working order is cancelled, and again after the cancel request.',
+        simulation_initial_cash: 'The cash SinoPac’s simulation account started with. That server reports no cash, so the SinoPac account page shows the site’s figure from this.',
       },
       watchlist: {
         automatic_expiry_sessions: 'A technical or Buzz entry stays through the close of this many trading sessions after its workflow last selected it: 1 keeps Friday evening’s Full Cycle entries through Monday’s session.',

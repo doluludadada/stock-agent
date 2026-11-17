@@ -4,7 +4,7 @@ from typing import Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from a_domain.rules.market.quote_refresh import QuoteRefreshRule
-from a_domain.types.enums import SettingUnit
+from a_domain.types.enums import MarketIndex, SettingUnit
 
 
 class MarketHoursConfig(BaseModel):
@@ -32,6 +32,18 @@ class MarketHoursConfig(BaseModel):
             )
 
         return self
+
+
+class IndexQuoteContract(BaseModel):
+    """
+    Where Shioaji keeps one index: Contracts.Indexs[exchange][symbol]. Both are the capitals and digits Shioaji names
+    them with, so no setting names an attribute of its contract lists.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    exchange: str = Field(pattern=r"^[A-Z]+$")
+    symbol: str = Field(pattern=r"^[A-Z0-9]+$")
 
 
 class MarketDataConfig(BaseModel):
@@ -79,6 +91,15 @@ class MarketDataConfig(BaseModel):
     """
     How often an open page asks whether the quotes change again once they no longer do: the session is over and its
     last quotes are read. Such a request costs Shioaji nothing, and it sees the next session start.
+    """
+
+    quote_index_contracts: dict[MarketIndex, IndexQuoteContract] = Field(
+        default={MarketIndex.TAIEX: IndexQuoteContract(exchange="TSE", symbol="TSE001")}, json_schema_extra={"operator_only": True}
+    )
+    """
+    Shioaji's contract of each market index the market overview quotes while a session trades, read in one snapshots
+    request of its own beside the stocks'. An index without one, or whose contract Shioaji does not list, gets no
+    quote and its page shows the settled close.
     """
 
     history_request_interval_seconds: float = Field(

@@ -374,6 +374,8 @@ class FakeOhlcvProvider:
         self.references: dict[str, dict[datetime, float]] = {}
         self.index_history: dict[MarketIndex, list[Ohlcv]] = {}
         self.realtime: dict[str, Ohlcv] = {}
+        self.index_quotes: dict[MarketIndex, Ohlcv] = {}
+        self.index_requests: list[list[MarketIndex]] = []
         self.history_requests: list[str] = []
         self.realtime_requests: list[str] = []
 
@@ -401,6 +403,10 @@ class FakeOhlcvProvider:
     async def fetch_realtime_bars(self, stocks: list[Stock]) -> dict[str, Ohlcv]:
         self.realtime_requests.extend(stock.stock_id for stock in stocks)
         return {stock.stock_id: self.realtime[stock.stock_id] for stock in stocks if stock.stock_id in self.realtime}
+
+    async def fetch_index_quotes(self, indexes: Collection[MarketIndex]) -> dict[MarketIndex, Ohlcv]:
+        self.index_requests.append(list(indexes))
+        return {index: self.index_quotes[index] for index in indexes if index in self.index_quotes}
 
 
 class FakeNewsProvider:

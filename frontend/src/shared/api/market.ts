@@ -33,6 +33,7 @@ export const marketKeys = {
   archiveStatus: ['public', 'market', 'archive-status'] as const,
   /** Private, so it leaves with the session: only a signed-in viewer makes the site ask the broker. */
   quotes: (codes: readonly string[]) => ['owner', 'market', 'quotes', ...codes] as const,
+  indexQuote: (index: MarketIndex) => ['owner', 'market', 'index-quotes', index] as const,
 }
 
 export interface SearchState {
@@ -152,13 +153,27 @@ function quoteOf(bar: DailyBar | null | undefined, previous?: DailyBar): StockQu
 }
 
 /**
- * The price to show: today's quote where the settled close is of an earlier session or there is none, else the
- * settled close. Once a session's close is settled it replaces that session's last quote.
+ * The one rule of what a page shows: today's quote, of the time `quotedAt`, where the settled figure is of an earlier
+ * session or there is none, else the settled one. Once a session is settled it replaces that session's last quote.
  */
+function showsQuote(settledAt: string | null | undefined, quotedAt: string): boolean {
+  return !settledAt || sessionDate(settledAt) < sessionDate(quotedAt)
+}
+
+/** The price to show, by that rule: today's quote or the settled close. */
 export function latestQuote(settled: StockQuote | null, quoted: DailyBar | null | undefined): StockQuote | null {
   const quote = quoteOf(quoted)
-  if (!quote || !quoted || (settled && settled.session >= quote.session)) return settled
+  if (!quote || !quoted || !showsQuote(settled?.session, quoted.ts)) return settled
   return { ...quote, tradedAt: quoted.ts }
+}
+
+/**
+ * A daily history that ends with today's quote, by the same rule, so its headline and its chart read the quote as the
+ * session so far; `tradedAt` is the quote's time where the last bar is the quote, else null.
+ */
+export function withQuote(bars: readonly DailyBar[], quoted: DailyBar | null | undefined): { bars: readonly DailyBar[]; tradedAt: string | null } {
+  if (!quoted || !showsQuote(bars.at(-1)?.ts, quoted.ts)) return { bars, tradedAt: null }
+  return { bars: [...bars, quoted], tradedAt: quoted.ts }
 }
 
 /** How long a tab waits before it asks for the quotes again: what the server answered, and no timer on a site without quotes now. */
@@ -176,11 +191,21 @@ export interface LiveQuotes {
 }
 
 /**
+ * How a tab asks the quote board again: after the time the server answers, its interval while the quotes change and a
+ * longer one once they stopped, which costs the broker nothing and sees the next session start; only while it is
+ * visible, and at once when it comes back into view, whatever the app's default freshness. A failed or refused
+ * request is not repeated and leaves the page on its settled closes.
+ */
+const QUOTE_POLLING = {
+  retry: false,
+  refetchOnWindowFocus: 'always',
+  refetchIntervalInBackground: false,
+  refetchInterval: (query: { state: { data: PageQuotes | undefined } }) => quotesPollMs(query.state.data),
+} as const
+
+/**
  * Today's realtime quotes of these stocks, from the board every page and user of the site share. Only a signed-in
- * viewer of a site with realtime quotes asks. The tab asks again after the time the server answers, its interval
- * while the quotes change and a longer one once they stopped, which costs the broker nothing and sees the next
- * session start; only while it is visible, and at once when it comes back into view. A failed or refused request
- * leaves the pages on their settled closes.
+ * viewer of a site with realtime quotes asks, and the tab asks again by QUOTE_POLLING.
  */
 export function useLiveQuotes(codes: readonly string[]): LiveQuotes {
   const signedIn = useIsSignedIn()
@@ -190,16 +215,29 @@ export function useLiveQuotes(codes: readonly string[]): LiveQuotes {
     queryKey: marketKeys.quotes(ids),
     queryFn: ({ signal }) => apiRequest('get', '/v1/market/quotes', { query: { ids }, signal }),
     enabled: signedIn && offered && ids.length > 0,
-    retry: false,
-    // Whatever the app's default freshness: a tab that comes back into view shows the price of now.
-    refetchOnWindowFocus: 'always',
-    refetchIntervalInBackground: false,
-    refetchInterval: (query) => quotesPollMs(query.state.data),
+    ...QUOTE_POLLING,
   })
   const bars = new Map<string, DailyBar>()
   for (const [code, bar] of Object.entries(answer.data?.quotes ?? {})) if (bar) bars.set(code, bar)
   const trades = [...bars].map(([code, bar]) => `${code}@${bar.ts}`).sort().join()
   return { bars, live: answer.data?.refresh?.changing === true, trades }
+}
+
+/**
+ * Today's quote of a market index once its session traded, from the same board and for the same viewers, one request
+ * for every panel that shows it. Before the session's first trade, to a visitor and on a site without realtime quotes
+ * there is none, and the panels stay on the settled close. A page that does not show the index turns it off.
+ */
+export function useIndexQuote(index: MarketIndex, enabled = true): { quote: DailyBar | null; live: boolean } {
+  const signedIn = useIsSignedIn()
+  const offered = useAllows('realtime_quotes')
+  const answer = useQuery({
+    queryKey: marketKeys.indexQuote(index),
+    queryFn: ({ signal }) => apiRequest('get', '/v1/market/index-quotes', { query: { indexes: [index] }, signal }),
+    enabled: enabled && signedIn && offered,
+    ...QUOTE_POLLING,
+  })
+  return { quote: answer.data?.indexes[index] ?? null, live: answer.data?.refresh?.changing === true }
 }
 
 /**

@@ -6,9 +6,12 @@ import { useTranslation } from '@/i18n'
 import {
   isApiError,
   useIndexHistory,
+  useIndexQuote,
   useMarketBreadth,
   useMostTraded,
   useStockHistory,
+  withQuote,
+  type DailyBar,
   type IndexHistory,
   type ListedStock,
   type MarketBreadth,
@@ -47,7 +50,9 @@ const INDUSTRY_ENDS_SHOWN = 3
  * Two stacks from 1280 px, whose heights end together: the trend over the industries' heat map, and the session's
  * breadth and the most traded stocks beside them. Narrower, the stacks dissolve into one grid in reading order: the
  * trend and the breadth across, then the industries beside the most traded stocks from 768 px. The panels that move out of DOM order hold no control, so the keyboard order still matches the screen.
- * The research target is part of the address (`/market?target=2330`); without one, the trend is the TAIEX.
+ * The research target is part of the address (`/market?target=2330`); without one, the trend is the TAIEX, which a
+ * signed-in viewer of a site with realtime quotes sees end at its quote once a session opened. The breadth, the
+ * industries and the most traded stocks are the last settled session's.
  */
 export function MarketOverviewPage() {
   const { t } = useTranslation('overview')
@@ -57,6 +62,7 @@ export function MarketOverviewPage() {
   const target: TrendTarget = isStockId(asked) ? { kind: 'stock', id: asked } : { kind: 'index', index: DEFAULT_INDEX }
   const mostTraded = useMostTraded()
   const breadth = useMarketBreadth()
+  const quoted = useIndexQuote(DEFAULT_INDEX, target.kind === 'index')
   const indexHistory = useIndexHistory(DEFAULT_INDEX, HISTORY_BARS, target.kind === 'index')
   const stockHistory = useStockHistory(asked, HISTORY_BARS, target.kind === 'stock')
   const history: UseQueryResult<IndexHistory | StockHistory> = target.kind === 'index' ? indexHistory : stockHistory
@@ -67,7 +73,7 @@ export function MarketOverviewPage() {
       <ArchiveWarmUp />
       <div className="grid gap-4 md:grid-cols-2 lg:gap-5 xl:grid-cols-[minmax(0,1fr)_26rem] xl:items-start">
         <div className="contents xl:flex xl:min-w-0 xl:flex-col xl:gap-5">
-          <TrendPanel target={target} history={history} onTarget={(id) => setParams({ target: id })} />
+          <TrendPanel target={target} history={history} quoted={target.kind === 'index' ? quoted.quote : null} live={quoted.live} onTarget={(id) => setParams({ target: id })} />
           <IndustryPanel breadth={breadth} />
         </div>
         <div className="contents xl:flex xl:min-w-0 xl:flex-col xl:gap-5">
@@ -79,8 +85,18 @@ export function MarketOverviewPage() {
   )
 }
 
-function TrendPanel({ target, history, onTarget }: { target: TrendTarget; history: UseQueryResult<IndexHistory | StockHistory>; onTarget: (id: string) => void }) {
+interface TrendPanelProps {
+  target: TrendTarget
+  history: UseQueryResult<IndexHistory | StockHistory>
+  /** Today's quote of the index the trend shows, which the trend then ends with. */
+  quoted: DailyBar | null
+  live: boolean
+  onTarget: (id: string) => void
+}
+
+function TrendPanel({ target, history, quoted, live, onTarget }: TrendPanelProps) {
   const { t } = useTranslation('overview')
+  const { bars, tradedAt } = withQuote(history.data?.bars ?? [], quoted)
   const listedName = history.data && 'stock' in history.data ? history.data.stock.name : null
   const name = target.kind === 'index' ? t(`index.${target.index}`) : (listedName ?? target.id)
 
@@ -125,7 +141,9 @@ function TrendPanel({ target, history, onTarget }: { target: TrendTarget; histor
       ) : (
         <PriceTrend
           key={target.kind === 'index' ? target.index : target.id}
-          bars={history.data.bars}
+          bars={bars}
+          tradedAt={tradedAt}
+          live={live}
           name={name}
           kind={target.kind === 'index' ? 'index' : 'price'}
           warmUp={false}

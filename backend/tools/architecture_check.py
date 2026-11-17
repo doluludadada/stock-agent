@@ -282,8 +282,10 @@ INFRASTRUCTURE_RULES = {
     "c_infrastructure/trading/mock/mock_execution_provider.py": frozenset({"FillRule", "OrderAcceptanceRule"}),
     # The SinoPac adapter promises the domain order's outcome: it refuses what the app never sends before any request,
     # splits the order into the exchange orders the broker takes, and reads their reports back into fills and costs.
+    # It also promises the account's cash, which its own acceptance checks each order against: on the simulation
+    # server, which reports none, that cash is the rule's figure from what the adapter reads of the account.
     "c_infrastructure/trading/shioaji/execution_provider.py": frozenset(
-        {"BrokerOutcomeRule", "FillRule", "LotSplitRule", "OrderAcceptanceRule", "TradingCostRule"}
+        {"BrokerOutcomeRule", "FillRule", "LotSplitRule", "OrderAcceptanceRule", "SimulationCashRule", "TradingCostRule"}
     ),
 }
 ANSWER_SOURCES = ("a_domain/model", "a_domain/types", "a_domain/ports")

@@ -7,7 +7,7 @@ import shioaji
 from shioaji.constant import Action, OrderType as BrokerTimeInForce, Status, StockOrderCond, StockOrderLot, StockPriceType, Unit
 from shioaji.error import TimeoutError as ShioajiTimeoutError, TokenError
 from shioaji.position import AccountBalance
-from support.fake_shioaji import FakeShioaji, Report, position, sale
+from support.fake_shioaji import FakeShioaji, FakeStocks, Report, position, sale, stock
 from support.fakes import RecordingLogger, no_refusal
 from support.settings import environment_setup, shipped_config
 from trading_stack import SilentLogger
@@ -35,7 +35,7 @@ def provider(client: FakeShioaji) -> ShioajiExecutionProvider:
     if client.stock_account is None:
         client.stock_account = client.account_at_login
 
-    login, connection = login_of(simulation=True), ShioajiConnection(client=client, up=True)
+    login, connection = login_of(client.simulation), ShioajiConnection(client=client, up=True)
     return ShioajiExecutionProvider(connection=connection, login=login, config=CONFIG, logger=SilentLogger())
 
 
@@ -192,7 +192,7 @@ async def test_an_order_the_adapter_cannot_send_faithfully_is_rejected_and_never
 
 
 async def test_a_buy_is_refused_when_cash_minus_settlement_payments_due_cannot_pay_it() -> None:
-    client = FakeShioaji(settlement_amounts=(0.0, 50_000.0, -950_000.0))
+    client = FakeShioaji(simulation=False, settlement_amounts=(0.0, 50_000.0, -950_000.0))
 
     placed = await provider(client).place_order(order(quantity=1000, price=100.0), no_refusal)
 
@@ -374,6 +374,7 @@ async def test_an_unconfirmed_order_fails_and_says_it_may_have_reached_the_excha
 
 async def test_get_account_reads_cash_less_payments_due_and_the_long_cash_positions_in_shares() -> None:
     client = FakeShioaji(
+        simulation=False,
         settlement_amounts=(-10_000.0, 20_000.0, -30_000.0),
         holdings=[
             position("2330", 1500, 95.5),
@@ -392,7 +393,7 @@ async def test_get_account_reads_cash_less_payments_due_and_the_long_cash_positi
 
 
 async def test_get_account_refuses_a_balance_the_broker_reports_as_an_error() -> None:
-    client = FakeShioaji()
+    client = FakeShioaji(simulation=False)
     client.balance = client.balance.model_copy(update={"errmsg": "bank link down"})
 
     with pytest.raises(RuntimeError, match="^Shioaji answered the account balance with an error message$"):
@@ -401,6 +402,7 @@ async def test_get_account_refuses_a_balance_the_broker_reports_as_an_error() ->
 
 async def test_the_statement_is_the_account_as_the_broker_reports_it_and_sends_nothing() -> None:
     client = FakeShioaji(
+        simulation=False,
         settlement_amounts=(-10_000.0, 0.0, 20_000.0),
         holdings=[
             position("2330", 1500, 95.5).model_copy(update={"last_price": 104.0, "pnl": 12_345.0}),
@@ -415,7 +417,7 @@ async def test_the_statement_is_the_account_as_the_broker_reports_it_and_sends_n
 
     statement = await broker.statement(date(2026, 7, 21), date(2026, 10, 19))
 
-    assert (statement.simulation, statement.balance, statement.sales_from) == (True, 1_000_000, date(2026, 7, 21))
+    assert (statement.simulation, statement.balance, statement.sales_from) == (False, 1_000_000, date(2026, 7, 21))
     assert [(settlement.settles_on, settlement.amount) for settlement in statement.settlements] == [
         (date(2026, 10, 19), -10_000),
         (date(2026, 10, 20), 0),
@@ -439,7 +441,7 @@ async def test_the_statement_is_the_account_as_the_broker_reports_it_and_sends_n
 
 
 async def test_the_days_fills_count_shares_for_every_lot_the_holder_traded_elsewhere_and_leave_out_a_block_trade() -> None:
-    client = FakeShioaji()
+    client = FakeShioaji(simulation=False)
     broker = provider(client)
     assert set(StockOrderLot) == {lot for lot, _ in ELSEWHERE}, "the SDK has a lot this test does not place"
 
@@ -476,7 +478,7 @@ ELSEWHERE = (
     "read", ["account_balance", "settlements", "list_positions", "update_status", "list_trades", "list_profit_loss"]
 )
 async def test_a_refused_read_of_the_statement_says_only_the_error_type_and_status(read: str) -> None:
-    client = FakeShioaji(refusals={read: sdk_refusal()})
+    client = FakeShioaji(simulation=False, refusals={read: sdk_refusal()})
 
     with pytest.raises(RuntimeError, match="^Shioaji answered TokenError, status 401$") as refused:
         await provider(client).statement(date(2026, 7, 21), date(2026, 10, 19))
@@ -526,7 +528,7 @@ async def test_production_refuses_an_account_that_has_not_signed_the_api_agreeme
 
 
 async def test_a_second_buy_is_refused_when_todays_first_fill_used_the_cash() -> None:
-    client = FakeShioaji(balance=AccountBalance(acc_balance=150_000.0, date="2026-10-19", errmsg=""))
+    client = FakeShioaji(simulation=False, balance=AccountBalance(acc_balance=150_000.0, date="2026-10-19", errmsg=""))
     broker = provider(client)
 
     first = await broker.place_order(order(quantity=1000, price=100.0), no_refusal)
@@ -611,22 +613,37 @@ async def test_a_refused_production_account_check_offers_no_sinopac_and_says_why
     assert private_parts(*said(logger)) == []
 
 
-ACCOUNT_READS = ("account_balance", "settlements", "update_status", "list_trades", "list_positions")
+SIMULATION_READS = ("update_status", "list_trades", "list_positions", "list_profit_loss")
+"""What an account read asks the simulation server, which reports no balance and no settlement."""
+
+PRODUCTION_READS = ("account_balance", "settlements", "update_status", "list_trades", "list_positions")
 
 
 @pytest.mark.parametrize(
     ("client", "says"),
     [
-        *[(FakeShioaji(refusals={read: sdk_refusal()}), "Shioaji answered TokenError, status 401") for read in ACCOUNT_READS],
-        (FakeShioaji(balance=AccountBalance(acc_balance=1_000_000.0, date="2026-10-19", errmsg=SERVER_WORDS)), "account balance"),
+        *[(FakeShioaji(refusals={read: sdk_refusal()}), "Shioaji answered TokenError, status 401") for read in SIMULATION_READS],
+        *[
+            (FakeShioaji(simulation=False, refusals={read: sdk_refusal()}), "Shioaji answered TokenError, status 401")
+            for read in PRODUCTION_READS
+        ],
+        (
+            FakeShioaji(simulation=False, balance=AccountBalance(acc_balance=1_000_000.0, date="2026-10-19", errmsg=SERVER_WORDS)),
+            "account balance",
+        ),
     ],
-    ids=[*ACCOUNT_READS, "balance with an error message"],
+    ids=[
+        *(f"simulation {read}" for read in SIMULATION_READS),
+        *(f"production {read}" for read in PRODUCTION_READS),
+        "balance with an error message",
+    ],
 )
 async def test_a_refused_account_read_raises_and_fails_the_order_saying_only_the_error_type_and_status(
     client: FakeShioaji, says: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     logger = RecordingLogger()
-    broker = await broker_of(client, monkeypatch, logger, SystemEnvironment.TEST)
+    environment = SystemEnvironment.TEST if client.simulation else SystemEnvironment.PROD
+    broker = await broker_of(client, monkeypatch, logger, environment)
     assert broker is not None
 
     with pytest.raises(Exception) as refused:
@@ -722,3 +739,113 @@ async def test_ordering_turned_off_between_the_parts_stops_the_odd_lot_and_the_o
     assert [(trade.order.order_lot, trade.order.quantity) for trade in client.placed] == [(StockOrderLot.Common, 1)]
     assert (placed.status, placed.filled_quantity) == (OrderStatus.CANCELLED, 1000)
     assert placed.reason is not None and f"the rest was not sent: {ORDERING_OFF[1]}" in placed.reason
+
+
+STARTING_CASH = CONFIG.shioaji.simulation_initial_cash
+
+
+async def test_on_the_simulation_server_the_cash_is_figured_from_the_starting_cash_and_the_brokers_own_records() -> None:
+    """Measured on 2026-11-17: the simulation server answers the balance with 0 and no error, and lists no settlement."""
+    client = FakeShioaji(
+        holdings=[position("2330", 1500, 95.5), position("2603", 2000, 50.0)],
+        profit_losses=[sale("2317", 1000, 58.0, -2_300.0, "2026-10-09"), sale("1101", 37, 35.0, 410.0, "2019-03-04")],
+    )
+
+    account = await provider(client).get_account()
+
+    assert account.cash == STARTING_CASH - 1500 * 95.5 - 2000 * 50.0 - 2_300.0 + 410.0
+    assert [(begin, unit) for begin, _, unit in client.profit_loss_requests] == [("1970-01-01", Unit.Share)]
+    assert client.bank_reads == []
+
+
+async def test_a_production_session_reads_the_brokers_balance_and_never_the_figure_from_the_starting_cash() -> None:
+    """The same records on the production server: the cash is the bank's, however much the starting cash would leave."""
+    client = FakeShioaji(
+        simulation=False,
+        balance=AccountBalance(acc_balance=30_000.0, date="2026-10-19", errmsg=""),
+        holdings=[position("2603", 2000, 50.0)],
+        profit_losses=[sale("2317", 1000, 58.0, 5_000.0, "2026-10-09")],
+    )
+    broker = provider(client)
+
+    account = await broker.get_account()
+    refused = await broker.place_order(order(quantity=1000, price=100.0), no_refusal)
+
+    assert (account.cash, client.profit_loss_requests) == (30_000.0, [])
+    assert (refused.status, client.placed) == (OrderStatus.REJECTED, [])
+    assert refused.reason == "INSUFFICIENT_CASH: needs 100,142 including fee, cash is 30,000"
+
+
+@pytest.mark.parametrize("listed_at_once", [False, True], ids=["the positions lag", "the positions list the fill at once"])
+async def test_on_the_simulation_server_buys_in_a_row_never_spend_the_same_cash_twice(listed_at_once: bool) -> None:
+    """After the positions the cash is 250,000: two BUYs of 100,142 fit and the third does not, however the broker lists a fill."""
+    client = FakeShioaji(holdings=[position("2603", 15_000, 50.0)])
+    client.Contracts.Stocks = FakeStocks({code: stock(code) for code in ("2330", "2317", "2454")})
+    broker = provider(client)
+    placed = []
+
+    for code in ("2330", "2317", "2454"):
+        placed.append(await broker.place_order(order(quantity=1000, price=100.0, stock_id=code), no_refusal))
+
+        if listed_at_once and placed[-1].status == OrderStatus.FILLED:
+            client.holdings.append(position(code, 1000, 100.0, held_yesterday=0))
+
+    assert [buy.status for buy in placed] == [OrderStatus.FILLED, OrderStatus.FILLED, OrderStatus.REJECTED]
+    assert placed[-1].reason == "INSUFFICIENT_CASH: needs 100,142 including fee, cash is 49,716"
+    assert (await broker.get_account()).cash == STARTING_CASH - 15_000 * 50.0 - 2 * 100_142
+
+
+@pytest.mark.parametrize("listed", [False, True], ids=["the position does not list it yet", "the position lists it"])
+async def test_on_the_simulation_server_a_buy_of_a_stock_held_since_yesterday_is_spent_once(listed: bool) -> None:
+    """A later run of the same day reads the account after an earlier run's BUY of 1000 more of a stock held since yesterday."""
+    client = FakeShioaji(holdings=[position("2330", 3000, 100.0)])
+    broker = provider(client)
+    bought = await broker.place_order(order(quantity=1000, price=100.0), no_refusal)
+
+    if listed:
+        client.holdings = [position("2330", 4000, (3000 * 100.0 + 100_142) / 4000, held_yesterday=3000)]
+
+    assert bought.status == OrderStatus.FILLED
+    assert (await broker.get_account()).cash == pytest.approx(STARTING_CASH - 3000 * 100.0 - 100_142)
+
+
+async def test_the_simulation_cash_starts_at_its_own_setting_and_not_at_the_mock_accounts() -> None:
+    config = CONFIG.model_copy(
+        update={
+            "mock_trading": CONFIG.mock_trading.model_copy(update={"initial_cash": 5_000_000.0}),
+            "shioaji": CONFIG.shioaji.model_copy(update={"simulation_initial_cash": 2_000_000.0}),
+        }
+    )
+    client = FakeShioaji()
+    client.stock_account = client.account_at_login
+    broker = ShioajiExecutionProvider(
+        connection=ShioajiConnection(client=client, up=True), login=login_of(simulation=True), config=config, logger=SilentLogger()
+    )
+
+    assert (await broker.get_account()).cash == 2_000_000
+
+
+async def test_on_the_simulation_server_the_statements_balance_is_the_same_figure_as_the_accounts_cash() -> None:
+    client = FakeShioaji(holdings=[position("2330", 1500, 95.5)], profit_losses=[sale("2317", 1000, 58.0, -2_300.0, "2025-01-09")])
+    broker = provider(client)
+
+    statement = await broker.statement(date(2026, 7, 21), date(2026, 10, 19))
+
+    assert (statement.simulation, statement.balance) == (True, STARTING_CASH - 1500 * 95.5 - 2_300.0)
+    assert (statement.balance, statement.sales) == ((await broker.get_account()).cash, [])
+
+
+async def test_records_that_spent_more_than_the_starting_cash_count_as_no_cash_and_say_so() -> None:
+    client, logger = FakeShioaji(holdings=[position("2330", 11_000, 100.0)]), RecordingLogger()
+    broker = ShioajiExecutionProvider(
+        connection=ShioajiConnection(client=client, up=True), login=login_of(simulation=True), config=CONFIG, logger=logger
+    )
+    client.stock_account = client.account_at_login
+
+    account = await broker.get_account()
+
+    assert account.cash == 0
+    assert [message for level, message in logger.records if level == "warning"] == [
+        "Shioaji simulation cash is -100,000 by the broker's records and shioaji.simulation_initial_cash 1,000,000: counted "
+        "as no cash. The setting is under what the account spent."
+    ]

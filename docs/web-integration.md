@@ -45,6 +45,7 @@ The server checks every request. Hiding a menu is never the protection.
   | `stock_pages` | `/v1/market/stocks/{id}/financials`, `/analysis`, `/news`, `/technical`, and `/ranking`, the stock's score, which needs `ranking` shown to the viewer too | everyone |
   | `watchlist` | `/v1/watchlist/*` | everyone |
   | any one of `holdings`, `mock_account`, `ranking`, `stock_pages`, `watchlist` | `/v1/market/quotes`, the realtime quotes those pages show | as each of them |
+  | `market_overview` | `/v1/market/index-quotes`, the index's realtime quote on the home page and the market overview | everyone |
   | `valuation` | `/v1/valuation/*` | administrators |
   | `full_cycle`, `specific_stock`, `buzz`, `intraday` | each one's start under `/v1/runs`; `specific_stock` also the manual BUY. A run's own pages (`GET /v1/runs*`) need any one of the four | administrators |
   | `strategy_library`, `strategy_designer` | `PUT /v1/technical-settings` (either one) | administrators |

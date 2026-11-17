@@ -3,7 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { PERSONAL_SITE, PUBLIC_SITE } from '@/test/audiences'
 import { TEST_USER } from '@/test/users'
-import { latestQuote, quotesPollMs, useLiveQuotes, useQuotesThenRefetch, type DailyBar, type PageQuotes, type StockQuote } from './market'
+import { latestQuote, quotesPollMs, useIndexQuote, useLiveQuotes, useQuotesThenRefetch, withQuote, type DailyBar, type PageQuotes, type StockQuote } from './market'
 import { session } from './session'
 
 const bar = (ts: string, close: number, change: number | null = 2): DailyBar => ({ ts, open: close, high: close, low: close, close, volume: 9_000, change })
@@ -26,11 +26,27 @@ describe('the price a page shows', () => {
   })
 })
 
+describe('the index history the market overview shows', () => {
+  const settledBars = [bar('2026-11-12T13:30:00+08:00', 43_675.12, null), bar('2026-11-13T13:30:00+08:00', 41_040.08, null)]
+
+  it('ends with today’s quote and says its time, once that is a newer session than the last settled bar', () => {
+    const quoted = bar('2026-11-16T10:32:05+08:00', 41_512.3, 472.22)
+    expect(withQuote(settledBars, quoted)).toEqual({ bars: [...settledBars, quoted], tradedAt: quoted.ts })
+    expect(withQuote([], quoted).bars).toEqual([quoted])
+  })
+
+  it('stays as it is without a quote, and when the quote’s session is settled', () => {
+    expect(withQuote(settledBars, null)).toEqual({ bars: settledBars, tradedAt: null })
+    expect(withQuote(settledBars, bar('2026-11-13T13:29:58+08:00', 41_039, -2_636.12))).toEqual({ bars: settledBars, tradedAt: null })
+  })
+})
+
 describe('when a tab asks for the quotes again', () => {
-  const answerOf = (changing: boolean, realtime = true): PageQuotes => ({
+  const answerOf = (changing: boolean, realtime = true, opened = changing): PageQuotes => ({
     realtime_quotes: realtime,
     refresh: realtime ? { changing, seconds: changing ? REFRESH_SECONDS : RECHECK_SECONDS } : null,
     quotes: { '2330': changing ? bar('2026-11-16T10:32:05+08:00', 1_000) : null, '2317': null },
+    indexes: { taiex: opened ? bar('2026-11-16T10:32:00+08:00', 41_512.3, 472.22) : null },
   })
   let asked: string[]
   let answer: PageQuotes
@@ -111,6 +127,47 @@ describe('when a tab asks for the quotes again', () => {
     await waitFor(() => expect(quoteRequests()).toHaveLength(2))
   })
 
+  it('asks for the market overview’s index in one request of its own for every panel, at the interval, only while the tab is visible', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 60_000 } } })
+    const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    const { result } = renderHook(() => [useIndexQuote('taiex'), useIndexQuote('taiex')] as const, { wrapper })
+    await waitFor(() => expect(result.current[0].live).toBe(true))
+    const indexRequests = () => asked.filter((url) => url.includes('/v1/market/index-quotes'))
+    expect(indexRequests()).toHaveLength(1)
+    expect(new URL(indexRequests()[0]!, 'http://site').searchParams.getAll('indexes')).toEqual(['taiex'])
+    expect(quoteRequests()).toHaveLength(0)
+    expect(result.current[1].quote).toMatchObject({ close: 41_512.3, change: 472.22 })
+
+    await pass(REFRESH_SECONDS * 1000 + 50)
+    await waitFor(() => expect(indexRequests()).toHaveLength(2))
+    act(() => focusManager.setFocused(false))
+    await pass(REFRESH_SECONDS * 1000 * 6)
+    expect(indexRequests()).toHaveLength(2)
+  })
+
+  it('has no index quote before the session opens, once it is over with nothing read, and for a visitor', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 60_000 } } })
+    const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    answer = answerOf(true, true, false)
+    const beforeTheOpen = renderHook(() => useIndexQuote('taiex'), { wrapper })
+    await waitFor(() => expect(beforeTheOpen.result.current.live).toBe(true))
+    expect(beforeTheOpen.result.current.quote).toBeNull()
+    beforeTheOpen.unmount()
+
+    client.clear()
+    answer = answerOf(false)
+    const closed = renderHook(() => useIndexQuote('taiex'), { wrapper })
+    await waitFor(() => expect(asked.filter((url) => url.includes('/v1/market/index-quotes'))).toHaveLength(2))
+    expect(closed.result.current).toEqual({ quote: null, live: false })
+    closed.unmount()
+
+    session.signOut()
+    const visitor = renderHook(() => useIndexQuote('taiex'), { wrapper })
+    await pass(REFRESH_SECONDS * 1000 * 2)
+    expect(visitor.result.current).toEqual({ quote: null, live: false })
+    expect(asked.filter((url) => url.includes('/v1/market/index-quotes'))).toHaveLength(2)
+  })
+
   it('never asks for a visitor or on a site without realtime quotes', async () => {
     audience = PUBLIC_SITE
     const onPublicSite = watch()
@@ -128,7 +185,7 @@ describe('when a tab asks for the quotes again', () => {
 })
 
 describe('a page whose own answer the server values at the quotes', () => {
-  const quotes = (ts: string): PageQuotes => ({ realtime_quotes: true, refresh: { changing: true, seconds: REFRESH_SECONDS }, quotes: { '2330': bar(ts, 1_000), '2317': null } })
+  const quotes = (ts: string): PageQuotes => ({ realtime_quotes: true, refresh: { changing: true, seconds: REFRESH_SECONDS }, quotes: { '2330': bar(ts, 1_000), '2317': null }, indexes: {} })
   let answer: PageQuotes
   const pass = (ms: number) => act(async () => void (await vi.advanceTimersByTimeAsync(ms)))
 

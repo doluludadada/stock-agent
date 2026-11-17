@@ -404,8 +404,11 @@ class ProviderDependencies:
     """The article store's vectors, in a Chroma collection of their own, computed by the runtime's own embedding model."""
     users_stocks: IUsersStocks
     """The stocks any user holds or watches, as stock ids alone: the timer keeps their articles current."""
-    broker_market_data: bool
-    """Whether the site's realtime quotes are its broker login's market data. Without it, no quote is served."""
+    broker_quotes: IBrokerQuoteProvider | None
+    """
+    The broker login's market data, which the site's realtime quotes come from and the pages' quote board asks for the
+    market indexes. None without it: no quote is served.
+    """
     shioaji: ShioajiConnection | None
     """
     The process's Shioaji login of the environment's key pair on an audience with realtime quotes, whether it is up or
@@ -847,7 +850,7 @@ async def build_provider_dependencies(
             config.stock_page.article_store.embedded_length,
         ),
         users_stocks=SqlUsersStocks(db, market_clock),
-        broker_market_data=quotes is not None,
+        broker_quotes=quotes,
         shioaji=process.shioaji_connections.get(login) if login is not None else None,
         daily_close_archive=archive,
         fundamentals_provider=create_fundamentals_provider(config, db, process, market_clock, stock_provider),
@@ -1241,7 +1244,7 @@ def compose_runtime(
     config: AppConfig, logger: ILoggingProvider, market_clock: TaiwanMarketClock, dependencies: ProviderDependencies
 ) -> Runtime:
     stock_feed = create_stock_feed(config, logger, market_clock, dependencies)
-    quote_board = QuoteBoard(dependencies.price_provider, market_clock, config.market_data, logger)
+    quote_board = QuoteBoard(dependencies.price_provider, dependencies.broker_quotes, market_clock, config.market_data, logger)
     signed_out = build_pipeline(config, logger, market_clock, dependencies, None, ExecutionProvider.MOCK, stock_feed, quote_board)
     return Runtime(
         pipeline_for=lambda user, broker: build_pipeline(
@@ -1252,7 +1255,7 @@ def compose_runtime(
         market_valuation_cache=MarketValuationCache(signed_out.load_market_valuation, config.api.valuation_cache_minutes * 60),
         config=config,
         logger=logger,
-        broker_market_data=dependencies.broker_market_data,
+        broker_market_data=dependencies.broker_quotes is not None,
         shioaji=dependencies.shioaji,
         real_broker=dependencies.real_broker,
     )
