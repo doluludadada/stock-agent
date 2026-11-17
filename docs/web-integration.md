@@ -349,7 +349,7 @@ The order-gate check drives it as route `F` on both audiences, with `P11_OFFICIA
 
 `POST /v1/rankings/follow` brings the user's mock account to the monthly ranking's latest decision, as a run of its own
 (`Workflow.RANKING_FOLLOW`) through the same order loop, gates and pricing as a follow of a run, on the mock account
-only. It sells each holding the ranking left, then buys each ranked stock the account lacks: the account's value over
+unless the request names `broker=shioaji` (below). It sells each holding the ranking left, then buys each ranked stock the account lacks: the account's value over
 the ranking's stocks, capped by its share of the cash the sales free, in whole lots of `analysis.lot_size`
 (`RankingFollowRule`). A ranked stock already held is left as it is, so a second follow of the same decision answers
 409 `nothing_to_follow`, and a stock whose order was refused stays open to the next follow. A ranking that ranks no
@@ -360,6 +360,18 @@ that left it, whether a run of the user runs now, and the account's return since
 holding to an equal weight each month; a follow buys at the price of the moment it is started, in whole shares, and
 keeps the holdings that stay, so the two results differ. The order-gate check drives it as route `K`, with
 `P17_RANKING_FOLLOW`.
+
+With `broker=shioaji` the follow brings SinoPac's simulation account to the ranking instead, through the order path
+every SinoPac order takes (`BrokerAccessRule`, the ordering switch asked again before each exchange order, the
+journal first, one order per stock). A ranking follow never orders with real money: `SimulationOnlyRule` refuses it
+unless the Shioaji login that answers is on SinoPac's simulation server, when the run starts and before the account
+is read (403 `not_simulation`), at each order's preparation and right before each exchange order (`NOT_SIMULATION`),
+and no setting lifts it. It needs an active administrator whom `features.sinopac_ordering` shows ordering and the
+login up. Each BUY is sized inside `trading.max_order_value`; one past `trading.max_daily_buy_value` is refused,
+recorded and left to a later follow. A user's schedule (`PUT /v1/rankings/follow/schedule`, `time` and `broker`)
+follows on the account it names; `GET /v1/rankings/follow/schedule` answers that account and the ones the site
+offers the user now. A decision is finished on the account its follow ran on, and a user the site no longer lets
+order on SinoPac is followed on no account, never on the mock account instead: the timer logs why.
 
 One run at a time holds per server process only. A CLI on the same database can run beside it; on the mock broker
 that can race the mock account's cash, which `formal-verify-order-gate` lists as not covered.

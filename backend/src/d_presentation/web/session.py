@@ -75,6 +75,10 @@ class OutsideFollowWindow(Exception):
     """FollowRefusal.OUTSIDE_FOLLOW_WINDOW: the site places no order in the market's phase now. 409."""
 
 
+class NotSimulation(PermissionError):
+    """FollowRefusal.NOT_SIMULATION: a ranking follow never orders on a real broker's production login. 403."""
+
+
 class SetupCodeRefused(PermissionError):
     """The first-time setup with a code this server did not print. 403."""
 

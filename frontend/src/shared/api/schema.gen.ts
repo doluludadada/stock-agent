@@ -977,19 +977,25 @@ export interface paths {
          * @description The ranking in the user's mock account: which of the latest decision's stocks it holds and lacks, which of its
          *     holdings left the ranking (every holding while the active formula holds cash), whether a follow may start now, its
          *     return since it first followed the ranking against ranking.benchmark_id over the same sessions, its follows so
-         *     far with the formula each used and whether the schedule or the user started it, and the user's schedule. It
-         *     records nothing and never orders.
+         *     far, on that account and on SinoPac, with the account and the formula each used and whether the schedule or the
+         *     user started it, and the user's schedule. It reads no SinoPac account, records nothing and never orders.
          */
         get: operations["get_ranking_follow_v1_rankings_follow_get"];
         put?: never;
         /**
          * Follow Ranking
-         * @description Brings the user's mock account to the ranking's latest decision by the active formula, as a run of its own, which
+         * @description Brings the account the `broker` query names, the user's mock account by default, to the ranking's latest decision
+         *     by the active formula, as a run of its own, which
          *     keeps that formula: it sells each holding the ranking left and buys each ranked stock the account lacks, at an
          *     equal weight of the account in whole lots of analysis.lot_size, priced as this site prices an order now, through
          *     the same order gates and journal as every order. While the formula holds cash it sells every holding and buys
-         *     nothing. It orders on the mock account only. A second follow of a decision the account already holds answers
-         *     nothing_to_follow.
+         *     nothing. A second follow of a decision the account already holds answers nothing_to_follow. With `broker=shioaji`
+         *     it follows into SinoPac's simulation account, for an administrator the site lets order on SinoPac while its login
+         *     is up, each BUY sized inside trading.max_order_value and refused past trading.max_daily_buy_value. SinoPac pays a
+         *     sale at settlement, so there a follow buys only what the cash the account has now pays for whole, best first, and
+         *     the run's log names each BUY that waits for a later follow. A login that is not on SinoPac's simulation server
+         *     answers not_simulation before the account is read, and the order gates refuse each order of a ranking follow on
+         *     such a login again. A ranking follow never orders with real money.
          */
         post: operations["follow_ranking_v1_rankings_follow_post"];
         delete?: never;
@@ -1015,14 +1021,17 @@ export interface paths {
         /**
          * Schedule Ranking Follow
          * @description My settings: schedules the user's ranking follow, or turns the schedule off with null. With a time, the site follows
-         *     each new decision of the ranking into the user's mock account by itself on the first session after it, from that
-         *     time in Taipei and while this site places orders, as a run like the button's (`POST /v1/rankings/follow`): the
-         *     same sizing, order gates and journal, on the mock account only, recorded as started by the schedule. It follows a
+         *     each new decision of the ranking into the account `broker` names by itself on the first session after it, from
+         *     that time in Taipei and while this site places orders, as a run like the button's (`POST /v1/rankings/follow`): the
+         *     same sizing, order gates and journal, recorded as started by the schedule. `shioaji` is SinoPac's simulation
+         *     account, which holds no real money, offered only to an administrator the site lets order on SinoPac while its login
+         *     is up on the simulation server; a user who loses any of that is followed on no account, never on the mock account
+         *     instead, until they have it again. A decision counts as finished on the account its follow ran on. It follows a
          *     decision until a follow left the account nothing to trade for it under the active formula, and never one the user
          *     finished by hand; a day whose window it missed, or whose follow ordered nothing or only a part, is tried again on
-         *     the next session, once a day, until the next decision supersedes it. A user the site hides the ranking or the mock
-         *     account from, or a deactivated one, is followed for by nobody. Setting a time needs the mock account shown;
-         *     turning the schedule off does not. `GET /v1/rankings/follow/schedule` answers the schedule as it stands.
+         *     the next session, once a day, until the next decision supersedes it. A user the site hides the ranking or the
+         *     account's ordering from, or a deactivated one, is followed for by nobody. Setting a time needs ordering on the
+         *     account shown; turning the schedule off does not. `GET /v1/rankings/follow/schedule` answers the schedule as it stands.
          */
         put: operations["schedule_ranking_follow_v1_rankings_follow_schedule_put"];
         post?: never;
@@ -2273,7 +2282,7 @@ export interface components {
          *     refused file, a user who is not an administrator and an installation on a real broker.
          * @enum {string}
          */
-        ErrorCode: "sign_in_required" | "sign_in_refused" | "sign_in_throttled" | "registration_closed" | "setup_code_refused" | "already_set_up" | "user_exists" | "last_administrator" | "unknown_host" | "app_request_required" | "administrators_only" | "feature_hidden" | "real_broker_refused" | "broker_unavailable" | "realtime_quotes_unavailable" | "mops_unavailable" | "password_required" | "password_refused" | "google_confirmation_required" | "settings_file_refused" | "settings_file_missing" | "settings_conflict" | "settings_edit_refused" | "settings_refused" | "technical_settings_conflict" | "ai_model_not_offered" | "follow_time_not_offered" | "run_in_progress" | "too_many_runs" | "nothing_to_follow" | "outside_follow_window" | "backtest_period_unavailable" | "ranking_unavailable" | "too_many_backtests" | "ai_allowance_spent" | "brief_limit_reached" | "listing_unavailable" | "not_found" | "invalid_request" | "body_too_large" | "request_refused";
+        ErrorCode: "sign_in_required" | "sign_in_refused" | "sign_in_throttled" | "registration_closed" | "setup_code_refused" | "already_set_up" | "user_exists" | "last_administrator" | "unknown_host" | "app_request_required" | "administrators_only" | "feature_hidden" | "real_broker_refused" | "broker_unavailable" | "realtime_quotes_unavailable" | "mops_unavailable" | "password_required" | "password_refused" | "google_confirmation_required" | "settings_file_refused" | "settings_file_missing" | "settings_conflict" | "settings_edit_refused" | "settings_refused" | "technical_settings_conflict" | "ai_model_not_offered" | "follow_time_not_offered" | "run_in_progress" | "too_many_runs" | "nothing_to_follow" | "outside_follow_window" | "not_simulation" | "follow_broker_not_offered" | "backtest_period_unavailable" | "ranking_unavailable" | "too_many_backtests" | "ai_allowance_spent" | "brief_limit_reached" | "listing_unavailable" | "not_found" | "invalid_request" | "body_too_large" | "request_refused";
         /**
          * ErrorResponse
          * @description Every refusal: `detail` in words for a person, `code` for the client to switch on.
@@ -2346,11 +2355,11 @@ export interface components {
         };
         /**
          * FollowRefusal
-         * @description Why a run's decisions, or the monthly ranking, cannot be followed into the user's mock account now. The Web API
-         *     answers each as its code.
+         * @description Why a run's decisions cannot be followed into the user's mock account now, or the monthly ranking into the account
+         *     its follow chose. The Web API answers each as its code.
          * @enum {string}
          */
-        FollowRefusal: "nothing_to_follow" | "outside_follow_window";
+        FollowRefusal: "nothing_to_follow" | "outside_follow_window" | "not_simulation";
         /**
          * FollowResponse
          * @description What a follow of the run may take now, and what it took so far.
@@ -2393,6 +2402,7 @@ export interface components {
         };
         /** FollowScheduleRequest */
         FollowScheduleRequest: {
+            broker: components["schemas"]["ExecutionProvider"];
             /**
              * Confirm
              * @constant
@@ -2406,6 +2416,11 @@ export interface components {
          * @description The user's schedule of the ranking follow (FollowSchedule), its last unfinished follow without the record's own texts.
          */
         FollowScheduleResponse: {
+            broker: components["schemas"]["ExecutionProvider"];
+            /** Broker Offered */
+            broker_offered: boolean;
+            /** Brokers */
+            brokers: components["schemas"]["ExecutionProvider"][];
             /** Due */
             due: boolean;
             /** Pending */
@@ -3322,9 +3337,10 @@ export interface components {
         };
         /**
          * RankingFollowRun
-         * @description One ranking follow of the mock account (its run record) with the formula it used, as the settings defined it then.
+         * @description One ranking follow of the user (its run record) with the formula it used, as the settings defined it then.
          */
         RankingFollowRun: {
+            execution_provider: components["schemas"]["ExecutionProvider"];
             /**
              * Ranking Decided On
              * Format: date
@@ -3381,7 +3397,7 @@ export interface components {
         };
         /**
          * RankingHoldings
-         * @description A mock account against the monthly ranking's latest decision. A ranking follow sells `left` and buys `lacking`.
+         * @description An account against the monthly ranking's latest decision. A ranking follow sells `left` and buys `lacking`.
          */
         RankingHoldings: {
             /**
@@ -4283,6 +4299,8 @@ export interface components {
              * @description What the user's role allows beyond their own data: the web app shows the administration pages from it.
              */
             readonly permissions: components["schemas"]["Permission"][];
+            /** @default mock */
+            ranking_follow_broker: components["schemas"]["ExecutionProvider"];
             /** Ranking Follow Time */
             ranking_follow_time?: string | null;
             role: components["schemas"]["Role"];
@@ -5969,7 +5987,9 @@ export interface operations {
     };
     follow_ranking_v1_rankings_follow_post: {
         parameters: {
-            query?: never;
+            query?: {
+                broker?: components["schemas"]["ExecutionProvider"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5989,7 +6009,7 @@ export interface operations {
                     "application/json": components["schemas"]["RunAccepted"];
                 };
             };
-            /** @description feature_hidden: the site does not show the user the ranking and the mock account. realtime_quotes_unavailable: the site prices orders on realtime quotes and has no Shioaji login now. */
+            /** @description feature_hidden: the site does not show the user the ranking and ordering on the account the `broker` query names. realtime_quotes_unavailable: the site prices orders on realtime quotes and has no Shioaji login now. real_broker_refused: `broker=shioaji` by a user who is no administrator. broker_unavailable: the site has no SinoPac login up. not_simulation: the site's SinoPac login is not on SinoPac's simulation server, the only one a ranking follow orders on. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -5998,7 +6018,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description nothing_to_follow: the mock account holds the ranking already, or the ranking ranks no stock. outside_follow_window: the site places no order in the market's phase now. run_in_progress: another run of this user is still running. */
+            /** @description nothing_to_follow: the account holds the ranking already, or the ranking ranks no stock. outside_follow_window: the site places no order in the market's phase now. run_in_progress: another run of this user is still running. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6067,7 +6087,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description feature_hidden: a time was given and the site does not show the user the mock account; nothing saved. */
+            /** @description feature_hidden: a time was given and the site does not show the user ordering on the account; nothing saved. follow_broker_not_offered: a time was given and the site does not let the user's ranking follow order on that account now; nothing saved. */
             403: {
                 headers: {
                     [name: string]: unknown;

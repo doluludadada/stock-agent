@@ -1233,9 +1233,11 @@ class FakeUserStore:
         if user.status != UserStatus.ACTIVE or changed:
             self.sessions = {token: session for token, session in self.sessions.items() if session.user_id != user.user_id}
 
-    async def save_ranking_follow_time(self, user_id: UserId, follow_time: time | None, now: datetime) -> None:
+    async def save_ranking_follow_schedule(
+        self, user_id: UserId, follow_time: time | None, broker: ExecutionProvider, now: datetime
+    ) -> None:
         if user_id in self.by_id:
-            self.by_id[user_id] = replace(self.by_id[user_id], ranking_follow_time=follow_time)
+            self.by_id[user_id] = replace(self.by_id[user_id], ranking_follow_time=follow_time, ranking_follow_broker=broker)
 
     async def save_ai_model(self, user_id: UserId, ai_model: AiProvider | None, now: datetime) -> None:
         if user_id in self.by_id:

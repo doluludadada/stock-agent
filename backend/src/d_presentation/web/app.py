@@ -21,6 +21,7 @@ from a_domain.types.errors import (
     BriefLimitReached,
     BrokerUnavailable,
     FeatureHidden,
+    FollowBrokerNotOffered,
     FollowTimeNotOffered,
     GoogleConfirmationRequired,
     LastAdministratorError,
@@ -56,6 +57,7 @@ from d_presentation.web.session import (
     AppRequestRequired,
     NotFound,
     NothingToFollow,
+    NotSimulation,
     OutsideFollowWindow,
     SetupCodeRefused,
     UnknownHost,
@@ -86,7 +88,10 @@ trading.max_daily_buy_value (`GET /v1/account/brokers` names them). A follow (`P
 finished Full Cycle's open decisions in the user's mock account only, priced again: at a fresh realtime quote in
 continuous trading, or on a site without realtime quotes at the last session's official close while no session
 trades. A ranking follow (`POST /v1/rankings/follow`) brings that mock account to the monthly ranking's latest decision,
-priced the same way, on the mock account only. No endpoint cancels or modifies an order.
+priced the same way; with `broker=shioaji` an administrator the site lets order on SinoPac follows the ranking into
+SinoPac's simulation account instead, and only there: on a login that is not on SinoPac's simulation server it answers
+403 `not_simulation` and every order of a ranking follow is refused, whatever the settings.
+No endpoint cancels or modifies an order.
 
 Open data. A public site (`audience: public`) uses only the TWSE and TPEX OpenAPI data the server archives: daily
 history and the index trend come from that archive, it has no realtime quote, so Buzz and Intraday answer 403
@@ -110,11 +115,14 @@ against the ranking.benchmark_id held over the same sessions. `GET /v1/rankings/
 formula over the same period and costs, and again at a liquidity floor, as the evidence beside the choice. All read only
 the held history and the archived monthly revenue, which `just backfill-history` brings back; they ask no AI, touch no
 account and never order. `GET /v1/rankings/follow` answers the user's mock account against that ranking, its return
-since it first followed it against the benchmark, and its follows with the formula each used; `POST
-/v1/rankings/follow` brings the mock account to the ranking, as a run that orders on the mock account only and keeps
-the formula it used. `PUT /v1/rankings/follow/schedule` lets the user schedule that follow: from the time they choose,
-on the first session after each new decision, the server starts the same run by itself, once per decision, on the
-user's mock account only, and its record says the schedule started it. No other run starts without a request.
+since it first followed it against the benchmark, and its follows with the account and the formula each used; `POST
+/v1/rankings/follow` brings the account its `broker` query names to the ranking, the user's mock account by default,
+as a run that orders on that account only and keeps the formula it used. `broker=shioaji` is SinoPac's simulation
+account, for an administrator the site lets order on SinoPac: a ranking follow is refused while the site's SinoPac
+login is not on the simulation server, so it never orders with real money. `PUT /v1/rankings/follow/schedule` lets the
+user schedule that follow and choose its account: from the time they choose, on the first session after each new
+decision, the server starts the same run by itself, once per decision, on the account the schedule names and on no
+other, and its record says the schedule started it. No other run starts without a request.
 
 The server replays `accounts.max_concurrent_backtests` strategy backtests and ranking backtests at once, and one more
 waits its turn. A user's request past `accounts.max_backtests_per_user` replaying or waiting answers 429
@@ -172,6 +180,8 @@ ERROR_ANSWERS: dict[type[Exception], tuple[int, ErrorCode]] = {
     FeatureHidden: (status.HTTP_403_FORBIDDEN, ErrorCode.FEATURE_HIDDEN),
     RealBrokerRefused: (status.HTTP_403_FORBIDDEN, ErrorCode.REAL_BROKER_REFUSED),
     BrokerUnavailable: (status.HTTP_403_FORBIDDEN, ErrorCode.BROKER_UNAVAILABLE),
+    NotSimulation: (status.HTTP_403_FORBIDDEN, ErrorCode.NOT_SIMULATION),
+    FollowBrokerNotOffered: (status.HTTP_403_FORBIDDEN, ErrorCode.FOLLOW_BROKER_NOT_OFFERED),
     RealtimeQuotesUnavailable: (status.HTTP_403_FORBIDDEN, ErrorCode.REALTIME_QUOTES_UNAVAILABLE),
     MopsUnavailable: (status.HTTP_403_FORBIDDEN, ErrorCode.MOPS_UNAVAILABLE),
     SettingsFileRefused: (status.HTTP_403_FORBIDDEN, ErrorCode.SETTINGS_FILE_REFUSED),

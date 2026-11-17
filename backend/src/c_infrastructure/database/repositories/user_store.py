@@ -14,7 +14,7 @@ from sqlmodel import col, select
 from a_domain.model.system.user import User, UserSession
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.user_store import IUserStore
-from a_domain.types.enums import AiProvider, Role, UserStatus
+from a_domain.types.enums import AiProvider, ExecutionProvider, Role, UserStatus
 from a_domain.types.errors import AlreadySetUpError, LastAdministratorError, UserExistsError
 from a_domain.types.ids import SessionToken, UserId
 from c_infrastructure.database.db_connector import DatabaseConnector
@@ -207,8 +207,11 @@ class SqlUserStore(IUserStore):
             await session.commit()
 
     @override
-    async def save_ranking_follow_time(self, user_id: UserId, follow_time: time | None, now: datetime) -> None:
-        changed = update(UserDTO).where(col(UserDTO.user_id) == user_id).values(ranking_follow_time=follow_time, updated_at=now)
+    async def save_ranking_follow_schedule(
+        self, user_id: UserId, follow_time: time | None, broker: ExecutionProvider, now: datetime
+    ) -> None:
+        values = {"ranking_follow_time": follow_time, "ranking_follow_broker": broker, "updated_at": now}
+        changed = update(UserDTO).where(col(UserDTO.user_id) == user_id).values(**values)
 
         async with self._db.get_session() as session:
             await session.execute(changed)

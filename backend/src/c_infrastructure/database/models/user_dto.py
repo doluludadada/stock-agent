@@ -16,7 +16,7 @@ from sqlmodel import Field, SQLModel, col
 
 from a_domain.model.system.user import User
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from a_domain.types.enums import AiProvider, Role, UserStatus
+from a_domain.types.enums import AiProvider, ExecutionProvider, Role, UserStatus
 from a_domain.types.ids import SessionToken, UserId
 from a_domain.types.values import comparable_name
 from b_application.config.app_config import AppConfig
@@ -133,7 +133,9 @@ class UserDTO(SQLModel, table=True):
     updated_at: datetime = Field(sa_type=UtcDateTime)
     ai_model: AiProvider | None = None
     ranking_follow_time: time | None = None
-    """The time of the user's scheduled ranking follow. Last, as the upgrade to version 11 added it."""
+    """The time of the user's scheduled ranking follow. After the first columns, as the upgrade to version 11 added it."""
+    ranking_follow_broker: ExecutionProvider = ExecutionProvider.MOCK
+    """The account the user's scheduled ranking follow orders on. Last, as the upgrade to version 13 added it."""
 
     @classmethod
     def from_domain(cls, user: User, password_hash: str, keys: UserKeys) -> Self:
@@ -150,6 +152,7 @@ class UserDTO(SQLModel, table=True):
             updated_at=user.created_at,
             ai_model=user.ai_model,
             ranking_follow_time=user.ranking_follow_time,
+            ranking_follow_broker=user.ranking_follow_broker,
         )
 
     @classmethod
@@ -167,6 +170,7 @@ class UserDTO(SQLModel, table=True):
             created_at=self.created_at,
             ai_model=self.ai_model,
             ranking_follow_time=self.ranking_follow_time,
+            ranking_follow_broker=self.ranking_follow_broker,
             has_password=self.password_hash != NO_PASSWORD,
         )
 

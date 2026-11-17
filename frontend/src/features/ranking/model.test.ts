@@ -11,6 +11,7 @@ import {
   monthHoldings,
   monthRows,
   nextDecision,
+  offeredBrokers,
   offeredTimes,
   parsePeriod,
   periodBefore,
@@ -224,6 +225,14 @@ describe('offeredTimes', () => {
     expect(offeredTimes({ time: '10:00:00', times })).toEqual(times)
     expect(offeredTimes({ time: null, times })).toEqual(times)
     expect(offeredTimes({ time: '09:30:00', times })).toEqual(['09:05:00', '09:30:00', '10:00:00'])
+  })
+})
+
+describe('offeredBrokers', () => {
+  it('lists the accounts the site offers, and the saved one after them while the site no longer offers it', () => {
+    expect(offeredBrokers({ broker: 'mock', broker_offered: true, brokers: ['mock'] })).toEqual(['mock'])
+    expect(offeredBrokers({ broker: 'shioaji', broker_offered: true, brokers: ['mock', 'shioaji'] })).toEqual(['mock', 'shioaji'])
+    expect(offeredBrokers({ broker: 'shioaji', broker_offered: false, brokers: ['mock'] })).toEqual(['mock', 'shioaji'])
   })
 })
 

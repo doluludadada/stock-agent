@@ -9,14 +9,17 @@ from a_domain.model.trading.ranking_formula import RankingFormula
 from a_domain.rules.trading.follow import FollowReturn, RankingHoldings
 from a_domain.rules.trading.ranking import Ranking
 from a_domain.rules.trading.ranking_backtest import RankingBacktest
-from a_domain.types.enums import Feature, FollowRefusal
+from a_domain.types.enums import ExecutionProvider, Feature, FollowRefusal
 from d_presentation.web.routers.backtests import BUSY
 from d_presentation.web.routers.runs import STARTED
 from d_presentation.web.schemas import Confirmed, ErrorResponse, PublicText, Response, RunAccepted
 from d_presentation.web.session import (
     BacktestTurn,
+    BrokerPipeline,
     CurrentUser,
     NothingToFollow,
+    NotSimulation,
+    OrderingShown,
     OutsideFollowWindow,
     PrivateAccess,
     QuoteLogin,
@@ -119,10 +122,16 @@ async def get_ranking_formulas(first: date, last: date, pipeline: UserPipeline) 
 
 
 class RankingFollowRun(Response):
-    """One ranking follow of the mock account (its run record) with the formula it used, as the settings defined it then."""
+    """One ranking follow of the user (its run record) with the formula it used, as the settings defined it then."""
 
     run_id: UUID
     start_time: datetime
+    execution_provider: ExecutionProvider
+    """
+    The account it ran on: the user's mock account, or SinoPac's simulation account. `GET /v1/runs/{run_id}/orders`
+    answers its orders, each with the status the broker gave it.
+    """
+
     ranking_formula: RankingFormula
     ranking_decided_on: date
     """The decision session of the ranking it took."""
@@ -158,6 +167,19 @@ class FollowScheduleResponse(Response):
     times: tuple[time, ...]
     """The times the site offers."""
 
+    broker: ExecutionProvider
+    """The account the schedule follows on: the user's mock account, or `shioaji`, SinoPac's simulation account."""
+
+    brokers: tuple[ExecutionProvider, ...]
+    """
+    The accounts the site lets the user's ranking follow order on now, the mock account first: `shioaji` only for an
+    active administrator whom features.sinopac_ordering shows ordering, while the site's Shioaji login is up and on
+    SinoPac's simulation server. A ranking follow never orders with real money.
+    """
+
+    broker_offered: bool
+    """Whether `broker` is one of `brokers`. A schedule on an account the site does not offer the user now follows on no account."""
+
     pending: date | None
     """
     The ranking's latest decision while a session after it has come and no ranking follow of the account finished it
@@ -187,9 +209,9 @@ class RankingFollowResponse(BaseModel):
 
     follows: list[RankingFollowRun]
     """
-    The account's ranking follows since it opened that took a decision, oldest first, each with the formula it used
-    and who started it: `performance` is what all of them made together, never one formula's result when several are
-    listed.
+    The user's ranking follows that took a decision, on the mock account since it opened and on SinoPac, oldest first,
+    each with its account, the formula it used and who started it: `performance` is what all of the mock account's
+    made together, never one formula's result when several are listed.
     """
 
     schedule: FollowScheduleResponse
@@ -202,14 +224,17 @@ FOLLOWING: dict[int | str, dict[str, Any]] = {
     status.HTTP_403_FORBIDDEN: {
         "model": ErrorResponse,
         "description": (
-            "feature_hidden: the site does not show the user the ranking and the mock account. "
-            "realtime_quotes_unavailable: the site prices orders on realtime quotes and has no Shioaji login now."
+            "feature_hidden: the site does not show the user the ranking and ordering on the account the `broker` query "
+            "names. realtime_quotes_unavailable: the site prices orders on realtime quotes and has no Shioaji login now. "
+            "real_broker_refused: `broker=shioaji` by a user who is no administrator. broker_unavailable: the site has "
+            "no SinoPac login up. not_simulation: the site's SinoPac login is not on SinoPac's simulation server, the "
+            "only one a ranking follow orders on."
         ),
     },
     status.HTTP_409_CONFLICT: {
         "model": ErrorResponse,
         "description": (
-            "nothing_to_follow: the mock account holds the ranking already, or the ranking ranks no stock. "
+            "nothing_to_follow: the account holds the ranking already, or the ranking ranks no stock. "
             "outside_follow_window: the site places no order in the market's phase now. "
             "run_in_progress: another run of this user is still running."
         ),
@@ -223,8 +248,8 @@ async def get_ranking_follow(pipeline: UserPipeline, user: CurrentUser, runs: Wo
     The ranking in the user's mock account: which of the latest decision's stocks it holds and lacks, which of its
     holdings left the ranking (every holding while the active formula holds cash), whether a follow may start now, its
     return since it first followed the ranking against ranking.benchmark_id over the same sessions, its follows so
-    far with the formula each used and whether the schedule or the user started it, and the user's schedule. It
-    records nothing and never orders.
+    far, on that account and on SinoPac, with the account and the formula each used and whether the schedule or the
+    user started it, and the user's schedule. It reads no SinoPac account, records nothing and never orders.
     """
     holdings, refusal = await pipeline.load_ranking_follow()
     performance, follows, schedule = await pipeline.load_ranking_follow_return(user)
@@ -252,6 +277,12 @@ class FollowScheduleRequest(Confirmed):
     time: time | None
     """One of the times the schedule offers (`schedule.times`), or null for no schedule."""
 
+    broker: ExecutionProvider
+    """
+    One of the accounts the schedule offers (`schedule.brokers`): the mock account, or `shioaji`, SinoPac's simulation
+    account. Required, so that a save of the time alone never moves a schedule to another account.
+    """
+
 
 @router.put(
     "/follow/schedule",
@@ -259,7 +290,11 @@ class FollowScheduleRequest(Confirmed):
     responses={
         status.HTTP_403_FORBIDDEN: {
             "model": ErrorResponse,
-            "description": "feature_hidden: a time was given and the site does not show the user the mock account; nothing saved.",
+            "description": (
+                "feature_hidden: a time was given and the site does not show the user ordering on the account; nothing "
+                "saved. follow_broker_not_offered: a time was given and the site does not let the user's ranking follow "
+                "order on that account now; nothing saved."
+            ),
         },
         status.HTTP_422_UNPROCESSABLE_CONTENT: {
             "model": ErrorResponse,
@@ -270,35 +305,46 @@ class FollowScheduleRequest(Confirmed):
 async def schedule_ranking_follow(body: FollowScheduleRequest, pipeline: UserPipeline, user: CurrentUser) -> None:
     """
     My settings: schedules the user's ranking follow, or turns the schedule off with null. With a time, the site follows
-    each new decision of the ranking into the user's mock account by itself on the first session after it, from that
-    time in Taipei and while this site places orders, as a run like the button's (`POST /v1/rankings/follow`): the
-    same sizing, order gates and journal, on the mock account only, recorded as started by the schedule. It follows a
+    each new decision of the ranking into the account `broker` names by itself on the first session after it, from
+    that time in Taipei and while this site places orders, as a run like the button's (`POST /v1/rankings/follow`): the
+    same sizing, order gates and journal, recorded as started by the schedule. `shioaji` is SinoPac's simulation
+    account, which holds no real money, offered only to an administrator the site lets order on SinoPac while its login
+    is up on the simulation server; a user who loses any of that is followed on no account, never on the mock account
+    instead, until they have it again. A decision counts as finished on the account its follow ran on. It follows a
     decision until a follow left the account nothing to trade for it under the active formula, and never one the user
     finished by hand; a day whose window it missed, or whose follow ordered nothing or only a part, is tried again on
-    the next session, once a day, until the next decision supersedes it. A user the site hides the ranking or the mock
-    account from, or a deactivated one, is followed for by nobody. Setting a time needs the mock account shown;
-    turning the schedule off does not. `GET /v1/rankings/follow/schedule` answers the schedule as it stands.
+    the next session, once a day, until the next decision supersedes it. A user the site hides the ranking or the
+    account's ordering from, or a deactivated one, is followed for by nobody. Setting a time needs ordering on the
+    account shown; turning the schedule off does not. `GET /v1/rankings/follow/schedule` answers the schedule as it stands.
     """
-    await pipeline.choose_follow_time(user, body.time)
+    await pipeline.choose_follow_schedule(user, body.time, body.broker)
 
 
-@router.post(
-    "/follow", status_code=status.HTTP_202_ACCEPTED, dependencies=[shows(Feature.MOCK_ACCOUNT), QuoteLogin], responses=FOLLOWING
-)
-async def follow_ranking(body: Confirmed, pipeline: UserPipeline, user: CurrentUser, start: RunStarter) -> RunAccepted:
+@router.post("/follow", status_code=status.HTTP_202_ACCEPTED, dependencies=[OrderingShown, QuoteLogin], responses=FOLLOWING)
+async def follow_ranking(body: Confirmed, pipeline: BrokerPipeline, user: CurrentUser, start: RunStarter) -> RunAccepted:
     """
-    Brings the user's mock account to the ranking's latest decision by the active formula, as a run of its own, which
+    Brings the account the `broker` query names, the user's mock account by default, to the ranking's latest decision
+    by the active formula, as a run of its own, which
     keeps that formula: it sells each holding the ranking left and buys each ranked stock the account lacks, at an
     equal weight of the account in whole lots of analysis.lot_size, priced as this site prices an order now, through
     the same order gates and journal as every order. While the formula holds cash it sells every holding and buys
-    nothing. It orders on the mock account only. A second follow of a decision the account already holds answers
-    nothing_to_follow.
+    nothing. A second follow of a decision the account already holds answers nothing_to_follow. With `broker=shioaji`
+    it follows into SinoPac's simulation account, for an administrator the site lets order on SinoPac while its login
+    is up, each BUY sized inside trading.max_order_value and refused past trading.max_daily_buy_value. SinoPac pays a
+    sale at settlement, so there a follow buys only what the cash the account has now pays for whole, best first, and
+    the run's log names each BUY that waits for a later follow. A login that is not on SinoPac's simulation server
+    answers not_simulation before the account is read, and the order gates refuse each order of a ranking follow on
+    such a login again. A ranking follow never orders with real money.
     """
     _, refusal = await pipeline.load_ranking_follow()
 
     match refusal:
+        case FollowRefusal.NOT_SIMULATION:
+            raise NotSimulation(
+                "A ranking follow orders on a real broker's simulation server only, and this site's login is not on it."
+            )
         case FollowRefusal.NOTHING_TO_FOLLOW:
-            raise NothingToFollow("The mock account holds this ranking already, or the ranking ranks no stock.")
+            raise NothingToFollow("The account holds this ranking already, or the ranking ranks no stock.")
         case FollowRefusal.OUTSIDE_FOLLOW_WINDOW:
             raise OutsideFollowWindow("This site places no order in the market's phase now. Follow the ranking when its window opens.")
         case None:

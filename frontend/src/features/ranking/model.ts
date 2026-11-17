@@ -1,4 +1,4 @@
-import type { Schemas } from '@/shared/api'
+import type { Broker, Schemas } from '@/shared/api'
 import { isIsoDate, monthsBefore, periodProblems, type Period, type PeriodProblem } from '@/shared/lib/dates'
 
 export type Ranking = Schemas['Ranking']
@@ -90,6 +90,15 @@ export function nextDecision(decidedOn: string, day: number, today: string): Nex
 export function offeredTimes(schedule: { time: string | null; times: readonly string[] }): string[] {
   const kept = schedule.time !== null && !schedule.times.includes(schedule.time) ? [schedule.time] : []
   return [...schedule.times, ...kept].sort()
+}
+
+/**
+ * The accounts a schedule's control lists, the mock account first: the ones the site lets the user's follow order on
+ * now and the saved one while the server says the site does not offer it (`broker_offered`), so the control always
+ * shows what is saved.
+ */
+export function offeredBrokers(schedule: Pick<FollowSchedule, 'broker' | 'broker_offered' | 'brokers'>): Broker[] {
+  return schedule.broker_offered ? [...schedule.brokers] : [...schedule.brokers, schedule.broker]
 }
 
 export type UnfinishedReason = 'failed' | 'neverEnded' | 'notStarted' | 'left'

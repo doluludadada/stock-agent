@@ -22,6 +22,7 @@ from a_domain.types.enums import (
     TradeAction,
     TradingPhase,
     UserStatus,
+    Workflow,
 )
 from a_domain.types.ids import RunId
 
@@ -94,6 +95,14 @@ class BrokerLink:
     broker: ExecutionProvider
     up: bool = True
     simulation: bool | None = None
+
+    @property
+    def on_simulation_server(self) -> bool:
+        """
+        The login that answered is on the broker's simulation server, which holds no real money. False for a login on
+        the production server, and for the mock account, which has no login.
+        """
+        return self.simulation is True
 
 
 @dataclass(frozen=True)
@@ -183,23 +192,76 @@ class BrokerLoginRule:
 
 
 @dataclass(frozen=True)
+class SimulationOnlyRule:
+    """
+    Why an order of a run of `workflow` may not go to what `link` reaches, or None. A workflow that orders on a real
+    broker's simulation server only (Workflow.simulation_only: a ranking follow) is refused on a real broker unless the
+    login that answers is on that server (BrokerLink.on_simulation_server), whatever the environment, the settings and
+    the user: it never orders with real money. The server it reads is the flag the broker's SDK client was constructed
+    with, which the client that sends the order reports of itself (BrokerLink.simulation). This app sets that flag from
+    the environment's table when it logs in, and this rule reads the table nowhere, so it refuses a client made for the
+    production server whatever environment the app runs as. No setting lifts it.
+    """
+
+    def apply(self, workflow: Workflow, link: BrokerLink) -> tuple[RejectReason, str] | None:
+        if not link.broker.real or not workflow.simulation_only or link.on_simulation_server:
+            return None
+
+        return (
+            RejectReason.NOT_SIMULATION,
+            f"a {workflow.value} orders on {link.broker.value}'s simulation server only, and this login is not on it",
+        )
+
+
+@dataclass(frozen=True)
+class RealBrokerGateRule:
+    """
+    Why a run of `workflow` by `user` may not order on `broker` now, or None: the one gate of a real broker
+    (ExecutionProvider.real), asked before a ranking follow starts, for the accounts My settings offers, by the
+    schedule's timer, and of every order right before its send (BrokerAccessRule). The mock account passes. A real
+    broker passes only while the site holds a login on it (`link`, what that login reports of itself now; None where
+    the site holds none), and three rules then decide, in this order: whether the workflow may order on the login's
+    server (SimulationOnlyRule), who may order on the broker at all (RealBrokerOrdererRule: the site's ordering switch
+    as it is now, `ordering`, then the user as saved now), and the login (BrokerLoginRule).
+    """
+
+    simulation_rule: SimulationOnlyRule
+    orderer_rule: RealBrokerOrdererRule
+    login_rule: BrokerLoginRule
+
+    def apply(
+        self, workflow: Workflow, broker: ExecutionProvider, link: BrokerLink | None, user: User | None, ordering: FeatureVisibility
+    ) -> tuple[RejectReason, str] | None:
+        if not broker.real:
+            return None
+
+        if link is None or link.broker != broker:
+            return RejectReason.BROKER_LOGIN_DOWN, f"this site holds no {broker.value} login"
+
+        return (
+            self.simulation_rule.apply(workflow, link)
+            or self.orderer_rule.apply(broker, user, ordering)
+            or self.login_rule.apply(link)
+        )
+
+
+@dataclass(frozen=True)
 class BrokerAccessRule:
     """
     Why an order may not go to the broker it would reach now, or None, checked right before the send: it must be the
-    broker its run chose when it started, and one the site's audience and order pricing offer (`brokers`). For a real
-    broker (ExecutionProvider.real) three rules then decide, in this order: who may order on it at all
-    (RealBrokerOrdererRule: the site's ordering switch as it is now, `ordering`, then the user as saved now), its login
-    (BrokerLoginRule), and a BUY's limits (BuyLimitRule).
+    broker its run chose when it started, and one the site's audience and order pricing offer (`brokers`). A real
+    broker must then pass its gate (RealBrokerGateRule: the workflow on the login's server, who may order, the login),
+    and a BUY its limits (BuyLimitRule).
     """
 
     brokers: frozenset[ExecutionProvider]
-    orderer_rule: RealBrokerOrdererRule
-    login_rule: BrokerLoginRule
+    gate_rule: RealBrokerGateRule
     limit_rule: BuyLimitRule
 
     def apply(
         self,
         order: Order,
+        workflow: Workflow,
         run_broker: ExecutionProvider,
         link: BrokerLink,
         user: User | None,
@@ -217,10 +279,7 @@ class BrokerAccessRule:
         if not broker.real:
             return None
 
-        if (refusal := self.orderer_rule.apply(broker, user, ordering) or self.login_rule.apply(link)) is not None:
-            return refusal
-
-        return self.limit_rule.apply(order, earlier_buys)
+        return self.gate_rule.apply(workflow, broker, link, user, ordering) or self.limit_rule.apply(order, earlier_buys)
 
 
 @dataclass(frozen=True)

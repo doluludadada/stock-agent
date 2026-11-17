@@ -288,7 +288,10 @@ async def test_the_steps_from_version_9_give_a_run_its_ranking_follow_columns_an
     await execute(
         "ALTER TABLE workflow_runs DROP COLUMN ranking_formula, DROP COLUMN ranking_decided_on, DROP COLUMN scheduled, "
         "DROP COLUMN ranking_open",
-        "ALTER TABLE users DROP COLUMN ranking_follow_time",
+        "ALTER TABLE users DROP COLUMN ranking_follow_time, DROP COLUMN ranking_follow_broker",
+        "INSERT INTO users (user_id, username_sealed, username_index, email_sealed, email_index, password_hash, role, status, "
+        "created_at, updated_at) VALUES ('u-before', '\\x01', '\\x02', '\\x03', '\\x04', 'none', 'USER', 'ACTIVE', "
+        "'2026-11-03 06:00:00', '2026-11-03 06:00:00')",
         "INSERT INTO workflow_runs (run_id, workflow, execution_provider, start_time, total_scanned, buzz_scanned, buzz_qualified, "
         "sentiment_analysed, passed_technical, ai_analysed, signals_generated, orders_submitted, orders_filled, orders_refused, "
         "stale_market_data_count, errors, execution_log, owner_id) VALUES ('00000000-0000-4000-8000-000000000001', 'RANKING_FOLLOW', "
@@ -309,9 +312,12 @@ async def test_the_steps_from_version_9_give_a_run_its_ranking_follow_columns_an
     assert "9 -> 10 add_the_ranking_formula_of_a_run" in output.getvalue()
     assert "10 -> 11 add_the_schedule_of_the_ranking_follow" in output.getvalue()
     assert "11 -> 12 add_what_a_ranking_follow_left_open" in output.getvalue()
-    assert after["schema_version"][1] == [("12",)]
+    assert "12 -> 13 add_the_account_of_the_scheduled_follow" in output.getvalue()
+    assert after["schema_version"][1] == [("13",)]
     assert {"ranking_formula", "ranking_decided_on", "scheduled", "ranking_open"} <= set(after["workflow_runs"][0])
     assert "ranking_follow_time" in after["users"][0]
+    followed_on = {row[after["users"][0].index("ranking_follow_broker")] for row in after["users"][1]}
+    assert after["users"][1] and followed_on == {"MOCK"}
     [run] = after["workflow_runs"][1]
     assert run[after["workflow_runs"][0].index("scheduled")] == "False"
     assert run[after["workflow_runs"][0].index("ranking_open")] == "None"

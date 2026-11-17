@@ -1,9 +1,8 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
-import { apiRequest, brokersKey, isApiError, runResultsKey, useIsSignedIn, type Broker, type Schemas } from '@/shared/api'
+import { apiRequest, brokersKey, isApiError, runOrdersKey, runResultsKey, useIsSignedIn, type Broker, type Schemas } from '@/shared/api'
 
 export type Run = Schemas['RunResponse']
 export type Signal = Schemas['SignalResponse']
-export type Order = Schemas['Order']
 export type Follow = Schemas['FollowResponse']
 export type FollowItem = Schemas['FollowItem']
 const START_PATHS = {
@@ -25,7 +24,7 @@ export const runKeys = {
   page: (offset: number) => ['owner', 'runs', 'page', offset] as const,
   run: (runId: string) => ['owner', 'runs', 'run', runId] as const,
   signals: (runId: string) => ['owner', 'runs', 'signals', runId] as const,
-  orders: (runId: string) => ['owner', 'runs', 'orders', runId] as const,
+  orders: runOrdersKey,
   /** Under the run results: a follow's end and a reset of the mock account change what is open to follow. */
   follow: (runId: string) => [...runResultsKey, 'follow', runId] as const,
 }
@@ -79,14 +78,6 @@ export function useRunSignals(runId: string, enabled: boolean) {
   return useQuery({
     queryKey: runKeys.signals(runId),
     queryFn: ({ signal }) => apiRequest('get', '/v1/runs/{run_id}/signals', { params: { run_id: runId }, signal }),
-    enabled,
-  })
-}
-
-export function useRunOrders(runId: string, enabled: boolean) {
-  return useQuery({
-    queryKey: runKeys.orders(runId),
-    queryFn: ({ signal }) => apiRequest('get', '/v1/runs/{run_id}/orders', { params: { run_id: runId }, signal }),
     enabled,
   })
 }

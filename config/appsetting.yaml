@@ -360,8 +360,10 @@ market_data:
 trading:
   # Buzz, Intraday and a manual BUY order on the account their run chose when it started: the user's mock account, the
   # default, or for an administrator on a personal site with a Shioaji login SinoPac, on its simulation server in dev
-  # and test and on the real account in prod. A follow orders on the mock account only. These two limits hold every
-  # SinoPac BUY, checked as it is sent; a SELL is never held to them and sells only shares the account holds.
+  # and test and on the real account in prod. A follow of a run orders on the mock account only. A follow of the
+  # monthly ranking orders on the mock account or, for such an administrator, on SinoPac's simulation server, and is
+  # refused on the real account whatever these settings say. These two limits hold every SinoPac BUY, checked as it
+  # is sent; a SELL is never held to them and sells only shares the account holds.
   # Most NT$ one SinoPac BUY may cost at its limit price, fees aside.
   max_order_value: 100000
   # Most NT$ the SinoPac BUYs of one Taiwan calendar day may cost together at their limit prices, counted from the

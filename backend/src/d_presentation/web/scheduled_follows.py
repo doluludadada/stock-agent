@@ -1,8 +1,7 @@
 import asyncio
 
 from a_domain.model.system.user import User
-from a_domain.types.enums import ExecutionProvider
-from a_domain.types.errors import RankingUnavailable
+from a_domain.types.errors import BrokerUnavailable, RankingUnavailable, RealBrokerRefused
 from a_domain.types.ids import RunId
 from d_presentation.live_runtime import OpenedRuntime, RuntimeSwitch
 from d_presentation.web.workflow_runs import RunInProgress, TooManyRuns, WorkflowRuns
@@ -12,7 +11,8 @@ async def follow_rankings_on_schedule(switch: RuntimeSwitch, runs: WorkflowRuns)
     """
     The Web API's timer of the scheduled ranking follows: every api.follow_schedule_poll_seconds of the current
     settings it starts the follows that are due (start_due_follows), on the current runtime. It is the one timer that
-    starts a run that orders, and it orders on a user's mock account alone. It never stops on an error of its own: it
+    starts a run that orders, and it orders on the account each user's schedule chose: the user's mock account, or
+    SinoPac's simulation account. It never stops on an error of its own: it
     logs it and looks again at the next interval. The lifespan cancels it at shutdown; a follow it started is a run of
     the server like any other and is cancelled with them.
     """
@@ -46,7 +46,7 @@ async def start_due_follows(opened: OpenedRuntime, runs: WorkflowRuns) -> list[R
             if (run_id := await start_follow_if_due(opened, runs, user)) is not None:
                 started.append(run_id)
                 runtime.logger.info(f"The schedule of user {user.user_id} started the ranking follow {run_id}.")
-        except (RankingUnavailable, RunInProgress, TooManyRuns) as error:
+        except (RankingUnavailable, RunInProgress, TooManyRuns, RealBrokerRefused, BrokerUnavailable) as error:
             runtime.logger.info(f"The scheduled ranking follow of user {user.user_id} waits: {error}")
         except Exception as error:
             runtime.logger.error(f"The scheduled ranking follow of user {user.user_id} did not start: {type(error).__name__}: {error}")
@@ -58,22 +58,28 @@ async def start_follow_if_due(opened: OpenedRuntime, runs: WorkflowRuns, user: U
     """
     Starts the ranking follow of a user whose schedule is due, as the button's route starts one: the same operation
     (Pipeline.follow_ranking) on the user's own Pipeline, as a background run of the server, one at a time per user,
-    recorded as started by the schedule. The Pipeline is the user's on the mock account, whoever the user is: no
-    setting names the broker of a scheduled follow. Whether it is due may take a read of the whole history, so the
-    users whose schedule may run are asked for again right before the start: a user who turned the schedule off, was
-    deactivated or lost a feature meanwhile is not followed. None for a user whose follow does not start.
+    recorded as started by the schedule. The Pipeline is the user's on the account the schedule chose
+    (User.ranking_follow_broker) and on no other: a user the site no longer lets order there was left out by
+    load_scheduled_followers and is not followed on the mock account instead. Whether it is due may take a read of the
+    whole history, so the users whose schedule may run are asked for again right before the start: a user who turned
+    the schedule off, moved it to another account, was deactivated or lost a feature meanwhile is not followed. None
+    for a user whose follow does not start.
     """
     runtime = opened.runtime
 
     if runs.running(user.user_id) is not None:
         return None
 
-    pipeline = runtime.pipeline_for(user, ExecutionProvider.MOCK)
+    pipeline = runtime.pipeline_for(user, user.ranking_follow_broker)
 
     if not (await pipeline.load_follow_schedule(user)).due:
         return None
 
-    if user.user_id not in {follower.user_id for follower in await runtime.signed_out.load_scheduled_followers()}:
+    followers = await runtime.signed_out.load_scheduled_followers()
+
+    if (user.user_id, user.ranking_follow_broker) not in {
+        (follower.user_id, follower.ranking_follow_broker) for follower in followers
+    }:
         return None
 
     cap = runtime.config.accounts.max_concurrent_runs

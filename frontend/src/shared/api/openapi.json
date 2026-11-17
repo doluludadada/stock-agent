@@ -1940,6 +1940,8 @@
           "too_many_runs",
           "nothing_to_follow",
           "outside_follow_window",
+          "not_simulation",
+          "follow_broker_not_offered",
           "backtest_period_unavailable",
           "ranking_unavailable",
           "too_many_backtests",
@@ -2102,10 +2104,11 @@
         "type": "object"
       },
       "FollowRefusal": {
-        "description": "Why a run's decisions, or the monthly ranking, cannot be followed into the user's mock account now. The Web API\nanswers each as its code.",
+        "description": "Why a run's decisions cannot be followed into the user's mock account now, or the monthly ranking into the account\nits follow chose. The Web API answers each as its code.",
         "enum": [
           "nothing_to_follow",
-          "outside_follow_window"
+          "outside_follow_window",
+          "not_simulation"
         ],
         "title": "FollowRefusal",
         "type": "string"
@@ -2209,6 +2212,9 @@
       },
       "FollowScheduleRequest": {
         "properties": {
+          "broker": {
+            "$ref": "#/components/schemas/ExecutionProvider"
+          },
           "confirm": {
             "const": true,
             "title": "Confirm",
@@ -2229,7 +2235,8 @@
         },
         "required": [
           "confirm",
-          "time"
+          "time",
+          "broker"
         ],
         "title": "FollowScheduleRequest",
         "type": "object"
@@ -2237,6 +2244,20 @@
       "FollowScheduleResponse": {
         "description": "The user's schedule of the ranking follow (FollowSchedule), its last unfinished follow without the record's own texts.",
         "properties": {
+          "broker": {
+            "$ref": "#/components/schemas/ExecutionProvider"
+          },
+          "broker_offered": {
+            "title": "Broker Offered",
+            "type": "boolean"
+          },
+          "brokers": {
+            "items": {
+              "$ref": "#/components/schemas/ExecutionProvider"
+            },
+            "title": "Brokers",
+            "type": "array"
+          },
           "due": {
             "title": "Due",
             "type": "boolean"
@@ -2287,6 +2308,9 @@
         "required": [
           "time",
           "times",
+          "broker",
+          "brokers",
+          "broker_offered",
           "pending",
           "unfinished",
           "due"
@@ -4702,8 +4726,11 @@
         "type": "object"
       },
       "RankingFollowRun": {
-        "description": "One ranking follow of the mock account (its run record) with the formula it used, as the settings defined it then.",
+        "description": "One ranking follow of the user (its run record) with the formula it used, as the settings defined it then.",
         "properties": {
+          "execution_provider": {
+            "$ref": "#/components/schemas/ExecutionProvider"
+          },
           "ranking_decided_on": {
             "format": "date",
             "title": "Ranking Decided On",
@@ -4730,6 +4757,7 @@
         "required": [
           "run_id",
           "start_time",
+          "execution_provider",
           "ranking_formula",
           "ranking_decided_on",
           "scheduled"
@@ -4800,7 +4828,7 @@
         "type": "object"
       },
       "RankingHoldings": {
-        "description": "A mock account against the monthly ranking's latest decision. A ranking follow sells `left` and buys `lacking`.",
+        "description": "An account against the monthly ranking's latest decision. A ranking follow sells `left` and buys `lacking`.",
         "properties": {
           "decided_on": {
             "anyOf": [
@@ -7183,6 +7211,10 @@
             "type": "array",
             "uniqueItems": true
           },
+          "ranking_follow_broker": {
+            "$ref": "#/components/schemas/ExecutionProvider",
+            "default": "mock"
+          },
           "ranking_follow_time": {
             "anyOf": [
               {
@@ -7768,7 +7800,7 @@
     }
   },
   "info": {
-    "description": "\nRuns the stock-agent workflows and reads what they recorded, on the same runtime as the CLI.\n\nUsers. Anyone may register (`POST /v1/auth/register`) while registration is open, and signs in with a username or an\nemail (`POST /v1/auth/sign-in`), which sets the HttpOnly session cookie `stock_agent_session`. A site with a Google\nclient also signs in with Google: the browser goes to `GET /v1/auth/google/start`, and Google sends it back to `GET\n/v1/auth/google/callback`, which sets the same cookie and sends the browser to the app. Public: sign-in,\nregistration, the first-time setup, the built-in strategies and market data (`/v1/market`). Signed in: every other\nread and write, each on the user's own runs, decisions, orders, watchlist, mock account and saved technical settings.\nAdministrator: the users (`/v1/admin/users`) and the settings form (`/v1/admin/settings`). 401 means sign in: the\nsession is missing, expired or ended. 403 means signed in but not allowed, and never ends the session. Every write\nsends the header `X-Requested-With: stock-agent`, and every write but sign-in, sign-out, registration and setup\nrepeats `\"confirm\": true` in its body.\n\nOrders. Full Cycle, specific-stock analysis, valuation and market data never order. Buzz, Intraday and a manual BUY\nof a stock a specific-stock run reported (`POST /v1/runs/{run_id}/manual-buy`) send orders through the same gates and\ntrading journal as the CLI, on the broker their `broker` query names for the whole run: the user's mock account by\ndefault, or SinoPac (`shioaji`) for an administrator while the site's Shioaji login is up, on its simulation server\nin dev and test and on the real account in prod, each BUY within trading.max_order_value and the day's within\ntrading.max_daily_buy_value (`GET /v1/account/brokers` names them). A follow (`POST /v1/runs/{run_id}/follow`) places a\nfinished Full Cycle's open decisions in the user's mock account only, priced again: at a fresh realtime quote in\ncontinuous trading, or on a site without realtime quotes at the last session's official close while no session\ntrades. A ranking follow (`POST /v1/rankings/follow`) brings that mock account to the monthly ranking's latest decision,\npriced the same way, on the mock account only. No endpoint cancels or modifies an order.\n\nOpen data. A public site (`audience: public`) uses only the TWSE and TPEX OpenAPI data the server archives: daily\nhistory and the index trend come from that archive, it has no realtime quote, so Buzz and Intraday answer 403\n`realtime_quotes_unavailable`, and it trades on the mock broker only. A personal site reads its daily history and\nindex trend from the exchanges' own daily reports; without a Shioaji login it has no realtime quote either, so it\nanswers Buzz and Intraday the same way. A public site reads no news site and no MOPS: the AI step\nreads the archived material information, the TWSE news naming the stock and its archived financials, a stock with none\nof them is decided on its technical score alone, and every valuation endpoint answers 403 `mops_unavailable`. `GET\n/v1/market/audience` answers the site's audience and what it allows, so the web app offers only that.\n\nBacktests. `POST /v1/backtests` replays the user's active technical strategy over past sessions the site already\nholds, with the live trading rules on the technical score alone, and saves the result for the user (`GET\n/v1/backtests`, `GET /v1/backtests/{backtest_id}`). `GET /v1/backtests/options` names the period it may cover. A\nbacktest asks no AI, touches no account, watchlist or run record, and never orders.\n\nRankings. The settings hold the formulas the ranking can be made by (`ranking.formulas`) and which one is active\n(`ranking.active_formula`); a save that switches it applies at once, to the ranking, every stock's score, the backtest\nand a follow alike. `GET /v1/rankings/latest` answers the monthly stock ranking by the active formula at the latest\ndecision session the site's daily history holds, and `GET /v1/rankings/backtest?first=&last=` replays it over a period\nagainst the ranking.benchmark_id held over the same sessions. `GET /v1/rankings/formulas?first=&last=` replays every\nformula over the same period and costs, and again at a liquidity floor, as the evidence beside the choice. All read only\nthe held history and the archived monthly revenue, which `just backfill-history` brings back; they ask no AI, touch no\naccount and never order. `GET /v1/rankings/follow` answers the user's mock account against that ranking, its return\nsince it first followed it against the benchmark, and its follows with the formula each used; `POST\n/v1/rankings/follow` brings the mock account to the ranking, as a run that orders on the mock account only and keeps\nthe formula it used. `PUT /v1/rankings/follow/schedule` lets the user schedule that follow: from the time they choose,\non the first session after each new decision, the server starts the same run by itself, once per decision, on the\nuser's mock account only, and its record says the schedule started it. No other run starts without a request.\n\nThe server replays `accounts.max_concurrent_backtests` strategy backtests and ranking backtests at once, and one more\nwaits its turn. A user's request past `accounts.max_backtests_per_user` replaying or waiting answers 429\n`too_many_backtests`.\n\nWorkflows run in the background, one at a time per user and a few at a time per server: a start answers 202 with the\nrun id, and GET /v1/runs/{run_id} reports the run's state and its record; another user's run id answers 404. Run the\nserver with one worker process.\n",
+    "description": "\nRuns the stock-agent workflows and reads what they recorded, on the same runtime as the CLI.\n\nUsers. Anyone may register (`POST /v1/auth/register`) while registration is open, and signs in with a username or an\nemail (`POST /v1/auth/sign-in`), which sets the HttpOnly session cookie `stock_agent_session`. A site with a Google\nclient also signs in with Google: the browser goes to `GET /v1/auth/google/start`, and Google sends it back to `GET\n/v1/auth/google/callback`, which sets the same cookie and sends the browser to the app. Public: sign-in,\nregistration, the first-time setup, the built-in strategies and market data (`/v1/market`). Signed in: every other\nread and write, each on the user's own runs, decisions, orders, watchlist, mock account and saved technical settings.\nAdministrator: the users (`/v1/admin/users`) and the settings form (`/v1/admin/settings`). 401 means sign in: the\nsession is missing, expired or ended. 403 means signed in but not allowed, and never ends the session. Every write\nsends the header `X-Requested-With: stock-agent`, and every write but sign-in, sign-out, registration and setup\nrepeats `\"confirm\": true` in its body.\n\nOrders. Full Cycle, specific-stock analysis, valuation and market data never order. Buzz, Intraday and a manual BUY\nof a stock a specific-stock run reported (`POST /v1/runs/{run_id}/manual-buy`) send orders through the same gates and\ntrading journal as the CLI, on the broker their `broker` query names for the whole run: the user's mock account by\ndefault, or SinoPac (`shioaji`) for an administrator while the site's Shioaji login is up, on its simulation server\nin dev and test and on the real account in prod, each BUY within trading.max_order_value and the day's within\ntrading.max_daily_buy_value (`GET /v1/account/brokers` names them). A follow (`POST /v1/runs/{run_id}/follow`) places a\nfinished Full Cycle's open decisions in the user's mock account only, priced again: at a fresh realtime quote in\ncontinuous trading, or on a site without realtime quotes at the last session's official close while no session\ntrades. A ranking follow (`POST /v1/rankings/follow`) brings that mock account to the monthly ranking's latest decision,\npriced the same way; with `broker=shioaji` an administrator the site lets order on SinoPac follows the ranking into\nSinoPac's simulation account instead, and only there: on a login that is not on SinoPac's simulation server it answers\n403 `not_simulation` and every order of a ranking follow is refused, whatever the settings.\nNo endpoint cancels or modifies an order.\n\nOpen data. A public site (`audience: public`) uses only the TWSE and TPEX OpenAPI data the server archives: daily\nhistory and the index trend come from that archive, it has no realtime quote, so Buzz and Intraday answer 403\n`realtime_quotes_unavailable`, and it trades on the mock broker only. A personal site reads its daily history and\nindex trend from the exchanges' own daily reports; without a Shioaji login it has no realtime quote either, so it\nanswers Buzz and Intraday the same way. A public site reads no news site and no MOPS: the AI step\nreads the archived material information, the TWSE news naming the stock and its archived financials, a stock with none\nof them is decided on its technical score alone, and every valuation endpoint answers 403 `mops_unavailable`. `GET\n/v1/market/audience` answers the site's audience and what it allows, so the web app offers only that.\n\nBacktests. `POST /v1/backtests` replays the user's active technical strategy over past sessions the site already\nholds, with the live trading rules on the technical score alone, and saves the result for the user (`GET\n/v1/backtests`, `GET /v1/backtests/{backtest_id}`). `GET /v1/backtests/options` names the period it may cover. A\nbacktest asks no AI, touches no account, watchlist or run record, and never orders.\n\nRankings. The settings hold the formulas the ranking can be made by (`ranking.formulas`) and which one is active\n(`ranking.active_formula`); a save that switches it applies at once, to the ranking, every stock's score, the backtest\nand a follow alike. `GET /v1/rankings/latest` answers the monthly stock ranking by the active formula at the latest\ndecision session the site's daily history holds, and `GET /v1/rankings/backtest?first=&last=` replays it over a period\nagainst the ranking.benchmark_id held over the same sessions. `GET /v1/rankings/formulas?first=&last=` replays every\nformula over the same period and costs, and again at a liquidity floor, as the evidence beside the choice. All read only\nthe held history and the archived monthly revenue, which `just backfill-history` brings back; they ask no AI, touch no\naccount and never order. `GET /v1/rankings/follow` answers the user's mock account against that ranking, its return\nsince it first followed it against the benchmark, and its follows with the account and the formula each used; `POST\n/v1/rankings/follow` brings the account its `broker` query names to the ranking, the user's mock account by default,\nas a run that orders on that account only and keeps the formula it used. `broker=shioaji` is SinoPac's simulation\naccount, for an administrator the site lets order on SinoPac: a ranking follow is refused while the site's SinoPac\nlogin is not on the simulation server, so it never orders with real money. `PUT /v1/rankings/follow/schedule` lets the\nuser schedule that follow and choose its account: from the time they choose, on the first session after each new\ndecision, the server starts the same run by itself, once per decision, on the account the schedule names and on no\nother, and its record says the schedule started it. No other run starts without a request.\n\nThe server replays `accounts.max_concurrent_backtests` strategy backtests and ranking backtests at once, and one more\nwaits its turn. A user's request past `accounts.max_backtests_per_user` replaying or waiting answers 429\n`too_many_backtests`.\n\nWorkflows run in the background, one at a time per user and a few at a time per server: a start answers 202 with the\nrun id, and GET /v1/runs/{run_id} reports the run's state and its record; another user's run id answers 404. Run the\nserver with one worker process.\n",
     "title": "TW-Stock-Alpha-Agent",
     "version": "0.2.0"
   },
@@ -9886,7 +9918,7 @@
     },
     "/v1/rankings/follow": {
       "get": {
-        "description": "The ranking in the user's mock account: which of the latest decision's stocks it holds and lacks, which of its\nholdings left the ranking (every holding while the active formula holds cash), whether a follow may start now, its\nreturn since it first followed the ranking against ranking.benchmark_id over the same sessions, its follows so\nfar with the formula each used and whether the schedule or the user started it, and the user's schedule. It\nrecords nothing and never orders.",
+        "description": "The ranking in the user's mock account: which of the latest decision's stocks it holds and lacks, which of its\nholdings left the ranking (every holding while the active formula holds cash), whether a follow may start now, its\nreturn since it first followed the ranking against ranking.benchmark_id over the same sessions, its follows so\nfar, on that account and on SinoPac, with the account and the formula each used and whether the schedule or the\nuser started it, and the user's schedule. It reads no SinoPac account, records nothing and never orders.",
         "operationId": "get_ranking_follow_v1_rankings_follow_get",
         "responses": {
           "200": {
@@ -9921,8 +9953,19 @@
         ]
       },
       "post": {
-        "description": "Brings the user's mock account to the ranking's latest decision by the active formula, as a run of its own, which\nkeeps that formula: it sells each holding the ranking left and buys each ranked stock the account lacks, at an\nequal weight of the account in whole lots of analysis.lot_size, priced as this site prices an order now, through\nthe same order gates and journal as every order. While the formula holds cash it sells every holding and buys\nnothing. It orders on the mock account only. A second follow of a decision the account already holds answers\nnothing_to_follow.",
+        "description": "Brings the account the `broker` query names, the user's mock account by default, to the ranking's latest decision\nby the active formula, as a run of its own, which\nkeeps that formula: it sells each holding the ranking left and buys each ranked stock the account lacks, at an\nequal weight of the account in whole lots of analysis.lot_size, priced as this site prices an order now, through\nthe same order gates and journal as every order. While the formula holds cash it sells every holding and buys\nnothing. A second follow of a decision the account already holds answers nothing_to_follow. With `broker=shioaji`\nit follows into SinoPac's simulation account, for an administrator the site lets order on SinoPac while its login\nis up, each BUY sized inside trading.max_order_value and refused past trading.max_daily_buy_value. SinoPac pays a\nsale at settlement, so there a follow buys only what the cash the account has now pays for whole, best first, and\nthe run's log names each BUY that waits for a later follow. A login that is not on SinoPac's simulation server\nanswers not_simulation before the account is read, and the order gates refuse each order of a ranking follow on\nsuch a login again. A ranking follow never orders with real money.",
         "operationId": "follow_ranking_v1_rankings_follow_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "broker",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ExecutionProvider",
+              "default": "mock"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -9952,7 +9995,7 @@
                 }
               }
             },
-            "description": "feature_hidden: the site does not show the user the ranking and the mock account. realtime_quotes_unavailable: the site prices orders on realtime quotes and has no Shioaji login now."
+            "description": "feature_hidden: the site does not show the user the ranking and ordering on the account the `broker` query names. realtime_quotes_unavailable: the site prices orders on realtime quotes and has no Shioaji login now. real_broker_refused: `broker=shioaji` by a user who is no administrator. broker_unavailable: the site has no SinoPac login up. not_simulation: the site's SinoPac login is not on SinoPac's simulation server, the only one a ranking follow orders on."
           },
           "409": {
             "content": {
@@ -9962,7 +10005,7 @@
                 }
               }
             },
-            "description": "nothing_to_follow: the mock account holds the ranking already, or the ranking ranks no stock. outside_follow_window: the site places no order in the market's phase now. run_in_progress: another run of this user is still running."
+            "description": "nothing_to_follow: the account holds the ranking already, or the ranking ranks no stock. outside_follow_window: the site places no order in the market's phase now. run_in_progress: another run of this user is still running."
           },
           "422": {
             "content": {
@@ -10023,7 +10066,7 @@
         ]
       },
       "put": {
-        "description": "My settings: schedules the user's ranking follow, or turns the schedule off with null. With a time, the site follows\neach new decision of the ranking into the user's mock account by itself on the first session after it, from that\ntime in Taipei and while this site places orders, as a run like the button's (`POST /v1/rankings/follow`): the\nsame sizing, order gates and journal, on the mock account only, recorded as started by the schedule. It follows a\ndecision until a follow left the account nothing to trade for it under the active formula, and never one the user\nfinished by hand; a day whose window it missed, or whose follow ordered nothing or only a part, is tried again on\nthe next session, once a day, until the next decision supersedes it. A user the site hides the ranking or the mock\naccount from, or a deactivated one, is followed for by nobody. Setting a time needs the mock account shown;\nturning the schedule off does not. `GET /v1/rankings/follow/schedule` answers the schedule as it stands.",
+        "description": "My settings: schedules the user's ranking follow, or turns the schedule off with null. With a time, the site follows\neach new decision of the ranking into the account `broker` names by itself on the first session after it, from\nthat time in Taipei and while this site places orders, as a run like the button's (`POST /v1/rankings/follow`): the\nsame sizing, order gates and journal, recorded as started by the schedule. `shioaji` is SinoPac's simulation\naccount, which holds no real money, offered only to an administrator the site lets order on SinoPac while its login\nis up on the simulation server; a user who loses any of that is followed on no account, never on the mock account\ninstead, until they have it again. A decision counts as finished on the account its follow ran on. It follows a\ndecision until a follow left the account nothing to trade for it under the active formula, and never one the user\nfinished by hand; a day whose window it missed, or whose follow ordered nothing or only a part, is tried again on\nthe next session, once a day, until the next decision supersedes it. A user the site hides the ranking or the\naccount's ordering from, or a deactivated one, is followed for by nobody. Setting a time needs ordering on the\naccount shown; turning the schedule off does not. `GET /v1/rankings/follow/schedule` answers the schedule as it stands.",
         "operationId": "schedule_ranking_follow_v1_rankings_follow_schedule_put",
         "requestBody": {
           "content": {
@@ -10047,7 +10090,7 @@
                 }
               }
             },
-            "description": "feature_hidden: a time was given and the site does not show the user the mock account; nothing saved."
+            "description": "feature_hidden: a time was given and the site does not show the user ordering on the account; nothing saved. follow_broker_not_offered: a time was given and the site does not let the user's ranking follow order on that account now; nothing saved."
           },
           "422": {
             "content": {

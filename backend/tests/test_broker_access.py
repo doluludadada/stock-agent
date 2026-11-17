@@ -25,6 +25,7 @@ from a_domain.types.enums import (
     TimeInForce,
     TradeAction,
     UserStatus,
+    Workflow,
 )
 from a_domain.types.ids import UserId, new_decision_id, new_run_id
 from c_infrastructure.system.market_clock import TAIWAN_TIMEZONE
@@ -73,7 +74,7 @@ def refusal(
     sent: Order, run_broker: ExecutionProvider, link: BrokerLink, user: User | None, earlier: list[Order] | None = None
 ) -> str | None:
     """With the site's ordering switch on for everyone at the send, so each later check of a real broker shows its own reason."""
-    reason = RULE.apply(sent, run_broker, link, user, FeatureVisibility.EVERYONE, earlier or [])
+    reason = RULE.apply(sent, Workflow.MANUAL_BUY, run_broker, link, user, FeatureVisibility.EVERYONE, earlier or [])
     return reason[0].name if reason else None
 
 
@@ -90,22 +91,22 @@ def test_the_shipped_settings_send_no_order_to_sinopac_whatever_the_environment_
     login = replace(SINOPAC, simulation=environment.shioaji_simulation)
 
     for sent in (order(), order(action=TradeAction.SELL)):
-        assert shipped.apply(sent, ExecutionProvider.SHIOAJI, login, user, SHIPPED_ORDERING, []) == (
+        assert shipped.apply(sent, Workflow.MANUAL_BUY, ExecutionProvider.SHIOAJI, login, user, SHIPPED_ORDERING, []) == (
             RejectReason.ORDERING_OFF,
             "this site has ordering on shioaji off: features.sinopac_ordering",
         )
 
     assert SHIPPED_ORDERING == FeatureVisibility.OFF
-    assert shipped.apply(order(), ExecutionProvider.MOCK, MOCK, user, SHIPPED_ORDERING, []) is None
+    assert shipped.apply(order(), Workflow.MANUAL_BUY, ExecutionProvider.MOCK, MOCK, user, SHIPPED_ORDERING, []) is None
 
 
 def test_ordering_shown_to_administrators_refuses_a_member_at_the_switch_and_lets_an_administrator_through() -> None:
     administrators = FeatureVisibility.ADMINISTRATORS
 
-    assert RULE.apply(order(), ExecutionProvider.SHIOAJI, SINOPAC, ADMINISTRATOR, administrators, []) is None
+    assert RULE.apply(order(), Workflow.MANUAL_BUY, ExecutionProvider.SHIOAJI, SINOPAC, ADMINISTRATOR, administrators, []) is None
 
     for user in (MEMBER, None):
-        refused = RULE.apply(order(), ExecutionProvider.SHIOAJI, SINOPAC, user, administrators, [])
+        refused = RULE.apply(order(), Workflow.MANUAL_BUY, ExecutionProvider.SHIOAJI, SINOPAC, user, administrators, [])
         assert refused is not None and refused[0] == RejectReason.ORDERING_OFF
 
 
@@ -137,14 +138,14 @@ def test_a_public_site_offers_no_real_broker_and_prod_trades_on_the_real_account
     prod = SHIPPED.model_copy(update={"environment": SystemEnvironment.PROD}).broker_access_rule()
     production, everyone = replace(SINOPAC, simulation=False), FeatureVisibility.EVERYONE
 
-    assert public.apply(order(), ExecutionProvider.SHIOAJI, SINOPAC, ADMINISTRATOR, everyone, []) == (
+    assert public.apply(order(), Workflow.MANUAL_BUY, ExecutionProvider.SHIOAJI, SINOPAC, ADMINISTRATOR, everyone, []) == (
         RejectReason.BROKER_NOT_OFFERED,
         "this site orders on mock only, not shioaji",
     )
-    assert (prod.apply(order(), ExecutionProvider.SHIOAJI, SINOPAC, ADMINISTRATOR, everyone, []) or ("",))[
+    assert (prod.apply(order(), Workflow.MANUAL_BUY, ExecutionProvider.SHIOAJI, SINOPAC, ADMINISTRATOR, everyone, []) or ("",))[
         0
     ] == RejectReason.BROKER_SERVER_MISMATCH
-    assert prod.apply(order(), ExecutionProvider.SHIOAJI, production, ADMINISTRATOR, everyone, []) is None
+    assert prod.apply(order(), Workflow.MANUAL_BUY, ExecutionProvider.SHIOAJI, production, ADMINISTRATOR, everyone, []) is None
 
 
 def test_a_sinopac_buy_above_the_order_limit_is_refused_and_one_at_it_passes() -> None:
@@ -155,7 +156,9 @@ def test_a_sinopac_buy_above_the_order_limit_is_refused_and_one_at_it_passes() -
 def test_a_sinopac_buy_without_a_limit_price_is_refused_since_the_limits_cannot_value_it() -> None:
     market = replace(order(), order_type=OrderType.MARKET, limit_price=None)
 
-    assert RULE.apply(market, ExecutionProvider.SHIOAJI, SINOPAC, ADMINISTRATOR, FeatureVisibility.EVERYONE, []) == (
+    assert RULE.apply(
+        market, Workflow.MANUAL_BUY, ExecutionProvider.SHIOAJI, SINOPAC, ADMINISTRATOR, FeatureVisibility.EVERYONE, []
+    ) == (
         RejectReason.ORDER_VALUE_LIMIT,
         "has no limit price to value against trading.max_order_value and trading.max_daily_buy_value",
     )

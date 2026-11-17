@@ -538,7 +538,7 @@ async def test_a_follow_under_a_formula_that_holds_cash_sells_every_holding_on_t
     async with app_of(harness) as app, client_at(app) as client:
         assert (await sign_in(client, ADMINISTRATOR.username, ADMINISTRATOR_PASSWORD)).status_code == 200
         assert (await save(client, ("ranking.active_formula", "cash_under_two"))).status_code == 200
-        started = await write(client, "POST", "/v1/rankings/follow?broker=shioaji", {})
+        started = await write(client, "POST", "/v1/rankings/follow", {})
         follow = await ended(client, started.json()["run_id"])
         placed = [(order.stock_id, order.action) for order in harness.broker.placed]
         assert (await save(client, ("ranking.active_formula", "best_one"))).status_code == 200

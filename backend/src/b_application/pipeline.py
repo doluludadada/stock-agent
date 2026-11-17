@@ -35,6 +35,7 @@ from a_domain.rules.watchlist.membership import WatchlistAddition
 from a_domain.types.enums import (
     AiAnalysisFocus,
     AiProvider,
+    ExecutionProvider,
     FollowRefusal,
     HoldingSource,
     MarketIndex,
@@ -134,7 +135,7 @@ from b_application.use_cases.trade.watch_stocks import WatchStocks
 from b_application.use_cases.users.ai_model_choice import AiModelChoice
 from b_application.use_cases.users.ai_model_lookup import AiModelLookup
 from b_application.use_cases.users.first_administrator_setup import FirstAdministratorSetup
-from b_application.use_cases.users.follow_time_choice import FollowTimeChoice
+from b_application.use_cases.users.follow_schedule_choice import FollowScheduleChoice
 from b_application.use_cases.users.google_account import GoogleAccount
 from b_application.use_cases.users.google_identity_check import GoogleIdentityCheck
 from b_application.use_cases.users.google_sign_in_start import GoogleSignInStart
@@ -173,11 +174,14 @@ class Pipeline:
     and the order joins status.orders before the next decision is prepared, so a decision never gets a second order.
     Buzz and Intraday send twice: right after the stop-loss check, while those quotes are fresh, and at the end. Full
     Cycle, specific-stock analysis and valuation never send; a follow sends a finished Full Cycle's decisions, priced
-    again, into the user's mock account, and a ranking follow what brings that account to the monthly ranking.
+    again, into the user's mock account, and a ranking follow what brings the account of the run's broker to the
+    monthly ranking.
 
     Which broker the ordering steps hold (account_loader, order_preparation, order_execution, order_outcome) is the
     run's choice, fixed when dependencies.py builds this Pipeline for the run: the mock account unless an administrator
-    chose a real broker. The mock_* steps always hold the user's mock account, and both follows use only them.
+    chose a real broker. The mock_* steps always hold the user's mock account, and a follow of a run uses only them. A
+    ranking follow orders on the run's choice, and on a real broker only on its simulation server: its candidates step
+    refuses any other login before the account is read, and the order gates refuse each order again (SimulationOnlyRule).
 
     A built-in strategy id, the CLI session's choice, makes a run use that built-in strategy instead of the saved one.
 
@@ -244,7 +248,7 @@ class Pipeline:
     ranking_follow_signals: RankingFollowSignals
     ranking_follow_return: RankingFollowReturn
     ranking_follow_schedule: RankingFollowSchedule
-    follow_time_choice: FollowTimeChoice
+    follow_schedule_choice: FollowScheduleChoice
     scheduled_followers: ScheduledFollowers
     mock_account_history: AccountHistory
     trade_history: TradeHistory
@@ -510,7 +514,8 @@ class Pipeline:
 
     async def follow_ranking(self, run_id: RunId | None = None, *, scheduled: bool = False) -> PipelineStatus:
         """
-        The user's follow of the monthly ranking's latest decision into their mock account, as its own recorded run,
+        The user's follow of the monthly ranking's latest decision into the account of the broker this Pipeline's run
+        chose, their mock account or SinoPac's simulation account, as its own recorded run,
         started by the user or, `scheduled`, by the site's schedule of that user, which the run's record says: a
         SELL of each holding the ranking left, then a BUY of each ranked stock the account lacks at an equal weight of
         the account (RankingFollowRule), each priced as this site prices an order now, like a follow of a run; every
@@ -519,9 +524,12 @@ class Pipeline:
         what the first could not fill. A follow that may not start (RankingFollowCandidates' refusal) records the
         refusal and sends nothing. After its orders it looks at the account once more, so its record says how many
         stocks it left to trade: the schedule follows the decision again until a follow left none. Every step that
-        reads the account, gates or sends an order holds the user's mock book (mock_account_loader,
-        mock_order_preparation, mock_order_execution, mock_order_outcome), never the broker the run chose, so no
-        ranking follow reaches a real account whatever broker its Pipeline was built for.
+        reads the account, gates or sends an order holds the broker the run chose (account_loader, order_preparation,
+        order_execution, order_outcome): on a Pipeline of the mock account that is the user's mock book, and on a
+        Pipeline of SinoPac the site's login, where the candidates step refuses a login that is not on the simulation
+        server and the order gates refuse each order of one, so no ranking follow orders with real money. On a real
+        broker each BUY is sized inside trading.max_order_value, one the day's limit refuses is left to a later follow,
+        and so is one the account's cash does not pay for until the follow's sales settle (RankingFollowRule).
         RankingUnavailable while the history holds no decision session.
         """
         async with self.run_history.execute(Workflow.RANKING_FOLLOW, run_id, scheduled=scheduled) as stats:
@@ -534,15 +542,15 @@ class Pipeline:
                 return status
 
             status.manual_stocks = await self.stock_lookup.execute(holdings.lacking, status.stats)
-            status.account, status.held_stocks = await self.mock_account_loader.execute(status.stocks)
+            status.account, status.held_stocks = await self.account_loader.execute(status.stocks)
             traded = [*status.held_stocks, *status.manual_stocks]
             await self.data_collector.execute(traded, 1, status.stats)
             status.stale_stock_ids = await self.realtime_quote_feed.execute(traded, status.stale_stock_ids, status.stats)
             status.signals = await self.ranking_follow_signals.execute(ranking, status.stocks, status.account, status.stats)
             for signal in status.signals:
-                if order := await self.mock_order_preparation.execute(signal, status.orders, status.stats):
-                    order = await self.mock_order_execution.execute(order, status.stats)
-                    status.account = await self.mock_order_outcome.execute(order, status.account, status.stocks, status.stats)
+                if order := await self.order_preparation.execute(signal, status.orders, status.stats):
+                    order = await self.order_execution.execute(order, status.stats)
+                    status.account = await self.order_outcome.execute(order, status.account, status.stocks, status.stats)
                     status.orders.append(order)
             await self.ranking_follow_candidates.execute(ranking, status.stats)
 
@@ -550,9 +558,10 @@ class Pipeline:
 
     async def load_ranking_follow(self) -> tuple[RankingHoldings, FollowRefusal | None]:
         """
-        The ranking page's block on the mock account, and the check before a ranking follow starts: which of the
-        ranking's stocks the user's mock account holds and lacks and which holdings the ranking left, and why a follow
-        may not start now. RankingUnavailable while the history holds no decision session.
+        The ranking page's block on the mock account, and the check before a ranking follow starts on the broker this
+        Pipeline's run chose: which of the ranking's stocks that account holds and lacks and which holdings the ranking
+        left, and why a follow may not start now. A real broker whose login is not on its simulation server is refused
+        without its account being read. RankingUnavailable while the history holds no decision session.
         """
         history = await self.ranking_history_loader.execute()
         ranking = await self.latest_ranking.execute(history)
@@ -562,8 +571,9 @@ class Pipeline:
     async def load_ranking_follow_return(self, user: User) -> tuple[FollowReturn | None, list[SystemStats], FollowSchedule]:
         """
         The ranking page's block on the mock account: what the account made since it first followed the ranking, against
-        the ranking's benchmark over the same sessions, None while it never did; its ranking follows since it opened
-        that took a decision, each run with the formula it used; and where the user's schedule of the follow stands,
+        the ranking's benchmark over the same sessions, None while it never did; the user's ranking follows that took a
+        decision, on the mock account since it opened and on SinoPac, each run with its account and the formula it
+        used; and where the user's schedule of the follow stands,
         from the same read of those runs. It reads the mock account's own history (mock_account_history).
         RankingUnavailable while the history holds no session.
         """
@@ -577,28 +587,32 @@ class Pipeline:
     async def load_follow_schedule(self, user: User) -> FollowSchedule:
         """
         My settings' schedule and the timer's question for one user: the time the user scheduled the ranking follow
-        at, the times the site offers, the ranking's latest decision while no follow of their mock account finished it,
-        and whether the schedule follows it now. It ranks nothing, never orders, and answers on a site whose history
-        holds no session yet: nothing is pending there.
+        at, the times the site offers, the account it follows on and the accounts the site offers the user now, the
+        ranking's latest decision while no follow of that account finished it, and whether the schedule follows it
+        now. It ranks nothing, never orders, and answers on a site whose history holds no session yet: nothing is
+        pending there.
         """
         schedule, _ = await self.ranking_follow_schedule.execute(user)
 
         return schedule
 
-    async def choose_follow_time(self, user: User, follow_time: time | None) -> User:
+    async def choose_follow_schedule(self, user: User, follow_time: time | None, broker: ExecutionProvider) -> User:
         """
-        My settings: saves when the site follows the ranking into the user's mock account by itself, or None for no
-        schedule, and answers the user with it. Saving nothing: FeatureHidden for a time where the site does not show
-        the user the mock account, FollowTimeNotOffered for a time the site does not offer.
+        My settings: saves when the site follows the ranking by itself and into which account, or None for no schedule,
+        and answers the user with it. Saving nothing: FeatureHidden for a time where the site does not show the user
+        ordering on that account, FollowTimeNotOffered for a time the site does not offer and FollowBrokerNotOffered
+        for an account it does not let the user's ranking follow order on now.
         """
-        return await self.follow_time_choice.execute(user, follow_time)
+        schedule, _ = await self.ranking_follow_schedule.execute(user)
+
+        return await self.follow_schedule_choice.execute(user, follow_time, broker, schedule.brokers)
 
     async def load_scheduled_followers(self) -> list[User]:
         """
         The Web API's timer: the users whose scheduled ranking follow may run now. Nobody outside the phase this site
         places an order in. The timer then asks each one's own Pipeline whether a follow is due (load_follow_schedule),
-        asks this again so that the user's schedule is still on, and starts the follow there (follow_ranking), on that
-        user's mock account.
+        asks this again so that the user's schedule is still on and on the same account, and starts the follow there
+        (follow_ranking), on the account the user's schedule chose.
         """
         return await self.scheduled_followers.execute()
 

@@ -15,6 +15,8 @@ const BY_CODE = {
   mops_unavailable: 'refusal.mops_unavailable',
   broker_unavailable: 'refusal.broker_unavailable',
   real_broker_refused: 'refusal.real_broker_refused',
+  not_simulation: 'refusal.not_simulation',
+  follow_broker_not_offered: 'refusal.follow_broker_not_offered',
   administrators_only: 'refusal.administrators_only',
   feature_hidden: 'refusal.feature_hidden',
 } as const satisfies Partial<Record<ErrorCode, string>>

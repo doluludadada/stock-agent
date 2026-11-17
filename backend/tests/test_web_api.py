@@ -49,7 +49,8 @@ ORDERING_WRITES = [
 ]
 """
 The only writes that can lead to an order: Buzz, Intraday and a manual BUY, on the broker their `broker` query names,
-and a follow of a run or of the monthly ranking, on the mock account only.
+a follow of a run, on the mock account only, and a follow of the monthly ranking, on the mock account unless its
+`broker` query names SinoPac, whose simulation server is the only one it orders on.
 """
 VALUATION_WRITES = [
     ("POST", "/v1/valuation/explanation", {"stock_id": "2330", "target_pe": 15}),
@@ -59,7 +60,7 @@ VALUATION_WRITES = [
 
 WRITES = [
     ("POST", "/v1/runs/full-cycle", {}),
-    ("PUT", "/v1/rankings/follow/schedule", {"time": "09:05"}),
+    ("PUT", "/v1/rankings/follow/schedule", {"time": "09:05", "broker": "mock"}),
     ("POST", "/v1/runs/specific-stocks", {"stock_ids": ["2330"]}),
     ("POST", "/v1/watchlist/manual", {"stock_ids": ["2330"]}),
     ("POST", "/v1/watchlist/manual/remove", {"stock_ids": ["2330"]}),

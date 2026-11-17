@@ -3,7 +3,8 @@ The monthly ranking followed into the user's mock account, on a real PostgreSQL 
 left the ranking and buys what the account lacks at an equal weight, in whole lots, at the price the site orders at now,
 through the same order gates as a follow of a run. A ranked stock already held is left alone, so a second follow of the
 same decision orders nothing. The account's return since its first follow is read against the benchmark over the same
-sessions. Then the Web API's two routes: their feature gates, their refusals, and the mock account as the only broker.
+sessions. Then the Web API's two routes: their feature gates, their refusals, and the mock account as the broker of a
+follow that names none. A follow on SinoPac's simulation account is test_sinopac_ranking_follow.py's.
 """
 
 import asyncio
@@ -13,7 +14,6 @@ import pytest
 from support.harness import ADMINISTRATOR, MARKET_CLOSED, MEMBER, MEMBER_PASSWORD, CliHarness, build_harness, harness_config
 from support.settings import small_formula, with_formulas
 from support.web import ended, serve, write
-from test_follow import RealBroker
 from test_ranking_rule import revenue
 from trading_stack import MONDAY_10_00, TradingStack, bar, open_stack
 
@@ -342,22 +342,6 @@ async def test_a_reset_account_has_never_followed(tmp_path) -> None:
     assert (await stack.pipeline.load_ranking_follow_return(ADMINISTRATOR))[:2] == (None, [])
 
 
-async def test_a_follow_on_a_pipeline_built_for_sinopac_never_reaches_it_and_orders_nothing(tmp_path) -> None:
-    real = RealBroker()
-    stack = await market(tmp_path, real_broker=real, broker=ExecutionProvider.SHIOAJI)
-
-    holdings, _ = await stack.pipeline.load_ranking_follow()
-    status = await stack.pipeline.follow_ranking()
-
-    assert holdings.lacking == ["2330", "2317"]
-    assert [(order.status, order.filled_quantity) for order in status.orders] == [(OrderStatus.REJECTED, 0)] * 2
-    assert all(
-        order.reason is not None and order.reason.startswith("BROKER_NOT_CHOSEN: the run chose shioaji") for order in status.orders
-    )
-    assert (await stack.broker.get_account()).positions == []
-    assert real.calls == []
-
-
 # ------------------------------- Public site ---------------------------------- #
 
 
@@ -409,7 +393,7 @@ async def test_the_web_follow_orders_the_ranking_on_the_mock_account_as_a_run_an
 
     async with serve(harness) as client:
         offered = (await client.get("/v1/rankings/follow")).json()
-        started = await write(client, "POST", "/v1/rankings/follow?broker=shioaji", {})
+        started = await write(client, "POST", "/v1/rankings/follow", {})
         follow = await ended(client, started.json()["run_id"])
         orders = (await client.get(f"/v1/runs/{started.json()['run_id']}/orders")).json()
         followed = (await client.get("/v1/rankings/follow")).json()["follows"]
@@ -423,6 +407,9 @@ async def test_the_web_follow_orders_the_ranking_on_the_mock_account_as_a_run_an
         "schedule": {
             "time": None,
             "times": ["09:05:00", "09:30:00", "10:00:00", "13:00:00"],
+            "broker": "mock",
+            "brokers": ["mock", "shioaji"],
+            "broker_offered": True,
             "pending": "2026-10-13",
             "unfinished": None,
             "due": False,

@@ -22,7 +22,8 @@ class OrderPreparation:
     back: REJECTED by OrderRule (market closed, stale price) or by BrokerAccessRule, or PENDING for OrderExecution to
     send to `execution_provider`, the same broker object this one asks. Both read the clock and the broker here, right
     before the send: a quote that aged while the run analysed other stocks is refused, and so is an order the broker
-    may not take now. BrokerAccessRule reads what the broker reports of itself (its link) against the run's choice, and
+    may not take now. BrokerAccessRule reads what the broker reports of itself (its link) against the run's choice and
+    its workflow (a ranking follow orders on a real broker's simulation server only), and
     for a real broker the site's ordering switch as it is now (`ordering_switch`: the settings files on disk, not the
     settings this run started on, so turning ordering off stops a run already under way), the user as saved now
     (`user_id`, the Pipeline's user) and the day's BUYs on it in the journal.
@@ -67,7 +68,7 @@ class OrderPreparation:
             await self._journal.save_order(order)
             buys = await self._journal.buy_orders(link.broker, day_start) if link.broker.real and order.status.is_open else []
             ordering = await self._ordering_switch.visibility(link.broker) if link.broker.real else FeatureVisibility.OFF
-            refusal = self._access_rule.apply(order, stats.execution_provider, link, user, ordering, buys)
+            refusal = self._access_rule.apply(order, stats.workflow, stats.execution_provider, link, user, ordering, buys)
 
             if order.status.is_open and refusal is not None:
                 order.reject(*refusal, now=now)

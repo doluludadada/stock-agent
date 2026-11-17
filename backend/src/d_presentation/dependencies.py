@@ -150,7 +150,7 @@ from b_application.use_cases.trade.watch_stocks import WatchStocks
 from b_application.use_cases.users.ai_model_choice import AiModelChoice
 from b_application.use_cases.users.ai_model_lookup import AiModelLookup
 from b_application.use_cases.users.first_administrator_setup import FirstAdministratorSetup
-from b_application.use_cases.users.follow_time_choice import FollowTimeChoice
+from b_application.use_cases.users.follow_schedule_choice import FollowScheduleChoice
 from b_application.use_cases.users.google_account import GoogleAccount
 from b_application.use_cases.users.google_identity_check import GoogleIdentityCheck
 from b_application.use_cases.users.google_sign_in_start import GoogleSignInStart
@@ -1000,10 +1000,10 @@ def build_pipeline(
     """
     Every use case once, over the shared ports and the user's own ports, or nobody's for None, on the broker the run
     chose (`chosen`). The trading and the valuation operations share the collect and process steps. The order path's
-    wiring is the same for every user and broker: the ordering steps hold `chosen`'s broker, and the mock_* steps and
-    the ranking follow's hold the user's mock account. The permissions decide whether the user may hold a real broker,
-    the AI limit (in owned_ports) and whether run reports reach the LINE recipients. The run records name the AI model
-    owned_ports gave the user and the broker chosen.
+    wiring is the same for every user and broker: the ordering steps and the ranking follow's candidates hold
+    `chosen`'s broker, and the mock_* steps hold the user's mock account. The permissions decide whether the user may
+    hold a real broker, the AI limit (in owned_ports) and whether run reports reach the LINE recipients. The run
+    records name the AI model owned_ports gave the user and the broker chosen.
     """
     owned = dependencies.owned_ports(user)
     notifications = (
@@ -1130,14 +1130,16 @@ def build_pipeline(
         mock_order_outcome=OrderOutcome(owned.mock_broker, journal, market_clock, logger),
         follow_candidates=FollowCandidates(journal, owned.mock_broker, market_clock, config),
         follow_signals=FollowSignals(journal, market_clock, logger),
-        ranking_follow_candidates=RankingFollowCandidates(owned.mock_broker, market_clock, config),
+        ranking_follow_candidates=RankingFollowCandidates(broker, market_clock, config),
         ranking_follow_signals=RankingFollowSignals(journal, market_clock, config, logger),
         ranking_follow_return=RankingFollowReturn(journal, owned.mock_broker, market_clock, config),
         ranking_follow_schedule=RankingFollowSchedule(
-            journal, owned.mock_broker, dependencies.bar_matrix_provider, market_clock, config
+            journal, owned.mock_broker, brokerage, ordering, dependencies.bar_matrix_provider, market_clock, config
         ),
-        follow_time_choice=FollowTimeChoice(dependencies.user_store, market_clock, config, logger),
-        scheduled_followers=ScheduledFollowers(dependencies.user_store, market_clock, config),
+        follow_schedule_choice=FollowScheduleChoice(dependencies.user_store, market_clock, config, logger),
+        scheduled_followers=ScheduledFollowers(
+            dependencies.user_store, dependencies.real_broker, ordering, market_clock, config, logger
+        ),
         mock_account_history=AccountHistory(owned.mock_broker, journal, stocks, prices, quote_board, market_clock, config, logger),
         trade_history=TradeHistory(broker, journal),
         mock_account_reset=MockAccountReset(owned.mock_broker, market_clock),

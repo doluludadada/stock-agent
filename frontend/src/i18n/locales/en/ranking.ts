@@ -7,6 +7,7 @@ const ranking = {
   times: '{{value}}×',
   span: '{{first}} to {{last}}',
   series: { ranking: 'The ranking' },
+  account: { mock: 'Mock account', shioaji: 'SinoPac (simulation)' },
   follow: {
     since: 'Since {{since}}',
     title: 'The ranking in your mock account',
@@ -22,20 +23,55 @@ const ranking = {
     used: 'Followed with',
     earlier: 'and {{count}} earlier',
     behind: 'To catch up: sell {{sells}}, buy {{buys}}.',
-    upToDate: 'Your mock account holds this month’s ranking.',
     nothing: 'This month ranks no stock.',
     running: 'A run is in progress…',
-    button: 'Follow this month’s ranking',
-    confirm: {
-      title: 'Bring your mock account to this month’s ranking?',
-      list: 'Orders of this follow',
-      sizing: 'Each BUY takes an equal share of the account’s value, in whole lots, with fees and tax as the mock account charges.',
+    confirm: { list: 'Orders of this follow' },
+    orders: 'Orders of {{date}}',
+    run: 'Run log of {{date}}',
+    on: {
+      mock: {
+        lead: 'Your mock account can follow the ranking too.',
+        button: 'Follow this month’s ranking',
+        upToDate: 'Your mock account holds this month’s ranking.',
+        confirm: {
+          title: 'Bring your mock account to this month’s ranking?',
+          realtime_quote: 'Each order below becomes a mock order at a realtime quote now. Only your mock account changes; no real money moves.',
+          official_close: 'Each order below becomes a mock order filled at the official close of the last session. Only your mock account changes; no real money moves.',
+          sizing: 'Each BUY takes an equal share of the account’s value, in whole lots, with fees and tax as the mock account charges.',
+        },
+      },
+      shioaji: {
+        lead: 'SinoPac’s simulation account can follow the ranking too. Its orders go to SinoPac’s simulation server; no real money is used.',
+        button: 'Follow on SinoPac (simulation)',
+        upToDate: 'SinoPac’s simulation account holds this month’s ranking.',
+        confirm: {
+          title: 'Bring SinoPac’s simulation account to this month’s ranking?',
+          realtime_quote:
+            'The site sells what that account holds outside the ranking and buys the ranked stocks it lacks, at a realtime quote now. The orders go to SinoPac’s simulation server; no real money moves.',
+          official_close:
+            'The site sells what that account holds outside the ranking and buys the ranked stocks it lacks, priced at the official close of the last session. The orders go to SinoPac’s simulation server; no real money moves.',
+          sizing:
+            'BUYs are paid from the cash the account has now; what this follow sells counts once it settles, so some BUYs may wait for a later follow, and the run’s log says which. This page does not read the SinoPac account, so the orders show under the follow once it has run.',
+        },
+      },
     },
   },
   schedule: {
     title: 'Scheduled follow',
     offChoice: 'Off',
     help: 'With a time, the site follows each new decision of the ranking into your mock account by itself, on the first trading day after it, from that time. It trades the mock account only, once per decision, and tries again the next trading day if it could not.',
+    helpChosen:
+      'With a time, the site follows each new decision of the ranking into the account chosen below by itself, on the first trading day after it, from that time. It trades that account only, once per decision, and tries again the next trading day if it could not.',
+    accountLabel: 'Account to follow on',
+    accountHelp: 'SinoPac (simulation) is SinoPac’s simulation account: no real money is used.',
+    notOffered: {
+      mock: 'The site does not follow on your mock account for you now, and it follows on no other account instead.',
+      shioaji: 'The site does not follow on SinoPac’s simulation account for you now, and it follows on no other account instead.',
+    },
+    on: {
+      mock: 'It follows on your mock account.',
+      shioaji: 'It follows on SinoPac’s simulation account.',
+    },
     loadFailed: 'The schedule could not be loaded.',
     failed: 'The schedule was not saved: {{reason}}',
     off: 'Schedule off.',

@@ -153,6 +153,13 @@ class FollowTimeNotOffered(ValueError):
     """A user chose a time for the scheduled ranking follow that ranking.follow_times does not offer. Nothing saved. 422."""
 
 
+class FollowBrokerNotOffered(PermissionError):
+    """
+    A user chose for the scheduled ranking follow an account the site does not let their follow order on now. The
+    message says why. Nothing saved. 403.
+    """
+
+
 class UnknownRankingFormula(LookupError):
     """A ranking formula was named that ranking.formulas does not hold. The message names the ones it holds."""
 

@@ -1,11 +1,11 @@
-import { ArrowLeft, ArrowRight, ClipboardList, ReceiptText, SearchX } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ClipboardList, SearchX } from 'lucide-react'
 import type { UseQueryResult } from '@tanstack/react-query'
 import { useMemo, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { useTranslation } from '@/i18n'
 import { usePageTitle } from '@/shared/lib/page-title'
 import { paths } from '@/shared/config/paths'
-import { isApiError, useAllows, useShows } from '@/shared/api'
+import { isApiError, useAllows, useRunOrders, useShows, type Order } from '@/shared/api'
 import { DASH, useFormat } from '@/shared/lib/format'
 import { ArchiveWarmUp } from '@/shared/ui/archive-warm-up'
 import { StockLink } from '@/shared/ui/stock-name'
@@ -13,12 +13,13 @@ import { Badge } from '@/shared/ui/badge'
 import { DataTable, type Column } from '@/shared/ui/data-table'
 import { ErrorState } from '@/shared/ui/error-state'
 import { NotAdviceNote } from '@/shared/ui/not-advice-note'
+import { OrdersTable } from '@/shared/ui/orders-table'
 import { Panel } from '@/shared/ui/panel'
 import { PageSkeleton, Skeleton } from '@/shared/ui/skeleton'
 import { Stat } from '@/shared/ui/stat'
 import { StateBlock } from '@/shared/ui/state-block'
 import { RequireSignIn } from '@/shared/ui/require-sign-in'
-import { useRun, useRunFollow, useRunOrders, useRunSignals, type Order, type Run, type Signal } from './api'
+import { useRun, useRunFollow, useRunSignals, type Run, type Signal } from './api'
 import { FollowPanel } from './FollowPanel'
 import { ManualBuy } from './ManualBuy'
 import { followMarks, type FollowMark } from './model'
@@ -259,26 +260,12 @@ function FollowBadge({ mark }: { mark: FollowMark | undefined }) {
 
 function Orders({ query }: { query: UseQueryResult<Order[]> }) {
   const { t } = useTranslation('runs')
-  const format = useFormat()
   if (query.isPending) return <Skeleton className="h-24 rounded-2xl" />
   if (query.isError) return <ErrorState error={query.error} title={t('ordersFailed')} onRetry={() => void query.refetch()} className="rounded-2xl border bg-card" />
   const orders = query.data
-  const columns: Column<Order>[] = [
-    { key: 'stock', header: t('column.stock'), className: 'font-mono', cell: (order) => order.stock_id },
-    { key: 'action', header: t('column.action'), cell: (order) => t(`action.${order.action}`) },
-    { key: 'status', header: t('column.status'), cell: (order) => t(`orderStatus.${order.status}`) },
-    { key: 'quantity', header: t('column.quantity'), numeric: true, cell: (order) => `${format.number(order.filled_quantity)} / ${format.number(order.quantity)}` },
-    { key: 'price', header: t('column.price'), numeric: true, from: 'sm', cell: (order) => (order.limit_price !== null ? format.price(order.limit_price) : DASH) },
-    { key: 'costs', header: t('column.costs'), numeric: true, from: 'md', cell: (order) => format.number(order.fee + order.tax) },
-    { key: 'reason', header: t('column.reason'), from: 'lg', className: 'w-full min-w-48 whitespace-normal text-xs text-muted-foreground', cell: (order) => order.reason ?? '' },
-  ]
   return (
     <Panel title={t('ordersTitle', { count: orders.length })} flush={orders.length > 0}>
-      {orders.length > 0 ? (
-        <DataTable rows={orders} columns={columns} rowKey={(order) => order.id} label={t('ordersTitle', { count: orders.length })} />
-      ) : (
-        <StateBlock icon={ReceiptText} title={t('noOrders')} className="py-4" />
-      )}
+      <OrdersTable orders={orders} label={t('ordersTitle', { count: orders.length })} />
     </Panel>
   )
 }

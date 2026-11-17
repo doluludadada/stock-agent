@@ -10,8 +10,8 @@ from a_domain.ports.system.ordering_switch import IOrderingSwitch
 from a_domain.ports.system.user_store import IUserStore
 from a_domain.ports.trading.execution_provider import IExecutionProvider
 from a_domain.ports.trading.trading_journal import ITradingJournal
-from a_domain.rules.trading.order_rule import RealBrokerOrdererRule
-from a_domain.types.enums import OrderStatus, RejectReason
+from a_domain.rules.trading.order_rule import RealBrokerOrdererRule, SimulationOnlyRule
+from a_domain.types.enums import OrderStatus, RejectReason, Workflow
 from a_domain.types.ids import UserId
 from b_application.config.app_config import AppConfig
 
@@ -21,19 +21,28 @@ async def send_refusal(
     user_id: UserId | None,
     user_store: IUserStore,
     ordering_switch: IOrderingSwitch,
+    simulation_rule: SimulationOnlyRule,
     orderer_rule: RealBrokerOrdererRule,
+    workflow: Workflow,
 ) -> tuple[RejectReason, str] | None:
     """
-    Why an exchange order may not go to the broker at this moment, or None: for a real broker, the site's ordering
-    switch and the user, each as it is now. OrderExecution hands it to the broker, which asks it right before each send.
+    Why an exchange order of a run of `workflow` may not go to the broker at this moment, or None: for a real broker,
+    the server its login is on where the workflow orders on the simulation server only (SimulationOnlyRule), then the
+    site's ordering switch and the user (RealBrokerOrdererRule), each as it is now. OrderExecution hands it to the
+    broker, which asks it right before each send. It asks two of the real broker's gate's three rules
+    (RealBrokerGateRule) and deliberately not the third, BrokerLoginRule: OrderPreparation asked the whole gate of this
+    order when it prepared it, and this asks again what a person may have changed since: the switch and the user.
     """
-    broker = execution_provider.link().broker
+    link = execution_provider.link()
 
-    if not broker.real:
+    if not link.broker.real:
         return None
 
+    if (refusal := simulation_rule.apply(workflow, link)) is not None:
+        return refusal
+
     user = await user_store.find(user_id) if user_id is not None else None
-    return orderer_rule.apply(broker, user, await ordering_switch.visibility(broker))
+    return orderer_rule.apply(link.broker, user, await ordering_switch.visibility(link.broker))
 
 
 class OrderExecution:
@@ -44,7 +53,9 @@ class OrderExecution:
 
     The broker asks `refusal_now` right before each exchange order it sends, the second lot part of an order included:
     for a real broker, the site's ordering switch as it is at that moment and the user as saved then
-    (RealBrokerOrdererRule), so ordering turned off between the order's preparation and a part's send stops that part.
+    (RealBrokerOrdererRule), so ordering turned off between the order's preparation and a part's send stops that part,
+    and for a ranking follow the server the login is on at that moment (SimulationOnlyRule), so no part of its order
+    goes to a production login.
 
     A cancel (Ctrl-C) during the broker call lets the broker answer and records that answer before it stops the run,
     so the journal never says PENDING about an order the broker saw. A second cancel stops the broker call itself,
@@ -65,15 +76,17 @@ class OrderExecution:
         self._execution_provider = execution_provider
         self._journal = journal
         self._market_clock = market_clock
-        orderer_rule = config.broker_access_rule().orderer_rule
-        self._refusal_now = partial(send_refusal, execution_provider, user_id, user_store, ordering_switch, orderer_rule)
+        gate_rule = config.broker_access_rule().gate_rule
+        self._refusal_now = partial(
+            send_refusal, execution_provider, user_id, user_store, ordering_switch, gate_rule.simulation_rule, gate_rule.orderer_rule
+        )
         self._logger = logger
 
     async def execute(self, order: Order, stats: SystemStats) -> Order:
         if order.status != OrderStatus.PENDING:
             return order
 
-        sending = asyncio.ensure_future(self._execution_provider.place_order(order, self._refusal_now))
+        sending = asyncio.ensure_future(self._execution_provider.place_order(order, partial(self._refusal_now, stats.workflow)))
         run_cancelled = False
 
         try:

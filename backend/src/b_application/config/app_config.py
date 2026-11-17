@@ -22,7 +22,9 @@ from a_domain.rules.trading.order_rule import (
     OrderGateRule,
     OrderPriceRule,
     OrderRule,
+    RealBrokerGateRule,
     RealBrokerOrdererRule,
+    SimulationOnlyRule,
 )
 from a_domain.rules.trading.ranking import DecisionSessionsRule, MonthlyRankingRule
 from a_domain.rules.trading.ranking_backtest import RankingBacktestRule, RankingPortfolioRule
@@ -290,12 +292,20 @@ class AppConfig(BaseSettings):
         )
 
     def ranking_follow_rule(self) -> RankingFollowRule:
-        """RankingFollowSignals' rule: the mock account's lot size, the order's limit and the market's fee and tax."""
+        """
+        RankingFollowSignals' rule: the lot size, the most one BUY may cost on a real broker, the order's limit and the
+        market's fee and tax.
+        """
         return RankingFollowRule(
             lot_size=self.analysis.lot_size,
+            max_order_value=self.trading.max_order_value,
             limit_price_rule=self.market.limit_price_rule(),
             affordable_quantity_rule=AffordableQuantityRule(cost_rule=self.market.cost_rule()),
         )
+
+    def follow_broker_rule(self) -> RealBrokerGateRule:
+        """Whether a user's ranking follow may order on a broker now: the gate broker_access_rule asks of every order."""
+        return self.broker_access_rule().gate_rule
 
     def manual_entry_rule(self) -> ManualEntryRule:
         """ManualSignal's rule: the confirmed BUY skips the buy threshold, never the sizing."""
@@ -316,8 +326,11 @@ class AppConfig(BaseSettings):
 
         return BrokerAccessRule(
             brokers=self.audience.brokers & self.audience.order_pricing.brokers,
-            orderer_rule=RealBrokerOrdererRule(),
-            login_rule=BrokerLoginRule(simulation=self.environment.shioaji_simulation),
+            gate_rule=RealBrokerGateRule(
+                simulation_rule=SimulationOnlyRule(),
+                orderer_rule=RealBrokerOrdererRule(),
+                login_rule=BrokerLoginRule(simulation=self.environment.shioaji_simulation),
+            ),
             limit_rule=limit_rule,
         )
 

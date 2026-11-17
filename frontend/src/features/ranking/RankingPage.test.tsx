@@ -3,8 +3,9 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import userEvent from '@testing-library/user-event'
 import { I18nextProvider } from 'react-i18next'
 import { MemoryRouter } from 'react-router'
+import { Toaster } from 'sonner'
 import { initI18n } from '@/i18n'
-import { session } from '@/shared/api'
+import { session, type Order } from '@/shared/api'
 import { PERSONAL_SITE } from '@/test/audiences'
 import { CASH_FORMULA, SHIPPED_FORMULA } from '@/test/ranking'
 import { TEST_ADMIN, TEST_USER } from '@/test/users'
@@ -57,11 +58,13 @@ interface Site {
   backtest?: (first: string, last: string) => Response | Promise<Response>
   /** The mock account against the ranking; a second one is what the read after a follow started answers. */
   follow?: RankingFollow[]
+  /** What the start of a follow answers. */
+  start?: () => Response
 }
 
 const HOLDINGS = { decided_on: LATEST.decided_on, held: [], lacking: LATEST.stocks.map((stock) => stock.stock_id), left: [] }
 const TIMES = ['09:05:00', '09:30:00', '10:00:00', '13:00:00']
-const NEVER_FOLLOWED: RankingFollow = { holdings: HOLDINGS, refusal: null, running: false, performance: null, follows: [], schedule: { time: null, times: TIMES, pending: LATEST.decided_on, unfinished: null, due: false } }
+const NEVER_FOLLOWED: RankingFollow = { holdings: HOLDINGS, refusal: null, running: false, performance: null, follows: [], schedule: { time: null, times: TIMES, broker: 'mock', broker_offered: true, brokers: ['mock'], pending: LATEST.decided_on, unfinished: null, due: false } }
 /** A month after the first follow: 18 of the 20 held, the two that entered lacking and one that left still held. */
 const A_MONTH_IN: RankingFollow = {
   holdings: { ...HOLDINGS, held: HOLDINGS.lacking.slice(2), lacking: HOLDINGS.lacking.slice(0, 2), left: ['1101'] },
@@ -69,14 +72,43 @@ const A_MONTH_IN: RankingFollow = {
   running: false,
   performance: { since: '2026-09-15', until: '2026-10-13', account_return: 0.0312, benchmark_id: '0050', benchmark_return: 0.021 },
   follows: [
-    { run_id: '00000000-0000-0000-0000-000000000011', start_time: '2026-09-15T01:05:00Z', ranking_formula: SHIPPED_FORMULA, ranking_decided_on: '2026-09-14', scheduled: false },
-    { run_id: '00000000-0000-0000-0000-000000000012', start_time: '2026-10-14T01:05:00Z', ranking_formula: CASH_FORMULA, ranking_decided_on: '2026-10-13', scheduled: true },
+    { run_id: '00000000-0000-0000-0000-000000000011', start_time: '2026-09-15T01:05:00Z', ranking_formula: SHIPPED_FORMULA, ranking_decided_on: '2026-09-14', scheduled: false, execution_provider: 'mock' },
+    { run_id: '00000000-0000-0000-0000-000000000012', start_time: '2026-10-14T01:05:00Z', ranking_formula: CASH_FORMULA, ranking_decided_on: '2026-10-13', scheduled: true, execution_provider: 'mock' },
   ],
-  schedule: { time: '09:05:00', times: TIMES, pending: null, unfinished: null, due: false },
+  schedule: { time: '09:05:00', times: TIMES, broker: 'mock', broker_offered: true, brokers: ['mock'], pending: null, unfinished: null, due: false },
 }
 
+/** A follow on SinoPac's simulation account, which the site offers this user, and the orders its run placed there. */
+const SINOPAC_RUN = '00000000-0000-0000-0000-000000000021'
+const ON_SINOPAC: RankingFollow = {
+  ...A_MONTH_IN,
+  follows: [...A_MONTH_IN.follows, { ...A_MONTH_IN.follows[1]!, run_id: SINOPAC_RUN, start_time: '2026-11-10T01:05:00Z', scheduled: false, execution_provider: 'shioaji' }],
+  schedule: { ...A_MONTH_IN.schedule, brokers: ['mock', 'shioaji'] },
+}
+const order = (stockId: string, action: Order['action'], status: Order['status'], filled: number, reason: string | null = null): Order => ({
+  id: `order-${stockId}`,
+  run_id: SINOPAC_RUN,
+  decision_id: `decision-${stockId}`,
+  stock_id: stockId,
+  action,
+  order_type: 'limit',
+  quantity: 1000,
+  limit_price: 512,
+  time_in_force: 'rod',
+  status,
+  reason,
+  filled_quantity: filled,
+  average_filled_price: filled > 0 ? 512 : null,
+  fee: 0,
+  tax: 0,
+  realized_pnl: null,
+  created_at: '2026-11-10T01:05:00Z',
+  updated_at: '2026-11-10T01:05:00Z',
+})
+const SINOPAC_ORDERS = [order('2330', 'buy', 'filled', 1000), order('2317', 'buy', 'submitted', 0), order('1101', 'sell', 'rejected', 0, 'The broker refused the order.')]
+
 /** The ranking endpoints as the backend answers them; returns the replays asked, each as `first..last`. */
-function serve({ latest = () => json(LATEST), backtest = () => json(BACKTEST), follow = [NEVER_FOLLOWED] }: Site = {}) {
+function serve({ latest = () => json(LATEST), backtest = () => json(BACKTEST), follow = [NEVER_FOLLOWED], start = () => json({ run_id: '00000000-0000-0000-0000-000000000001' }, 202) }: Site = {}) {
   const asked: string[] = []
   const answers = [...follow]
   vi.stubGlobal(
@@ -85,8 +117,13 @@ function serve({ latest = () => json(LATEST), backtest = () => json(BACKTEST), f
       const { pathname, searchParams } = new URL(url, 'http://localhost')
       if (pathname === '/v1/market/audience') return json(PERSONAL_SITE)
       if (pathname === '/v1/rankings/follow') {
-        asked.push(`${init?.method ?? 'GET'} follow`)
-        return init?.method === 'POST' ? json({ run_id: '00000000-0000-0000-0000-000000000001' }, 202) : json(answers.length > 1 ? answers.shift() : answers[0])
+        asked.push(`${init?.method ?? 'GET'} follow${searchParams.size > 0 ? `?${searchParams}` : ''}`)
+        return init?.method === 'POST' ? start() : json(answers.length > 1 ? answers.shift() : answers[0])
+      }
+      const ordersOf = pathname.match(/^\/v1\/runs\/([\w-]+)\/orders$/)?.[1]
+      if (ordersOf) {
+        asked.push('orders')
+        return json(ordersOf === SINOPAC_RUN ? SINOPAC_ORDERS : [])
       }
       if (pathname === '/v1/rankings/latest') {
         asked.push('latest')
@@ -120,6 +157,7 @@ function open(address = '/ranking', locale: 'en' | 'zh-TW' = 'en', mockAccount =
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <MemoryRouter initialEntries={[address]}>
           <RankingPage mockAccount={mockAccount} />
+          <Toaster />
         </MemoryRouter>
       </QueryClientProvider>
     </I18nextProvider>,
@@ -220,11 +258,109 @@ describe('the ranking page', () => {
     const block = await screen.findByRole('region', { name: 'The ranking in your mock account' })
     const follows = within(await within(block).findByRole('list', { name: 'Followed with' })).getAllByRole('listitem')
     expect(follows.map((item) => item.textContent)).toEqual([
-      '10/14/2026 schedule Revenue, 3 mo ÷ 12 mo + Vs 250-session high · Cash while the benchmark is under its 60-session average',
-      '09/15/2026 by hand Revenue, 3 mo ÷ 12 mo + Vs 250-session high',
+      '10/14/2026 schedule · Mock account · Revenue, 3 mo ÷ 12 mo + Vs 250-session high · Cash while the benchmark is under its 60-session average Orders of 10/14 Run log of 10/14',
+      '09/15/2026 by hand · Mock account · Revenue, 3 mo ÷ 12 mo + Vs 250-session high Orders of 9/15 Run log of 9/15',
     ])
     expect(within(block).getByTestId('follow-schedule')).toHaveTextContent('Schedule on: next follow about 11/16 09:05. Last followed 10/14 by the schedule. Change')
     expect(within(block).getByRole('link', { name: 'Change' })).toHaveAttribute('href', '/settings')
+  })
+
+  it('says the account each follow ran on, and gives each its orders, with the status the broker gave each, and its run', async () => {
+    const asked = serve({ follow: [ON_SINOPAC] })
+    const user = userEvent.setup()
+    open('/ranking', 'en', true)
+
+    const block = await screen.findByRole('region', { name: 'The ranking in your mock account' })
+    const follows = within(await within(block).findByRole('list', { name: 'Followed with' })).getAllByRole('listitem')
+    expect(follows.map((item) => item.textContent?.replace(/ · Revenue.*/, ''))).toEqual(['11/10/2026 by hand · SinoPac (simulation)', '10/14/2026 schedule · Mock account', '09/15/2026 by hand · Mock account'])
+    expect(follows.map((item) => within(item).getByRole('button').textContent)).toEqual(['Orders of 11/10', 'Orders of 10/14', 'Orders of 9/15'])
+    expect(follows.map((item) => within(item).getByRole('link').getAttribute('href')), 'the run’s log says what a follow left for a later one').toEqual([
+      `/runs/${SINOPAC_RUN}`,
+      `/runs/${A_MONTH_IN.follows[1]!.run_id}`,
+      `/runs/${A_MONTH_IN.follows[0]!.run_id}`,
+    ])
+    expect(within(follows[0]!).getByRole('link')).toHaveAccessibleName('Run log of 11/10')
+    expect(asked, 'the orders wait for the reader').not.toContain('orders')
+
+    await user.click(within(follows[0]!).getByRole('button', { name: 'Orders of 11/10' }))
+    const rows = within(await within(block).findByRole('table', { name: 'Orders of 11/10' })).getAllByRole('row')
+    expect(rows.slice(1).map((row) => within(row).getAllByRole('cell').map((cell) => cell.textContent))).toEqual([
+      ['2330', 'BUY', 'Filled', '1,000 / 1,000'],
+      ['2317', 'BUY', 'Submitted', '0 / 1,000'],
+      ['1101', 'SELL', 'RejectedThe broker refused the order.', '0 / 1,000'],
+    ])
+
+    await user.click(within(follows[0]!).getByRole('button', { name: 'Orders of 11/10' }))
+    expect(within(block).queryByRole('table', { name: 'Orders of 11/10' })).not.toBeInTheDocument()
+  })
+
+  it('offers a follow on SinoPac’s simulation account only where the site offers it, and starts it there after a yes that says no real money moves', async () => {
+    serve({ follow: [A_MONTH_IN] })
+    open('/ranking', 'en', true)
+    const mockOnly = await screen.findByRole('region', { name: 'The ranking in your mock account' })
+    expect(await within(mockOnly).findByRole('button', { name: 'Follow this month’s ranking' })).toBeEnabled()
+    expect(within(mockOnly).queryByRole('button', { name: 'Follow on SinoPac (simulation)' })).not.toBeInTheDocument()
+    cleanup()
+
+    const asked = serve({ follow: [ON_SINOPAC, { ...ON_SINOPAC, running: true }] })
+    const user = userEvent.setup()
+    open('/ranking', 'en', true)
+    const block = await screen.findByRole('region', { name: 'The ranking in your mock account' })
+    expect(await within(block).findByText(/Its orders go to SinoPac’s simulation server; no real money is used\./)).toBeVisible()
+    await user.click(within(block).getByRole('button', { name: 'Follow on SinoPac (simulation)' }))
+    const dialog = await screen.findByRole('alertdialog', { name: 'Bring SinoPac’s simulation account to this month’s ranking?' })
+    expect(within(dialog).getByText(/at a realtime quote now\. The orders go to SinoPac’s simulation server; no real money moves\./)).toBeVisible()
+    expect(asked.filter((request) => request.startsWith('POST'))).toEqual([])
+
+    await user.click(within(dialog).getByRole('button', { name: 'Follow' }))
+    await waitFor(() => expect(within(block).getByRole('button', { name: 'Follow on SinoPac (simulation)' })).toBeDisabled())
+    expect(asked.filter((request) => request.startsWith('POST'))).toEqual(['POST follow?broker=shioaji'])
+  })
+
+  it('leaves the SinoPac follow to the server’s answer, whatever the mock account’s own refusal says', async () => {
+    const held = { ...A_MONTH_IN.holdings, held: HOLDINGS.lacking, lacking: [], left: [] }
+    const asked = serve({ follow: [{ ...ON_SINOPAC, refusal: 'outside_follow_window' }], start: () => json({ detail: 'Outside the window.', code: 'outside_follow_window' }, 409) })
+    const user = userEvent.setup()
+    open('/ranking', 'en', true)
+    const block = await screen.findByRole('region', { name: 'The ranking in your mock account' })
+    expect(await within(block).findByRole('button', { name: 'Follow this month’s ranking' })).toBeDisabled()
+    const sinopac = within(block).getByRole('button', { name: 'Follow on SinoPac (simulation)' })
+    expect(sinopac).toBeEnabled()
+    await user.click(sinopac)
+    const dialog = await screen.findByRole('alertdialog', { name: 'Bring SinoPac’s simulation account to this month’s ranking?' })
+    expect(within(dialog).getByText(/^BUYs are paid from the cash the account has now; what this follow sells counts once it settles, so some BUYs may wait for a later follow/)).toBeVisible()
+    await user.click(within(dialog).getByRole('button', { name: 'Follow' }))
+    expect(await screen.findByText('This site places no order now. Follow the run when its window opens.')).toBeVisible()
+    expect(asked.filter((request) => request.startsWith('POST'))).toEqual(['POST follow?broker=shioaji'])
+    cleanup()
+
+    serve({ follow: [{ ...ON_SINOPAC, holdings: held, refusal: 'nothing_to_follow' }], start: () => json({ detail: 'Nothing to follow.', code: 'nothing_to_follow' }, 409) })
+    open('/ranking', 'en', true)
+    const upToDate = await screen.findByRole('region', { name: 'The ranking in your mock account' })
+    await user.click(await within(upToDate).findByRole('button', { name: 'Follow on SinoPac (simulation)' }))
+    await user.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Follow' }))
+    expect(await screen.findByText('SinoPac’s simulation account holds this month’s ranking.')).toBeVisible()
+  })
+
+  it('says why SinoPac refused a follow, and that a schedule on SinoPac follows there or on no account', async () => {
+    serve({ follow: [{ ...ON_SINOPAC, schedule: { ...ON_SINOPAC.schedule, broker: 'shioaji' } }], start: () => json({ detail: 'Not the simulation server.', code: 'not_simulation' }, 403) })
+    const user = userEvent.setup()
+    open('/ranking', 'en', true)
+    const block = await screen.findByRole('region', { name: 'The ranking in your mock account' })
+    expect(await within(block).findByTestId('follow-schedule')).toHaveTextContent('Schedule on: next follow about 11/16 09:05. It follows on SinoPac’s simulation account. Last followed 11/10 by hand. Change')
+    await user.click(within(block).getByRole('button', { name: 'Follow on SinoPac (simulation)' }))
+    await user.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Follow' }))
+    expect(await screen.findByText(/The site’s SinoPac login is not on the simulation server, and a ranking follow never orders with real money\./)).toBeVisible()
+    cleanup()
+
+    serve({ follow: [{ ...A_MONTH_IN, schedule: { ...A_MONTH_IN.schedule, broker: 'shioaji', broker_offered: false } }] })
+    open('/ranking', 'zh-TW', true)
+    expect(await screen.findByTestId('follow-schedule')).toHaveTextContent('排程開啟：下次跟單約在 11/16 09:05。 本站目前不會幫你在永豐金模擬帳戶跟單，也不會改在其他帳戶跟單。 上次跟單 10/14，由排程執行。')
+    cleanup()
+
+    serve({ follow: [ON_SINOPAC] })
+    open('/ranking', 'en', true)
+    expect(await screen.findByTestId('follow-schedule')).toHaveTextContent('Schedule on: next follow about 11/16 09:05. It follows on your mock account. Last followed 11/10 by hand. Change')
   })
 
   it('says the schedule is off, and which decision a schedule that is on still has to follow', async () => {
@@ -310,12 +446,12 @@ describe('the ranking page', () => {
     expect(listed).toHaveLength(20)
     expect(listed.slice(0, 2)).toEqual([`${LATEST.stocks[0]!.stock_id} AlphaBUY`, `${LATEST.stocks[1]!.stock_id} BetaBUY`])
     expect(within(dialog).getByText(/at a realtime quote now\. Only your mock account changes; no real money moves\./)).toBeVisible()
-    expect(asked).not.toContain('POST follow')
+    expect(asked.filter((request) => request.startsWith('POST'))).toEqual([])
 
     await user.click(within(dialog).getByRole('button', { name: 'Follow' }))
     expect(await within(block).findByText('A run is in progress…')).toBeVisible()
     expect(within(block).getByRole('button', { name: 'Follow this month’s ranking' })).toBeDisabled()
-    expect(asked.filter((request) => request === 'POST follow')).toHaveLength(1)
+    expect(asked.filter((request) => request.startsWith('POST'))).toEqual(['POST follow?broker=mock'])
   })
 
   it('says what the mock account holds of the ranking and what it made since its first follow against the benchmark', async () => {

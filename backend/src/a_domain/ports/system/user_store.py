@@ -4,7 +4,7 @@ from typing import Protocol
 from pydantic import SecretStr
 
 from a_domain.model.system.user import User, UserSession
-from a_domain.types.enums import AiProvider
+from a_domain.types.enums import AiProvider, ExecutionProvider
 from a_domain.types.ids import SessionToken, UserId
 
 
@@ -69,8 +69,13 @@ class IUserStore(Protocol):
         """
         ...
 
-    async def save_ranking_follow_time(self, user_id: UserId, follow_time: time | None, now: datetime) -> None:
-        """Writes only the time of the user's scheduled ranking follow, None for no schedule, changed at `now`."""
+    async def save_ranking_follow_schedule(
+        self, user_id: UserId, follow_time: time | None, broker: ExecutionProvider, now: datetime
+    ) -> None:
+        """
+        Writes only the user's scheduled ranking follow, changed at `now`: its time, None for no schedule, and the
+        account it orders on.
+        """
         ...
 
     async def save_ai_model(self, user_id: UserId, ai_model: AiProvider | None, now: datetime) -> None:

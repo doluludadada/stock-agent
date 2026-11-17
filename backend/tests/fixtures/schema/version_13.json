@@ -2034,6 +2034,15 @@
         "nullable": false,
         "postgresql": "VARCHAR"
       },
+      "ranking_follow_broker": {
+        "class": "Enum",
+        "members": [
+          "MOCK",
+          "SHIOAJI"
+        ],
+        "nullable": false,
+        "postgresql": "executionprovider"
+      },
       "ranking_follow_time": {
         "class": "Time",
         "nullable": true,

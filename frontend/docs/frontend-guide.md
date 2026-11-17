@@ -118,7 +118,8 @@ the contract by `catalog.test.ts`.
 | The open data's providers, datasets and license | `attribution/api.ts` | `/v1/market/attribution` |
 | The world indicators, the written world briefs of the latest days and the kept world news | `world/api.ts` | `/v1/world` |
 | Built-in strategies, owner settings, saves with revisions | `strategies/api/queries.ts` | `/v1/technical-settings` |
-| Runs, decisions, orders; a start of Buzz or Intraday on the broker chosen | `runs/api.ts` | `/v1/runs` |
+| Runs, decisions; a start of Buzz or Intraday on the broker chosen | `runs/api.ts` | `/v1/runs` |
+| A run's orders, for the run page and the ranking's follows | `shared/api/run-orders.ts` | `/v1/runs/{run_id}/orders` |
 | A manual BUY of a stock a specific-stock run reported, on the broker chosen | `runs/api.ts` | `/v1/runs/{run_id}/manual-buy` |
 | A run's follow into the mock account: what is open, the refusal, the follows so far; starting one | `runs/api.ts` | `/v1/runs/{run_id}/follow` |
 | A backtest's options, a run that is saved, the saved backtests, one of them, a delete | `backtest/api.ts` | `/v1/backtests` |
@@ -432,6 +433,21 @@ tap away, and open at once when the address names a period or a month. Narrower,
   While the schedule is on, no follow runs and its last follow left the decision pending (`schedule.unfinished`), the
   line says instead the day it tried, why (`unfinishedReason`: an error, a run that never ended, a follow that could
   not start, or the stocks left to trade), that it tries again on the next trading day, and links to that run.
+- A ranking follow also runs on SinoPac's simulation account, never with real money, where the server says so:
+  `schedule.brokers` lists the accounts it lets this user's follow order on now, the mock account first, and
+  `schedule.broker_offered` says whether the saved account is one of them. The page takes both as answered: it
+  compares no account's name and derives neither. With more than one account in play, the panel offers the account
+  under the time (`offeredBrokers` keeps a saved account the site does not offer, with one line that the site then
+  follows on no account), a save sends the time and the account, and the block's schedule line names the account.
+  The block's own action follows on the first account listed, the one its holdings are read from. Every other account
+  gets one button (`AccountFollow`), held only by a run of the user in progress and by the quotes the site prices on:
+  the server reads no such account for the block, so the confirmation lists no order, and a closed window or an
+  account that holds the ranking is the server's refusal of the start, said as a toast. An account's words are keyed
+  by its member (`ranking:account.*`, `ranking:follow.on.<account>.*`, `ranking:schedule.on.*`,
+  `ranking:schedule.notOffered.*`), so another account needs its entries and no code. Each listed follow names its
+  account, opens its orders with the status the account gave each (`useRunOrders` in `shared/api/run-orders.ts` and
+  `OrdersTable` in `shared/ui/orders-table.tsx`, which the run page's orders use too), and links to its run, whose log
+  says which BUYs a follow on SinoPac left to a later one because its cash did not pay for them yet.
 - The address holds the period (`?period=5Y`, or `?first=&last=`; none is the whole history) and the decision whose
   stocks are open (`?month=` with the decision's date), so both survive a reload. `ranking/model.ts` reads and writes them.
 - The first answer after a server start takes close to a minute and later ones seconds. The page asks for the latest
@@ -498,7 +514,7 @@ third party's item, the stock page's news too.
 `segmented`, `range-tabs`, `show-more`, `range-meter`, `breadth-bar`, `quote-headline`, `quote-time`, `state-block`, `page-header`,
 `ranking-score`, `formula-line`, `stock-name`, `error-state`, `ai-byline`, `news-row`,
 `field`, `password-input`, `avatar`, `price-volume-chart`, `price-trend`, `comparison-chart`, `progress-note`,
-`stock-picker`, `confirm-dialog`, `stock-ids-problem`). Lint relaxes only fast-refresh and a few a11y role rules there, to stay close to upstream.
+`stock-picker`, `confirm-dialog`, `stock-ids-problem`, `orders-table`). Lint relaxes only fast-refresh and a few a11y role rules there, to stay close to upstream.
 
 ## Internationalization
 

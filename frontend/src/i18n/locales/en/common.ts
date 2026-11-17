@@ -71,6 +71,8 @@ const common = {
     mops_unavailable: 'This site does not read MOPS, so this is not offered here.',
     broker_unavailable: 'SinoPac has no login up on this site right now.',
     real_broker_refused: 'Only an administrator uses the SinoPac account.',
+    not_simulation: 'The site’s SinoPac login is not on the simulation server, and a ranking follow never orders with real money.',
+    follow_broker_not_offered: 'The site does not let your ranking follow order on that account now.',
     administrators_only: 'Administrators only.',
     feature_hidden: 'This site does not offer this now.',
   },

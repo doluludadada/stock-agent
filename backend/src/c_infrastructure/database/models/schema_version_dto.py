@@ -57,10 +57,21 @@ async def add_what_a_ranking_follow_left_open(connection: AsyncConnection) -> No
     await connection.execute(text("ALTER TABLE workflow_runs ADD COLUMN ranking_open INTEGER"))
 
 
+async def add_the_account_of_the_scheduled_follow(connection: AsyncConnection) -> None:
+    """
+    Version 12 to 13: a user keeps the account their scheduled ranking follow orders on, the mock account for every
+    user before it, which is where every schedule followed until now. The column's type is the one workflow_runs
+    names a run's broker with.
+    """
+    await connection.execute(text("ALTER TABLE users ADD COLUMN ranking_follow_broker executionprovider NOT NULL DEFAULT 'MOCK'"))
+    await connection.execute(text("ALTER TABLE users ALTER COLUMN ranking_follow_broker DROP DEFAULT"))
+
+
 UPGRADES: tuple[UpgradeStep, ...] = (
     add_the_ranking_formula_of_a_run,
     add_the_schedule_of_the_ranking_follow,
     add_what_a_ranking_follow_left_open,
+    add_the_account_of_the_scheduled_follow,
 )
 """
 The steps that upgrade an older database in place, oldest first: UPGRADES[n] turns version FIRST_SCHEMA_VERSION + n

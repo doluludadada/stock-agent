@@ -74,6 +74,8 @@ const common: DictionaryShape<typeof en> = {
     mops_unavailable: '本站不讀取公開資訊觀測站，這裡不提供這項功能。',
     broker_unavailable: '本站目前沒有登入永豐金。',
     real_broker_refused: '只有管理員能使用永豐金帳戶。',
+    not_simulation: '本站的永豐金登入不在模擬環境，而排名跟單不會使用真實資金下單。',
+    follow_broker_not_offered: '本站目前不讓你的排名跟單在這個帳戶下單。',
     administrators_only: '僅限管理員。',
     feature_hidden: '本站目前不提供這項功能。',
   },

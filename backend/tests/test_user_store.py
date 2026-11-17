@@ -23,7 +23,7 @@ from support.settings import shipped_config
 from trading_stack import SilentLogger
 
 from a_domain.model.system.user import User
-from a_domain.types.enums import AiProvider, Role, UserStatus
+from a_domain.types.enums import AiProvider, ExecutionProvider, Role, UserStatus
 from a_domain.types.errors import AlreadySetUpError, LastAdministratorError, SignInRefused, SignInThrottled, UserExistsError
 from a_domain.types.ids import SessionToken, UserId
 from b_application.use_cases.users.sign_in_attempt import SignInAttempt
@@ -241,17 +241,19 @@ async def test_a_users_ai_model_and_an_administrators_change_of_their_role_never
 
 
 @pytest.mark.asyncio
-async def test_the_time_of_a_users_scheduled_ranking_follow_is_saved_alone_and_cleared(store: SqlUserStore) -> None:
+async def test_a_users_scheduled_ranking_follow_is_saved_alone_with_its_account_and_cleared(store: SqlUserStore) -> None:
     before = await store.find(UserId("u-2"))
-    await store.save_ranking_follow_time(UserId("u-2"), time(9, 5), NOW)
+    await store.save_ranking_follow_schedule(UserId("u-2"), time(9, 5), ExecutionProvider.SHIOAJI, NOW)
     scheduled = await store.find(UserId("u-2"))
-    others = [user.ranking_follow_time for user in await store.users() if user.user_id != UserId("u-2")]
-    await store.save_ranking_follow_time(UserId("u-2"), None, NOW)
+    others = [(user.ranking_follow_time, user.ranking_follow_broker) for user in await store.users() if user.user_id != UserId("u-2")]
+    await store.save_ranking_follow_schedule(UserId("u-2"), None, ExecutionProvider.MOCK, NOW)
     cleared = await store.find(UserId("u-2"))
 
     assert before is not None and scheduled is not None and cleared is not None
-    assert (before.ranking_follow_time, scheduled.ranking_follow_time, cleared.ranking_follow_time) == (None, time(9, 5), None)
-    assert replace(scheduled, ranking_follow_time=None) == before and set(others) == {None}
+    assert (before.ranking_follow_time, before.ranking_follow_broker) == (None, ExecutionProvider.MOCK)
+    assert (scheduled.ranking_follow_time, scheduled.ranking_follow_broker) == (time(9, 5), ExecutionProvider.SHIOAJI)
+    assert replace(scheduled, ranking_follow_time=None, ranking_follow_broker=ExecutionProvider.MOCK) == before
+    assert cleared == before and set(others) == {(None, ExecutionProvider.MOCK)}
 
 
 @pytest.mark.asyncio

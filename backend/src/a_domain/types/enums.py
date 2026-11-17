@@ -190,6 +190,12 @@ class RejectReason(StrEnum):
     BROKER_SERVER_MISMATCH = auto()
     """The real broker's login is on another server than the environment trades on (SystemEnvironment.shioaji_simulation)."""
 
+    NOT_SIMULATION = auto()
+    """
+    An order of a workflow that orders on a real broker's simulation server only (Workflow.simulation_only) would reach
+    a login that is not on it: a ranking follow never orders with real money.
+    """
+
     ORDER_VALUE_LIMIT = auto()
     """A real broker's BUY costs more than trading.max_order_value at its limit price, or has no limit price to value."""
 
@@ -291,8 +297,8 @@ class OrderPricing(StrEnum):
 
 class FollowRefusal(StrEnum):
     """
-    Why a run's decisions, or the monthly ranking, cannot be followed into the user's mock account now. The Web API
-    answers each as its code.
+    Why a run's decisions cannot be followed into the user's mock account now, or the monthly ranking into the account
+    its follow chose. The Web API answers each as its code.
     """
 
     NOTHING_TO_FOLLOW = auto()
@@ -305,13 +311,22 @@ class FollowRefusal(StrEnum):
     OUTSIDE_FOLLOW_WINDOW = auto()
     """The market is in a phase in which this site's order pricing places no order (OrderPricing.trading_phase)."""
 
+    NOT_SIMULATION = auto()
+    """
+    The ranking would be followed on a real broker whose login is not on the broker's simulation server: a ranking
+    follow never orders with real money (SimulationOnlyRule). The account is not read.
+    """
+
     @property
     def lifts_later(self) -> bool:
-        """Whether the same follow may start once the market's phase changes. Nothing to follow stays so."""
+        """
+        Whether the same follow may start without the account changing: once the market's phase changes, or the
+        broker's login is on its simulation server. Nothing to follow stays so.
+        """
         match self:
             case FollowRefusal.NOTHING_TO_FOLLOW:
                 return False
-            case FollowRefusal.OUTSIDE_FOLLOW_WINDOW:
+            case FollowRefusal.OUTSIDE_FOLLOW_WINDOW | FollowRefusal.NOT_SIMULATION:
                 return True
 
 
@@ -791,7 +806,10 @@ class ExecutionProvider(StrEnum):
     """
 
     MOCK = auto()
-    """The user's own mock account, kept in the app's database: the default everywhere, and a follow's only broker."""
+    """
+    The user's own mock account, kept in the app's database: the default everywhere, and the only broker of a follow
+    of a run.
+    """
 
     SHIOAJI = auto()
     """SinoPac through the Shioaji API, on the site's own login: its simulation server in dev and test, the real account in prod."""
@@ -815,6 +833,20 @@ class ExecutionProvider(StrEnum):
                 return False
             case ExecutionProvider.SHIOAJI:
                 return True
+
+    @property
+    def credits_sales_at_once(self) -> bool:
+        """
+        A sale's proceeds are cash the account can buy with as soon as the sale fills. The mock account settles at the
+        fill. SinoPac pays a sale at settlement, two sessions later, and the cash it reports until then leaves the sale
+        out, so a BUY sized on it would be refused: a ranking follow sizes its BUYs on the cash the account has without
+        its own sales (RankingFollowRule).
+        """
+        match self:
+            case ExecutionProvider.MOCK:
+                return True
+            case ExecutionProvider.SHIOAJI:
+                return False
 
     @property
     def account_feature(self) -> Feature:
@@ -1035,7 +1067,10 @@ class Workflow(StrEnum):
     """
 
     RANKING_FOLLOW = auto()
-    """The user's follow of the monthly ranking's latest decision into their mock account, as its own recorded run."""
+    """
+    The user's follow of the monthly ranking's latest decision, as its own recorded run: into their mock account, or
+    into SinoPac's simulation account when the follow chose SinoPac.
+    """
 
     VALUATION = auto()
     """Menus 5 and 6. Read-only: no run record, no order."""
@@ -1050,6 +1085,15 @@ class Workflow(StrEnum):
         the manual BUY and a follow already ordered theirs: following one would order the same decisions twice.
         """
         return self == Workflow.FULL_CYCLE
+
+    @property
+    def simulation_only(self) -> bool:
+        """
+        A real broker takes its orders on the broker's simulation server only, never with real money
+        (SimulationOnlyRule): the site decides a ranking follow's orders by itself, and its schedule starts one with
+        nobody at the site. Never configured: ordering a ranking follow with real money is a change of this table.
+        """
+        return self == Workflow.RANKING_FOLLOW
 
 
 class RuleEffect(StrEnum):
@@ -1686,6 +1730,15 @@ class ErrorCode(StrEnum):
 
     OUTSIDE_FOLLOW_WINDOW = auto()
     """FollowRefusal.OUTSIDE_FOLLOW_WINDOW: the site places no order in the market's phase now."""
+
+    NOT_SIMULATION = auto()
+    """
+    FollowRefusal.NOT_SIMULATION: a ranking follow orders on a real broker's simulation server only, and the site's
+    login is not on it. Nothing started and no account was read.
+    """
+
+    FOLLOW_BROKER_NOT_OFFERED = auto()
+    """The site does not let the user's ranking follow order on that account now: `detail` names the ones it offers. Nothing saved."""
 
     BACKTEST_PERIOD_UNAVAILABLE = auto()
     """The daily history the site holds cannot replay the period asked: `detail` says which days a backtest may cover."""

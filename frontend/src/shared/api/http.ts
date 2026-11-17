@@ -71,6 +71,8 @@ const ERROR_CODES = {
   too_many_runs: true,
   nothing_to_follow: true,
   outside_follow_window: true,
+  not_simulation: true,
+  follow_broker_not_offered: true,
   backtest_period_unavailable: true,
   ranking_unavailable: true,
   too_many_backtests: true,

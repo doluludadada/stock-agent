@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiRequest, runResultsKey, useIsSignedIn } from '@/shared/api'
+import { apiRequest, runResultsKey, useIsSignedIn, useRunOrders, type Broker } from '@/shared/api'
 import type { Period } from './model'
 
 export const rankingKeys = {
@@ -89,20 +89,25 @@ export function useFollowSchedule() {
   })
 }
 
-/** Saves when the site follows the ranking into the mock account by itself, or null for no schedule; the schedule and the block's answer follow it. */
+/** The orders of a follow, asked once its row is opened and again while a run of the user may still place one. */
+export function useFollowOrders(runId: string, open: boolean, running: boolean) {
+  return useRunOrders(runId, open, running ? RUN_POLL_MS : false)
+}
+
+/** Saves when the site follows the ranking by itself, null for no schedule, and on which account; the schedule and the block's answer follow it. */
 export function useScheduleFollow() {
   const client = useQueryClient()
   return useMutation({
-    mutationFn: (time: string | null) => apiRequest('put', '/v1/rankings/follow/schedule', { body: { confirm: true, time } }),
+    mutationFn: (schedule: { time: string | null; broker: Broker }) => apiRequest('put', '/v1/rankings/follow/schedule', { body: { confirm: true, ...schedule } }),
     onSettled: () => Promise.all([rankingKeys.schedule, rankingKeys.follow].map((queryKey) => client.invalidateQueries({ queryKey }))),
   })
 }
 
-/** Starts the follow of the latest ranking into the mock account, as a run whose id the answer carries. */
+/** Starts the follow of the latest ranking into the account named, as a run whose id the answer carries. */
 export function useFollowRanking() {
   const client = useQueryClient()
   return useMutation({
-    mutationFn: () => apiRequest('post', '/v1/rankings/follow', { body: { confirm: true } }),
+    mutationFn: (broker: Broker) => apiRequest('post', '/v1/rankings/follow', { query: { broker }, body: { confirm: true } }),
     onSettled: () => client.invalidateQueries({ queryKey: runResultsKey }),
   })
 }

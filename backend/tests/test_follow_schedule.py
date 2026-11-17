@@ -1,9 +1,10 @@
 """
 The scheduled ranking follow: when a user's schedule is due (the first session after a decision, from the user's time,
 while the site places orders, once a day until a follow left the account nothing to trade for that decision under the
-active formula), and the Web API's timer step that starts it: on the user's mock account alone, recorded as started by
-the schedule, never again for a decision a follow finished, never for a deactivated user or one the site hides the
-ranking or the mock account from, and never outside continuous trading or without a realtime quote. A follow that
+active formula), and the Web API's timer step that starts it: on the account the schedule names, here the user's mock
+account (test_sinopac_ranking_follow.py has SinoPac's simulation account), recorded as started by the schedule, never
+again for a decision a follow finished, never for a deactivated user or one the site hides the ranking or the
+account's ordering from, and never outside continuous trading or without a realtime quote. A follow that
 ordered nothing or only a part, on a holiday the clock does not know, with a stock at its limit, of a ranking that
 ranks nothing or stopped by an error, leaves the decision pending, and the page says why.
 """
@@ -43,6 +44,7 @@ from d_presentation.web.scheduled_follows import start_due_follows
 pytestmark = pytest.mark.asyncio
 
 NINE_FIVE = time(9, 5)
+ON_MOCK = {"broker": "mock", "brokers": ["mock"], "broker_offered": True}
 RULE = FollowScheduleRule(
     decision_rule=DecisionSessionsRule(decision_day=13, deadline_day=10),
     time_rule=FollowTimeRule(pricing=OrderPricing.REALTIME_QUOTE),
@@ -81,7 +83,9 @@ def follow(
 
 
 def due(sessions: list[date], now: datetime, *follows: SystemStats, follow_time: time | None = NINE_FIVE) -> tuple[date | None, bool]:
-    schedule = RULE.apply(follow_time, sessions, follows, now, TradingPhase.CONTINUOUS)
+    schedule = RULE.apply(
+        follow_time, sessions, follows, now, TradingPhase.CONTINUOUS, ExecutionProvider.MOCK, (ExecutionProvider.MOCK,)
+    )
     return schedule.pending, schedule.due
 
 
@@ -103,7 +107,10 @@ def test_the_schedule_follows_only_while_the_site_places_orders() -> None:
     sessions = weekdays(date(2026, 10, 1), date(2026, 10, 13))
     now = at(date(2026, 10, 14), 13, 27)
 
-    phases = {phase: RULE.apply(NINE_FIVE, sessions, [], now, phase).due for phase in TradingPhase}
+    phases = {
+        phase: RULE.apply(NINE_FIVE, sessions, [], now, phase, ExecutionProvider.MOCK, (ExecutionProvider.MOCK,)).due
+        for phase in TradingPhase
+    }
 
     assert phases == {phase: phase == TradingPhase.CONTINUOUS for phase in TradingPhase}
 
@@ -155,9 +162,42 @@ def test_a_follow_that_left_stocks_to_trade_leaves_the_decision_pending_and_the_
     assert due(sessions, at(thursday, 10), partial) == (decided, True)
     assert due(sessions, at(wednesday, 10), partial_by_hand) == (decided, True)
     assert due(sessions, at(thursday, 10), partial, finished_by_hand) == (None, False)
-    assert RULE.apply(NINE_FIVE, sessions, [partial_by_hand, partial], at(thursday, 10), TradingPhase.CONTINUOUS).unfinished == partial
-    assert RULE.apply(NINE_FIVE, sessions, [partial_by_hand], at(thursday, 10), TradingPhase.CONTINUOUS).unfinished is None
-    assert RULE.apply(NINE_FIVE, sessions, [partial, finished_by_hand], at(thursday, 10), TradingPhase.CONTINUOUS).unfinished is None
+    assert (
+        RULE.apply(
+            NINE_FIVE,
+            sessions,
+            [partial_by_hand, partial],
+            at(thursday, 10),
+            TradingPhase.CONTINUOUS,
+            ExecutionProvider.MOCK,
+            (ExecutionProvider.MOCK,),
+        ).unfinished
+        == partial
+    )
+    assert (
+        RULE.apply(
+            NINE_FIVE,
+            sessions,
+            [partial_by_hand],
+            at(thursday, 10),
+            TradingPhase.CONTINUOUS,
+            ExecutionProvider.MOCK,
+            (ExecutionProvider.MOCK,),
+        ).unfinished
+        is None
+    )
+    assert (
+        RULE.apply(
+            NINE_FIVE,
+            sessions,
+            [partial, finished_by_hand],
+            at(thursday, 10),
+            TradingPhase.CONTINUOUS,
+            ExecutionProvider.MOCK,
+            (ExecutionProvider.MOCK,),
+        ).unfinished
+        is None
+    )
 
 
 def test_a_decision_finished_under_another_formula_is_pending_under_the_active_one() -> None:
@@ -169,7 +209,18 @@ def test_a_decision_finished_under_another_formula_is_pending_under_the_active_o
     assert due(sessions, at(wednesday, 10), under_the_former) == (decided, False)
     assert due(sessions, at(thursday, 10), under_the_former) == (decided, True)
     assert due(sessions, at(thursday, 10), redefined) == (decided, True)
-    assert RULE.apply(NINE_FIVE, sessions, [under_the_former], at(thursday, 10), TradingPhase.CONTINUOUS).unfinished is None
+    assert (
+        RULE.apply(
+            NINE_FIVE,
+            sessions,
+            [under_the_former],
+            at(thursday, 10),
+            TradingPhase.CONTINUOUS,
+            ExecutionProvider.MOCK,
+            (ExecutionProvider.MOCK,),
+        ).unfinished
+        is None
+    )
 
 
 # ------------------------------- The timer step ------------------------------- #
@@ -180,7 +231,7 @@ async def administrator(client: httpx.AsyncClient) -> None:
 
 
 async def schedule(client: httpx.AsyncClient, at_time: str | None) -> httpx.Response:
-    return await write(client, "PUT", "/v1/rankings/follow/schedule", {"time": at_time})
+    return await write(client, "PUT", "/v1/rankings/follow/schedule", {"time": at_time, "broker": "mock"})
 
 
 async def look(app: Any) -> list[Any]:
@@ -216,10 +267,10 @@ async def test_the_schedule_is_off_until_the_user_chooses_one_of_the_offered_tim
         off = await schedule(client, None)
 
     offered = ["09:05:00", "09:30:00", "10:00:00", "13:00:00"]
-    assert before == {"time": None, "times": offered, "pending": "2026-10-13", "unfinished": None, "due": False}
+    assert before == {**ON_MOCK, "time": None, "times": offered, "pending": "2026-10-13", "unfinished": None, "due": False}
     assert (refused.status_code, refused.json()["code"]) == (422, "follow_time_not_offered")
     assert (chosen.status_code, off.status_code) == (204, 204)
-    assert after == {"time": "09:30:00", "times": offered, "pending": "2026-10-13", "unfinished": None, "due": True}
+    assert after == {**ON_MOCK, "time": "09:30:00", "times": offered, "pending": "2026-10-13", "unfinished": None, "due": True}
     assert me["ranking_follow_time"] == "09:30:00"
     assert harness.users.by_id[ADMINISTRATOR.user_id].ranking_follow_time is None
     assert placed(harness) == []
@@ -470,7 +521,7 @@ async def test_a_user_who_turned_the_schedule_off_during_the_look_is_not_followe
         reads.append(len(reads))
 
         if len(reads) > 1:
-            await harness.users.save_ranking_follow_time(ADMINISTRATOR.user_id, None, harness.clock.now())
+            await harness.users.save_ranking_follow_schedule(ADMINISTRATOR.user_id, None, harness.clock.now())
 
         return await users()
 
@@ -510,7 +561,7 @@ async def test_the_schedule_is_read_and_changed_on_a_site_that_can_make_no_ranki
 
     offered = ["09:05:00", "09:30:00", "10:00:00", "13:00:00"]
     assert (page.status_code, page.json()["code"], chosen.status_code) == (422, "ranking_unavailable", 204)
-    assert panel.json() == {"time": "09:30:00", "times": offered, "pending": None, "unfinished": None, "due": False}
+    assert panel.json() == {**ON_MOCK, "time": "09:30:00", "times": offered, "pending": None, "unfinished": None, "due": False}
 
 
 async def test_a_window_the_schedule_missed_is_followed_on_the_next_session_and_each_look_costs_one_read_of_the_users(

@@ -13,7 +13,7 @@ from b_application.config.app_config import AppConfig
 
 class RankingFollowSignals:
     """
-    Use Case: Decide what brings the mock account to the ranking (RankingFollowRule), on the account valued at the
+    Use Case: Decide what brings the account of the run's broker to the ranking (RankingFollowRule), on the account valued at the
     run's latest prices (AccountValueRule) and against one reading of the clock, and record the decisions as this run's,
     so each order that follows has its decision saved first. A stock that gets no decision now is logged in the run
     and stays open. When the decisions cannot be saved, none is returned, so nothing is sent.
@@ -28,7 +28,8 @@ class RankingFollowSignals:
 
     async def execute(self, ranking: Ranking, stocks: Mapping[str, Stock], account: Account, stats: SystemStats) -> list[TradeSignal]:
         now = self._market_clock.now()
-        decided = self._follow_rule.apply(ranking, self._value_rule.apply(account, stocks.values()), stocks, now)
+        valued = self._value_rule.apply(account, stocks.values())
+        decided = self._follow_rule.apply(ranking, valued, stocks, now, stats.execution_provider)
         follows = [decision for decision in decided if isinstance(decision, TradeSignal)]
 
         for unfollowed in decided:

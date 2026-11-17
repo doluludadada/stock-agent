@@ -3,7 +3,7 @@ from datetime import datetime, time
 from pydantic import ConfigDict, computed_field
 from pydantic.dataclasses import dataclass
 
-from a_domain.types.enums import AiProvider, Permission, Role, UserStatus
+from a_domain.types.enums import AiProvider, ExecutionProvider, Permission, Role, UserStatus
 from a_domain.types.ids import SessionToken, UserId
 from a_domain.types.values import EmailAddress, Username
 
@@ -29,8 +29,13 @@ class User:
     """
     ranking_follow_time: time | None = None
     """
-    The time of day in Taipei from which the site follows each new decision of the monthly ranking into the user's mock
-    account by itself, on the first session after it. None: only the user's own click follows.
+    The time of day in Taipei from which the site follows each new decision of the monthly ranking by itself, on the
+    first session after it, into the account `ranking_follow_broker` names. None: only the user's own click follows.
+    """
+    ranking_follow_broker: ExecutionProvider = ExecutionProvider.MOCK
+    """
+    The account the user's scheduled ranking follow orders on: their mock account, or SinoPac, where a ranking follow
+    orders on the simulation server only. A user the site no longer lets order there is not followed on another account.
     """
     has_password: bool = True
     """

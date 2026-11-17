@@ -4,7 +4,7 @@ import { useId, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { useTranslation } from '@/i18n'
-import { isApiError, useAudience, type Schemas } from '@/shared/api'
+import { isApiError, useAudience, type Order, type Schemas } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
 import { useFormat } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
@@ -15,7 +15,7 @@ import { DataTable, type Column } from '@/shared/ui/data-table'
 import { ErrorState } from '@/shared/ui/error-state'
 import { Panel } from '@/shared/ui/panel'
 import { Skeleton } from '@/shared/ui/skeleton'
-import { useFollowRun, type Follow, type FollowItem, type Order, type Signal } from './api'
+import { useFollowRun, type Follow, type FollowItem, type Signal } from './api'
 import { openDecisions } from './model'
 
 type OrderPricing = Schemas['OrderPricing']
@@ -63,6 +63,9 @@ function useLead(follow: Follow, pricing: OrderPricing, quoted: boolean): string
       return t(`follow.window.${pricing}`)
     case 'nothing_to_follow':
       return follow.follows.some(({ order }) => order.filled_quantity > 0) ? t('follow.allFollowed') : t('follow.noDecisions')
+    // Only a ranking follow on SinoPac is refused so; the contract's one list of refusals names it here too.
+    case 'not_simulation':
+      return t('common:refusal.not_simulation')
   }
 }
 
