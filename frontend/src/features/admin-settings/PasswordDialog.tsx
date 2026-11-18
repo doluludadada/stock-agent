@@ -1,5 +1,5 @@
 import { LoaderCircle, TriangleAlert } from 'lucide-react'
-import { useEffect, useRef, useState, type FormEvent, type RefObject } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from 'react'
 import { useTranslation } from '@/i18n'
 import { useErrorReason } from '@/shared/lib/error-reason'
 import { Button } from '@/shared/ui/button'
@@ -16,13 +16,20 @@ interface PasswordDialogProps {
   onOpenChange: (open: boolean) => void
   /** Sends the save with the administrator's password; null once the dialog has nothing left to say. */
   onConfirm: (password: string) => Promise<DialogRefusal | null>
+  /** A page's own title and sentence, in place of the settings page's. */
+  title?: string
+  description?: string
+  /** What the dialog shows above the password: what the save changes, and a field of the page's own. */
+  children?: ReactNode
+  /** False holds the confirm button until the page's own field is filled. */
+  ready?: boolean
 }
 
 /**
  * Every save needs the administrator's password again, so a stolen session alone changes no setting. A wrong password,
  * the attempt limit and a lost connection keep the dialog open.
  */
-export function PasswordDialog({ open, onOpenChange, onConfirm }: PasswordDialogProps) {
+export function PasswordDialog({ open, onOpenChange, onConfirm, title, description, children, ready = true }: PasswordDialogProps) {
   const { t } = useTranslation('admin')
   const [pending, setPending] = useState(false)
   const [throttledUntil, setThrottledUntil] = useState<number | null>(null)
@@ -38,9 +45,10 @@ export function PasswordDialog({ open, onOpenChange, onConfirm }: PasswordDialog
         }}
       >
         <DialogHeader>
-          <DialogTitle className="text-title">{t('password.title')}</DialogTitle>
-          <DialogDescription className="text-pretty">{t('password.description')}</DialogDescription>
+          <DialogTitle className="text-title">{title ?? t('password.title')}</DialogTitle>
+          <DialogDescription className="text-pretty">{description ?? t('password.description')}</DialogDescription>
         </DialogHeader>
+        {children}
         <PasswordForm
           field={field}
           onConfirm={onConfirm}
@@ -49,6 +57,7 @@ export function PasswordDialog({ open, onOpenChange, onConfirm }: PasswordDialog
           setPending={setPending}
           throttledUntil={throttledUntil}
           onThrottled={setThrottledUntil}
+          ready={ready}
         />
       </DialogContent>
     </Dialog>
@@ -63,10 +72,11 @@ interface PasswordFormProps {
   setPending: (pending: boolean) => void
   throttledUntil: number | null
   onThrottled: (until: number) => void
+  ready: boolean
 }
 
 /** The dialog's body; it mounts each time the dialog opens, so a password typed before never comes back. */
-function PasswordForm({ field, onConfirm, onCancel, pending, setPending, throttledUntil, onThrottled }: PasswordFormProps) {
+function PasswordForm({ field, onConfirm, onCancel, pending, setPending, throttledUntil, onThrottled, ready }: PasswordFormProps) {
   const { t } = useTranslation('admin')
   const reason = useErrorReason()
   const [password, setPassword] = useState('')
@@ -75,7 +85,7 @@ function PasswordForm({ field, onConfirm, onCancel, pending, setPending, throttl
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
-    if (pending || wait > 0 || !password) return
+    if (pending || wait > 0 || !password || !ready) return
     setPending(true)
     setRefusal(null)
     const result = await onConfirm(password)
@@ -121,7 +131,7 @@ function PasswordForm({ field, onConfirm, onCancel, pending, setPending, throttl
         <Button type="button" variant="outline" onClick={onCancel} disabled={pending}>
           {t('password.cancel')}
         </Button>
-        <Button type="submit" disabled={pending || wait > 0 || !password}>
+        <Button type="submit" disabled={pending || wait > 0 || !password || !ready}>
           {pending && <LoaderCircle aria-hidden className="animate-spin" />}
           {pending ? t('password.saving') : t('password.confirm')}
         </Button>

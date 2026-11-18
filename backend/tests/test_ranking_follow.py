@@ -118,7 +118,7 @@ def test_the_holdings_are_split_into_the_ranked_ones_held_the_ranked_ones_lackin
         cash=0, positions=[Position(stock_id=stock_id, quantity=1, average_cost=1) for stock_id in ("2603", "2317", "1101")]
     )
 
-    holdings = RankingHoldingsRule().apply(ranking_of("2330", "2317"), account)
+    holdings = RankingHoldingsRule().apply(ranking_of("2330", "2317"), account.stock_ids)
 
     assert (holdings.held, holdings.lacking, holdings.left) == (["2317"], ["2330"], ["1101", "2603"])
     assert holdings.open == ["1101", "2603", "2330"]
@@ -128,7 +128,7 @@ def test_the_holdings_are_split_into_the_ranked_ones_held_the_ranked_ones_lackin
 def test_a_ranking_of_no_stock_sells_nothing() -> None:
     account = Account(cash=0, positions=[Position(stock_id="2317", quantity=1, average_cost=1)])
 
-    assert RankingHoldingsRule().apply(ranking_of(), account) == RankingHoldings(decided_on=SESSIONS[3])
+    assert RankingHoldingsRule().apply(ranking_of(), account.stock_ids) == RankingHoldings(decided_on=SESSIONS[3])
 
 
 def test_the_return_counts_from_the_close_before_the_first_follow_to_the_last_session_both_curves_reach() -> None:
@@ -162,14 +162,14 @@ def test_the_return_counts_from_the_close_before_the_first_follow_to_the_last_se
 async def test_a_follow_from_an_empty_account_buys_each_ranked_stock_at_an_equal_weight_in_whole_shares(tmp_path) -> None:
     stack = await market(tmp_path)
 
-    before, refusal = await stack.pipeline.load_ranking_follow()
-    performance = (await stack.pipeline.load_ranking_follow_return(ADMINISTRATOR))[:2]
-    status = await stack.pipeline.follow_ranking()
-    _, follows, schedule = await stack.pipeline.load_ranking_follow_return(ADMINISTRATOR)
+    _, _, before, refusal, _, _ = await stack.pipeline.load_ranking_follow(ADMINISTRATOR)
+    performance = (await stack.pipeline.load_ranking_follow(ADMINISTRATOR))[4:]
+    status = await stack.pipeline.follow_ranking(ADMINISTRATOR)
+    _, schedule, _, _, _, follows = await stack.pipeline.load_ranking_follow(ADMINISTRATOR)
 
     account = await stack.broker.get_account()
     decisions = await stack.journal.signals_of(status.stats.run_id)
-    after, again = await stack.pipeline.load_ranking_follow()
+    _, _, after, again, _, _ = await stack.pipeline.load_ranking_follow(ADMINISTRATOR)
     assert (before.held, before.lacking, before.left, refusal, performance) == ([], ["2330", "2317"], [], None, (None, []))
     assert [(run.run_id, run.ranking_formula, run.ranking_open) for run in follows] == [(status.stats.run_id, FORMULA, 0)]
     assert (schedule.pending, schedule.unfinished) == (None, None)
@@ -188,12 +188,12 @@ async def test_a_follow_from_an_empty_account_buys_each_ranked_stock_at_an_equal
 
 async def test_a_second_follow_of_the_same_decision_orders_nothing_whatever_the_prices_did(tmp_path) -> None:
     stack = await market(tmp_path)
-    first = await stack.pipeline.follow_ranking()
+    first = await stack.pipeline.follow_ranking(ADMINISTRATOR)
     held = await stack.broker.get_account()
     stack.clock.current = MONDAY_10_00 + timedelta(minutes=30)
     stack.quotes.realtime = {stock_id: bar(stack.clock.current, price * 1.05) for stock_id, price in CLOSES.items()}
 
-    second = await stack.pipeline.follow_ranking()
+    second = await stack.pipeline.follow_ranking(ADMINISTRATOR)
 
     assert len(first.orders) == 2
     assert (second.follow_refusal, second.signals, second.orders) == (FollowRefusal.NOTHING_TO_FOLLOW, [], [])
@@ -204,7 +204,7 @@ async def test_an_account_that_holds_last_months_ranking_sells_what_left_and_buy
     stack = await market(tmp_path)
     await holding(stack, ("2317", 9000, 50.0), ("1101", 15000, 30.0))
 
-    status = await stack.pipeline.follow_ranking()
+    status = await stack.pipeline.follow_ranking(ADMINISTRATOR)
 
     account = await stack.broker.get_account()
     sell, buy = status.orders
@@ -227,7 +227,7 @@ async def test_a_buy_is_sized_from_the_cash_the_account_has_once_the_sales_settl
     stack = await market(tmp_path)
     await holding(stack, ("2317", 18000, 50.0))
 
-    status = await stack.pipeline.follow_ranking()
+    status = await stack.pipeline.follow_ranking(ADMINISTRATOR)
 
     [buy] = status.orders
     assert (buy.stock_id, buy.status, buy.filled_quantity) == ("2330", OrderStatus.FILLED, affordable(100_000, 100))
@@ -238,9 +238,9 @@ async def test_an_account_without_the_cash_for_one_lot_buys_nothing_and_the_run_
     stack = await market(tmp_path)
     await holding(stack, cash=60)
 
-    status = await stack.pipeline.follow_ranking()
+    status = await stack.pipeline.follow_ranking(ADMINISTRATOR)
 
-    holdings, refusal = await stack.pipeline.load_ranking_follow()
+    _, _, holdings, refusal, _, _ = await stack.pipeline.load_ranking_follow(ADMINISTRATOR)
     assert (status.signals, status.orders) == ([], [])
     assert [line.split("] ")[1] for line in status.stats.execution_log] == [
         "Not followed now: 2330: its share of the account, 30, buys no lot of 1 at 100.0",
@@ -253,9 +253,9 @@ async def test_a_stock_without_a_fresh_quote_is_refused_at_the_gate_and_the_next
     stack = await market(tmp_path)
     del stack.quotes.realtime["2317"]
 
-    first = await stack.pipeline.follow_ranking()
+    first = await stack.pipeline.follow_ranking(ADMINISTRATOR)
     stack.quotes.realtime["2317"] = bar(MONDAY_10_00 - timedelta(minutes=1), 50)
-    second = await stack.pipeline.follow_ranking()
+    second = await stack.pipeline.follow_ranking(ADMINISTRATOR)
 
     bought, refused = first.orders
     [retried] = second.orders
@@ -277,7 +277,7 @@ async def test_a_stock_with_no_price_at_all_gets_no_decision_and_the_run_says_so
 
     monkeypatch.setattr(stack.quotes, "fetch_history", without_2317)
 
-    status = await stack.pipeline.follow_ranking()
+    status = await stack.pipeline.follow_ranking(ADMINISTRATOR)
 
     assert [order.stock_id for order in status.orders] == ["2330"]
     assert status.stats.execution_log[-1].endswith("Not followed now: 2317 has neither a realtime quote nor an official close")
@@ -287,8 +287,8 @@ async def test_outside_continuous_trading_the_follow_is_refused_and_sends_nothin
     stack = await market(tmp_path)
     stack.clock.current = MONDAY_10_00 + timedelta(hours=4)
 
-    holdings, refusal = await stack.pipeline.load_ranking_follow()
-    status = await stack.pipeline.follow_ranking()
+    _, _, holdings, refusal, _, _ = await stack.pipeline.load_ranking_follow(ADMINISTRATOR)
+    status = await stack.pipeline.follow_ranking(ADMINISTRATOR)
 
     assert (holdings.lacking, refusal) == (["2330", "2317"], FollowRefusal.OUTSIDE_FOLLOW_WINDOW)
     assert (status.follow_refusal, status.signals, status.orders) == (FollowRefusal.OUTSIDE_FOLLOW_WINDOW, [], [])
@@ -299,8 +299,8 @@ async def test_a_month_without_revenue_ranks_nothing_and_a_follow_of_it_keeps_ev
     stack.archive.monthly_revenues.clear()
     await holding(stack, ("1101", 1000, 30.0))
 
-    holdings, refusal = await stack.pipeline.load_ranking_follow()
-    status = await stack.pipeline.follow_ranking()
+    _, _, holdings, refusal, _, _ = await stack.pipeline.load_ranking_follow(ADMINISTRATOR)
+    status = await stack.pipeline.follow_ranking(ADMINISTRATOR)
 
     assert (holdings, refusal) == (RankingHoldings(decided_on=SESSIONS[3]), FollowRefusal.NOTHING_TO_FOLLOW)
     assert status.orders == [] and (await stack.broker.get_account()).stock_ids == {"1101"}
@@ -308,9 +308,9 @@ async def test_a_month_without_revenue_ranks_nothing_and_a_follow_of_it_keeps_ev
 
 async def test_the_return_since_the_first_follow_is_read_against_the_benchmark_over_the_same_sessions(tmp_path) -> None:
     stack = await market(tmp_path)
-    status = await stack.pipeline.follow_ranking()
+    status = await stack.pipeline.follow_ranking(ADMINISTRATOR)
     monday, tuesday = date(2026, 10, 19), date(2026, 10, 20)
-    on_the_day, _, _ = await stack.pipeline.load_ranking_follow_return(ADMINISTRATOR)
+    _, _, _, _, on_the_day, _ = await stack.pipeline.load_ranking_follow(ADMINISTRATOR)
     later = {"2330": (101.0, 110.0), "2317": (50.0, 51.0), "1101": (30.0, 30.0), "0050": (188.0, 190.0)}
 
     for stock_id, closes in later.items():
@@ -320,7 +320,7 @@ async def test_the_return_since_the_first_follow_is_read_against_the_benchmark_o
         ]
 
     stack.clock.current = datetime.combine(tuesday, time(15, 0), TAIWAN_TIMEZONE)
-    performance, _, _ = await stack.pipeline.load_ranking_follow_return(ADMINISTRATOR)
+    _, _, _, _, performance, _ = await stack.pipeline.load_ranking_follow(ADMINISTRATOR)
 
     cash = (await stack.broker.get_account()).cash
     equity = cash + sum(order.filled_quantity * later[order.stock_id][1] for order in status.orders)
@@ -332,14 +332,14 @@ async def test_the_return_since_the_first_follow_is_read_against_the_benchmark_o
 
 async def test_a_reset_account_has_never_followed(tmp_path) -> None:
     stack = await market(tmp_path)
-    await stack.pipeline.follow_ranking()
+    await stack.pipeline.follow_ranking(ADMINISTRATOR)
     stack.clock.current = MONDAY_10_00 + timedelta(minutes=5)
     await stack.pipeline.reset_mock_account(500_000)
 
-    holdings, refusal = await stack.pipeline.load_ranking_follow()
+    _, _, holdings, refusal, _, _ = await stack.pipeline.load_ranking_follow(ADMINISTRATOR)
 
     assert (holdings.held, holdings.lacking, refusal) == ([], ["2330", "2317"], None)
-    assert (await stack.pipeline.load_ranking_follow_return(ADMINISTRATOR))[:2] == (None, [])
+    assert (await stack.pipeline.load_ranking_follow(ADMINISTRATOR))[4:] == (None, [])
 
 
 # ------------------------------- Public site ---------------------------------- #
@@ -354,10 +354,10 @@ async def test_on_the_public_site_a_follow_fills_at_the_last_sessions_official_c
         raise RuntimeError("open data has no realtime quote")
 
     monkeypatch.setattr(stack.quotes, "fetch_realtime_bars", no_realtime_quotes)
-    _, in_session = await stack.pipeline.load_ranking_follow()
+    _, _, _, in_session, _, _ = await stack.pipeline.load_ranking_follow(ADMINISTRATOR)
     stack.clock.current = datetime(2026, 10, 17, 10, 0, tzinfo=TAIWAN_TIMEZONE)
 
-    status = await stack.pipeline.follow_ranking()
+    status = await stack.pipeline.follow_ranking(ADMINISTRATOR)
 
     assert in_session == FollowRefusal.OUTSIDE_FOLLOW_WINDOW
     assert [(order.stock_id, order.status, order.limit_price) for order in status.orders] == [
@@ -393,12 +393,13 @@ async def test_the_web_follow_orders_the_ranking_on_the_mock_account_as_a_run_an
 
     async with serve(harness) as client:
         offered = (await client.get("/v1/rankings/follow")).json()
-        started = await write(client, "POST", "/v1/rankings/follow", {})
+        started = await write(client, "POST", "/v1/rankings/follow", {"broker": "mock"})
         follow = await ended(client, started.json()["run_id"])
         orders = (await client.get(f"/v1/runs/{started.json()['run_id']}/orders")).json()
         followed = (await client.get("/v1/rankings/follow")).json()["follows"]
 
     assert offered == {
+        "account": {"broker": "mock", "brokers": ["mock", "shioaji"], "refusal": None, "server": "simulation"},
         "holdings": {"decided_on": "2026-10-13", "held": [], "lacking": ["2330", "2317"], "left": ["1101"]},
         "refusal": None,
         "running": False,
@@ -407,9 +408,6 @@ async def test_the_web_follow_orders_the_ranking_on_the_mock_account_as_a_run_an
         "schedule": {
             "time": None,
             "times": ["09:05:00", "09:30:00", "10:00:00", "13:00:00"],
-            "broker": "mock",
-            "brokers": ["mock", "shioaji"],
-            "broker_offered": True,
             "pending": "2026-10-13",
             "unfinished": None,
             "due": False,
@@ -434,19 +432,19 @@ async def test_the_web_follow_is_refused_when_nothing_is_left_outside_its_window
     held.hold("2317", 1, 50.0)
 
     async with serve(held) as client:
-        nothing = await write(client, "POST", "/v1/rankings/follow", {})
+        nothing = await write(client, "POST", "/v1/rankings/follow", {"broker": "mock"})
 
     async with serve(site(now=MARKET_CLOSED)) as client:
-        closed = await write(client, "POST", "/v1/rankings/follow", {})
+        closed = await write(client, "POST", "/v1/rankings/follow", {"broker": "mock"})
         offered = (await client.get("/v1/rankings/follow")).json()
 
     unquoted = site(realtime_quotes=False)
 
     async with serve(unquoted) as client:
-        no_login = await write(client, "POST", "/v1/rankings/follow", {})
+        no_login = await write(client, "POST", "/v1/rankings/follow", {"broker": "mock"})
 
     async with serve(build_harness()) as client:
-        no_history = [await client.get("/v1/rankings/follow"), await write(client, "POST", "/v1/rankings/follow", {})]
+        no_history = [await client.get("/v1/rankings/follow"), await write(client, "POST", "/v1/rankings/follow", {"broker": "mock"})]
 
     assert (nothing.status_code, nothing.json()["code"]) == (409, "nothing_to_follow")
     assert (closed.status_code, closed.json()["code"], offered["refusal"]) == (409, "outside_follow_window", "outside_follow_window")
@@ -455,15 +453,17 @@ async def test_the_web_follow_is_refused_when_nothing_is_left_outside_its_window
     assert held.journal.runs == unquoted.journal.runs == {} and held.broker.placed == unquoted.broker.placed == []
 
 
-@pytest.mark.parametrize("hidden", ["ranking", "mock_account"])
-async def test_the_follow_is_refused_while_the_site_hides_the_ranking_or_the_mock_account_from_the_user(hidden: str) -> None:
+@pytest.mark.parametrize(("hidden", "page", "code"), [("ranking", 403, "feature_hidden"), ("mock_account", 200, "ordering_off")])
+async def test_the_follow_is_refused_while_the_site_hides_the_ranking_or_the_mock_account_from_the_user(
+    hidden: str, page: int, code: str
+) -> None:
     harness = site(
         features={"ranking": FeatureVisibility.EVERYONE, "mock_account": FeatureVisibility.EVERYONE}
         | {hidden: FeatureVisibility.ADMINISTRATORS}
     )
 
     async with serve(harness, user=(MEMBER.username, MEMBER_PASSWORD)) as member:
-        refused = [await member.get("/v1/rankings/follow"), await write(member, "POST", "/v1/rankings/follow", {})]
+        refused = [await member.get("/v1/rankings/follow"), await write(member, "POST", "/v1/rankings/follow", {"broker": "mock"})]
 
     async with serve(harness) as administrator:
         shown = await administrator.get("/v1/rankings/follow")
@@ -471,7 +471,10 @@ async def test_the_follow_is_refused_while_the_site_hides_the_ranking_or_the_moc
     async with serve(harness, authorized=False) as visitor:
         signed_out = await visitor.get("/v1/rankings/follow")
 
-    assert [(answer.status_code, answer.json()["code"]) for answer in refused] == [(403, "feature_hidden")] * 2
+    block, posted = refused
+    assert block.status_code == page, "a hidden ranking refuses the page; a hidden account is the block's own refusal"
+    assert block.json().get("code", block.json().get("account", {}).get("refusal")) == code
+    assert (posted.status_code, posted.json()["code"]) == (403, code)
     assert (shown.status_code, signed_out.status_code) == (200, 401)
     assert harness.journal.runs == {} and harness.broker.placed == []
 
@@ -490,7 +493,7 @@ async def test_a_follow_waits_for_the_users_running_run_and_the_answer_says_one_
     async with serve(harness) as client:
         running = await write(client, "POST", "/v1/runs/full-cycle", {})
         during = (await client.get("/v1/rankings/follow")).json()
-        refused = await write(client, "POST", "/v1/rankings/follow", {})
+        refused = await write(client, "POST", "/v1/rankings/follow", {"broker": "mock"})
         release.set()
         await ended(client, running.json()["run_id"])
         after = (await client.get("/v1/rankings/follow")).json()

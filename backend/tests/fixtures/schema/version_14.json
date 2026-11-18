@@ -156,6 +156,47 @@
     ],
     "unique": []
   },
+  "article_vectors": {
+    "columns": {
+      "embedding_model": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR"
+      },
+      "key": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR"
+      },
+      "published_day": {
+        "class": "Date",
+        "nullable": false,
+        "postgresql": "DATE"
+      },
+      "stock_id": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR"
+      },
+      "text_digest": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR"
+      },
+      "vector": {
+        "class": "VECTOR",
+        "nullable": false,
+        "postgresql": "VECTOR(512)"
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "primary_key": [
+      "stock_id",
+      "key"
+    ],
+    "unique": []
+  },
   "backtests": {
     "columns": {
       "backtest": {
@@ -192,6 +233,46 @@
     ],
     "primary_key": [
       "backtest_id"
+    ],
+    "unique": []
+  },
+  "chat_conversations": {
+    "columns": {
+      "conversation_id": {
+        "class": "Uuid",
+        "nullable": false,
+        "postgresql": "UUID"
+      },
+      "created_at": {
+        "class": "UtcDateTime",
+        "nullable": false,
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
+      },
+      "messages": {
+        "class": "JSON",
+        "nullable": false,
+        "postgresql": "JSON"
+      },
+      "selected_model_name": {
+        "class": "AutoString",
+        "nullable": true,
+        "postgresql": "VARCHAR"
+      },
+      "updated_at": {
+        "class": "UtcDateTime",
+        "nullable": false,
+        "postgresql": "TIMESTAMP WITHOUT TIME ZONE"
+      },
+      "user_id": {
+        "class": "AutoString",
+        "nullable": false,
+        "postgresql": "VARCHAR"
+      }
+    },
+    "foreign_keys": [],
+    "indexes": [],
+    "primary_key": [
+      "user_id"
     ],
     "unique": []
   },

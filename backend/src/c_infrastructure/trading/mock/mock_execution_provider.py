@@ -1,3 +1,4 @@
+from asyncio import Event
 from datetime import datetime
 from typing import override
 
@@ -90,7 +91,7 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
         return BrokerLink(broker=ExecutionProvider.MOCK)
 
     @override
-    async def place_order(self, order: Order, refusal_now: SendRefusal) -> Order:
+    async def place_order(self, order: Order, refusal_now: SendRefusal, stop: Event) -> Order:
         now = self._market_clock.now()
 
         try:
@@ -119,6 +120,10 @@ class MockExecutionProvider(ISimulatedExecutionProvider):
             self._logger.error(f"Mock order failed. {order.stock_id}: {order.reason}")
 
         return order
+
+    @override
+    async def open_positions(self) -> list[Position]:
+        return (await self.get_account()).positions
 
     @override
     async def get_account(self) -> Account:

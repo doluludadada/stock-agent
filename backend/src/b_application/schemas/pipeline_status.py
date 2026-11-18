@@ -102,7 +102,10 @@ class PipelineStatus:
     """FollowCandidates: every follow of the followed run's decisions so far, each with its order."""
 
     follow_refusal: FollowRefusal | None = None
-    """FollowCandidates, or RankingFollowCandidates: why a follow may not start now. None when it may."""
+    """
+    FollowCandidates, or RankingFollowCandidates: why a follow may not start now. None when it may, and while the
+    user's follow account refuses a ranking follow, which reads nothing then.
+    """
 
     manual_buy_refusal: str | None = None
     """ManualSignal: why the confirmed manual BUY of this run sent no order. Unset when it made an orderable decision."""
@@ -128,9 +131,8 @@ class PipelineStatus:
     def stocks(self) -> dict[str, Stock]:
         """
         Every stock the run loaded, by id, the first object per id. AccountLoader and BuzzScanner reuse a stock they
-        find here; StockLookup loads its own copies. Fill snapshots, the equity and decision memory read stocks
-        through it. The full market comes first, so Full
-        Cycle marks a held stock with the copy whose history it loaded.
+        find here; StockLookup loads its own copies. Fill snapshots and the equity read stocks through it. The full
+        market comes first, so Full Cycle marks a held stock with the copy whose history it loaded.
         """
         lists = (self.universe_stocks, self.held_stocks, self.buzz_stocks, self.candidates, self.manual_stocks)
         stocks: dict[str, Stock] = {}

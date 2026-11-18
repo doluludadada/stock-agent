@@ -41,6 +41,8 @@ def main() -> None:
         workers=1,
         reload=os.environ.get("RELOAD") == "1",
         log_level="info",
+        # A stop waits this long for open requests, then cancels the runs (compose.yml's stop_grace_period covers both).
+        timeout_graceful_shutdown=5,
     )
 
 

@@ -241,16 +241,19 @@ async def test_a_users_ai_model_and_an_administrators_change_of_their_role_never
 
 
 @pytest.mark.asyncio
-async def test_a_users_scheduled_ranking_follow_is_saved_alone_with_its_account_and_cleared(store: SqlUserStore) -> None:
+async def test_a_users_ranking_follow_is_saved_alone_and_only_for_that_user(store: SqlUserStore) -> None:
     before = await store.find(UserId("u-2"))
-    await store.save_ranking_follow_schedule(UserId("u-2"), time(9, 5), ExecutionProvider.SHIOAJI, NOW)
+    await store.save_ranking_follow(UserId("u-2"), None, ExecutionProvider.SHIOAJI, NOW)
+    on_sinopac = await store.find(UserId("u-2"))
+    await store.save_ranking_follow(UserId("u-2"), time(9, 5), ExecutionProvider.SHIOAJI, NOW)
     scheduled = await store.find(UserId("u-2"))
     others = [(user.ranking_follow_time, user.ranking_follow_broker) for user in await store.users() if user.user_id != UserId("u-2")]
-    await store.save_ranking_follow_schedule(UserId("u-2"), None, ExecutionProvider.MOCK, NOW)
+    await store.save_ranking_follow(UserId("u-2"), None, ExecutionProvider.MOCK, NOW)
     cleared = await store.find(UserId("u-2"))
 
-    assert before is not None and scheduled is not None and cleared is not None
+    assert before is not None and on_sinopac is not None and scheduled is not None and cleared is not None
     assert (before.ranking_follow_time, before.ranking_follow_broker) == (None, ExecutionProvider.MOCK)
+    assert (on_sinopac.ranking_follow_time, on_sinopac.ranking_follow_broker) == (None, ExecutionProvider.SHIOAJI)
     assert (scheduled.ranking_follow_time, scheduled.ranking_follow_broker) == (time(9, 5), ExecutionProvider.SHIOAJI)
     assert replace(scheduled, ranking_follow_time=None, ranking_follow_broker=ExecutionProvider.MOCK) == before
     assert cleared == before and set(others) == {(None, ExecutionProvider.MOCK)}

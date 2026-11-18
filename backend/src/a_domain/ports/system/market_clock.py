@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Protocol
 
 from a_domain.types.enums import TradingPhase
@@ -43,4 +43,12 @@ class IMarketClock(Protocol):
 
     def trading_phase(self) -> TradingPhase:
         """Where the exchange's trading day stands now. Exchange holidays and a delayed open or close are not modelled."""
+        ...
+
+    def until_odd_lot_session(self) -> timedelta:
+        """
+        How long from now until the intraday odd-lot session's first match, while continuous trading runs before it,
+        and zero at any other time: never longer than from the continuous start to that match. Exchange holidays are not
+        modelled.
+        """
         ...

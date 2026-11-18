@@ -11,7 +11,7 @@ option.
 `compose.yml` runs three containers on one network, named `stock-agent-database`, `stock-agent-backend` and
 `stock-agent-frontend` after their services:
 
-- `database` is PostgreSQL 18. It publishes no port.
+- `database` is PostgreSQL 18 with pgvector, built from `database/Dockerfile`. It publishes no port.
 - `backend` is the Web API, as a user without root rights, with one worker. It publishes no port. The image also holds
   the project's commands, and `pg_dump` and `pg_restore` for the database commands. It runs with a terminal, so its
   log keeps its colours, and the log leaves out the answered status requests of the health check.
@@ -19,7 +19,7 @@ option.
   (`/docs`, `/redoc`, `/openapi.json`) are not reachable. It is the only container that publishes a port.
 
 Everything the site saves lives in one folder on the host, the state folder: the settings in `config/`, the accounts
-key in `secrets/`, `backups/`, `.settings-admin/`, `chroma_data/`, and the PostgreSQL data in `postgres/`. The site
+key in `secrets/`, `backups/`, `.settings-admin/`, and the PostgreSQL data in `postgres/`. The site
 reads its settings from the `config/` of the state folder, not from the checkout. So the settings editor and your own
 edits never change a file that Git tracks, and `git pull` never meets a local change.
 
@@ -60,17 +60,14 @@ You need Docker Engine with the Compose plugin, Git, and Tailscale. Your user mu
    - `PROXY_BIND`, the Tailscale address of the server. The command `tailscale ip -4` prints it.
    - `APP_UID` and `APP_GID`, only if `id -u` or `id -g` does not print `1000`.
 
-   Leave `DB_HOST` and `DB_PORT` unset: `compose.yml` sets both. Do not set a production Shioaji credential: the
-   `test` environment refuses to start while one is set.
+   Leave `DB_HOST` and `DB_PORT` unset: `compose.yml` sets both. Leave the production Shioaji credentials out for
+   now: [Connect the real SinoPac account](#connect-the-real-sinopac-account) adds them.
 
-5. Change three settings in `/srv/stock-agent-state/config/appsetting.yaml`. Change the two existing lines, and add
-   the `api` section at the end of the file.
+5. Change two settings in `/srv/stock-agent-state/config/appsetting.yaml`. Change the existing line, and add the
+   `api` section at the end of the file.
 
    ```yaml
    environment: test
-
-   db:
-     backend: postgresql
 
    api:
      allowed_hosts: [127.0.0.1, localhost, my-server.my-tailnet.ts.net]
@@ -85,8 +82,8 @@ You need Docker Engine with the Compose plugin, Git, and Tailscale. Your user mu
    docker compose up -d --build
    ```
 
-   The first build takes several minutes. The first start creates every table of the empty database at the schema
-   version of the code, so no migration is needed. When the command returns, `docker compose ps` shows `database` and
+   The first build takes several minutes. The first start creates the `vector` extension and every table of the
+   empty database at the schema version of the code, so no migration is needed. When the command returns, `docker compose ps` shows `database` and
    `backend` as `healthy`. If `backend` is `unhealthy`, `docker compose logs backend` names the setting to change.
 
 7. Read the one-time setup code. The backend prints it while no user exists, and makes a new one at each start.
@@ -198,11 +195,11 @@ docker compose exec backend python -m d_presentation.cli.reset_password <usernam
 
 ### Connect the real SinoPac account
 
-Seeing the SinoPac account and ordering on it are two settings. The steps below connect the real account so that an
-administrator can read it on the SinoPac account page and analyse it on My holdings. The site still cannot place an
-order on it: `features.sinopac_ordering` ships `off`, and while it is off the API, the CLI and the order gate refuse
-every SinoPac order. Only `environment: prod` logs in to the real account; `dev` and `test` log in to SinoPac's
-simulation server with the `*_TEST` key pair.
+The site logs in to one SinoPac server at a time, the one `shioaji.server` names: `simulation`, SinoPac's
+paper-trading server with no real money, or `production`, the real account with real money. The server can hold both
+key sets, and an administrator switches between them on the SinoPac account page without a restart. Environment
+`test` and `prod` may switch; `dev` logs in to the simulation server only and refuses to start with a production key
+set.
 
 1. Put the CA certificate in the state folder, readable only by the user that owns it.
 
@@ -210,9 +207,8 @@ simulation server with the `*_TEST` key pair.
    install -m 600 Sinopac.pfx "$STATE_DIR/secrets/Sinopac.pfx"
    ```
 
-2. Add the production credentials to `.env`. The backend's working folder is the state folder, `/state` in the
-   container, so the certificate's path starts there. `prod` never reads `SHIOAJI_API_KEY_TEST` and
-   `SHIOAJI_SECRET_KEY_TEST`, so they may stay or go.
+2. Add the production credentials to `.env`, next to the `*_TEST` pair, which stays. The backend's working folder is
+   the state folder, `/state` in the container, so the certificate's path starts there.
 
    ```dotenv
    SHIOAJI_API_KEY="..."
@@ -222,30 +218,41 @@ simulation server with the `*_TEST` key pair.
    SHIOAJI_PERSON_ID="..."
    ```
 
-3. Check what `prod` needs besides them. It reads the accounts key only
-   from `ACCOUNTS_KEY` in `.env`, never from `secrets/accounts.key`: copy the key the site already uses into `.env`
-   first, or no one can sign in. It refuses to start with `accounts.registration_open: true`.
-
-4. Set `environment: prod` in `config/appsetting.yaml` of the state folder, and check that `features.sinopac_account`
-   is `administrators` and `features.sinopac_ordering` is `"off"`. The environment changes only at a restart, and the
-   settings page refuses to change it.
-
-5. Restart the backend and read its log. `Logged in to Shioaji production for realtime quotes` and `SinoPac production
-   connected` say the login and the account check passed, the certificate included. `SinoPac production orders
-   unavailable` names what failed instead, without the server's words.
+3. Restart the backend once, so it reads the new `.env`. It still logs in to the server `shioaji.server` names.
 
    ```bash
    docker compose up -d --force-recreate backend
+   ```
+
+4. Open the SinoPac account page as an administrator. The panel at the top names the server and lists the production
+   variables the server still lacks, by name. While one is missing, the switch to production stays off.
+
+5. Choose **Switch to production**. The dialog says what changes, asks for your password (or a fresh Google sign-in
+   for an administrator without one), and asks you to type 「正式環境」. The save writes `features.sinopac_ordering` off
+   first, then the server, and the site logs in to production at once: the realtime quotes come from the production
+   login too, and the login on the simulation server stays open until the backend stops, for a switch back. The switch
+   is refused while a production variable is missing and while `accounts.registration_open` is on, and ordering then
+   stays off on the simulation server. A run that started on the simulation login never orders after the switch, even
+   once ordering is on again.
+
+6. Read the backend's log. `Logged in to Shioaji production for realtime quotes` and `SinoPac production connected`
+   say the login and the account check passed, the certificate included. `SinoPac production orders unavailable`
+   names what failed instead, without the server's words.
+
+   ```bash
    docker compose logs backend | grep -i -E "shioaji|sinopac"
    ```
 
-6. Open the SinoPac account page. It says `Real account`, shows the account as the broker reports it, and says that
-   ordering is off.
+A switch enables no order by itself. To let the site order on the real account, an administrator turns ordering on
+in the same panel, which asks for the password again. Each order then still needs an administrator who chooses
+SinoPac for that run, and stays within `trading.max_order_value` and `trading.max_daily_buy_value`. A ranking follow,
+by hand or by schedule, never orders on production. To go back, choose **Switch to simulation**: ordering turns off
+again. A run that started before a switch keeps the login of the server it started on, and its orders are refused
+while the settings name the other server. If the server is switched back while that run still goes on, its orders
+pass again once ordering is turned on, so wait for the run to end before you switch back.
 
-Switching to `prod` also makes the realtime quotes come from the production login. It enables no order by itself. To
-let the site order on the real account later, an administrator sets `features.sinopac_ordering` to `administrators` in
-the settings page, which asks for the password or a fresh Google sign-in. Each order then still needs an administrator
-who chooses SinoPac for that run, and stays within `trading.max_order_value` and `trading.max_daily_buy_value`.
+Keep `environment` as it is. `prod` changes more than the server: it reads the accounts key from `ACCOUNTS_KEY` only,
+so a switch of the environment on a site whose key lives in `secrets/accounts.key` locks every account.
 
 ### Run a command of the project
 
@@ -293,7 +300,8 @@ Without `secrets/accounts.key` from the state folder, no one can sign in again, 
    ```
 
 To restore on a new server, extract the archive to `/srv`, and put `.env` back. Then restore the dump into the empty
-database, and start the site. The first command also starts PostgreSQL, which creates the empty database.
+database, and start the site. The first command also starts PostgreSQL, which creates the empty database, and the
+restore gives the database the `vector` extension before its tables.
 
 ```bash
 docker compose run --rm backend python -m d_presentation.cli.database restore backups/<file> --yes
@@ -352,6 +360,84 @@ docker compose up -d --build
    docker compose run --rm backend python -m d_presentation.cli.database migrate
    docker compose up -d
    ```
+
+### Update to the vectors in PostgreSQL (schema version 14)
+
+From schema version 14 the database holds what Chroma held: the article index's vectors (`article_vectors`) and the
+LINE chat's conversations (`chat_conversations`). The vectors use the `vector` extension of pgvector, so the database
+runs on an image of its own, `database/Dockerfile`: `postgres:18.7` with PGDG's `postgresql-18-pgvector` at a pinned
+version. The data folder `postgres/` stays as it is, because the new image runs the same PostgreSQL 18.7. Nothing is
+copied from `chroma_data/`: the article index computes its vectors again from the kept articles, Chroma held no
+conversation on the deployed site, and the AI reads its past decisions from the trading journal, which holds them all.
+
+The Dockerfile pins PGDG's exact pgvector build. When PGDG publishes a newer one, it moves the pinned one to
+apt-archive.postgresql.org, so a fresh build then fails until the pin in `database/Dockerfile` is raised.
+
+1. Get the new version and build the three images. The site keeps running.
+
+   ```bash
+   git pull
+   docker compose build
+   ```
+
+2. Back up the database while the old backend still runs.
+
+   ```bash
+   docker compose exec backend python -m d_presentation.cli.database backup
+   ```
+
+3. Stop the backend, and start the database on its new image.
+
+   ```bash
+   docker compose stop backend
+   docker compose up -d database
+   ```
+
+4. Check that the server offers the extension. Use the `DB_USER` and `DB_NAME` of `.env` in place of `stock_agent`.
+   The answer is `vector|0.8.7|`: the version the server offers, and none installed yet.
+
+   ```bash
+   docker compose exec database psql -U stock_agent -d stock_agent -Atc "SELECT name, default_version, installed_version FROM pg_available_extensions WHERE name = 'vector'"
+   ```
+
+   No row means the database still runs the official image: run `docker compose up -d --build database` and check
+   again.
+
+5. Upgrade the database. The command dumps it first, then creates the extension in one transaction, and prints
+   `13 -> 14 add_the_vector_extension`. Only a superuser may create the extension. The image's `DB_USER` is one.
+
+   ```bash
+   docker compose run --rm backend python -m d_presentation.cli.database migrate
+   ```
+
+6. Start the site. Its first start creates the two tables, empty.
+
+   ```bash
+   docker compose up -d
+   ```
+
+7. Check the extension, compute the vectors again, and count them.
+
+   ```bash
+   docker compose exec database psql -U stock_agent -d stock_agent -c '\dx vector'
+   docker compose exec backend python -m d_presentation.cli.article_store
+   docker compose exec database psql -U stock_agent -d stock_agent -Atc 'SELECT count(*) FROM article_vectors'
+   ```
+
+   `\dx` lists `vector` at `0.8.7`. The second command embeds every stock's kept articles on the server's CPU, prints
+   how many, and asks no AI. The count is then those articles and the world news items, which the timer's world
+   refresh embeds at the start. Without the command, the Web API's timer and each stock's AI brief compute the vectors
+   of the stocks they reach.
+
+8. The start names `db.chroma_persist_path` as a setting the app no longer reads. Delete that line from
+   `config/appsetting.yaml` in the state folder.
+
+To go back to the version before, keep the database on its pgvector image: restore the backup of step 2 with
+`docker compose run --rm backend python -m d_presentation.cli.database restore backups/<file> --yes`, then check out
+the old version and rebuild only the backend with `docker compose up -d --no-deps --build backend`.
+
+When the site works, you can delete `chroma_data/` from the state folder. Nothing reads it any more, and the backup of
+step 2 does not need it.
 
 ### Read the company background
 

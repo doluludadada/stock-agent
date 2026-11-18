@@ -69,13 +69,8 @@ class IUserStore(Protocol):
         """
         ...
 
-    async def save_ranking_follow_schedule(
-        self, user_id: UserId, follow_time: time | None, broker: ExecutionProvider, now: datetime
-    ) -> None:
-        """
-        Writes only the user's scheduled ranking follow, changed at `now`: its time, None for no schedule, and the
-        account it orders on.
-        """
+    async def save_ranking_follow(self, user_id: UserId, follow_time: time | None, broker: ExecutionProvider, now: datetime) -> None:
+        """Writes only the user's ranking follow, changed at `now`: its schedule's time, None for none, and their follow account."""
         ...
 
     async def save_ai_model(self, user_id: UserId, ai_model: AiProvider | None, now: datetime) -> None:

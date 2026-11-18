@@ -63,9 +63,6 @@ function useLead(follow: Follow, pricing: OrderPricing, quoted: boolean): string
       return t(`follow.window.${pricing}`)
     case 'nothing_to_follow':
       return follow.follows.some(({ order }) => order.filled_quantity > 0) ? t('follow.allFollowed') : t('follow.noDecisions')
-    // Only a ranking follow on SinoPac is refused so; the contract's one list of refusals names it here too.
-    case 'not_simulation':
-      return t('common:refusal.not_simulation')
   }
 }
 

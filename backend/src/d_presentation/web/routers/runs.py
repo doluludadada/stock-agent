@@ -31,6 +31,7 @@ from d_presentation.web.session import (
     QuoteLogin,
     RealtimeQuotes,
     RunStarter,
+    ServerConfirmed,
     ShowsRuns,
     UserPipeline,
     WorkflowRunsDependency,
@@ -50,6 +51,14 @@ STARTED: dict[int | str, dict[str, Any]] = {
 
 ORDERING: dict[int | str, dict[str, Any]] = {
     **STARTED,
+    status.HTTP_409_CONFLICT: {
+        "model": ErrorResponse,
+        "description": (
+            "broker_server_changed: a real `broker` whose login is on another server now than the `server` the query "
+            "names, the one the run's confirmation showed (GET /v1/account/brokers). run_in_progress: another run of "
+            "this user is still running."
+        ),
+    },
     status.HTTP_403_FORBIDDEN: {
         "model": ErrorResponse,
         "description": (
@@ -80,7 +89,7 @@ async def start_specific_stock_analysis(
 @router.post(
     "/buzz-scan",
     status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[shows(Feature.BUZZ), OrderingShown, RealtimeQuotes],
+    dependencies=[shows(Feature.BUZZ), OrderingShown, ServerConfirmed, RealtimeQuotes],
     responses=ORDERING,
 )
 async def start_buzz_scan(body: Confirmed, pipeline: BrokerPipeline, user: CurrentUser, start: RunStarter) -> RunAccepted:
@@ -95,7 +104,7 @@ async def start_buzz_scan(body: Confirmed, pipeline: BrokerPipeline, user: Curre
 @router.post(
     "/intraday",
     status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[shows(Feature.INTRADAY), OrderingShown, RealtimeQuotes],
+    dependencies=[shows(Feature.INTRADAY), OrderingShown, ServerConfirmed, RealtimeQuotes],
     responses=ORDERING,
 )
 async def start_intraday(body: Confirmed, pipeline: BrokerPipeline, user: CurrentUser, start: RunStarter) -> RunAccepted:
@@ -112,7 +121,7 @@ MANUAL_BUY: dict[int | str, dict[str, Any]] = {
 @router.post(
     "/{run_id}/manual-buy",
     status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[shows(Feature.SPECIFIC_STOCK), OrderingShown, RealtimeQuotes],
+    dependencies=[shows(Feature.SPECIFIC_STOCK), OrderingShown, ServerConfirmed, RealtimeQuotes],
     responses=MANUAL_BUY,
 )
 async def buy_manually(

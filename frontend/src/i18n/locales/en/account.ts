@@ -69,10 +69,65 @@ const account = {
   brokerage: {
     signIn: 'Sign in to see your SinoPac account',
     loadFailed: 'The SinoPac account could not be loaded.',
-    server: { simulation: 'Simulation server, no real money', live: 'Real account' },
+    account: 'SinoPac account',
+    server: { simulation: 'Simulation', production: 'Production' },
+    serverNote: {
+      simulation: 'SinoPac’s Simulation server: no real money.',
+      production: 'SinoPac’s Production server: the real account, real money.',
+    },
+    login: { up: 'Logged in', down: 'Not logged in', unavailable: 'Unavailable' },
     ordering: {
       off: 'Ordering off',
       on: 'Ordering on',
+    },
+    manage: {
+      server: {
+        label: 'Server',
+        to: { simulation: 'Switch to Simulation…', production: 'Switch to Production…' },
+        refusal: {
+          environment: 'This machine’s environment does not log in to {{server}}.',
+          registration_open: 'Production refuses open registration. Close registration on the settings page first.',
+          ordering_on: 'A switch of the server turns ordering on SinoPac off in the same save.',
+          credentials_missing: '{{server}} needs these variables in the server’s .env, which are not set yet:',
+        },
+        title: { simulation: 'Switch to Simulation?', production: 'Switch to Production?' },
+        description: 'The site logs in to the other server at once. What changes:',
+        changes: {
+          realMoney: 'Every order on SinoPac from now on is real money.',
+          noRealMoney: 'Orders on SinoPac from now on use no real money.',
+          orderingOff: 'Ordering on SinoPac turns off. Turn it on again here to order.',
+          login: 'The SinoPac login restarts on the new server, and the quotes come from it too.',
+          follows: 'A ranking follow, by hand or by schedule, never orders on Production.',
+        },
+        type: 'Type {{phrase}} to confirm',
+        saved: 'Switched to {{server}}. The site logs in there now.',
+      },
+      ordering: {
+        label: 'Ordering on SinoPac',
+        turnOn: 'Turn ordering on…',
+        turnOff: 'Turn ordering off…',
+        title: { on: 'Turn ordering on SinoPac on?', off: 'Turn ordering on SinoPac off?' },
+        description: {
+          on: 'Administrators may then choose SinoPac for a run. Every order still meets the BUY limits and every order check.',
+          off: 'No order of the site reaches SinoPac from the save on, a run already going included.',
+        },
+        realMoney: 'This account is on Production: every order is real money.',
+        saved: { on: 'Ordering on SinoPac is on.', off: 'Ordering on SinoPac is off.' },
+      },
+      cash: {
+        label: 'Starting cash',
+        note: 'All the money put into the Simulation account. To add money, raise it.',
+        edit: 'Change…',
+        title: 'Change the starting cash?',
+        field: 'Starting cash (NT$)',
+        invalid: 'Enter an amount above 0.',
+        saved: 'The starting cash is NT${{amount}} now.',
+      },
+      refused: {
+        conflict: 'The settings changed since this page read them. Try again.',
+        other: 'The server refused the save.',
+        orderingOff: 'Ordering on SinoPac was turned off before the switch and is off now.',
+      },
     },
     own: 'The broker’s own figures, read {{time}}.',
     analysis: 'My holdings',
@@ -80,11 +135,15 @@ const account = {
       title: 'The site’s SinoPac login is down',
       description: 'The site reconnects by itself.',
     },
+    unavailable: {
+      title: 'SinoPac ordering is unavailable on this login',
+      description: 'The site could not open the SinoPac account on this server, such as Production’s CA certificate. The server’s log says why.',
+    },
     summary: {
       balance: 'Bank balance',
       figuredCash: 'Cash (the site’s figure)',
       figuredNote:
-        'SinoPac’s simulation server reports no cash balance, so the cash here is the site’s figure: the simulation account’s starting cash (a setting), less what the holdings and today’s purchases cost, plus the profit and loss of every sale SinoPac lists, taken as after fees and tax.',
+        'SinoPac’s Simulation reports no cash balance, so the cash here is the site’s figure: the account’s starting cash on Simulation (a setting), less what the holdings and today’s purchases cost, plus the profit and loss of every sale SinoPac lists, taken as after fees and tax.',
       realized: 'Realized P&L since {{date}}',
     },
     positions: {

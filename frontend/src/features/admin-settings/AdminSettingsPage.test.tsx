@@ -182,6 +182,19 @@ describe('the settings page', { timeout: 30_000 }, () => {
     expect(within(row).queryByRole('radiogroup')).not.toBeInTheDocument()
   })
 
+  it('shows SinoPac’s server as text with a link to the SinoPac account page, which switches it behind its own confirmation', async () => {
+    const server = fakeServer()
+    server.state.fields = [...server.state.fields, field('shioaji.server', 'choice', 'trading_limits', 'simulation', { options: ['simulation', 'production'] })]
+    renderPage(server)
+
+    await screen.findByText('Development (dev)')
+    const row = document.getElementById('setting-shioaji.server') as HTMLElement
+    expect(within(row).getByText('SinoPac server')).toBeInTheDocument()
+    expect(within(row).getByText('Simulation')).toBeInTheDocument()
+    expect(within(row).getByRole('link', { name: 'Switch it on the SinoPac account page' })).toHaveAttribute('href', '/account/sinopac')
+    expect(within(row).queryByRole('radiogroup')).not.toBeInTheDocument()
+  })
+
   it('saves only the changed settings with the password, and shows the saved values', async () => {
     const server = fakeServer()
     renderPage(server)

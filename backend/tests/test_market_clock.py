@@ -117,3 +117,39 @@ def test_the_trading_day_and_the_bar_stamp_follow_the_configured_market_hours() 
 def test_market_hours_out_of_order_are_refused() -> None:
     with pytest.raises(ValidationError, match="market hours"):
         MarketHoursConfig(close=time(13, 0))
+
+
+@pytest.mark.parametrize(
+    ("moment", "wait"),
+    [
+        (datetime(2026, 10, 19, 8, 45), timedelta(0)),
+        (datetime(2026, 10, 19, 9, 0), timedelta(minutes=10)),
+        (datetime(2026, 10, 19, 9, 5, 15), timedelta(minutes=4, seconds=45)),
+        (datetime(2026, 10, 19, 9, 10), timedelta(0)),
+        (datetime(2026, 10, 19, 13, 0), timedelta(0)),
+        (datetime(2026, 10, 24, 9, 5), timedelta(0)),
+    ],
+    ids=["mon-opening-auction", "mon-09:00", "mon-09:05:15", "mon-09:10", "mon-13:00", "sat-09:05"],
+)
+def test_continuous_trading_before_the_odd_lot_sessions_first_match_waits_until_it(moment: datetime, wait: timedelta) -> None:
+    assert ClockAt(moment.replace(tzinfo=TAIWAN_TIMEZONE)).until_odd_lot_session() == wait
+
+
+def test_an_odd_lot_session_that_opens_with_continuous_trading_never_waits() -> None:
+    hours = MarketHoursConfig(odd_lot_start=time(9, 0))
+
+    assert ClockAt(datetime(2026, 10, 19, 9, 0, tzinfo=TAIWAN_TIMEZONE), hours).until_odd_lot_session() == timedelta(0)
+
+
+@pytest.mark.parametrize(
+    "odd_lot_start", [time(8, 59), time(9, 16), time(11, 10), time(13, 25)], ids=["08:59", "09:16", "11:10", "13:25"]
+)
+def test_an_odd_lot_start_outside_0900_to_0915_is_refused_naming_the_setting(odd_lot_start: time) -> None:
+    with pytest.raises(ValidationError, match="odd_lot_start"):
+        MarketHoursConfig(odd_lot_start=odd_lot_start)
+
+
+@pytest.mark.parametrize("seconds", [0, 11], ids=["none", "past-10"])
+def test_an_odd_lot_match_interval_outside_its_bounds_is_refused_naming_the_setting(seconds: float) -> None:
+    with pytest.raises(ValidationError, match="odd_lot_match_seconds"):
+        MarketHoursConfig(odd_lot_match_seconds=seconds)

@@ -2,6 +2,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from typing import ClassVar
 
 from sqlalchemy import Connection, inspect, select, text, update
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection
 from sqlmodel import Field, SQLModel
 
@@ -10,7 +11,8 @@ class OutdatedDatabaseError(RuntimeError):
     """
     The database is of an older schema version, which `just db-migrate` upgrades, or it holds tables of a schema version
     no upgrade reaches, or of none, or a table with columns other than its SQLModel class declares, or data an upgrade
-    step cannot carry over without guessing. create_all never alters an existing table. Startup raises it, and so do
+    step cannot carry over without guessing, or it is new and could not get pgvector's extension (vector_extension_refusal).
+    create_all never alters an existing table. Startup raises it, and so do
     `just db-migrate` and its steps; the CLI, the Web API and the database commands catch it to print the remedy, so it
     belongs to the database adapter rather than to the domain's errors.
     """
@@ -67,11 +69,31 @@ async def add_the_account_of_the_scheduled_follow(connection: AsyncConnection) -
     await connection.execute(text("ALTER TABLE users ALTER COLUMN ranking_follow_broker DROP DEFAULT"))
 
 
+async def add_the_vector_extension(connection: AsyncConnection) -> None:
+    """
+    Version 13 to 14: the database gets pgvector's extension, whose type the column of the article index's vectors
+    needs, so the next start can create article_vectors. Only a superuser may create the extension.
+    """
+    await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+
+
+def vector_extension_refusal(error: DBAPIError) -> str:
+    """Why the database could not get pgvector's extension, in the driver's own words, and how it gets the extension."""
+    driver_error = error.orig.__cause__ if error.orig is not None else None
+    return (
+        "The database could not create pgvector's extension, which the article index's vectors need: "
+        f"{driver_error or error.orig}\n"
+        "Install pgvector on the PostgreSQL server (the database image of database/Dockerfile has it; on a Mac, "
+        'brew install pgvector), then create the extension once as a superuser: psql -d <DB_NAME> -c "CREATE EXTENSION vector"'
+    )
+
+
 UPGRADES: tuple[UpgradeStep, ...] = (
     add_the_ranking_formula_of_a_run,
     add_the_schedule_of_the_ranking_follow,
     add_what_a_ranking_follow_left_open,
     add_the_account_of_the_scheduled_follow,
+    add_the_vector_extension,
 )
 """
 The steps that upgrade an older database in place, oldest first: UPGRADES[n] turns version FIRST_SCHEMA_VERSION + n

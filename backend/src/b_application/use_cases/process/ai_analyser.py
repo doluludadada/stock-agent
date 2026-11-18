@@ -2,10 +2,10 @@ from a_domain.model.chat.message import Message
 from a_domain.model.market.stock import Stock
 from a_domain.model.system.stats import SystemStats
 from a_domain.ports.ai.ai_provider import IAiProvider
-from a_domain.ports.ai.knowledge_repository import IKnowledgeRepository
 from a_domain.ports.market.daily_close_archive import IDailyCloseArchive
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
+from a_domain.ports.trading.trading_journal import ITradingJournal
 from a_domain.rules.ai.parser import parse_ai_report
 from a_domain.rules.ai.prompt import AiReportPromptBuilder
 from a_domain.rules.scoring.composite import CompositeScoreRule
@@ -17,7 +17,9 @@ class AiAnalyser:
     """
     Analyses workflow-selected candidate stocks with the configured AI provider, then gives each stock its composite
     score from its technical and AI scores. A stock without both scores gets no composite score, but for the one below:
-    a failed read of its financials, like a failed AI call, is that stock's error and leaves it without one.
+    a failed read of its financials, like a failed AI call, is that stock's error and leaves it without one. Each prompt
+    carries the stock's newest decisions from the trading journal; a failed read of them is logged, and the AI is asked
+    without them, as they are context it may go without.
 
     Automatic workflows normally pass technically valid survivors.
     Manual specific-stock analysis may intentionally pass technical failures
@@ -33,7 +35,7 @@ class AiAnalyser:
     def __init__(
         self,
         ai_provider: IAiProvider,
-        knowledge_repository: IKnowledgeRepository,
+        journal: ITradingJournal,
         archive: IDailyCloseArchive,
         market_clock: IMarketClock,
         config: AppConfig,
@@ -41,7 +43,7 @@ class AiAnalyser:
     ) -> None:
         self._ai_provider = ai_provider
         self._market_clock = market_clock
-        self._knowledge_repository = knowledge_repository
+        self._journal = journal
         self._archive = archive
         self._logger = logger
         self._prompt_builder = AiReportPromptBuilder(
@@ -72,8 +74,13 @@ class AiAnalyser:
                     stats.log(f"{stock.stock_id}: {self._unasked_note}", now=self._market_clock.now())
                     continue
 
-                history = await self._knowledge_repository.find_decision_history(stock.stock_id)
-                prompt = self._prompt_builder.apply(stock, history, quarters, revenues, focus=focus)
+                try:
+                    decisions = await self._journal.decision_history(stock.stock_id)
+                except Exception as error:
+                    self._logger.error(f"Decision history lookup failed for {stock.stock_id}: {error}")
+                    decisions = []
+
+                prompt = self._prompt_builder.apply(stock, decisions, quarters, revenues, focus=focus)
                 message = Message(role=MessageRole.USER, content=prompt, timestamp=self._market_clock.now())
                 response = await self._ai_provider.generate_reply(messages=(message,))
                 self._ai_provider.save_response(stock.stock_id, response.content)

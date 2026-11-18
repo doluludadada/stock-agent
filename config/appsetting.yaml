@@ -1,14 +1,14 @@
 # config/appsetting.yaml
 
-# dev: a developer's machine. test: staging before launch. prod: the live service, PostgreSQL only. A personal site's
-# Shioaji login, which its realtime quotes and its SinoPac orders share, is on SinoPac's simulation server with the
-# *_TEST key pair in dev and test, and on the real account with the production credentials in prod: only prod places a
-# real-money order. dev and test refuse to start while a production Shioaji credential is set. Neither the Web editor
-# nor a reload changes it: restart.
+# dev: a developer's machine. test: staging, and the owner's own server. prod: the live service, PostgreSQL only, which
+# reads the accounts key from ACCOUNTS_KEY alone. Which SinoPac server the site trades on is shioaji.server, not this:
+# dev logs in to SinoPac's simulation server only and refuses to start while a production Shioaji credential is set;
+# test and prod may hold both key sets and switch servers from the SinoPac page. Neither the Web editor nor a reload
+# changes the environment: restart.
 environment: dev
 
 # personal: the owner's own machine, with the daily history and index trend of the exchanges' own daily reports,
-# Shioaji's realtime quotes, and SinoPac for the runs an administrator starts on it. Without the environment's Shioaji
+# Shioaji's realtime quotes, and SinoPac for the runs an administrator starts on it. Without shioaji.server's Shioaji
 # key pair it has no realtime quote, so Buzz and Intraday are refused and it orders nothing. public: a
 # free public website on open-licensed data only. Its daily history and index trend come from the open-data archive of
 # the TWSE and TPEX OpenAPI closes, it has no realtime quote, so Buzz, Intraday and manual BUY are refused, and it trades
@@ -56,10 +56,8 @@ behavior:
       "查詢",
     ]
 
-db:
-  # The PostgreSQL database is named by DB_USER, DB_PASSWORD, DB_HOST, DB_PORT and DB_NAME in .env: the app refuses to
-  # start without them.
-  chroma_persist_path: "chroma_data"
+# The PostgreSQL database is named by DB_USER, DB_PASSWORD, DB_HOST, DB_PORT and DB_NAME in .env, never in this file:
+# the app refuses to start without them.
 
 chat:
   reset_commands:
@@ -317,6 +315,13 @@ freshness:
 market_hours:
   opening_auction_start: "08:30"
   continuous_start: "09:00"
+  # The intraday odd-lot session takes limit ROD orders from 09:00 and matches them by call auction, the first match at
+  # odd_lot_start (09:00 to 09:15) and then every odd_lot_match_seconds (at most 10) until the close. A SinoPac order's
+  # odd-lot part is sent right after its board-lot part and stays working until the later of then and the first match,
+  # plus shioaji.odd_lot_matches intervals and half of one. TWSE plans to move the first match to 09:00 (set
+  # odd_lot_start to "09:00" when it does) and the interval to 1 second.
+  odd_lot_start: "09:10"
+  odd_lot_match_seconds: 5
   closing_auction_start: "13:25"
   close: "13:30"
   # A session's daily bar is final in every price source from this time: the after-hours fixed-price session ends at
@@ -393,7 +398,7 @@ accounts:
   # An administrator's calls count toward it and are never refused.
   daily_ai_calls_total: 600
   # true: anyone may register as a user once the first administrator exists. A user trades on their own mock account
-  # only. prod, the environment with the real SinoPac account, refuses to start with it on.
+  # only. shioaji.server production, the real SinoPac account, refuses it on.
   registration_open: false
   # Failed sign-ins before the next is refused for the window: per sign-in name and client address, and per address.
   sign_in_failures_per_name: 5
@@ -443,17 +448,35 @@ accounts:
   google_clock_skew_seconds: 30
 
 # The Shioaji login of a personal site: its realtime quotes, and the SinoPac orders of the runs that choose SinoPac.
-# The environment above decides the server and the credentials, which come from the environment or .env only: dev and
-# test log in to Shioaji's simulation server with SHIOAJI_API_KEY_TEST and SHIOAJI_SECRET_KEY_TEST; prod logs in to the
-# real account with SHIOAJI_API_KEY and SHIOAJI_SECRET_KEY, and orders also need SHIOAJI_CA_PATH, SHIOAJI_CA_PASSWORD
-# and SHIOAJI_PERSON_ID.
+# The credentials come from the environment or .env only: the simulation server reads SHIOAJI_API_KEY_TEST and
+# SHIOAJI_SECRET_KEY_TEST; production reads SHIOAJI_API_KEY and SHIOAJI_SECRET_KEY, and its orders also need
+# SHIOAJI_CA_PATH, SHIOAJI_CA_PASSWORD and SHIOAJI_PERSON_ID.
 shioaji:
+  # simulation: SinoPac's paper-trading server, no real money. production: the real account, real money. An
+  # administrator switches it on the SinoPac page, with their password, and the site logs in on the new server at once.
+  # The save that switches it also turns features.sinopac_ordering off, and is refused while the new server's
+  # credentials are not all set, in environment dev (production), and with accounts.registration_open on (production).
+  # A ranking follow never orders on production, whatever this says.
+  server: simulation
   # Seconds between two reads of an order's status at the broker.
   poll_interval_seconds: 0.5
   # Reads of an order's status before a working order is cancelled, and again after the cancel request.
   max_polls: 10
-  # The cash SinoPac's simulation account started with. That server reports no balance, so the site figures the
-  # account's cash from this and SinoPac's records (SimulationCashRule).
+  # Seconds SinoPac may take to refresh the status of every order of the account today, asked once by each read of
+  # its cash or today's deals: the SinoPac page, a run's account and a ranking follow. A day of many orders takes
+  # longer than the SDK's own 5 seconds. 5 to 60.
+  status_timeout_seconds: 30
+  # The intraday odd-lot matches (market_hours.odd_lot_match_seconds apart, at most 10) an odd-lot ROD part stays working
+  # through after the session's first match, its status read after each, before what is left is cancelled. A run
+  # cancelled meanwhile (Ctrl-C, or the server stopping) cancels it at once and sends nothing more. The board-lot IOC
+  # part keeps max_polls.
+  odd_lot_matches: 3
+  # Seconds, at most 30, the broker may take to settle a cancel and the reads after it. Past them the order is recorded
+  # failed with a reason to check SinoPac. compose.yml's stop_grace_period covers it.
+  cancel_timeout_seconds: 15
+  # The cash SinoPac's simulation account started with, all of it the owner has put in. That server reports no
+  # balance, so the site figures the account's cash from this and SinoPac's records (SimulationCashRule): adding money
+  # to the simulation account is raising this.
   simulation_initial_cash: 1000000
 
 holdings:
@@ -1006,8 +1029,9 @@ features:
   # Reading SinoPac's account as the broker reports it: holdings, cash, settlements, profit and loss, fills. It never
   # orders, and only an administrator reads it.
   sinopac_account: administrators
-  # Ordering on SinoPac. Off, no order reaches SinoPac, whatever the environment and whoever the user is. Turning it
-  # on grants nothing more: only an administrator may order there, and every order gate still checks each order.
+  # Ordering on SinoPac. Off, no order reaches SinoPac, whatever the server and whoever the user is (see
+  # shioaji.server for its switch). Turning it on grants nothing more: only an administrator may order there, and every
+  # order gate still checks each order.
   sinopac_ordering: "off"
   # My holdings: the holdings a user enters by hand, analysed with those of the accounts the site shows the user.
   holdings: everyone

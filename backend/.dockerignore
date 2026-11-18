@@ -3,7 +3,6 @@ __pycache__
 *.py[cod]
 .pytest_cache
 .ruff_cache
-chroma_data
 embedding_models
 tests
 tools

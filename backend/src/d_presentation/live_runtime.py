@@ -25,6 +25,7 @@ from b_application.config.app_config import AppConfig
 from b_application.config.settings_loader import (
     InvalidSettingsError,
     get_project_root,
+    production_notice,
     settings_notices,
     settings_revision,
     settings_texts,
@@ -162,10 +163,10 @@ class RuntimeSwitch:
 
     async def reload(self) -> SettingsReload | None:
         """
-        The watcher's reload rule: when the settings files on disk differ from both the revisions the current runtime
-        runs on and the last refused ones, opens a runtime from the files as they are and makes it current. None when
-        there is nothing new to load. A refusal leaves the current runtime serving and is kept, so the same files are
-        not tried again until they change. Running it twice changes nothing the second time.
+        The watcher's and the CLI's reload rule: when the settings files on disk differ from both the revisions the
+        current runtime runs on and the last refused ones, opens a runtime from the files as they are and makes it
+        current. None when there is nothing new to load. A refusal leaves the current runtime serving and is kept, so
+        the same files are not tried again until they change. Running it twice changes nothing the second time.
         """
         async with self.lock:
             revisions = {file: settings_revision(text) for file, text in settings_texts(self.project_root).items()}
@@ -228,27 +229,41 @@ class RuntimeSwitch:
         A change that turns a broker's ordering off is reviewed and, once the administrator confirmed, written on its
         own before the rest is even reviewed again. The settings files on disk are the ordering switch every order
         asks (IOrderingSwitch), so ordering is off from that write on, in every process, whatever refuses the rest of
-        the save afterwards: another change the app would not start on, a start past the time limit, a lockout of the
-        editor. Everything else of a refused save stays unwritten.
-        Work that started earlier finishes on the runtime it holds.
+        the save afterwards, and a runtime opened from the files then becomes current (publish_from_disk), so the pages
+        answer ordering off at once. Everything else of a refused save stays unwritten. A change of SinoPac's server is
+        part of the rest (ServerSwitchRule), so a refused switch leaves ordering off. The runtime the save opens logs in
+        on the new server. Work that started earlier finishes on the runtime it holds.
         """
         async with self.lock:
             if opened is not self.opened[-1]:
                 raise SettingsConflictError("The server reloaded its settings after this page read them; read them again")
 
-            pipeline = opened.runtime.pipeline_for(administrator, ExecutionProvider.MOCK)
-            actor = administrator.user_id
+            pipeline, actor = opened.runtime.pipeline_for(administrator, ExecutionProvider.MOCK), administrator.user_id
             switching_off = await pipeline.review_settings_form([change for change in changes if change.turns_ordering_off], host)
             edits = [] if switching_off else await pipeline.review_settings_form(changes, host)
             await pipeline.confirm_settings_save(administrator, password, google_confirmation, client)
             switched_off = [await pipeline.save_settings_file(edit, actor) for edit in switching_off]
 
-            if switched_off:
-                edits = await pipeline.review_settings_form(changes, host)
-            elif not edits:
-                return []
+            if not switched_off:
+                return await self.write_and_publish(pipeline, edits, actor) if edits else []
 
-            return await self.write_and_publish(pipeline, edits, actor) or switched_off
+            try:
+                rest = await pipeline.review_settings_form(changes, host)
+                return await self.write_and_publish(pipeline, rest, actor) or switched_off
+            except Exception:
+                await self.publish_from_disk()
+                raise
+
+    async def publish_from_disk(self) -> None:
+        """
+        Makes a runtime opened from the settings files as they are on disk current, best effort: after a save wrote its
+        turn-off of ordering and the rest was refused. One that would not open leaves the current one serving, and the
+        watcher tries again. The caller holds the lock.
+        """
+        try:
+            self.publish(await self.open_candidate({}, None))
+        except InvalidSettingsError as error:
+            self.logger.warning(f"The settings on disk after a refused save were not loaded:\n{error}")
 
     async def write_and_publish(self, pipeline: Pipeline, edits: Sequence[SettingsEdit], actor: UserId) -> list[SettingsEdit]:
         """
@@ -283,7 +298,7 @@ class RuntimeSwitch:
 
         try:
             async with asyncio.timeout(timeout):
-                config = startup_settings(self.project_root, candidates, current.config.environment, current.config.audience)
+                config = startup_settings(self.project_root, candidates, current.config)
                 runtime = await stack.enter_async_context(self.opener(config))
                 await runtime.signed_out.confirm_editor_access(await current.signed_out.load_sign_in_options(), administrator)
         except BaseException as error:
@@ -328,7 +343,7 @@ async def open_runtime_switch(project_root: Path | None = None) -> AsyncGenerato
     config = startup_settings(root)
     process = create_process_state(config)
 
-    for notice in settings_notices(root):
+    for notice in [*settings_notices(root), *production_notice(config)]:
         process.logger.warning(notice)
 
     switch = RuntimeSwitch(lambda candidate: open_runtime(candidate, process), root, process.logger)
@@ -343,9 +358,9 @@ async def open_runtime_switch(project_root: Path | None = None) -> AsyncGenerato
 async def watch_settings(switch: RuntimeSwitch) -> None:
     """
     The Web API's look at config/ for edits made outside the app: every api.settings_poll_seconds of the current
-    settings, a reload when a file changed. A reload or a refusal is logged once, and the same refused files are not
-    tried again until they change. It never stops on an error of its own: it logs it and looks again at the next
-    interval. The lifespan cancels it at shutdown.
+    settings, a reload when a file changed (RuntimeSwitch.reload). A reload or a refusal is logged once, and the same
+    refused files are not tried again until they change. It never stops on an error of its own: it logs it and looks
+    again at the next interval. The lifespan cancels it at shutdown.
     """
     while True:
         with switch.hold() as opened:

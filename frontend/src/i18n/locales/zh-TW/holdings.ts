@@ -6,9 +6,9 @@ const holdings: DictionaryShape<typeof en> = {
   signIn: '登入後查看你的持股',
   loadFailed: '無法載入你的持股。',
   unknownName: '已不在上市櫃清單中',
-  source: { brokerage: '永豐金證券庫存', manual: '手動輸入', mock: '模擬帳戶（虛擬資金）' },
+  source: { brokerage: '永豐金帳戶', manual: '手動輸入', mock: '本站模擬帳戶（虛擬資金）' },
   filter: { label: '計入的持股來源' },
-  loginDown: '本站的永豐金連線中斷，這裡沒有計入永豐金證券帳戶的庫存。',
+  loginDown: '本站的永豐金連線中斷，這裡沒有計入永豐金帳戶的庫存。',
   noClose: '沒有收盤價，以成本計',
   empty: {
     title: '還沒有持股',

@@ -10,10 +10,21 @@ type Schemas = components['schemas']
 /** Whose account a run orders on: the user's mock account, or a real broker. */
 export type Broker = Schemas['ExecutionProvider']
 
+/** The server a real broker's login is on: SinoPac's Simulation, no real money, or Production, real money. */
+export type Server = Schemas['ShioajiServer']
+
 /** A broker the user may choose now. A real one carries what a confirmation names: its server and its BUY limits. */
 export type BrokerOffer =
   | { broker: 'mock' }
-  | { broker: Exclude<Broker, 'mock'>; simulation: boolean; max_order_value: number; max_daily_buy_value: number }
+  | { broker: Exclude<Broker, 'mock'>; server: Server; max_order_value: number; max_daily_buy_value: number }
+
+/**
+ * The query of a start that orders on `offer`: the broker, and for a real one the server its confirmation showed. The
+ * server refuses the start (broker_server_changed) when its login is on another server by then.
+ */
+export function brokerQuery(offer: BrokerOffer): { broker: Broker; server?: Server } {
+  return offer.broker === 'mock' ? { broker: offer.broker } : { broker: offer.broker, server: offer.server }
+}
 
 const MOCK_ONLY: readonly BrokerOffer[] = [{ broker: 'mock' }]
 const NONE: readonly BrokerOffer[] = []
@@ -29,10 +40,10 @@ export function chosenOffer(offers: readonly BrokerOffer[], chosen: Broker): Bro
 }
 
 /** A real broker sent without its server or its limits is left out: no confirmation could name them. */
-function offerOf({ broker, simulation, max_order_value, max_daily_buy_value }: Schemas['BrokerResponse']): BrokerOffer[] {
+function offerOf({ broker, server, max_order_value, max_daily_buy_value }: Schemas['BrokerResponse']): BrokerOffer[] {
   if (broker === 'mock') return [{ broker }]
-  if (simulation === null || max_order_value === null || max_daily_buy_value === null) return []
-  return [{ broker, simulation, max_order_value, max_daily_buy_value }]
+  if (server === null || max_order_value === null || max_daily_buy_value === null) return []
+  return [{ broker, server, max_order_value, max_daily_buy_value }]
 }
 
 /**

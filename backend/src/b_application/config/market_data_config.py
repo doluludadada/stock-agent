@@ -13,14 +13,18 @@ class MarketHoursConfig(BaseModel):
 
     Both exchanges take orders from `opening_auction_start`, match the opening call auction at `continuous_start`,
     trade continuously until `closing_auction_start` and run the closing call auction until `close`. A session's
-    daily bar is final in every price source from `settled`.
+    daily bar is final in every price source from `settled`. Their intraday odd-lot session takes limit ROD orders from
+    09:00 and matches them by call auction, the first at `odd_lot_start` (about 09:10, 09:00 once TWSE moves it) and
+    then every `odd_lot_match_seconds` until `close`.
     """
 
     opening_auction_start: time = time(8, 30)
     continuous_start: time = time(9, 0)
+    odd_lot_start: time = Field(default=time(9, 10), ge=time(9, 0), le=time(9, 15))
     closing_auction_start: time = time(13, 25)
     close: time = time(13, 30)
     settled: time = time(15, 0)
+    odd_lot_match_seconds: float = Field(default=5, gt=0, le=10, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def validate_order(self) -> Self:
@@ -30,6 +34,9 @@ class MarketHoursConfig(BaseModel):
             raise ValueError(
                 "market hours must run opening_auction_start < continuous_start < closing_auction_start < close < settled"
             )
+
+        if not self.continuous_start <= self.odd_lot_start < self.closing_auction_start:
+            raise ValueError("market hours must run continuous_start <= odd_lot_start < closing_auction_start")
 
         return self
 

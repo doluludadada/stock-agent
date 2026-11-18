@@ -1,4 +1,4 @@
-import { isApiError, type ErrorCode, type Schemas } from '@/shared/api'
+import { isApiError, type ErrorCode, type PageRefusal, type Schemas } from '@/shared/api'
 
 export type SettingsProblem = Schemas['SettingsProblem']
 type SettingsFileId = Schemas['SettingsFile']
@@ -19,8 +19,7 @@ export type SaveRefusal =
   | { kind: 'wrongPassword' }
   | { kind: 'googleRequired' }
   | { kind: 'throttled'; retryAfter: number | null }
-  | { kind: 'conflict' }
-  | { kind: 'refused'; problems: SettingsProblem[]; error: unknown }
+  | PageRefusal
   | { kind: 'failed'; error: unknown }
 
 /** By the refusal's code, never its words or its status alone: a 403 can be a wrong password or a lost role. */

@@ -17,6 +17,12 @@ class TaiwanMarketClock(IMarketClock):
     09:00-13:25, and run the closing call auction 13:25-13:30, which takes limit ROD orders only. Sources, read
     2026-10-31: the TWSE trading mechanism page (https://www.twse.com.tw/en/products/system/trading.html) and the
     TPEx trading system overview, sections 5 and 6 (https://www.tpex.org.tw/zh-tw/mainboard/trading/rules/system.html).
+
+    Their intraday odd-lot session takes limit ROD orders 09:00-13:30 and matches them by call auction, first at 09:10
+    and then every 5 seconds. TWSE plans to move the first match to 09:00 by the end of 2026 and the interval to 1
+    second in July 2027. Sources, found 2026-11-18: the TPEx odd-lot page
+    (https://www.tpex.org.tw/zh-tw/mainboard/trading/rules/odd-lot.html) and TechNews of 2026-07-08
+    (https://finance.technews.tw/2026/07/08/odd-lot-trading/).
     """
 
     def __init__(self, hours: MarketHoursConfig) -> None:
@@ -102,3 +108,12 @@ class TaiwanMarketClock(IMarketClock):
             return TradingPhase.CLOSED
 
         return next((phase for start, phase in self._trading_day if now.time() >= start), TradingPhase.CLOSED)
+
+    @override
+    def until_odd_lot_session(self) -> timedelta:
+        now = self.now()
+
+        if now.weekday() >= 5 or not self._hours.continuous_start <= now.time() < self._hours.odd_lot_start:
+            return timedelta(0)
+
+        return datetime.combine(now.date(), self._hours.odd_lot_start, now.tzinfo) - now

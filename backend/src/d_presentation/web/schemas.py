@@ -31,6 +31,7 @@ from a_domain.model.valuation.valuation import PeMedian, ReportSection
 from a_domain.ports.system.settings_files import SettingChange, SettingsProblem
 from a_domain.rules.fundamentals.stock_analysis import RevenueMonth
 from a_domain.rules.market.quote_refresh import QuoteRefresh
+from a_domain.rules.system.settings_change import ServerSwitchRefusal
 from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
 from a_domain.rules.trading.ranking import RankedStock
 from a_domain.types.enums import (
@@ -55,6 +56,7 @@ from a_domain.types.enums import (
     Role,
     ScanStep,
     ScenarioName,
+    ShioajiServer,
     SignalSource,
     TradeAction,
     UserStatus,
@@ -446,8 +448,8 @@ class BrokerResponse(BaseModel):
     """
 
     broker: ExecutionProvider
-    simulation: bool | None
-    """A real broker's server: true for SinoPac's simulation server (dev and test), false for the real account (prod)."""
+    server: ShioajiServer | None
+    """A real broker's server (shioaji.server). None on the mock account."""
 
     max_order_value: float | None
     """A real broker's most NT$ per BUY at its limit price (trading.max_order_value). None on the mock account."""
@@ -478,14 +480,36 @@ class BrokerageStatementResponse(Response):
 
 
 class BrokerageAccountResponse(BaseModel):
-    """The SinoPac account page: which server the site's login is on, whether it is up, and the account while it is."""
+    """
+    The SinoPac account page: which server the site's login is on, whether it is up, and the account while it is, with
+    what the page's administrator panel switches through the settings save (PUT /v1/admin/settings).
+    """
 
-    simulation: bool
-    """The server this environment logs in to: SinoPac's simulation server (dev and test) or, false, the real account (prod)."""
+    server: ShioajiServer
+    """The server the site's login is made on (shioaji.server)."""
+
+    switch_refusal: ServerSwitchRefusal | None
+    """
+    Why the page's switch to the other server would be refused (ServerSwitchRule), with the variables its login reads
+    that are not set, by name, never a value; None while the switch is open.
+    """
 
     login_up: bool
+    login_down: bool
+    """
+    The site's Shioaji login failed or went down, and the Web API's timer logs in again (Runtime.login_down). False with
+    `login_up` false: nothing logs in again before the next save or restart, since the login is up but SinoPac's account
+    check failed, such as the CA certificate's activation on production, or the site has no Shioaji login. The log says why.
+    """
+
     ordering: bool
     """Whether the site lets the user order on SinoPac now (features.sinopac_ordering). False: no order of theirs reaches it."""
+
+    simulation_initial_cash: float | None
+    """
+    The total put into SinoPac's simulation account (shioaji.simulation_initial_cash), which that server does not
+    report: adding money is raising it. None on production, whose bank balance is the broker's own.
+    """
 
     statement: BrokerageStatementResponse | None
     """None while the login is down."""

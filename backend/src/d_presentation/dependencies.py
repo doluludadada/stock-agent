@@ -3,17 +3,13 @@ from collections.abc import AsyncGenerator, Callable, Mapping
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field, replace
 from datetime import timedelta
-from hashlib import sha256
 from typing import TYPE_CHECKING, Any
 
-import chromadb
-from chromadb.api import ClientAPI
 from pydantic import SecretStr
 
 from a_domain.model.system.user import User
 from a_domain.ports.ai.ai_provider import IAiProvider
 from a_domain.ports.ai.article_index import IArticleIndex
-from a_domain.ports.ai.knowledge_repository import IKnowledgeRepository
 from a_domain.ports.ai.sentiment_classifier import ISentimentClassifier
 from a_domain.ports.ai.stock_brief_repository import IStockBriefRepository
 from a_domain.ports.ai.system_writing_log import ISystemWritingLog
@@ -52,7 +48,6 @@ from a_domain.ports.trading.users_stocks import IUsersStocks
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
 from a_domain.types.enums import AiProvider, BriefKind, ExecutionProvider, MarketScope, MarketType, Permission
 from a_domain.types.errors import BrokerUnavailable, RealBrokerRefused
-from a_domain.types.ids import UserId
 from b_application.config.api_config import FeaturesConfig
 from b_application.config.app_config import AppConfig
 from b_application.config.settings_loader import (
@@ -118,7 +113,6 @@ from b_application.use_cases.ranking.ranking_evidence import RankingEvidence
 from b_application.use_cases.ranking.ranking_history_loader import RankingHistoryLoader
 from b_application.use_cases.ranking.ranking_replay import RankingReplay
 from b_application.use_cases.ranking.ranking_standing import StockRankingStanding
-from b_application.use_cases.ship.decision_memory import DecisionMemory
 from b_application.use_cases.ship.reporting import Reporting
 from b_application.use_cases.ship.run_history import RunHistory
 from b_application.use_cases.ship.run_lookup import RunLookup
@@ -150,11 +144,11 @@ from b_application.use_cases.trade.watch_stocks import WatchStocks
 from b_application.use_cases.users.ai_model_choice import AiModelChoice
 from b_application.use_cases.users.ai_model_lookup import AiModelLookup
 from b_application.use_cases.users.first_administrator_setup import FirstAdministratorSetup
-from b_application.use_cases.users.follow_schedule_choice import FollowScheduleChoice
 from b_application.use_cases.users.google_account import GoogleAccount
 from b_application.use_cases.users.google_identity_check import GoogleIdentityCheck
 from b_application.use_cases.users.google_sign_in_start import GoogleSignInStart
 from b_application.use_cases.users.password_reset import PasswordReset
+from b_application.use_cases.users.ranking_follow_choice import RankingFollowChoice
 from b_application.use_cases.users.scheduled_followers import ScheduledFollowers
 from b_application.use_cases.users.session_start import SessionStart
 from b_application.use_cases.users.sign_in_attempt import SignInAttempt
@@ -176,16 +170,14 @@ from c_infrastructure.ai_models.ai_adapter.system_ai_provider import SystemAiPro
 from c_infrastructure.ai_models.ai_adapter.web_search_adapter import WebSearchAiAdapter
 from c_infrastructure.ai_models.onnx_text_embedder import OnnxTextEmbedder
 from c_infrastructure.ai_models.sentiment_classifier import AiSentimentClassifier
-from c_infrastructure.database.chroma.article_index import ChromaArticleIndex
-from c_infrastructure.database.chroma.conversation_repository import ChromaConversationRepository
-from c_infrastructure.database.chroma.knowledge_repository import ChromaKnowledgeRepository
-from c_infrastructure.database.chroma.schema import ChromaCollection
 from c_infrastructure.database.db_connector import DatabaseConnector, OutdatedDatabaseError
 from c_infrastructure.database.models.stock_brief_dto import CompanyCardDTO, StockBriefDTO, WorldBriefDTO
 from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID, load_accounts_key
+from c_infrastructure.database.repositories.article_index import SqlArticleIndex
 from c_infrastructure.database.repositories.article_store import SqlArticleStore
 from c_infrastructure.database.repositories.backtest_repository import SqlBacktestRepository
 from c_infrastructure.database.repositories.company_profile_repository import SqlCompanyProfileRepository
+from c_infrastructure.database.repositories.conversation_repository import SqlConversationRepository
 from c_infrastructure.database.repositories.daily_close_archive import SqlDailyCloseArchive
 from c_infrastructure.database.repositories.holding_repository import HoldingRepository
 from c_infrastructure.database.repositories.sentiment_repository import SentimentRepository
@@ -322,9 +314,12 @@ class ProcessState:
     """The pace of the requests to each exchange's site for a daily report, which every runtime's requests keep."""
     shioaji_connections: dict[ShioajiLogin, ShioajiConnection] = field(default_factory=dict)
     """
-    The Shioaji connection of each login the process made: its client, logged in once and again only after the login
-    failed or went down, every earlier client, never logged out, and the one request pacer of the login. Every later
-    runtime reuses it; shioaji 1.3.1 segfaults at the next garbage collection after a logout.
+    The Shioaji connection of each login a runtime of the process made, kept for the life of the process: its client,
+    logged in once and again only after the login failed or went down, every earlier client, and the one request pacer
+    of the login. Every later runtime on the same login reuses it, after a switch of shioaji.server away and back too.
+    The process logs in once per server and never logs out, and no client is collected: shioaji 1.3.1 on Python 3.14
+    can segfault after a logout, when Solace's thread races the interpreter. The session ends with the process, which
+    may itself exit on a segfault from Solace's thread at finalization, after the app's shutdown, so losing nothing.
     """
     settings_confirmations: ISettingsConfirmations = field(default_factory=MemorySettingsConfirmations)
     """The fresh Google authentications granted for a settings save, which a reload of the settings must not forget."""
@@ -345,7 +340,6 @@ class OwnedPorts:
     journal: ITradingJournal
     watchlist_repository: IWatchlistRepository
     technical_settings_repository: ITechnicalSettingsRepository
-    knowledge_repository: IKnowledgeRepository
     mock_broker: ISimulatedExecutionProvider
     ai_provider: IAiProvider
     """
@@ -401,7 +395,7 @@ class ProviderDependencies:
     article_store: IArticleStore
     """What the site read about each stock, kept in the database and shared by every user."""
     article_index: IArticleIndex
-    """The article store's vectors, in a Chroma collection of their own, computed by the runtime's own embedding model."""
+    """The article store's vectors, in a table of their own, computed by the runtime's own embedding model."""
     users_stocks: IUsersStocks
     """The stocks any user holds or watches, as stock ids alone: the timer keeps their articles current."""
     broker_quotes: IBrokerQuoteProvider | None
@@ -411,8 +405,8 @@ class ProviderDependencies:
     """
     shioaji: ShioajiConnection | None
     """
-    The process's Shioaji login of the environment's key pair on an audience with realtime quotes, whether it is up or
-    not: a login that failed at the start has one too. None on a public site and without the key pair.
+    The process's Shioaji login on the server shioaji.server names, on an audience with realtime quotes, whether it is
+    up or not: a login that failed at the start has one too. None on a public site and without the server's key pair.
     """
     daily_close_archive: IDailyCloseArchive
     fundamentals_provider: IFundamentalsProvider | None
@@ -506,8 +500,8 @@ def import_shioaji() -> type[Shioaji]:
 
 
 def site_login(config: AppConfig) -> ShioajiLogin | None:
-    """The login the site's market data needs: the environment's key pair on an audience with realtime quotes, else None."""
-    return config.shioaji.login(config.environment) if config.audience.realtime_quotes else None
+    """The login the site's market data needs: shioaji.server's key pair on an audience with realtime quotes, else None."""
+    return config.shioaji.login() if config.audience.realtime_quotes else None
 
 
 async def connect_shioaji(
@@ -515,11 +509,11 @@ async def connect_shioaji(
 ) -> tuple[IBrokerQuoteProvider | None, RealBroker | None]:
     """
     The market data and the SinoPac broker of a runtime on the process's Shioaji login. Both read the client of the
-    environment's key pair, simulation in dev and test, production in prod, which the process logs in once and every
-    later runtime of it reuses, until the login fails or Shioaji reports it down: then the next runtime logs in again on
-    a new client (ShioajiQuoteProvider.connect). The broker exists where the audience offers it and its account check
-    passes (in prod with the CA certificate the production credentials name); a run uses it only when an administrator
-    chooses it.
+    login on the server shioaji.server names, which the process logs in once and every later runtime on that server
+    reuses, until the login fails or Shioaji reports it down: then the next runtime logs in again on a new client
+    (ShioajiQuoteProvider.connect). A runtime on the other server, after a switch, logs in there on a client of its own.
+    The broker exists where the audience offers it and its account check passes (on production with the CA certificate
+    the production credentials name); a run uses it only when an administrator chooses it.
 
     An audience without realtime quotes (public) builds no Shioaji adapter. A personal site without the key pair, or
     whose login fails, has no realtime quote and no SinoPac, so nothing is ordered; its daily history still comes from
@@ -530,7 +524,7 @@ async def connect_shioaji(
 
     if login is None:
         if config.audience.realtime_quotes:
-            logger.warning(f"No Shioaji key pair for environment {config.environment.value}: no realtime quote, so no order")
+            logger.warning(f"No Shioaji key pair for SinoPac's {config.shioaji.server.label} server: no realtime quote, so no order")
 
         return None, None
 
@@ -539,19 +533,19 @@ async def connect_shioaji(
     from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection, ShioajiQuoteProvider
 
     if login not in process.shioaji_connections:
-        process.shioaji_connections[login] = ShioajiConnection(client=client_class(simulation=login.simulation))
+        process.shioaji_connections[login] = ShioajiConnection(client=client_class(simulation=login.server.simulation))
 
     connection = process.shioaji_connections[login]
     quotes = ShioajiQuoteProvider(
         connection=connection,
-        new_client=lambda: client_class(simulation=login.simulation),
+        new_client=lambda: client_class(simulation=login.server.simulation),
         login=login,
         market_clock=market_clock,
         market_data=config.market_data,
         board_lot_shares=config.market.board_lot_shares,
         logger=logger,
     )
-    server, reused = "simulation" if login.simulation else "production", connection.up
+    server, reused = login.server.label, connection.up
 
     try:
         await quotes.connect()
@@ -561,11 +555,11 @@ async def connect_shioaji(
 
     login_line = f"Reused the process's Shioaji {server} login" if reused else f"Logged in to Shioaji {server}"
     logger.info(f"{login_line} for realtime quotes")
-    return quotes, await connect_sinopac(config, connection, login, logger)
+    return quotes, await connect_sinopac(config, connection, login, market_clock, logger)
 
 
 async def connect_sinopac(
-    config: AppConfig, connection: ShioajiConnection, login: ShioajiLogin, logger: ILoggingProvider
+    config: AppConfig, connection: ShioajiConnection, login: ShioajiLogin, market_clock: TaiwanMarketClock, logger: ILoggingProvider
 ) -> RealBroker | None:
     """SinoPac's broker on the login the quotes hold, where the audience offers it and its account check passes, else None."""
     from c_infrastructure.trading.shioaji.execution_provider import ShioajiExecutionProvider
@@ -573,8 +567,8 @@ async def connect_sinopac(
     if ExecutionProvider.SHIOAJI not in config.audience.brokers:
         return None
 
-    broker = ShioajiExecutionProvider(connection=connection, login=login, config=config, logger=logger)
-    server = "simulation" if login.simulation else "production"
+    broker = ShioajiExecutionProvider(connection=connection, login=login, config=config, market_clock=market_clock, logger=logger)
+    server = login.server.label
 
     try:
         await broker.connect()
@@ -802,9 +796,6 @@ async def build_provider_dependencies(
         exchange=config.sources.exchange, market_clock=market_clock, market_data=config.market_data, logger=logger
     )
 
-    logger.info(f"Opening ChromaDB at: {config.db.chroma_persist_path}")
-    chroma_client = chromadb.PersistentClient(path=config.db.chroma_persist_path)
-
     ai_providers = {provider: create_ai_provider(config, logger, provider) for provider in config.ai.offered_models}
     archive = SqlDailyCloseArchive(db, market_clock, config.sources.exchange, config.analysis.material_information_days, logger)
     history_cache = create_history_cache(config, db, process, market_clock, quotes, archive)
@@ -840,9 +831,9 @@ async def build_provider_dependencies(
             config.stock_page.article_store.max_per_stock,
             {MarketScope.WORLD.value: (config.world.retention(), config.world.max_items)},
         ),
-        article_index=ChromaArticleIndex(
-            chroma_client,
-            article_collection(config),
+        article_index=SqlArticleIndex(
+            db,
+            config.stock_page.article_store.embedding.identity,
             OnnxTextEmbedder(
                 config.stock_page.article_store.embedding, config.project_root / config.folder.embedding_model_dir, logger
             ),
@@ -863,13 +854,14 @@ async def build_provider_dependencies(
             else None
         ),
         ai_provider=ai_providers[config.ai.active_model],
-        conversation_repository=ChromaConversationRepository(chroma_client, logger),
+        conversation_repository=SqlConversationRepository(db, logger),
         notification_provider=create_notification_provider(config, logger),
         platform_provider=create_platform_provider(config, logger),
         settings_files=SettingsFiles(
             project_root=config.project_root,
             max_bytes=config.api.settings_file_max_bytes,
             backups_kept=config.api.settings_backups_kept,
+            running=config,
             logger=logger,
         ),
         user_store=SqlUserStore(db, accounts_key, logger),
@@ -878,23 +870,22 @@ async def build_provider_dependencies(
         identity_provider=create_identity_provider(config),
         settings_confirmations=process.settings_confirmations,
         ordering_switch=SettingsFileOrderingSwitch(config.project_root),
-        owned_ports=create_owned_ports(config, db, chroma_client, ai_providers, market_clock, logger, process.cache_writes),
+        owned_ports=create_owned_ports(config, db, ai_providers, market_clock, logger, process.cache_writes),
     )
 
 
 def create_owned_ports(
     config: AppConfig,
     db: DatabaseConnector,
-    chroma_client: ClientAPI,
     ai_providers: Mapping[AiProvider, IAiProvider],
     market_clock: TaiwanMarketClock,
     logger: ILoggingProvider,
     cache_writes: asyncio.Lock,
 ) -> Callable[[User | None], OwnedPorts]:
     """
-    The real factory of one user's adapters: one connector bound to the user, over the one database and Chroma client,
-    and the provider of the AI model config.ai.model_for picks for the user from `ai_providers`, one per offered model.
-    `cache_writes` is the process's write lock of the shared caches.
+    The real factory of one user's adapters: one connector bound to the user, over the one database, and the provider
+    of the AI model config.ai.model_for picks for the user from `ai_providers`, one per offered model. `cache_writes` is
+    the process's write lock of the shared caches.
     """
     sentiment_repository = SentimentRepository(db, cache_writes)
 
@@ -908,7 +899,6 @@ def create_owned_ports(
             journal=TradingJournal(owners_db),
             watchlist_repository=WatchlistRepository(owners_db, logger, market_clock),
             technical_settings_repository=SqlTechnicalSettingsRepository(owners_db),
-            knowledge_repository=ChromaKnowledgeRepository(chroma_client, knowledge_collection(owner_id), logger),
             mock_broker=MockExecutionProvider(owners_db, config, market_clock, logger),
             ai_provider=counted,
             sentiment_classifier=AiSentimentClassifier(counted, sentiment_repository, config, logger),
@@ -917,32 +907,6 @@ def create_owned_ports(
         )
 
     return owned_ports
-
-
-def article_collection(config: AppConfig) -> str:
-    """
-    The Chroma collection of the article index: stock_articles with a fingerprint of what its vectors depend on, the
-    embedding model and how much of an article it reads. Vectors of two models cannot be compared, so a change of
-    either starts an empty collection, which fills again from the kept articles; the old one stays until it is deleted.
-    """
-    store = config.stock_page.article_store
-    fingerprint = sha256(f"{store.embedding.identity}/{store.embedded_length}".encode()).hexdigest()[:12]
-
-    return f"{ChromaCollection.STOCK_ARTICLES}-{fingerprint}"
-
-
-def knowledge_collection(owner_id: UserId | None) -> str | None:
-    """
-    The owner's Chroma collection of decisions. The legacy owner keeps market_knowledge, which the single-owner versions
-    wrote, so its decision memory needs no copy; every other owner's is market_knowledge-<owner id>. None signed out.
-    """
-    if owner_id is None:
-        return None
-
-    if owner_id == LEGACY_OWNER_ID:
-        return ChromaCollection.MARKET_KNOWLEDGE
-
-    return f"{ChromaCollection.MARKET_KNOWLEDGE}-{owner_id}"
 
 
 def real_broker_holder(user: User | None) -> bool:
@@ -990,6 +954,15 @@ def broker_for(
     return dependencies.real_broker
 
 
+def account_ports(
+    mock_broker: IExecutionProvider, real_broker: IExecutionProvider | None
+) -> dict[ExecutionProvider, IExecutionProvider]:
+    """The accounts these ports read, by their broker: the mock account, and the real broker when one is given."""
+    real = {real_broker.link().broker: real_broker} if real_broker is not None else {}
+
+    return {ExecutionProvider.MOCK: mock_broker} | real
+
+
 def build_pipeline(
     config: AppConfig,
     logger: ILoggingProvider,
@@ -1003,10 +976,11 @@ def build_pipeline(
     """
     Every use case once, over the shared ports and the user's own ports, or nobody's for None, on the broker the run
     chose (`chosen`). The trading and the valuation operations share the collect and process steps. The order path's
-    wiring is the same for every user and broker: the ordering steps and the ranking follow's candidates hold
-    `chosen`'s broker, and the mock_* steps hold the user's mock account. The permissions decide whether the user may
-    hold a real broker, the AI limit (in owned_ports) and whether run reports reach the LINE recipients. The run
-    records name the AI model owned_ports gave the user and the broker chosen.
+    wiring is the same for every user and broker: the ordering steps hold `chosen`'s broker, the mock_* steps hold the
+    user's mock account, and the steps that read the user's accounts by their broker (`accounts`) hold the mock
+    account and the real broker a holder may read. The permissions decide whether the user may hold a real broker,
+    the AI limit (in owned_ports) and whether run reports reach the LINE recipients. The run records name the AI
+    model owned_ports gave the user and the broker chosen.
     """
     owned = dependencies.owned_ports(user)
     notifications = (
@@ -1017,6 +991,7 @@ def build_pipeline(
     journal, broker, users = owned.journal, broker_for(dependencies, owned, user, chosen), dependencies.user_store
     ordering = dependencies.ordering_switch
     brokerage = dependencies.real_broker if real_broker_holder(user) else None
+    accounts = account_ports(owned.mock_broker, brokerage)
     user_id = user.user_id if user is not None else None
     chat_styler = ChatStylerService(config.sources.line.sentence_endings, config.sources.line.max_message_length)
     ai_model = config.ai.offered_models[config.ai.model_for(user.ai_model if user is not None else None)]
@@ -1114,16 +1089,13 @@ def build_pipeline(
         technical_filter=TechnicalFilter(logger),
         indicator_readings=IndicatorReadings(),
         news_feed=NewsFeed(dependencies.news_provider, config, logger),
-        ai_analyser=AiAnalyser(
-            owned.ai_provider, owned.knowledge_repository, dependencies.daily_close_archive, market_clock, config, logger
-        ),
+        ai_analyser=AiAnalyser(owned.ai_provider, owned.journal, dependencies.daily_close_archive, market_clock, config, logger),
         sentiment_analyser=SentimentAnalyser(owned.sentiment_classifier, config, logger),
         watch_stocks=WatchStocks(owned.watchlist_repository, market_clock, config, logger),
         unwatch_stocks=UnwatchStocks(owned.watchlist_repository, logger),
         account_risk_check=AccountRiskCheck(journal, market_clock, config, logger),
         signals=Signals(journal, market_clock, config, logger),
         manual_signal=ManualSignal(journal, market_clock, config, logger),
-        decision_memory=DecisionMemory(owned.knowledge_repository, logger),
         order_preparation=OrderPreparation(journal, broker, users, ordering, user_id, market_clock, config, logger),
         order_execution=OrderExecution(broker, journal, users, ordering, user_id, market_clock, config, logger),
         order_outcome=OrderOutcome(broker, journal, market_clock, logger),
@@ -1133,21 +1105,21 @@ def build_pipeline(
         mock_order_outcome=OrderOutcome(owned.mock_broker, journal, market_clock, logger),
         follow_candidates=FollowCandidates(journal, owned.mock_broker, market_clock, config),
         follow_signals=FollowSignals(journal, market_clock, logger),
-        ranking_follow_candidates=RankingFollowCandidates(broker, market_clock, config),
+        ranking_follow_candidates=RankingFollowCandidates(accounts, market_clock, config),
         ranking_follow_signals=RankingFollowSignals(journal, market_clock, config, logger),
         ranking_follow_return=RankingFollowReturn(journal, owned.mock_broker, market_clock, config),
         ranking_follow_schedule=RankingFollowSchedule(
-            journal, owned.mock_broker, brokerage, ordering, dependencies.bar_matrix_provider, market_clock, config
+            journal, accounts, ordering, dependencies.bar_matrix_provider, market_clock, config
         ),
-        follow_schedule_choice=FollowScheduleChoice(dependencies.user_store, market_clock, config, logger),
+        ranking_follow_choice=RankingFollowChoice(dependencies.user_store, market_clock, config, logger),
         scheduled_followers=ScheduledFollowers(
-            dependencies.user_store, dependencies.real_broker, ordering, market_clock, config, logger
+            dependencies.user_store, account_ports(owned.mock_broker, dependencies.real_broker), ordering, market_clock, config, logger
         ),
         mock_account_history=AccountHistory(owned.mock_broker, journal, stocks, prices, quote_board, market_clock, config, logger),
         trade_history=TradeHistory(broker, journal),
         mock_account_reset=MockAccountReset(owned.mock_broker, market_clock),
         brokerage_statement=BrokerageStatementReader(brokerage, market_clock, config),
-        held_positions=HeldPositions(owned.holding_repository, owned.mock_broker, brokerage, logger),
+        held_positions=HeldPositions(owned.holding_repository, accounts, logger),
         holdings_analysis=HoldingsAnalysis(stocks, dependencies.daily_close_archive, quote_board, market_clock, config, logger),
         holding_entry=HoldingEntry(owned.holding_repository, market_clock),
         holding_removal=HoldingRemoval(owned.holding_repository),
@@ -1176,7 +1148,7 @@ def build_pipeline(
         ),
         dispatcher=Dispatcher(dependencies.platform_provider, logger),
         settings_reader=SettingsReader(dependencies.settings_files),
-        settings_editor=SettingsEditor(dependencies.settings_files, config),
+        settings_editor=SettingsEditor(dependencies.settings_files),
         settings_confirmation=SettingsConfirmation(
             dependencies.user_store, dependencies.attempt_log, dependencies.settings_confirmations, market_clock, config, logger
         ),
@@ -1280,10 +1252,10 @@ async def open_runtime(config: AppConfig, process: ProcessState, *, broker_login
     The whole startup for settings startup_settings passed: the accounts key (secrets/accounts.key created on the first
     start where the environment allows it), the database (opened and brought to the current schema), the Shioaji login
     that the realtime quotes and a Shioaji broker share (once per process, see ProcessState.shioaji_connections), every
-    adapter and the check that the key opens the saved users. It raises one of STARTUP_REFUSALS for a setup it
-    refuses, before any workflow runs. The database closes when the caller is done, or at once when a later step fails.
-    Without broker_login it makes no Shioaji login, as a personal site without the key pair: no realtime quote and no
-    SinoPac, for a command that reads only the held history.
+    adapter and the check that the key opens the saved users. It raises one of STARTUP_REFUSALS for a setup it refuses,
+    before any workflow runs. The database closes when the caller is done, or at once when a later step fails. Without
+    broker_login it makes no Shioaji login, as a personal site without the key pair: no realtime quote and no SinoPac,
+    for a command that reads only the held history.
     """
     accounts_key = load_accounts_key(config, process.logger)
     market_clock = TaiwanMarketClock(config.market_hours)

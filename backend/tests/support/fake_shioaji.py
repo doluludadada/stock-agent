@@ -15,7 +15,7 @@ import c_infrastructure.trading.shioaji.sdk_reporting  # noqa: F401
 
 # isort: split
 from shioaji.account import Account, StockAccount
-from shioaji.constant import Action, ChangeType, Exchange, Status, StockOrderCond, StockOrderLot, TickType, Unit
+from shioaji.constant import Action, ChangeType, Exchange, OrderState, Status, StockOrderCond, StockOrderLot, TickType, Unit
 from shioaji.contracts import Contract, Index, Stock
 from shioaji.data import Snapshot
 from shioaji.order import Deal, Order, OrderStatus, Trade
@@ -34,6 +34,68 @@ class Report:
     status_code: str = ""
     deal_quantity: int | None = None
     """What OrderStatus.deal_quantity says; unset, the sum of the deals."""
+
+
+@dataclass(frozen=True)
+class OddLotMatches:
+    """
+    The intraday odd-lot session's call auctions: the first at `first`, then every `interval`. An odd-lot order deals
+    at these only, so it takes its script's next report at each one that runs after it was placed, and none before.
+    """
+
+    first: datetime.datetime
+    interval: datetime.timedelta
+
+    def between(self, placed: datetime.datetime, now: datetime.datetime) -> int:
+        """How many matches ran after `placed` and by `now`."""
+        if now < self.first:
+            return 0
+
+        before = -1 if placed < self.first else (placed - self.first) // self.interval
+        return (now - self.first) // self.interval - before
+
+
+def order_event(contract: Contract, order: Order) -> dict:
+    """An order event as Solace sends it for a new order: the account and the login's person id included."""
+    account = order.account
+    return {
+        "operation": {"op_type": "New", "op_code": "00", "op_msg": f"accepted for {account.person_id if account else ''}"},
+        "order": {
+            "seqno": order.seqno,
+            "account": account.model_dump() if account else {},
+            "action": order.action.value,
+            "price": order.price,
+            "quantity": order.quantity,
+            "order_lot": order.order_lot.value,
+            "custom_field": order.custom_field,
+        },
+        "contract": {"code": contract.code},
+    }
+
+
+def deal_event(trade: Trade, price: float, quantity: int) -> dict:
+    """A deal event as Solace sends it: the account's ids included."""
+    order = trade.order
+    account = order.account
+    return {
+        "seqno": order.seqno,
+        "account_id": account.account_id if account else "",
+        "broker_id": account.broker_id if account else "",
+        "action": order.action.value,
+        "code": trade.contract.code,
+        "order_lot": order.order_lot.value,
+        "price": price,
+        "quantity": quantity,
+        "custom_field": order.custom_field,
+    }
+
+
+def call_back(order_callback: Callable[[OrderState, dict], None] | None, state: OrderState, event: dict) -> None:
+    """What the SDK does with each order and deal event: calls the order callback, from a thread of its own."""
+    if order_callback is not None:
+        caller = threading.Thread(target=order_callback, args=(state, event))
+        caller.start()
+        caller.join()
 
 
 def stock(code: str, reference: float = 100.0) -> Stock:
@@ -184,14 +246,29 @@ class FakeShioaji:
     scripts: dict[StockOrderLot, list[Report]] = field(default_factory=dict)
     """What update_status reports, in turn, for the next order of each lot. Unscripted: filled at its price on the first refresh."""
     honours_cancel: bool = True
+    clock: Callable[[], datetime.datetime] | None = None
+    """The test's clock: set, each place_order and cancel_order is stamped with it in placed_at and cancelled_at."""
+    odd_lot_matches: OddLotMatches | None = None
+    """Set, with `clock`: an odd-lot order's script moves at the session's matches instead of at each status read."""
     place_error: Exception | None = None
     place_error_after_accepting: bool = False
+    place_gate: threading.Event | None = None
+    """When set, place_order waits in its thread, the order already at the broker, until the test sets the event."""
+    status_gate: threading.Event | None = None
+    """When set, update_status after a cancel request waits in its thread until the test sets the event, unanswered."""
     refusals: dict[str, Exception] = field(default_factory=dict)
     """What each named method of the account and its orders raises instead of answering, as the SDK does for a server's refusal."""
     refuses_once_placed: bool = False
     """True: the refusals start once an order was placed, so the account read before it still answers."""
     updates_in_place: bool = True
     """False: place_order returns a copy, and update_status refreshes only the trade that list_trades holds."""
+    account_refresh_milliseconds: int = 0
+    """
+    How long the server takes to refresh every order of the account today. An account-wide update_status that may wait
+    less raises TimeoutError, as the SDK did on 2026-11-18 for an account of about 40 orders at its 5 s default.
+    """
+    account_refreshes: list[int] = field(default_factory=list)
+    """The timeout, in milliseconds, of each account-wide update_status the server answered or timed out."""
 
     market_data_error: Exception | None = None
     """What snapshots raises instead of answering, as the SDK does for a server's refusal."""
@@ -199,6 +276,8 @@ class FakeShioaji:
     """A snapshots request that names one of these codes raises after it is counted, as a server that refuses a contract would."""
     session_down_callback: Callable[[], None] | None = None
     """The one callback the SDK keeps: a second registration replaces the first."""
+    order_callback: Callable[[OrderState, dict], None] | None = None
+    """What the SDK calls with each order and deal event; unset, the SDK prints the whole event to stdout."""
     snapshot_answers: dict[str, Snapshot] = field(default_factory=dict)
     """What snapshots answers for each code; a code without one gets no snapshot."""
     snapshot_requests: list[list[str]] = field(default_factory=list)
@@ -209,11 +288,14 @@ class FakeShioaji:
     ca_activations: list[dict] = field(default_factory=list)
     placed: list[Trade] = field(default_factory=list)
     cancelled: list[Trade] = field(default_factory=list)
+    placed_at: list[datetime.datetime] = field(default_factory=list)
+    cancelled_at: list[datetime.datetime] = field(default_factory=list)
     position_units: list[Unit] = field(default_factory=list)
     profit_loss_requests: list[tuple[str, str, Unit]] = field(default_factory=list)
     bank_reads: list[str] = field(default_factory=list)
     """Each read of the bank balance and of the settlements, which only a production account has."""
     _queued: dict[str, list[Report]] = field(default_factory=dict)
+    _matched: dict[str, int] = field(default_factory=dict)
 
     def login(
         self,
@@ -238,6 +320,9 @@ class FakeShioaji:
 
     def set_session_down_callback(self, func: Callable[[], None]) -> None:
         self.session_down_callback = func
+
+    def set_order_callback(self, func: Callable[[OrderState, dict], None]) -> None:
+        self.order_callback = func
 
     def session_down(self) -> None:
         """What Solace does once its reconnects gave up: calls the session-down callback, from a thread of its own."""
@@ -282,7 +367,12 @@ class FakeShioaji:
             contract, order, OrderStatus(id=order.seqno, status=Status.PendingSubmit, order_quantity=order.quantity, deals=[])
         )
         self.placed.append(trade)
+        self._stamp(self.placed_at)
         self._queued[order.seqno] = list(self.scripts.get(order.order_lot, [Report(Status.Filled, ((order.price, order.quantity),))]))
+        call_back(self.order_callback, OrderState.StockOrder, order_event(contract, order))
+
+        if self.place_gate is not None:
+            self.place_gate.wait(timeout=5)
 
         if self.place_error is not None:
             raise self.place_error
@@ -291,14 +381,26 @@ class FakeShioaji:
 
     def update_status(self, account: Account = None, trade: Trade = None, timeout: int = 5000, cb=None) -> None:
         self._fail_if_told("update_status")
+
+        if trade is None:
+            self.account_refreshes.append(timeout)
+
+            if self.account_refresh_milliseconds > timeout:
+                raise TimeoutError("the server did not refresh the account's orders in time")
+
         seqnos = {trade.order.seqno} if trade else {known.order.seqno for known in self.placed if known.order.account == account}
         cancel_requested = {cancelled.order.seqno for cancelled in self.cancelled}
 
-        for known in [known for known in self.placed if known.order.seqno in seqnos]:
-            queued = self._queued[known.order.seqno]
+        if cancel_requested and self.status_gate is not None:
+            self.status_gate.wait(timeout=5)
 
-            if queued:
-                self._report(known, queued.pop(0))
+        for known in [known for known in self.placed if known.order.seqno in seqnos]:
+            queued, due = self._queued[known.order.seqno], self._reports_due(known)
+
+            if queued and due:
+                report = queued[min(due, len(queued)) - 1]
+                del queued[:due]
+                self._report(known, report)
 
             elif known.order.seqno in cancel_requested and known.status.status not in DONE and self.honours_cancel:
                 self._report(known, Report(Status.Cancelled, tuple((deal.price, deal.quantity) for deal in known.status.deals)))
@@ -306,6 +408,7 @@ class FakeShioaji:
     def cancel_order(self, trade: Trade, timeout: int = 5000, cb=None) -> Trade:
         self._fail_if_told("cancel_order")
         self.cancelled.append(trade)
+        self._stamp(self.cancelled_at)
         self._queued[trade.order.seqno].clear()
         return trade
 
@@ -344,7 +447,25 @@ class FakeShioaji:
             for offset, amount in enumerate(self.settlement_amounts)
         ]
 
+    def _stamp(self, times: list[datetime.datetime]) -> None:
+        if self.clock is not None:
+            times.append(self.clock())
+
+    def _reports_due(self, trade: Trade) -> int:
+        """One per status read; for an odd-lot order under odd_lot_matches, one per match since the last read."""
+        if self.odd_lot_matches is None or trade.order.order_lot != StockOrderLot.IntradayOdd:
+            return 1
+
+        assert self.clock is not None, "odd_lot_matches runs on the test's clock"
+        seqno = trade.order.seqno
+        matches = self.odd_lot_matches.between(self.placed_at[self.placed.index(trade)], self.clock())
+        due, self._matched[seqno] = matches - self._matched.get(seqno, 0), matches
+        return due
+
     def _report(self, trade: Trade, report: Report) -> None:
+        for price, quantity in report.deals[len(trade.status.deals or []) :]:
+            call_back(self.order_callback, OrderState.StockDeal, deal_event(trade, price, quantity))
+
         trade.status.status = report.status
         trade.status.msg = report.msg
         trade.status.status_code = report.status_code

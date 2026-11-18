@@ -7,7 +7,6 @@ a model the site does not offer.
 import asyncio
 from dataclasses import replace
 
-import chromadb
 import pytest
 from support.fakes import AiVendor
 from support.harness import ADMINISTRATOR, MARKET_OPEN, MEMBER, MEMBER_PASSWORD, build_harness, harness_config, rising_history
@@ -37,9 +36,7 @@ async def test_a_users_calls_go_to_the_model_they_chose_and_to_the_default_once_
     config = offering(AiProvider.OPENAI)
     config.prompts = config.prompts.model_copy(update={"social_sentiment": "Stock {stock_id}\n{posts_text}"})
     vendors = {AiProvider.CLAUDE: AiVendor(), AiProvider.OPENAI: AiVendor()}
-    owned_ports = create_owned_ports(
-        config, database, chromadb.EphemeralClient(), vendors, MovableClock(MARKET_OPEN), SilentLogger(), asyncio.Lock()
-    )
+    owned_ports = create_owned_ports(config, database, vendors, MovableClock(MARKET_OPEN), SilentLogger(), asyncio.Lock())
     users = [
         replace(MEMBER, user_id=UserId("u-openai"), ai_model=AiProvider.OPENAI),
         replace(MEMBER, user_id=UserId("u-gemini"), ai_model=AiProvider.GEMINI),

@@ -1,12 +1,8 @@
-import { ArrowRight, FlaskConical, Landmark, ReceiptText, Unplug, Wallet } from 'lucide-react'
-import { useMemo } from 'react'
-import { Link } from 'react-router'
+import { ReceiptText, Unplug, Wallet } from 'lucide-react'
+import { useMemo, type ComponentType } from 'react'
 import { useTranslation } from '@/i18n'
-import { isApiError, useListedNames, useShows } from '@/shared/api'
-import { paths } from '@/shared/config/paths'
+import { isApiError, useListedNames, type SaveConfirmationProps } from '@/shared/api'
 import { DASH, useFormat } from '@/shared/lib/format'
-import { cn } from '@/shared/lib/utils'
-import { Badge } from '@/shared/ui/badge'
 import { ChangeValue } from '@/shared/ui/change-value'
 import { StockLink } from '@/shared/ui/stock-name'
 import { DataTable, type Column } from '@/shared/ui/data-table'
@@ -17,78 +13,57 @@ import { AdministratorsOnly, RequireSignIn } from '@/shared/ui/require-sign-in'
 import { PageSkeleton } from '@/shared/ui/skeleton'
 import { Stat } from '@/shared/ui/stat'
 import { StateBlock } from '@/shared/ui/state-block'
-import { useBrokerageAccount, useTrades, type BrokerageAccount, type BrokerageStatement, type BrokerFill, type BrokerPosition, type Settlement } from './api'
+import { useBrokerageAccount, useTrades, type BrokerageStatement, type BrokerFill, type BrokerPosition, type Settlement } from './api'
+import { loginState } from './model'
+import { SinoPacPanel } from './SinoPacPanel'
 import { TradesPanel } from './Trades'
 
 /**
- * The SinoPac account as the broker reports it. The page only reads: which server it shows and whether the site may
- * order there lead, then the account while the site's login is up.
+ * The SinoPac account: its server, its login and whether the site may order there lead, managed there by an
+ * administrator through `Confirmation`, the settings save's confirmation the route hands in; then the account as the
+ * broker reports it while the site's login is up, which the page only reads.
  */
-export function BrokerageAccountPage() {
+export function BrokerageAccountPage({ Confirmation }: { Confirmation: ComponentType<SaveConfirmationProps> }) {
   const { t } = useTranslation('account')
   return (
     <div className="page-stack">
       <PageHeader title={t('page.shioaji.title')} />
       <RequireSignIn layout="page" needs="use_real_broker" reason={t('brokerage.signIn')}>
-        <Brokerage />
+        <Brokerage Confirmation={Confirmation} />
       </RequireSignIn>
     </div>
   )
 }
 
-function Brokerage() {
+/**
+ * A read SinoPac did not answer (broker_not_answering) fails the whole answer. Once an answer came, its server, login
+ * and switches stay on the page through a later failed read, which then takes the statement's place with its retry.
+ */
+function Brokerage({ Confirmation }: { Confirmation: ComponentType<SaveConfirmationProps> }) {
   const { t } = useTranslation('account')
   const account = useBrokerageAccount()
+  const retry = () => void account.refetch()
   if (account.isPending) return <PageSkeleton />
-  if (account.isError) {
-    if (isApiError(account.error) && account.error.code === 'administrators_only') return <AdministratorsOnly layout="page" />
-    return <ErrorState error={account.error} title={t('brokerage.loadFailed')} onRetry={() => void account.refetch()} framed />
-  }
+  if (account.isError && isApiError(account.error) && account.error.code === 'administrators_only') return <AdministratorsOnly layout="page" />
+  if (account.isLoadingError) return <ErrorState error={account.error} title={t('brokerage.loadFailed')} onRetry={retry} framed />
   const { statement } = account.data
+  const down = loginState(account.data) === 'down'
   return (
     <div className="card-stack">
-      <ServerPanel account={account.data} />
-      {statement ? (
+      <SinoPacPanel account={account.data} Confirmation={Confirmation} />
+      {account.isRefetchError ? (
+        <ErrorState error={account.error} title={t('brokerage.loadFailed')} onRetry={retry} framed />
+      ) : statement ? (
         <Statement statement={statement} />
       ) : (
-        <StateBlock icon={Unplug} title={t('brokerage.down.title')} description={t('brokerage.down.description')} framed />
+        <StateBlock
+          icon={Unplug}
+          title={t(down ? 'brokerage.down.title' : 'brokerage.unavailable.title')}
+          description={t(down ? 'brokerage.down.description' : 'brokerage.unavailable.description')}
+          framed
+        />
       )}
     </div>
-  )
-}
-
-/** Which server the figures come from and whether the site may order there, before any figure. */
-function ServerPanel({ account }: { account: BrokerageAccount }) {
-  const { t } = useTranslation('account')
-  const format = useFormat()
-  const analysed = useShows('holdings')
-  const server = account.simulation ? 'simulation' : 'live'
-  const Icon = account.simulation ? FlaskConical : Landmark
-  return (
-    <Panel>
-      <div className="space-y-2">
-        <p className="flex flex-wrap items-center gap-x-3 gap-y-2 text-title font-semibold">
-          <span className="flex items-center gap-2">
-            <Icon aria-hidden className="size-4.5 shrink-0 text-gold" />
-            {t(`brokerage.server.${server}`)}
-          </span>
-          <Badge variant="outline" className={cn('font-normal', account.ordering ? 'border-gold/50 text-gold' : 'text-muted-foreground')}>
-            {t(account.ordering ? 'brokerage.ordering.on' : 'brokerage.ordering.off')}
-          </Badge>
-        </p>
-        {account.statement && (
-          <p className="flex flex-wrap items-center gap-x-3 text-xs text-pretty text-muted-foreground">
-            {t('brokerage.own', { time: format.dateTime(account.statement.read_at) })}
-            {analysed && (
-              <Link to={paths.holdings} className="inline-flex min-h-11 items-center gap-1 text-brand underline-offset-4 hover:underline md:min-h-0">
-                {t('brokerage.analysis')}
-                <ArrowRight aria-hidden className="size-3.5" />
-              </Link>
-            )}
-          </p>
-        )}
-      </div>
-    </Panel>
   )
 }
 

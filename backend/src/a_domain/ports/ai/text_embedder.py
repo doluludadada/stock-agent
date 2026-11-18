@@ -12,3 +12,7 @@ class ITextEmbedder(Protocol):
     async def embed(self, texts: Sequence[str]) -> list[list[float]]:
         """One vector per text, in the texts' order. The first text opens the model. Raises when it cannot be opened."""
         ...
+
+    async def vector_length(self) -> int:
+        """The length of every vector `embed` returns, as the model declares it, without embedding a text. It opens the model."""
+        ...

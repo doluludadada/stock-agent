@@ -8,8 +8,8 @@ from a_domain.model.market.world_indicator import IndicatorReading
 from a_domain.ports.market.world_indicator_repository import IWorldIndicatorRepository
 from a_domain.types.enums import WorldIndicator
 from c_infrastructure.database.db_connector import DatabaseConnector
-from c_infrastructure.database.models.daily_close_archive_dto import replacing
 from c_infrastructure.database.models.world_indicator_dto import WorldIndicatorReadingDTO
+from c_infrastructure.database.upsert import replacing
 
 
 class SqlWorldIndicatorRepository(IWorldIndicatorRepository):

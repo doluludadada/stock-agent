@@ -41,8 +41,8 @@ from c_infrastructure.database.models.daily_close_archive_dto import (
     MonthlyRevenueDTO,
     ValuationRatiosDTO,
     YearToDateEpsDTO,
-    replacing,
 )
+from c_infrastructure.database.upsert import replacing
 
 
 class SqlDailyCloseArchive(IDailyCloseArchive):
@@ -367,7 +367,7 @@ class SqlDailyCloseArchive(IDailyCloseArchive):
     async def fetch_realtime_bars(self, stocks: list[Stock]) -> dict[str, Ohlcv]:
         raise RealtimeQuotesUnavailable(
             "The open-data archive holds settled daily closes only, never a realtime quote. A personal site quotes on its "
-            "Shioaji login: set the environment's Shioaji key pair and restart."
+            "Shioaji login: set the Shioaji key pair of the server shioaji.server names and restart."
         )
 
     @override

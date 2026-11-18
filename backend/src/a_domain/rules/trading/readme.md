@@ -36,7 +36,7 @@ Each rule makes one decision in `apply`:
 |                 | `LimitPriceRule`          | An order's limit price: the decided price as a tick, up for a BUY and down for a SELL      |
 | `order_rule.py` | `OrderGateRule`           | Why an order may not be sent now: continuous trading, quote age                            |
 |                 | `RealBrokerOrdererRule`   | Why a user may not order on a real broker: the site's ordering switch as it is at the send, then the user |
-|                 | `BrokerLoginRule`         | Why a real broker's login may not take an order now: down, or on another server than the environment's |
+|                 | `BrokerLoginRule`         | Why a real broker's login may not take an order now: down, or on another server than shioaji.server names on disk at the ask |
 |                 | `BrokerAccessRule`        | Why an order may not reach its broker now: the run's choice, a real broker's orderer, login, limits |
 |                 | `BuyLimitRule`            | Why a real broker's BUY may not be sent: its value and the day's BUYs above the limits     |
 |                 | `OrderRule`               | The order for a decision: LIMIT IOC at its limit price, or REJECTED with the gate's reason |

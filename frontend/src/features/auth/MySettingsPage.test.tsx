@@ -36,13 +36,13 @@ function serve(offer: Offer) {
   return saves
 }
 
-function open(mockAccount?: ReactNode) {
+function open(accountPanels?: ReactNode) {
   render(
     <I18nextProvider i18n={initI18n('en')}>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <MemoryRouter>
           <ThemeProvider>
-            <MySettingsPage mockAccount={mockAccount} />
+            <MySettingsPage accountPanels={accountPanels} />
           </ThemeProvider>
         </MemoryRouter>
       </QueryClientProvider>

@@ -9,6 +9,7 @@ from typing import Self, override
 import sqlalchemy
 from sqlalchemy import event, func, select
 from sqlalchemy.engine import URL
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
@@ -23,9 +24,11 @@ from c_infrastructure.database.models.schema_version_dto import (
     SCHEMA_VERSION,
     OutdatedDatabaseError,
     SchemaVersionDTO,
+    add_the_vector_extension,
     live_layout,
     pending_steps,
     upgrade,
+    vector_extension_refusal,
 )
 
 BACKUP_HEADER = b"PGDMP"
@@ -61,10 +64,11 @@ class DatabaseConnector(IDatabaseConnector[AsyncSession]):
     @override
     async def init_db(self) -> None:
         """
-        Create the tables that do not exist yet; a new database first gets its schema version stamp. Raise
-        OutdatedDatabaseError, and change nothing, when the database is not new and its stamp is not SCHEMA_VERSION, an
-        older version included, or when an existing table's columns differ from its SQLModel class. Startup never
-        upgrades a database: `just db-migrate` does, after a backup.
+        Create the tables that do not exist yet; a new database first gets the vector extension its tables need
+        (article_store_dto) and its schema version stamp. Raise OutdatedDatabaseError, and change nothing, when the
+        database is not new and its stamp is not SCHEMA_VERSION, an older version included, when an existing table's
+        columns differ from its SQLModel class, or when a new database cannot get the extension. Startup never upgrades
+        a database: `just db-migrate` does, after a backup.
         """
         stamp_table = SQLModel.metadata.tables[SchemaVersionDTO.__tablename__]
 
@@ -76,7 +80,11 @@ class DatabaseConnector(IDatabaseConnector[AsyncSession]):
 
             if not stamps:
                 # A database with tables and no stamp is refused, so the stamp goes in before any other table.
-                await connection.run_sync(SQLModel.metadata.create_all, tables=[stamp_table])
+                try:
+                    await connection.run_sync(SQLModel.metadata.create_all, tables=[stamp_table])
+                except DBAPIError as error:
+                    raise OutdatedDatabaseError(vector_extension_refusal(error)) from error
+
                 await connection.execute(stamp_table.insert().values(version=SCHEMA_VERSION))
 
             self._logger.debug("Running DB schema creation...")
@@ -105,6 +113,10 @@ class DatabaseConnector(IDatabaseConnector[AsyncSession]):
 
     @override
     async def backup(self) -> Path:
+        """
+        A copy of every table and row, without the vector extension: the extension belongs to the database as the
+        database itself does, and a restore that dropped it again would need the role that created it.
+        """
         stamps = (await self.state()).stamps
         self._backups.mkdir(exist_ok=True)
         self._backups.chmod(0o700)
@@ -115,7 +127,7 @@ class DatabaseConnector(IDatabaseConnector[AsyncSession]):
         destination.touch(mode=0o600, exist_ok=False)
 
         try:
-            await run_postgresql_client("pg_dump", self._db, "--format=custom", f"--file={destination}")
+            await run_postgresql_client("pg_dump", self._db, "--format=custom", "--exclude-extension=vector", f"--file={destination}")
         except BaseException:
             destination.unlink(missing_ok=True)
             raise
@@ -152,6 +164,7 @@ class DatabaseConnector(IDatabaseConnector[AsyncSession]):
 
     @override
     async def restore(self, backup: Path) -> Path | None:
+        """A database without the vector extension gets it first, which the vectors of a backup need (backup)."""
         if not backup.is_file():
             raise DatabaseCommandError(f"There is no file at {backup}. Nothing changed.")
 
@@ -160,6 +173,12 @@ class DatabaseConnector(IDatabaseConnector[AsyncSession]):
                 raise DatabaseCommandError(f"{backup} is not a backup that pg_dump wrote. Nothing changed.")
 
         current = await self.backup() if (await self.state()).rows else None
+
+        try:
+            async with self._engine.begin() as connection:
+                await add_the_vector_extension(connection)
+        except DBAPIError as error:
+            raise DatabaseCommandError(f"{vector_extension_refusal(error)}\nNothing was restored.") from error
 
         await run_postgresql_client(
             "pg_restore", self._db, "--clean", "--if-exists", "--single-transaction", "--no-owner", str(backup)

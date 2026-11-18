@@ -15,7 +15,9 @@ export function useSettingsForm() {
 
 /**
  * Writes the changes into the settings files and runs on them at once; the answer is the form after the save. A save
- * can change what any page shows, the ranking's formula for one, so every other answer the tab holds is asked again.
+ * can change what any page shows, the ranking's formula for one, so every other answer the tab holds is asked again,
+ * after a refusal too: the server writes a turn-off of ordering on its own before it reviews the rest, so a refused
+ * save may still have turned ordering off.
  */
 export function useSaveSettings() {
   const client = useQueryClient()
@@ -25,6 +27,8 @@ export function useSaveSettings() {
     onMutate: sentInSession,
     onSuccess: (fields, _, sent) => {
       if (isSameSession(sent)) client.setQueryData(FORM_KEY, fields)
+    },
+    onSettled: () => {
       void client.invalidateQueries({ predicate: (query) => query.queryKey[0] !== 'admin' })
     },
   })

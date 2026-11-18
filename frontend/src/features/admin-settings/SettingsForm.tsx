@@ -1,9 +1,9 @@
 import { ChevronDown, Minus, Plus, Search, TriangleAlert } from 'lucide-react'
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
-import { useBlocker, useSearchParams } from 'react-router'
+import { Link, useBlocker, useNavigate, useSearchParams } from 'react-router'
 import { toast } from 'sonner'
 import { useTranslation } from '@/i18n'
-import { useSession } from '@/shared/api'
+import { useSession, type PageRefusal } from '@/shared/api'
 import { useErrorReason } from '@/shared/lib/error-reason'
 import { clockTime, useFormat } from '@/shared/lib/format'
 import { useKeptDraft } from '@/shared/lib/kept-draft'
@@ -30,6 +30,7 @@ import {
   inputOf,
   isLongText,
   isNamedOption,
+  MANAGED_ELSEWHERE,
   onGrid,
   problemsAt,
   problemsElsewhere,
@@ -41,9 +42,9 @@ import {
   type SettingField,
   type SettingGroup,
 } from './form'
-import { confirmationRefusal, inputsOf, startGoogleConfirmation, takePendingSave, type PendingSave } from './googleConfirmation'
-import { problemMessage, reasonOf, refusalOf, type SaveRefusal, type SettingsProblem } from './model'
-import { PasswordDialog, type DialogRefusal } from './PasswordDialog'
+import { confirmationRefusal, inputsOf, takePendingSave, type PendingSave } from './googleConfirmation'
+import { problemMessage, reasonOf, refusalOf, type SettingsProblem } from './model'
+import { SaveConfirmation } from './SaveConfirmation'
 
 /** What a save was refused for: the server's problems, each at its setting, or one sentence of the form's own. */
 interface Refused {
@@ -97,6 +98,7 @@ function FormBody({ fields, onStale }: { fields: SettingField[]; onStale: () => 
   const toGoogle = useRef(false)
   const blocker = useLeaveGuard(dirty, toGoogle)
   const [params, setParams] = useSearchParams()
+  const navigate = useNavigate()
   const outcome = params.get('google')
 
   useEffect(() => {
@@ -118,7 +120,7 @@ function FormBody({ fields, onStale }: { fields: SettingField[]; onStale: () => 
   }
 
   /** A refusal the form answers itself, above the settings or at the setting it is about. */
-  const refuse = (refusal: Extract<SaveRefusal, { kind: 'refused' | 'conflict' }>) => {
+  const refuse = (refusal: PageRefusal) => {
     setConfirming(false)
     // A search may hide the setting the refusal is about.
     setQuery('')
@@ -127,25 +129,15 @@ function FormBody({ fields, onStale }: { fields: SettingField[]; onStale: () => 
     setRefused(refusal.kind === 'refused' && refusal.problems.length > 0 ? { problems: refusal.problems, notice: null } : noticed(general))
   }
 
-  const confirm = async (password: string): Promise<DialogRefusal | null> => {
-    try {
-      await save.mutateAsync({ changes, password })
-      saved()
-      return null
-    } catch (error) {
-      const refusal = refusalOf(error)
-      if (refusal.kind === 'refused' || refusal.kind === 'conflict') refuse(refusal)
-      else if (refusal.kind === 'googleRequired') return { kind: 'failed', error }
-      else return refusal
-      return null
-    }
-  }
-
-  /** Back from Google: the save that waited is sent with the id Google's fresh sign-in was granted for. */
+  /**
+   * Back from Google: the save that waited is sent with the id Google's fresh sign-in was granted for, and a save made
+   * on another page goes back there once it is saved.
+   */
   const sendConfirmed = async (pending: PendingSave) => {
     try {
       await save.mutateAsync({ changes: pending.changes, google_confirmation: pending.id })
       saved()
+      if (pending.returnTo) void navigate(pending.returnTo)
     } catch (error) {
       const refusal = refusalOf(error)
       if (refusal.kind === 'refused' || refusal.kind === 'conflict') refuse(refusal)
@@ -166,7 +158,8 @@ function FormBody({ fields, onStale }: { fields: SettingField[]; onStale: () => 
     )
     const pending = takePendingSave()
     if (!pending) return
-    setInputs(inputsOf(fields, pending.changes))
+    // A save made on another page is that page's: the form holds none of it, so nothing holds the way back there.
+    if (!pending.returnTo) setInputs(inputsOf(fields, pending.changes))
     if (outcome === 'confirmed') void sendConfirmed(pending)
     else setRefused(noticed(t(`google.refused.${confirmationRefusal(outcome)}`)))
     // The return from Google is handled once, when the form first shows with ?google= in the address.
@@ -255,22 +248,16 @@ function FormBody({ fields, onStale }: { fields: SettingField[]; onStale: () => 
         </GroupSection>
       ))}
 
-      {byGoogle ? (
-        <ConfirmDialog
-          open={confirming}
-          onOpenChange={setConfirming}
-          title={t('google.title')}
-          description={t('google.description')}
-          cancel={t('google.cancel')}
-          confirm={t('google.confirm')}
-          onConfirm={() => {
-            toGoogle.current = true
-            startGoogleConfirmation(changes)
-          }}
-        />
-      ) : (
-        <PasswordDialog open={confirming} onOpenChange={setConfirming} onConfirm={confirm} />
-      )}
+      <SaveConfirmation
+        open={confirming}
+        onOpenChange={setConfirming}
+        changes={changes}
+        onSaved={saved}
+        onRefused={refuse}
+        onLeave={() => {
+          toGoogle.current = true
+        }}
+      />
       <ConfirmDialog
         open={blocker.state === 'blocked'}
         title={t('leave.title')}
@@ -384,6 +371,8 @@ function SettingRowView({ field, input, changed, problems, onChange }: SettingRo
   // A control made of several parts names itself; one control takes the label.
   const entries = field.kind === 'choice' ? entriesOf(field) : []
   const grouped = field.kind === 'choices' || field.kind === 'range' || isSegmented(field, entries, entries.map((entry) => wording.entry(field, entry)))
+  const managedAt = MANAGED_ELSEWHERE[field.path]
+  const fixed = field.restart_only || managedAt !== undefined
   return (
     <div id={rowId(field.path)} className={cn('grid gap-x-6 gap-y-2 py-3.5', !wide && 'md:grid-cols-[minmax(0,1fr)_minmax(12rem,18rem)] md:items-start')}>
       <div className="min-w-0 space-y-1">
@@ -394,15 +383,22 @@ function SettingRowView({ field, input, changed, problems, onChange }: SettingRo
               <span className="sr-only">{t('form.changed')}</span>
             </>
           )}
-          {field.restart_only || grouped ? <p className="text-sm leading-none font-medium">{label}</p> : <Label htmlFor={id}>{label}</Label>}
+          {fixed || grouped ? <p className="text-sm leading-none font-medium">{label}</p> : <Label htmlFor={id}>{label}</Label>}
         </div>
         <div id={helpId} className="space-y-1 text-xs text-pretty text-muted-foreground">
           <p>{t(`form.help.${field.path}`)}</p>
           {field.restart_only && <p>{t('form.restartOnly')}</p>}
+          {managedAt !== undefined && (
+            <p>
+              <Link to={managedAt} className="tap text-brand underline-offset-4 hover:underline">
+                {t(`form.managedAt.${field.path}`)}
+              </Link>
+            </p>
+          )}
         </div>
       </div>
       <div className="min-w-0 space-y-1.5">
-        {field.restart_only ? (
+        {fixed ? (
           <p className="text-sm font-medium">{wording.value(field, field.value)}</p>
         ) : (
           <Control field={field} input={input} label={label} described={described} onChange={(next) => onChange(field.path, next)} />

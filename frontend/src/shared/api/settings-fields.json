@@ -943,6 +943,16 @@
     "unit": null
   },
   {
+    "path": "shioaji.server",
+    "kind": "choice",
+    "group": "trading_limits",
+    "options": [
+      "simulation",
+      "production"
+    ],
+    "unit": null
+  },
+  {
     "path": "shioaji.poll_interval_seconds",
     "kind": "steps",
     "group": "trading_limits",
@@ -955,6 +965,13 @@
     "group": "trading_limits",
     "options": [],
     "unit": null
+  },
+  {
+    "path": "shioaji.status_timeout_seconds",
+    "kind": "steps",
+    "group": "trading_limits",
+    "options": [],
+    "unit": "seconds"
   },
   {
     "path": "shioaji.simulation_initial_cash",

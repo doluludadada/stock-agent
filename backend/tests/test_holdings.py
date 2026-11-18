@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 from sqlalchemy import text
 from support.databases import open_database, raw_engine
+from support.fake_shioaji import FakeShioaji
 from support.harness import (
     ADMINISTRATOR,
     ADMINISTRATOR_PASSWORD,
@@ -22,9 +23,11 @@ from support.harness import (
     MEMBER_PASSWORD,
     CliHarness,
     build_harness,
+    harness_config,
     rising_history,
     runtime_for,
 )
+from support.settings import sinopac_setup
 from support.web import app_of, client_at, ended, serve, sign_in, write
 from test_ranking import SESSIONS, bars, market, revenue
 from test_web_api import FOLLOWED_RUN, SINOPAC_STARTS, reported_run
@@ -33,10 +36,21 @@ from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.account import BrokerFill, Position, Settlement
 from a_domain.rules.trading.ranking import MonthlyRankingRule, Ranking
-from a_domain.types.enums import ExecutionProvider, FeatureVisibility, OrderStatus, RejectReason, TradeAction
+from a_domain.types.enums import (
+    ExecutionProvider,
+    FeatureVisibility,
+    OrderStatus,
+    RejectReason,
+    ShioajiCredential,
+    ShioajiServer,
+    SystemEnvironment,
+    TradeAction,
+)
 from a_domain.types.ids import UserId
 from c_infrastructure.database.models.schema_version_dto import SCHEMA_VERSION
 from c_infrastructure.database.repositories.holding_repository import HoldingRepository
+from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection
+from c_infrastructure.trading.shioaji.execution_provider import ShioajiExecutionProvider
 
 pytestmark = pytest.mark.asyncio
 
@@ -534,7 +548,7 @@ async def test_an_administrator_reads_the_sinopac_account_as_the_broker_reports_
 
     body = answer.json()
     statement = body["statement"]
-    assert (answer.status_code, body["simulation"], body["login_up"], body["ordering"]) == (200, True, True, False)
+    assert (answer.status_code, body["server"], body["login_up"], body["ordering"]) == (200, "simulation", True, False)
     assert (statement["balance"], statement["settlements"]) == (42_000, [{"settles_on": "2026-10-21", "amount": -47_500}])
     assert [(held["stock_id"], held["quantity"], held["average_cost"]) for held in statement["positions"]] == [("2330", 500, 95)]
     assert [(fill["stock_id"], fill["action"], fill["quantity"], fill["price"]) for fill in statement["fills"]] == [
@@ -547,26 +561,109 @@ async def test_an_administrator_reads_the_sinopac_account_as_the_broker_reports_
     assert harness.real_broker.placed == []
 
 
-async def test_the_sinopac_account_says_which_server_it_is_and_when_its_login_is_down() -> None:
+async def test_the_sinopac_account_says_which_server_it_is_when_its_login_is_down_and_when_sinopac_failed_on_an_up_login() -> None:
     down = portfolio_site()
     down.real_broker.current_link = replace(down.real_broker.current_link, up=False)
+    assert down.runtime.shioaji is not None
+    down.runtime.shioaji.up = False
 
     async with serve(down) as client:
         login_down = (await client.get("/v1/account/brokerage")).json()
 
     async with serve(build_harness()) as client:
-        no_login = (await client.get("/v1/account/brokerage")).json()
+        no_sinopac = (await client.get("/v1/account/brokerage")).json()
 
     async with serve(portfolio_site()) as client:
         ordering_on = (await client.get("/v1/account/brokerage")).json()
 
-    assert login_down == {"simulation": True, "login_up": False, "ordering": True, "statement": None}
-    assert no_login == {"simulation": True, "login_up": False, "ordering": True, "statement": None}
+    developers_machine = {
+        "server": "simulation",
+        "switch_refusal": {"reason": "environment", "server": "production", "missing": []},
+        "simulation_initial_cash": 1_000_000,
+        "statement": None,
+    }
+    assert login_down == {**developers_machine, "login_up": False, "login_down": True, "ordering": True}
+    assert no_sinopac == {**developers_machine, "login_up": False, "login_down": False, "ordering": True}, "nothing logs in again"
     assert (ordering_on["login_up"], ordering_on["ordering"], ordering_on["statement"]["positions"][0]["stock_id"]) == (
         True,
         True,
         "2330",
     )
+
+
+def sinopac_answering_in(milliseconds: int) -> tuple[CliHarness, FakeShioaji]:
+    """
+    A site whose SinoPac is the real adapter over a fake client on the simulation server, which takes `milliseconds`
+    to refresh the status of every order of the account today.
+    """
+    config = sinopac_setup(harness_config(), ShioajiServer.SIMULATION)
+    harness = build_harness(config=config, sinopac=True)
+    client = FakeShioaji(account_refresh_milliseconds=milliseconds)
+    client.stock_account = client.account_at_login
+    login = config.shioaji.login()
+    assert login is not None
+    adapter = ShioajiExecutionProvider(ShioajiConnection(client=client, up=True), login, config, harness.clock, harness.logger)
+    dependencies = replace(harness.dependencies, real_broker=adapter)
+    runtime = runtime_for(replace(harness, dependencies=dependencies), config)
+    runtime.become_current()
+    return replace(harness, dependencies=dependencies, runtime=runtime), client
+
+
+async def test_a_busy_days_sinopac_account_is_read_with_one_status_refresh_that_waits_shioaji_status_timeout_seconds() -> None:
+    harness, client = sinopac_answering_in(8_000)
+
+    async with serve(harness) as client_of_site:
+        answer = await client_of_site.get("/v1/account/brokerage")
+
+    assert (answer.status_code, answer.json()["statement"]["balance"]) == (200, 1_000_000)
+    assert client.account_refreshes == [30_000], "one refresh of the day's orders per read, as long as the setting allows"
+
+
+async def test_when_sinopac_does_not_answer_the_account_pages_answer_503_broker_not_answering_and_order_nothing() -> None:
+    harness, client = sinopac_answering_in(30_001)
+
+    async with serve(harness) as client_of_site:
+        answers = [
+            await client_of_site.get("/v1/account/brokerage"),
+            await client_of_site.get("/v1/account/history", params={"broker": "shioaji"}),
+            await client_of_site.get("/v1/account/trades", params={"broker": "shioaji"}),
+        ]
+
+    assert [(answer.status_code, answer.json()) for answer in answers] == [
+        (503, {"detail": "Shioaji answered TimeoutError", "code": "broker_not_answering"})
+    ] * 3
+    assert (client.account_refreshes, client.placed) == ([30_000] * 3, [])
+
+
+@pytest.mark.parametrize(
+    ("server", "refusal", "starting_cash"),
+    [
+        (
+            ShioajiServer.SIMULATION,
+            {"reason": "credentials_missing", "server": "production", "missing": ["SHIOAJI_CA_PATH", "SHIOAJI_PERSON_ID"]},
+            1_000_000,
+        ),
+        (ShioajiServer.PRODUCTION, None, None),
+    ],
+)
+async def test_the_sinopac_account_tells_its_panel_the_server_why_a_switch_is_refused_and_the_starting_cash(
+    server: ShioajiServer, refusal: dict[str, object] | None, starting_cash: float | None
+) -> None:
+    held = [
+        *ShioajiServer.SIMULATION.credentials,
+        ShioajiCredential.API_KEY,
+        ShioajiCredential.SECRET_KEY,
+        ShioajiCredential.CA_PASSWORD,
+    ]
+    held += [] if refusal else [ShioajiCredential.CA_PATH, ShioajiCredential.PERSON_ID]
+    on_server = sinopac_setup(market().config, server, SystemEnvironment.TEST, held)
+    config = on_server.model_copy(update={"accounts": on_server.accounts.model_copy(update={"registration_open": False})})
+
+    async with serve(build_harness(config=config, sinopac=True)) as client:
+        body = (await client.get("/v1/account/brokerage")).json()
+
+    assert (body["server"], body["switch_refusal"], body["simulation_initial_cash"]) == (server.value, refusal, starting_cash)
+    assert "SHIOAJI_CA_PASSWORD" not in str(body), "a variable that is set is never named, and no value ever is"
 
 
 @pytest.mark.parametrize(

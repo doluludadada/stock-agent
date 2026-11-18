@@ -8,8 +8,8 @@ export const rankingKeys = {
   formulas: (period: Period) => ['owner', 'ranking', 'formulas', period.first, period.last] as const,
   /** Under the run results: a run's end and a reset of the mock account change what the account holds. */
   follow: [...runResultsKey, 'ranking-follow'] as const,
-  /** Under the run results too: a follow's end changes what the schedule still has to follow. */
-  schedule: [...runResultsKey, 'ranking-follow-schedule'] as const,
+  /** My settings' follow account and schedule, under the run results too: a follow's end changes what the schedule still has to follow. */
+  settings: [...runResultsKey, 'ranking-follow-settings'] as const,
 }
 
 /**
@@ -68,7 +68,7 @@ const RUN_POLL_MS = 4000
 /** A follow refused outside its window is asked again each minute, so the button opens with the window. */
 const WINDOW_POLL_MS = 60_000
 
-/** The viewer's mock account against the latest ranking, and what following the ranking did so far. */
+/** The viewer's follow account against the latest ranking, and what following the ranking did so far. */
 export function useRankingFollow() {
   const signedIn = useIsSignedIn()
   return useQuery({
@@ -79,11 +79,14 @@ export function useRankingFollow() {
   })
 }
 
-/** The viewer's schedule of the follow alone, which the server answers even while no ranking can be made. */
-export function useFollowSchedule() {
+/**
+ * The viewer's follow account, the accounts the site offers them as one and why it refuses theirs, and their schedule
+ * of the follow there, which the server answers even while no ranking can be made.
+ */
+export function useFollowSettings() {
   const signedIn = useIsSignedIn()
   return useQuery({
-    queryKey: rankingKeys.schedule,
+    queryKey: rankingKeys.settings,
     queryFn: ({ signal }) => apiRequest('get', '/v1/rankings/follow/schedule', { signal }),
     enabled: signedIn,
   })
@@ -94,20 +97,32 @@ export function useFollowOrders(runId: string, open: boolean, running: boolean) 
   return useRunOrders(runId, open, running ? RUN_POLL_MS : false)
 }
 
-/** Saves when the site follows the ranking by itself, null for no schedule, and on which account; the schedule and the block's answer follow it. */
+/** Saves when the site follows the ranking by itself, null for no schedule; the account stays. The schedule and the block's answer follow it. */
 export function useScheduleFollow() {
   const client = useQueryClient()
   return useMutation({
-    mutationFn: (schedule: { time: string | null; broker: Broker }) => apiRequest('put', '/v1/rankings/follow/schedule', { body: { confirm: true, ...schedule } }),
-    onSettled: () => Promise.all([rankingKeys.schedule, rankingKeys.follow].map((queryKey) => client.invalidateQueries({ queryKey }))),
+    mutationFn: (time: string | null) => apiRequest('put', '/v1/rankings/follow/schedule', { body: { confirm: true, time } }),
+    onSettled: () => Promise.all([rankingKeys.settings, rankingKeys.follow].map((queryKey) => client.invalidateQueries({ queryKey }))),
   })
 }
 
-/** Starts the follow of the latest ranking into the account named, as a run whose id the answer carries. */
+/** Saves the account the button and the schedule follow on; the schedule's time stays. The block answers for it next. */
+export function useChooseFollowAccount() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (broker: Broker) => apiRequest('put', '/v1/rankings/follow/account', { body: { confirm: true, broker } }),
+    onSettled: () => Promise.all([rankingKeys.settings, rankingKeys.follow].map((queryKey) => client.invalidateQueries({ queryKey }))),
+  })
+}
+
+/**
+ * Starts the follow of the latest ranking into the viewer's follow account, naming the account the viewer confirmed,
+ * as a run whose id the answer carries. The server refuses one that is no longer the follow account.
+ */
 export function useFollowRanking() {
   const client = useQueryClient()
   return useMutation({
-    mutationFn: (broker: Broker) => apiRequest('post', '/v1/rankings/follow', { query: { broker }, body: { confirm: true } }),
+    mutationFn: (broker: Broker) => apiRequest('post', '/v1/rankings/follow', { body: { confirm: true, broker } }),
     onSettled: () => client.invalidateQueries({ queryKey: runResultsKey }),
   })
 }

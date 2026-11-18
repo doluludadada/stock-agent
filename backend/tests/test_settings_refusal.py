@@ -12,11 +12,12 @@ from pathlib import Path
 
 import pytest
 import yaml
+from support.settings import running_on
 from trading_stack import SilentLogger
 
 from a_domain.ports.system.settings_files import SettingsProblem
-from a_domain.types.enums import Audience, SettingsFile, SystemEnvironment
-from b_application.config.settings_loader import InvalidSettingsError, load_settings, startup_settings
+from a_domain.types.enums import Audience, SettingsFile, ShioajiServer, SystemEnvironment
+from b_application.config.settings_loader import InvalidSettingsError, load_settings, production_notice, startup_settings
 from c_infrastructure.system.settings_files import SettingsFiles
 
 BACKEND = Path(__file__).resolve().parents[1]
@@ -206,14 +207,16 @@ def test_a_refusal_pydantic_words_names_its_type_and_the_schemas_limits_so_a_cli
     ids=["unknown", "environment-alias", "environment-field", "prompt"],
 )
 def test_a_key_the_app_would_not_read_is_refused_at_its_line(addition: str, path: str | None, words: str) -> None:
-    section = {"order_mod": "trading:\n", "OPENAI_API_KEY": "ai:\n", "password": "db:\n", "system_prompt": "ai:\n"}
+    sections = {"order_mod": "trading:\n", "OPENAI_API_KEY": "ai:\n", "password": "db:\n", "system_prompt": "ai:\n"}
     key = addition.strip().split(":")[0]
-    text = SHIPPED[SettingsFile.APPSETTING].replace(section[key], section[key] + addition, 1)
+    section = sections[key]
+    shipped = SHIPPED[SettingsFile.APPSETTING]
+    text = shipped.replace(section, section + addition, 1) if section in shipped else f"{shipped}{section}{addition}"
 
     [problem] = refused(SettingsFile.APPSETTING, text)
 
     assert (problem.line, problem.column) == at(text, addition.lstrip())
-    assert problem.path == (path or f"{section[key].strip(':\n')}.{key}") and words in problem.message
+    assert problem.path == (path or f"{section.strip(':\n')}.{key}") and words in problem.message
     assert "from-yaml" not in str(problem)
 
 
@@ -245,9 +248,11 @@ def test_an_unsafe_trading_setup_is_located_at_the_setting_it_names(tmp_path: Pa
         (tmp_path / "config" / file.file_name).write_text(text, encoding="utf-8")
     (tmp_path / "config" / "strategies").symlink_to(CONFIG / "strategies")
     text = SHIPPED[SettingsFile.APPSETTING].replace("environment: dev", "environment: prod", 1)
-    files = SettingsFiles(project_root=tmp_path, max_bytes=262_144, backups_kept=3, logger=SilentLogger())
+    files = SettingsFiles(
+        project_root=tmp_path, max_bytes=262_144, backups_kept=3, running=running_on(SystemEnvironment.DEV), logger=SilentLogger()
+    )
 
-    problems = files.check({SettingsFile.APPSETTING: text}, SystemEnvironment.DEV, Audience.PERSONAL, "127.0.0.1")
+    problems = files.check({SettingsFile.APPSETTING: text}, "127.0.0.1")
     [problem] = [problem for problem in problems if problem.path == "environment"]
 
     assert (problem.path, problem.line) == ("environment", at(text, "environment: prod")[0])
@@ -349,9 +354,7 @@ def test_settings_of_another_environment_or_audience_than_the_process_started_in
     text = SHIPPED[SettingsFile.APPSETTING].replace(old, new, 1)
 
     with pytest.raises(InvalidSettingsError) as refused:
-        startup_settings(
-            project_with_shipped_settings(tmp_path), {SettingsFile.APPSETTING: text}, SystemEnvironment.DEV, Audience.PERSONAL
-        )
+        startup_settings(project_with_shipped_settings(tmp_path), {SettingsFile.APPSETTING: text}, running_on(SystemEnvironment.DEV))
 
     [problem] = refused.value.problems
     assert (problem.file, problem.path, problem.line, problem.column) == (SettingsFile.APPSETTING, old.split(":")[0], *at(text, new))
@@ -365,7 +368,9 @@ def test_a_public_site_whose_ai_would_search_the_web_or_x_is_refused_where_the_s
 
     with pytest.raises(InvalidSettingsError) as refused:
         startup_settings(
-            project_with_shipped_settings(tmp_path), {SettingsFile.APPSETTING: text}, SystemEnvironment.DEV, Audience.PUBLIC
+            project_with_shipped_settings(tmp_path),
+            {SettingsFile.APPSETTING: text},
+            running_on(SystemEnvironment.DEV, Audience.PUBLIC),
         )
 
     [problem] = refused.value.problems
@@ -382,23 +387,24 @@ def test_a_personal_site_may_search_the_web_and_x(tmp_path: Path, monkeypatch: p
     )
 
     config = startup_settings(
-        project_with_shipped_settings(tmp_path), {SettingsFile.APPSETTING: text}, SystemEnvironment.DEV, Audience.PERSONAL
+        project_with_shipped_settings(tmp_path), {SettingsFile.APPSETTING: text}, running_on(SystemEnvironment.DEV)
     )
 
     assert (config.audience, config.behavior.enable_web_search, config.behavior.enable_x_search) == (Audience.PERSONAL, True, True)
 
 
-def prod_settings(registration_open: str) -> str:
-    """The shipped settings in prod, with accounts.registration_open as given."""
-    text = SHIPPED[SettingsFile.APPSETTING].replace("environment: dev", "environment: prod", 1)
+def production_settings(registration_open: str) -> str:
+    """The shipped settings in test on SinoPac's production server, with accounts.registration_open as given."""
+    text = SHIPPED[SettingsFile.APPSETTING].replace("environment: dev", "environment: test", 1)
+    text = text.replace("  server: simulation", "  server: production", 1)
     return text.replace("registration_open: false", f"registration_open: {registration_open}", 1)
 
 
-def test_registration_ships_closed_and_prod_refuses_to_start_with_it_open_naming_the_remedy(
+def test_registration_ships_closed_and_the_production_server_refuses_to_start_with_it_open_naming_the_remedy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "placeholder")
-    project, text = project_with_shipped_settings(tmp_path), prod_settings("true")
+    project, text = project_with_shipped_settings(tmp_path), production_settings("true")
     open_in_dev = SHIPPED[SettingsFile.APPSETTING].replace("registration_open: false", "registration_open: true", 1)
     shipped, dev = startup_settings(project), startup_settings(project, {SettingsFile.APPSETTING: open_in_dev})
 
@@ -410,8 +416,70 @@ def test_registration_ships_closed_and_prod_refuses_to_start_with_it_open_naming
     [problem] = refused.value.problems
     assert (problem.path, problem.line) == ("accounts.registration_open", at(text, "registration_open: true")[0])
     assert problem.message == (
-        "environment prod refuses to start while accounts.registration_open is true: its Shioaji login is the real "
-        "account. Set accounts.registration_open to false in config/appsetting.yaml"
+        "shioaji.server production refuses accounts.registration_open: the site's SinoPac login is the real account. "
+        "Close registration first"
     )
     assert (shipped.accounts.registration_open, dev.accounts.registration_open) == (False, True)
-    assert not startup_settings(project, {SettingsFile.APPSETTING: prod_settings("false")}).accounts.registration_open
+    assert not startup_settings(project, {SettingsFile.APPSETTING: production_settings("false")}).accounts.registration_open
+
+
+def test_a_reload_that_moves_the_sinopac_server_needs_ordering_off_in_the_same_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "placeholder")
+    for credential in ShioajiServer.PRODUCTION.credentials:
+        monkeypatch.setenv(credential.value, credential.value)
+    project = project_with_shipped_settings(tmp_path)
+    monkeypatch.chdir(project)
+    moved = production_settings("false")
+    ordering_on = moved.replace('sinopac_ordering: "off"', "sinopac_ordering: administrators", 1)
+    on_simulation, on_production = (
+        running_on(SystemEnvironment.TEST),
+        running_on(SystemEnvironment.TEST, server=ShioajiServer.PRODUCTION),
+    )
+
+    with pytest.raises(InvalidSettingsError) as refused:
+        startup_settings(project, {SettingsFile.APPSETTING: ordering_on}, on_simulation)
+
+    [problem] = refused.value.problems
+    assert (problem.path, problem.line) == ("shioaji.server", at(ordering_on, "server: production")[0])
+    assert startup_settings(project, {SettingsFile.APPSETTING: moved}, on_simulation).shioaji.server == ShioajiServer.PRODUCTION
+    assert startup_settings(project, {SettingsFile.APPSETTING: ordering_on}, on_production), "the server stays"
+    assert startup_settings(project, {SettingsFile.APPSETTING: ordering_on}), "a start moves no login"
+
+
+def test_a_switch_back_to_simulation_names_the_simulation_variables_it_lacks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "placeholder")
+    for credential in ShioajiServer.PRODUCTION.credentials:
+        monkeypatch.setenv(credential.value, credential.value)
+    for credential in ShioajiServer.SIMULATION.credentials:
+        monkeypatch.delenv(credential.value, raising=False)
+    project = project_with_shipped_settings(tmp_path)
+    monkeypatch.chdir(project)
+    back = SHIPPED[SettingsFile.APPSETTING].replace("environment: dev", "environment: test", 1)
+
+    with pytest.raises(InvalidSettingsError) as refused:
+        startup_settings(project, {SettingsFile.APPSETTING: back}, running_on(SystemEnvironment.TEST, server=ShioajiServer.PRODUCTION))
+
+    [problem] = refused.value.problems
+    assert problem.message == (
+        "shioaji.server simulation needs SHIOAJI_API_KEY_TEST, SHIOAJI_SECRET_KEY_TEST in the server's environment or .env"
+    )
+
+
+def test_no_variable_sets_the_sinopac_server_and_a_start_on_production_says_whether_ordering_is_on(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "placeholder")
+    monkeypatch.setenv("SHIOAJI_SERVER", "production")
+    project = project_with_shipped_settings(tmp_path)
+    monkeypatch.chdir(project)
+    without_server = SHIPPED[SettingsFile.APPSETTING].replace("  server: simulation\n", "", 1)
+    ordering_on = production_settings("false").replace('sinopac_ordering: "off"', "sinopac_ordering: administrators", 1)
+    monkeypatch.setenv("ACCOUNTS_KEY", "A" * 43)
+
+    assert startup_settings(project, {SettingsFile.APPSETTING: without_server}).shioaji.server == ShioajiServer.SIMULATION
+    assert production_notice(startup_settings(project, {SettingsFile.APPSETTING: ordering_on})) == [
+        "SinoPac's login is on the production server, real money: features.sinopac_ordering is administrators"
+    ]
+    assert production_notice(startup_settings(project)) == []

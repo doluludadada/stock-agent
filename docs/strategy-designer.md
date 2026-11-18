@@ -323,7 +323,7 @@ has been applied by this design work.
   Subsequent loads preserve their saved definitions and selection.
 - Preserve owner scoping and revision conflicts. Service identity must come from an
   authenticated account; a configured local profile ID is not account authentication.
-- Chroma keeps its existing memory role.
+- The decision memory keeps its existing role.
 - Keep the CLI limited to loading Conservative, Balanced and Aggressive. Editing/saving is
   exposed through the backend API for future website/iOS clients.
 - Saving changes subsequent runs. A running analysis retains its loaded strategy snapshot.

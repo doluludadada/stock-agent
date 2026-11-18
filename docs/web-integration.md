@@ -77,7 +77,7 @@ The server checks every request. Hiding a menu is never the protection.
 - The server replays `accounts.max_concurrent_backtests` strategy backtests and ranking backtests at once, every
   user's together, and one more waits its turn. A user's request past `accounts.max_backtests_per_user` replaying or
   waiting answers 429 `too_many_backtests`.
-- Registration ships closed (`accounts.registration_open: false`), and `environment: prod` refuses to start with it
+- Registration ships closed (`accounts.registration_open: false`), and `shioaji.server: production` refuses it
   open. The API docs (`/docs`, `/redoc`, `/openapi.json`) are served only in `environment: dev`.
 - Behind a reverse proxy, the proxy must pass the visitor's address and scheme, or every visitor shares the proxy's
   address in the attempt limits and the cookie loses `Secure` under TLS: `proxy_set_header X-Forwarded-For
@@ -338,8 +338,8 @@ there (`broker_pipeline`; 403 `feature_hidden`, `real_broker_refused` or `broker
 each order `BrokerAccessRule` checks again that the order reaches the broker the run chose, that
 `features.sinopac_ordering`, as the settings file on disk holds it at that moment and not as the run's settings held it
 at its start, lets the user order there (`RealBrokerOrdererRule`, `ORDERING_OFF` otherwise), that the
-user is still an active administrator, that the login is up on the server the environment
-trades on, and `BuyLimitRule` holds every SinoPac BUY to `trading.max_order_value` and the day's to
+user is still an active administrator, that the login is up on the server `shioaji.server` names on disk at that
+moment (`BrokerLoginRule`, `BROKER_SERVER_MISMATCH` otherwise), and `BuyLimitRule` holds every SinoPac BUY to `trading.max_order_value` and the day's to
 `trading.max_daily_buy_value`. `GET /v1/account/brokers` answers what each start's confirmation names.
 
 `POST /v1/runs/{id}/follow` follows a finished Full Cycle into the user's mock account, the only account it orders on, as a
@@ -348,31 +348,40 @@ realtime quote in continuous trading on a personal site; on a public site, which
 close of the last closed session while no session trades, on the mock broker only (`OrderPricing.OFFICIAL_CLOSE`).
 The order-gate check drives it as route `F` on both audiences, with `P11_OFFICIAL_CLOSE` and `P12_FOLLOW_ONCE`.
 
-`POST /v1/rankings/follow` brings the user's mock account to the monthly ranking's latest decision, as a run of its own
-(`Workflow.RANKING_FOLLOW`) through the same order loop, gates and pricing as a follow of a run, on the mock account
-unless the request names `broker=shioaji` (below). It sells each holding the ranking left, then buys each ranked stock the account lacks: the account's value over
+Each user follows the ranking on one follow account (`User.ranking_follow_broker`), chosen on My settings
+(`PUT /v1/rankings/follow/account`; `GET /v1/rankings/follow/schedule` answers it with the schedule): the mock account,
+which a user who chose nothing has, or SinoPac's simulation account (below). One rule (`FollowAccountRule`) says which
+accounts the site offers the user as one now and why it refuses theirs (`account.refusal`: `ordering_off`,
+`not_simulation`, `broker_unavailable`), for the block, the button, the schedule and My settings alike.
+`POST /v1/rankings/follow` brings that account to the monthly ranking's latest decision, as a run of its own
+(`Workflow.RANKING_FOLLOW`) through the same order loop, gates and pricing as a follow of a run; its body names the
+account the user confirmed, and one that is no longer the saved account answers 409 `follow_account_changed`. It sells each holding the ranking left, then buys each ranked stock the account lacks: the account's value over
 the ranking's stocks, capped by its share of the cash the sales free, in whole lots of `analysis.lot_size`
 (`RankingFollowRule`). A ranked stock already held is left as it is, so a second follow of the same decision answers
 409 `nothing_to_follow`, and a stock whose order was refused stays open to the next follow. A ranking that ranks no
-stock sells nothing. `GET /v1/rankings/follow` answers what the account holds and lacks of the ranking, the holdings
-that left it, whether a run of the user runs now, and the account's return since its first ranking follow against
-`ranking.benchmark_id` over the same sessions, from the close before that follow. Both need the `ranking` and the
-`mock_account` features. The ranking's backtest buys at the open of the session after the decision and resets every
+stock sells nothing. `GET /v1/rankings/follow` answers which account it is for (`account`), what that account holds
+and lacks of the ranking, the holdings that left it, why a follow may not start there now (`refusal`), whether a run of
+the user runs now, and the mock account's return since its first ranking follow against `ranking.benchmark_id` over the
+same sessions, from the close before that follow (none while the follow account is SinoPac, whose history the site does
+not keep). Both need the `ranking` feature; the read needs the follow account's own feature (`mock_account`,
+`sinopac_account`) and the follow its ordering feature (`mock_account`, `sinopac_ordering`). The ranking's backtest buys at the open of the session after the decision and resets every
 holding to an equal weight each month; a follow buys at the price of the moment it is started, in whole shares, and
 keeps the holdings that stay, so the two results differ. The order-gate check drives it as route `K`, with
 `P17_RANKING_FOLLOW`.
 
-With `broker=shioaji` the follow brings SinoPac's simulation account to the ranking instead, through the order path
+On a follow account of SinoPac the follow brings SinoPac's simulation account to the ranking, through the order path
 every SinoPac order takes (`BrokerAccessRule`, the ordering switch asked again before each exchange order, the
 journal first, one order per stock). A ranking follow never orders with real money: `SimulationOnlyRule` refuses it
 unless the Shioaji login that answers is on SinoPac's simulation server, when the run starts and before the account
 is read (403 `not_simulation`), at each order's preparation and right before each exchange order (`NOT_SIMULATION`),
 and no setting lifts it. It needs an active administrator whom `features.sinopac_ordering` shows ordering and the
-login up. Each BUY is sized inside `trading.max_order_value`; one past `trading.max_daily_buy_value` is refused,
-recorded and left to a later follow. A user's schedule (`PUT /v1/rankings/follow/schedule`, `time` and `broker`)
-follows on the account it names; `GET /v1/rankings/follow/schedule` answers that account and the ones the site
-offers the user now. A decision is finished on the account its follow ran on, and a user the site no longer lets
-order on SinoPac is followed on no account, never on the mock account instead: the timer logs why.
+login up; `GET /v1/rankings/follow` reads its positions in one request, and only while the site lets the user follow
+there. Each BUY is sized inside `trading.max_order_value`; one past `trading.max_daily_buy_value` is refused,
+recorded and left to a later follow. A user's schedule (`PUT /v1/rankings/follow/schedule`, `time` alone) follows on
+the follow account, and saving either never changes the other. A decision is finished on the account its follow ran
+on, and a user the site does not let follow on their account now is refused there, by the button (403
+`real_broker_refused`, `feature_hidden`, `broker_unavailable` or `not_simulation`) and by the schedule (the timer logs
+why), and never followed on the mock account instead.
 
 One run at a time holds per server process only. A CLI on the same database can run beside it; on the mock broker
 that can race the mock account's cash, which `formal-verify-order-gate` lists as not covered.
@@ -511,9 +520,7 @@ more in total is mostly the year of 0050 daily bars.
   the person saved in the account stays there.
 - `bun audit` still lists deepmerge (low, no fixed release) and minimatch (moderate) under the `shadcn` CLI, a
   development tool that never reaches the browser or the production install (`bun audit --prod` finds nothing).
-- pip-audit still lists chromadb (no fixed release), filelock (fix needs a major) and
-  urllib3 (pinned by kubernetes, reached through chromadb and the Google SDK, not by the app's own HTTP, which uses
-  httpx).
+- pip-audit still lists filelock (fix needs a major).
 - `GET /v1/market/stocks/{id}` and `/v1/market/indexes/{index}` are public and, on a personal site, fetch the sessions
   the history cache lacks from the exchanges' sites, each question at most once per retry interval and nothing for a
   retry interval after a request failed; put a rate limit in the reverse proxy before exposing them.

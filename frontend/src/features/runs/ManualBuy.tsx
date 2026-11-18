@@ -32,7 +32,8 @@ export function ManualBuy({ runId, stockId, name }: ManualBuyProps) {
   const [open, setOpen] = useState(false)
   const [chosen, setChosen] = useState<Broker>('mock')
   const [shares, setShares] = useState('')
-  const broker = chosenOffer(offers, chosen).broker
+  const offer = chosenOffer(offers, chosen)
+  const broker = offer.broker
   const quantity = parseShares(shares)
   const stock = name ? `${stockId} ${name}` : stockId
 
@@ -45,7 +46,7 @@ export function ManualBuy({ runId, stockId, name }: ManualBuyProps) {
     if (quantity === null) return
     setOpen(false)
     buy.mutate(
-      { stockId, quantity, broker },
+      { stockId, quantity, offer },
       {
         onSuccess: (accepted) => {
           toast.success(t('buy.started', { stock }))

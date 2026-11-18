@@ -12,7 +12,7 @@ from a_domain.model.trading.account import AccountSnapshot
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.ports.trading.trading_journal import ITradingJournal
-from a_domain.types.enums import ExecutionProvider, TradeAction, Workflow
+from a_domain.types.enums import ExecutionProvider, SignalSource, TradeAction, Workflow
 from a_domain.types.ids import RunId
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.trading_journal_dto import (
@@ -120,6 +120,21 @@ class TradingJournal(ITradingJournal):
     async def signals_of(self, run_id: RunId) -> list[TradeSignal]:
         async with self._db.owner_session() as session:
             statement = select(TradeSignalDTO).where(col(TradeSignalDTO.run_id) == run_id).order_by(col(TradeSignalDTO.generated_at))
+            rows = (await session.execute(statement)).scalars().all()
+
+        return [row.to_domain() for row in rows]
+
+    @override
+    async def decision_history(self, stock_id: str, limit: int = 3) -> list[TradeSignal]:
+        remembered = [source for source in SignalSource if source.in_decision_history]
+        statement = (
+            select(TradeSignalDTO)
+            .where(col(TradeSignalDTO.stock_id) == stock_id, col(TradeSignalDTO.source).in_(remembered))
+            .order_by(col(TradeSignalDTO.generated_at).desc())
+            .limit(limit)
+        )
+
+        async with self._db.owner_session() as session:
             rows = (await session.execute(statement)).scalars().all()
 
         return [row.to_domain() for row in rows]

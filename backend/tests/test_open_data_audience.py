@@ -25,7 +25,7 @@ import shioaji
 from pydantic import SecretStr
 from rich.console import Console
 from support.harness import CliHarness, build_harness, harness_config, rising_history
-from support.settings import environment_setup, shipped_config
+from support.settings import shipped_config, sinopac_setup
 from support.web import serve, write
 from trading_stack import SilentLogger
 
@@ -41,6 +41,7 @@ from a_domain.types.enums import (
     InformationSource,
     MarketIndex,
     MarketType,
+    ShioajiServer,
     SystemEnvironment,
 )
 from a_domain.types.values import FiscalQuarter
@@ -158,8 +159,8 @@ def refused_adapters(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
 def deployment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, audience: Audience) -> AppConfig:
     """
-    The shipped settings for `audience` on the mock broker, over the session's database and a Chroma folder in tmp_path, with a
-    Tavily key set and the AI's web search switched on where startup allows it: only on an audience with news articles.
+    The shipped settings for `audience` on the mock broker, over the session's database, with a Tavily key set and the
+    AI's web search switched on where startup allows it: only on an audience with news articles.
     """
     monkeypatch.setenv("ANTHROPIC_API_KEY", "placeholder")
     monkeypatch.setenv("GROQ_API_KEY", "placeholder")
@@ -167,9 +168,9 @@ def deployment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, audience: Audien
     shipped = load_settings(get_project_root()).model_copy(update={"project_root": tmp_path, "audience": audience})
     shipped.behavior.enable_web_search = audience == Audience.PERSONAL
     shipped.ai.user_selectable = [*shipped.ai.user_selectable, AiProvider.GROQ]
-    config = environment_setup(shipped, SystemEnvironment.DEV)
+    config = sinopac_setup(shipped, ShioajiServer.SIMULATION, SystemEnvironment.DEV)
     config.accounts.key = KEY
-    config.db = DbConfig(_env_file=None, chroma_persist_path=str(tmp_path / "chroma"))
+    config.db = DbConfig(_env_file=None)
     validate_trading_environment(config)
     return config
 
@@ -261,7 +262,7 @@ async def test_just_archive_closes_opens_no_broker_no_accounts_key_and_no_ai_on_
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, asked: list[str], refused_adapters: list[str], screen: io.StringIO
 ) -> None:
     personal = deployment(tmp_path, monkeypatch, Audience.PERSONAL)
-    config = environment_setup(personal, SystemEnvironment.DEV)
+    config = sinopac_setup(personal, ShioajiServer.SIMULATION, SystemEnvironment.DEV)
     config.ai = config.ai.model_copy(
         update={"anthropic_api_key": None, "groq_api_key": None, "openai_api_key": None, "nvidia_api_key": None}
     )
@@ -279,11 +280,11 @@ async def test_just_archive_closes_opens_no_broker_no_accounts_key_and_no_ai_on_
     assert "The archive holds 7 dates" in screen.getvalue()
 
 
-@pytest.mark.parametrize("environment", list(SystemEnvironment))
+@pytest.mark.parametrize("server", list(ShioajiServer))
 async def test_a_public_site_logs_in_to_no_broker_and_offers_only_the_mock_account_whatever_key_pair_it_holds(
-    environment: SystemEnvironment, refused_adapters: list[str]
+    server: ShioajiServer, refused_adapters: list[str]
 ) -> None:
-    public = environment_setup(harness_config(), environment).model_copy(update={"audience": Audience.PUBLIC})
+    public = sinopac_setup(harness_config(), server).model_copy(update={"audience": Audience.PUBLIC})
     validate_trading_environment(public)
     state = ProcessState(logger=SilentLogger(), attempt_log=MemoryAttemptLog(), cache_writes=asyncio.Lock())
 

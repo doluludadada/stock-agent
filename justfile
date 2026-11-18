@@ -48,7 +48,7 @@ backfill-history first:
 
 # Keeps the announcements and TWSE news the open-data archive holds in the article store, then brings the vectors of
 # every stock the store keeps up to date. The first run fetches the text embedding model's files (23 MB) into
-# embedding_models/. Run again it adds nothing, and after chroma_data/ was lost it computes every vector again from
+# embedding_models/. Run again it adds nothing, and after the vectors were lost it computes every vector again from
 # the kept articles. It reaches no news site, orders nothing and asks no AI.
 [unix]
 backfill-articles:

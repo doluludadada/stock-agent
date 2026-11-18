@@ -116,13 +116,13 @@ DOMAIN_FORBIDDEN_LIBRARIES = frozenset(
         "aiohttp",
         "asyncpg",
         "bs4",
-        "chromadb",
         "fastapi",
         "flet",
         "httpx",
         "lxml",
         "openai",
         "pandas",
+        "pgvector",
         "requests",
         "shioaji",
         "sqlalchemy",
@@ -143,10 +143,9 @@ BUILTIN_EXCEPTIONS = frozenset(
 FACTORY_MODULE = PurePosixPath("d_presentation/dependencies.py")
 FACTORY_TARGETS = ("c_infrastructure", "b_application.use_cases", "b_application.pipeline")
 PRESENTATION_SETTINGS = {
-    # The runtime switch compares the revisions a runtime was built from with the files on disk, bounds how long the
-    # startup on new settings may take, and starts every new runtime in the environment and the audience the process
-    # started in. The Web API's timers look at the settings files, archive the open data and read the world's feeds
-    # at the current settings' intervals.
+    # The runtime switch compares the revisions a runtime was built from with the files on disk and bounds how long the
+    # startup on new settings may take. The Web API's timers look at the settings files, archive the open data and read
+    # the world's feeds at the current settings' intervals.
     "d_presentation/live_runtime.py": frozenset(
         {
             "settings_revisions",
@@ -154,24 +153,26 @@ PRESENTATION_SETTINGS = {
             "api.settings_poll_seconds",
             "api.archive_interval_hours",
             "api.world_interval_minutes",
-            "environment",
-            "audience",
         }
     ),
     # The settings editor shows the environment the server started in, read-only: a save cannot change it.
     "d_presentation/web/routers/admin.py": frozenset({"environment"}),
     # The brokers endpoint names, for a run's confirmation, the server a real broker trades on and its BUY limits, so
-    # the user confirms SinoPac's simulation or real account and the limits the order gates will hold the run to.
+    # the user confirms SinoPac's simulation or real account and the limits the order gates will hold the run to. The
+    # SinoPac page shows the server and the simulation account's starting cash, which its panel switches through the
+    # settings save.
     "d_presentation/web/routers/account.py": frozenset(
-        {"environment.shioaji_simulation", "trading.max_order_value", "trading.max_daily_buy_value"}
+        {"shioaji.server", "shioaji.simulation_initial_cash", "trading.max_order_value", "trading.max_daily_buy_value"}
     ),
     # The Web's request gates: the host names it answers, and the audience's realtime quotes and MOPS, which decide which
     # runs and valuations a browser may start. A run starts under the cap of background runs of the runtime it starts on,
     # and a backtest takes its turn under the caps of replays. Whom the site shows each feature to gates the feature's
-    # routes here, in front of the Pipeline, and tells the web app what to hide.
+    # routes here, in front of the Pipeline, and tells the web app what to hide. A run on a real broker starts only on
+    # the server its confirmation showed, the one shioaji.server names in the runtime it starts on.
     "d_presentation/web/session.py": frozenset(
         {
             "features",
+            "shioaji.server",
             "api.allowed_hosts",
             "audience.realtime_quotes",
             "audience.mops",
@@ -204,6 +205,8 @@ PRESENTATION_SETTINGS = {
         {
             "environment",
             "audience",
+            # The menu's header and a run's broker panel name the SinoPac server the site's login is on.
+            "shioaji.server",
             "trading.max_order_value",
             "trading.max_daily_buy_value",
             "valuation.undervaluation_formula",

@@ -152,7 +152,7 @@ const auth: DictionaryShape<typeof en> = {
     roles: {
       title: '角色說明',
       administrator: '管理使用者與系統設定，也能使用一般使用者的所有功能；看不到其他人的資料。',
-      user: '擁有自己的觀察清單、模擬帳戶、分析任務與策略，看不到別人的資料。',
+      user: '擁有自己的觀察清單、本站模擬帳戶、分析任務與策略，看不到別人的資料。',
       deactivated: '不能登入，資料會保留，管理員可以隨時重新啟用。',
       passwordTitle: '設定新密碼',
       password: '使用者會立刻在所有裝置上被登出。請當面告訴對方新的密碼。',

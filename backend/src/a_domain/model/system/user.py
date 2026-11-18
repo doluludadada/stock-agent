@@ -34,8 +34,10 @@ class User:
     """
     ranking_follow_broker: ExecutionProvider = ExecutionProvider.MOCK
     """
-    The account the user's scheduled ranking follow orders on: their mock account, or SinoPac, where a ranking follow
-    orders on the simulation server only. A user the site no longer lets order there is not followed on another account.
+    The user's follow account, chosen on My settings: the one account their ranking follow orders on, by the ranking
+    page's button and by their schedule alike. Their mock account, or SinoPac, where a ranking follow orders on the
+    simulation server only. While the site does not offer it to the user (FollowAccountRule), a follow there is
+    refused and the schedule does not follow; neither ever moves to another account.
     """
     has_password: bool = True
     """

@@ -7,7 +7,7 @@ from a_domain.model.market.company_profile import CompanyProfile
 from a_domain.ports.market.company_profile_repository import ICompanyProfileRepository
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.company_profile_dto import CompanyProfileDTO
-from c_infrastructure.database.models.daily_close_archive_dto import replacing
+from c_infrastructure.database.upsert import replacing
 
 
 class SqlCompanyProfileRepository(ICompanyProfileRepository):

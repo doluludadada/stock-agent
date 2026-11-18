@@ -1,7 +1,7 @@
 from dataclasses import replace
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from a_domain.model.trading.ranking_formula import RankingFormula
@@ -14,7 +14,7 @@ from a_domain.rules.trading.cost import AffordableQuantityRule
 from a_domain.rules.trading.decision import DecisionRule, RunDecisionsRule
 from a_domain.rules.trading.entry import EntryRule, ManualEntryRule
 from a_domain.rules.trading.exit import ExitRule, StopLossRule
-from a_domain.rules.trading.follow import FollowScheduleRule, FollowTimeRule, RankingFollowRule
+from a_domain.rules.trading.follow import FollowAccountRule, FollowScheduleRule, FollowTimeRule, RankingFollowRule
 from a_domain.rules.trading.order_rule import (
     BrokerAccessRule,
     BrokerLoginRule,
@@ -30,7 +30,7 @@ from a_domain.rules.trading.ranking import DecisionSessionsRule, MonthlyRankingR
 from a_domain.rules.trading.ranking_backtest import RankingBacktestRule, RankingPortfolioRule
 from a_domain.rules.trading.reason import AnalysisSummaryRule, EntryReasonRule, ExitReasonRule
 from a_domain.rules.trading.sizing import BuyCostRule, SizingRule
-from a_domain.types.enums import Audience, BriefKind, Feature, Permission, SettingGroup, SettingsFile, SystemEnvironment
+from a_domain.types.enums import Audience, BriefKind, ExecutionProvider, Feature, SettingGroup, SettingsFile, SystemEnvironment
 from b_application.config.accounts_config import AccountsConfig
 from b_application.config.ai_config import AiConfig, BehaviorConfig, PromptsConfig, SentimentConfig, TavilyConfig
 from b_application.config.api_config import ApiConfig, FeaturesConfig
@@ -61,10 +61,10 @@ from b_application.config.valuation_config import ValuationConfig
 
 class DbConfig(BaseSettings):
     """
-    Where the app keeps its data: the PostgreSQL database of accounts, orders, watchlists and technical settings, and
-    the Chroma folder of chat and decision memory. The database's address and credentials come from the environment or
-    .env, never from a settings file, and the app refuses to start while one is missing or blank. `retired` names the
-    setting this section once had and no longer reads (settings_notices).
+    Where the app keeps its data: the PostgreSQL database, which holds every table, the article index's vectors
+    included. Its address and credentials come from the environment or .env, never from a settings file, and the app
+    refuses to start while one is missing or blank. `retired` names the settings this section once had and no longer
+    reads (settings_notices).
     """
 
     model_config = SettingsConfigDict(
@@ -72,10 +72,8 @@ class DbConfig(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         str_strip_whitespace=True,
-        json_schema_extra={"retired": ["backend"]},
+        json_schema_extra={"retired": ["backend", "chroma_persist_path"]},
     )
-
-    chroma_persist_path: str
 
     user: str = Field(min_length=1, validation_alias="DB_USER")
     password: str = Field(min_length=1, validation_alias="DB_PASSWORD")
@@ -119,7 +117,7 @@ class AppConfig(BaseSettings):
     ai: AiConfig = Field(json_schema_extra={"group": SettingGroup.AI})
     line: LineConfig = Field(default_factory=LineConfig, json_schema_extra={"group": SettingGroup.ADVANCED})
     behavior: BehaviorConfig = Field(json_schema_extra={"group": SettingGroup.AI})
-    db: DbConfig = Field(json_schema_extra={"operator_only": True})
+    db: DbConfig = Field(default_factory=dict, validate_default=True, json_schema_extra={"operator_only": True})
     """
     `operator_only` marks a setting, or every setting of a section, that only an operator who edits
     config/appsetting.yaml changes: the settings form neither shows it nor accepts a change to it. The file, the load
@@ -157,6 +155,15 @@ class AppConfig(BaseSettings):
     api: ApiConfig = Field(default_factory=ApiConfig, json_schema_extra={"group": SettingGroup.ADVANCED})
     sources: SourcesConfig = Field(json_schema_extra={"operator_only": True})
     features: FeaturesConfig = Field(default_factory=FeaturesConfig, json_schema_extra={"group": SettingGroup.FEATURES})
+
+    @field_validator("db", mode="before")
+    @classmethod
+    def empty_section_is_unset(cls, section: object) -> object:
+        """
+        A file without `db:`, or with a `db:` left holding nothing, as deleting its last retired setting leaves it, reads
+        like `db: {}`: every setting comes from the environment, and a refused one is named under db.
+        """
+        return {} if section is None else section
 
     def sizing_rule(self) -> SizingRule:
         return SizingRule(
@@ -235,7 +242,7 @@ class AppConfig(BaseSettings):
     @property
     def world_shown(self) -> bool:
         """Whether features.world shows the world to somebody. While it shows it to nobody, nothing of it is read or written."""
-        return self.features.visibility(Feature.WORLD).shown_to(frozenset(Permission))
+        return self.features.visibility(Feature.WORLD).shown_to_anyone
 
     def world_brief_due_rule(self) -> WorldBriefDueRule:
         """
@@ -303,9 +310,11 @@ class AppConfig(BaseSettings):
             affordable_quantity_rule=AffordableQuantityRule(cost_rule=self.market.cost_rule()),
         )
 
-    def follow_broker_rule(self) -> RealBrokerGateRule:
-        """Whether a user's ranking follow may order on a broker now: the gate broker_access_rule asks of every order."""
-        return self.broker_access_rule().gate_rule
+    def follow_account_rule(self) -> FollowAccountRule:
+        """The accounts the site offers a user as their follow account: each one's feature, then broker_access_rule's gate."""
+        accounts = {broker: self.features.visibility(broker.account_feature) for broker in ExecutionProvider}
+
+        return FollowAccountRule(gate_rule=self.broker_access_rule().gate_rule, accounts=accounts)
 
     def manual_entry_rule(self) -> ManualEntryRule:
         """ManualSignal's rule: the confirmed BUY skips the buy threshold, never the sizing."""
@@ -318,18 +327,17 @@ class AppConfig(BaseSettings):
 
     def broker_access_rule(self) -> BrokerAccessRule:
         """
-        OrderPreparation's check at the send: the brokers both the audience and its order pricing offer and the
-        environment's server. Whom features.* lets order on a broker is no part of it: OrderPreparation reads that from
-        the site's ordering switch at each send.
+        OrderPreparation's check at the send: the brokers both the audience and its order pricing offer. Whom
+        features.* lets order on a broker and the SinoPac server shioaji.server names are no part of it:
+        OrderPreparation reads both from the site's ordering switch at each send, and send_refusal again before each
+        exchange order.
         """
         limit_rule = BuyLimitRule(max_order_value=self.trading.max_order_value, max_daily_buy_value=self.trading.max_daily_buy_value)
 
         return BrokerAccessRule(
             brokers=self.audience.brokers & self.audience.order_pricing.brokers,
             gate_rule=RealBrokerGateRule(
-                simulation_rule=SimulationOnlyRule(),
-                orderer_rule=RealBrokerOrdererRule(),
-                login_rule=BrokerLoginRule(simulation=self.environment.shioaji_simulation),
+                simulation_rule=SimulationOnlyRule(), orderer_rule=RealBrokerOrdererRule(), login_rule=BrokerLoginRule()
             ),
             limit_rule=limit_rule,
         )

@@ -40,7 +40,7 @@ export const PAGES = {
   brokerage: {
     path: paths.brokerage,
     features: ['sinopac_account'],
-    load: () => import('@/features/account').then((m) => m.BrokerageAccountPage),
+    load: () => import('./router/routes/brokerage').then((m) => m.BrokerageRoute),
     needs: 'use_real_broker',
     nav: { section: 'mine', icon: Landmark },
   },

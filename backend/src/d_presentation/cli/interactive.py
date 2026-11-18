@@ -310,11 +310,16 @@ async def load_built_in_strategy(runtime: Runtime, session: terminal.CliSession)
 def print_trading_setup(runtime: Runtime, session: terminal.CliSession) -> None:
     config = runtime.config
     real = ", ".join(broker.label for broker in runtime.brokers_for(session.user) if broker.real)
-    server = "simulation" if config.environment.shioaji_simulation else "PRODUCTION, REAL MONEY"
+    shioaji = config.shioaji.server
+    server = shioaji.label if shioaji.simulation else f"{shioaji.label.upper()}, REAL MONEY"
     order_limit, daily_limit = config.trading.max_order_value, config.trading.max_daily_buy_value
     limits = f"each BUY at most {order_limit:,.0f} NT$, at most {daily_limit:,.0f} NT$ of BUYs a day"
 
     terminal.console.print(f"Environment:        {terminal.format_label(config.environment.value)}")
+
+    if runtime.real_broker is not None:
+        terminal.console.print(f"SinoPac server:     {server} (shioaji.server)")
+
     terminal.console.print(
         f"Orders:             your mock account{f', or {real} ({server}) when you choose it for a run: {limits}' if real else ''}"
     )

@@ -1,25 +1,39 @@
-from datetime import UTC, datetime
-from pathlib import Path
+"""
+The AI's decision history: a stock's newest decisions in the owner's trading journal, which the AI reads again, with the
+evidence each was made on, in the stock's past analysis.
+"""
 
-import chromadb
+from dataclasses import replace
+from datetime import UTC, datetime
+
 import pytest
 from support.fakes import FakeDailyCloseArchive
 from support.settings import shipped_config
 from trading_stack import MONDAY_10_00, MovableClock, run_stats
 
+from a_domain.model.analysis.ai_analysis_report import AiAnalysisReport
+from a_domain.model.analysis.technical_report import TechnicalObservation, TechnicalReport
 from a_domain.model.chat.message import Message
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.signal import TradeSignal
+from a_domain.ports.trading.trading_journal import ITradingJournal
 from a_domain.types.enums import AiAnalysisFocus, MessageRole, SignalSource, TradeAction, Workflow
+from a_domain.types.ids import UserId
 from b_application.config.ai_config import PromptsConfig
 from b_application.use_cases.process.ai_analyser import AiAnalyser
-from b_application.use_cases.ship.decision_memory import DecisionMemory
-from c_infrastructure.database.chroma.knowledge_repository import ChromaKnowledgeRepository
-from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
-from d_presentation.dependencies import knowledge_collection
+from c_infrastructure.database.db_connector import DatabaseConnector
+from c_infrastructure.database.repositories.trading_journal import TradingJournal
+
+pytestmark = pytest.mark.asyncio
 
 
-class SilentLogger:
+class RecordingLogger:
+    def __init__(self) -> None:
+        self.errors: list[str] = []
+
+    def error(self, message: str) -> None:
+        self.errors.append(message)
+
     def __getattr__(self, name: str):
         return lambda message: None
 
@@ -36,121 +50,116 @@ class PromptRecordingAiProvider:
         return None
 
 
-def make_signal(stock_id: str, action: TradeAction, score: int, reason: str, hour: int) -> TradeSignal:
+class UnreadableJournal:
+    async def decision_history(self, stock_id: str, limit: int = 3) -> list[TradeSignal]:
+        raise ConnectionError("the database went away")
+
+
+def decision(stock_id: str, reason: str, hour: int, source: SignalSource = SignalSource.COMBINED) -> TradeSignal:
     generated_at = datetime(2026, 10, 30, hour, 0, tzinfo=UTC)
     return TradeSignal(
         stock_id=stock_id,
-        action=action,
-        quantity=0 if action == TradeAction.HOLD else 1000,
+        action=TradeAction.HOLD,
+        source=source,
+        score=50 + hour,
+        reason=reason,
         price_at_signal=100.0,
         price_observed_at=generated_at,
-        source=SignalSource.COMBINED,
-        score=score,
-        reason=reason,
         generated_at=generated_at,
     )
 
 
 @pytest.fixture
-def knowledge_repository(tmp_path: Path) -> ChromaKnowledgeRepository:
-    return ChromaKnowledgeRepository(
-        chromadb.PersistentClient(path=str(tmp_path / "chroma")), knowledge_collection(LEGACY_OWNER_ID), SilentLogger()
-    )
+def journal(database: DatabaseConnector) -> TradingJournal:
+    return TradingJournal(database.for_owner(UserId("alice")))
 
 
-async def remember(repository: ChromaKnowledgeRepository, *signals: TradeSignal) -> None:
-    stocks = {signal.stock_id: Stock(stock_id=signal.stock_id) for signal in signals}
-    await DecisionMemory(knowledge_repository=repository, logger=SilentLogger()).execute(
-        signals, stocks, run_stats(Workflow.FULL_CYCLE)
-    )
-
-
-class FailingFor2317:
-    def __init__(self, repository: ChromaKnowledgeRepository) -> None:
-        self._repository = repository
-
-    async def save_decision(self, stock: Stock, signal: TradeSignal) -> None:
-        if stock.stock_id == "2317":
-            raise RuntimeError("disk full")
-
-        await self._repository.save_decision(stock, signal)
-
-
-@pytest.mark.asyncio
-async def test_one_failed_save_does_not_stop_the_other_decisions(knowledge_repository: ChromaKnowledgeRepository) -> None:
-    signals = [make_signal(stock_id, TradeAction.HOLD, 50, "hold", hour=1) for stock_id in ("2317", "2330")]
-    stocks = {signal.stock_id: Stock(stock_id=signal.stock_id) for signal in signals}
-    stats = run_stats(Workflow.FULL_CYCLE)
-
-    await DecisionMemory(knowledge_repository=FailingFor2317(knowledge_repository), logger=SilentLogger()).execute(
-        signals, stocks, stats
-    )
-
-    assert "Stock: 2330" in await knowledge_repository.find_decision_history("2330")
-    assert stats.errors == ["Decision memory failed for 2317: disk full"]
-
-
-@pytest.mark.asyncio
-async def test_decision_history_returns_only_that_stocks_decisions_newest_first(
-    knowledge_repository: ChromaKnowledgeRepository,
-) -> None:
-    await remember(
-        knowledge_repository,
-        make_signal("2330", TradeAction.HOLD, 55, "Waiting for the 2330 earnings call", hour=1),
-        make_signal("2317", TradeAction.SELL, 25, "2330 supplier news hurts 2317", hour=2),
-        make_signal("2330", TradeAction.BUY, 85, "Strong 2330 revenue growth", hour=3),
-    )
-
-    history = await knowledge_repository.find_decision_history("2330")
-    decisions = history.split("\n\n---\n\n")
-
-    assert len(decisions) == 2
-    assert all("Stock: 2330" in decision for decision in decisions)
-    assert "Stock: 2317" not in history
-    assert "Decision: buy" in decisions[0]
-    assert "Combined Score: 85" in decisions[0]
-    assert "Reason: Strong 2330 revenue growth" in decisions[0]
-    assert "Generated At: 2026-10-30T03:00:00+00:00" in decisions[0]
-    assert "Decision: hold" in decisions[1]
-
-
-@pytest.mark.asyncio
-async def test_decision_history_is_limited_and_empty_for_a_stock_without_decisions(
-    knowledge_repository: ChromaKnowledgeRepository,
-) -> None:
-    await remember(knowledge_repository, *(make_signal("2330", TradeAction.HOLD, 50 + hour, "hold", hour=hour) for hour in range(5)))
-
-    newest_two = await knowledge_repository.find_decision_history("2330", limit=2)
-
-    assert "Combined Score: 54" in newest_two
-    assert "Combined Score: 53" in newest_two
-    assert newest_two.count("Stock: 2330") == 2
-    assert await knowledge_repository.find_decision_history("2317") == ""
-
-
-@pytest.mark.asyncio
-async def test_ai_analysis_prompt_carries_the_analysed_stocks_own_history(knowledge_repository: ChromaKnowledgeRepository) -> None:
-    await remember(
-        knowledge_repository,
-        make_signal("2330", TradeAction.BUY, 85, "Strong revenue growth", hour=1),
-        make_signal("2317", TradeAction.SELL, 25, "Margin pressure", hour=2),
-    )
+async def analysis_prompt(journal: ITradingJournal, logger: RecordingLogger) -> str:
     template = "Analyse {stock_id}: {articles_text}"
     config = shipped_config().model_copy(
         update={"prompts": PromptsConfig(analysis_report_fundamental=template, analysis_report_momentum=template)}
     )
     ai_provider = PromptRecordingAiProvider()
-    analyser = AiAnalyser(
-        ai_provider=ai_provider,
-        knowledge_repository=knowledge_repository,
-        archive=FakeDailyCloseArchive(),
-        config=config,
-        logger=SilentLogger(),
-        market_clock=MovableClock(MONDAY_10_00),
-    )
+    analyser = AiAnalyser(ai_provider, journal, FakeDailyCloseArchive(), MovableClock(MONDAY_10_00), config, logger)
 
     await analyser.execute([Stock(stock_id="2330")], AiAnalysisFocus.FUNDAMENTAL, run_stats(Workflow.FULL_CYCLE))
 
-    assert "[Past Analysis]" in ai_provider.prompts[0]
-    assert "Reason: Strong revenue growth" in ai_provider.prompts[0]
-    assert "Margin pressure" not in ai_provider.prompts[0]
+    [prompt] = ai_provider.prompts
+    return prompt
+
+
+async def test_the_history_is_the_stocks_own_decisions_newest_first_and_as_many_as_asked(journal: TradingJournal) -> None:
+    await journal.save_signals(
+        run_stats().run_id,
+        [
+            decision("2330", "first", 1),
+            decision("2317", "another stock", 2),
+            decision("2330", "second", 3),
+            decision("2330", "third", 4),
+        ],
+    )
+
+    assert [signal.reason for signal in await journal.decision_history("2330")] == ["third", "second", "first"]
+    assert [signal.reason for signal in await journal.decision_history("2330", limit=2)] == ["third", "second"]
+    assert await journal.decision_history("1101") == []
+
+
+async def test_a_follow_and_a_ranking_follow_are_not_in_the_history(journal: TradingJournal) -> None:
+    analysed = decision("2330", "analysed", 1)
+    stopped = decision("2330", "stopped out", 2, SignalSource.STOP_LOSS)
+    bought = decision("2330", "bought by hand", 3, SignalSource.MANUAL)
+    followed = replace(decision("2330", "followed", 4, SignalSource.FOLLOW), followed_decision_id=analysed.decision_id)
+    ranked = decision("2330", "ranked", 5, SignalSource.RANKING)
+    await journal.save_signals(run_stats(Workflow.FULL_CYCLE).run_id, [analysed, stopped, bought])
+    await journal.save_signals(run_stats(Workflow.FOLLOW).run_id, [followed])
+    await journal.save_signals(run_stats(Workflow.RANKING_FOLLOW).run_id, [ranked])
+
+    history = await journal.decision_history("2330", limit=5)
+
+    assert [signal.reason for signal in history] == ["bought by hand", "stopped out", "analysed"]
+
+
+async def test_the_ai_reads_each_past_decision_of_the_stock_with_the_evidence_it_was_made_on(journal: TradingJournal) -> None:
+    technical = TechnicalReport(
+        score=72,
+        hard_failures=["below_ma60"],
+        soft_failures=["volume_expansion", "rsi_high"],
+        observations=[
+            TechnicalObservation(rule="golden_cross", detected=True),
+            TechnicalObservation(rule="macd_turn", detected=False),
+        ],
+    )
+    ai = AiAnalysisReport(
+        score=64, bullish_factors=["AI demand"], bearish_factors=["margin pressure"], summary="Strong", raw_response="{}"
+    )
+    stop_loss = replace(
+        decision("2330", "Stop loss hit", 2, SignalSource.STOP_LOSS),
+        action=TradeAction.SELL,
+        quantity=1000,
+        stop_loss_price=95.0,
+        technical_report=technical,
+        ai_report=ai,
+    )
+    await journal.save_signals(run_stats().run_id, [decision("2330", "Waiting", 1), stop_loss, decision("2317", "Margin", 3)])
+
+    prompt = await analysis_prompt(journal, RecordingLogger())
+
+    assert prompt.partition("[Past Analysis]\n")[2].split("\n\n---\n\n") == [
+        "Stock: 2330\nDecision: sell\nSource: stop_loss\nGenerated At: 2026-10-30T02:00:00+00:00\nPrice: 100.0\n"
+        "Quantity: 1000\nTechnical Score: 72\nAI Score: 64\nCombined Score: 52\nReason: Stop loss hit\n"
+        "Hard Failures: below_ma60\nSoft Failures: volume_expansion, rsi_high\n"
+        "Observations: golden_cross: detected, macd_turn: not detected\nAI Summary: Strong\nBullish Factors: AI demand\n"
+        "Bearish Factors: margin pressure\nStop Loss Price: 95.0",
+        "Stock: 2330\nDecision: hold\nSource: combined\nGenerated At: 2026-10-30T01:00:00+00:00\nPrice: 100.0\n"
+        "Quantity: 0\nTechnical Score: Unavailable\nAI Score: Unavailable\nCombined Score: 51\nReason: Waiting\n"
+        "Hard Failures: \nSoft Failures: \nObservations: \nAI Summary: \nBullish Factors: \nBearish Factors: ",
+    ]
+
+
+async def test_a_history_the_journal_cannot_read_is_logged_and_the_ai_is_asked_without_it() -> None:
+    logger = RecordingLogger()
+
+    prompt = await analysis_prompt(UnreadableJournal(), logger)
+
+    assert "[Past Analysis]" not in prompt
+    assert logger.errors == ["Decision history lookup failed for 2330: the database went away"]

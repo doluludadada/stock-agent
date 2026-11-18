@@ -129,11 +129,11 @@ def test_a_prompt_ending_in_one_line_end_is_a_literal_block_two_columns_past_its
 
 
 def test_a_setting_the_file_does_not_set_is_inserted_after_the_last_setting_of_its_section() -> None:
-    text = "notifications:\n  enabled: false  # off\n\ndb:\n  chroma_persist_path: chroma_data\n"
+    text = "notifications:\n  enabled: false  # off\n\nfolder:\n  news_archive_dir: news_archive\n"
     after = edited(appsetting(text), ("notifications.recipients", ["owner"]))
 
     assert after[SettingsFile.APPSETTING] == (
-        "notifications:\n  enabled: false  # off\n  recipients: [owner]\n\ndb:\n  chroma_persist_path: chroma_data\n"
+        "notifications:\n  enabled: false  # off\n  recipients: [owner]\n\nfolder:\n  news_archive_dir: news_archive\n"
     )
 
 
@@ -242,7 +242,7 @@ def test_a_setting_only_an_operator_changes_is_a_setting_of_the_file_and_no_fiel
     every = {field.path for field in settings_fields({}, with_operator_only=True)}
     operator_only = {
         "api.allowed_hosts",
-        "db.chroma_persist_path",
+        "folder.embedding_model_dir",
         "sources.ptt.base_url",
         "market.stock_ticks",
         "valuation.low_pe_caveat",
@@ -368,16 +368,49 @@ def test_a_file_that_still_sets_a_retired_setting_starts_and_the_start_names_it(
 def test_a_file_that_still_chooses_a_database_backend_starts_on_postgresql_and_the_start_names_the_setting(
     tmp_path: Path, backend: str
 ) -> None:
-    shipped = repository_texts()[SettingsFile.APPSETTING]
-    older = shipped.replace("\n  chroma_persist_path:", f"\n  backend: {backend}\n  chroma_persist_path:", 1)
+    older = f"{repository_texts()[SettingsFile.APPSETTING]}\ndb:\n  backend: {backend}\n"
     project = project_with(tmp_path, older)
 
-    assert older != shipped
     assert load_settings(project).db == load_settings(PROJECT).db
     assert settings_notices(project)[0] == (
         "appsetting.yaml still sets db.backend: the app no longer reads them. Remove them from the file."
     )
     assert "db.backend" not in "".join(settings_notices(PROJECT))
+
+
+RETIRED_VECTOR_FOLDER = '  chroma_persist_path: "chroma_data"\n'
+"""The one setting of the db section before schema version 14, which the deployment notes say to delete."""
+
+DB_SECTION_BEFORE_VERSION_14 = (
+    "db:\n"
+    "  # The PostgreSQL database is named by DB_USER, DB_PASSWORD, DB_HOST, DB_PORT and DB_NAME in .env: the app refuses to\n"
+    "  # start without them.\n"
+    f"{RETIRED_VECTOR_FOLDER}"
+)
+"""The db section as config/appsetting.yaml shipped it before schema version 14."""
+
+
+def test_a_file_from_before_schema_version_14_starts_and_the_start_names_its_retired_db_setting(tmp_path: Path) -> None:
+    project = project_with(tmp_path, f"{repository_texts()[SettingsFile.APPSETTING]}\n{DB_SECTION_BEFORE_VERSION_14}")
+
+    assert load_settings(project).db == load_settings(PROJECT).db
+    assert settings_notices(project)[0] == (
+        "appsetting.yaml still sets db.chroma_persist_path: the app no longer reads them. Remove them from the file."
+    )
+
+
+@pytest.mark.parametrize(
+    "section",
+    [DB_SECTION_BEFORE_VERSION_14.replace(RETIRED_VECTOR_FOLDER, ""), "db:\n", "db: {}\n"],
+    ids=["comments-left", "nothing-left", "empty-braces"],
+)
+def test_a_db_section_left_empty_by_deleting_the_retired_setting_starts_saves_and_names_nothing(tmp_path: Path, section: str) -> None:
+    project = project_with(tmp_path, f"{repository_texts()[SettingsFile.APPSETTING]}\n{section}")
+    saved = edited(settings_texts(project), ("notifications.recipients", ["owner"]))
+
+    assert load_settings(project).db == load_settings(PROJECT).db
+    assert load_settings(project, saved).notifications.recipients == ["owner"]
+    assert not [notice for notice in settings_notices(project) if "db." in notice]
 
 
 def test_a_file_that_still_sets_the_rankings_timestamp_settings_starts_and_the_start_names_them(tmp_path: Path) -> None:

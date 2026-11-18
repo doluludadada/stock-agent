@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from enum import StrEnum, auto
 
 
@@ -115,6 +116,14 @@ class SignalSource(StrEnum):
     stock it lacked, at an equal weight of the account.
     """
 
+    @property
+    def in_decision_history(self) -> bool:
+        """
+        Whether the AI reads the decision again in its stock's past analysis. A follow carries out a decision that is
+        there already, and a ranking follow decides on the ranking without analysing the stock.
+        """
+        return self not in (SignalSource.FOLLOW, SignalSource.RANKING)
+
 
 class OrderType(StrEnum):
     MARKET = auto()
@@ -188,7 +197,7 @@ class RejectReason(StrEnum):
     """The real broker's login failed or went down before the send."""
 
     BROKER_SERVER_MISMATCH = auto()
-    """The real broker's login is on another server than the environment trades on (SystemEnvironment.shioaji_simulation)."""
+    """The real broker's login is on another server than shioaji.server names in the settings on disk (BrokerLoginRule)."""
 
     NOT_SIMULATION = auto()
     """
@@ -202,6 +211,9 @@ class RejectReason(StrEnum):
     DAILY_BUY_LIMIT = auto()
     """A real broker's BUY would take the day's BUYs on it past trading.max_daily_buy_value."""
 
+    RUN_CANCELLED = auto()
+    """The run was cancelled (Ctrl-C, or the server stopping) before this exchange order was sent."""
+
     MARKET_CLOSED = auto()
     SESSION_IN_PROGRESS = auto()
     """An official close prices an order only while no session trades: during one, that close is no longer the price."""
@@ -214,6 +226,20 @@ class RejectReason(StrEnum):
     UNSUPPORTED_TIME_IN_FORCE = auto()
     BROKER_REFUSED = auto()
     """The real broker refused the order before it worked (its own checks or the exchange's); the detail quotes the broker."""
+
+    @property
+    def follow_refusal(self) -> FollowAccountRefusal:
+        """
+        The ranking follow's refusal of an account for a reason of the real broker's gate (RealBrokerGateRule): who may
+        order, the login's server, or the login. The gate gives no other reason.
+        """
+        match self:
+            case RejectReason.ORDERING_OFF | RejectReason.REAL_BROKER_REFUSED:
+                return FollowAccountRefusal.ORDERING_OFF
+            case RejectReason.NOT_SIMULATION:
+                return FollowAccountRefusal.NOT_SIMULATION
+            case _:
+                return FollowAccountRefusal.BROKER_UNAVAILABLE
 
 
 class SkipReason(StrEnum):
@@ -297,8 +323,8 @@ class OrderPricing(StrEnum):
 
 class FollowRefusal(StrEnum):
     """
-    Why a run's decisions cannot be followed into the user's mock account now, or the monthly ranking into the account
-    its follow chose. The Web API answers each as its code.
+    Why a run's decisions cannot be followed into the user's mock account now, or the monthly ranking into the user's
+    follow account. The Web API answers each as its code.
     """
 
     NOTHING_TO_FOLLOW = auto()
@@ -311,23 +337,37 @@ class FollowRefusal(StrEnum):
     OUTSIDE_FOLLOW_WINDOW = auto()
     """The market is in a phase in which this site's order pricing places no order (OrderPricing.trading_phase)."""
 
-    NOT_SIMULATION = auto()
-    """
-    The ranking would be followed on a real broker whose login is not on the broker's simulation server: a ranking
-    follow never orders with real money (SimulationOnlyRule). The account is not read.
-    """
-
     @property
     def lifts_later(self) -> bool:
-        """
-        Whether the same follow may start without the account changing: once the market's phase changes, or the
-        broker's login is on its simulation server. Nothing to follow stays so.
-        """
+        """Whether the same follow may start without the account changing: once the market's phase does. Nothing to follow stays so."""
         match self:
             case FollowRefusal.NOTHING_TO_FOLLOW:
                 return False
-            case FollowRefusal.OUTSIDE_FOLLOW_WINDOW | FollowRefusal.NOT_SIMULATION:
+            case FollowRefusal.OUTSIDE_FOLLOW_WINDOW:
                 return True
+
+
+class FollowAccountRefusal(StrEnum):
+    """
+    Why the site does not let a user's ranking follow order on an account now (FollowAccountRule), so it does not offer
+    the account as their follow account. The account is not read. The Web API answers each as its code, in the
+    ranking's follow block and as the refusal of a follow.
+    """
+
+    ORDERING_OFF = auto()
+    """
+    The site does not show the user the account or ordering on it, its ordering switch included, or the account is a
+    real broker's and the user is no active administrator.
+    """
+
+    NOT_SIMULATION = auto()
+    """
+    The account is a real broker's whose login is not on the broker's simulation server: a ranking follow never orders
+    with real money (SimulationOnlyRule).
+    """
+
+    BROKER_UNAVAILABLE = auto()
+    """The site holds no login up on the account's real broker, or one on another server than the site trades on."""
 
 
 class TimeInForce(StrEnum):
@@ -785,7 +825,7 @@ class WatchlistType(StrEnum):
 class ShioajiCredential(StrEnum):
     """
     An environment variable a Shioaji login reads, from the process environment or .env, never from a settings file.
-    SystemEnvironment.shioaji_credentials says which ones each environment reads; no environment reads another's.
+    ShioajiServer.credentials says which ones each server's login reads; no server reads another's.
     """
 
     API_KEY = "SHIOAJI_API_KEY"
@@ -794,7 +834,7 @@ class ShioajiCredential(StrEnum):
     CA_PASSWORD = "SHIOAJI_CA_PASSWORD"
     PERSON_ID = "SHIOAJI_PERSON_ID"
     API_KEY_TEST = "SHIOAJI_API_KEY_TEST"
-    """The simulation key pair, which environments dev and test read."""
+    """The simulation server's key pair."""
 
     SECRET_KEY_TEST = "SHIOAJI_SECRET_KEY_TEST"
 
@@ -812,7 +852,7 @@ class ExecutionProvider(StrEnum):
     """
 
     SHIOAJI = auto()
-    """SinoPac through the Shioaji API, on the site's own login: its simulation server in dev and test, the real account in prod."""
+    """SinoPac through the Shioaji API, on the site's own login, on the server shioaji.server names (ShioajiServer)."""
 
     @property
     def label(self) -> str:
@@ -826,7 +866,7 @@ class ExecutionProvider(StrEnum):
     def real(self) -> bool:
         """
         A broker outside the app, reached on a login: only a user with USE_REAL_BROKER may order on it, only while its
-        login is up on the server the environment trades on, and every BUY is held to the trading limits.
+        login is up on the server shioaji.server names, and every BUY is held to the trading limits.
         """
         match self:
             case ExecutionProvider.MOCK:
@@ -841,6 +881,18 @@ class ExecutionProvider(StrEnum):
         fill. SinoPac pays a sale at settlement, two sessions later, and the cash it reports until then leaves the sale
         out, so a BUY sized on it would be refused: a ranking follow sizes its BUYs on the cash the account has without
         its own sales (RankingFollowRule).
+        """
+        match self:
+            case ExecutionProvider.MOCK:
+                return True
+            case ExecutionProvider.SHIOAJI:
+                return False
+
+    @property
+    def equity_history(self) -> bool:
+        """
+        The site keeps the account's value at each session's close, so a ranking follow's return can be measured on it:
+        the mock account's book is the site's own. SinoPac's history is the broker's, which the site does not keep.
         """
         match self:
             case ExecutionProvider.MOCK:
@@ -870,34 +922,30 @@ class ExecutionProvider(StrEnum):
                 return Feature.SINOPAC_ORDERING
 
 
-class SystemEnvironment(StrEnum):
+class ShioajiServer(StrEnum):
     """
-    Which machine the app runs on, and with it which Shioaji server it trades on. Its properties are the one table of
-    what each environment allows; the trading setup check, the broker login and the order gates read them, and
-    nothing else decides by environment. A process takes its environment at start: neither the Web editor nor a
-    reload changes it.
+    The SinoPac server the site's Shioaji login is made on: shioaji.server, which an administrator switches from the
+    SinoPac page without a restart. Its properties are the one table of what each server reads and whether it is real
+    money; the trading setup check, the broker login and the order gates read them, and nothing else decides by server.
     """
 
-    DEV = auto()
-    """A developer's machine: Shioaji's simulation server, with the *_TEST key pair."""
+    SIMULATION = auto()
+    """SinoPac's paper-trading server, with the *_TEST key pair: no real money."""
 
-    TEST = auto()
-    """Staging before launch: Shioaji's simulation server, with the *_TEST key pair."""
-
-    PROD = auto()
-    """The live service: Shioaji's real account, with the production credentials. The only real money."""
+    PRODUCTION = auto()
+    """The real account, with the production key pair, the CA certificate that signs orders and the person id: real money."""
 
     @property
-    def shioaji_credentials(self) -> tuple[ShioajiCredential, ...]:
+    def credentials(self) -> tuple[ShioajiCredential, ...]:
         """
-        The variables a Shioaji login reads here: the API key and the secret key, and in production the CA certificate's
-        path, its password and the person id. ShioajiConfig.login reads each by name. The realtime quotes need only the
-        key pair; Shioaji as the broker needs them all.
+        The variables a login on this server reads: the API key and the secret key, and on production the CA
+        certificate's path, its password and the person id. ShioajiConfig.login reads each by name. The realtime
+        quotes need only the key pair; SinoPac as the broker needs them all.
         """
         match self:
-            case SystemEnvironment.DEV | SystemEnvironment.TEST:
+            case ShioajiServer.SIMULATION:
                 return (ShioajiCredential.API_KEY_TEST, ShioajiCredential.SECRET_KEY_TEST)
-            case SystemEnvironment.PROD:
+            case ShioajiServer.PRODUCTION:
                 return (
                     ShioajiCredential.API_KEY,
                     ShioajiCredential.SECRET_KEY,
@@ -907,12 +955,109 @@ class SystemEnvironment(StrEnum):
                 )
 
     @property
-    def shioaji_simulation(self) -> bool:
+    def simulation(self) -> bool:
+        """No real money: the login is made on this server, and the order gates refuse a SinoPac order on a login on any other."""
+        match self:
+            case ShioajiServer.SIMULATION:
+                return True
+            case ShioajiServer.PRODUCTION:
+                return False
+
+    @property
+    def label(self) -> str:
+        """The server's name in the logs and the CLI, the same as in the site's English text."""
+        match self:
+            case ShioajiServer.SIMULATION:
+                return "Simulation"
+            case ShioajiServer.PRODUCTION:
+                return "Production"
+
+    @classmethod
+    def of_client(cls, simulation: bool) -> ShioajiServer:
+        """The server of a login whose SDK client reports `simulation` of itself (BrokerLink.simulation)."""
+        return cls.SIMULATION if simulation else cls.PRODUCTION
+
+    @property
+    def other(self) -> ShioajiServer:
+        """The server the SinoPac page offers to switch to."""
+        match self:
+            case ShioajiServer.SIMULATION:
+                return ShioajiServer.PRODUCTION
+            case ShioajiServer.PRODUCTION:
+                return ShioajiServer.SIMULATION
+
+
+class ServerSwitchRefusalReason(StrEnum):
+    """Why the site's SinoPac login may not be on a server (ServerSwitchRule)."""
+
+    ENVIRONMENT = auto()
+    """The environment the machine runs in does not log in to that server (SystemEnvironment.shioaji_servers)."""
+
+    REGISTRATION_OPEN = auto()
+    """The server is real money and registration is open: a stranger could register on the installation that orders on it."""
+
+    ORDERING_ON = auto()
+    """A switch of the server that leaves SinoPac ordering on: an order could reach the new server before anyone turned it on there."""
+
+    CREDENTIALS_MISSING = auto()
+    """A switch to a server whose login reads variables that are not set."""
+
+    @property
+    def setting(self) -> str:
+        """The setting a refusal of this kind is located at."""
+        match self:
+            case ServerSwitchRefusalReason.REGISTRATION_OPEN:
+                return "accounts.registration_open"
+            case _:
+                return "shioaji.server"
+
+    def sentence(self, server: ShioajiServer, missing: Sequence[ShioajiCredential]) -> str:
+        """A refusal of this kind of the login on `server`, as the settings check words it; `missing` by name only."""
+        match self:
+            case ServerSwitchRefusalReason.ENVIRONMENT:
+                return f"the environment this machine runs in does not log in to SinoPac's {server.value} server"
+            case ServerSwitchRefusalReason.REGISTRATION_OPEN:
+                return (
+                    f"shioaji.server {server.value} refuses accounts.registration_open: the site's SinoPac login is the real "
+                    "account. Close registration first"
+                )
+            case ServerSwitchRefusalReason.ORDERING_ON:
+                return (
+                    f"a switch of shioaji.server to {server.value} turns features.sinopac_ordering off in the same save: no "
+                    "order reaches the new server until ordering is turned on again there"
+                )
+            case ServerSwitchRefusalReason.CREDENTIALS_MISSING:
+                variables = ", ".join(credential.value for credential in missing)
+                return f"shioaji.server {server.value} needs {variables} in the server's environment or .env"
+
+
+class SystemEnvironment(StrEnum):
+    """
+    Which machine the app runs on. Its properties are the one table of what each environment allows; the trading setup
+    check and the accounts key read them, and nothing else decides by environment. A process takes its environment at
+    start: neither the Web editor nor a reload changes it. Which SinoPac server it trades on is shioaji.server.
+    """
+
+    DEV = auto()
+    """A developer's machine: SinoPac's simulation server only."""
+
+    TEST = auto()
+    """Staging before launch, and the owner's own server: either SinoPac server, as shioaji.server names it."""
+
+    PROD = auto()
+    """The live service: either SinoPac server, as shioaji.server names it."""
+
+    @property
+    def shioaji_servers(self) -> frozenset[ShioajiServer]:
         """
-        Shioaji's paper-trading server, or the real account: the login is made on it, and the order gates refuse a
-        SinoPac order on a login on any other. Never configured: dev and test are always simulation, prod never.
+        The SinoPac servers the app may log in to here (ServerSwitchRule). A developer's machine never holds the real
+        account's credentials either (refused_credentials).
         """
-        return self != SystemEnvironment.PROD
+        match self:
+            case SystemEnvironment.DEV:
+                return frozenset({ShioajiServer.SIMULATION})
+            case SystemEnvironment.TEST | SystemEnvironment.PROD:
+                return frozenset(ShioajiServer)
 
     @property
     def accounts_key_file(self) -> bool:
@@ -929,13 +1074,12 @@ class SystemEnvironment(StrEnum):
 
     @property
     def refused_credentials(self) -> tuple[ShioajiCredential, ...]:
-        """
-        The production credentials, wherever this environment does not read them: dev and test refuse to start while
-        one is set, so the production key lives only on the production machine.
-        """
-        return tuple(
-            credential for credential in SystemEnvironment.PROD.shioaji_credentials if credential not in self.shioaji_credentials
-        )
+        """The credentials whose variable stops a start here: on a developer's machine the real account's, which never belong there."""
+        match self:
+            case SystemEnvironment.DEV:
+                return ShioajiServer.PRODUCTION.credentials
+            case SystemEnvironment.TEST | SystemEnvironment.PROD:
+                return ()
 
     @property
     def api_docs(self) -> bool:
@@ -1643,6 +1787,17 @@ class HoldingSource(StrEnum):
                 return Feature.HOLDINGS
 
     @property
+    def broker(self) -> ExecutionProvider | None:
+        """The account the source's holdings are the positions of; None for the holdings entered by hand."""
+        match self:
+            case HoldingSource.BROKERAGE:
+                return ExecutionProvider.SHIOAJI
+            case HoldingSource.MOCK:
+                return ExecutionProvider.MOCK
+            case HoldingSource.MANUAL:
+                return None
+
+    @property
     def permission(self) -> Permission | None:
         """The permission reading the source needs beyond its feature: the real broker's account is the site's own, not a user's."""
         match self:
@@ -1673,6 +1828,11 @@ class FeatureVisibility(StrEnum):
                 return Permission.SEE_ADMINISTRATOR_FEATURES in permissions
             case FeatureVisibility.EVERYONE:
                 return True
+
+    @property
+    def shown_to_anyone(self) -> bool:
+        """Whether some viewer sees the feature: one with every permission does, unless the feature is off for all."""
+        return self.shown_to(frozenset(Permission))
 
 
 class ErrorCode(StrEnum):
@@ -1732,13 +1892,22 @@ class ErrorCode(StrEnum):
     """FollowRefusal.OUTSIDE_FOLLOW_WINDOW: the site places no order in the market's phase now."""
 
     NOT_SIMULATION = auto()
-    """
-    FollowRefusal.NOT_SIMULATION: a ranking follow orders on a real broker's simulation server only, and the site's
-    login is not on it. Nothing started and no account was read.
-    """
+    """FollowAccountRefusal.NOT_SIMULATION, as the refusal of a ranking follow. Nothing started and no account was read."""
+
+    ORDERING_OFF = auto()
+    """FollowAccountRefusal.ORDERING_OFF, as the refusal of a ranking follow. Nothing started and no account was read."""
+
+    FOLLOW_ACCOUNT_CHANGED = auto()
+    """A ranking follow names another account than the user's follow account as saved now. Nothing started."""
+
+    BROKER_SERVER_CHANGED = auto()
+    """A run on a real broker names another server than the one its login is on now. Nothing started."""
 
     FOLLOW_BROKER_NOT_OFFERED = auto()
-    """The site does not let the user's ranking follow order on that account now: `detail` names the ones it offers. Nothing saved."""
+    """
+    The site does not offer that account as the user's follow account now, and a schedule needs one it offers: `detail`
+    names the ones it offers. Nothing saved.
+    """
 
     BACKTEST_PERIOD_UNAVAILABLE = auto()
     """The daily history the site holds cannot replay the period asked: `detail` says which days a backtest may cover."""
@@ -1756,6 +1925,9 @@ class ErrorCode(StrEnum):
     """stock_page.brief.daily_stocks stocks got a new AI brief today already. Stored briefs stay readable."""
 
     LISTING_UNAVAILABLE = auto()
+    BROKER_NOT_ANSWERING = auto()
+    """SinoPac did not answer a request in time, or answered an error, such as a read of its account: ask again later."""
+
     NOT_FOUND = auto()
     INVALID_REQUEST = auto()
     """The body, the path or the query does not validate: `detail` is FastAPI's list of the fields and why."""

@@ -6,7 +6,6 @@ limit, the server's total, an administrator's calls (counted, never refused), an
 import asyncio
 from datetime import timedelta
 
-import chromadb
 import pytest
 from support.fakes import AiVendor
 from support.harness import ADMINISTRATOR, MARKET_OPEN, MEMBER
@@ -94,13 +93,7 @@ async def test_the_wiring_caps_a_user_at_the_daily_calls_and_never_an_administra
         }
     )
     owned_ports = create_owned_ports(
-        config,
-        database,
-        chromadb.EphemeralClient(),
-        {config.ai.active_model: AiVendor()},
-        MovableClock(MARKET_OPEN),
-        SilentLogger(),
-        asyncio.Lock(),
+        config, database, {config.ai.active_model: AiVendor()}, MovableClock(MARKET_OPEN), SilentLogger(), asyncio.Lock()
     )
     member, administrator = owned_ports(MEMBER).ai_provider, owned_ports(ADMINISTRATOR).ai_provider
     await spend(member, 2)

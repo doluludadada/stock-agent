@@ -8,14 +8,27 @@ from pydantic.dataclasses import dataclass
 
 from a_domain.model.market.stock import Stock
 from a_domain.model.system.stats import SystemStats
+from a_domain.model.system.user import User
 from a_domain.model.trading.account import Account, AccountOpening, Position
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.ranking_formula import RankingFormula
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.rules.trading.cost import AffordableQuantityRule
+from a_domain.rules.trading.order_rule import BrokerLink, RealBrokerGateRule, SiteOrdering
 from a_domain.rules.trading.ranking import DecisionSessionsRule, Ranking, RankingHistory
 from a_domain.rules.trading.tick import LimitPriceRule
-from a_domain.types.enums import ExecutionProvider, FollowRefusal, OrderPricing, SignalSource, TradeAction, TradingPhase
+from a_domain.types.enums import (
+    ExecutionProvider,
+    FeatureVisibility,
+    FollowAccountRefusal,
+    FollowRefusal,
+    OrderPricing,
+    ShioajiServer,
+    SignalSource,
+    TradeAction,
+    TradingPhase,
+    Workflow,
+)
 from a_domain.types.values import NonEmptyText, PositiveFiniteFloat
 
 
@@ -127,12 +140,12 @@ class RankingHoldings:
 @dataclass(frozen=True)
 class RankingHoldingsRule:
     """
-    Which of the ranking's stocks the account holds and lacks, and which of its holdings the ranking left. A ranking
-    whose formula holds cash left every holding. Any other ranking of no stock, a month whose revenue the site does not
-    hold, is no instruction to sell: it leaves all three empty.
+    Which of the ranking's stocks an account that holds `held`, the ids of its positions, holds and lacks, and which of
+    its holdings the ranking left. A ranking whose formula holds cash left every holding. Any other ranking of no
+    stock, a month whose revenue the site does not hold, is no instruction to sell: it leaves all three empty.
     """
 
-    def apply(self, ranking: Ranking, account: Account) -> RankingHoldings:
+    def apply(self, ranking: Ranking, held: frozenset[str]) -> RankingHoldings:
         ranked = [stock.stock_id for stock in ranking.stocks]
 
         if not ranking.decides:
@@ -140,30 +153,93 @@ class RankingHoldingsRule:
 
         return RankingHoldings(
             decided_on=ranking.decided_on,
-            held=[stock_id for stock_id in ranked if stock_id in account.stock_ids],
-            lacking=[stock_id for stock_id in ranked if stock_id not in account.stock_ids],
-            left=sorted(account.stock_ids.difference(ranked)),
+            held=[stock_id for stock_id in ranked if stock_id in held],
+            lacking=[stock_id for stock_id in ranked if stock_id not in held],
+            left=sorted(held.difference(ranked)),
         )
 
 
 @dataclass(frozen=True, kw_only=True, config=ConfigDict(use_attribute_docstrings=True))
+class FollowAccount:
+    """
+    The user's follow account (User.ranking_follow_broker), whether a ranking follow may order there now, and the
+    accounts the site offers them as one.
+    """
+
+    broker: ExecutionProvider
+    """The user's follow account."""
+
+    brokers: tuple[ExecutionProvider, ...]
+    """The accounts the site offers the user as their follow account now, the mock account first."""
+
+    refusal: FollowAccountRefusal | None
+    """Why the site does not offer the user `broker` now, so no follow orders there; None while it is one of `brokers`."""
+
+    server: ShioajiServer | None
+    """The server of the site's login on the real broker, as the login reports itself. None where the user's Pipeline holds none."""
+
+    @property
+    def measured(self) -> bool:
+        """The site measures the follow's return on the account: it keeps the account's history and offers it to the user now."""
+        return self.refusal is None and self.broker.equity_history
+
+
+@dataclass(frozen=True)
+class FollowAccountRule:
+    """
+    The user's follow account and the accounts the site offers them as one now. The site offers an account only while
+    it shows the user that account (`accounts`, the visibility of each broker's account feature) and ordering on it
+    (`ordering`, one read of the site's ordering switch), and a real broker only while its gate lets a ranking follow
+    order there (RealBrokerGateRule), with who may order asked before the login: a user the site would never let order
+    there is told so whatever the login. `links` are what the real brokers' logins the user's Pipeline holds report of
+    themselves now.
+    """
+
+    gate_rule: RealBrokerGateRule
+    accounts: Mapping[ExecutionProvider, FeatureVisibility]
+
+    def apply(self, user: User, links: Mapping[ExecutionProvider, BrokerLink], ordering: SiteOrdering | None) -> FollowAccount:
+        refusals = {broker: account_refusal(self, broker, user, links.get(broker), ordering) for broker in ExecutionProvider}
+        servers = [ShioajiServer.of_client(link.simulation) for link in links.values() if link.simulation is not None]
+
+        return FollowAccount(
+            broker=user.ranking_follow_broker,
+            brokers=tuple(broker for broker, refusal in refusals.items() if refusal is None),
+            refusal=refusals[user.ranking_follow_broker],
+            server=servers[0] if servers else None,
+        )
+
+
+def account_refusal(
+    rule: FollowAccountRule, broker: ExecutionProvider, user: User, link: BrokerLink | None, ordering: SiteOrdering | None
+) -> FollowAccountRefusal | None:
+    """
+    Why the site does not offer `user` the account on `broker` as their follow account now, or None. Settings files on
+    disk that do not load (`ordering` None) show nobody ordering on any account.
+    """
+    visibility = ordering.ordering[broker] if ordering is not None else FeatureVisibility.OFF
+
+    if not (rule.accounts[broker].shown_to(user.permissions) and visibility.shown_to(user.permissions)):
+        return FollowAccountRefusal.ORDERING_OFF
+
+    if broker.real and (refused := rule.gate_rule.orderer_rule.apply(broker, user, visibility)) is not None:
+        return refused[0].follow_refusal
+
+    if (refused := rule.gate_rule.apply(Workflow.RANKING_FOLLOW, broker, link, user, ordering)) is not None:
+        return refused[0].follow_refusal
+
+    return None
+
+
+@dataclass(frozen=True, kw_only=True, config=ConfigDict(use_attribute_docstrings=True))
 class FollowSchedule:
-    """A user's schedule of the ranking follow into the account they chose, and where it stands now."""
+    """A user's schedule of the ranking follow on their follow account, and where it stands now."""
 
     time: time | None
     """The time of day in Taipei from which the site follows by itself. None: the schedule is off."""
 
     times: tuple[time, ...]
     """The times the site offers."""
-
-    broker: ExecutionProvider
-    """The account the schedule follows on: the user's mock account, or SinoPac's simulation account."""
-
-    brokers: tuple[ExecutionProvider, ...]
-    """The accounts the site lets the user's ranking follow order on now (RealBrokerGateRule), the mock account first."""
-
-    broker_offered: bool
-    """Whether `broker` is one of `brokers`. A schedule on an account the site does not offer the user now follows on no account."""
 
     pending: date | None
     """
@@ -179,7 +255,10 @@ class FollowSchedule:
     """
 
     due: bool
-    """The schedule follows `pending` now: it is on, its time has come today, and the market is in the phase orders are placed in."""
+    """
+    The schedule follows `pending` now: it is on, the site offers the user their follow account, its time has come
+    today, and the market is in the phase orders are placed in.
+    """
 
 
 @dataclass(frozen=True)
@@ -221,16 +300,16 @@ class FollowScheduleRule:
     """
     Where a user's schedule of the ranking follow stands at `now`. The decision to follow is the ranking's latest one
     among `sessions` (DecisionSessionsRule) once a day after it has come: an older one is superseded and never
-    followed late. Whether the decision is finished is judged on the follows on `broker`, the account the schedule
-    follows on, so a follow that finished it in another account finishes nothing here; a follow the schedule started
-    today counts on whatever account, so a user who moves the schedule to another account is still followed once a day. `brokers` are
-    the accounts the site offers the user now. The decision is pending until one ranking follow of the account finished it under
-    `formula`, the active one: it took that decision by that formula as it is defined now and left nothing to trade,
-    whoever started it. So the schedule never repeats a finished follow or one the user finished by hand, it goes on
-    after a follow that ordered nothing or only a part, and it brings the account to a formula an administrator
-    switched to. It is due when the schedule may follow now (FollowTimeRule) and has started no follow yet today: a
-    scheduled follow that failed, was refused or left stocks to trade is tried again on the next session, not every
-    minute of this one.
+    followed late. Whether the decision is finished is judged on the follows on the user's follow account (`account`),
+    so a follow that finished it in another account finishes nothing here; a follow the schedule started today counts
+    on whatever account, so a user who changes their follow account is still followed once a day. The decision is
+    pending until one ranking follow of the account finished it under `formula`, the active one: it took that decision
+    by that formula as it is defined now and left nothing to trade, whoever started it. So the schedule never repeats
+    a finished follow or one the user finished by hand, it goes on after a follow that ordered nothing or only a part,
+    and it brings the account to a formula an administrator switched to. It is due when the site offers the user their
+    follow account now, the schedule may follow now (FollowTimeRule) and has started no follow yet today: a scheduled
+    follow that failed, was refused or left stocks to trade is tried again on the next session, not every minute of
+    this one.
     """
 
     decision_rule: DecisionSessionsRule
@@ -245,11 +324,10 @@ class FollowScheduleRule:
         follows: Sequence[SystemStats],
         now: datetime,
         phase: TradingPhase,
-        broker: ExecutionProvider,
-        brokers: tuple[ExecutionProvider, ...],
+        account: FollowAccount,
     ) -> FollowSchedule:
         tried_today = bool(scheduled_since(follows, now.date(), now))
-        follows = [follow for follow in follows if follow.execution_provider == broker]
+        follows = [follow for follow in follows if follow.execution_provider == account.broker]
         decisions = self.decision_rule.apply(sessions)
         decided_on = sessions[decisions[-1][0]] if decisions else None
         finished = any(
@@ -261,12 +339,9 @@ class FollowScheduleRule:
         return FollowSchedule(
             time=follow_time,
             times=self.times,
-            broker=broker,
-            brokers=brokers,
-            broker_offered=broker in brokers,
             pending=pending,
             unfinished=unfinished_follow(follows, pending, now),
-            due=pending is not None and not tried_today and self.time_rule.apply(follow_time, now, phase),
+            due=pending is not None and account.refusal is None and not tried_today and self.time_rule.apply(follow_time, now, phase),
         )
 
 
@@ -351,7 +426,7 @@ class RankingFollowRule:
     def apply(
         self, ranking: Ranking, account: Account, stocks: Mapping[str, Stock], now: datetime, broker: ExecutionProvider
     ) -> list[TradeSignal | str]:
-        holdings = RankingHoldingsRule().apply(ranking, account)
+        holdings = RankingHoldingsRule().apply(ranking, account.stock_ids)
         priced = {stock_id: stock for stock_id in holdings.open if (stock := stocks.get(stock_id)) and stock.current_price}
         unpriced = [
             f"{stock_id} has neither a realtime quote nor an official close" for stock_id in holdings.open if stock_id not in priced

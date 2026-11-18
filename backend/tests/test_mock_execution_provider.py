@@ -68,7 +68,7 @@ async def cash(broker: MockExecutionProvider) -> float:
 async def test_buy_fills_against_a_real_database_and_pays_the_fee(tmp_path) -> None:
     db, broker = await open_broker(tmp_path)
 
-    placed = await broker.place_order(order(TradeAction.BUY, 1000, 100), no_refusal)
+    placed = await broker.place_order(order(TradeAction.BUY, 1000, 100), no_refusal, asyncio.Event())
 
     assert (placed.status, placed.filled_quantity, placed.average_filled_price, placed.fee, placed.tax) == (
         OrderStatus.FILLED,
@@ -84,9 +84,9 @@ async def test_buy_fills_against_a_real_database_and_pays_the_fee(tmp_path) -> N
 
 async def test_sell_realizes_pnl_net_of_both_fees_and_the_tax(tmp_path) -> None:
     db, broker = await open_broker(tmp_path)
-    await broker.place_order(order(TradeAction.BUY, 1000, 100), no_refusal)
+    await broker.place_order(order(TradeAction.BUY, 1000, 100), no_refusal, asyncio.Event())
 
-    sold = await broker.place_order(order(TradeAction.SELL, 1000, 110), no_refusal)
+    sold = await broker.place_order(order(TradeAction.SELL, 1000, 110), no_refusal, asyncio.Event())
 
     assert (sold.status, sold.fee, sold.tax) == (OrderStatus.FILLED, 156, 330)
     assert sold.realized_pnl == pytest.approx(110_000 - 156 - 330 - 100_142)
@@ -97,9 +97,9 @@ async def test_sell_realizes_pnl_net_of_both_fees_and_the_tax(tmp_path) -> None:
 
 async def test_an_etf_sell_pays_the_etf_transaction_tax_from_the_config(tmp_path) -> None:
     db, broker = await open_broker(tmp_path)
-    await broker.place_order(order(TradeAction.BUY, 1000, 100, stock_id="0050"), no_refusal)
+    await broker.place_order(order(TradeAction.BUY, 1000, 100, stock_id="0050"), no_refusal, asyncio.Event())
 
-    sold = await broker.place_order(order(TradeAction.SELL, 1000, 110, stock_id="0050"), no_refusal)
+    sold = await broker.place_order(order(TradeAction.SELL, 1000, 110, stock_id="0050"), no_refusal, asyncio.Event())
 
     assert (sold.fee, sold.tax) == (156, 110)
     assert sold.realized_pnl == pytest.approx(110_000 - 156 - 110 - 100_142)
@@ -109,9 +109,9 @@ async def test_an_etf_sell_pays_the_etf_transaction_tax_from_the_config(tmp_path
 @pytest.mark.parametrize(("exempt_until", "tax"), [(date(2099, 12, 31), 0), (date(2000, 1, 1), 110)])
 async def test_a_bond_etf_sell_pays_no_tax_until_the_configured_exemption_ends(tmp_path, exempt_until: date, tax: int) -> None:
     db, broker = await open_broker(tmp_path, bond_etf_tax_exempt_until=exempt_until)
-    await broker.place_order(order(TradeAction.BUY, 1000, 100, stock_id="00679B"), no_refusal)
+    await broker.place_order(order(TradeAction.BUY, 1000, 100, stock_id="00679B"), no_refusal, asyncio.Event())
 
-    sold = await broker.place_order(order(TradeAction.SELL, 1000, 110, stock_id="00679B"), no_refusal)
+    sold = await broker.place_order(order(TradeAction.SELL, 1000, 110, stock_id="00679B"), no_refusal, asyncio.Event())
 
     assert (sold.status, sold.fee, sold.tax) == (OrderStatus.FILLED, 156, tax)
     assert await cash(broker) == pytest.approx(1_000_000 - 100_142 + 110_000 - 156 - tax)
@@ -121,7 +121,7 @@ async def test_a_bond_etf_sell_pays_no_tax_until_the_configured_exemption_ends(t
 async def test_ioc_fills_what_the_market_can_take_and_cancels_the_rest(tmp_path) -> None:
     db, broker = await open_broker(tmp_path, max_fill_quantity=400)
 
-    placed = await broker.place_order(order(TradeAction.BUY, 1000, 100, TimeInForce.IOC), no_refusal)
+    placed = await broker.place_order(order(TradeAction.BUY, 1000, 100, TimeInForce.IOC), no_refusal, asyncio.Event())
 
     assert (placed.status, placed.filled_quantity, placed.fee) == (OrderStatus.CANCELLED, 400, 57)
     assert await cash(broker) == 1_000_000 - 40_057
@@ -135,7 +135,7 @@ async def test_ioc_fills_what_the_market_can_take_and_cancels_the_rest(tmp_path)
 async def test_fok_fills_everything_or_nothing(tmp_path, max_fill_quantity: int | None, status: OrderStatus, filled: int) -> None:
     db, broker = await open_broker(tmp_path, max_fill_quantity=max_fill_quantity)
 
-    placed = await broker.place_order(order(TradeAction.BUY, 1000, 100, TimeInForce.FOK), no_refusal)
+    placed = await broker.place_order(order(TradeAction.BUY, 1000, 100, TimeInForce.FOK), no_refusal, asyncio.Event())
 
     assert (placed.status, placed.filled_quantity) == (status, filled)
     assert sum(quantity for _, quantity, _ in await holdings(broker)) == filled
@@ -145,7 +145,7 @@ async def test_fok_fills_everything_or_nothing(tmp_path, max_fill_quantity: int 
 async def test_rod_is_rejected_because_nothing_could_fill_its_working_remainder(tmp_path) -> None:
     db, broker = await open_broker(tmp_path)
 
-    placed = await broker.place_order(order(TradeAction.BUY, 1000, 100, TimeInForce.ROD), no_refusal)
+    placed = await broker.place_order(order(TradeAction.BUY, 1000, 100, TimeInForce.ROD), no_refusal, asyncio.Event())
 
     assert placed.status == OrderStatus.REJECTED
     assert placed.reason is not None and placed.reason.startswith("UNSUPPORTED_TIME_IN_FORCE")
@@ -162,7 +162,7 @@ async def test_business_refusals_are_rejected_before_acceptance(
 ) -> None:
     db, broker = await open_broker(tmp_path, initial_cash=initial_cash)
 
-    placed = await broker.place_order(order(action, quantity, 100), no_refusal)
+    placed = await broker.place_order(order(action, quantity, 100), no_refusal, asyncio.Event())
 
     assert placed.status == OrderStatus.REJECTED
     assert placed.reason is not None and placed.reason.startswith(reason)
@@ -172,9 +172,9 @@ async def test_business_refusals_are_rejected_before_acceptance(
 
 async def test_selling_more_than_held_is_rejected(tmp_path) -> None:
     db, broker = await open_broker(tmp_path)
-    await broker.place_order(order(TradeAction.BUY, 1000, 100), no_refusal)
+    await broker.place_order(order(TradeAction.BUY, 1000, 100), no_refusal, asyncio.Event())
 
-    placed = await broker.place_order(order(TradeAction.SELL, 1001, 100), no_refusal)
+    placed = await broker.place_order(order(TradeAction.SELL, 1001, 100), no_refusal, asyncio.Event())
 
     assert placed.status == OrderStatus.REJECTED
     assert placed.reason is not None and placed.reason.startswith("INSUFFICIENT_POSITION")
@@ -184,7 +184,7 @@ async def test_selling_more_than_held_is_rejected(tmp_path) -> None:
 async def test_a_technical_error_fails_the_order(tmp_path) -> None:
     db, broker = await open_broker(tmp_path, create_tables=False)
 
-    placed = await broker.place_order(order(TradeAction.BUY, 1000, 100), no_refusal)
+    placed = await broker.place_order(order(TradeAction.BUY, 1000, 100), no_refusal, asyncio.Event())
 
     assert placed.status == OrderStatus.FAILED
     assert placed.reason is not None and "UndefinedTableError" in placed.reason

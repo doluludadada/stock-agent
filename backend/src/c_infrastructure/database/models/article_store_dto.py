@@ -1,7 +1,8 @@
 from datetime import date, datetime
 from typing import ClassVar, Self
 
-from sqlalchemy import Column, Text
+from pgvector.sqlalchemy import VECTOR
+from sqlalchemy import DDL, Column, Text, event
 from sqlmodel import Field, SQLModel
 
 from a_domain.model.market.article import Article
@@ -62,3 +63,43 @@ class StoredArticleDTO(SQLModel, table=True):
             clause=self.clause,
             fact_date=self.fact_date,
         )
+
+
+ARTICLE_VECTOR_LENGTH = 512
+"""
+How many numbers each vector of article_vectors holds: the width of the last layer of the shipped embedding model
+(stock_page.article_store.embedding, Xenova/bge-small-zh-v1.5), as its ONNX file declares it. A model of another width
+needs an upgrade step that changes the column.
+"""
+
+
+class ArticleVectorDTO(SQLModel, table=True):
+    """
+    The article index's vector of one kept article (IArticleIndex), shared by every user, under the stock and key the
+    article store keeps the article by: no title, no text and no address. `published_day` is the day the article was
+    published in the exchange's zone, which a search bounds. `text_digest` is the SHA-256 of the text the vector was
+    computed from, and `embedding_model` the identity of the model that computed it (EmbeddingConfig.identity), so a
+    vector of other text or of another model is computed again rather than compared. Each vector stays in its row
+    (STORAGE PLAIN): at 2 KB it is past the size PostgreSQL moves into its TOAST table, where a search, which compares
+    every vector of the stock, would fetch each one on its own and take more than twice as long for a stock of 5,000.
+    """
+
+    __tablename__: ClassVar[str] = "article_vectors"
+
+    stock_id: str = Field(primary_key=True)
+    key: str = Field(primary_key=True)
+    published_day: date
+    text_digest: str
+    embedding_model: str
+    vector: list[float] = Field(sa_column=Column(VECTOR(ARTICLE_VECTOR_LENGTH), nullable=False))
+
+
+event.listen(
+    SQLModel.metadata.tables[ArticleVectorDTO.__tablename__],
+    "after_create",
+    DDL("ALTER TABLE article_vectors ALTER COLUMN vector SET STORAGE PLAIN"),
+)
+
+# Every create_all creates pgvector's extension before any table, as a new database's article_vectors needs its type.
+# Where the database has it, the statement does nothing, whatever the role.
+event.listen(SQLModel.metadata, "before_create", DDL("CREATE EXTENSION IF NOT EXISTS vector"))

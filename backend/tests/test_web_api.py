@@ -18,14 +18,14 @@ from support.harness import (
     open_harness_switch,
     rising_history,
 )
-from support.settings import environment_setup, shipped_config
+from support.settings import shipped_config, sinopac_setup
 from support.web import ended, hold_stock_list, run_to_end, serve, write
 
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.account import Position
 from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
-from a_domain.types.enums import Role, SystemEnvironment, TradeAction, WatchlistType
+from a_domain.types.enums import Role, ShioajiServer, SystemEnvironment, TradeAction, WatchlistType
 from b_application.config import settings_loader
 from b_application.config.settings_loader import InvalidSettingsError
 from d_presentation.live_runtime import open_runtime_switch
@@ -45,12 +45,12 @@ ORDERING_WRITES = [
     ("POST", "/v1/runs/intraday", {}),
     ("POST", f"/v1/runs/{FOLLOWED_RUN}/manual-buy", {"stock_id": "2330", "quantity": 100}),
     ("POST", f"/v1/runs/{FOLLOWED_RUN}/follow", {}),
-    ("POST", "/v1/rankings/follow", {}),
+    ("POST", "/v1/rankings/follow", {"broker": "mock"}),
 ]
 """
 The only writes that can lead to an order: Buzz, Intraday and a manual BUY, on the broker their `broker` query names,
-a follow of a run, on the mock account only, and a follow of the monthly ranking, on the mock account unless its
-`broker` query names SinoPac, whose simulation server is the only one it orders on.
+a follow of a run, on the mock account only, and a follow of the monthly ranking, on the user's follow account: the
+mock account unless they chose SinoPac, whose simulation server is the only one it orders on.
 """
 VALUATION_WRITES = [
     ("POST", "/v1/valuation/explanation", {"stock_id": "2330", "target_pe": 15}),
@@ -60,7 +60,8 @@ VALUATION_WRITES = [
 
 WRITES = [
     ("POST", "/v1/runs/full-cycle", {}),
-    ("PUT", "/v1/rankings/follow/schedule", {"time": "09:05", "broker": "mock"}),
+    ("PUT", "/v1/rankings/follow/schedule", {"time": "09:05"}),
+    ("PUT", "/v1/rankings/follow/account", {"broker": "mock"}),
     ("POST", "/v1/runs/specific-stocks", {"stock_ids": ["2330"]}),
     ("POST", "/v1/watchlist/manual", {"stock_ids": ["2330"]}),
     ("POST", "/v1/watchlist/manual/remove", {"stock_ids": ["2330"]}),
@@ -461,14 +462,14 @@ async def test_the_account_page_reads_the_mock_account_by_default_and_sinopac_wh
 
     async with serve(harness) as client:
         mock = (await client.get("/v1/account/history")).json()
-        sinopac = (await client.get("/v1/account/history", params={"broker": "shioaji"})).json()
+        sinopac = (await client.get("/v1/account/history", params=SINOPAC_SIMULATION)).json()
         brokers = (await client.get("/v1/account/brokers")).json()
 
     assert (mock["execution_provider"], mock["current"]["cash"], mock["current"]["positions"]) == ("mock", harness.broker.cash, [])
     assert (sinopac["execution_provider"], sinopac["current"]["cash"], len(sinopac["current"]["positions"])) == ("shioaji", 42_000, 1)
     assert brokers == [
-        {"broker": "mock", "simulation": None, "max_order_value": None, "max_daily_buy_value": None},
-        {"broker": "shioaji", "simulation": True, "max_order_value": 100_000.0, "max_daily_buy_value": 300_000.0},
+        {"broker": "mock", "server": None, "max_order_value": None, "max_daily_buy_value": None},
+        {"broker": "shioaji", "server": "simulation", "max_order_value": 100_000.0, "max_daily_buy_value": 300_000.0},
     ]
 
 
@@ -631,6 +632,9 @@ async def test_no_request_but_buzz_and_intraday_reaches_the_broker() -> None:
     }
 
 
+SINOPAC_SIMULATION = {"broker": "shioaji", "server": "simulation"}
+"""A start on SinoPac whose confirmation showed the simulation server, the one the harness's login is on."""
+
 SINOPAC_STARTS = [(path, body) for method, path, body in ORDERING_WRITES if not path.endswith("/follow")]
 
 
@@ -643,14 +647,30 @@ async def test_a_sinopac_start_is_refused_to_a_user_and_while_no_login_is_up_and
     unavailable = build_harness()
 
     async with serve(offered, user=(MEMBER.username, MEMBER_PASSWORD)) as client:
-        member = await client.post(path, params={"broker": "shioaji"}, json={"confirm": True, **body})
+        member = await client.post(path, params=SINOPAC_SIMULATION, json={"confirm": True, **body})
 
     async with serve(unavailable) as client:
-        administrator = await client.post(path, params={"broker": "shioaji"}, json={"confirm": True, **body})
+        administrator = await client.post(path, params=SINOPAC_SIMULATION, json={"confirm": True, **body})
 
     assert (member.status_code, member.json()["code"]) == (403, "real_broker_refused")
     assert (administrator.status_code, administrator.json()["code"]) == (403, "broker_unavailable")
     assert (offered.real_broker.placed, offered.journal.runs, unavailable.journal.runs) == ([], {}, {})
+
+
+@pytest.mark.parametrize(("path", "body"), SINOPAC_STARTS)
+async def test_a_sinopac_start_whose_confirmation_showed_another_server_than_its_login_s_starts_nothing(
+    path: str, body: dict[str, Any]
+) -> None:
+    harness = build_harness(sinopac=True)
+
+    async with serve(harness) as client:
+        older_page = await client.post(path, params={"broker": "shioaji", "server": "production"}, json={"confirm": True, **body})
+        no_server = await client.post(path, params={"broker": "shioaji"}, json={"confirm": True, **body})
+
+    for refused in (older_page, no_server):
+        assert (refused.status_code, refused.json()["code"]) == (409, "broker_server_changed")
+    assert "SinoPac is on its simulation server now" in older_page.json()["detail"]
+    assert (harness.real_broker.placed, harness.journal.runs) == ([], {})
 
 
 async def test_web_intraday_on_sinopac_orders_on_sinopac_only_and_records_the_choice_on_the_run() -> None:
@@ -660,7 +680,7 @@ async def test_web_intraday_on_sinopac_orders_on_sinopac_only_and_records_the_ch
     harness.hold("2317", quantity=1000, average_cost=100.0)
 
     async with serve(harness) as client:
-        response = await client.post("/v1/runs/intraday", params={"broker": "shioaji"}, json={"confirm": True})
+        response = await client.post("/v1/runs/intraday", params=SINOPAC_SIMULATION, json={"confirm": True})
         run = await ended(client, response.json()["run_id"])
 
     assert (run["state"], run["summary"]["execution_provider"]) == ("finished", "shioaji")
@@ -677,7 +697,9 @@ async def reported_run(client: Any, stock_id: str = "2330") -> str:
 
 async def manual_buy(client: Any, run_id: str, quantity: int, broker: str = "mock", stock_id: str = "2330") -> dict[str, Any]:
     response = await client.post(
-        f"/v1/runs/{run_id}/manual-buy", params={"broker": broker}, json={"confirm": True, "stock_id": stock_id, "quantity": quantity}
+        f"/v1/runs/{run_id}/manual-buy",
+        params={"broker": broker} | ({"server": "simulation"} if broker != "mock" else {}),
+        json={"confirm": True, "stock_id": stock_id, "quantity": quantity},
     )
     assert response.status_code == 202, response.text
     bought = await ended(client, response.json()["run_id"])
@@ -738,7 +760,7 @@ async def test_an_administrator_demoted_during_a_sinopac_run_has_its_next_order_
         run_id = await reported_run(client)
         harness.prices.fetch_realtime_bars = held_quotes
         started = await client.post(
-            f"/v1/runs/{run_id}/manual-buy", params={"broker": "shioaji"}, json={"confirm": True, "stock_id": "2330", "quantity": 100}
+            f"/v1/runs/{run_id}/manual-buy", params=SINOPAC_SIMULATION, json={"confirm": True, "stock_id": "2330", "quantity": 100}
         )
         harness.administrator.role = Role.USER
         release.set()
@@ -783,7 +805,7 @@ async def test_a_settings_read_that_a_save_interrupts_answers_409_and_the_next_r
 
 
 async def test_the_api_refuses_to_start_on_the_trading_setups_the_cli_refuses(monkeypatch) -> None:
-    production = environment_setup(shipped_config(), SystemEnvironment.PROD)
+    production = sinopac_setup(shipped_config(), ShioajiServer.PRODUCTION, SystemEnvironment.PROD)
     unsafe = production.model_copy(update={"environment": SystemEnvironment.DEV})
     monkeypatch.setattr(settings_loader, "load_settings", lambda project_root, texts: unsafe)
     app = create_app(open_runtime_switch)

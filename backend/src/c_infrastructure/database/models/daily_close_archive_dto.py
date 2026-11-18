@@ -3,7 +3,6 @@ from datetime import date, datetime
 from typing import ClassVar, Self
 
 from sqlalchemy import JSON, BigInteger, Column
-from sqlalchemy.dialects.postgresql import Insert, insert
 from sqlmodel import Field, SQLModel
 
 from a_domain.model.fundamentals.eps import Eps
@@ -18,14 +17,6 @@ from a_domain.types.values import FiscalQuarter
 from b_application.config.sources_config import FinancialSummaryFields
 from c_infrastructure.database.utc_datetime import UtcDateTime
 from c_infrastructure.market.exchange_text import parse_number
-
-
-def replacing(table: type[SQLModel]) -> Insert:
-    """The upsert of one of the archive's tables: a row it already holds keeps its key and takes every other column."""
-    statement = insert(table)
-    keys = [column.name for column in statement.table.primary_key]
-    replaced = {column.name: statement.excluded[column.name] for column in statement.table.columns if column.name not in keys}
-    return statement.on_conflict_do_update(index_elements=keys, set_=replaced)
 
 
 class DailyCloseDTO(SQLModel, table=True):

@@ -2,12 +2,14 @@ import asyncio
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from functools import partial
 from typing import override
 
 import c_infrastructure.trading.shioaji.sdk_reporting  # noqa: F401
 
 # isort: split
 from shioaji import Shioaji
+from shioaji.constant import OrderState
 from shioaji.contracts import Index
 from shioaji.data import Snapshot
 
@@ -17,6 +19,7 @@ from a_domain.ports.market.broker_quote_provider import IBrokerQuoteProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.types.enums import MarketIndex
+from a_domain.types.errors import BrokerNotAnswering
 from b_application.config.market_data_config import IndexQuoteContract, MarketDataConfig
 from b_application.config.trading_config import ShioajiLogin
 from c_infrastructure.request_pace import RequestPace
@@ -30,9 +33,8 @@ class ShioajiConnection:
     is the client of the latest login and `login` that login in its thread. `up` says the login succeeded and Shioaji has
     not reported its session down since: Solace calls the session-down callback from its own thread once its reconnects
     gave up. `pace` paces every market-data request on the login, whichever runtime makes it, since Shioaji counts its
-    50 market-data queries per 10 seconds per login. `earlier_clients` keeps every client a login was
-    made on before `client` for the life of the process: none is logged out or collected, because shioaji 1.3.1 on
-    Python 3.14 segfaults at the next garbage collection after a logout.
+    50 market-data queries per 10 seconds per login. `earlier_clients` keeps every client a login was made on before
+    `client` for the life of the process, none logged out or collected.
     """
 
     client: Shioaji
@@ -87,10 +89,10 @@ class ShioajiQuoteProvider(IBrokerQuoteProvider):
     @override
     async def connect(self) -> None:
         """
-        Logs in without subscribing to the account's order events (the broker polls its orders itself), unless the
-        login is up, and waits for it. A login that failed or went down is made again on a new client, and the one before
-        is kept, never logged out. The wait is shielded: a reload that times out or is cancelled leaves the login
-        running, and the next runtime waits for the same login instead of making another.
+        Logs in without subscribing to the account's order events (the broker polls its orders itself; its own orders'
+        events go to log_order_event), unless the login is up, and waits for it. A login that failed or went down is made
+        again on a new client, and the one before is kept, never logged out. The wait is shielded: a reload that times out
+        or is cancelled leaves the login running, and the next runtime waits for the same login instead of making another.
         """
         connection = self._connection
 
@@ -109,10 +111,10 @@ class ShioajiQuoteProvider(IBrokerQuoteProvider):
                     connection.up = False
 
             def log_in() -> None:
-                client.login(
-                    api_key=login.api_key.get_secret_value(), secret_key=login.secret_key.get_secret_value(), subscribe_trade=False
-                )
+                api_key, secret_key = login.api_key.get_secret_value(), login.secret_key.get_secret_value()
+                client.login(api_key=api_key, secret_key=secret_key, subscribe_trade=False)
                 client.set_session_down_callback(gone_down)
+                client.set_order_callback(partial(log_order_event, self._logger))
                 connection.up = True
 
             connection.login = asyncio.get_running_loop().run_in_executor(None, log_in)
@@ -233,13 +235,44 @@ async def sdk_request[**Arguments, Answer](
     call: Callable[Arguments, Answer], *args: Arguments.args, **kwargs: Arguments.kwargs
 ) -> Answer:
     """
-    Makes one request of the SDK, `call` with its arguments in a worker thread. Its failure raises RuntimeError saying
-    what failure_of says of the SDK's error, never the error's text.
+    Makes one request of the SDK, `call` with its arguments in a worker thread. Its failure raises BrokerNotAnswering
+    saying what failure_of says of the SDK's error, never the error's text.
     """
     try:
         return await asyncio.to_thread(call, *args, **kwargs)
     except Exception as error:
-        raise RuntimeError(f"Shioaji answered {failure_of(error)}") from None
+        raise BrokerNotAnswering(f"Shioaji answered {failure_of(error)}") from None
+
+
+def log_order_event(logger: ILoggingProvider, state: OrderState, event: Mapping[str, object]) -> None:
+    """
+    Shioaji's order callback, which the SDK calls from a thread of its own: one INFO line per event, the deal trail
+    of the production log, of the stock, the action, the lot, the quantity and the price, and for an order event its
+    operation's type and code; a deal event's quantity and price are the deal's. The event also holds the account, the
+    login's person id, the operation's message and the order's ids, so nothing else of it is read. It never raises
+    into the SDK: an event it cannot read is one WARNING line that names the error's type only.
+    """
+    try:
+        if state in (OrderState.StockDeal, OrderState.FuturesDeal):
+            stock = f"{event.get('action')} {event.get('code')} {event.get('order_lot')}"
+            logger.info(f"Shioaji deal: {stock} {event.get('quantity')} at {event.get('price')}")
+            return
+
+        order, operation, contract = (event_section(event, key) for key in ("order", "operation", "contract"))
+        stock = f"{order.get('action')} {contract.get('code')} {order.get('order_lot')}"
+        logger.info(
+            f"Shioaji order event {operation.get('op_type')} {operation.get('op_code')}: "
+            f"{stock} {order.get('quantity')} at {order.get('price')}"
+        )
+
+    except Exception as error:
+        logger.warning(f"Shioaji order event not logged: {type(error).__name__}")
+
+
+def event_section(event: Mapping[str, object], key: str) -> Mapping[str, object]:
+    """The section `key` of an order event, or nothing where the event has no such section."""
+    section = event.get(key)
+    return section if isinstance(section, Mapping) else {}
 
 
 def failure_of(error: Exception) -> str:

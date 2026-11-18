@@ -92,6 +92,14 @@ class BrokerUnavailable(LookupError):
     """A real broker that has no login up on this site now, or that the site's audience does not offer. The Web answers 403."""
 
 
+class BrokerNotAnswering(RuntimeError):
+    """
+    A request of a real broker's SDK on an up login failed: the server did not answer in time, or answered an error
+    instead. The message says the error's type and the server's status, never its words. A RuntimeError, so whatever
+    takes a failed broker call in its stride, such as an order that fails, takes this one too. The Web answers 503.
+    """
+
+
 class RealtimeQuotesUnavailable(PermissionError):
     """
     The deployment uses open data only (audience public), which has no realtime quote, or it has no Shioaji login, and
@@ -155,8 +163,22 @@ class FollowTimeNotOffered(ValueError):
 
 class FollowBrokerNotOffered(PermissionError):
     """
-    A user chose for the scheduled ranking follow an account the site does not let their follow order on now. The
-    message says why. Nothing saved. 403.
+    A user chose as their follow account one the site does not offer them now, or a schedule on one it does not offer.
+    The message names the ones it offers. Nothing saved. 403.
+    """
+
+
+class FollowAccountChanged(LookupError):
+    """
+    A ranking follow would order on another account than the user's follow account as saved now: the account the user
+    confirmed, or the one its run started on, is no longer it. Nothing is read and nothing sent. 409.
+    """
+
+
+class BrokerServerChanged(LookupError):
+    """
+    A run would order on a real broker whose login is on another server than the one the user confirmed: the server
+    was switched after the page showed it. Nothing started. 409.
     """
 
 

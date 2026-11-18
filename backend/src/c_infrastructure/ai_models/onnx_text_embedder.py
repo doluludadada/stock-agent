@@ -19,18 +19,20 @@ if TYPE_CHECKING:
 
 # ONNX Runtime uploads usage telemetry to Microsoft from the moment it is imported unless this is set first, and its
 # upload thread aborts the process when the interpreter exits during an upload. The site reports nothing about itself
-# to a third party. Set here, at the start, it also covers Chroma's own later import of the runtime.
+# to a third party.
 os.environ.setdefault("ORT_DISABLE_TELEMETRY", "1")
+# The tokenizer encodes a batch on several threads, and warns on each later fork, such as a backup's pg_dump, unless this is set.
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 
 class OnnxTextEmbedder(ITextEmbedder):
     """
-    A sentence embedding model run with ONNX Runtime on the server's CPU: the runtime and the tokenizer Chroma itself
-    installs, with a model that reads Chinese. Its two files come from the Hugging Face repository at the pinned
-    revision into `folder`, once: a file already there is opened without a request, so only the first use of a server
-    needs the network. The runtime is imported and the model opened at the first text, not at the start, so a site that
-    embeds nothing pays nothing. One batch runs at a time, on `threads` CPU threads and without ONNX Runtime's memory
-    arena, which would keep the largest batch's memory for the life of the process. Each vector has length 1.
+    A sentence embedding model that reads Chinese, run with ONNX Runtime on the server's CPU. Its two files come from
+    the Hugging Face repository at the pinned revision into `folder`, once: a file already there is opened without a
+    request, so only the first use of a server needs the network. The runtime is imported and the model opened at the
+    first text, not at the start, so a site that embeds nothing pays nothing. One batch runs at a time, on `threads` CPU
+    threads and without ONNX Runtime's memory arena, which would keep the largest batch's memory for the life of the
+    process. Each vector has length 1.
     """
 
     def __init__(self, embedding: EmbeddingConfig, folder: Path, logger: ILoggingProvider) -> None:
@@ -52,6 +54,19 @@ class OnnxTextEmbedder(ITextEmbedder):
                 vectors.extend(await asyncio.to_thread(batch_vectors, batch, *self._model, self._embedding.pooling))
 
         return vectors
+
+    @override
+    async def vector_length(self) -> int:
+        async with self._embedding_one_batch:
+            if self._model is None:
+                self._model = await asyncio.to_thread(opened_model, self._embedding, self._folder, self._logger)
+
+            length = self._model[1].get_outputs()[0].shape[-1]
+
+        if not isinstance(length, int):
+            raise ValueError(f"The text embedding model {self._embedding.repository} declares no fixed length of its vectors")
+
+        return length
 
 
 def batch_vectors(

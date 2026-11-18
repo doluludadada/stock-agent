@@ -1,9 +1,11 @@
+from typing import override
+
 from pydantic.dataclasses import dataclass
 
 from a_domain.model.system.user import User
 from a_domain.rules.system.google_sign_in import GoogleAccessRule, GoogleAdmission
 from a_domain.rules.system.registration import SignInOffer
-from a_domain.types.enums import Permission, UserStatus
+from a_domain.types.enums import FeatureVisibility, Permission, ServerSwitchRefusalReason, ShioajiCredential, ShioajiServer, UserStatus
 from a_domain.types.ids import UserId
 from a_domain.types.values import comparable_name
 
@@ -41,5 +43,63 @@ class EditorAccessRule:
 
         if saving is None and candidate.needs_first_administrator and not running.needs_first_administrator:
             return "The new settings' database has no administrator: nobody could sign in to the editor."
+
+        return None
+
+
+@dataclass(frozen=True)
+class ServerSwitchRefusal:
+    """Why the site's SinoPac login may not be on `server`, with the variables its login reads that are not set, by name only."""
+
+    reason: ServerSwitchRefusalReason
+    server: ShioajiServer
+    missing: tuple[ShioajiCredential, ...] = ()
+
+    @override
+    def __str__(self) -> str:
+        """How the settings check words it, at the setting `reason` names."""
+        return self.reason.sentence(self.server, self.missing)
+
+
+@dataclass(frozen=True)
+class ServerSwitchRule:
+    """
+    Which SinoPac server the site's login may be on, at a start and at a reload or a save that switches it without a
+    restart. Only a server the machine's environment logs in to (`servers`), and never the real account while
+    registration is open. A switch from the server the process runs on must also turn SinoPac ordering off in the same
+    files, so no order reaches the new server until an administrator turns ordering on again there, and every
+    variable the new server's login reads must be set. A start, and a save that keeps the server, need neither: a start
+    on production with ordering on is the state a switch and a deploy leave.
+    """
+
+    servers: frozenset[ShioajiServer]
+
+    def apply(
+        self,
+        running: ShioajiServer | None,
+        target: ShioajiServer,
+        ordering: FeatureVisibility,
+        given: frozenset[ShioajiCredential],
+        registration_open: bool,
+    ) -> ServerSwitchRefusal | None:
+        """
+        Why the login may not be on `target`, or None. `running` is the server the process logs in to now, None at its
+        first start; `ordering` whom features.sinopac_ordering shows ordering to in the new settings; `given` the
+        Shioaji variables that are set.
+        """
+        if target not in self.servers:
+            return ServerSwitchRefusal(reason=ServerSwitchRefusalReason.ENVIRONMENT, server=target)
+
+        if registration_open and not target.simulation:
+            return ServerSwitchRefusal(reason=ServerSwitchRefusalReason.REGISTRATION_OPEN, server=target)
+
+        if running is None or running == target:
+            return None
+
+        if ordering.shown_to_anyone:
+            return ServerSwitchRefusal(reason=ServerSwitchRefusalReason.ORDERING_ON, server=target)
+
+        if missing := tuple(credential for credential in target.credentials if credential not in given):
+            return ServerSwitchRefusal(reason=ServerSwitchRefusalReason.CREDENTIALS_MISSING, server=target, missing=missing)
 
         return None

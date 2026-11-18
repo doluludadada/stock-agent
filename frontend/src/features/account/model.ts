@@ -1,7 +1,16 @@
-import type { AccountHistory } from './api'
+import type { AccountHistory, BrokerageAccount } from './api'
 
 export type AccountValue = AccountHistory['current']
 export type Position = AccountValue['positions'][number]
+
+/**
+ * What the page says of the site's SinoPac login: up; down, which the site logs in again by itself; or unavailable,
+ * the login up with no SinoPac account on it, which nothing tries again before a save or a restart.
+ */
+export function loginState(account: Pick<BrokerageAccount, 'login_up' | 'login_down'>): 'up' | 'down' | 'unavailable' {
+  if (account.login_up) return 'up'
+  return account.login_down ? 'down' : 'unavailable'
+}
 
 /** The positions, largest first. */
 export function holdings(value: AccountValue): Position[] {

@@ -207,9 +207,7 @@ class SqlUserStore(IUserStore):
             await session.commit()
 
     @override
-    async def save_ranking_follow_schedule(
-        self, user_id: UserId, follow_time: time | None, broker: ExecutionProvider, now: datetime
-    ) -> None:
+    async def save_ranking_follow(self, user_id: UserId, follow_time: time | None, broker: ExecutionProvider, now: datetime) -> None:
         values = {"ranking_follow_time": follow_time, "ranking_follow_broker": broker, "updated_at": now}
         changed = update(UserDTO).where(col(UserDTO.user_id) == user_id).values(**values)
 

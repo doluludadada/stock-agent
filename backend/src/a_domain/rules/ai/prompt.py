@@ -5,6 +5,7 @@ from a_domain.model.fundamentals.monthly_revenue import MonthlyRevenue
 from a_domain.model.fundamentals.quarter_financials import QuarterFinancials
 from a_domain.model.market.article import Article
 from a_domain.model.market.stock import Stock
+from a_domain.model.trading.signal import TradeSignal
 from a_domain.model.valuation.valuation import ValuationReport
 from a_domain.rules.valuation.valuation import FactSectionsRule
 from a_domain.types.enums import AiAnalysisFocus, PeNotApplicableReason
@@ -14,7 +15,7 @@ from a_domain.types.values import NonEmptyText
 @dataclass(frozen=True)
 class AiReportPromptBuilder:
     """
-    Builds AI analysis prompts from stock context: its articles, its archived financials and its past analysis.
+    Builds AI analysis prompts from stock context: its articles, its archived financials and its past decisions.
 
     This is pure string construction. It does not call an AI provider.
     The workflow explicitly selects the analysis focus.
@@ -29,7 +30,7 @@ class AiReportPromptBuilder:
     def apply(
         self,
         stock: Stock,
-        historical_context: str = "",
+        decisions: list[TradeSignal] | None = None,
         quarters: list[QuarterFinancials] | None = None,
         monthly_revenues: list[MonthlyRevenue] | None = None,
         *,
@@ -37,14 +38,15 @@ class AiReportPromptBuilder:
     ) -> NonEmptyText:
         """
         The articles, then the financials when the archive holds any: the latest archived quarter and the one archived
-        before it, oldest first, and the latest month's revenue. Then the past analysis.
+        before it, oldest first, and the latest month's revenue. Then the past analysis: `decisions` in their order, each
+        with its evidence.
         """
         financials = [quarter.describe() for quarter in (quarters or [])[-2:]]
         financials += [revenue.describe() for revenue in (monthly_revenues or [])[-1:]]
         sections = [
             format_articles(stock.articles, self.max_articles, self.max_content_length),
             "[Financials]\n" + "\n".join(financials) if financials else "",
-            f"[Past Analysis]\n{historical_context}" if historical_context else "",
+            "[Past Analysis]\n" + "\n\n---\n\n".join(describe_decision(decision) for decision in decisions) if decisions else "",
         ]
 
         template = self.fundamental_template
@@ -52,6 +54,34 @@ class AiReportPromptBuilder:
             template = self.momentum_template
 
         return template.format(stock_id=stock.stock_id, articles_text="\n\n".join(section for section in sections if section))
+
+
+def describe_decision(signal: TradeSignal) -> str:
+    """One past decision and the evidence it was made on, as the AI reads it again in the stock's past analysis."""
+    technical, ai = signal.technical_report, signal.ai_report
+    lines = [
+        f"Stock: {signal.stock_id}",
+        f"Decision: {signal.action.value}",
+        f"Source: {signal.source.value}",
+        f"Generated At: {signal.generated_at.isoformat()}",
+        f"Price: {signal.price_at_signal}",
+        f"Quantity: {signal.quantity}",
+        f"Technical Score: {technical.score if technical is not None else 'Unavailable'}",
+        f"AI Score: {ai.score if ai is not None else 'Unavailable'}",
+        f"Combined Score: {signal.score}",
+        f"Reason: {signal.reason}",
+        f"Hard Failures: {', '.join(technical.hard_failures) if technical is not None else ''}",
+        f"Soft Failures: {', '.join(technical.soft_failures) if technical is not None else ''}",
+        f"Observations: {', '.join(item.sentence for item in technical.observations) if technical is not None else ''}",
+        f"AI Summary: {ai.summary if ai is not None else ''}",
+        f"Bullish Factors: {', '.join(ai.bullish_factors) if ai is not None else ''}",
+        f"Bearish Factors: {', '.join(ai.bearish_factors) if ai is not None else ''}",
+    ]
+
+    if signal.stop_loss_price is not None:
+        lines.append(f"Stop Loss Price: {signal.stop_loss_price}")
+
+    return "\n".join(lines)
 
 
 def format_articles(articles: list[Article], max_articles: int, max_content_length: int) -> str:

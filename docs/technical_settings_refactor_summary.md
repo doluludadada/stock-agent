@@ -41,8 +41,8 @@ YAML-text-in-SQL proposals below are historical context.
 - Website and iOS share the service database through the API.
   Saved settings are scoped by authenticated account.
 
-- Chroma continues its memory/knowledge role.
-  Private Chroma-backed data must also be account-scoped.
+- The decision memory continues its role.
+  It is account-scoped like every owned table.
 
 - Named rule definitions move into YAML.
   Indicator calculations and generic evaluation remain in Python.

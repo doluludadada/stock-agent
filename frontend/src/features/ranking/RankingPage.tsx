@@ -10,22 +10,17 @@ import { PageSkeleton } from '@/shared/ui/skeleton'
 import { useLatestRanking, useRankingBacktest, useRankingFormulas } from './api'
 import { FormulaComparison } from './FormulaComparison'
 import { LatestRanking, type PreviousRanking } from './LatestRanking'
-import { MockAccountFollow } from './MockAccountFollow'
+import { RankingFollowPanel } from './RankingFollowPanel'
 import { choiceOf, choiceParams, decisionDay, nextDecision, periodBefore, periodOf, rankingBefore, weekdayAfter } from './model'
 import { NoHistory, RankingRecord, Waiting } from './RankingRecord'
 
-interface RankingPageProps {
-  /** Whether the site shows the viewer the mock account, which the ranking can be followed into. */
-  mockAccount: boolean
-}
-
-export function RankingPage({ mockAccount }: RankingPageProps) {
+export function RankingPage() {
   const { t } = useTranslation('ranking')
   return (
     <div className="page-stack">
       <PageHeader title={t('page.title')} />
       <RequireSignIn layout="page" reason={t('signIn')}>
-        <Workbench mockAccount={mockAccount} />
+        <Workbench />
       </RequireSignIn>
     </div>
   )
@@ -35,11 +30,11 @@ export function RankingPage({ mockAccount }: RankingPageProps) {
 const DETAIL_PARAMS = ['period', 'first', 'last', 'month']
 
 /**
- * The month's stocks lead. The mock account's follow, the backtest's figures and the formulas compared come after
- * them, beside them from 1280 px. The replays are asked only once the latest ranking has answered: the server reads
+ * The month's stocks lead. The follow account's block, which says what the server answered for the viewer's follow
+ * account, the backtest's figures and the formulas compared come after them, beside them from 1280 px. The replays are asked only once the latest ranking has answered: the server reads
  * its whole history for the first answer, and one read serves the rest. The comparison waits for the backtest.
  */
-function Workbench({ mockAccount }: RankingPageProps) {
+function Workbench() {
   const { t } = useTranslation('ranking')
   const [params, setParams] = useSearchParams()
   const [today] = useState(() => sessionDate(new Date().toISOString()))
@@ -76,7 +71,7 @@ function Workbench({ mockAccount }: RankingPageProps) {
     <div className="card-grid xl:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
       <LatestRanking ranking={ranking} previous={previous} decisionDay={decisionDay(decisions)!} today={today} />
       <div className="card-stack">
-        {mockAccount && <MockAccountFollow ranking={ranking} nextFollow={weekdayAfter(nextDecision(ranking.decided_on, decisionDay(decisions)!, today).on)} />}
+        <RankingFollowPanel ranking={ranking} nextFollow={weekdayAfter(nextDecision(ranking.decided_on, decisionDay(decisions)!, today).on)} />
         <RankingRecord choice={choice} today={today} onChoose={(next) => setParams(choiceParams(next))} query={record} detailAtFirst={detailAtFirst} />
         {record.data && <FormulaComparison query={formulas} />}
       </div>

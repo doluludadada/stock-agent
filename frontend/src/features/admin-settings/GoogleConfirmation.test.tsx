@@ -28,12 +28,14 @@ const TEMPERATURE: SettingField = {
   restart_only: false,
 }
 
+const ORDERING: SettingField = { ...TEMPERATURE, path: 'features.sinopac_ordering', kind: 'choice', group: 'features', value: 'administrators', options: ['off', 'administrators', 'everyone'], minimum: null, maximum: null, step: null }
+
 /** The settings API in memory: a save needs the confirmation id the test says Google granted. */
 function fakeServer(granted: string | null) {
   const saves: Record<string, unknown>[] = []
   const json = (body: unknown, code = 200) => new Response(JSON.stringify(body), { status: code, headers: { 'Content-Type': 'application/json' } })
   const fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
-    if ((init?.method ?? 'GET') === 'GET') return json([TEMPERATURE])
+    if ((init?.method ?? 'GET') === 'GET') return json([TEMPERATURE, ORDERING])
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>
     saves.push(body)
     if (body.google_confirmation !== granted) return json({ detail: 'Confirm the save with a fresh Google sign-in.', code: 'google_confirmation_required' }, 403)
@@ -47,7 +49,13 @@ function renderPage(server: ReturnType<typeof fakeServer>, entry = '/admin/setti
   const i18n = initI18n('en')
   void i18n.changeLanguage('en')
   session.signIn(GOOGLE_ONLY_ADMIN)
-  const router = createMemoryRouter([{ path: '/admin/settings', element: <AdminSettingsPage /> }], { initialEntries: [entry] })
+  const router = createMemoryRouter(
+    [
+      { path: '/admin/settings', element: <AdminSettingsPage /> },
+      { path: '/account/sinopac', element: <p>The SinoPac account</p> },
+    ],
+    { initialEntries: [entry] },
+  )
   render(
     <I18nextProvider i18n={i18n}>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
@@ -84,7 +92,7 @@ describe('a settings save by an administrator without a password', { timeout: 30
 
   it('keeps the changes under a fresh id while the browser goes to the start of the confirmation', () => {
     const visited: string[] = []
-    startGoogleConfirmation([{ path: 'ai.temperature', value: 0.3 }], (address) => visited.push(address))
+    startGoogleConfirmation({ changes: [{ path: 'ai.temperature', value: 0.3 }], navigate: (address) => visited.push(address) })
 
     const pending = takePendingSave()
     expect(pending?.changes).toEqual([{ path: 'ai.temperature', value: 0.3 }])
@@ -103,6 +111,26 @@ describe('a settings save by an administrator without a password', { timeout: 30
     expect(screen.getByRole('slider', { name: 'Temperature' })).toHaveValue('0.3')
     expect(router.state.location.search).toBe('')
     expect(sessionStorage.getItem(STORAGE_KEY)).toBeNull()
+  })
+
+  it('goes back to the page the save was made on once the settings page sent it', async () => {
+    const server = fakeServer('d'.repeat(32))
+    const changes = [
+      { path: 'shioaji.server', value: 'production' },
+      { path: 'features.sinopac_ordering', value: 'off' },
+    ]
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ id: 'd'.repeat(32), changes, returnTo: '/account/sinopac' }))
+    const router = renderPage(server, '/admin/settings?google=confirmed')
+
+    expect(await screen.findByText('The SinoPac account')).toBeVisible()
+    expect(server.saves).toEqual([{ confirm: true, changes, google_confirmation: 'd'.repeat(32) }])
+    expect(router.state.location.pathname).toBe('/account/sinopac')
+  })
+
+  it('never goes back to an address outside the site that the storage names', () => {
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ id: 'e'.repeat(32), changes: [], returnTo: '//elsewhere.example' }))
+
+    expect(takePendingSave()).toEqual({ id: 'e'.repeat(32), changes: [] })
   })
 
   it('says why Google did not confirm, sends nothing and keeps what was typed', async () => {

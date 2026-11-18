@@ -59,6 +59,13 @@ class ITradingJournal(Protocol):
         """The run's decisions, HOLD included, oldest first."""
         ...
 
+    async def decision_history(self, stock_id: str, limit: int = 3) -> list[TradeSignal]:
+        """
+        The `limit` newest decisions on the stock whose source is in the decision history (SignalSource), HOLD
+        included, of any run, newest first: what the AI reads again of its past analysis.
+        """
+        ...
+
     async def orders_of(self, run_id: RunId) -> list[Order]:
         """The run's orders, oldest first."""
         ...

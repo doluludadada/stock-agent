@@ -7,6 +7,7 @@ from a_domain.model.analysis.technical_report import TechnicalReport
 from a_domain.model.chat.message import Message
 from a_domain.model.market.stock import Stock
 from a_domain.model.system.stats import SystemStats
+from a_domain.model.trading.signal import TradeSignal
 from a_domain.rules.ai.parser import parse_ai_report
 from a_domain.types.enums import AiAnalysisFocus, MessageRole, Workflow
 from a_domain.types.errors import AiReportParseError
@@ -32,8 +33,8 @@ class ScriptedAiProvider:
 
 
 class NoHistory:
-    async def find_decision_history(self, stock_id: str, limit: int = 3) -> str:
-        return ""
+    async def decision_history(self, stock_id: str, limit: int = 3) -> list[TradeSignal]:
+        return []
 
 
 def make_config() -> AppConfig:
@@ -48,7 +49,7 @@ async def analyse_and_score(reply: str) -> tuple[Stock, SystemStats]:
     stats = run_stats(Workflow.SPECIFIC_STOCKS)
     analyser = AiAnalyser(
         ai_provider=ScriptedAiProvider(reply),
-        knowledge_repository=NoHistory(),
+        journal=NoHistory(),
         archive=FakeDailyCloseArchive(),
         config=make_config(),
         logger=SilentLogger(),

@@ -7,7 +7,8 @@
 services:
   database:
     container_name: stock-agent-database
-    image: postgres:18.7
+    # postgres:18.7 with pgvector (database/Dockerfile).
+    build: ./database
     # The image's entrypoint starts as root, gives the data folder to the postgres user and drops to it.
     cap_drop: [ALL]
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
@@ -30,6 +31,9 @@ services:
       - maintenance_work_mem=128MB
       - -c
       - max_connections=50
+      # Log lines in Taipei time, as the backend's; the database's own time zone for data stays UTC.
+      - -c
+      - log_timezone=Asia/Taipei
     shm_size: 256mb
     volumes:
       # The image keeps its data in /var/lib/postgresql/18/docker.
@@ -57,6 +61,8 @@ services:
     env_file: .env
     environment:
       HOST: 0.0.0.0
+      # Log lines in Taipei time. Every clock of the app names its zone (Asia/Taipei or UTC), so only the log changes.
+      TZ: Asia/Taipei
       DB_HOST: database
       DB_PORT: "5432"
       # uvicorn reads the visitor's address and scheme only from the proxy and from the gateway, which is the address
@@ -66,8 +72,8 @@ services:
       ORT_DISABLE_TELEMETRY: "1"
       HF_HUB_DISABLE_TELEMETRY: "1"
     volumes:
-      # The project root of the app: config/, which the settings editor writes, secrets/, backups/, .settings-admin/,
-      # chroma_data/ and the archives.
+      # The project root of the app: config/, which the settings editor writes, secrets/, backups/, .settings-admin/
+      # and the archives.
       - ${STATE_DIR:?Set STATE_DIR in .env to the folder that keeps everything the site saves}:/state
     networks:
       site:
@@ -76,6 +82,10 @@ services:
       database:
         condition: service_healthy
     restart: unless-stopped
+    # A stop waits at most 5 s for open requests (backend/main.py), then cancels each run: a SinoPac call in flight
+    # ends (5 s, its lookup up to shioaji.status_timeout_seconds), then the order cancels its working odd-lot part and
+    # reads its deals within shioaji.cancel_timeout_seconds. 5 + 5 + 30 + 5 + 15 s with the shipped settings.
+    stop_grace_period: 90s
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8800/v1/auth/status', timeout=5)"]
       interval: 10s

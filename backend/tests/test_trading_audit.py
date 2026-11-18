@@ -260,9 +260,9 @@ class CountingBroker:
     def link(self) -> BrokerLink:
         return self.stack.broker.link()
 
-    async def place_order(self, order: Order, refusal_now: SendRefusal) -> Order:
+    async def place_order(self, order: Order, refusal_now: SendRefusal, stop: asyncio.Event) -> Order:
         self.asked.append(order.status)
-        return await self.stack.broker.place_order(order, refusal_now)
+        return await self.stack.broker.place_order(order, refusal_now, stop)
 
     async def get_account(self):
         return await self.stack.broker.get_account()
@@ -275,7 +275,7 @@ class CountingBroker:
 async def test_order_execution_sends_only_a_pending_order(tmp_path, ending: str | None, asked: list, status: OrderStatus) -> None:
     stack = await open_stack(tmp_path)
     broker = CountingBroker(stack)
-    switch = FakeOrderingSwitch(stack.config.features)
+    switch = FakeOrderingSwitch(stack.config.features, stack.config.shioaji.server)
     execution = OrderExecution(broker, stack.journal, FakeUserStore(), switch, None, stack.clock, stack.config, SilentLogger())
     stock = analysed_stock()
     stock.realtime_bar = stack.quotes.realtime["2330"]
@@ -302,12 +302,12 @@ class BrokerThatChecksTheRecord:
         self.stack = stack
         self.recorded_before_sending: list[OrderStatus] = []
 
-    async def place_order(self, order: Order, refusal_now: SendRefusal) -> Order:
+    async def place_order(self, order: Order, refusal_now: SendRefusal, stop: asyncio.Event) -> Order:
         async with self.stack.db.for_owner(LEGACY_OWNER_ID).owner_session() as session:
             row = await session.get(OrderDTO, order.id)
             self.recorded_before_sending.append(row.status if row else None)
 
-        return await self.stack.broker.place_order(order, refusal_now)
+        return await self.stack.broker.place_order(order, refusal_now, stop)
 
     async def get_account(self):
         return await self.stack.broker.get_account()
@@ -344,24 +344,37 @@ async def test_a_run_is_recorded_when_it_starts_and_when_it_aborts(tmp_path) -> 
 
 
 class SlowBroker:
-    """The mock broker behind a gate: place_order waits until the test opens it, as a slow broker call does."""
+    """
+    The mock broker behind a gate that the test opens: right after the broker asked `refusal_now`, as a slow send to
+    the exchange does, or, with `before_the_ask`, before it asked, as a slow account read before any send does.
+    """
 
-    def __init__(self, stack) -> None:
+    def __init__(self, stack, before_the_ask: bool = False) -> None:
         self.stack = stack
+        self.before_the_ask = before_the_ask
         self.called = asyncio.Event()
         self.gate = asyncio.Event()
 
-    async def place_order(self, order: Order, refusal_now: SendRefusal) -> Order:
-        self.called.set()
-        await self.gate.wait()
-        return await self.stack.broker.place_order(order, refusal_now)
+    async def place_order(self, order: Order, refusal_now: SendRefusal, stop: asyncio.Event) -> Order:
+        async def slow_send() -> tuple[RejectReason, str] | None:
+            refusal = await refusal_now()
+            self.called.set()
+            await self.gate.wait()
+            return refusal
+
+        if self.before_the_ask:
+            self.called.set()
+            await self.gate.wait()
+            return await self.stack.broker.place_order(order, refusal_now, stop)
+
+        return await self.stack.broker.place_order(order, slow_send, stop)
 
     async def get_account(self):
         return await self.stack.broker.get_account()
 
 
-async def cancel_during_the_broker_call(stack, cancels: int) -> None:
-    broker = SlowBroker(stack)
+async def cancel_during_the_broker_call(stack, cancels: int, before_the_ask: bool = False) -> None:
+    broker = SlowBroker(stack, before_the_ask)
     stack.order_execution._execution_provider = broker
     run = asyncio.create_task(stack.pipeline.buy_manually(analysed_stock()))
     await broker.called.wait()
@@ -390,6 +403,15 @@ async def test_a_cancel_during_the_broker_call_lets_the_call_finish_and_records_
 
     assert await recorded_orders(stack) == [(OrderStatus.FILLED, 2000, None)]
     assert [position.quantity for position in (await stack.broker.get_account()).positions] == [2000]
+
+
+async def test_a_cancel_before_the_broker_asks_whether_it_may_send_sends_nothing_and_records_the_order_rejected(tmp_path) -> None:
+    stack = await open_stack(tmp_path)
+
+    await cancel_during_the_broker_call(stack, cancels=1, before_the_ask=True)
+
+    assert await recorded_orders(stack) == [(OrderStatus.REJECTED, 0, "RUN_CANCELLED: the run was cancelled before it was sent")]
+    assert (await stack.broker.get_account()).positions == []
 
 
 async def test_a_second_cancel_that_stops_the_broker_call_records_the_order_failed(tmp_path) -> None:

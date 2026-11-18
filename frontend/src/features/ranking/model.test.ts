@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  accountChoices,
   choiceOf,
   choiceParams,
   decisionDay,
@@ -7,11 +8,12 @@ import {
   growthCurve,
   cashDecisions,
   idleDecisions,
+  LEAD_BUTTON,
+  leadOf,
   logAxis,
   monthHoldings,
   monthRows,
   nextDecision,
-  offeredBrokers,
   offeredTimes,
   parsePeriod,
   periodBefore,
@@ -24,6 +26,7 @@ import {
   yearRows,
   type Ranking,
   type RankingBacktest,
+  type RankingFollow,
 } from './model'
 import { SHIPPED_FORMULA } from '@/test/ranking'
 import recordedBacktest from './test-support/backtest-2023-2024.json'
@@ -228,11 +231,74 @@ describe('offeredTimes', () => {
   })
 })
 
-describe('offeredBrokers', () => {
+describe('accountChoices', () => {
   it('lists the accounts the site offers, and the saved one after them while the site no longer offers it', () => {
-    expect(offeredBrokers({ broker: 'mock', broker_offered: true, brokers: ['mock'] })).toEqual(['mock'])
-    expect(offeredBrokers({ broker: 'shioaji', broker_offered: true, brokers: ['mock', 'shioaji'] })).toEqual(['mock', 'shioaji'])
-    expect(offeredBrokers({ broker: 'shioaji', broker_offered: false, brokers: ['mock'] })).toEqual(['mock', 'shioaji'])
+    expect(accountChoices({ broker: 'mock', brokers: ['mock'] })).toEqual(['mock'])
+    expect(accountChoices({ broker: 'shioaji', brokers: ['mock', 'shioaji'] })).toEqual(['mock', 'shioaji'])
+    expect(accountChoices({ broker: 'shioaji', brokers: ['mock'] })).toEqual(['mock', 'shioaji'])
+  })
+})
+
+describe('leadOf', () => {
+  const ranked = { stocks: [{ stock_id: '2330' }, { stock_id: '2317' }] as Ranking['stocks'], holds_cash: false }
+  const live = { order_pricing: 'realtime_quote', realtime_quotes: true } as const
+  const ready: Pick<RankingFollow, 'running' | 'account' | 'refusal' | 'holdings'> = {
+    running: false,
+    account: { broker: 'shioaji', brokers: ['mock', 'shioaji'], refusal: null, server: 'simulation' },
+    refusal: null,
+    holdings: { decided_on: '2026-10-13', held: [], lacking: ['2330', '2317'], left: [] },
+  }
+  const refused = { ...ready.account, brokers: ['mock' as const], refusal: 'broker_unavailable' as const }
+  const button = (lead: ReturnType<typeof leadOf>) => LEAD_BUTTON[lead.kind]
+
+  it('says a run under way first, whatever else the server answered', () => {
+    expect(leadOf({ ...ready, running: true, account: refused }, ranked, live)).toEqual({ kind: 'running' })
+  })
+
+  it('says the follow account’s own refusal before anything about the market, with the button held back', () => {
+    const lead = leadOf({ ...ready, account: refused }, ranked, { order_pricing: 'realtime_quote', realtime_quotes: false })
+    expect(lead).toEqual({ kind: 'refused', refusal: 'broker_unavailable' })
+    expect(button(lead)).toBe('disabled')
+  })
+
+  it('says nothing and offers no button once the account holds a ranking that ranks stocks', () => {
+    const lead = leadOf({ ...ready, refusal: 'nothing_to_follow' }, ranked, live)
+    expect(lead).toEqual({ kind: 'held' })
+    expect(button(lead)).toBe('none')
+  })
+
+  it('says a month that ranks nothing, or holds cash, without a button', () => {
+    expect(leadOf({ ...ready, refusal: 'nothing_to_follow' }, { stocks: [], holds_cash: false }, live)).toEqual({ kind: 'nothing' })
+    const cash = leadOf({ ...ready, refusal: 'nothing_to_follow' }, { stocks: [], holds_cash: true }, live)
+    expect(cash).toEqual({ kind: 'inCash' })
+    expect(button(cash)).toBe('none')
+  })
+
+  it('needs the realtime quote a site that follows at one prices at, before the market’s phase', () => {
+    const lead = leadOf({ ...ready, refusal: 'outside_follow_window' }, ranked, { order_pricing: 'realtime_quote', realtime_quotes: false })
+    expect(lead).toEqual({ kind: 'noQuotes' })
+    expect(button(lead)).toBe('disabled')
+    expect(leadOf(ready, ranked, { order_pricing: 'official_close', realtime_quotes: false }), 'a site that follows at the close needs none').toEqual({ kind: 'never' })
+  })
+
+  it('says when the window is, by the site’s pricing', () => {
+    const lead = leadOf({ ...ready, refusal: 'outside_follow_window' }, ranked, { order_pricing: 'official_close', realtime_quotes: false })
+    expect(lead).toEqual({ kind: 'window', pricing: 'official_close' })
+    expect(button(lead)).toBe('disabled')
+  })
+
+  it('counts the sales a follow to cash makes, and the sales and purchases one that catches up makes', () => {
+    const behind = { ...ready.holdings, held: ['2330'], lacking: ['2317'], left: ['1101', '2454'] }
+    const toCash = leadOf({ ...ready, holdings: behind }, { ...ranked, holds_cash: true }, live)
+    expect(toCash).toEqual({ kind: 'toCash', sells: 2 })
+    expect(button(toCash)).toBe('ready')
+    expect(leadOf({ ...ready, holdings: behind }, ranked, live)).toEqual({ kind: 'behind', sells: 2, buys: 1 })
+  })
+
+  it('says an account that holds none of the ranking has never followed it, and may follow now', () => {
+    const lead = leadOf(ready, ranked, live)
+    expect(lead).toEqual({ kind: 'never' })
+    expect(button(lead)).toBe('ready')
   })
 })
 

@@ -12,7 +12,7 @@ from support.settings import shipped_config
 
 from a_domain.model.system.user import User
 from a_domain.model.trading.order import Order
-from a_domain.rules.trading.order_rule import BrokerLink
+from a_domain.rules.trading.order_rule import BrokerLink, SiteOrdering
 from a_domain.types.enums import (
     Audience,
     ExecutionProvider,
@@ -21,7 +21,7 @@ from a_domain.types.enums import (
     OrderType,
     RejectReason,
     Role,
-    SystemEnvironment,
+    ShioajiServer,
     TimeInForce,
     TradeAction,
     UserStatus,
@@ -41,8 +41,11 @@ SHIPPED = shipped_config()
 RULE = SHIPPED.broker_access_rule()
 """The shipped settings: dev (SinoPac's simulation server), a personal site, at most 100,000 a BUY and 300,000 a day."""
 
-SHIPPED_ORDERING = SHIPPED.features.ordering()[ExecutionProvider.SHIOAJI]
-"""Whom the shipped settings let order on SinoPac: nobody."""
+SHIPPED_ORDERING = SiteOrdering(ordering=SHIPPED.features.ordering(), server=SHIPPED.shioaji.server)
+"""What the shipped settings on disk say of SinoPac: nobody orders, on the simulation server."""
+
+EVERYONE = SiteOrdering(ordering=dict.fromkeys(ExecutionProvider, FeatureVisibility.EVERYONE), server=ShioajiServer.SIMULATION)
+"""Settings on disk that let everyone order on SinoPac's simulation server."""
 
 
 def order(
@@ -74,7 +77,7 @@ def refusal(
     sent: Order, run_broker: ExecutionProvider, link: BrokerLink, user: User | None, earlier: list[Order] | None = None
 ) -> str | None:
     """With the site's ordering switch on for everyone at the send, so each later check of a real broker shows its own reason."""
-    reason = RULE.apply(sent, Workflow.MANUAL_BUY, run_broker, link, user, FeatureVisibility.EVERYONE, earlier or [])
+    reason = RULE.apply(sent, Workflow.MANUAL_BUY, run_broker, link, user, EVERYONE, earlier or [])
     return reason[0].name if reason else None
 
 
@@ -82,26 +85,26 @@ def test_the_mock_account_takes_any_order_of_a_run_that_chose_it_from_anyone() -
     assert refusal(order(price=5000, quantity=1000), ExecutionProvider.MOCK, MOCK, None) is None
 
 
-@pytest.mark.parametrize("environment", list(SystemEnvironment))
+@pytest.mark.parametrize("server", list(ShioajiServer))
 @pytest.mark.parametrize("user", [ADMINISTRATOR, MEMBER, None], ids=["administrator", "member", "nobody"])
-def test_the_shipped_settings_send_no_order_to_sinopac_whatever_the_environment_and_the_user(
-    environment: SystemEnvironment, user: User | None
+def test_the_shipped_settings_send_no_order_to_sinopac_whatever_the_server_and_the_user(
+    server: ShioajiServer, user: User | None
 ) -> None:
-    shipped = SHIPPED.model_copy(update={"environment": environment}).broker_access_rule()
-    login = replace(SINOPAC, simulation=environment.shioaji_simulation)
+    shipped = replace(SHIPPED_ORDERING, server=server)
+    login = replace(SINOPAC, simulation=server.simulation)
 
     for sent in (order(), order(action=TradeAction.SELL)):
-        assert shipped.apply(sent, Workflow.MANUAL_BUY, ExecutionProvider.SHIOAJI, login, user, SHIPPED_ORDERING, []) == (
+        assert RULE.apply(sent, Workflow.MANUAL_BUY, ExecutionProvider.SHIOAJI, login, user, shipped, []) == (
             RejectReason.ORDERING_OFF,
             "this site has ordering on shioaji off: features.sinopac_ordering",
         )
 
-    assert SHIPPED_ORDERING == FeatureVisibility.OFF
-    assert shipped.apply(order(), Workflow.MANUAL_BUY, ExecutionProvider.MOCK, MOCK, user, SHIPPED_ORDERING, []) is None
+    assert SHIPPED_ORDERING.ordering[ExecutionProvider.SHIOAJI] == FeatureVisibility.OFF
+    assert RULE.apply(order(), Workflow.MANUAL_BUY, ExecutionProvider.MOCK, MOCK, user, shipped, []) is None
 
 
 def test_ordering_shown_to_administrators_refuses_a_member_at_the_switch_and_lets_an_administrator_through() -> None:
-    administrators = FeatureVisibility.ADMINISTRATORS
+    administrators = replace(EVERYONE, ordering=EVERYONE.ordering | {ExecutionProvider.SHIOAJI: FeatureVisibility.ADMINISTRATORS})
 
     assert RULE.apply(order(), Workflow.MANUAL_BUY, ExecutionProvider.SHIOAJI, SINOPAC, ADMINISTRATOR, administrators, []) is None
 
@@ -125,7 +128,7 @@ def test_an_administrators_sinopac_buy_within_the_limits_passes() -> None:
         (ExecutionProvider.SHIOAJI, replace(SINOPAC, up=False), ADMINISTRATOR, "BROKER_LOGIN_DOWN"),
         (ExecutionProvider.SHIOAJI, replace(SINOPAC, simulation=False), ADMINISTRATOR, "BROKER_SERVER_MISMATCH"),
     ],
-    ids=["mock-run-to-sinopac", "sinopac-run-to-mock", "member", "deactivated", "nobody", "login-down", "production-login-in-dev"],
+    ids=["mock-run-to-sinopac", "sinopac-run-to-mock", "member", "deactivated", "nobody", "login-down", "production-login"],
 )
 def test_each_check_of_a_real_broker_refuses_with_its_reason(
     run_broker: ExecutionProvider, link: BrokerLink, user: User | None, reason: str
@@ -133,19 +136,37 @@ def test_each_check_of_a_real_broker_refuses_with_its_reason(
     assert refusal(order(), run_broker, link, user) == reason
 
 
-def test_a_public_site_offers_no_real_broker_and_prod_trades_on_the_real_account_only() -> None:
+def test_a_public_site_offers_no_real_broker() -> None:
     public = SHIPPED.model_copy(update={"audience": Audience.PUBLIC}).broker_access_rule()
-    prod = SHIPPED.model_copy(update={"environment": SystemEnvironment.PROD}).broker_access_rule()
-    production, everyone = replace(SINOPAC, simulation=False), FeatureVisibility.EVERYONE
 
-    assert public.apply(order(), Workflow.MANUAL_BUY, ExecutionProvider.SHIOAJI, SINOPAC, ADMINISTRATOR, everyone, []) == (
+    assert public.apply(order(), Workflow.MANUAL_BUY, ExecutionProvider.SHIOAJI, SINOPAC, ADMINISTRATOR, EVERYONE, []) == (
         RejectReason.BROKER_NOT_OFFERED,
         "this site orders on mock only, not shioaji",
     )
-    assert (prod.apply(order(), Workflow.MANUAL_BUY, ExecutionProvider.SHIOAJI, SINOPAC, ADMINISTRATOR, everyone, []) or ("",))[
-        0
-    ] == RejectReason.BROKER_SERVER_MISMATCH
-    assert prod.apply(order(), Workflow.MANUAL_BUY, ExecutionProvider.SHIOAJI, production, ADMINISTRATOR, everyone, []) is None
+
+
+@pytest.mark.parametrize("named", [*ShioajiServer, None], ids=[*ShioajiServer, "settings-that-do-not-load"])
+@pytest.mark.parametrize("login", list(ShioajiServer))
+def test_a_sinopac_order_goes_only_to_a_login_on_the_server_the_settings_on_disk_name_at_the_send(
+    login: ShioajiServer, named: ShioajiServer | None
+) -> None:
+    """
+    The server comes from the same read of the settings on disk as the switch, not from the settings the run started
+    on: a run that started on one server and whose login is still there is refused once the files name the other one,
+    with ordering on for everyone.
+    """
+    link, on_disk = replace(SINOPAC, simulation=login.simulation), replace(EVERYONE, server=named) if named is not None else None
+    refused = RULE.apply(order(), Workflow.MANUAL_BUY, ExecutionProvider.SHIOAJI, link, ADMINISTRATOR, on_disk, [])
+
+    if named == login:
+        assert refused is None
+    elif named is None:
+        assert refused == (RejectReason.ORDERING_OFF, "the settings files on disk do not load, so this site lets nobody order")
+    else:
+        assert refused == (
+            RejectReason.BROKER_SERVER_MISMATCH,
+            f"the shioaji login is not on the {named.value} server shioaji.server names on disk now",
+        )
 
 
 def test_a_sinopac_buy_above_the_order_limit_is_refused_and_one_at_it_passes() -> None:
@@ -156,9 +177,7 @@ def test_a_sinopac_buy_above_the_order_limit_is_refused_and_one_at_it_passes() -
 def test_a_sinopac_buy_without_a_limit_price_is_refused_since_the_limits_cannot_value_it() -> None:
     market = replace(order(), order_type=OrderType.MARKET, limit_price=None)
 
-    assert RULE.apply(
-        market, Workflow.MANUAL_BUY, ExecutionProvider.SHIOAJI, SINOPAC, ADMINISTRATOR, FeatureVisibility.EVERYONE, []
-    ) == (
+    assert RULE.apply(market, Workflow.MANUAL_BUY, ExecutionProvider.SHIOAJI, SINOPAC, ADMINISTRATOR, EVERYONE, []) == (
         RejectReason.ORDER_VALUE_LIMIT,
         "has no limit price to value against trading.max_order_value and trading.max_daily_buy_value",
     )

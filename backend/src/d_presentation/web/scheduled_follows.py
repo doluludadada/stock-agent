@@ -11,8 +11,8 @@ async def follow_rankings_on_schedule(switch: RuntimeSwitch, runs: WorkflowRuns)
     """
     The Web API's timer of the scheduled ranking follows: every api.follow_schedule_poll_seconds of the current
     settings it starts the follows that are due (start_due_follows), on the current runtime. It is the one timer that
-    starts a run that orders, and it orders on the account each user's schedule chose: the user's mock account, or
-    SinoPac's simulation account. It never stops on an error of its own: it
+    starts a run that orders, and it orders on each user's follow account: the user's mock account, or SinoPac's
+    simulation account. It never stops on an error of its own: it
     logs it and looks again at the next interval. The lifespan cancels it at shutdown; a follow it started is a run of
     the server like any other and is cancelled with them.
     """
@@ -58,11 +58,11 @@ async def start_follow_if_due(opened: OpenedRuntime, runs: WorkflowRuns, user: U
     """
     Starts the ranking follow of a user whose schedule is due, as the button's route starts one: the same operation
     (Pipeline.follow_ranking) on the user's own Pipeline, as a background run of the server, one at a time per user,
-    recorded as started by the schedule. The Pipeline is the user's on the account the schedule chose
-    (User.ranking_follow_broker) and on no other: a user the site no longer lets order there was left out by
-    load_scheduled_followers and is not followed on the mock account instead. Whether it is due may take a read of the
+    recorded as started by the schedule. The Pipeline is the user's on their follow account and on no other: a user
+    the site does not offer theirs now was left out by load_scheduled_followers and is not followed on another
+    account instead. Whether it is due may take a read of the
     whole history, so the users whose schedule may run are asked for again right before the start: a user who turned
-    the schedule off, moved it to another account, was deactivated or lost a feature meanwhile is not followed. None
+    the schedule off, changed their follow account, was deactivated or lost a feature meanwhile is not followed. None
     for a user whose follow does not start.
     """
     runtime = opened.runtime
@@ -72,7 +72,9 @@ async def start_follow_if_due(opened: OpenedRuntime, runs: WorkflowRuns, user: U
 
     pipeline = runtime.pipeline_for(user, user.ranking_follow_broker)
 
-    if not (await pipeline.load_follow_schedule(user)).due:
+    _, schedule = await pipeline.load_follow_schedule(user)
+
+    if not schedule.due:
         return None
 
     followers = await runtime.signed_out.load_scheduled_followers()
@@ -84,4 +86,4 @@ async def start_follow_if_due(opened: OpenedRuntime, runs: WorkflowRuns, user: U
 
     cap = runtime.config.accounts.max_concurrent_runs
 
-    return runs.start(user, opened.hold(), lambda run_id: pipeline.follow_ranking(run_id=run_id, scheduled=True), cap)
+    return runs.start(user, opened.hold(), lambda run_id: pipeline.follow_ranking(user, run_id=run_id, scheduled=True), cap)

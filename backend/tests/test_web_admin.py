@@ -13,7 +13,7 @@ import asyncpg
 import httpx
 import pytest
 import support.harness
-from support.databases import ENVIRONMENT, SERVER
+from support.databases import ENVIRONMENT, SERVER, TestDatabase, as_superuser
 from support.harness import (
     ADMINISTRATOR,
     ADMINISTRATOR_PASSWORD,
@@ -24,10 +24,11 @@ from support.harness import (
     harness_config,
     runtime_for,
 )
+from support.settings import sinopac_setup
 from support.web import app_of, client_at, ended, hold_stock_list, serve, sign_in
 
 from a_domain.ports.system.settings_files import SettingChange
-from a_domain.types.enums import ExecutionProvider, FeatureVisibility, SettingsFile
+from a_domain.types.enums import ExecutionProvider, FeatureVisibility, SettingsFile, ShioajiServer, SystemEnvironment
 from a_domain.types.errors import SettingsConflictError
 from b_application.config.api_config import ApiConfig
 from b_application.config.app_config import AppConfig
@@ -351,10 +352,10 @@ async def test_wrong_passwords_have_their_own_limit_and_never_lock_the_sign_in(p
     [
         ("api.allowed_hosts", ["admin.example"]),
         ("sources.ai.nvidia_base_url", "https://attacker.example/v1"),
-        ("db.chroma_persist_path", "elsewhere"),
+        ("folder.embedding_model_dir", "elsewhere"),
         ("market.stock_ticks", {"0": "1"}),
     ],
-    ids=["hosts", "ai-base-url", "chroma-folder", "ticks"],
+    ids=["hosts", "ai-base-url", "model-folder", "ticks"],
 )
 async def test_a_setting_only_an_operator_changes_is_not_on_the_form_and_a_save_that_names_it_writes_nothing(
     project: Path, path: str, value: Any
@@ -581,9 +582,8 @@ async def test_a_saved_sinopac_limit_holds_the_runs_that_start_after_it(project:
 
 @pytest.fixture
 def real_project(project: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """The project copy served by the real opener: Chroma inside it, the session's database, no .env."""
+    """The project copy served by the real opener: the session's database, no .env."""
     monkeypatch.chdir(project)
-    write_by_hand(project, 'chroma_persist_path: "chroma_data"', f'chroma_persist_path: "{project / "chroma"}"')
     return project
 
 
@@ -619,14 +619,18 @@ async def test_a_database_that_cannot_be_reached_refuses_the_save_writes_nothing
 
 
 @asynccontextmanager
-async def another_empty_database() -> AsyncIterator[str]:
-    """The name of a second database on the tests' server, which holds no table and no account, dropped afterwards."""
+async def another_empty_database(superuser: str) -> AsyncIterator[str]:
+    """
+    The name of a second database on the tests' server, which holds no table and no account but the vector extension,
+    as `superuser` creates it, dropped afterwards.
+    """
     name = f"{ENVIRONMENT['DB_NAME']}_other"
     server = await asyncpg.connect(database="postgres", **SERVER)
 
     try:
         await server.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
         await server.execute(f'CREATE DATABASE "{name}"')
+        await as_superuser(superuser, name, "CREATE EXTENSION vector")
         yield name
     finally:
         await server.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
@@ -634,11 +638,11 @@ async def another_empty_database() -> AsyncIterator[str]:
 
 
 async def test_a_database_with_no_account_of_the_saving_administrator_is_refused(
-    real_project: Path, monkeypatch: pytest.MonkeyPatch
+    real_project: Path, monkeypatch: pytest.MonkeyPatch, test_database: TestDatabase
 ) -> None:
     app = create_app(lambda: open_runtime_switch(real_project))
 
-    async with app.router.lifespan_context(app), client_at(app) as client, another_empty_database() as other:
+    async with app.router.lifespan_context(app), client_at(app) as client, another_empty_database(test_database.superuser) as other:
         await set_up_and_sign_in(app, client)
         monkeypatch.setenv("DB_NAME", other)
         text = text_of(real_project)
@@ -681,17 +685,23 @@ def ordering_project(project: Path) -> Path:
     return project
 
 
+async def sinopac_switch(switch: SettingsFileOrderingSwitch) -> tuple[FeatureVisibility, ShioajiServer] | None:
+    """What one read of the ordering switch says of SinoPac: whom it lets order and the server; None for files that do not load."""
+    read = await switch.read()
+    return (read.ordering[SHIOAJI], read.server) if read is not None else None
+
+
 async def test_ordering_turned_off_is_written_although_another_change_of_the_same_save_is_refused(ordering_project: Path) -> None:
     switch = SettingsFileOrderingSwitch(ordering_project)
 
     async with serve(admin_harness(ordering_project)) as client:
-        before = await switch.visibility(SHIOAJI)
+        before = await sinopac_switch(switch)
         refused = await save(client, ("features.sinopac_ordering", "off"), ("ai.temperature", 99))
 
-    assert before == FeatureVisibility.ADMINISTRATORS
+    assert before == (FeatureVisibility.ADMINISTRATORS, ShioajiServer.SIMULATION)
     assert (refused.status_code, refused.json()["code"]) == (422, "settings_refused")
     assert ORDERING_ON not in text_of(ordering_project) and "temperature: 0.7\n" in text_of(ordering_project)
-    assert await switch.visibility(SHIOAJI) == FeatureVisibility.OFF
+    assert await sinopac_switch(switch) == (FeatureVisibility.OFF, ShioajiServer.SIMULATION)
 
 
 async def test_ordering_turned_off_is_written_although_the_app_does_not_start_on_the_new_settings(
@@ -706,7 +716,7 @@ async def test_ordering_turned_off_is_written_although_the_app_does_not_start_on
 
     assert (refused.status_code, refused.json()["code"]) == (422, "settings_refused")
     assert ORDERING_ON not in text_of(ordering_project) and "temperature: 0.7\n" in text_of(ordering_project)
-    assert await SettingsFileOrderingSwitch(ordering_project).visibility(SHIOAJI) == FeatureVisibility.OFF
+    assert await sinopac_switch(SettingsFileOrderingSwitch(ordering_project)) == (FeatureVisibility.OFF, ShioajiServer.SIMULATION)
 
 
 async def test_ordering_is_not_turned_off_by_a_save_the_administrator_did_not_confirm(ordering_project: Path) -> None:
@@ -728,25 +738,175 @@ async def test_a_save_that_only_turns_ordering_off_runs_on_it_at_once(ordering_p
     assert running == FeatureVisibility.OFF and ORDERING_ON not in text_of(ordering_project)
 
 
+# ------------------------- switching SinoPac's server is a save that turns SinoPac ordering off ------------------------- #
+
+SIMULATION_SERVER, PRODUCTION_SERVER = "  server: simulation", "  server: production"
+
+
+@pytest.fixture
+def server_project(ordering_project: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """
+    The owner's server: environment test, administrators ordering on SinoPac's simulation server, and both key sets in
+    the environment, each variable set to its own name.
+    """
+    write_by_hand(ordering_project, "environment: dev", "environment: test")
+    monkeypatch.chdir(ordering_project)
+
+    for credential in (*ShioajiServer.SIMULATION.credentials, *ShioajiServer.PRODUCTION.credentials):
+        monkeypatch.setenv(credential.value, credential.value)
+
+    return ordering_project
+
+
+def server_harness(project: Path, environment: SystemEnvironment = SystemEnvironment.TEST) -> CliHarness:
+    """The harness of a site in `environment` whose runtime runs on SinoPac's simulation server."""
+    return build_harness(config=sinopac_setup(harness_config(), ShioajiServer.SIMULATION, environment), settings_root=project)
+
+
+async def test_a_switch_of_the_server_writes_ordering_off_before_the_server_and_runs_on_the_new_server_at_once(
+    server_project: Path,
+) -> None:
+    async with app_of(server_harness(server_project)) as app, client_at(app) as client:
+        assert (await sign_in(client, ADMINISTRATOR.username, ADMINISTRATOR_PASSWORD)).status_code == 200
+        saved = await save(client, ("shioaji.server", "production"), ("features.sinopac_ordering", "off"))
+        running = app.state.runtime_switch.opened[-1].runtime.config
+
+    assert values_of(saved)["shioaji.server"] == "production"
+    assert (running.shioaji.server, running.features.sinopac_ordering) == (ShioajiServer.PRODUCTION, FeatureVisibility.OFF)
+    assert PRODUCTION_SERVER in text_of(server_project) and ORDERING_ON not in text_of(server_project)
+    first, then = [
+        json.loads(line) for line in (server_project / ".settings-admin" / "audit.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert first["settings"] == ["features.sinopac_ordering"], "ordering is off on disk before the files name the new server"
+    assert "shioaji.server" in then["settings"]
+    assert await sinopac_switch(SettingsFileOrderingSwitch(server_project)) == (FeatureVisibility.OFF, ShioajiServer.PRODUCTION)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [(("shioaji.server", "production"),), (("shioaji.server", "production"), ("features.sinopac_ordering", "administrators"))],
+    ids=["server-alone", "ordering-kept-on"],
+)
+async def test_a_switch_of_the_server_that_leaves_ordering_on_is_refused_with_nothing_written(
+    server_project: Path, changes: tuple[tuple[str, str], ...]
+) -> None:
+    text = text_of(server_project)
+
+    async with serve(server_harness(server_project)) as client:
+        refused = await save(client, *changes)
+
+    [problem] = refused.json()["problems"]
+    assert (refused.status_code, problem["path"]) == (422, "shioaji.server")
+    assert "turns features.sinopac_ordering off in the same save" in problem["message"]
+    assert text_of(server_project) == text and not (server_project / ".settings-admin").exists()
+
+
+async def test_a_switch_to_production_while_a_production_variable_is_unset_is_refused_naming_it_and_leaves_ordering_off(
+    server_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("SHIOAJI_CA_PATH")
+    monkeypatch.setenv("SHIOAJI_PERSON_ID", " ")
+
+    async with serve(server_harness(server_project)) as client:
+        refused = await save(client, ("shioaji.server", "production"), ("features.sinopac_ordering", "off"))
+
+    [problem] = refused.json()["problems"]
+    assert (refused.status_code, problem["path"]) == (422, "shioaji.server")
+    assert problem["message"] == (
+        "shioaji.server production needs SHIOAJI_CA_PATH, SHIOAJI_PERSON_ID in the server's environment or .env"
+    )
+    assert "SHIOAJI_CA_PASSWORD" not in refused.text, "a variable that is set is never named, and no value ever is"
+    assert await sinopac_switch(SettingsFileOrderingSwitch(server_project)) == (FeatureVisibility.OFF, ShioajiServer.SIMULATION), (
+        "the switch is refused, the turn-off holds"
+    )
+
+
+async def test_a_switch_to_production_while_registration_is_open_is_refused_and_leaves_ordering_off(server_project: Path) -> None:
+    write_by_hand(server_project, "registration_open: false", "registration_open: true")
+    harness = server_harness(server_project)
+
+    async with serve(harness) as client:
+        refused = await save(client, ("shioaji.server", "production"), ("features.sinopac_ordering", "off"))
+
+    [problem] = refused.json()["problems"]
+    assert (refused.status_code, problem["path"]) == (422, "accounts.registration_open")
+    assert await sinopac_switch(SettingsFileOrderingSwitch(server_project)) == (FeatureVisibility.OFF, ShioajiServer.SIMULATION)
+
+
+async def test_a_developers_machine_refuses_a_switch_to_production_and_leaves_ordering_off(
+    ordering_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(ordering_project)
+
+    async with serve(server_harness(ordering_project, SystemEnvironment.DEV)) as client:
+        refused = await save(client, ("shioaji.server", "production"), ("features.sinopac_ordering", "off"))
+
+    problems = {problem["path"]: problem["message"] for problem in refused.json()["problems"]}
+    assert refused.status_code == 422
+    assert problems["shioaji.server"] == "the environment this machine runs in does not log in to SinoPac's production server"
+    assert await sinopac_switch(SettingsFileOrderingSwitch(ordering_project)) == (FeatureVisibility.OFF, ShioajiServer.SIMULATION)
+
+
+async def test_a_refused_switch_of_the_server_shows_ordering_off_at_once(
+    server_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The refused save's turn-off of ordering, written first, is what the SinoPac page and the run's brokers answer next."""
+    monkeypatch.delenv("SHIOAJI_CA_PATH")
+
+    async with serve(server_harness(server_project)) as client:
+        before = (await client.get("/v1/account/brokerage")).json()
+        refused = await save(client, ("shioaji.server", "production"), ("features.sinopac_ordering", "off"))
+        after = (await client.get("/v1/account/brokerage")).json()
+        brokers = (await client.get("/v1/account/brokers")).json()
+
+    assert (before["ordering"], refused.status_code) == (True, 422)
+    assert ORDERING_ON not in text_of(server_project)
+    assert (after["ordering"], after["server"]) == (False, "simulation")
+    assert after["switch_refusal"] == {"reason": "credentials_missing", "server": "production", "missing": ["SHIOAJI_CA_PATH"]}
+    assert [broker["broker"] for broker in brokers] == ["mock"]
+
+
+async def test_a_switch_back_to_simulation_turns_ordering_off_too(server_project: Path) -> None:
+    write_by_hand(server_project, SIMULATION_SERVER, PRODUCTION_SERVER)
+    harness = build_harness(
+        config=sinopac_setup(harness_config(), ShioajiServer.PRODUCTION, SystemEnvironment.TEST), settings_root=server_project
+    )
+
+    async with serve(harness) as client:
+        refused = await save(client, ("shioaji.server", "simulation"))
+        saved = await save(client, ("shioaji.server", "simulation"), ("features.sinopac_ordering", "off"))
+
+    assert refused.status_code == 422 and saved.status_code == 200
+    assert SIMULATION_SERVER in text_of(server_project) and ORDERING_ON not in text_of(server_project)
+
+
+async def test_a_save_that_keeps_the_server_changes_nothing_about_ordering(server_project: Path) -> None:
+    async with serve(server_harness(server_project)) as client:
+        saved = await save(client, ("shioaji.server", "simulation"), ("ai.temperature", 0.3))
+
+    assert saved.status_code == 200 and ORDERING_ON in text_of(server_project) and "temperature: 0.3\n" in text_of(server_project)
+
+
 # ------------------------------- the settings files on disk are the switch every process asks ------------------------------- #
 
 
 async def test_the_switch_is_what_the_settings_on_disk_say_at_each_ask_and_off_while_they_do_not_say(ordering_project: Path) -> None:
     switch, other_process = SettingsFileOrderingSwitch(ordering_project), SettingsFileOrderingSwitch(ordering_project)
-    on = (await switch.visibility(SHIOAJI), await other_process.visibility(SHIOAJI))
+    on = (await sinopac_switch(switch), await sinopac_switch(other_process))
 
     write_by_hand(ordering_project, ORDERING_ON, ORDERING_OFF)
-    off = (await switch.visibility(SHIOAJI), await other_process.visibility(SHIOAJI))
+    off = (await sinopac_switch(switch), await sinopac_switch(other_process))
 
     write_by_hand(ordering_project, f"  {ORDERING_OFF}\n", "")
-    unset = await switch.visibility(SHIOAJI)
+    unset = await sinopac_switch(switch)
 
     write_by_hand(ordering_project, "temperature: 0.7", f"temperature: 99\n  {ORDERING_ON}")
-    not_loadable = await switch.visibility(SHIOAJI)
+    not_loadable = await sinopac_switch(switch)
 
-    assert on == (FeatureVisibility.ADMINISTRATORS, FeatureVisibility.ADMINISTRATORS)
-    assert off == (FeatureVisibility.OFF, FeatureVisibility.OFF)
-    assert (unset, not_loadable) == (FeatureVisibility.OFF, FeatureVisibility.OFF)
+    shown, nobody = (FeatureVisibility.ADMINISTRATORS, ShioajiServer.SIMULATION), (FeatureVisibility.OFF, ShioajiServer.SIMULATION)
+    assert on == (shown, shown)
+    assert off == (nobody, nobody)
+    assert (unset, not_loadable) == (nobody, None), "files no start accepts give no answer, which lets nobody order"
 
 
 async def test_a_saved_log_level_and_the_follow_times_apply_at_once_and_the_times_read_in_the_day_s_order(project: Path) -> None:

@@ -8,7 +8,7 @@ use-case constructors.
 import tempfile
 from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager, nullcontext
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -74,7 +74,6 @@ from support.fakes import (
     FakeDailyCloseArchive,
     FakeFundamentalsProvider,
     FakeHoldingRepository,
-    FakeKnowledgeRepository,
     FakeMarketClock,
     FakeNewsProvider,
     FakeOhlcvProvider,
@@ -209,7 +208,6 @@ class CliHarness:
     social: FakeSocialMediaProvider
     ai: FakeAiProvider
     sentiment: FakeSentimentClassifier
-    knowledge: FakeKnowledgeRepository
     conversations: FakeConversationRepository
     chat_platform: RecordingChatPlatform
     journal: FakeTradingJournal
@@ -410,7 +408,7 @@ def build_harness(
     """
     realtime_quotes is whether the runtime has a broker login, as the audience allows unless the test says otherwise:
     False on a personal site is one without a Shioaji login. sinopac offers the administrator's runs SinoPac on that
-    login, the harness's `real_broker`, on the server the environment trades on.
+    login, the harness's `real_broker`, on the server shioaji.server names.
     """
     config = config or harness_config()
     login = config.audience.realtime_quotes if realtime_quotes is None else realtime_quotes
@@ -430,14 +428,13 @@ def build_harness(
     social = FakeSocialMediaProvider()
     ai = FakeAiProvider()
     sentiment = FakeSentimentClassifier()
-    knowledge = FakeKnowledgeRepository()
     conversations = FakeConversationRepository()
     chat_platform = RecordingChatPlatform()
     journal = FakeTradingJournal()
     watchlist = FakeWatchlistRepository(clock)
     technical_settings = FakeTechnicalSettingsRepository(settings or harness_settings())
     broker = RecordingExecutionProvider()
-    sinopac_link = BrokerLink(broker=ExecutionProvider.SHIOAJI, up=True, simulation=config.environment.shioaji_simulation)
+    sinopac_link = BrokerLink(broker=ExecutionProvider.SHIOAJI, up=True, simulation=config.shioaji.server.simulation)
     real_broker = RecordingExecutionProvider(link=sinopac_link)
 
     backtests = FakeBacktestRepository()
@@ -467,7 +464,7 @@ def build_harness(
             return OwnedPorts(*(cast(Any, SignedOut(cast(type, field.type))) for field in fields(OwnedPorts)))
 
         if user.user_id == ADMINISTRATOR.user_id:
-            return OwnedPorts(journal, watchlist, technical_settings, knowledge, broker, ai, sentiment, backtests, holdings)
+            return OwnedPorts(journal, watchlist, technical_settings, broker, ai, sentiment, backtests, holdings)
 
         return owners.setdefault(
             user.user_id,
@@ -475,7 +472,6 @@ def build_harness(
                 FakeTradingJournal(),
                 FakeWatchlistRepository(clock),
                 FakeTechnicalSettingsRepository(settings or harness_settings()),
-                FakeKnowledgeRepository(),
                 RecordingExecutionProvider(),
                 ai,
                 sentiment,
@@ -514,11 +510,11 @@ def build_harness(
         conversation_repository=conversations,
         notification_provider=None,
         platform_provider=chat_platform,
-        settings_files=SettingsFiles(project_root=settings_root, max_bytes=262_144, backups_kept=3, logger=logger),
+        settings_files=SettingsFiles(project_root=settings_root, max_bytes=262_144, backups_kept=3, running=config, logger=logger),
         user_store=users,
         attempt_log=MemoryAttemptLog(),
         real_broker=real_broker if sinopac else None,
-        ordering_switch=FakeOrderingSwitch(config.features),
+        ordering_switch=FakeOrderingSwitch(config.features, config.shioaji.server),
         owned_ports=owned_ports,
     )
     runtime = compose_runtime(config, logger, clock, dependencies)
@@ -549,7 +545,6 @@ def build_harness(
         social=social,
         ai=ai,
         sentiment=sentiment,
-        knowledge=knowledge,
         conversations=conversations,
         chat_platform=chat_platform,
         journal=journal,
@@ -586,7 +581,10 @@ def runtime_for(harness: CliHarness, config: AppConfig) -> Runtime:
     these settings' ordering from here on, for the orders of every runtime of the harness.
     """
     harness.dependencies.ordering_switch.features = config.features
-    return compose_runtime(config, harness.logger, harness.clock, harness.dependencies)
+    settings_files = SettingsFiles(
+        project_root=harness.settings_root, max_bytes=262_144, backups_kept=3, running=config, logger=harness.logger
+    )
+    return compose_runtime(config, harness.logger, harness.clock, replace(harness.dependencies, settings_files=settings_files))
 
 
 @asynccontextmanager

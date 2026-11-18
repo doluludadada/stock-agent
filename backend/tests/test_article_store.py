@@ -1,18 +1,17 @@
 """
-The article store: what the site read about each stock kept once in the database, with a vector per article in a Chroma
-collection of its own; what a site may hold of an article's text; retention; the stocks the timer keeps current; the
-searches a stock's AI brief makes, by stock, days and meaning; and the brief as it was while the index finds nothing.
+The article store: what the site read about each stock kept once in the database, with a vector per article in a table
+of its own; what a site may hold of an article's text; retention; the stocks the timer keeps current; the searches a
+stock's AI brief makes, by stock, days and meaning; and the brief as it was while the index finds nothing.
 """
 
 import asyncio
 import json
 from dataclasses import replace
 from datetime import date, datetime, timedelta
-from pathlib import Path
 
-import chromadb
 import pytest
 from pydantic import SecretStr
+from support.databases import execute
 from support.fakes import FakeArticleIndex, FakeTextEmbedder
 from support.harness import MARKET_OPEN, MEMBER, MEMBER_PASSWORD, build_harness, daily_history, harness_config, rising_history
 from support.settings import shipped_config
@@ -30,9 +29,9 @@ from a_domain.rules.ai.stock_brief import BriefSearch
 from a_domain.types.enums import Audience, BriefSourceKind, InformationSource, MarketType, Role, WatchlistType
 from a_domain.types.ids import UserId
 from b_application.config.app_config import AppConfig
-from c_infrastructure.database.chroma.article_index import ChromaArticleIndex
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.mock_trading_dto import MockPosition
+from c_infrastructure.database.repositories.article_index import SqlArticleIndex
 from c_infrastructure.database.repositories.article_store import SqlArticleStore
 from c_infrastructure.database.repositories.daily_close_archive import SqlDailyCloseArchive
 from c_infrastructure.database.repositories.holding_repository import HoldingRepository
@@ -40,7 +39,6 @@ from c_infrastructure.database.repositories.user_store import SqlUserStore
 from c_infrastructure.database.repositories.users_stocks import SqlUsersStocks
 from c_infrastructure.database.repositories.watchlist_repository import WatchlistRepository
 from c_infrastructure.feed.stock_feed import HeldStockFeed
-from d_presentation.dependencies import article_collection
 
 pytestmark = pytest.mark.asyncio
 
@@ -55,9 +53,9 @@ def store_of(database: DatabaseConnector, clock: MovableClock, max_per_stock: in
 
 
 def index_of(
-    client: chromadb.ClientAPI, embedder: FakeTextEmbedder, clock: MovableClock, name: str = "stock_articles-test"
-) -> ChromaArticleIndex:
-    return ChromaArticleIndex(client, name, embedder, clock, text_length=300)
+    database: DatabaseConnector, embedder: FakeTextEmbedder, clock: MovableClock, model: str = "fake-model", text_length: int = 300
+) -> SqlArticleIndex:
+    return SqlArticleIndex(database, model, embedder, clock, text_length)
 
 
 def of_stock(stock_id: str, given: Article) -> Article:
@@ -152,9 +150,9 @@ async def test_retention_drops_what_is_too_old_and_a_stocks_oldest_beyond_its_mo
 # ------------------------------------------------ the index ------------------------------------------------ #
 
 
-async def test_an_unchanged_article_is_never_embedded_again_and_a_gone_one_leaves_the_index() -> None:
+async def test_an_unchanged_article_is_never_embedded_again_and_a_gone_one_leaves_the_index(database: DatabaseConnector) -> None:
     clock, embedder = MovableClock(MARKET_OPEN), FakeTextEmbedder()
-    index = index_of(chromadb.EphemeralClient(), embedder, clock, "stock_articles-unchanged")
+    index = index_of(database, embedder, clock)
     revenue = article(REVENUE, InformationSource.NEWS_MEDIA, MARKET_OPEN - timedelta(days=1), "https://news.example/r")
     plant = article("公告", InformationSource.TWSE_MOPS, MARKET_OPEN - timedelta(days=2), content=PLANT)
 
@@ -169,9 +167,9 @@ async def test_an_unchanged_article_is_never_embedded_again_and_a_gone_one_leave
     assert await index.search("2330", PRODUCTS, None, None, 5) == [revenue.key]
 
 
-async def test_a_search_stays_inside_the_stock_and_the_days_and_answers_the_closest_first() -> None:
+async def test_a_search_stays_inside_the_stock_and_the_days_and_answers_the_closest_first(database: DatabaseConnector) -> None:
     clock, embedder = MovableClock(MARKET_OPEN), FakeTextEmbedder()
-    index = index_of(chromadb.EphemeralClient(), embedder, clock, "stock_articles-search")
+    index = index_of(database, embedder, clock)
     day = MARKET_OPEN.date()
     revenue = article(REVENUE, InformationSource.NEWS_MEDIA, MARKET_OPEN - timedelta(days=1), "https://news.example/r")
     plant = article(PLANT, InformationSource.NEWS_MEDIA, MARKET_OPEN - timedelta(days=3), "https://news.example/p")
@@ -193,7 +191,7 @@ async def test_a_search_stays_inside_the_stock_and_the_days_and_answers_the_clos
 
 
 async def test_lost_vectors_are_computed_again_from_the_kept_articles_and_kept_ones_survive_a_restart(
-    database: DatabaseConnector, tmp_path: Path
+    database: DatabaseConnector,
 ) -> None:
     clock, embedder = MovableClock(MARKET_OPEN), FakeTextEmbedder()
     store = store_of(database, clock)
@@ -202,30 +200,51 @@ async def test_lost_vectors_are_computed_again_from_the_kept_articles_and_kept_o
     await store.save([revenue, plant])
     kept = await store.latest("2330", 100)
 
-    before = await index_of(chromadb.PersistentClient(path=str(tmp_path / "chroma")), embedder, clock).sync("2330", kept)
-    restarted = index_of(chromadb.PersistentClient(path=str(tmp_path / "chroma")), embedder, clock)
+    before = await index_of(database, embedder, clock).sync("2330", kept)
+    restarted = index_of(database, embedder, clock)
     after_restart = await restarted.sync("2330", kept)
-    lost = index_of(chromadb.PersistentClient(path=str(tmp_path / "empty")), embedder, clock)
-    nothing = await lost.search("2330", "興建新廠", None, None, 1)
-    rebuilt = await lost.sync("2330", kept)
+    await execute("DELETE FROM article_vectors")
+    nothing = await restarted.search("2330", "興建新廠", None, None, 1)
+    rebuilt = await restarted.sync("2330", kept)
 
     assert (before, after_restart, nothing, rebuilt) == (2, 0, [], 2)
     assert await restarted.search("2330", "興建新廠", None, None, 1) == [plant.key]
-    assert await lost.search("2330", "興建新廠", None, None, 1) == [plant.key]
-    assert [held.title for held in await store.find("2330", await lost.search("2330", "興建新廠", None, None, 1))] == [PLANT]
+    assert [held.title for held in await store.find("2330", await restarted.search("2330", "興建新廠", None, None, 1))] == [PLANT]
 
 
-async def test_another_embedding_model_or_reading_length_has_a_collection_of_its_own() -> None:
-    config = shipped_config()
-    store = config.stock_page.article_store
-    other_model = store.model_copy(update={"embedding": store.embedding.model_copy(update={"revision": "0" * 40})})
-    longer = store.model_copy(update={"embedded_length": store.embedded_length + 1})
-    names = {
-        article_collection(config.model_copy(update={"stock_page": config.stock_page.model_copy(update={"article_store": changed})}))
-        for changed in (store, other_model, longer)
-    }
+async def test_a_vector_of_another_model_or_reading_length_is_computed_again_and_never_compared(database: DatabaseConnector) -> None:
+    clock, embedder = MovableClock(MARKET_OPEN), FakeTextEmbedder()
+    plant = article("公告", InformationSource.TWSE_MOPS, MARKET_OPEN - timedelta(days=2), content=PLANT + PRODUCTS)
+    revenue = article(REVENUE, InformationSource.NEWS_MEDIA, MARKET_OPEN - timedelta(days=1), "https://news.example/r")
+    first = index_of(database, embedder, clock, model="model-a")
+    other_model = index_of(database, embedder, clock, model="model-b")
+    reads_less = index_of(database, embedder, clock, model="model-b", text_length=len(REVENUE))
+    await first.sync("2330", [plant, revenue])
 
-    assert len(names) == 3 and all(name.startswith("stock_articles-") for name in names)
+    unsynced = await other_model.search("2330", PLANT, None, None, 5)
+    again = await other_model.sync("2330", [plant, revenue])
+    replaced = await first.search("2330", PLANT, None, None, 5)
+    shortened = await reads_less.sync("2330", [plant, revenue])
+
+    assert (unsynced, again, replaced, shortened) == ([], 2, [], 1)
+    assert embedder.embedded[-1] == f"公告\n{(PLANT + PRODUCTS)[: len(REVENUE)]}"
+
+
+async def test_a_model_of_vectors_the_table_cannot_hold_is_named_before_it_embeds_and_the_vectors_stay(
+    database: DatabaseConnector,
+) -> None:
+    clock, embedder = MovableClock(MARKET_OPEN), FakeTextEmbedder()
+    revenue = article(REVENUE, InformationSource.NEWS_MEDIA, MARKET_OPEN - timedelta(days=1), "https://news.example/r")
+    plant = article(PLANT, InformationSource.NEWS_MEDIA, MARKET_OPEN - timedelta(days=3), "https://news.example/p")
+    index = index_of(database, embedder, clock)
+    wider = FakeTextEmbedder(vector_length=768)
+    await index.sync("2330", [revenue])
+
+    with pytest.raises(ValueError, match="vectors of length 768, not the 512 of article_vectors"):
+        await index_of(database, wider, clock, model="wider-model").sync("2330", [revenue, plant])
+
+    assert wider.embedded == []
+    assert await index.search("2330", REVENUE, None, None, 5) == [revenue.key]
 
 
 # ------------------------------------------- the stocks that matter ------------------------------------------- #
@@ -535,7 +554,7 @@ async def test_a_stock_with_no_kept_article_gets_the_brief_it_got_before_the_sto
     assert BriefSourceKind.NEWS.value not in plain_ai.prompts[0].split("Facts:")[1].split("Write one part")[0]
 
 
-async def test_the_fake_index_answers_as_the_chroma_index_does() -> None:
+async def test_the_fake_index_answers_as_the_sql_index_does(database: DatabaseConnector) -> None:
     clock = MovableClock(MARKET_OPEN)
     day = MARKET_OPEN.date()
     given = [
@@ -543,7 +562,7 @@ async def test_the_fake_index_answers_as_the_chroma_index_does() -> None:
         article(PLANT, InformationSource.NEWS_MEDIA, MARKET_OPEN - timedelta(days=3), "https://news.example/p"),
         article("公告", InformationSource.TWSE_MOPS, MARKET_OPEN - timedelta(days=9), content=PRODUCTS),
     ]
-    real = index_of(chromadb.EphemeralClient(), FakeTextEmbedder(), clock, "stock_articles-parity")
+    real = index_of(database, FakeTextEmbedder(), clock)
     fake = FakeArticleIndex(FakeTextEmbedder())
     asked = [
         ("營收創新高", None, None, 3),

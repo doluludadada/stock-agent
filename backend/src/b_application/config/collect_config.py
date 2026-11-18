@@ -183,8 +183,10 @@ class EmbeddingConfig(BaseModel):
     """
     The text embedding model the article store's vectors come from. It runs on the server itself with ONNX Runtime, so
     no article leaves the server and no call is paid for. Its files are fetched once from the Hugging Face repository
-    into folder.embedding_model_dir, at the pinned revision. Another model, revision or file starts a collection of its
-    own, which fills again from the kept articles.
+    into folder.embedding_model_dir, at the pinned revision. After a change to another model, revision or file, each
+    stock's vectors are computed again from its kept articles at its next sync, and no search compares the two models'
+    vectors. The article_vectors table holds vectors of the shipped model's length, so a model of another length needs
+    an upgrade step first.
     """
 
     model_config = ConfigDict(use_attribute_docstrings=True)

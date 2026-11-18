@@ -2,15 +2,15 @@ import type en from '../en/account'
 import type { DictionaryShape } from '../../types'
 
 const account: DictionaryShape<typeof en> = {
-  signIn: '登入後查看你的模擬帳戶',
+  signIn: '登入後查看你的本站模擬帳戶',
   page: {
-    mock: { title: '模擬帳戶' },
-    shioaji: { title: '永豐金證券帳戶' },
+    mock: { title: '本站模擬帳戶' },
+    shioaji: { title: '永豐金帳戶' },
   },
   loadFailed: '無法載入帳戶。',
-  provider: { mock: '模擬券商' },
+  provider: { mock: '本站模擬券商' },
   notice: {
-    mock: '模擬券商維護的紙上帳戶，不是真實資產。',
+    mock: '本站自己維護的紙上帳戶，不是真實資產。',
   },
   value: { equity: '總權益', cash: '現金', marketValue: '持股市值', unrealized: '未實現損益' },
   summary: { today: '今日', since: '自 {{date}} 起', positions: '持股', count: '{{count}} 檔', total: '總損益', startingCapital: '起始資金' },
@@ -49,7 +49,7 @@ const account: DictionaryShape<typeof en> = {
   asOfTitle: '截至 {{time}}（當日最後一筆成交）',
   about: { title: '關於這個帳戶', broker: '券商' },
   start: {
-    title: '模擬帳戶目前是空的',
+    title: '本站模擬帳戶目前是空的',
     ranking: {
       description: '到「每月排名」頁面，把這個月的排名跟單到這個帳戶。之後這裡會列出成交、持股與權益，讓你看看照排名操作的結果。',
       link: '前往每月排名',
@@ -72,10 +72,65 @@ const account: DictionaryShape<typeof en> = {
   brokerage: {
     signIn: '登入後查看你的永豐金證券帳戶',
     loadFailed: '無法載入永豐金證券帳戶。',
-    server: { simulation: '模擬環境，不涉及真實資金', live: '正式帳戶' },
+    account: '永豐金帳戶',
+    server: { simulation: '測試環境', production: '正式環境' },
+    serverNote: {
+      simulation: '永豐金的測試環境：不涉及真實資金。',
+      production: '永豐金的正式環境：真實帳戶，涉及真實資金。',
+    },
+    login: { up: '已登入', down: '未登入', unavailable: '無法使用' },
     ordering: {
       off: '下單已關閉',
       on: '下單已開啟',
+    },
+    manage: {
+      server: {
+        label: '環境',
+        to: { simulation: '切換到測試環境…', production: '切換到正式環境…' },
+        refusal: {
+          environment: '這台機器的 environment 不能登入{{server}}。',
+          registration_open: '正式環境不允許開放註冊。請先在設定頁面關閉註冊。',
+          ordering_on: '切換環境時，同一次儲存必須關閉永豐金下單。',
+          credentials_missing: '{{server}}還缺下列設定，請在伺服器的 .env 設定：',
+        },
+        title: { simulation: '切換到測試環境？', production: '切換到正式環境？' },
+        description: '本站會立刻登入另一個環境。會改變的事：',
+        changes: {
+          realMoney: '之後在永豐金的每一筆委託都是真錢。',
+          noRealMoney: '之後在永豐金的委託不涉及真實資金。',
+          orderingOff: '永豐金下單會關閉，要下單請在這裡重新開啟。',
+          login: '永豐金登入會在新環境重新連線，報價也改由新環境提供。',
+          follows: '排名跟單（手動或排程）在正式環境一律不下單。',
+        },
+        type: '請輸入「{{phrase}}」以確認',
+        saved: '已切換到{{server}}，本站正在登入。',
+      },
+      ordering: {
+        label: '永豐金下單',
+        turnOn: '開啟下單…',
+        turnOff: '關閉下單…',
+        title: { on: '開啟永豐金下單？', off: '關閉永豐金下單？' },
+        description: {
+          on: '之後管理員可以在任務中選擇永豐金。每筆委託仍受買進上限與所有下單檢查限制。',
+          off: '儲存後，本站不會再有任何委託送到永豐金，包括正在進行的任務。',
+        },
+        realMoney: '這個帳戶在正式環境：每一筆委託都是真錢。',
+        saved: { on: '永豐金下單已開啟。', off: '永豐金下單已關閉。' },
+      },
+      cash: {
+        label: '起始資金',
+        note: '投入測試環境帳戶的總金額。要加錢，就把它調高。',
+        edit: '調整…',
+        title: '調整起始資金？',
+        field: '起始資金（新台幣）',
+        invalid: '請輸入大於 0 的金額。',
+        saved: '起始資金已改為 NT${{amount}}。',
+      },
+      refused: {
+        conflict: '這個頁面讀取後設定已經改變，請再試一次。',
+        other: '伺服器拒絕了這次儲存。',
+        orderingOff: '永豐金下單在切換前已先關閉，現在是關閉的。',
+      },
     },
     own: '券商回報的數字，讀取時間 {{time}}。',
     analysis: '我的持股',
@@ -83,10 +138,14 @@ const account: DictionaryShape<typeof en> = {
       title: '本站的永豐金連線中斷',
       description: '本站會自動重新連線。',
     },
+    unavailable: {
+      title: '這次登入無法在永豐金下單',
+      description: '本站無法在這個環境開啟永豐金帳戶，例如正式環境的 CA 憑證。原因請看伺服器的紀錄。',
+    },
     summary: {
       balance: '銀行餘額',
       figuredCash: '現金（本站推算）',
-      figuredNote: '永豐金模擬環境不回報現金餘額，所以這裡的現金是本站推算的數字：永豐金模擬帳戶的起始資金（設定值），減去庫存與今日買進的成本，加上永豐金列出的每筆賣出損益（視為已扣手續費與稅）。',
+      figuredNote: '永豐金測試環境不回報現金餘額，所以這裡的現金是本站推算的數字：測試環境帳戶的起始資金（設定值），減去庫存與今日買進的成本，加上永豐金列出的每筆賣出損益（視為已扣手續費與稅）。',
       realized: '已實現損益（自 {{date}} 起）',
     },
     positions: {
@@ -105,16 +164,16 @@ const account: DictionaryShape<typeof en> = {
     },
   },
   reset: {
-    title: '模擬帳戶',
+    title: '本站模擬帳戶',
     capital: '起始資金',
     opened: '開立時間',
     label: '新的起始資金',
     hint: '重設後，帳戶會以這筆現金重新開始，沒有任何持股。',
     amount: 'NT${{amount}}',
     current: 'NT${{amount}}（目前的金額）',
-    button: '重設模擬帳戶…',
+    button: '重設本站模擬帳戶…',
     confirm: {
-      title: '要重設你的模擬帳戶嗎？',
+      title: '要重設你的本站模擬帳戶嗎？',
       description: '重設後無法復原。',
       goes: '會清除',
       positions: '所有持股。',
@@ -127,10 +186,10 @@ const account: DictionaryShape<typeof en> = {
       cancel: '取消',
     },
     resetting: '重設中…',
-    done: '已重設。模擬帳戶於 {{date}} 以 {{cash}} 重新開始。',
+    done: '已重設。本站模擬帳戶於 {{date}} 以 {{cash}} 重新開始。',
     busy: '你還有任務在執行，可能會在這段期間下單。請等它結束再重設。',
     failed: '沒有重設。{{reason}}',
-    loadFailed: '無法載入模擬帳戶。',
+    loadFailed: '無法載入本站模擬帳戶。',
   },
 }
 

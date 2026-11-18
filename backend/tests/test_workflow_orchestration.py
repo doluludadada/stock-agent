@@ -12,7 +12,7 @@ from support.harness import (
     harness_config,
     rising_history,
 )
-from support.settings import environment_setup
+from support.settings import sinopac_setup
 
 from a_domain.model.market.article import Article
 from a_domain.model.market.stock import Stock
@@ -21,8 +21,8 @@ from a_domain.types.enums import (
     ExecutionProvider,
     InformationSource,
     OrderStatus,
+    ShioajiServer,
     SignalSource,
-    SystemEnvironment,
     TradeAction,
     WatchlistType,
 )
@@ -465,21 +465,21 @@ def wanted_by_every_workflow(config: AppConfig | None = None, sinopac: bool = Fa
 
 
 @pytest.mark.parametrize(
-    ("environment", "sinopac", "order_on"),
+    ("server", "sinopac", "order_on"),
     [
-        (SystemEnvironment.DEV, False, None),
-        (SystemEnvironment.DEV, True, ExecutionProvider.MOCK),
-        (SystemEnvironment.DEV, True, ExecutionProvider.SHIOAJI),
-        (SystemEnvironment.PROD, True, ExecutionProvider.SHIOAJI),
+        (ShioajiServer.SIMULATION, False, None),
+        (ShioajiServer.SIMULATION, True, ExecutionProvider.MOCK),
+        (ShioajiServer.SIMULATION, True, ExecutionProvider.SHIOAJI),
+        (ShioajiServer.PRODUCTION, True, ExecutionProvider.SHIOAJI),
     ],
     ids=["mock-only-site", "mock-chosen", "sinopac-simulation", "sinopac-production"],
 )
 @pytest.mark.parametrize("menu", ["2", "3"], ids=["buzz", "intraday"])
 @pytest.mark.asyncio
 async def test_buzz_and_intraday_order_on_the_account_the_run_chose_and_only_there(
-    menu: str, environment: SystemEnvironment, sinopac: bool, order_on: ExecutionProvider | None
+    menu: str, server: ShioajiServer, sinopac: bool, order_on: ExecutionProvider | None
 ) -> None:
-    harness = wanted_by_every_workflow(environment_setup(harness_config(), environment), sinopac=sinopac)
+    harness = wanted_by_every_workflow(sinopac_setup(harness_config(), server), sinopac=sinopac)
     harness.real_broker.cash = 150_000
 
     status = await harness.run_menu(menu, order_on=order_on)
@@ -491,20 +491,3 @@ async def test_buzz_and_intraday_order_on_the_account_the_run_chose_and_only_the
     assert status.stats.execution_provider == (order_on or ExecutionProvider.MOCK)
     assert [placed.stock_id for placed in chosen.placed] == ["2330"] and other.placed == []
     assert (order.stock_id, order.status) == ("2330", OrderStatus.FILLED)
-
-
-@pytest.mark.parametrize(
-    ("menu", "answers"),
-    [("1", {}), ("2", {}), ("3", {}), ("4", {"stock_ids": "2330", "buy": {"2330"}})],
-    ids=["full-cycle", "buzz", "intraday", "manual-buy"],
-)
-@pytest.mark.asyncio
-async def test_every_workflow_that_decides_hands_each_decision_to_the_knowledge_repository(menu: str, answers: dict) -> None:
-    harness = wanted_by_every_workflow()
-
-    await harness.run_menu(menu, **answers)
-
-    assert [(signal.stock_id, signal.action) for signal in harness.journal.signals] == [("2330", TradeAction.BUY)]
-    assert [(stock_id, signal.decision_id) for stock_id, signal in harness.knowledge.decisions] == [
-        (signal.stock_id, signal.decision_id) for signal in harness.journal.signals
-    ]

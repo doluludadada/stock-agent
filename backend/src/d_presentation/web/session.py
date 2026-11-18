@@ -17,8 +17,8 @@ from fastapi.security import APIKeyCookie
 from pydantic import SecretStr, TypeAdapter
 
 from a_domain.model.system.user import SignInFlow, User, UserSession
-from a_domain.types.enums import ExecutionProvider, Feature, FeatureVisibility, HoldingSource, Permission
-from a_domain.types.errors import FeatureHidden, MopsUnavailable, RealtimeQuotesUnavailable, SignInRequired
+from a_domain.types.enums import ExecutionProvider, Feature, FeatureVisibility, HoldingSource, Permission, ShioajiServer
+from a_domain.types.errors import BrokerServerChanged, FeatureHidden, MopsUnavailable, RealtimeQuotesUnavailable, SignInRequired
 from a_domain.types.ids import RunId, SessionToken
 from b_application.pipeline import Pipeline
 from b_application.schemas.pipeline_status import PipelineStatus
@@ -76,7 +76,11 @@ class OutsideFollowWindow(Exception):
 
 
 class NotSimulation(PermissionError):
-    """FollowRefusal.NOT_SIMULATION: a ranking follow never orders on a real broker's production login. 403."""
+    """FollowAccountRefusal.NOT_SIMULATION: a ranking follow never orders on a real broker's production login. 403."""
+
+
+class OrderingOff(PermissionError):
+    """FollowAccountRefusal.ORDERING_OFF: the site does not let the user's ranking follow order on their follow account now. 403."""
 
 
 class SetupCodeRefused(PermissionError):
@@ -266,6 +270,21 @@ def require_ordering_shown(runtime: RuntimeDependency, user: Viewer, broker: Exe
     require_shown(runtime, user, (broker.ordering_feature,))
 
 
+def require_confirmed_server(
+    runtime: RuntimeDependency, broker: ExecutionProvider = ExecutionProvider.MOCK, server: ShioajiServer | None = None
+) -> None:
+    """
+    A route that orders on the real `broker` the query names: 409 broker_server_changed unless `server` is the one its
+    login is on now (shioaji.server, as GET /v1/account/brokers answers it), the server the run's confirmation showed.
+    A switch of the server from another page after the confirmation was shown starts nothing.
+    """
+    now = runtime.config.shioaji.server
+
+    if broker.real and server != now:
+        shown = f"the {server.value} server" if server is not None else "no server"
+        raise BrokerServerChanged(f"{broker.label} is on its {now.value} server now, and this page showed {shown}. Nothing started.")
+
+
 def holding_sources(runtime: RuntimeDependency, user: CurrentUser) -> frozenset[HoldingSource]:
     """
     The sources the My holdings page may read for the user: those whose feature the site shows the user and whose
@@ -416,6 +435,7 @@ QuoteLogin = Depends(require_quote_login)
 Mops = Depends(require_mops)
 AccountShown = Depends(require_account_shown)
 OrderingShown = Depends(require_ordering_shown)
+ServerConfirmed = Depends(require_confirmed_server)
 HoldingSources = Annotated[frozenset[HoldingSource], Depends(holding_sources)]
 RealBrokerHolder = Depends(requires(Permission.USE_REAL_BROKER))
 """The SinoPac account's own routes: 403 for a user who may not hold the real broker, whatever the site shows."""

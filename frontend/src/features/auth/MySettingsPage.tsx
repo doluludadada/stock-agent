@@ -18,15 +18,15 @@ import { Stat } from '@/shared/ui/stat'
 import { useAiModels, useChooseAiModel, type AiModels, type AiProvider } from './api'
 
 interface MySettingsPageProps {
-  /** The mock account's panels: the account feature's starting capital and reset, and the ranking feature's scheduled follow. */
-  mockAccount?: ReactNode
+  /** The accounts' panels: the mock account's starting capital and reset, and the ranking follow's account and schedule. */
+  accountPanels?: ReactNode
 }
 
 /**
  * Everything that is the signed-in user's own: who they are and how their password changes, the language and the
  * theme, the AI model of their runs, their mock account, and where their active strategy is chosen.
  */
-export function MySettingsPage({ mockAccount }: MySettingsPageProps) {
+export function MySettingsPage({ accountPanels }: MySettingsPageProps) {
   const { t } = useTranslation('auth')
   const library = useShows('strategy_library')
   const session = useSession()
@@ -38,7 +38,7 @@ export function MySettingsPage({ mockAccount }: MySettingsPageProps) {
           {session.status === 'signedIn' && <AccountPanel user={session.user} />}
           <DisplayPanel />
           <AiModelPanel />
-          {mockAccount}
+          {accountPanels}
           {library && (
             <Panel title={t('settings.strategy.title')}>
               <Button asChild variant="outline" size="sm">

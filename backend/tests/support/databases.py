@@ -1,11 +1,13 @@
 """
 The PostgreSQL database the tests run on. A test session owns one throwaway database, stock_agent_test_<process id>,
 which it creates on the server at 127.0.0.1:5432 as the role stock_agent_test and drops when it ends, and every test
-that opened it leaves it for the next one emptied. The role is the only setup (README.md, "Tests"): it may create
-databases and owns none but the sessions', so no test reaches a database of the app or of another project.
+that opened it leaves it for the next one emptied. The role and pgvector are the only setup (README.md, "Tests"): the
+role may create databases and owns none but the sessions', so no test reaches a database of the app or of another
+project.
 """
 
 import asyncio
+import getpass
 import os
 from pathlib import Path
 
@@ -32,19 +34,25 @@ ENVIRONMENT = {
 """The database settings every test's configuration reads: the session's own database."""
 
 SETUP = (
-    f"The tests need PostgreSQL at {SERVER['host']}:{SERVER['port']} and the role {TEST_ROLE}, which may create "
-    f"databases. Create it once: psql -d postgres -c \"CREATE ROLE {TEST_ROLE} LOGIN CREATEDB PASSWORD '{TEST_ROLE}'\""
+    f"The tests need PostgreSQL at {SERVER['host']}:{SERVER['port']} with pgvector (brew install pgvector), and the role "
+    f"{TEST_ROLE}, which may create databases. Create it once: "
+    f"psql -d postgres -c \"CREATE ROLE {TEST_ROLE} LOGIN CREATEDB PASSWORD '{TEST_ROLE}'\""
 )
 
 
 class TestDatabase:
-    """The session's database, and whether a test has opened it since it was last emptied."""
+    """
+    The session's database, whether a test has opened it since it was last emptied, and `superuser`, the role that may
+    create pgvector's extension: the test role where it is a superuser, as on CI, else the user running the tests, who
+    is the superuser of a Homebrew server.
+    """
 
     __test__ = False
 
     def __init__(self) -> None:
         self.name = ENVIRONMENT["DB_NAME"]
         self.opened = False
+        self.superuser = TEST_ROLE
         event.listen(Engine, "connect", self.mark_opened)
 
     def mark_opened(self, *_: object) -> None:
@@ -68,11 +76,18 @@ class TestDatabase:
                     await server.execute(f'DROP DATABASE "{name["datname"]}" WITH (FORCE)')
 
             await server.execute(f'CREATE DATABASE "{self.name}"')
+            superuser = await server.fetchval("SELECT rolsuper FROM pg_roles WHERE rolname = current_user")
         finally:
             await server.close()
 
+        self.superuser = TEST_ROLE if superuser else getpass.getuser()
+        await as_superuser(self.superuser, self.name, "CREATE EXTENSION IF NOT EXISTS vector")
+
     def empty(self) -> None:
-        """Leaves no table, type or row, and no connection a test left open, if a test opened the database."""
+        """
+        Leaves no table, type or row, and no connection a test left open, if a test opened the database. The vector
+        extension, which went with the schema, is created again.
+        """
         if self.opened:
             asyncio.run(self.drop_everything())
             self.opened = False
@@ -90,6 +105,8 @@ class TestDatabase:
         finally:
             await database.close()
 
+        await as_superuser(self.superuser, self.name, "CREATE EXTENSION IF NOT EXISTS vector")
+
     def drop(self) -> None:
         asyncio.run(self.drop_database())
 
@@ -100,6 +117,17 @@ class TestDatabase:
             await server.execute(f'DROP DATABASE IF EXISTS "{self.name}" WITH (FORCE)')
         finally:
             await server.close()
+
+
+async def as_superuser(superuser: str, database: str, statement: str) -> None:
+    """Runs `statement` on `database` alone as `superuser` (TestDatabase.superuser), as creating pgvector's extension needs."""
+    password = SERVER["password"] if superuser == TEST_ROLE else None
+    connection = await asyncpg.connect(host=SERVER["host"], port=SERVER["port"], user=superuser, password=password, database=database)
+
+    try:
+        await connection.execute(statement)
+    finally:
+        await connection.close()
 
 
 def process_runs(process_id: str) -> bool:

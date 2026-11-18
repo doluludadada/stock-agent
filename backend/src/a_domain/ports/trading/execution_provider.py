@@ -1,3 +1,4 @@
+from asyncio import Event
 from collections.abc import Awaitable, Callable
 from datetime import date, datetime
 from typing import Protocol
@@ -31,15 +32,26 @@ class IExecutionProvider(Protocol):
         """Which broker this is and, for a real one, whether its login is up now and on which server. Read right before each send."""
         ...
 
-    async def place_order(self, order: Order, refusal_now: SendRefusal) -> Order:
+    async def place_order(self, order: Order, refusal_now: SendRefusal, stop: Event) -> Order:
         """
         Sends `order`, asking `refusal_now` right before each exchange order it sends. A refusal sends nothing more: the
         order is REJECTED with it when nothing went out, and otherwise ends with what the parts already sent did.
+
+        `stop` set (the run was cancelled) ends any wait for an exchange order already sent: what still works of it is
+        cancelled at the broker and what it dealt is read. A call to the broker in flight is never interrupted.
         """
         ...
 
     async def get_account(self) -> Account:
         """Cash and positions, read together."""
+        ...
+
+    async def open_positions(self) -> list[Position]:
+        """
+        The positions alone, in one read: the mock account's book, or the long cash positions a real broker lists, in
+        shares at their cost, each marked with the broker's last price and the unrealized PnL the broker computes;
+        without a mark where the broker gives no last price.
+        """
         ...
 
 
@@ -75,20 +87,13 @@ class IBrokerExecutionProvider[Contract, Trade](IExecutionProvider, Protocol):
         """
         ...
 
-    async def open_positions(self) -> list[Position]:
-        """
-        The long cash positions the broker lists, in shares at their cost, each marked with the broker's last price and
-        the unrealized PnL the broker computes; without a mark where the broker gives no last price.
-        """
-        ...
-
     async def send(
-        self, contract: Contract, order: Order, held: Position | None, refusal_now: SendRefusal
+        self, contract: Contract, order: Order, held: Position | None, refusal_now: SendRefusal, stop: Event
     ) -> tuple[list[ExchangeOrder], tuple[RejectReason, str] | None]:
         """
         Sends the order as one exchange order per lot part, in turn, asking `refusal_now` right before each, and records
         what each part dealt on it. Stops at a part still working and at a refusal. Returns the report of every part it
-        sent, and the refusal that stopped it before a part, if one did.
+        sent, and the refusal that stopped it before a part, if one did. `stop` as place_order says.
         """
         ...
 

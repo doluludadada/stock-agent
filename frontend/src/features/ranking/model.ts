@@ -1,4 +1,4 @@
-import type { Broker, Schemas } from '@/shared/api'
+import type { Audience, Broker, Schemas } from '@/shared/api'
 import { isIsoDate, monthsBefore, periodProblems, type Period, type PeriodProblem } from '@/shared/lib/dates'
 
 export type Ranking = Schemas['Ranking']
@@ -7,6 +7,8 @@ export type RankingBacktest = Schemas['RankingBacktest']
 export type RankingFollow = Schemas['RankingFollowResponse']
 export type FormulaEvidence = Schemas['FormulaEvidence']
 export type FollowSchedule = Schemas['FollowScheduleResponse']
+export type FollowAccount = Schemas['FollowAccount']
+export type FollowSettings = Schemas['FollowSettingsResponse']
 export type UnfinishedFollow = Schemas['UnfinishedFollow']
 
 export type { Period }
@@ -93,20 +95,74 @@ export function offeredTimes(schedule: { time: string | null; times: readonly st
 }
 
 /**
- * The accounts a schedule's control lists, the mock account first: the ones the site lets the user's follow order on
- * now and the saved one while the server says the site does not offer it (`broker_offered`), so the control always
- * shows what is saved.
+ * The accounts My settings' control lists, the mock account first: the ones the site lets the user's follow order on
+ * now and the saved one while the site does not offer it, so the control always shows what is saved.
  */
-export function offeredBrokers(schedule: Pick<FollowSchedule, 'broker' | 'broker_offered' | 'brokers'>): Broker[] {
-  return schedule.broker_offered ? [...schedule.brokers] : [...schedule.brokers, schedule.broker]
+export function accountChoices(account: Pick<FollowAccount, 'broker' | 'brokers'>): Broker[] {
+  return account.brokers.includes(account.broker) ? [...account.brokers] : [...account.brokers, account.broker]
+}
+
+/**
+ * What the follow block says above its button, and so whether the button shows and may be pressed (LEAD_BUTTON): a
+ * run under way, why the follow account cannot follow, a ranking the account holds (nothing to say) or that holds no
+ * stock, no price to follow at, a market phase that places no order, or what a follow would trade.
+ */
+export type FollowLead =
+  | { kind: 'running' }
+  | { kind: 'refused'; refusal: Schemas['FollowAccountRefusal'] }
+  | { kind: 'held' }
+  | { kind: 'inCash' }
+  | { kind: 'nothing' }
+  | { kind: 'noQuotes' }
+  | { kind: 'window'; pricing: Schemas['OrderPricing'] }
+  | { kind: 'toCash'; sells: number }
+  | { kind: 'behind'; sells: number; buys: number }
+  | { kind: 'never' }
+
+/** The follow button under each lead: none where the account holds the ranking, held back until a follow may start. */
+export const LEAD_BUTTON: Readonly<Record<FollowLead['kind'], 'none' | 'disabled' | 'ready'>> = {
+  running: 'disabled',
+  refused: 'disabled',
+  held: 'none',
+  inCash: 'none',
+  nothing: 'none',
+  noQuotes: 'disabled',
+  window: 'disabled',
+  toCash: 'ready',
+  behind: 'ready',
+  never: 'ready',
+}
+
+/**
+ * The follow block's lead from the server's answer: a run under way first, then the follow account's own refusal,
+ * which leaves the account unread, then an account that holds the ranking, then the price a follow needs (a site that
+ * follows at a realtime quote needs its Shioaji login), then the market's phase, then what a follow would trade.
+ */
+export function leadOf(
+  follow: Pick<RankingFollow, 'running' | 'account' | 'refusal' | 'holdings'>,
+  ranking: Pick<Ranking, 'stocks' | 'holds_cash'>,
+  audience: Pick<Audience, 'order_pricing' | 'realtime_quotes'>,
+): FollowLead {
+  if (follow.running) return { kind: 'running' }
+  if (follow.account.refusal !== null) return { kind: 'refused', refusal: follow.account.refusal }
+  if (follow.refusal === 'nothing_to_follow') {
+    if (ranking.stocks.length > 0) return { kind: 'held' }
+    return { kind: ranking.holds_cash ? 'inCash' : 'nothing' }
+  }
+  if (audience.order_pricing === 'realtime_quote' && !audience.realtime_quotes) return { kind: 'noQuotes' }
+  if (follow.refusal === 'outside_follow_window') return { kind: 'window', pricing: audience.order_pricing }
+  const { held, lacking, left } = follow.holdings
+  if (ranking.holds_cash) return { kind: 'toCash', sells: left.length }
+  if (held.length > 0) return { kind: 'behind', sells: left.length, buys: lacking.length }
+  return { kind: 'never' }
 }
 
 export type UnfinishedReason = 'failed' | 'neverEnded' | 'notStarted' | 'left'
 
 /**
  * Why a scheduled follow that is not running left its decision pending, read from its record: an error stopped it, its
- * process stopped before the end, it took nothing (the market was outside its window, or the ranking ranked no
- * stock), or it left `ranking_open` stocks to trade.
+ * process stopped before the end, it took nothing (the follow account refused it, the market was outside its window,
+ * or the ranking ranked no stock), or it left `ranking_open` stocks to trade.
  */
 export function unfinishedReason(follow: Pick<UnfinishedFollow, 'failure' | 'end_time' | 'ranking_open'>): UnfinishedReason {
   if (follow.failure !== null) return 'failed'

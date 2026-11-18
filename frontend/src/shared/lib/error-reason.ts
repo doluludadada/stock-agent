@@ -10,6 +10,7 @@ const BY_CODE = {
   brief_limit_reached: 'refusal.brief_limit_reached',
   run_in_progress: 'refusal.run_in_progress',
   listing_unavailable: 'refusal.listing_unavailable',
+  broker_not_answering: 'refusal.broker_not_answering',
   ranking_unavailable: 'refusal.ranking_unavailable',
   realtime_quotes_unavailable: 'refusal.realtime_quotes_unavailable',
   mops_unavailable: 'refusal.mops_unavailable',
@@ -17,6 +18,8 @@ const BY_CODE = {
   real_broker_refused: 'refusal.real_broker_refused',
   not_simulation: 'refusal.not_simulation',
   follow_broker_not_offered: 'refusal.follow_broker_not_offered',
+  ordering_off: 'refusal.ordering_off',
+  follow_account_changed: 'refusal.follow_account_changed',
   administrators_only: 'refusal.administrators_only',
   feature_hidden: 'refusal.feature_hidden',
 } as const satisfies Partial<Record<ErrorCode, string>>

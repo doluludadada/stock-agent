@@ -36,6 +36,13 @@ from d_presentation.web.workflow_runs import RunInProgress
 router = APIRouter(prefix="/account", tags=["Account"], dependencies=[PrivateAccess])
 
 
+SINOPAC_READ: dict[int | str, dict[str, Any]] = {
+    status.HTTP_503_SERVICE_UNAVAILABLE: {
+        "model": ErrorResponse,
+        "description": "broker_not_answering: SinoPac did not answer a read of the account in time, or answered an error. Ask again.",
+    }
+}
+
 BROKER_READ: dict[int | str, dict[str, Any]] = {
     status.HTTP_403_FORBIDDEN: {
         "model": ErrorResponse,
@@ -43,7 +50,8 @@ BROKER_READ: dict[int | str, dict[str, Any]] = {
             "real_broker_refused: a real broker's account, asked by a user who is not an administrator. "
             "broker_unavailable: the real broker has no login up on this site now."
         ),
-    }
+    },
+    **SINOPAC_READ,
 }
 
 
@@ -58,7 +66,7 @@ async def get_brokers(runtime: RuntimeDependency, user: CurrentUser) -> list[Bro
     return [
         BrokerResponse(
             broker=broker,
-            simulation=config.environment.shioaji_simulation if broker.real else None,
+            server=config.shioaji.server if broker.real else None,
             max_order_value=config.trading.max_order_value if broker.real else None,
             max_daily_buy_value=config.trading.max_daily_buy_value if broker.real else None,
         )
@@ -67,24 +75,31 @@ async def get_brokers(runtime: RuntimeDependency, user: CurrentUser) -> list[Bro
     ]
 
 
-@router.get("/brokerage", dependencies=[shows(Feature.SINOPAC_ACCOUNT), RealBrokerHolder])
+@router.get("/brokerage", responses=SINOPAC_READ, dependencies=[shows(Feature.SINOPAC_ACCOUNT), RealBrokerHolder])
 async def get_brokerage_account(runtime: RuntimeDependency, user: CurrentUser, pipeline: UserPipeline) -> BrokerageAccountResponse:
     """
     The SinoPac account as the broker reports it now, for an administrator the site shows features.sinopac_account:
     the bank balance (the site's figure on the simulation server: `statement.simulation`), the settlements due, the
     positions with the broker's last prices and its own unrealized PnL, today's deals and the sales of the last
     holdings.realized_days days with the PnL the broker says each realized.
-    `simulation` says which server this environment logs in to, `login_up` whether the login is up (`statement` is None
-    while it is down), and `ordering` whether the site lets the user order there (features.sinopac_ordering, off by
-    default). It only reads: it sends no order, whatever `ordering` says, and it answers no account number.
+    `server` says which server the site logs in to and `switch_refusal` why the switch to the other server would be
+    refused (names of unset variables only), `login_up` whether the login is up (`statement` is None while it is
+    not), `login_down` whether the site logs in again, `ordering` whether the site lets the user order there
+    (features.sinopac_ordering, off by default), and `simulation_initial_cash` the simulation account's starting cash.
+    The page switches them through the settings save, PUT /v1/admin/settings. It only reads: it sends no order, whatever
+    `ordering` says, and it answers no account number and no credential's value.
     """
+    config = runtime.config
     link = runtime.real_broker.link() if runtime.real_broker is not None else None
-    statement = await pipeline.load_brokerage_statement()
+    statement, switch_refusal = await pipeline.load_brokerage_statement()
 
     return BrokerageAccountResponse(
-        simulation=runtime.config.environment.shioaji_simulation,
+        server=config.shioaji.server,
+        switch_refusal=switch_refusal,
         login_up=link is not None and link.up,
+        login_down=runtime.login_down,
         ordering=ExecutionProvider.SHIOAJI.ordering_feature in shown_features(runtime, user),
+        simulation_initial_cash=config.shioaji.simulation_initial_cash if config.shioaji.server.simulation else None,
         statement=None if statement is None else BrokerageStatementResponse.model_validate(statement),
     )
 

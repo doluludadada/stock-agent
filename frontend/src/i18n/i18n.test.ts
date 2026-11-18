@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { headingOf, isNamedOption, sectionOf } from '@/features/admin-settings/form'
+import { headingOf, isNamedOption, MANAGED_ELSEWHERE, sectionOf } from '@/features/admin-settings/form'
 import { BUILT_IN_IDS, builtInJson } from '@/features/strategies/model/built-ins.test-support'
 import { EMPTY_DRAFT } from '@/features/holdings/model'
 import { CAVEATS, PRESET_KEYS } from '@/features/ranking/model'
@@ -98,10 +98,22 @@ describe('translations', () => {
       ['admin', 'form.unit', openapi.components.schemas.SettingUnit.enum as string[]],
       ['admin', 'form.field', SETTING_PATHS],
       ['admin', 'form.help', SETTING_PATHS],
+      ['admin', 'form.managedAt', Object.keys(MANAGED_ELSEWHERE)],
       ['admin', 'form.option', [...new Set(settingsFields.flatMap((field) => field.options))].filter(isNamedOption)],
       ['common', 'broker.name', openapi.components.schemas.ExecutionProvider.enum as string[]],
+      ['common', 'broker.server', openapi.components.schemas.ShioajiServer.enum as string[]],
+      ['runs', 'broker.server', openapi.components.schemas.ShioajiServer.enum as string[]],
       ['account', 'page', (openapi.components.schemas.ExecutionProvider.enum as string[]).map((broker) => `${broker}.title`)],
-      ['account', 'brokerage.server', ['simulation', 'live']],
+      ['account', 'brokerage.server', openapi.components.schemas.ShioajiServer.enum as string[]],
+      ['account', 'brokerage.login', ['up', 'down', 'unavailable']],
+      ['account', 'brokerage.serverNote', openapi.components.schemas.ShioajiServer.enum as string[]],
+      ['account', 'brokerage.manage.server.to', openapi.components.schemas.ShioajiServer.enum as string[]],
+      ['account', 'brokerage.manage.server.title', openapi.components.schemas.ShioajiServer.enum as string[]],
+      ['account', 'brokerage.manage.server.changes', ['realMoney', 'noRealMoney', 'orderingOff', 'login', 'follows']],
+      ['account', 'brokerage.manage.server.refusal', openapi.components.schemas.ServerSwitchRefusalReason.enum as string[]],
+      ['account', 'brokerage.manage.ordering.title', ['on', 'off']],
+      ['account', 'brokerage.manage.ordering.description', ['on', 'off']],
+      ['account', 'brokerage.manage.ordering.saved', ['on', 'off']],
       ['holdings', 'source', openapi.components.schemas.HoldingSource.enum as string[]],
       ['holdings', 'form.problem', Object.keys(EMPTY_DRAFT)],
       ['holdings', 'form.refusal', ['unlisted', 'failed']],
@@ -124,10 +136,8 @@ describe('translations', () => {
       ['backtest', 'trades.column', ['bought', 'sold', 'pnl', 'return', 'held']],
       ['backtest', 'notes', ['technicalOnly', 'nextOpen', 'listedToday']],
       ['ranking', 'preset', PRESET_KEYS],
-      ['ranking', 'account', openapi.components.schemas.ExecutionProvider.enum as string[]],
-      ['ranking', 'schedule.on', openapi.components.schemas.ExecutionProvider.enum as string[]],
-      ['ranking', 'schedule.notOffered', openapi.components.schemas.ExecutionProvider.enum as string[]],
-      ['ranking', 'follow.on', (openapi.components.schemas.ExecutionProvider.enum as string[]).flatMap((broker) => ['lead', 'button', 'upToDate', 'confirm.title', 'confirm.sizing', ...(openapi.components.schemas.OrderPricing.enum as string[]).map((pricing) => `confirm.${pricing}`)].map((key) => `${broker}.${key}`))],
+      ['common', 'refusal', [...(openapi.components.schemas.FollowAccountRefusal.enum as string[]), 'follow_account_changed']],
+      ['ranking', 'follow.on', (openapi.components.schemas.ExecutionProvider.enum as string[]).flatMap((broker) => ['upToDate', 'page', 'confirm.title', 'confirm.sizing', ...(openapi.components.schemas.OrderPricing.enum as string[]).map((pricing) => `confirm.${pricing}`)].map((key) => `${broker}.${key}`))],
       ['ranking', 'problem', ['dateRequired', 'firstAfterLast', 'afterLast']],
       ['ranking', 'mark', ['entered', 'notBought']],
       ['ranking', 'record.row', ['annual', 'worth', 'drawdown']],

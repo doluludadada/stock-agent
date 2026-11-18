@@ -3,7 +3,7 @@ import { useId, useState } from 'react'
 import { Link } from 'react-router'
 import { toast } from 'sonner'
 import { useTranslation } from '@/i18n'
-import { isApiError, useAudience, type Audience, type Broker } from '@/shared/api'
+import { isApiError, useAccountLabel, useAudience, type Audience, type Broker } from '@/shared/api'
 import { paths } from '@/shared/config/paths'
 import { useErrorReason } from '@/shared/lib/error-reason'
 import { clockTime, DASH, useFormat } from '@/shared/lib/format'
@@ -17,20 +17,26 @@ import { Panel, PanelLink } from '@/shared/ui/panel'
 import { Skeleton } from '@/shared/ui/skeleton'
 import { Stat } from '@/shared/ui/stat'
 import { useFollowOrders, useFollowRanking, useRankingFollow } from './api'
-import { offeredBrokers, unfinishedReason, type Ranking, type RankingFollow } from './model'
+import { LEAD_BUTTON, leadOf, unfinishedReason, type FollowLead, type Ranking, type RankingFollow } from './model'
 
 /**
- * The ranking in the viewer's mock account: what it holds, lacks and still holds, its return against the benchmark, and
- * the one action. The block's own action follows on the first account the server lists, the one its holdings are read
- * from; every other account the server lists gets one button, and each follow says the account it ran on.
+ * The ranking in the viewer's follow account, the one account the button and the schedule follow on, which the title
+ * names as the server answered it: what it holds, lacks and still holds, the mock account's return against the
+ * benchmark or the way to SinoPac's own page, the schedule, the follows so far, and the one action, or why the account
+ * cannot follow now. The account is changed on My settings.
  */
-export function MockAccountFollow({ ranking, nextFollow, className }: { ranking: Ranking; nextFollow: string; className?: string }) {
+export function RankingFollowPanel({ ranking, nextFollow, className }: { ranking: Ranking; nextFollow: string; className?: string }) {
   const { t } = useTranslation('ranking')
+  const label = useAccountLabel()
   const follow = useRankingFollow()
   const audience = useAudience()
-  const [own, ...others] = follow.data?.schedule.brokers ?? []
+  const account = follow.data?.account
   return (
-    <Panel className={className} title={t('follow.title')} aside={<PanelLink to={paths.account}>{t('follow.account')}</PanelLink>}>
+    <Panel
+      className={className}
+      title={account ? label(account.broker, account.server) : undefined}
+      aside={<PanelLink to={paths.mySettings}>{t('follow.change')}</PanelLink>}
+    >
       {follow.isError ? (
         <ErrorState error={follow.error} title={t('follow.loadFailed')} onRetry={() => void follow.refetch()} />
       ) : audience.isError ? (
@@ -40,15 +46,29 @@ export function MockAccountFollow({ ranking, nextFollow, className }: { ranking:
       ) : (
         <div className="flex flex-col gap-3">
           {(follow.data.performance || follow.data.holdings.held.length > 0) && <Standing follow={follow.data} count={ranking.stocks.length} />}
+          <AccountPage follow={follow.data} />
           <Schedule follow={follow.data} nextFollow={nextFollow} />
           <Follows follows={follow.data.follows} running={follow.data.running} />
-          {own && <Action broker={own} follow={follow.data} ranking={ranking} audience={audience.data} />}
-          {others.map((broker) => (
-            <AccountFollow key={broker} broker={broker} running={follow.data.running} audience={audience.data} />
-          ))}
+          <Action follow={follow.data} ranking={ranking} audience={audience.data} />
         </div>
       )}
     </Panel>
+  )
+}
+
+/** Each account's own page: the mock account's, or SinoPac's, whose history the site does not keep. */
+const ACCOUNT_PAGES: Readonly<Record<Broker, string>> = { mock: paths.account, shioaji: paths.brokerage }
+
+/** Where the account's own figures are. */
+function AccountPage({ follow }: { follow: RankingFollow }) {
+  const { t } = useTranslation('ranking')
+  const broker = follow.account.broker
+  return (
+    <p className="text-sm">
+      <Link to={ACCOUNT_PAGES[broker]} className="tap text-brand underline-offset-4 hover:underline">
+        {t(`follow.on.${broker}.page`)}
+      </Link>
+    </p>
   )
 }
 
@@ -88,8 +108,9 @@ function Standing({ follow, count }: { follow: RankingFollow; count: number }) {
 
 /**
  * The schedule's state in one line, and who started the last follow; the way to change it is My settings. A schedule
- * that is on and whose last follow left the decision pending says so, with why and the run, in place of what it
- * follows next. With more than one account in play it says the account, or that the site does not offer the saved one.
+ * that is on while the server refuses the account says it follows on no account. One whose last follow left the
+ * decision pending says so, with why and the run, in place of what it follows next. It follows on the account the
+ * title names.
  */
 function Schedule({ follow, nextFollow }: { follow: RankingFollow; nextFollow: string }) {
   const { t } = useTranslation('ranking')
@@ -103,6 +124,8 @@ function Schedule({ follow, nextFollow }: { follow: RankingFollow; nextFollow: s
     <p className="text-sm text-pretty text-muted-foreground" data-testid="follow-schedule">
       {!time ? (
         t('schedule.off')
+      ) : follow.account.refusal !== null ? (
+        t('schedule.refused')
       ) : unfinished ? (
         <>
           {t('schedule.unfinished', {
@@ -119,7 +142,6 @@ function Schedule({ follow, nextFollow }: { follow: RankingFollow; nextFollow: s
       ) : (
         t('schedule.next', { date: format.monthDay(nextFollow), time })
       )}{' '}
-      {time && offeredBrokers(schedule).length > 1 && `${t(schedule.broker_offered ? `schedule.on.${schedule.broker}` : `schedule.notOffered.${schedule.broker}`)} `}
       {last && `${t(last.scheduled ? 'schedule.lastScheduled' : 'schedule.lastByHand', { date: format.monthDay(last.start_time) })} `}
       <Link to={paths.mySettings} className="tap text-brand underline-offset-4 hover:underline">
         {t('schedule.change')}
@@ -147,7 +169,7 @@ function Follows({ follows, running }: { follows: RankingFollow['follows']; runn
       <ul aria-label={t('follow.used')}>
         {newest.slice(0, FOLLOWS_SHOWN).map((run) => (
           <li key={run.run_id}>
-            <span className="tabular">{format.date(run.start_time)}</span> {t(run.scheduled ? 'schedule.byScheduleMark' : 'schedule.byHandMark')} · {t(`account.${run.execution_provider}`)} ·{' '}
+            <span className="tabular">{format.date(run.start_time)}</span> {t(run.scheduled ? 'schedule.byScheduleMark' : 'schedule.byHandMark')} · {t(`common:broker.name.${run.execution_provider}`)} ·{' '}
             <FormulaLine formula={run.ranking_formula} />
             <FollowOrders runId={run.run_id} date={format.monthDay(run.start_time)} running={running} />{' '}
             <Link to={paths.run(run.run_id)} className="tap text-brand underline-offset-4 hover:underline">
@@ -201,12 +223,62 @@ const REFUSALS: Record<string, 'runs:follow.refused.window' | 'runs:follow.refus
   run_in_progress: 'runs:busy',
 }
 
-/** Starts a follow on an account and says how it went: the block's own words for a refusal it has them for, else the reason by its code. */
-function useStartFollow() {
+/** The lead's words; an account that holds the ranking has none. */
+function useLeadText(lead: FollowLead): string | null {
+  const { t } = useTranslation('ranking')
+  switch (lead.kind) {
+    case 'running':
+      return t('follow.running')
+    case 'refused':
+      return t(`common:refusal.${lead.refusal}`)
+    case 'held':
+      return null
+    case 'inCash':
+      return t('follow.inCash')
+    case 'nothing':
+      return t('follow.nothing')
+    case 'noQuotes':
+      return t('runs:follow.noQuotes')
+    case 'window':
+      return t(`runs:follow.window.${lead.pricing}`)
+    case 'toCash':
+      return t('follow.toCash', { sells: lead.sells })
+    case 'behind':
+      return t('follow.behind', { sells: lead.sells, buys: lead.buys })
+    case 'never':
+      return t('follow.never')
+  }
+}
+
+interface ActionProps {
+  follow: RankingFollow
+  ranking: Ranking
+  audience: Audience
+}
+
+/**
+ * Why the account cannot follow now, or the button; an account that holds the ranking shows neither. A refusal of the
+ * account itself is said in place of what a follow would do, and the button stays, disabled, so the viewer sees where
+ * the follow would happen. The follow names the account the dialog showed, so a change on My settings meanwhile is
+ * refused rather than followed elsewhere.
+ */
+function Action({ follow, ranking, audience }: ActionProps) {
   const { t } = useTranslation('ranking')
   const reason = useErrorReason()
   const start = useFollowRanking()
-  const follow = (broker: Broker) =>
+  const [confirming, setConfirming] = useState(false)
+  const leadId = useId()
+  const lead = leadOf(follow, ranking, audience)
+  const text = useLeadText(lead)
+  const button = LEAD_BUTTON[lead.kind]
+  const { holdings } = follow
+  const broker = follow.account.broker
+  const pricing = audience.order_pricing
+  const names = new Map(ranking.stocks.map((stock) => [stock.stock_id, stock.stock_name]))
+  const trades = [...holdings.left.map((stockId) => ({ stockId, action: 'sell' as const })), ...holdings.lacking.map((stockId) => ({ stockId, action: 'buy' as const }))]
+
+  const confirm = () => {
+    setConfirming(false)
     start.mutate(broker, {
       onSuccess: () => toast.success(t('runs:follow.started')),
       onError: (error) => {
@@ -215,63 +287,18 @@ function useStartFollow() {
         toast.error(own ?? t('runs:follow.failed', { reason: reason(error) }))
       },
     })
-  return { follow, pending: start.isPending }
-}
-
-interface ActionProps {
-  /** The account the block's holdings are read from, which this action follows on. */
-  broker: Broker
-  follow: RankingFollow
-  ranking: Ranking
-  audience: Audience
-}
-
-/** Why the account cannot follow now, or the button; an account that holds the ranking shows neither. */
-function Action({ broker, follow, ranking, audience }: ActionProps) {
-  const { t } = useTranslation('ranking')
-  const start = useStartFollow()
-  const [confirming, setConfirming] = useState(false)
-  const leadId = useId()
-  const { holdings, refusal } = follow
-  const ranked = ranking.stocks
-  const pricing = audience.order_pricing
-  // A site that follows at a realtime quote needs its Shioaji login for the price.
-  const quoted = pricing !== 'realtime_quote' || audience.realtime_quotes
-  const upToDate = refusal === 'nothing_to_follow'
-  const ready = quoted && refusal === null && !follow.running
-  const lead = follow.running
-    ? t('follow.running')
-    : upToDate
-      ? ranked.length > 0
-        ? null
-        : t(ranking.holds_cash ? 'follow.inCash' : 'follow.nothing')
-      : !quoted
-        ? t('runs:follow.noQuotes')
-        : refusal === 'outside_follow_window'
-          ? t(`runs:follow.window.${pricing}`)
-          : ranking.holds_cash
-            ? t('follow.toCash', { sells: holdings.left.length })
-            : holdings.held.length > 0
-              ? t('follow.behind', { sells: holdings.left.length, buys: holdings.lacking.length })
-              : t('follow.never')
-  const names = new Map(ranked.map((stock) => [stock.stock_id, stock.stock_name]))
-  const trades = [...holdings.left.map((stockId) => ({ stockId, action: 'sell' as const })), ...holdings.lacking.map((stockId) => ({ stockId, action: 'buy' as const }))]
-
-  const confirm = () => {
-    setConfirming(false)
-    start.follow(broker)
   }
 
-  if (lead === null) return null
+  if (text === null) return null
   return (
     <div className="flex flex-col gap-3 @lg:flex-row @lg:items-center @lg:justify-between">
       <p id={leadId} className="text-sm text-pretty text-muted-foreground">
-        {lead}
+        {text}
       </p>
-      {!upToDate && (
-        <Button type="button" className="shrink-0 self-start @lg:self-auto" disabled={!ready || start.pending} aria-describedby={leadId} onClick={() => setConfirming(true)}>
+      {button !== 'none' && (
+        <Button type="button" className="shrink-0 self-start @lg:self-auto" disabled={button !== 'ready' || start.isPending} aria-describedby={leadId} onClick={() => setConfirming(true)}>
           <CopyCheck aria-hidden />
-          {t(`follow.on.${broker}.button`)}
+          {t('follow.button')}
         </Button>
       )}
       <ConfirmDialog
@@ -293,48 +320,6 @@ function Action({ broker, follow, ranking, audience }: ActionProps) {
             </li>
           ))}
         </ul>
-        <p className="text-xs text-muted-foreground">{t(`follow.on.${broker}.confirm.sizing`)}</p>
-      </ConfirmDialog>
-    </div>
-  )
-}
-
-/**
- * A follow by hand on an account the block reads nothing of, so the yes lists no order. The button knows only the
- * site's facts, a run of the user in progress and the quotes the site prices on: whether that account can follow now is
- * the server's answer to the start.
- */
-function AccountFollow({ broker, running, audience }: { broker: Broker; running: boolean; audience: Audience }) {
-  const { t } = useTranslation('ranking')
-  const start = useStartFollow()
-  const [confirming, setConfirming] = useState(false)
-  const leadId = useId()
-  const pricing = audience.order_pricing
-  const quoted = pricing !== 'realtime_quote' || audience.realtime_quotes
-
-  const confirm = () => {
-    setConfirming(false)
-    start.follow(broker)
-  }
-
-  return (
-    <div className="flex flex-col gap-3 border-t pt-3 @lg:flex-row @lg:items-center @lg:justify-between">
-      <p id={leadId} className="text-sm text-pretty text-muted-foreground">
-        {quoted ? t(`follow.on.${broker}.lead`) : t('runs:follow.noQuotes')}
-      </p>
-      <Button type="button" variant="outline" className="shrink-0 self-start @lg:self-auto" disabled={!quoted || running || start.pending} aria-describedby={leadId} onClick={() => setConfirming(true)}>
-        <CopyCheck aria-hidden />
-        {t(`follow.on.${broker}.button`)}
-      </Button>
-      <ConfirmDialog
-        open={confirming}
-        onOpenChange={setConfirming}
-        title={t(`follow.on.${broker}.confirm.title`)}
-        description={t(`follow.on.${broker}.confirm.${pricing}`)}
-        cancel={t('runs:confirm.cancel')}
-        confirm={t('runs:follow.confirm.go')}
-        onConfirm={confirm}
-      >
         <p className="text-xs text-muted-foreground">{t(`follow.on.${broker}.confirm.sizing`)}</p>
       </ConfirmDialog>
     </div>

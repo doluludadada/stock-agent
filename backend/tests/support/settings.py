@@ -1,11 +1,12 @@
 """The settings the app ships, for tests that build an adapter, a use case or a runtime themselves."""
 
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
 from a_domain.model.trading.ranking_formula import NearnessToHigh, RankingFormula, RevenueAcceleration
 from a_domain.rules.trading.ranking import MonthlyRankingRule
-from a_domain.types.enums import SystemEnvironment
+from a_domain.types.enums import Audience, ShioajiCredential, ShioajiServer, SystemEnvironment
 from b_application.config.app_config import AppConfig
 from b_application.config.settings_loader import inject_built_in_strategies, load_yaml, settings_texts
 from b_application.config.trading_config import RankingConfig, ShioajiConfig
@@ -24,15 +25,30 @@ def shipped_config(project_root: Path = Path(".")) -> AppConfig:
     return AppConfig(project_root=project_root, **settings)
 
 
-def environment_setup(config: AppConfig, environment: SystemEnvironment) -> AppConfig:
+def sinopac_setup(
+    config: AppConfig,
+    server: ShioajiServer,
+    environment: SystemEnvironment = SystemEnvironment.TEST,
+    credentials: Iterable[ShioajiCredential] | None = None,
+) -> AppConfig:
     """
-    `config` in `environment` with exactly the Shioaji credentials the environment reads, never another's, each set to
-    its own variable's name, so a test sees which variable reached which part of a login. Read from the process
-    environment only, never .env.
+    `config` on SinoPac's `server`, in `environment`, with exactly `credentials` set, by default the ones that server
+    reads and never the other's, each set to its own variable's name, so a test sees which variable reached which part
+    of a login. Read from the process environment only, never .env.
     """
-    polling = config.shioaji.model_dump(include={"poll_interval_seconds", "max_polls"})
-    credentials = {credential.value: credential.value for credential in environment.shioaji_credentials}
-    return config.model_copy(update={"environment": environment, "shioaji": ShioajiConfig(_env_file=None, **polling, **credentials)})
+    polling = config.shioaji.model_dump(
+        include={"poll_interval_seconds", "max_polls", "simulation_initial_cash", "odd_lot_matches", "status_timeout_seconds"}
+    )
+    given = {credential.value: credential.value for credential in (server.credentials if credentials is None else credentials)}
+    shioaji = ShioajiConfig(_env_file=None, server=server, **polling, **given)
+    return config.model_copy(update={"environment": environment, "shioaji": shioaji})
+
+
+def running_on(
+    environment: SystemEnvironment, audience: Audience = Audience.PERSONAL, server: ShioajiServer = ShioajiServer.SIMULATION
+) -> AppConfig:
+    """The settings a running process started on, which a reload's and a save's checks compare new settings with."""
+    return sinopac_setup(shipped_config(), server, environment).model_copy(update={"audience": audience})
 
 
 def small_formula(

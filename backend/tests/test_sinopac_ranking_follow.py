@@ -1,9 +1,10 @@
 """
-A ranking follow on SinoPac: by hand (`POST /v1/rankings/follow?broker=shioaji`) or by the user's schedule, it brings
+A ranking follow on SinoPac, the user's follow account: by hand (`POST /v1/rankings/follow`) or by their schedule, it brings
 SinoPac's account to the ranking through the order path every SinoPac order takes, and only while the login that
 answers is on SinoPac's simulation server. A production login is refused when the run starts, before the account is
 read, at each order's preparation and right before each exchange order, whatever the settings. Only an active
-administrator the site lets order on SinoPac is followed there, and one who loses any of that is followed on no account.
+administrator the site lets order on SinoPac is followed there, and one who loses any of that is refused and followed on
+no account, never on the mock account in its place.
 """
 
 from dataclasses import replace
@@ -25,22 +26,25 @@ from a_domain.model.system.user import User
 from a_domain.model.trading.account import Account, Position
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.signal import TradeSignal
-from a_domain.rules.trading.order_rule import BrokerLink, SimulationOnlyRule
+from a_domain.rules.trading.follow import FollowAccount
+from a_domain.rules.trading.order_rule import BrokerLink, SimulationOnlyRule, SiteOrdering
 from a_domain.rules.trading.ranking import RankedFactor, RankedStock, Ranking
 from a_domain.types.enums import (
     ExecutionProvider,
     FeatureVisibility,
+    FollowAccountRefusal,
     OrderStatus,
     OrderType,
     RejectReason,
     Role,
-    SystemEnvironment,
+    ShioajiServer,
     TimeInForce,
     TradeAction,
     TradingPhase,
     UserStatus,
     Workflow,
 )
+from a_domain.types.errors import FollowAccountChanged
 from a_domain.types.ids import RunId, UserId
 from b_application.use_cases.trade.order_execution import OrderExecution
 
@@ -52,7 +56,17 @@ PRODUCTION = BrokerLink(broker=ExecutionProvider.SHIOAJI, up=True, simulation=Fa
 MOCK = BrokerLink(broker=ExecutionProvider.MOCK)
 ADMIN = User(user_id=UserId("u-admin"), username="admin", email="admin@example.com", role=Role.ADMINISTRATOR, created_at=NOW)
 PLAIN = replace(ADMIN, user_id=UserId("u-plain"), role=Role.USER)
-SHOWN, OFF = FeatureVisibility.ADMINISTRATORS, FeatureVisibility.OFF
+
+
+def sinopac_shown(visibility: FeatureVisibility) -> SiteOrdering:
+    """Settings files on disk on SinoPac's simulation server that show `visibility` ordering on SinoPac and everyone on the mock."""
+    ordering = {ExecutionProvider.MOCK: FeatureVisibility.EVERYONE, ExecutionProvider.SHIOAJI: visibility}
+    return SiteOrdering(ordering=ordering, server=ShioajiServer.SIMULATION)
+
+
+SHOWN = sinopac_shown(FeatureVisibility.ADMINISTRATORS)
+OFF = sinopac_shown(FeatureVisibility.OFF)
+EVERYONE = sinopac_shown(FeatureVisibility.EVERYONE)
 
 
 def order_of(action: TradeAction = TradeAction.BUY) -> Order:
@@ -96,28 +110,35 @@ def test_only_a_ranking_follow_on_a_real_broker_off_its_simulation_server_is_ref
     assert [workflow for workflow in Workflow if workflow.simulation_only] == [Workflow.RANKING_FOLLOW]
 
 
-@pytest.mark.parametrize("environment", ["dev", "test", "prod"])
-async def test_no_setting_lets_a_ranking_follows_order_reach_a_production_login(environment: str) -> None:
-    """In prod the login rule takes the production login and the switch and the user allow the order: the workflow alone refuses it."""
-    rule = harness_config().model_copy(update={"environment": SystemEnvironment(environment)}).broker_access_rule()
+@pytest.mark.parametrize("server", list(ShioajiServer))
+async def test_no_setting_lets_a_ranking_follows_order_reach_a_production_login(server: ShioajiServer) -> None:
+    """
+    With the settings on disk naming production the login rule takes the production login and the switch and the user
+    allow the order: the workflow alone refuses it.
+    """
+    rule, on_disk = harness_config().broker_access_rule(), replace(EVERYONE, server=server)
 
     def refusal(workflow: Workflow, link: BrokerLink) -> RejectReason | None:
-        return reason_of(rule.apply(order_of(), workflow, ExecutionProvider.SHIOAJI, link, ADMIN, FeatureVisibility.EVERYONE, []))
+        return reason_of(rule.apply(order_of(), workflow, ExecutionProvider.SHIOAJI, link, ADMIN, on_disk, []))
 
+    on_production = not server.simulation
     assert refusal(Workflow.RANKING_FOLLOW, PRODUCTION) == RejectReason.NOT_SIMULATION
-    assert refusal(Workflow.RANKING_FOLLOW, SIMULATION) == (RejectReason.BROKER_SERVER_MISMATCH if environment == "prod" else None)
-    assert refusal(Workflow.MANUAL_BUY, PRODUCTION) == (None if environment == "prod" else RejectReason.BROKER_SERVER_MISMATCH)
+    assert refusal(Workflow.RANKING_FOLLOW, SIMULATION) == (RejectReason.BROKER_SERVER_MISMATCH if on_production else None)
+    assert refusal(Workflow.MANUAL_BUY, PRODUCTION) == (None if on_production else RejectReason.BROKER_SERVER_MISMATCH)
 
 
 async def test_right_before_each_exchange_order_a_ranking_follow_is_refused_on_a_production_login() -> None:
-    """The broker asks what OrderExecution hands it right before it sends, as SinoPac's adapter does before each part."""
+    """
+    The broker asks what OrderExecution hands it right before it sends, as SinoPac's adapter does before each part. The
+    settings on disk name the server the login is on, so the workflow alone refuses.
+    """
     config = harness_config()
     users = FakeUserStore()
     users.add(ADMIN, None)
-    switch = FakeOrderingSwitch(config.features)
 
     async def sent(link: BrokerLink, workflow: Workflow) -> tuple[OrderStatus, str, int]:
         broker = RecordingExecutionProvider(link=link)
+        switch = FakeOrderingSwitch(config.features, ShioajiServer.SIMULATION if link.simulation else ShioajiServer.PRODUCTION)
         execution = OrderExecution(
             broker, FakeTradingJournal(), users, switch, ADMIN.user_id, FakeMarketClock(NOW), config, SilentLogger()
         )
@@ -131,23 +152,29 @@ async def test_right_before_each_exchange_order_a_ranking_follow_is_refused_on_a
 
 
 def test_a_ranking_follow_may_order_on_sinopac_only_for_an_active_administrator_shown_ordering_on_an_up_simulation_login() -> None:
-    rule = harness_config().follow_broker_rule()
+    rule = harness_config().follow_account_rule()
     sinopac = ExecutionProvider.SHIOAJI
-
-    follow = Workflow.RANKING_FOLLOW
-
-    assert rule.apply(follow, ExecutionProvider.MOCK, None, PLAIN, OFF) is None
-    assert rule.apply(follow, sinopac, SIMULATION, ADMIN, SHOWN) is None
-    assert reason_of(rule.apply(follow, sinopac, None, ADMIN, SHOWN)) == RejectReason.BROKER_LOGIN_DOWN
-    assert reason_of(rule.apply(follow, sinopac, MOCK, ADMIN, SHOWN)) == RejectReason.BROKER_LOGIN_DOWN
-    assert reason_of(rule.apply(follow, sinopac, PRODUCTION, ADMIN, SHOWN)) == RejectReason.NOT_SIMULATION
-    assert reason_of(rule.apply(follow, sinopac, SIMULATION, ADMIN, OFF)) == RejectReason.ORDERING_OFF
-    assert reason_of(rule.apply(follow, sinopac, SIMULATION, PLAIN, SHOWN)) == RejectReason.ORDERING_OFF
-    assert reason_of(rule.apply(follow, sinopac, SIMULATION, PLAIN, FeatureVisibility.EVERYONE)) == RejectReason.REAL_BROKER_REFUSED
-    assert reason_of(rule.apply(follow, sinopac, SIMULATION, None, FeatureVisibility.EVERYONE)) == RejectReason.REAL_BROKER_REFUSED
     deactivated = replace(ADMIN, status=UserStatus.DEACTIVATED)
-    assert reason_of(rule.apply(follow, sinopac, SIMULATION, deactivated, SHOWN)) == RejectReason.REAL_BROKER_REFUSED
-    assert reason_of(rule.apply(follow, sinopac, replace(SIMULATION, up=False), ADMIN, SHOWN)) == RejectReason.BROKER_LOGIN_DOWN
+
+    def account(link: BrokerLink | None, user: User, ordering: SiteOrdering) -> tuple[tuple[ExecutionProvider, ...], Any]:
+        links = {ExecutionProvider.MOCK: MOCK} | ({sinopac: link} if link is not None else {})
+        chosen = rule.apply(replace(user, ranking_follow_broker=sinopac), links, ordering)
+        return chosen.brokers, chosen.refusal
+
+    mock_only = (ExecutionProvider.MOCK,)
+    assert account(SIMULATION, ADMIN, SHOWN) == ((ExecutionProvider.MOCK, sinopac), None)
+    assert account(None, ADMIN, SHOWN) == (mock_only, FollowAccountRefusal.BROKER_UNAVAILABLE)
+    assert account(PRODUCTION, ADMIN, SHOWN) == (mock_only, FollowAccountRefusal.NOT_SIMULATION)
+    assert account(SIMULATION, ADMIN, OFF) == (mock_only, FollowAccountRefusal.ORDERING_OFF)
+    assert account(replace(SIMULATION, up=False), ADMIN, SHOWN) == (mock_only, FollowAccountRefusal.BROKER_UNAVAILABLE)
+    assert account(replace(SIMULATION, simulation=False), ADMIN, SHOWN) == (mock_only, FollowAccountRefusal.NOT_SIMULATION)
+    on_production = replace(SHOWN, server=ShioajiServer.PRODUCTION)
+    assert account(SIMULATION, ADMIN, on_production) == (mock_only, FollowAccountRefusal.BROKER_UNAVAILABLE), (
+        "a login off the server on disk"
+    )
+    for user, ordering in ((PLAIN, SHOWN), (PLAIN, EVERYONE), (deactivated, SHOWN)):
+        for link in (SIMULATION, PRODUCTION, None):
+            assert account(link, user, ordering)[1] == FollowAccountRefusal.ORDERING_OFF, "who may order comes first"
 
 
 def test_on_a_real_broker_each_buy_is_sized_inside_the_order_limit_and_on_the_mock_account_at_its_equal_weight() -> None:
@@ -241,17 +268,18 @@ def test_a_decision_is_finished_only_on_the_schedules_account_and_the_schedule_s
     decided, now = date(2026, 10, 13), at(date(2026, 10, 15), 10)
     on_mock = follow(decided, at(date(2026, 10, 14), 9, 5), scheduled=True)
     on_sinopac = replace(on_mock, execution_provider=ExecutionProvider.SHIOAJI)
-    both = (ExecutionProvider.MOCK, ExecutionProvider.SHIOAJI)
 
     def standing(broker: ExecutionProvider, *follows: Any) -> tuple[date | None, bool]:
-        schedule = RULE.apply(NINE_FIVE, sessions, follows, now, TradingPhase.CONTINUOUS, broker, both)
-        assert (schedule.broker, schedule.brokers) == (broker, both)
+        account = FollowAccount(broker=broker, brokers=tuple(ExecutionProvider), refusal=None, server=ShioajiServer.SIMULATION)
+        schedule = RULE.apply(NINE_FIVE, sessions, follows, now, TradingPhase.CONTINUOUS, account)
         return schedule.pending, schedule.due
 
     assert standing(ExecutionProvider.SHIOAJI, on_mock) == (decided, True)
     assert standing(ExecutionProvider.MOCK, on_sinopac) == (decided, True)
     assert standing(ExecutionProvider.SHIOAJI, on_mock, on_sinopac) == (None, False)
     assert standing(ExecutionProvider.MOCK, on_mock, on_sinopac) == (None, False)
+    refused = FollowAccount(broker=ExecutionProvider.SHIOAJI, brokers=(), refusal=FollowAccountRefusal.ORDERING_OFF, server=None)
+    assert RULE.apply(NINE_FIVE, sessions, [on_mock], now, TradingPhase.CONTINUOUS, refused).due is False
     tried_today_on_mock = follow(decided, at(date(2026, 10, 15), 9, 5), scheduled=True, left=1)
     assert standing(ExecutionProvider.SHIOAJI, tried_today_on_mock) == (decided, False)
     assert standing(ExecutionProvider.SHIOAJI, replace(tried_today_on_mock, start_time=at(date(2026, 10, 14), 9, 5))) == (
@@ -276,19 +304,45 @@ def on_production(harness: CliHarness) -> None:
     harness.real_broker.current_link = PRODUCTION
 
 
-async def test_a_follow_that_chose_sinopac_brings_the_simulation_account_to_the_ranking_inside_the_buy_limit() -> None:
+async def follow_on(client: httpx.AsyncClient, broker: str) -> httpx.Response:
+    return await write(client, "PUT", "/v1/rankings/follow/account", {"broker": broker})
+
+
+async def follow_ranking(client: httpx.AsyncClient, broker: str = "shioaji") -> httpx.Response:
+    return await write(client, "POST", "/v1/rankings/follow", {"broker": broker})
+
+
+async def account_of(client: httpx.AsyncClient) -> Any:
+    return (await client.get("/v1/rankings/follow/schedule")).json()["account"]
+
+
+async def on_sinopac(client: httpx.AsyncClient) -> None:
+    assert (await follow_on(client, "shioaji")).status_code == 204
+
+
+def saved_on_sinopac(harness: CliHarness, user: User) -> None:
+    """A user saved as following on SinoPac, as one the site let choose it once is after they lost it."""
+    harness.users.by_id[user.user_id] = replace(harness.users.by_id[user.user_id], ranking_follow_broker=ExecutionProvider.SHIOAJI)
+
+
+async def test_a_follow_on_sinopac_brings_the_simulation_account_to_the_ranking_inside_the_buy_limit() -> None:
     harness = site(sinopac=True)
     harness.real_broker.positions = [(await harness.broker.get_account()).buy("1101", 1000, price=30.0, total_cost=30_000.0)]
     limit = harness.runtime.config.trading.max_order_value
 
     async with app_of(harness) as app, client_at(app) as client:
         await signed_in(client)
-        started = await write(client, "POST", "/v1/rankings/follow?broker=shioaji", {})
+        await on_sinopac(client)
+        before = (await client.get("/v1/rankings/follow")).json()
+        started = await follow_ranking(client)
         run = await ended(client, started.json()["run_id"])
         orders = (await client.get(f"/v1/runs/{started.json()['run_id']}/orders")).json()
         page = (await client.get("/v1/rankings/follow")).json()
-        again = await write(client, "POST", "/v1/rankings/follow?broker=shioaji", {})
+        again = await follow_ranking(client)
 
+    assert before["account"] == {"broker": "shioaji", "brokers": ["mock", "shioaji"], "refusal": None, "server": "simulation"}
+    assert before["holdings"] == {"decided_on": "2026-10-13", "held": [], "lacking": ["2330", "2317"], "left": ["1101"]}
+    assert (before["refusal"], before["performance"]) == (None, None)
     assert (started.status_code, run["state"], run["summary"]["execution_provider"]) == (202, "finished", "shioaji")
     assert sent(harness.real_broker) == [
         ("1101", TradeAction.SELL, 1000),
@@ -298,38 +352,53 @@ async def test_a_follow_that_chose_sinopac_brings_the_simulation_account_to_the_
     assert [(order["stock_id"], order["status"]) for order in orders] == [("1101", "filled"), ("2330", "filled"), ("2317", "filled")]
     assert harness.broker.placed == [] and (await harness.broker.get_account()).positions == []
     assert [(row["run_id"], row["execution_provider"]) for row in page["follows"]] == [(started.json()["run_id"], "shioaji")]
-    assert page["holdings"]["lacking"] == ["2330", "2317"] and page["performance"] is None
+    assert (page["holdings"]["held"], page["holdings"]["lacking"], page["holdings"]["left"]) == (["2330", "2317"], [], [])
+    assert (page["refusal"], page["performance"]) == ("nothing_to_follow", None)
     assert (again.status_code, again.json()["code"]) == (409, "nothing_to_follow")
     assert [record.ranking_open for record in harness.journal.runs.values()] == [0]
 
 
-async def test_on_a_production_login_a_follow_that_chose_sinopac_is_refused_before_the_account_is_read() -> None:
+async def test_the_ranking_block_on_sinopac_reads_its_positions_once_and_nothing_else_of_the_account() -> None:
     harness = site(sinopac=True)
-    on_production(harness)
-
-    async def account_read() -> Account:
-        raise AssertionError("a ranking follow read a production account")
-
-    harness.real_broker.get_account = account_read  # type: ignore[method-assign]
+    harness.real_broker.positions = [(await harness.broker.get_account()).buy("2330", 1000, price=100.0, total_cost=100_000.0)]
 
     async with app_of(harness) as app, client_at(app) as client:
         await signed_in(client)
-        refused = await write(client, "POST", "/v1/rankings/follow?broker=shioaji", {})
-        offered = (await client.get("/v1/rankings/follow/schedule")).json()["brokers"]
-        scheduled = await write(client, "PUT", "/v1/rankings/follow/schedule", {"time": "09:05", "broker": "shioaji"})
-        on_mock = await write(client, "POST", "/v1/rankings/follow", {})
-        await ended(client, on_mock.json()["run_id"])
+        await on_sinopac(client)
+        page = (await client.get("/v1/rankings/follow")).json()
+
+    assert harness.real_broker.requests == ["open_positions"]
+    assert (page["holdings"]["held"], page["holdings"]["lacking"]) == (["2330"], ["2317"])
+    assert harness.real_broker.placed == [] and harness.broker.placed == [] and harness.journal.runs == {}
+
+
+async def test_on_a_production_login_a_follow_on_sinopac_is_refused_before_the_account_is_read_and_not_moved_to_the_mock_account() -> (
+    None
+):
+    harness = site(sinopac=True)
+
+    async with app_of(harness) as app, client_at(app) as client:
+        await signed_in(client)
+        await on_sinopac(client)
+        on_production(harness)
+        refused = await follow_ranking(client)
+        page = (await client.get("/v1/rankings/follow")).json()
+        account = await account_of(client)
+        timed = await write(client, "PUT", "/v1/rankings/follow/schedule", {"time": "09:05"})
 
     assert (refused.status_code, refused.json()["code"]) == (403, "not_simulation")
-    assert offered == ["mock"]
-    assert (scheduled.status_code, scheduled.json()["code"]) == (403, "follow_broker_not_offered")
-    assert harness.users.by_id[ADMINISTRATOR.user_id].ranking_follow_time is None
-    assert harness.real_broker.placed == [] and len(harness.broker.placed) == 2
+    assert (page["account"]["refusal"], page["refusal"]) == ("not_simulation", None)
+    assert page["holdings"] == {"decided_on": "2026-10-13", "held": [], "lacking": [], "left": []}
+    assert account == {"broker": "shioaji", "brokers": ["mock"], "refusal": "not_simulation", "server": "production"}
+    assert (timed.status_code, timed.json()["code"]) == (403, "follow_broker_not_offered")
+    assert harness.real_broker.requests == [], "SinoPac's account is not read"
+    assert harness.real_broker.placed == [] and harness.broker.placed == [] and harness.journal.runs == {}
 
 
 async def test_a_login_that_turns_out_to_be_production_during_a_run_gets_no_order_of_the_follow() -> None:
     harness = site(sinopac=True)
-    pipeline = harness.runtime.pipeline_for(harness.administrator, ExecutionProvider.SHIOAJI)
+    user = replace(harness.administrator, ranking_follow_broker=ExecutionProvider.SHIOAJI)
+    pipeline = harness.runtime.pipeline_for(user, ExecutionProvider.SHIOAJI)
     lookup = pipeline.stock_lookup.execute
 
     async def lookup_then_production(*arguments: Any) -> Any:
@@ -338,57 +407,67 @@ async def test_a_login_that_turns_out_to_be_production_during_a_run_gets_no_orde
 
     pipeline.stock_lookup.execute = lookup_then_production  # type: ignore[method-assign]
 
-    status = await pipeline.follow_ranking()
+    status = await pipeline.follow_ranking(user)
 
     assert [order.status.value for order in status.orders] == ["rejected", "rejected"]
     assert all(order.reason is not None and order.reason.startswith("NOT_SIMULATION") for order in status.orders)
-    assert harness.real_broker.placed == [] and status.stats.ranking_open == 2
+    assert harness.real_broker.placed == [] and harness.broker.placed == [] and status.stats.ranking_open == 2
 
 
 @pytest.mark.parametrize(
-    ("member", "features", "code"),
+    ("member", "features"),
     [
-        (True, {}, "real_broker_refused"),
-        (False, {"sinopac_ordering": FeatureVisibility.OFF}, "feature_hidden"),
-        (True, {"sinopac_ordering": FeatureVisibility.ADMINISTRATORS}, "feature_hidden"),
+        (True, {}),
+        (True, {"sinopac_ordering": FeatureVisibility.EVERYONE, "sinopac_account": FeatureVisibility.EVERYONE}),
+        (False, {"sinopac_ordering": FeatureVisibility.OFF}),
+        (False, {"sinopac_account": FeatureVisibility.OFF}),
     ],
 )
-async def test_only_an_administrator_the_site_lets_order_on_sinopac_follows_the_ranking_there(
-    member: bool, features: dict[str, FeatureVisibility], code: str
+async def test_a_user_the_site_does_not_let_order_on_sinopac_is_refused_there_and_never_followed_on_the_mock_account(
+    member: bool, features: dict[str, FeatureVisibility]
 ) -> None:
     harness = site(sinopac=True, features=features)
+    saved_on_sinopac(harness, MEMBER if member else ADMINISTRATOR)
 
     async with app_of(harness) as app, client_at(app) as client:
         await signed_in(client, member)
-        refused = await write(client, "POST", "/v1/rankings/follow?broker=shioaji", {})
-        schedule = (await client.get("/v1/rankings/follow/schedule")).json()
-        chosen = await write(client, "PUT", "/v1/rankings/follow/schedule", {"time": "09:05", "broker": "shioaji"})
+        refused = await follow_ranking(client)
+        page = await client.get("/v1/rankings/follow")
+        account = await account_of(client)
+        timed = await write(client, "PUT", "/v1/rankings/follow/schedule", {"time": "09:05"})
 
-    assert (refused.status_code, refused.json()["code"]) == (403, code)
-    assert schedule["brokers"] == ["mock"]
-    assert chosen.status_code == 403 and chosen.json()["code"] in ("feature_hidden", "follow_broker_not_offered")
-    assert harness.real_broker.placed == [] and harness.broker.placed == []
-    assert {user.ranking_follow_broker for user in harness.users.by_id.values()} == {ExecutionProvider.MOCK}
+    assert (refused.status_code, refused.json()["code"]) == (403, "ordering_off")
+    assert page.status_code == 200, "a hidden account is the block's refusal, not a refused page"
+    assert (page.json()["account"]["refusal"], page.json()["holdings"]["lacking"]) == ("ordering_off", [])
+    assert (account["broker"], account["brokers"], account["refusal"]) == ("shioaji", ["mock"], "ordering_off")
+    assert (timed.status_code, timed.json()["code"]) == (403, "follow_broker_not_offered")
+    assert harness.real_broker.placed == [] and harness.broker.placed == [] and harness.journal.runs == {}
 
 
-async def test_without_a_sinopac_login_the_site_offers_the_mock_account_alone() -> None:
+async def test_without_a_sinopac_login_the_site_offers_the_mock_account_alone_and_refuses_a_follow_saved_on_sinopac() -> None:
     harness = site()
+    saved_on_sinopac(harness, ADMINISTRATOR)
 
     async with app_of(harness) as app, client_at(app) as client:
         await signed_in(client)
-        refused = await write(client, "POST", "/v1/rankings/follow?broker=shioaji", {})
-        chosen = await write(client, "PUT", "/v1/rankings/follow/schedule", {"time": "09:05", "broker": "shioaji"})
+        refused = await follow_ranking(client)
+        page = (await client.get("/v1/rankings/follow")).json()
+        back = await follow_on(client, "mock")
+        on_mock = await follow_ranking(client, "mock")
+        await ended(client, on_mock.json()["run_id"])
 
     assert (refused.status_code, refused.json()["code"]) == (403, "broker_unavailable")
-    assert (chosen.status_code, chosen.json()["code"]) == (403, "follow_broker_not_offered")
+    assert page["account"] == {"broker": "shioaji", "brokers": ["mock"], "refusal": "broker_unavailable", "server": None}
+    assert back.status_code == 204
+    assert (on_mock.status_code, len(harness.broker.placed)) == (202, 2), "the mock account follows once the user chose it"
 
 
 # -------------------------------- The schedule -------------------------------- #
 
 
 async def on_sinopac_from(client: httpx.AsyncClient, at_time: str = "09:05") -> None:
-    chosen = await write(client, "PUT", "/v1/rankings/follow/schedule", {"time": at_time, "broker": "shioaji"})
-    assert chosen.status_code == 204
+    await on_sinopac(client)
+    assert (await write(client, "PUT", "/v1/rankings/follow/schedule", {"time": at_time})).status_code == 204
 
 
 async def test_a_schedule_on_sinopac_follows_into_the_simulation_account_and_a_follow_of_the_mock_account_does_not_finish_it() -> None:
@@ -396,16 +475,17 @@ async def test_a_schedule_on_sinopac_follows_into_the_simulation_account_and_a_f
 
     async with app_of(harness) as app, client_at(app) as client:
         await signed_in(client)
-        by_hand = await write(client, "POST", "/v1/rankings/follow", {})
+        by_hand = await follow_ranking(client, "mock")
         await ended(client, by_hand.json()["run_id"])
         await on_sinopac_from(client)
-        schedule = (await client.get("/v1/rankings/follow/schedule")).json()
+        settings = (await client.get("/v1/rankings/follow/schedule")).json()
+        account, schedule = settings["account"], settings["schedule"]
         [run_id] = await look(app)
         run = await finished(harness, run_id)
         again = await look(app)
         after = (await client.get("/v1/rankings/follow")).json()
 
-    assert (schedule["broker"], schedule["brokers"], schedule["pending"], schedule["due"]) == (
+    assert (account["broker"], account["brokers"], schedule["pending"], schedule["due"]) == (
         "shioaji",
         ["mock", "shioaji"],
         "2026-10-13",
@@ -428,9 +508,11 @@ async def test_a_schedule_on_the_mock_account_is_not_finished_by_a_follow_on_sin
 
     async with app_of(harness) as app, client_at(app) as client:
         await signed_in(client)
-        by_hand = await write(client, "POST", "/v1/rankings/follow?broker=shioaji", {})
+        await on_sinopac(client)
+        by_hand = await follow_ranking(client)
         await ended(client, by_hand.json()["run_id"])
-        assert (await write(client, "PUT", "/v1/rankings/follow/schedule", {"time": "09:05", "broker": "mock"})).status_code == 204
+        assert (await follow_on(client, "mock")).status_code == 204
+        assert (await write(client, "PUT", "/v1/rankings/follow/schedule", {"time": "09:05"})).status_code == 204
         [run_id] = await look(app)
         run = await finished(harness, run_id)
 
@@ -447,9 +529,10 @@ async def test_a_follow_on_sinopac_buys_with_the_cash_the_account_has_now_and_it
 
     async with app_of(harness) as app, client_at(app) as client:
         await signed_in(client)
-        started = await write(client, "POST", "/v1/rankings/follow?broker=shioaji", {})
+        await on_sinopac(client)
+        started = await follow_ranking(client)
         run = await ended(client, started.json()["run_id"])
-        again = await write(client, "POST", "/v1/rankings/follow?broker=shioaji", {})
+        again = await follow_ranking(client)
         second = await ended(client, again.json()["run_id"])
 
     waiting = [line for line in run["summary"]["execution_log"] if "Not followed now: 2317: a BUY of" in line]
@@ -460,16 +543,35 @@ async def test_a_follow_on_sinopac_buys_with_the_cash_the_account_has_now_and_it
     assert second["summary"]["errors"] == [] and harness.broker.placed == []
 
 
-async def test_a_save_of_the_schedule_names_its_account() -> None:
+async def test_the_follow_account_and_the_schedules_time_are_saved_apart() -> None:
     harness = site(sinopac=True)
+
+    async def saved() -> tuple[time | None, ExecutionProvider]:
+        user = harness.users.by_id[ADMINISTRATOR.user_id]
+        return user.ranking_follow_time, user.ranking_follow_broker
 
     async with app_of(harness) as app, client_at(app) as client:
         await signed_in(client)
-        await on_sinopac_from(client)
-        unnamed = await write(client, "PUT", "/v1/rankings/follow/schedule", {"time": "10:00"})
+        account_while_off = (await follow_on(client, "shioaji"), await saved())
+        timed = (await write(client, "PUT", "/v1/rankings/follow/schedule", {"time": "10:00"}), await saved())
+        moved = (await follow_on(client, "mock"), await saved())
+        off = (await write(client, "PUT", "/v1/rankings/follow/schedule", {"time": None}), await saved())
+        named = await write(client, "PUT", "/v1/rankings/follow/schedule", {"time": "09:05", "broker": "shioaji"})
+        stale = await write(client, "POST", "/v1/rankings/follow", {"broker": "shioaji"})
 
-    assert unnamed.status_code == 422
-    assert harness.users.by_id[ADMINISTRATOR.user_id].ranking_follow_broker == ExecutionProvider.SHIOAJI
+    assert [(answer.status_code, kept) for answer, kept in (account_while_off, timed, moved, off)] == [
+        (204, (None, ExecutionProvider.SHIOAJI)),
+        (204, (time(10, 0), ExecutionProvider.SHIOAJI)),
+        (204, (time(10, 0), ExecutionProvider.MOCK)),
+        (204, (None, ExecutionProvider.MOCK)),
+    ]
+    assert (named.status_code, await saved()) == (422, (None, ExecutionProvider.MOCK)), (
+        "an old page's schedule with an account saves nothing"
+    )
+    assert (stale.status_code, stale.json()["code"]) == (409, "follow_account_changed"), (
+        "the follow names the account the user confirmed"
+    )
+    assert harness.real_broker.placed == [] and harness.broker.placed == [] and harness.journal.runs == {}
 
 
 def ordering_off(harness: CliHarness) -> None:
@@ -490,12 +592,7 @@ def login_down(harness: CliHarness) -> None:
 
 @pytest.mark.parametrize(
     ("lose", "why"),
-    [
-        (ordering_off, "this site has ordering on shioaji off"),
-        (demoted, "only an active administrator orders on shioaji"),
-        (login_down, "the shioaji login is down"),
-        (on_production, "orders on shioaji's simulation server only"),
-    ],
+    [(ordering_off, "ordering_off"), (demoted, "ordering_off"), (login_down, "broker_unavailable"), (on_production, "not_simulation")],
 )
 async def test_a_user_who_lost_sinopac_is_followed_on_no_account_and_the_look_logs_why(lose: Any, why: str) -> None:
     harness = site(sinopac=True)
@@ -505,20 +602,19 @@ async def test_a_user_who_lost_sinopac_is_followed_on_no_account_and_the_look_lo
         await on_sinopac_from(client)
         lose(harness)
         started = [*await look(app), *await look(app)]
-        schedule = (await client.get("/v1/rankings/follow/schedule")).json()
+        settings = (await client.get("/v1/rankings/follow/schedule")).json()
 
     logged = [message for level, message in harness.logger.records if "does nothing now" in message]
     assert started == [] and harness.journal.runs == {}
     assert harness.real_broker.placed == [] and harness.broker.placed == []
     assert len(logged) == 1, "the timer looks every minute, and the reason is logged once a day"
     assert f"user {ADMINISTRATOR.user_id} on SinoPac" in logged[0] and why in logged[0]
-    assert (schedule["broker"], schedule["brokers"], schedule["broker_offered"]) == ("shioaji", ["mock"], False)
+    assert (settings["account"]["broker"], settings["account"]["brokers"]) == ("shioaji", ["mock"])
+    assert settings["account"]["refusal"] == why and settings["schedule"]["due"] is False
     assert harness.users.by_id[ADMINISTRATOR.user_id].ranking_follow_broker == ExecutionProvider.SHIOAJI
 
 
-async def test_a_user_who_moved_the_schedule_to_another_account_during_the_look_is_not_followed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_a_user_who_changed_their_follow_account_during_the_look_is_not_followed(monkeypatch: pytest.MonkeyPatch) -> None:
     harness = site(sinopac=True)
 
     async with app_of(harness) as app, client_at(app) as client:
@@ -538,17 +634,31 @@ async def test_a_user_who_moved_the_schedule_to_another_account_during_the_look_
     assert started == [] and harness.real_broker.placed == [] and harness.broker.placed == []
 
 
-async def test_turning_the_schedule_off_is_never_refused_and_a_time_keeps_the_account(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_schedule_is_not_moved_to_an_account_that_cannot_follow_and_can_still_be_turned_off_and_never_moves_it() -> None:
     harness = site(sinopac=True)
 
     async with app_of(harness) as app, client_at(app) as client:
         await signed_in(client)
         await on_sinopac_from(client, "09:30")
-        saved = harness.users.by_id[ADMINISTRATOR.user_id]
         on_production(harness)
-        later = await write(client, "PUT", "/v1/rankings/follow/schedule", {"time": "10:00", "broker": "shioaji"})
-        off = await write(client, "PUT", "/v1/rankings/follow/schedule", {"time": None, "broker": "shioaji"})
+        later = await write(client, "PUT", "/v1/rankings/follow/schedule", {"time": "10:00"})
+        kept = harness.users.by_id[ADMINISTRATOR.user_id]
+        off = await write(client, "PUT", "/v1/rankings/follow/schedule", {"time": None})
 
-    assert (saved.ranking_follow_time, saved.ranking_follow_broker) == (time(9, 30), ExecutionProvider.SHIOAJI)
     assert (later.status_code, later.json()["code"], off.status_code) == (403, "follow_broker_not_offered", 204)
+    assert (kept.ranking_follow_time, kept.ranking_follow_broker) == (time(9, 30), ExecutionProvider.SHIOAJI)
     assert harness.users.by_id[ADMINISTRATOR.user_id].ranking_follow_time is None
+    assert harness.users.by_id[ADMINISTRATOR.user_id].ranking_follow_broker == ExecutionProvider.SHIOAJI
+
+
+async def test_a_run_that_started_on_another_account_than_the_follow_account_reads_and_sends_nothing() -> None:
+    harness = site(sinopac=True)
+    user = harness.administrator
+    pipeline = harness.runtime.pipeline_for(user, ExecutionProvider.SHIOAJI)
+
+    with pytest.raises(FollowAccountChanged):
+        await pipeline.follow_ranking(user)
+
+    [run] = harness.journal.runs.values()
+    assert (run.execution_provider, run.failure is not None, run.ranking_open) == (ExecutionProvider.SHIOAJI, True, None)
+    assert harness.real_broker.requests == [] and harness.real_broker.placed == [] and harness.broker.placed == []

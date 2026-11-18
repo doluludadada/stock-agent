@@ -1,9 +1,8 @@
 """
 Each port that holds a user's data, through the adapters the production factory create_owned_ports builds, over a real
-PostgreSQL database and a real Chroma folder, for two owners. For every method of every such port, owner Bob
-calls it with what Alice saved and sees none of it, changes none of it, and Alice still reads her own (the control).
-The first test makes the case table complete: a port added to OwnedPorts, or a method added to one of its ports,
-without a case fails here, by name.
+PostgreSQL database, for two owners. For every method of every such port, owner Bob calls it with what Alice saved
+and sees none of it, changes none of it, and Alice still reads her own (the control). The first test makes the case
+table complete: a port added to OwnedPorts, or a method added to one of its ports, without a case fails here, by name.
 """
 
 import asyncio
@@ -13,7 +12,6 @@ from dataclasses import dataclass, fields, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-import chromadb
 import pytest
 import pytest_asyncio
 from sqlalchemy.exc import IntegrityError
@@ -47,7 +45,6 @@ from b_application.config.ai_config import PromptsConfig
 from b_application.config.app_config import AppConfig
 from c_infrastructure.ai_models.ai_adapter.daily_capped_ai_provider import AiAllowanceSpentError
 from c_infrastructure.database.db_connector import DatabaseConnector
-from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
 from d_presentation.dependencies import OwnedPorts, create_owned_ports
 
 AT = MARKET_OPEN
@@ -83,13 +80,7 @@ async def owners(database: DatabaseConnector, tmp_path: Path) -> AsyncIterator[O
     vendor = AiVendor(reply=CLASSIFIED)
     config = owners_config(tmp_path)
     owned_ports = create_owned_ports(
-        config,
-        database,
-        chromadb.PersistentClient(path=str(tmp_path / "chroma")),
-        {config.ai.active_model: vendor},
-        MovableClock(AT),
-        SilentLogger(),
-        asyncio.Lock(),
+        config, database, {config.ai.active_model: vendor}, MovableClock(AT), SilentLogger(), asyncio.Lock()
     )
 
     yield Owners(alice=owned_ports(user_named("alice")), bob=owned_ports(user_named("bob")), vendor=vendor, owned_ports=owned_ports)
@@ -232,6 +223,13 @@ async def signals_of(owners: Owners) -> None:
 
     assert await owners.bob.journal.signals_of(recorded.run_id) == []
     assert len(await owners.alice.journal.signals_of(recorded.run_id)) == 1
+
+
+async def decision_history(owners: Owners) -> None:
+    await alice_records_a_run(owners)
+
+    assert await owners.bob.journal.decision_history("2330") == []
+    assert [signal.reason for signal in await owners.alice.journal.decision_history("2330")] == ["Alice's reason"]
 
 
 async def orders_of(owners: Owners) -> None:
@@ -381,29 +379,11 @@ async def save_settings(owners: Owners) -> None:
     assert await owners.alice.technical_settings_repository.load(harness_settings()) == alices
 
 
-# ---------------------------------------------------- the decision memory -------------------------------------------------- #
-
-
-async def find_decision_history(owners: Owners) -> None:
-    await owners.alice.knowledge_repository.save_decision(analysed_stock(), decision())
-
-    assert await owners.bob.knowledge_repository.find_decision_history("2330") == ""
-    assert "Alice's reason" in await owners.alice.knowledge_repository.find_decision_history("2330")
-
-
-async def save_decision(owners: Owners) -> None:
-    await owners.alice.knowledge_repository.save_decision(analysed_stock(), decision())
-    await owners.bob.knowledge_repository.save_decision(analysed_stock(), replace(decision(), reason="Bob's reason"))
-
-    assert "Bob's reason" not in await owners.alice.knowledge_repository.find_decision_history("2330")
-    assert "Alice's reason" not in await owners.bob.knowledge_repository.find_decision_history("2330")
-
-
 # ------------------------------------------------------ the mock book ------------------------------------------------------ #
 
 
 async def alice_buys(owners: Owners) -> Order:
-    return await owners.alice.mock_broker.place_order(order_of(run_stats().run_id, decision()), no_refusal)
+    return await owners.alice.mock_broker.place_order(order_of(run_stats().run_id, decision()), no_refusal, asyncio.Event())
 
 
 async def connect(owners: Owners) -> None:
@@ -428,12 +408,19 @@ async def get_account(owners: Owners) -> None:
     assert [position.stock_id for position in (await owners.alice.mock_broker.get_account()).positions] == ["2330"]
 
 
+async def open_positions(owners: Owners) -> None:
+    await alice_buys(owners)
+
+    assert await owners.bob.mock_broker.open_positions() == []
+    assert [position.stock_id for position in await owners.alice.mock_broker.open_positions()] == ["2330"]
+
+
 async def place_order(owners: Owners) -> None:
     filled = await alice_buys(owners)
     sale = replace(order_of(run_stats().run_id, decision()), action=TradeAction.SELL)
 
     assert filled.filled_quantity == 1000
-    assert (await owners.bob.mock_broker.place_order(sale, no_refusal)).filled_quantity == 0
+    assert (await owners.bob.mock_broker.place_order(sale, no_refusal, asyncio.Event())).filled_quantity == 0
     assert [position.quantity for position in (await owners.alice.mock_broker.get_account()).positions] == [1000]
 
 
@@ -578,6 +565,7 @@ CASES: dict[str, dict[str, Case]] = {
         "recent_runs": recent_runs,
         "find_run": find_run,
         "signals_of": signals_of,
+        "decision_history": decision_history,
         "orders_of": orders_of,
         "follows_of": follows_of,
         "trades": trades,
@@ -587,11 +575,11 @@ CASES: dict[str, dict[str, Case]] = {
     },
     "watchlist_repository": {"get_active": get_active, "save": save, "remove": remove},
     "technical_settings_repository": {"load": load, "save": save_settings},
-    "knowledge_repository": {"find_decision_history": find_decision_history, "save_decision": save_decision},
     "mock_broker": {
         "connect": connect,
         "link": link,
         "get_account": get_account,
+        "open_positions": open_positions,
         "place_order": place_order,
         "fill": fill,
         "reset": reset,
@@ -613,9 +601,7 @@ def test_every_owned_port_method_has_an_isolation_case(tmp_path: Path) -> None:
     config = owners_config(tmp_path)
     db = DatabaseConnector(config=config, logger=SilentLogger())
     vendors = {config.ai.active_model: AiVendor()}
-    owned = create_owned_ports(config, db, chromadb.EphemeralClient(), vendors, MovableClock(AT), SilentLogger(), asyncio.Lock())(
-        user_named("alice")
-    )
+    owned = create_owned_ports(config, db, vendors, MovableClock(AT), SilentLogger(), asyncio.Lock())(user_named("alice"))
 
     assert {name: set(cases) for name, cases in CASES.items()} == {
         field.name: methods_of(getattr(owned, field.name)) for field in fields(OwnedPorts)
@@ -628,16 +614,3 @@ def test_every_owned_port_method_has_an_isolation_case(tmp_path: Path) -> None:
 )
 async def test_one_owner_never_reads_or_changes_another_owners_data(owners: Owners, case: Case) -> None:
     await case(owners)
-
-
-@pytest.mark.asyncio
-async def test_the_legacy_owner_reads_the_decisions_the_single_owner_versions_saved(owners: Owners, tmp_path: Path) -> None:
-    single_owner = chromadb.PersistentClient(path=str(tmp_path / "chroma")).get_or_create_collection("market_knowledge")
-    single_owner.upsert(
-        ids=["1"], documents=["Decision: BUY, the single owner's reason"], metadatas=[{"stock_id": "2330", "generated_at": "x"}]
-    )
-
-    assert "single owner's reason" in await owners.owned_ports(
-        user_named(LEGACY_OWNER_ID, Role.ADMINISTRATOR)
-    ).knowledge_repository.find_decision_history("2330")
-    assert await owners.alice.knowledge_repository.find_decision_history("2330") == ""

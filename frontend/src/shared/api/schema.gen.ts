@@ -17,9 +17,12 @@ export interface paths {
          *     the bank balance (the site's figure on the simulation server: `statement.simulation`), the settlements due, the
          *     positions with the broker's last prices and its own unrealized PnL, today's deals and the sales of the last
          *     holdings.realized_days days with the PnL the broker says each realized.
-         *     `simulation` says which server this environment logs in to, `login_up` whether the login is up (`statement` is None
-         *     while it is down), and `ordering` whether the site lets the user order there (features.sinopac_ordering, off by
-         *     default). It only reads: it sends no order, whatever `ordering` says, and it answers no account number.
+         *     `server` says which server the site logs in to and `switch_refusal` why the switch to the other server would be
+         *     refused (names of unset variables only), `login_up` whether the login is up (`statement` is None while it is
+         *     not), `login_down` whether the site logs in again, `ordering` whether the site lets the user order there
+         *     (features.sinopac_ordering, off by default), and `simulation_initial_cash` the simulation account's starting cash.
+         *     The page switches them through the settings save, PUT /v1/admin/settings. It only reads: it sends no order, whatever
+         *     `ordering` says, and it answers no account number and no credential's value.
          */
         get: operations["get_brokerage_account_v1_account_brokerage_get"];
         put?: never;
@@ -1000,30 +1003,50 @@ export interface paths {
         };
         /**
          * Get Ranking Follow
-         * @description The ranking in the user's mock account: which of the latest decision's stocks it holds and lacks, which of its
-         *     holdings left the ranking (every holding while the active formula holds cash), whether a follow may start now, its
-         *     return since it first followed the ranking against ranking.benchmark_id over the same sessions, its follows so
-         *     far, on that account and on SinoPac, with the account and the formula each used and whether the schedule or the
-         *     user started it, and the user's schedule. It reads no SinoPac account, records nothing and never orders.
+         * @description The ranking in the user's follow account (`account`): which of the latest decision's stocks it holds and lacks,
+         *     which of its holdings left the ranking (every holding while the active formula holds cash), whether a follow may
+         *     start now and why not, the mock account's return since it first followed the ranking against ranking.benchmark_id
+         *     over the same sessions, the user's follows so far, on that account and on SinoPac, with the account and the
+         *     formula each used and whether the schedule or the user started it, and the user's schedule. It reads the account,
+         *     SinoPac's positions in one request, only while the site offers it to the user; it records nothing and never orders.
          */
         get: operations["get_ranking_follow_v1_rankings_follow_get"];
         put?: never;
         /**
          * Follow Ranking
-         * @description Brings the account the `broker` query names, the user's mock account by default, to the ranking's latest decision
-         *     by the active formula, as a run of its own, which
-         *     keeps that formula: it sells each holding the ranking left and buys each ranked stock the account lacks, at an
-         *     equal weight of the account in whole lots of analysis.lot_size, priced as this site prices an order now, through
-         *     the same order gates and journal as every order. While the formula holds cash it sells every holding and buys
-         *     nothing. A second follow of a decision the account already holds answers nothing_to_follow. With `broker=shioaji`
-         *     it follows into SinoPac's simulation account, for an administrator the site lets order on SinoPac while its login
-         *     is up, each BUY sized inside trading.max_order_value and refused past trading.max_daily_buy_value. SinoPac pays a
-         *     sale at settlement, so there a follow buys only what the cash the account has now pays for whole, best first, and
-         *     the run's log names each BUY that waits for a later follow. A login that is not on SinoPac's simulation server
-         *     answers not_simulation before the account is read, and the order gates refuse each order of a ranking follow on
-         *     such a login again. A ranking follow never orders with real money.
+         * @description Brings the user's follow account, the one `broker` names as the user confirmed it, to the ranking's latest
+         *     decision by the active formula, as a run of its own on that account and no other, which keeps that formula: it
+         *     sells each holding the ranking left and buys each ranked stock the account lacks, at an equal weight of the account
+         *     in whole lots of analysis.lot_size, priced as this site prices an order now, through the same order gates and
+         *     journal as every order. While the formula holds cash it sells every holding and buys nothing. A second follow of a
+         *     decision the account already holds answers nothing_to_follow. On SinoPac it follows into the simulation account,
+         *     each BUY sized inside trading.max_order_value and refused past trading.max_daily_buy_value. SinoPac pays a sale at
+         *     settlement, so there a follow buys only what the cash the account has now pays for whole, best first, and the
+         *     run's log names each BUY that waits for a later follow. The order gates refuse each order of a ranking follow on a
+         *     login that is not on SinoPac's simulation server again. A ranking follow never orders with real money.
          */
         post: operations["follow_ranking_v1_rankings_follow_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/rankings/follow/account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Choose Follow Account
+         * @description My settings: the user's follow account, one of those the site offers them now. The schedule's time stays as it
+         *     is, and follows on the new account.
+         */
+        put: operations["choose_follow_account_v1_rankings_follow_account_put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1039,25 +1062,22 @@ export interface paths {
         };
         /**
          * Get Follow Schedule
-         * @description My settings: the user's schedule of the ranking follow as it stands, with the times the site offers. It answers on
-         *     a site that can make no ranking yet, where nothing is pending, and for a user the site hides the mock account
-         *     from, who may still turn a schedule off. It ranks nothing, records nothing and never orders.
+         * @description My settings: the user's follow account, the accounts the site offers them as one now and why it refuses theirs,
+         *     and their schedule of the ranking follow as it stands, with the times the site offers. It answers on a site that
+         *     can make no ranking yet, where nothing is pending. It reads no account, records nothing and never orders.
          */
         get: operations["get_follow_schedule_v1_rankings_follow_schedule_get"];
         /**
          * Schedule Ranking Follow
-         * @description My settings: schedules the user's ranking follow, or turns the schedule off with null. With a time, the site follows
-         *     each new decision of the ranking into the account `broker` names by itself on the first session after it, from
-         *     that time in Taipei and while this site places orders, as a run like the button's (`POST /v1/rankings/follow`): the
-         *     same sizing, order gates and journal, recorded as started by the schedule. `shioaji` is SinoPac's simulation
-         *     account, which holds no real money, offered only to an administrator the site lets order on SinoPac while its login
-         *     is up on the simulation server; a user who loses any of that is followed on no account, never on the mock account
-         *     instead, until they have it again. A decision counts as finished on the account its follow ran on. It follows a
-         *     decision until a follow left the account nothing to trade for it under the active formula, and never one the user
-         *     finished by hand; a day whose window it missed, or whose follow ordered nothing or only a part, is tried again on
-         *     the next session, once a day, until the next decision supersedes it. A user the site hides the ranking or the
-         *     account's ordering from, or a deactivated one, is followed for by nobody. Setting a time needs ordering on the
-         *     account shown; turning the schedule off does not. `GET /v1/rankings/follow/schedule` answers the schedule as it stands.
+         * @description My settings: schedules the user's ranking follow on their follow account, or turns the schedule off with null; the
+         *     account stays as it is. With a time, the site follows each new decision of the ranking into that account by itself
+         *     on the first session after it, from that time in Taipei and while this site places orders, as a run like the
+         *     button's (`POST /v1/rankings/follow`): the same account, sizing, order gates and journal, recorded as started by
+         *     the schedule. A decision counts as finished on the account its follow ran on. It follows a decision until a follow
+         *     left the account nothing to trade for it under the active formula, and never one the user finished by hand; a day
+         *     whose window it missed, or whose follow ordered nothing or only a part, is tried again on the next session, once a
+         *     day, until the next decision supersedes it. Setting a time needs an account the site offers; turning the schedule
+         *     off does not. While the site does not offer the account, the schedule follows on no account, and on no other.
          */
         put: operations["schedule_ranking_follow_v1_rankings_follow_schedule_put"];
         post?: never;
@@ -2058,21 +2078,25 @@ export interface components {
             max_daily_buy_value: number | null;
             /** Max Order Value */
             max_order_value: number | null;
-            /** Simulation */
-            simulation: boolean | null;
+            server: components["schemas"]["ShioajiServer"] | null;
         };
         /**
          * BrokerageAccountResponse
-         * @description The SinoPac account page: which server the site's login is on, whether it is up, and the account while it is.
+         * @description The SinoPac account page: which server the site's login is on, whether it is up, and the account while it is, with
+         *     what the page's administrator panel switches through the settings save (PUT /v1/admin/settings).
          */
         BrokerageAccountResponse: {
+            /** Login Down */
+            login_down: boolean;
             /** Login Up */
             login_up: boolean;
             /** Ordering */
             ordering: boolean;
-            /** Simulation */
-            simulation: boolean;
+            server: components["schemas"]["ShioajiServer"];
+            /** Simulation Initial Cash */
+            simulation_initial_cash: number | null;
             statement: components["schemas"]["BrokerageStatementResponse"] | null;
+            switch_refusal: components["schemas"]["ServerSwitchRefusal"] | null;
         };
         /**
          * BrokerageStatementResponse
@@ -2311,7 +2335,7 @@ export interface components {
          *     refused file, a user who is not an administrator and an installation on a real broker.
          * @enum {string}
          */
-        ErrorCode: "sign_in_required" | "sign_in_refused" | "sign_in_throttled" | "registration_closed" | "setup_code_refused" | "already_set_up" | "user_exists" | "last_administrator" | "unknown_host" | "app_request_required" | "administrators_only" | "feature_hidden" | "real_broker_refused" | "broker_unavailable" | "realtime_quotes_unavailable" | "mops_unavailable" | "password_required" | "password_refused" | "google_confirmation_required" | "settings_file_refused" | "settings_file_missing" | "settings_conflict" | "settings_edit_refused" | "settings_refused" | "technical_settings_conflict" | "ai_model_not_offered" | "follow_time_not_offered" | "run_in_progress" | "too_many_runs" | "nothing_to_follow" | "outside_follow_window" | "not_simulation" | "follow_broker_not_offered" | "backtest_period_unavailable" | "ranking_unavailable" | "too_many_backtests" | "ai_allowance_spent" | "brief_limit_reached" | "listing_unavailable" | "not_found" | "invalid_request" | "body_too_large" | "request_refused";
+        ErrorCode: "sign_in_required" | "sign_in_refused" | "sign_in_throttled" | "registration_closed" | "setup_code_refused" | "already_set_up" | "user_exists" | "last_administrator" | "unknown_host" | "app_request_required" | "administrators_only" | "feature_hidden" | "real_broker_refused" | "broker_unavailable" | "realtime_quotes_unavailable" | "mops_unavailable" | "password_required" | "password_refused" | "google_confirmation_required" | "settings_file_refused" | "settings_file_missing" | "settings_conflict" | "settings_edit_refused" | "settings_refused" | "technical_settings_conflict" | "ai_model_not_offered" | "follow_time_not_offered" | "run_in_progress" | "too_many_runs" | "nothing_to_follow" | "outside_follow_window" | "not_simulation" | "ordering_off" | "follow_account_changed" | "broker_server_changed" | "follow_broker_not_offered" | "backtest_period_unavailable" | "ranking_unavailable" | "too_many_backtests" | "ai_allowance_spent" | "brief_limit_reached" | "listing_unavailable" | "broker_not_answering" | "not_found" | "invalid_request" | "body_too_large" | "request_refused";
         /**
          * ErrorResponse
          * @description Every refusal: `detail` in words for a person, `code` for the client to switch on.
@@ -2375,6 +2399,41 @@ export interface components {
             year: number;
         };
         /**
+         * FollowAccount
+         * @description The user's follow account (User.ranking_follow_broker), whether a ranking follow may order there now, and the
+         *     accounts the site offers them as one.
+         */
+        FollowAccount: {
+            /** @description The user's follow account. */
+            broker: components["schemas"]["ExecutionProvider"];
+            /**
+             * Brokers
+             * @description The accounts the site offers the user as their follow account now, the mock account first.
+             */
+            brokers: components["schemas"]["ExecutionProvider"][];
+            /** @description Why the site does not offer the user `broker` now, so no follow orders there; None while it is one of `brokers`. */
+            refusal: components["schemas"]["FollowAccountRefusal"] | null;
+            /** @description The server of the site's login on the real broker, as the login reports itself. None where the user's Pipeline holds none. */
+            server: components["schemas"]["ShioajiServer"] | null;
+        };
+        /**
+         * FollowAccountRefusal
+         * @description Why the site does not let a user's ranking follow order on an account now (FollowAccountRule), so it does not offer
+         *     the account as their follow account. The account is not read. The Web API answers each as its code, in the
+         *     ranking's follow block and as the refusal of a follow.
+         * @enum {string}
+         */
+        FollowAccountRefusal: "ordering_off" | "not_simulation" | "broker_unavailable";
+        /** FollowAccountRequest */
+        FollowAccountRequest: {
+            broker: components["schemas"]["ExecutionProvider"];
+            /**
+             * Confirm
+             * @constant
+             */
+            confirm: true;
+        };
+        /**
          * FollowItem
          * @description One follow of a decision: the follow's decision, priced when it was followed, and its order.
          */
@@ -2382,13 +2441,22 @@ export interface components {
             decision: components["schemas"]["SignalResponse"];
             order: components["schemas"]["Order"];
         };
+        /** FollowRankingRequest */
+        FollowRankingRequest: {
+            broker: components["schemas"]["ExecutionProvider"];
+            /**
+             * Confirm
+             * @constant
+             */
+            confirm: true;
+        };
         /**
          * FollowRefusal
-         * @description Why a run's decisions cannot be followed into the user's mock account now, or the monthly ranking into the account
-         *     its follow chose. The Web API answers each as its code.
+         * @description Why a run's decisions cannot be followed into the user's mock account now, or the monthly ranking into the user's
+         *     follow account. The Web API answers each as its code.
          * @enum {string}
          */
-        FollowRefusal: "nothing_to_follow" | "outside_follow_window" | "not_simulation";
+        FollowRefusal: "nothing_to_follow" | "outside_follow_window";
         /**
          * FollowResponse
          * @description What a follow of the run may take now, and what it took so far.
@@ -2431,7 +2499,6 @@ export interface components {
         };
         /** FollowScheduleRequest */
         FollowScheduleRequest: {
-            broker: components["schemas"]["ExecutionProvider"];
             /**
              * Confirm
              * @constant
@@ -2445,11 +2512,6 @@ export interface components {
          * @description The user's schedule of the ranking follow (FollowSchedule), its last unfinished follow without the record's own texts.
          */
         FollowScheduleResponse: {
-            broker: components["schemas"]["ExecutionProvider"];
-            /** Broker Offered */
-            broker_offered: boolean;
-            /** Brokers */
-            brokers: components["schemas"]["ExecutionProvider"][];
             /** Due */
             due: boolean;
             /** Pending */
@@ -2459,6 +2521,14 @@ export interface components {
             /** Times */
             times: string[];
             unfinished: components["schemas"]["UnfinishedFollow"] | null;
+        };
+        /**
+         * FollowSettingsResponse
+         * @description My settings' ranking follow: the user's follow account and their schedule of the follow there.
+         */
+        FollowSettingsResponse: {
+            account: components["schemas"]["FollowAccount"];
+            schedule: components["schemas"]["FollowScheduleResponse"];
         };
         /**
          * FormulaEvidence
@@ -3356,9 +3426,10 @@ export interface components {
         RankingFactor: components["schemas"]["RevenueAcceleration"] | components["schemas"]["RevenueYoy"] | components["schemas"]["NearnessToHigh"] | components["schemas"]["PriceMomentum"];
         /**
          * RankingFollowResponse
-         * @description The user's mock account against the ranking's latest decision, and what following the ranking did so far.
+         * @description The user's follow account against the ranking's latest decision, and what following the ranking did so far.
          */
         RankingFollowResponse: {
+            account: components["schemas"]["FollowAccount"];
             /** Follows */
             follows: components["schemas"]["RankingFollowRun"][];
             holdings: components["schemas"]["RankingHoldings"];
@@ -3690,6 +3761,25 @@ export interface components {
         };
         Score_int_: number;
         /**
+         * ServerSwitchRefusal
+         * @description Why the site's SinoPac login may not be on `server`, with the variables its login reads that are not set, by name only.
+         */
+        ServerSwitchRefusal: {
+            /**
+             * Missing
+             * @default []
+             */
+            missing: components["schemas"]["ShioajiCredential"][];
+            reason: components["schemas"]["ServerSwitchRefusalReason"];
+            server: components["schemas"]["ShioajiServer"];
+        };
+        /**
+         * ServerSwitchRefusalReason
+         * @description Why the site's SinoPac login may not be on a server (ServerSwitchRule).
+         * @enum {string}
+         */
+        ServerSwitchRefusalReason: "environment" | "registration_open" | "ordering_on" | "credentials_missing";
+        /**
          * SettingChange
          * @description One setting the settings form changes: the path of its field, and its new value as JSON.
          */
@@ -3826,6 +3916,21 @@ export interface components {
             setup_code: string;
             username: components["schemas"]["Username"];
         };
+        /**
+         * ShioajiCredential
+         * @description An environment variable a Shioaji login reads, from the process environment or .env, never from a settings file.
+         *     ShioajiServer.credentials says which ones each server's login reads; no server reads another's.
+         * @enum {string}
+         */
+        ShioajiCredential: "SHIOAJI_API_KEY" | "SHIOAJI_SECRET_KEY" | "SHIOAJI_CA_PATH" | "SHIOAJI_CA_PASSWORD" | "SHIOAJI_PERSON_ID" | "SHIOAJI_API_KEY_TEST" | "SHIOAJI_SECRET_KEY_TEST";
+        /**
+         * ShioajiServer
+         * @description The SinoPac server the site's Shioaji login is made on: shioaji.server, which an administrator switches from the
+         *     SinoPac page without a restart. Its properties are the one table of what each server reads and whether it is real
+         *     money; the trading setup check, the broker login and the order gates read them, and nothing else decides by server.
+         * @enum {string}
+         */
+        ShioajiServer: "simulation" | "production";
         /** SignInRequest */
         SignInRequest: {
             /** Identifier */
@@ -4545,6 +4650,15 @@ export interface operations {
                     "application/json": components["schemas"]["BrokerageAccountResponse"];
                 };
             };
+            /** @description broker_not_answering: SinoPac did not answer a read of the account in time, or answered an error. Ask again. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     get_brokers_v1_account_brokers_get: {
@@ -4605,6 +4719,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description broker_not_answering: SinoPac did not answer a read of the account in time, or answered an error. Ask again. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -4689,6 +4812,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description broker_not_answering: SinoPac did not answer a read of the account in time, or answered an error. Ask again. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -6051,16 +6183,14 @@ export interface operations {
     };
     follow_ranking_v1_rankings_follow_post: {
         parameters: {
-            query?: {
-                broker?: components["schemas"]["ExecutionProvider"];
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["Confirmed"];
+                "application/json": components["schemas"]["FollowRankingRequest"];
             };
         };
         responses: {
@@ -6073,7 +6203,7 @@ export interface operations {
                     "application/json": components["schemas"]["RunAccepted"];
                 };
             };
-            /** @description feature_hidden: the site does not show the user the ranking and ordering on the account the `broker` query names. realtime_quotes_unavailable: the site prices orders on realtime quotes and has no Shioaji login now. real_broker_refused: `broker=shioaji` by a user who is no administrator. broker_unavailable: the site has no SinoPac login up. not_simulation: the site's SinoPac login is not on SinoPac's simulation server, the only one a ranking follow orders on. */
+            /** @description ordering_off, not_simulation, broker_unavailable: the user's follow account refuses a ranking follow now (FollowAccountRefusal, `account.refusal` of `GET /v1/rankings/follow`). realtime_quotes_unavailable: the site prices orders on realtime quotes and has no Shioaji login now. None of these follows on another account. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -6082,7 +6212,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description nothing_to_follow: the account holds the ranking already, or the ranking ranks no stock. outside_follow_window: the site places no order in the market's phase now. run_in_progress: another run of this user is still running. */
+            /** @description follow_account_changed: `broker` is not the user's follow account as saved now. nothing_to_follow: the account holds the ranking already, or the ranking ranks no stock. outside_follow_window: the site places no order in the market's phase now. run_in_progress: another run of this user is still running. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6111,6 +6241,46 @@ export interface operations {
             };
         };
     };
+    choose_follow_account_v1_rankings_follow_account_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FollowAccountRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description follow_broker_not_offered: the site does not offer the user that account as their follow account now, and a new account or a schedule that is on needs one it offers; nothing saved. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_follow_schedule_v1_rankings_follow_schedule_get: {
         parameters: {
             query?: never;
@@ -6126,7 +6296,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FollowScheduleResponse"];
+                    "application/json": components["schemas"]["FollowSettingsResponse"];
                 };
             };
         };
@@ -6151,7 +6321,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description feature_hidden: a time was given and the site does not show the user ordering on the account; nothing saved. follow_broker_not_offered: a time was given and the site does not let the user's ranking follow order on that account now; nothing saved. */
+            /** @description follow_broker_not_offered: the site does not offer the user that account as their follow account now, and a new account or a schedule that is on needs one it offers; nothing saved. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -6277,6 +6447,7 @@ export interface operations {
         parameters: {
             query?: {
                 broker?: components["schemas"]["ExecutionProvider"];
+                server?: components["schemas"]["ShioajiServer"] | null;
             };
             header?: never;
             path?: never;
@@ -6306,7 +6477,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Another run of this user is still running. */
+            /** @description broker_server_changed: a real `broker` whose login is on another server now than the `server` the query names, the one the run's confirmation showed (GET /v1/account/brokers). run_in_progress: another run of this user is still running. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6390,6 +6561,7 @@ export interface operations {
         parameters: {
             query?: {
                 broker?: components["schemas"]["ExecutionProvider"];
+                server?: components["schemas"]["ShioajiServer"] | null;
             };
             header?: never;
             path?: never;
@@ -6419,7 +6591,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Another run of this user is still running. */
+            /** @description broker_server_changed: a real `broker` whose login is on another server now than the `server` the query names, the one the run's confirmation showed (GET /v1/account/brokers). run_in_progress: another run of this user is still running. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6645,6 +6817,7 @@ export interface operations {
         parameters: {
             query?: {
                 broker?: components["schemas"]["ExecutionProvider"];
+                server?: components["schemas"]["ShioajiServer"] | null;
             };
             header?: never;
             path: {
@@ -6685,7 +6858,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Another run of this user is still running. */
+            /** @description broker_server_changed: a real `broker` whose login is on another server now than the `server` the query names, the one the run's confirmation showed (GET /v1/account/brokers). run_in_progress: another run of this user is still running. */
             409: {
                 headers: {
                     [name: string]: unknown;

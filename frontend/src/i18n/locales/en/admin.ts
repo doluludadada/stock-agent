@@ -20,6 +20,7 @@ const admin = {
     increase: 'Increase {{label}}',
     changed: 'Changed',
     restartOnly: 'Changes only when the app restarts.',
+    managedAt: { shioaji: { server: 'Switch it on the SinoPac account page' } },
     lines: 'One item per line.',
     json: 'JSON',
     section: {
@@ -250,9 +251,11 @@ const admin = {
         max_fill_quantity: 'Most shares filled per order',
       },
       shioaji: {
+        server: 'SinoPac server',
         poll_interval_seconds: 'Order status check interval (seconds)',
         max_polls: 'Status checks before a cancel',
-        simulation_initial_cash: 'Starting cash of the SinoPac simulation account',
+        status_timeout_seconds: 'Wait for the day’s orders to refresh (seconds)',
+        simulation_initial_cash: 'Starting cash of the SinoPac account on Simulation',
       },
       watchlist: {
         automatic_expiry_sessions: 'Sessions an automatic entry stays',
@@ -316,7 +319,7 @@ const admin = {
       },
     },
     help: {
-      environment: 'Which machine the app runs on. dev is a developer’s machine on the mock broker, test is staging with Shioaji in simulation, and prod is the live service on PostgreSQL, the only environment for live orders.',
+      environment: 'Which machine the app runs on. dev is a developer’s machine, on SinoPac’s Simulation only. test is staging and the owner’s server, and prod the live service, which reads the accounts key from ACCOUNTS_KEY only. Which SinoPac server the site trades on is switched on the SinoPac account page.',
       audience: 'Whom the site serves. personal is the owner’s machine with every data source and broker. public is a public website on the TWSE and TPEX open data only, with no realtime quote, on the mock broker.',
       features: {
         market_overview: 'The home page: the index trend, the most traded stocks and the session’s breadth. Hidden, the home address leads to the first page the viewer still sees.',
@@ -333,7 +336,7 @@ const admin = {
         strategy_backtest: 'The page that replays the strategy in use over a past period. Hidden, the page leaves the navigation.',
         mock_account: 'Each user’s paper account: its page, its reset in My settings, and following a run into it. Hidden, all three go.',
         sinopac_account: 'The SinoPac account page, which only reads the account as the broker reports it: the balance, the holdings, what is due and the deals. It also lets My holdings count the account’s holdings. Hidden, the page goes and no holding of the account is read. It never orders.',
-        sinopac_ordering: 'Whether the site may place an order on SinoPac: SinoPac as a choice for a run’s orders or a BUY. It is off unless you turn it on, and while it is off no order can reach SinoPac. It does not show or hide the account page. The server’s other rules for a real broker apply either way.',
+        sinopac_ordering: 'Whether the site may place an order on the SinoPac account: a choice for a run’s orders, a BUY or the ranking follow. It is off unless you turn it on, and while it is off no order can reach SinoPac. It does not show or hide the account page. The server’s other rules for a real broker apply either way.',
         holdings: 'The My holdings page: the user’s holdings read as one portfolio, with each stock’s ranking score and revenue, and the entries typed by hand. Hidden, the page leaves the navigation and nothing is read.',
         world:
           'The World page and the home page’s World block: the world indicators, the day’s AI brief of the world and the world news. Off, the site also reads no world feed and writes no world brief.',
@@ -500,9 +503,11 @@ const admin = {
         max_fill_quantity: 'Most shares the mock broker fills per order at the limit price. Not set fills any quantity.',
       },
       shioaji: {
+        server: 'Simulation, no real money, or Production, real money.',
         poll_interval_seconds: 'The wait between two reads of an order’s status at the broker.',
         max_polls: 'Reads of an order’s status before a working order is cancelled, and again after the cancel request.',
-        simulation_initial_cash: 'The cash SinoPac’s simulation account started with. That server reports no cash, so the SinoPac account page shows the site’s figure from this.',
+        status_timeout_seconds: 'How long SinoPac may take to refresh every order of the account today, once for each read of its cash or today’s fills: the SinoPac account page, a run’s account and a ranking follow. A day of many orders takes longer.',
+        simulation_initial_cash: 'All the money put into the SinoPac account on Simulation. That server reports no cash, so the SinoPac account page shows the site’s figure from this. To add money, raise it.',
       },
       watchlist: {
         automatic_expiry_sessions: 'A technical or Buzz entry stays through the close of this many trading sessions after its workflow last selected it: 1 keeps Friday evening’s Full Cycle entries through Monday’s session.',
@@ -514,7 +519,7 @@ const admin = {
       accounts: {
         daily_ai_calls: 'Paid AI calls a user (not an administrator) may make per Taiwan calendar day: stock analyses, valuation explanations and Buzz sentiment, every workflow counted. Past it the call is refused like a vendor’s limit.',
         daily_ai_calls_total: 'Paid AI calls of every user together per Taiwan calendar day, so the limit above does not multiply with registrations. An administrator’s calls count toward it and are never refused by it.',
-        registration_open: 'Anyone may register as a user while an administrator exists. Never on an installation with a real broker: prod refuses to start with it on.',
+        registration_open: 'Anyone may register as a user while an administrator exists. Never while SinoPac is on Production, the real account: the site refuses it on there.',
         sign_in_failures_per_name: 'Failed sign-ins of one sign-in name from one client address within the window before the next is refused.',
         sign_in_failures_per_client: 'Failed sign-ins of any name from one client address within the window before the next is refused.',
         sign_in_window_minutes: 'The window failed sign-ins and wrong settings passwords are counted in.',
@@ -580,6 +585,8 @@ const admin = {
       dev: 'Development (dev)',
       test: 'Staging (test)',
       prod: 'Production (prod)',
+      simulation: 'Simulation',
+      production: 'Production',
       personal: 'Personal use (personal)',
       public: 'Public website (public)',
       openai: 'OpenAI',

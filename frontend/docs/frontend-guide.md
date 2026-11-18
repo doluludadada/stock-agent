@@ -38,8 +38,9 @@ src/
     watchlist/         server watchlist and its toggle button
     account/           mock account: the total P&L since it opened, positions, equity curve, the trades with the run
                        each came from, and the mock account panel of My settings (starting capital and the reset).
-                       The SinoPac account on its own page, read only: which server, whether the site may order
-                       there, and the account as the broker reports it
+                       The SinoPac account on its own page: its server, its login and whether the site may order
+                       there, switched there by an administrator through the settings save, then the account as the
+                       broker reports it, read only
     holdings/          My holdings: the SinoPac account's holdings, the mock account's and the ones entered by hand as
                        one portfolio, each stock with its ranking score and revenue; the entry form
     admin-settings/    every setting of appsetting.yaml and the AI prompts of instructions.yaml as one form of choices,
@@ -61,8 +62,8 @@ src/
 
 - Dependencies point `app -> features -> shared`. `i18n` and `styles` are foundations.
 - A feature never imports another feature. `app/router/routes/*` passes render slots between them; for example the
-  run detail page receives `renderWatch` from the watchlist feature, My settings receives `mockAccount` from the
-  account feature, and My holdings receives the `watched` stocks from the watchlist feature. The home page
+  run detail page receives `renderWatch` from the watchlist feature, My settings receives `accountPanels` from the
+  account and ranking features, and My holdings receives the `watched` stocks from the watchlist feature. The home page
   (`app/router/routes/home.tsx`) is composed the same way: each feature exports its own card (`WorldToday`, `MarketToday`,
   `RankingToday`, `HoldingsToday`, `WatchlistToday`), and the route lays them out. URL builders are shared config
   (`shared/config/paths.ts`): features link with them, and routes pass no hrefs.
@@ -119,9 +120,9 @@ the contract by `catalog.test.ts`.
 | The open data's providers, datasets and license | `attribution/api.ts` | `/v1/market/attribution` |
 | The world indicators, the written world briefs of the latest days and the kept world news | `world/api.ts` | `/v1/world` |
 | Built-in strategies, owner settings, saves with revisions | `strategies/api/queries.ts` | `/v1/technical-settings` |
-| Runs, decisions; a start of Buzz or Intraday on the broker chosen | `runs/api.ts` | `/v1/runs` |
+| Runs, decisions; a start of Buzz or Intraday on the broker chosen, with the server the confirmation showed (`brokerQuery`) | `runs/api.ts` | `/v1/runs` |
 | A run's orders, for the run page and the ranking's follows | `shared/api/run-orders.ts` | `/v1/runs/{run_id}/orders` |
-| A manual BUY of a stock a specific-stock run reported, on the broker chosen | `runs/api.ts` | `/v1/runs/{run_id}/manual-buy` |
+| A manual BUY of a stock a specific-stock run reported, on the broker chosen, with the server the confirmation showed | `runs/api.ts` | `/v1/runs/{run_id}/manual-buy` |
 | A run's follow into the mock account: what is open, the refusal, the follows so far; starting one | `runs/api.ts` | `/v1/runs/{run_id}/follow` |
 | A backtest's options, a run that is saved, the saved backtests, one of them, a delete | `backtest/api.ts` | `/v1/backtests` |
 | The latest monthly ranking; its replay over a period against the benchmark, with each decision's ranking and holdings; every formula of the settings replayed over the same period; the ranking in the mock account, and the start of its follow | `ranking/api.ts` | `/v1/rankings/latest`, `/v1/rankings/backtest`, `/v1/rankings/formulas`, `/v1/rankings/follow`, `/v1/rankings/follow/schedule` |
@@ -129,7 +130,7 @@ the contract by `catalog.test.ts`.
 | Valuation | `valuation/api.ts` | `/v1/valuation` |
 | The mock account: now, the curve, the opening and the total P&L | `account/api.ts` | `/v1/account/history` |
 | A broker's trades (the mock account's since the opening, the site's orders on SinoPac), each with the run whose decision it carried out (the followed run for a follow) | `account/api.ts` | `/v1/account/trades` |
-| The SinoPac account as the broker reports it: which server, whether the login is up, whether the site may order there, and the statement | `account/api.ts` | `/v1/account/brokerage` |
+| The SinoPac account as the broker reports it: which server, why a switch to the other one would be refused (`switch_refusal`, with the names of the variables still unset), whether the login is up or down, whether the site may order there, the simulation's starting cash, and the statement | `account/api.ts` | `/v1/account/brokerage` |
 | The user's holdings as one portfolio, from the sources chosen; a hand-entered holding kept or removed | `holdings/api.ts` | `/v1/holdings`, `/v1/holdings/manual`, `/v1/holdings/manual/remove` |
 | The reset of the mock account with a new starting capital | `account/api.ts` | `/v1/account/reset` |
 | The settings form: every setting with its kind, bounds, choices and value; a save of the changed ones | `admin-settings/api.ts` | `/v1/admin/settings` |
@@ -262,7 +263,7 @@ when it is back in focus a minute later, and at once when a request is refused w
   no feature, so it always opens, and shows the card of each feature the viewer sees. The settings pages name no
   feature either, so no setting locks the administrator out.
 - Inside a page: a run kind names its feature next to its capability (`KINDS`); the routes pass the watch button,
-  My settings' mock account panel and My holdings' watched stocks only where their feature shows; the search goes with the stock pages; a follow needs the mock account; the SinoPac account links to My
+  My settings' mock account panel and My holdings' watched stocks only where their feature shows; the search goes with the stock pages; a follow of a run needs the mock account, and the ranking's follow block and My settings' follow panel only the ranking, since each says what the server answers for the viewer's follow account; the SinoPac account links to My
   holdings only where that shows. The server leaves a hidden broker out of `/v1/account/brokers`,
   so a workflow that orders and the manual BUY show only while that list offers an account (`useBrokerOffers`), and a
   real broker alone still shows its server and limits.
@@ -376,6 +377,10 @@ secret: the server refuses one written into them, and its form shows none.
   under the search jumps to each. Every group folds on a click of its title. `advanced` starts folded, and under
   768 px every group but the first does, since the form is one long column there; a group opens when the
   administrator opens it or jumps to it, a search finds a setting in it or a problem sits in it.
+- A setting another page manages behind its own confirmation shows in the form as text with a link to that page
+  (`MANAGED_ELSEWHERE` in `form.ts`): `shioaji.server`, which the SinoPac account page switches.
+  Every page saves through the one confirmation, `SaveConfirmation` (the password, or a fresh Google sign-in that
+  comes back to the settings page, which sends the save and then goes back to the page it was made on).
 - A setting that changes only at a restart (`environment`, `audience`) shows as text with one line why. JSON that does
   not parse is held at its field in the words of the server's refusal codes (`admin:refusal.<code>`), and a save the
   server refuses shows each problem at its setting. A setting the server adds later shows with no frontend change: its
@@ -407,15 +412,19 @@ validator's separation checks against `--chart-price` in both themes, and its li
 
 The ranking page (`/ranking`) leads with the stocks the formula picks now (`LatestRanking.tsx`), because they are
 what the reader came for; the decision's date, the next one and what changed are one line each around the list. From
-1280 px, beside them are the ranking in the mock account (`MockAccountFollow.tsx`: what it holds, lacks and still
-holds, its return against the benchmark, one button) and the backtest (`RankingRecord.tsx`) as three figures of the
+1280 px, beside them are the ranking in the viewer's follow account (`RankingFollowPanel.tsx`: what it holds, lacks
+and still holds, the mock account's return against the benchmark, one button) and the backtest (`RankingRecord.tsx`) as three figures of the
 ranking and the benchmark, marked simulated. The period, the curve, every year, every decision and the caveats are one
 tap away, and open at once when the address names a period or a month. Narrower, they follow the list. The operator's command (`just backfill-history`) shows only to a viewer with
 `see_administrator_features`. Its rules:
 
-- The mock account's block shows only where the site shows the viewer the mock account: the route hands
-  `mockAccount` in, and without it the page never asks `/v1/rankings/follow`. An account that never followed gets one
-  sentence and the button. One that did gets how many of the ranking's stocks it holds, its return since the first
+- The follow block always shows, and says what the server answers for the viewer's follow account
+  (`/v1/rankings/follow`), a refusal of the account included: the page decides nothing about which accounts the site
+  offers. The block's title is the account the server answered for (`account`), named as the site names it
+  (`useAccountLabel` in `shared/api/account-label.ts`: 「本站模擬帳戶」, or 「永豐金帳戶」 with its server, 「測試環境」
+  or 「正式環境」), with 「換帳戶」 to My settings beside it. Its lead is `leadOf` in `ranking/model.ts`, a pure
+  function of the server's answer, the ranking and the audience, with `LEAD_BUTTON` saying whether the button shows and
+  may be pressed. An account that never followed gets one sentence and the button. One that did gets how many of the ranking's stocks it holds, its return since the first
   follow beside the benchmark's over the same sessions, the stocks it lacks and the holdings that left. The button
   asks first, listing every sale and purchase, and leaves once the account holds the ranking, when no sentence repeats
   the figures. The block is under
@@ -430,28 +439,32 @@ tap away, and open at once when the address names a period or a month. Narrower,
 - `FormulaComparison.tsx` is the evidence beside that choice (`/v1/rankings/formulas`): every formula over the
   backtest's period, as defined and at the comparison's liquidity floor, marked simulated, the one in use marked,
   and one line that the best of a past period is not thereby the best next. It is asked once the backtest answered.
-- The mock account's block lists the formula each follow used, newest first, and the account page's trades name it
+- The follow block lists the formula each follow used, newest first, and the account page's trades name it
   at a ranking follow's run, so a result is never read as one formula's when several made it.
-- The scheduled follow is the user's own setting: `FollowSchedulePanel` on My settings (the route hands it in beside
-  the mock account's panel, where the site shows both features) offers off and the server's times as one
-  `Segmented`, and saves at once. The block says the schedule's state in one line: off; on with the decision it
+- The scheduled follow is the user's own setting: `FollowSettingsPanel` on My settings (the route hands it in where
+  the site shows the ranking) offers off and the server's times as one `Segmented`, and saves at once. The block says the schedule's state in one line: off; on with the decision it
   still has to follow; or on with the next follow's day, the first weekday after the next decision
   (`weekdayAfter`), said with "about"; then who started the last follow. Each listed follow says schedule or by hand.
   While the schedule is on, no follow runs and its last follow left the decision pending (`schedule.unfinished`), the
   line says instead the day it tried, why (`unfinishedReason`: an error, a run that never ended, a follow that could
-  not start, or the stocks left to trade), that it tries again on the next trading day, and links to that run.
-- A ranking follow also runs on SinoPac's simulation account, never with real money, where the server says so:
-  `schedule.brokers` lists the accounts it lets this user's follow order on now, the mock account first, and
-  `schedule.broker_offered` says whether the saved account is one of them. The page takes both as answered: it
-  compares no account's name and derives neither. With more than one account in play, the panel offers the account
-  under the time (`offeredBrokers` keeps a saved account the site does not offer, with one line that the site then
-  follows on no account), a save sends the time and the account, and the block's schedule line names the account.
-  The block's own action follows on the first account listed, the one its holdings are read from. Every other account
-  gets one button (`AccountFollow`), held only by a run of the user in progress and by the quotes the site prices on:
-  the server reads no such account for the block, so the confirmation lists no order, and a closed window or an
-  account that holds the ranking is the server's refusal of the start, said as a toast. An account's words are keyed
-  by its member (`ranking:account.*`, `ranking:follow.on.<account>.*`, `ranking:schedule.on.*`,
-  `ranking:schedule.notOffered.*`), so another account needs its entries and no code. Each listed follow names its
+  not start, for the account, the market's phase or a ranking of no stock, or the stocks left to trade), that it
+  tries again on the next trading day, and links to that run. A schedule that is on while the server refuses the
+  account says it follows nothing.
+- Each user follows on one follow account, the mock account or the SinoPac account (on its simulation server only,
+  never with real money), which the button and the schedule share and only My settings changes. The panel there reads
+  one answer (`GET /v1/rankings/follow/schedule`: the account and the schedule) and has two controls that each save
+  alone (`PUT /v1/rankings/follow/account`, `PUT /v1/rankings/follow/schedule`): the account, shown where the viewer
+  may have more than one (`accountChoices` keeps a saved account the site no longer offers, with one line that the
+  site then follows on no other), and the time, whose help names the account it follows on, or, while the server
+  refuses the account, says it follows on no account and why. The page takes the server's answer as given: `brokers`
+  and `refusal` say which accounts the site offers, and it compares no account's name and derives neither. The block
+  reads the server's answer for that account and words it: SinoPac's holdings are its positions as the broker lists
+  them, its return is on the SinoPac account page (the site keeps no history of it), and an account the server refuses
+  (`account.refusal`, the same code the POST answers) says why through `common:refusal.<code>` in place of what a
+  follow would do, the button disabled. The POST names the account the dialog showed (`broker`), and the server answers
+  `follow_account_changed` when it is no longer the follow account, so a change on My settings in another tab is
+  never followed elsewhere. An account's words and pages are keyed by its member (`ranking:follow.on.<account>.*`,
+  `common:broker.name.*`, `ACCOUNT_PAGES`, `REAL_BROKER`), so another account needs its entries and no code. Each listed follow names its
   account, opens its orders with the status the account gave each (`useRunOrders` in `shared/api/run-orders.ts` and
   `OrdersTable` in `shared/ui/orders-table.tsx`, which the run page's orders use too), and links to its run, whose log
   says which BUYs a follow on SinoPac left to a later one because its cash did not pay for them yet.
@@ -471,13 +484,24 @@ tap away, and open at once when the address names a period or a month. Narrower,
   other figure comes from the API.
 
 The mock account page (`/account`) is the mock account alone. The SinoPac account has its own page
-(`/account/sinopac`, `BrokerageAccountPage.tsx`), for a user with `use_real_broker`, and it only reads:
+(`/account/sinopac`, `BrokerageAccountPage.tsx`), for a user with `use_real_broker`:
 
-- Its first card says which server the figures come from ("Simulation server, no real money" or "Real account") and,
-  as a badge, whether the site may order there ("Ordering off" or "Ordering on"), before any figure and whatever else
-  the page shows. It says once that every figure is the broker's own, with the time read.
-- While the site's login is down the server sends no statement: the page says so and that the site retries, and asks
-  for nothing else. An `administrators_only` answer shows `AdministratorsOnly`, the state `RequireSignIn` shows.
+- Its first card (`SinoPacPanel.tsx`) names the account, 「永豐金帳戶」, with its server as a badge, 「測試環境」 or
+  「正式環境」, the login's state and whether the site may order there, before any figure and whatever else the page
+  shows. It says once that every figure is the broker's own, with the time read.
+- For an administrator who edits the settings the same card manages SinoPac: the server, ordering on it (off or
+  administrators) and, on the simulation server, the starting cash, which is all the money put in. Each is a save of
+  the settings files through the settings feature's `SaveConfirmation`, which the route hands in
+  (`app/router/routes/brokerage.tsx`). A switch of the server lists what changes, sends the server and ordering off
+  in one save, and on the way to production asks for 「正式環境」 typed out. While the server refuses the switch
+  (`switch_refusal`, ServerSwitchRule's) the switch stays off and the card says why, with the target server's unset
+  variables by name, never a value. The server decides every rule of a switch; the card only says them. A start of a
+  run on SinoPac sends the server its confirmation showed; a server switched since answers 409
+  `broker_server_changed`, which the run pages say and which asks the brokers again.
+- While the site's login is down (`login_down`) the server sends no statement: the page says so and that the site
+  retries, and asks for nothing else. A login that is up with no SinoPac account, such as a CA certificate that did not
+  activate, is unavailable: the page says ordering is unavailable on this login and to see the server's log, and
+  promises no retry. An `administrators_only` answer shows `AdministratorsOnly`, the state `RequireSignIn` shows.
 - The statement reads in one order: the bank balance, market value and both P&Ls; the holdings at the broker's last
   prices; the settlements, each said as to pay or to receive, not by a market color; today's fills; the past sales;
   then the orders this site placed there, the same `TradesPanel` the mock account lists its trades with.

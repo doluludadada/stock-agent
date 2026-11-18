@@ -33,14 +33,35 @@ backup was made.` and changes nothing.
 A Docker Compose deployment has no `just`. [How to deploy the site](../frontend/docs/deployment.md) gives each command
 as a `docker compose` command that runs inside the backend container.
 
+## The vector extension (version 14)
+
+From version 14 the article index keeps its vectors in a column of pgvector's `vector` type, in the table
+`article_vectors`, and the LINE chat keeps its conversations in `chat_conversations`: what Chroma held before. The
+step from 13 to 14 creates the extension (`CREATE EXTENSION IF NOT EXISTS vector`), and the next start creates the two
+tables. A new database gets the extension at its first start, before its tables. Nothing is copied from Chroma: the
+article index computes its vectors again from the kept articles (`just backfill-articles`, or the Web API's timer), and
+the AI reads its past decisions on a stock from the trading journal's `trade_signals`, which already holds every one.
+
+The server needs pgvector installed, and only a superuser may create the extension:
+
+- Docker Compose: the database image of `database/Dockerfile` has pgvector, and its `DB_USER` is a superuser.
+  [How to deploy the site](../frontend/docs/deployment.md#update-to-the-vectors-in-postgresql-schema-version-14) has
+  the steps.
+- A developer's machine: `brew install pgvector`, then, as the server's superuser, `psql -d <DB_NAME> -c "CREATE
+  EXTENSION vector"` once. The app's role then needs no further right: the step and the start find the extension.
+
+Without pgvector the step fails with `extension "vector" is not available`, and without the right to create it with
+`permission denied to create extension "vector"`. Either way the upgrade rolls back and the database stays at 13. A
+new database's first start and a restore refuse in the same way, with the database's words and the remedy above.
+
 ## Restore a backup
 
 1. Stop the CLI and the Web API.
 2. Run `just db-restore backups/<file> --yes`.
 
 Without `--yes`, the command prints what it would replace and changes nothing. With `--yes`, it first backs up the
-current database, unless the database has no table, and then runs `pg_restore --clean --if-exists
---single-transaction --no-owner` into the configured database. `pg_restore` drops and recreates only the tables the
+current database, unless the database has no table, gives the database the `vector` extension if it lacks it, and
+then runs `pg_restore --clean --if-exists --single-transaction --no-owner` into the configured database. `pg_restore` drops and recreates only the tables the
 backup holds, so a table created after the backup stays.
 
 The command never deletes or changes the backup it restores from. Startup refuses a restored database of an older
@@ -103,9 +124,11 @@ version of its `postgres` service.
 ## Backups
 
 - `backups/` is at the project root, is created with mode 700, and is ignored by git. Each backup file has mode 600.
-- A backup is `backups/<DB_NAME>.<yyyymmdd-HHMMSS>.v<N>.dump`, written by `pg_dump --format=custom`.
+- A backup is `backups/<DB_NAME>.<yyyymmdd-HHMMSS>.v<N>.dump`, written by `pg_dump --format=custom
+  --exclude-extension=vector`. The extension belongs to the database, as the database itself does: a restore that
+  dropped it again would need the role that created it, so a restore creates it when it is missing instead.
 - The time is UTC, and `<N>` is the schema version of the database, `none` when it has no stamp. A second backup in the
   same second gets `-2` after the time.
-- A backup holds the whole database: the hashed passwords, the sealed usernames and emails, and every trading record.
+- A backup holds every table: the hashed passwords, the sealed usernames and emails, and every trading record.
   Keep backups private, and keep a backup of `secrets/accounts.key` with them, or of the `ACCOUNTS_KEY` variable when
   you set one, because only the original key reads the saved users.

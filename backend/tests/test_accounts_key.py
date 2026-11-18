@@ -36,7 +36,7 @@ def new_key() -> str:
 
 @pytest.fixture
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A project root with no key file and no .env, ACCOUNTS_KEY unset, Chroma inside it."""
+    """A project root with no key file and no .env, ACCOUNTS_KEY unset."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ACCOUNTS_KEY", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "placeholder")

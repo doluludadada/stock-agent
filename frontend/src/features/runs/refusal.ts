@@ -14,6 +14,8 @@ export function useStartRefusal(): (error: Error) => string {
         return t('brokerRefused')
       case 'broker_unavailable':
         return t('brokerUnavailable')
+      case 'broker_server_changed':
+        return t('serverChanged')
       default:
         return t('startFailed', { reason: reason(error) })
     }

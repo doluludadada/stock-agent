@@ -12,7 +12,7 @@ from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.types.enums import InformationSource
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.article_store_dto import StoredArticleDTO
-from c_infrastructure.database.models.daily_close_archive_dto import replacing
+from c_infrastructure.database.upsert import replacing
 
 
 class SqlArticleStore(IArticleStore):

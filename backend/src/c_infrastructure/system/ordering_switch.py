@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import override
 
 from a_domain.ports.system.ordering_switch import IOrderingSwitch
-from a_domain.types.enums import ExecutionProvider, FeatureVisibility
+from a_domain.rules.trading.order_rule import SiteOrdering
 from b_application.config.settings_loader import load_settings
 
 
@@ -17,10 +17,10 @@ class SettingsFileOrderingSwitch(IOrderingSwitch):
         self._project_root = project_root
 
     @override
-    async def visibility(self, broker: ExecutionProvider) -> FeatureVisibility:
+    async def read(self) -> SiteOrdering | None:
         try:
             config = await asyncio.to_thread(load_settings, self._project_root)
         except Exception:
-            return FeatureVisibility.OFF
+            return None
 
-        return config.features.ordering()[broker]
+        return SiteOrdering(ordering=config.features.ordering(), server=config.shioaji.server)

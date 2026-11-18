@@ -14,14 +14,14 @@ from pydantic import SecretStr, ValidationError
 from shioaji.error import TokenError
 from support.fake_shioaji import FakeContracts, FakeShioaji, FakeStocks, snapshot, stock
 from support.fakes import RecordingLogger
-from support.settings import environment_setup, shipped_config
+from support.settings import shipped_config, sinopac_setup
 from trading_stack import MONDAY_10_00, SilentLogger, analysed_stock, open_stack
 
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.model.trading.order import Order
 from a_domain.ports.system.logging_provider import ILoggingProvider
-from a_domain.types.enums import Audience, MarketIndex, OrderStatus, SystemEnvironment
+from a_domain.types.enums import Audience, MarketIndex, OrderStatus, ShioajiServer, SystemEnvironment
 from a_domain.types.errors import RealtimeQuotesUnavailable
 from b_application.config.app_config import AppConfig
 from b_application.config.market_data_config import IndexQuoteContract, MarketDataConfig, MarketHoursConfig
@@ -63,7 +63,7 @@ def quote_provider(
     return ShioajiQuoteProvider(
         connection=ShioajiConnection(client=client, up=True),
         new_client=FakeShioaji,
-        login=ShioajiLogin(simulation=True, api_key=SecretStr("key"), secret_key=SecretStr("secret")),
+        login=ShioajiLogin(server=ShioajiServer.SIMULATION, api_key=SecretStr("key"), secret_key=SecretStr("secret")),
         market_clock=CLOCK,
         market_data=market_data or MarketDataConfig(quote_request_interval_seconds=0),
         board_lot_shares=1000,
@@ -71,8 +71,8 @@ def quote_provider(
     )
 
 
-def shioaji_site(environment: SystemEnvironment, audience: Audience = Audience.PERSONAL) -> AppConfig:
-    return environment_setup(shipped_config(), environment).model_copy(update={"audience": audience})
+def shioaji_site(server: ShioajiServer, audience: Audience = Audience.PERSONAL) -> AppConfig:
+    return sinopac_setup(shipped_config(), server).model_copy(update={"audience": audience})
 
 
 async def test_a_quote_is_the_session_so_far_stamped_with_the_exchanges_trade_time_in_lots_of_shares() -> None:
@@ -212,7 +212,7 @@ async def test_quotes_and_a_shioaji_broker_share_one_login_that_every_runtime_of
 ) -> None:
     made: list[FakeShioaji] = []
     monkeypatch.setattr(shioaji, "Shioaji", lambda simulation: made.append(FakeShioaji(simulation)) or made[-1])
-    shared, site = process(), shioaji_site(SystemEnvironment.TEST)
+    shared, site = process(), shioaji_site(ShioajiServer.SIMULATION)
 
     for _ in ("startup", "reload"):
         quotes, broker = await connect_shioaji(site, shared, CLOCK)
@@ -226,13 +226,14 @@ async def test_quotes_and_a_shioaji_broker_share_one_login_that_every_runtime_of
 
 
 @pytest.mark.parametrize("environment", [SystemEnvironment.DEV, SystemEnvironment.TEST])
-async def test_dev_and_test_read_their_quotes_and_offer_sinopac_on_the_simulation_server(
+async def test_the_simulation_server_reads_its_quotes_and_offers_sinopac_there_in_dev_and_test(
     environment: SystemEnvironment, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     made: list[FakeShioaji] = []
     monkeypatch.setattr(shioaji, "Shioaji", lambda simulation: made.append(FakeShioaji(simulation)) or made[-1])
+    site = sinopac_setup(shipped_config(), ShioajiServer.SIMULATION, environment)
 
-    quotes, broker = await connect_shioaji(shioaji_site(environment), process(), CLOCK)
+    quotes, broker = await connect_shioaji(site, process(), CLOCK)
 
     [client] = made
     assert quotes is not None and broker is not None and broker.link().simulation is True
@@ -240,13 +241,13 @@ async def test_dev_and_test_read_their_quotes_and_offer_sinopac_on_the_simulatio
 
 
 async def test_a_public_site_builds_no_shioaji_client_and_has_no_quote() -> None:
-    assert await connect_shioaji(shioaji_site(SystemEnvironment.TEST, Audience.PUBLIC), process(), CLOCK) == (None, None)
+    assert await connect_shioaji(shioaji_site(ShioajiServer.SIMULATION, Audience.PUBLIC), process(), CLOCK) == (None, None)
 
 
 async def test_a_personal_site_without_a_key_pair_or_whose_login_fails_has_no_quote_and_no_sinopac(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    without_keys = shioaji_site(SystemEnvironment.DEV)
+    without_keys = shioaji_site(ShioajiServer.SIMULATION)
     without_keys.shioaji = ShioajiConfig(
         _env_file=None, **without_keys.shioaji.model_dump(include={"poll_interval_seconds", "max_polls"})
     )
@@ -259,7 +260,7 @@ async def test_a_personal_site_without_a_key_pair_or_whose_login_fails_has_no_qu
     shared = process()
 
     for _ in ("startup", "reload"):
-        assert await connect_shioaji(shioaji_site(SystemEnvironment.DEV), shared, CLOCK) == (None, None)
+        assert await connect_shioaji(shioaji_site(ShioajiServer.SIMULATION), shared, CLOCK) == (None, None)
 
     assert [(len(client.logins), client.logouts) for client in made] == [(1, 0), (1, 0)]
 
@@ -277,7 +278,7 @@ def made_clients(monkeypatch: pytest.MonkeyPatch, **fields: object) -> list[Fake
 async def test_the_runtimes_of_one_login_pace_their_requests_together(monkeypatch: pytest.MonkeyPatch) -> None:
     """Shioaji counts its 50 market-data queries per 10 seconds per login, whichever runtime asks."""
     made = made_clients(monkeypatch)
-    site, shared = shioaji_site(SystemEnvironment.TEST), process()
+    site, shared = shioaji_site(ShioajiServer.SIMULATION), process()
     site.market_data = site.market_data.model_copy(update={"quote_request_interval_seconds": 0.2})
     (startup, _), (reload, _) = [await connect_shioaji(site, shared, CLOCK) for _ in ("startup", "reload")]
     [client] = made
@@ -294,7 +295,7 @@ async def test_the_runtimes_of_one_login_pace_their_requests_together(monkeypatc
 async def test_a_login_a_timed_out_reload_left_running_is_the_one_the_next_reload_uses(monkeypatch: pytest.MonkeyPatch) -> None:
     gate = threading.Event()
     made = made_clients(monkeypatch, login_gate=gate)
-    site, shared = shioaji_site(SystemEnvironment.TEST), process()
+    site, shared = shioaji_site(ShioajiServer.SIMULATION), process()
 
     with pytest.raises(TimeoutError):
         async with asyncio.timeout(0.1):
@@ -316,7 +317,7 @@ async def test_an_sdk_error_reaches_the_logs_and_the_run_record_as_its_type_and_
 ) -> None:
     logger = RecordingLogger()
     made_clients(monkeypatch, login_error=SDK_REFUSAL)
-    site = shioaji_site(SystemEnvironment.DEV)
+    site = shioaji_site(ShioajiServer.SIMULATION)
     shared = ProcessState(logger=logger, attempt_log=MemoryAttemptLog(), cache_writes=asyncio.Lock())
     assert await connect_shioaji(site, shared, CLOCK) == (None, None)
 
@@ -329,7 +330,7 @@ async def test_an_sdk_error_reaches_the_logs_and_the_run_record_as_its_type_and_
 
     said = [message for _, message in logger.records] + status.stats.errors
     assert [message for message in said if "TokenError, status 401" in message] == [
-        "Shioaji simulation login failed: TokenError, status 401. No realtime quote, so no order",
+        "Shioaji Simulation login failed: TokenError, status 401. No realtime quote, so no order",
         "Failed to fetch realtime market data: Shioaji answered TokenError, status 401",
     ]
     assert not [message for message in said if "A123456789" in message or "203.0.113.7" in message]

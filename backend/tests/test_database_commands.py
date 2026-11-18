@@ -2,14 +2,15 @@
 The database commands (`just db-status`, `db-backup`, `db-migrate`, `db-restore`) on a real PostgreSQL database: what
 they print, the backups they write, an upgrade that keeps every row, a second migrate and a failed one that change
 nothing, and a restore that puts a backup back after backing the current database up. The tests that migrate give the
-code a step of their own, from one version below the code's, so they hold whatever steps the code has; one test runs
-the code's own steps from version 9.
+code a step of their own, from one version below the code's, so they hold whatever steps the code has; two tests run
+the code's own steps, from version 9 and from version 13. Only a superuser may create pgvector's extension, so the
+tests of a database without it run as the session's superuser (TestDatabase.superuser).
 """
 
 import hashlib
 import io
 import re
-from datetime import datetime, tzinfo
+from datetime import datetime, timedelta, tzinfo
 from pathlib import Path
 
 import pytest
@@ -17,12 +18,18 @@ from rich.console import Console
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 from sqlmodel import SQLModel
-from support.databases import ENVIRONMENT, database_snapshot, execute, open_database
+from support.databases import ENVIRONMENT, TestDatabase, as_superuser, database_snapshot, execute, open_database, raw_engine
+from support.fakes import FakeTextEmbedder
+from support.harness import MARKET_OPEN
+from test_stock_page import article
+from trading_stack import MovableClock
 
 import c_infrastructure.database.db_connector as db_connector
 import c_infrastructure.database.models.schema_version_dto as schema_version
+from a_domain.types.enums import InformationSource
 from c_infrastructure.database.db_connector import DatabaseCommandError, DatabaseConnector, OutdatedDatabaseError
 from c_infrastructure.database.models.schema_version_dto import FIRST_SCHEMA_VERSION, SCHEMA_VERSION
+from c_infrastructure.database.repositories.article_index import SqlArticleIndex
 from d_presentation.cli import database as commands, terminal
 
 pytestmark = pytest.mark.asyncio
@@ -313,7 +320,8 @@ async def test_the_steps_from_version_9_give_a_run_its_ranking_follow_columns_an
     assert "10 -> 11 add_the_schedule_of_the_ranking_follow" in output.getvalue()
     assert "11 -> 12 add_what_a_ranking_follow_left_open" in output.getvalue()
     assert "12 -> 13 add_the_account_of_the_scheduled_follow" in output.getvalue()
-    assert after["schema_version"][1] == [("13",)]
+    assert "13 -> 14 add_the_vector_extension" in output.getvalue()
+    assert after["schema_version"][1] == [("14",)]
     assert {"ranking_formula", "ranking_decided_on", "scheduled", "ranking_open"} <= set(after["workflow_runs"][0])
     assert "ranking_follow_time" in after["users"][0]
     followed_on = {row[after["users"][0].index("ranking_follow_broker")] for row in after["users"][1]}
@@ -321,6 +329,132 @@ async def test_the_steps_from_version_9_give_a_run_its_ranking_follow_columns_an
     [run] = after["workflow_runs"][1]
     assert run[after["workflow_runs"][0].index("scheduled")] == "False"
     assert run[after["workflow_runs"][0].index("ranking_open")] == "None"
+
+
+REVENUE = "十月營收創新高 年增四成"
+"""The title of the one article the tests of the vector extension index and search."""
+
+
+async def index_and_search(connector: DatabaseConnector) -> tuple[int, bool]:
+    """How many vectors a sync of one article wrote into the connector's database, and whether a search of its title finds it."""
+    revenue = article(REVENUE, InformationSource.NEWS_MEDIA, MARKET_OPEN - timedelta(days=1), "https://news.example/r")
+    index = SqlArticleIndex(connector, "fake-model", FakeTextEmbedder(), MovableClock(MARKET_OPEN), 300)
+    embedded = await index.sync("2330", [revenue])
+    return embedded, await index.search("2330", REVENUE, None, None, 5) == [revenue.key]
+
+
+async def vector_storage() -> str:
+    """How article_vectors stores its vectors: "p" (PLAIN) keeps each in its row."""
+    engine = raw_engine()
+
+    async with engine.connect() as connection:
+        storage = await connection.scalar(
+            text("SELECT attstorage::text FROM pg_attribute WHERE attrelid = 'article_vectors'::regclass AND attname = 'vector'")
+        )
+
+    await engine.dispose()
+    return str(storage)
+
+
+async def test_the_step_from_version_13_gives_a_database_the_vector_extension_and_keeps_every_row(
+    tmp_path: Path, output: io.StringIO, monkeypatch: pytest.MonkeyPatch, test_database: TestDatabase
+) -> None:
+    monkeypatch.setenv("DB_USER", test_database.superuser)
+    connector = open_database(tmp_path)
+    await connector.init_db()
+    at_version_13 = "DROP TABLE article_vectors, chat_conversations; DROP EXTENSION vector; UPDATE schema_version SET version = 13"
+    await as_superuser(test_database.superuser, test_database.name, "; ".join((*ROWS, at_version_13)))
+
+    try:
+        with pytest.raises(OutdatedDatabaseError, match="just db-migrate"):
+            await connector.init_db()
+
+        assert await commands.migrate(connector) == 0
+        await connector.init_db()
+        indexed = await index_and_search(connector)
+        state = await connector.state()
+    finally:
+        await connector.close()
+
+    assert "13 -> 14 add_the_vector_extension" in output.getvalue()
+    assert (state.stamps, indexed) == ((SCHEMA_VERSION,), (1, True))
+    assert {name: rows for name, rows in state.rows.items() if rows} == {**HELD, "article_vectors": 1}
+    assert await vector_storage() == "p"
+
+
+async def test_a_new_database_gets_the_vector_extension_at_its_first_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, test_database: TestDatabase
+) -> None:
+    monkeypatch.setenv("DB_USER", test_database.superuser)
+    await execute("DROP SCHEMA public CASCADE", "CREATE SCHEMA public")
+    connector = open_database(tmp_path)
+
+    try:
+        await connector.init_db()
+        indexed = await index_and_search(connector)
+    finally:
+        await connector.close()
+
+    assert indexed == (1, True)
+
+
+async def test_a_new_database_that_cannot_get_the_vector_extension_is_refused_with_the_remedy(tmp_path: Path) -> None:
+    # Without a schema to create it in, CREATE EXTENSION fails for any role, a superuser's included.
+    await execute("DROP SCHEMA public CASCADE")
+    connector = open_database(tmp_path)
+
+    try:
+        with pytest.raises(OutdatedDatabaseError) as refused:
+            await connector.init_db()
+    finally:
+        await connector.close()
+        await execute("CREATE SCHEMA public")
+
+    assert str(refused.value).startswith("The database could not create pgvector's extension")
+    assert 'as a superuser: psql -d <DB_NAME> -c "CREATE EXTENSION vector"' in str(refused.value)
+
+
+async def test_a_restore_into_a_new_database_gives_it_the_vector_extension_and_the_vectors_back(
+    tmp_path: Path, output: io.StringIO, monkeypatch: pytest.MonkeyPatch, test_database: TestDatabase
+) -> None:
+    monkeypatch.setenv("DB_USER", test_database.superuser)
+    connector = open_database(tmp_path)
+
+    try:
+        await connector.init_db()
+        await index_and_search(connector)
+        await commands.backup(connector)
+        [backup] = backups(tmp_path)
+        await execute("DROP SCHEMA public CASCADE", "CREATE SCHEMA public")
+        await commands.restore(connector, backup, confirmed=True)
+        state = await connector.state()
+    finally:
+        await connector.close()
+
+    assert f"The database had no table, so no backup was made, then restored {backup}:" in output.getvalue()
+    assert (state.stamps, state.rows["article_vectors"]) == ((SCHEMA_VERSION,), 1)
+
+
+async def test_a_restore_into_a_database_that_cannot_get_the_vector_extension_names_the_remedy_and_restores_nothing(
+    tmp_path: Path, output: io.StringIO
+) -> None:
+    connector = await current_database(tmp_path)
+
+    try:
+        await commands.backup(connector)
+        [backup] = backups(tmp_path)
+        # Without a schema to create it in, CREATE EXTENSION fails for any role, a superuser's included.
+        await execute("DROP SCHEMA public CASCADE")
+
+        with pytest.raises(DatabaseCommandError) as refused:
+            await commands.restore(connector, backup, confirmed=True)
+    finally:
+        await connector.close()
+        await execute("CREATE SCHEMA public")
+
+    assert str(refused.value).startswith("The database could not create pgvector's extension")
+    assert str(refused.value).endswith('"CREATE EXTENSION vector"\nNothing was restored.')
+    assert await database_snapshot() == {}
 
 
 @pytest.mark.parametrize("stamp", [0, FIRST_SCHEMA_VERSION - 1, SCHEMA_VERSION + 1])
@@ -429,7 +563,9 @@ async def test_restore_refuses_a_file_pg_dump_did_not_write_and_a_missing_file(t
     assert await database_snapshot() == before
 
 
-async def test_restore_into_a_database_without_a_table_makes_no_backup(tmp_path: Path, output: io.StringIO) -> None:
+async def test_restore_into_a_database_without_a_table_makes_no_backup(
+    tmp_path: Path, output: io.StringIO, test_database: TestDatabase
+) -> None:
     connector = await current_database(tmp_path)
 
     try:
@@ -437,6 +573,7 @@ async def test_restore_into_a_database_without_a_table_makes_no_backup(tmp_path:
         [backup] = backups(tmp_path)
         await connector.close()
         await execute("DROP SCHEMA public CASCADE", "CREATE SCHEMA public")
+        await as_superuser(test_database.superuser, test_database.name, "CREATE EXTENSION vector")
         connector = open_database(tmp_path)
         await commands.restore(connector, backup, confirmed=True)
     finally:

@@ -11,6 +11,7 @@ const runs = {
   busy: 'Another run is still going. Wait for it to end.',
   brokerRefused: 'Only an administrator may order at a broker. Start on the mock account.',
   brokerUnavailable: 'The broker has no login on this site now. Start on the mock account, or try again later.',
+  serverChanged: 'SinoPac’s server changed after this page showed it, so nothing started. Check the server and confirm again.',
   startFailed: 'The run did not start: {{reason}}',
   stocksLabel: 'Stock codes to analyse',
   stocksPlaceholder: '2330, 2317',
@@ -86,7 +87,7 @@ const runs = {
   },
   broker: {
     label: 'Account for the orders',
-    server: { simulation: '{{name}}: simulation, no real money', live: '{{name}}: live account, real money' },
+    server: { simulation: '{{name}}: Simulation, no real money', production: '{{name}}: Production, real money' },
     limits: 'Each BUY up to NT${{order}}, and BUYs up to NT${{daily}} per Taiwan day. The server refuses a BUY past them.',
   },
   buy: {

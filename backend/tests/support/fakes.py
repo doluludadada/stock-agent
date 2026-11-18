@@ -4,13 +4,14 @@ Each fake answers like its real adapter and records what the outside system
 behind that port would observe: rows written, prompts sent, orders placed.
 """
 
+import asyncio
 import inspect
 import itertools
 import json
 import math
 import re
 import zlib
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, time, timedelta
@@ -61,20 +62,20 @@ from a_domain.ports.trading.execution_provider import SendRefusal
 from a_domain.rules.fundamentals.trailing_eps import EpsFilings, QuarterEps
 from a_domain.rules.technical.strategy import TechnicalSettings
 from a_domain.rules.trading.cost import TradingCostRule
-from a_domain.rules.trading.order_rule import BrokerLink
+from a_domain.rules.trading.order_rule import BrokerLink, SiteOrdering
 from a_domain.rules.trading.ranking import ListedHistory, ListedHistoryRule
 from a_domain.types.enums import (
     AiAnalysisFocus,
     AiProvider,
     BriefStatus,
     ExecutionProvider,
-    FeatureVisibility,
     FinancialStatement,
     MarketIndex,
     MarketType,
     MessageRole,
     Role,
     SentimentLabel,
+    ShioajiServer,
     TradeAction,
     UserStatus,
     WatchlistType,
@@ -92,8 +93,9 @@ from a_domain.types.ids import BacktestId, DecisionId, RunId, SessionToken, User
 from a_domain.types.values import FiscalQuarter, comparable_name
 from b_application.config.api_config import FeaturesConfig
 from b_application.config.market_data_config import MarketHoursConfig
-from c_infrastructure.database.chroma.article_index import embedded_text
+from c_infrastructure.database.models.article_store_dto import ARTICLE_VECTOR_LENGTH
 from c_infrastructure.database.models.trading_journal_dto import RunStockReportDTO
+from c_infrastructure.database.repositories.article_index import embedded_text
 from c_infrastructure.system.market_clock import TaiwanMarketClock
 
 PROMPT_TEMPLATES = {
@@ -530,17 +532,6 @@ class FakeAiProvider:
         return [call.stock_id for call in self.calls]
 
 
-class FakeKnowledgeRepository:
-    def __init__(self) -> None:
-        self.decisions: list[tuple[str, TradeSignal]] = []
-
-    async def find_decision_history(self, stock_id: str, limit: int = 3) -> str:
-        return ""
-
-    async def save_decision(self, stock: Stock, signal: TradeSignal) -> None:
-        self.decisions.append((stock.stock_id, signal))
-
-
 class FakeConversationRepository:
     def __init__(self) -> None:
         self.conversations: dict[str, Conversation] = {}
@@ -617,6 +608,10 @@ class FakeTradingJournal:
 
     async def signals_of(self, run_id: RunId) -> list[TradeSignal]:
         return [signal for signal in self.signals if self.signal_runs[signal.decision_id] == run_id]
+
+    async def decision_history(self, stock_id: str, limit: int = 3) -> list[TradeSignal]:
+        kept = [signal for signal in self.signals if signal.stock_id == stock_id and signal.source.in_decision_history]
+        return sorted(kept, key=lambda signal: signal.generated_at, reverse=True)[:limit]
 
     async def orders_of(self, run_id: RunId) -> list[Order]:
         return [order for order in self.orders.values() if order.run_id == run_id]
@@ -725,11 +720,15 @@ class RecordingExecutionProvider:
     """
     Broker that records each place_order call and fills it in full at its limit, charging fees like the mock, and
     whose account then holds the fill where its cash or its position covers it, as a test set them. Its `link` says
-    which broker it stands for: the mock account unless a test makes it SinoPac.
+    which broker it stands for: the mock account unless a test makes it SinoPac. `requests` names each read of the
+    account a caller sent it, in order. `before_send` runs at each place_order before the order's last check, as a
+    change elsewhere between an order and its send.
     """
 
     def __init__(self, cash: float = 1_000_000.0, cost_rule: TradingCostRule | None = None, link: BrokerLink | None = None) -> None:
         self.current_link = link or BrokerLink(broker=ExecutionProvider.MOCK)
+        self.before_send: Callable[[], None] = lambda: None
+        self.requests: list[str] = []
         self.cash = cash
         self.opening: AccountOpening | None = None
         self.positions: list[Position] = []
@@ -744,7 +743,9 @@ class RecordingExecutionProvider:
     def link(self) -> BrokerLink:
         return self.current_link
 
-    async def place_order(self, order: Order, refusal_now: SendRefusal) -> Order:
+    async def place_order(self, order: Order, refusal_now: SendRefusal, stop: asyncio.Event) -> Order:
+        self.before_send()
+
         if (refusal := await refusal_now()) is not None:
             order.reject(*refusal, now=datetime.now(UTC))
             return order
@@ -758,7 +759,7 @@ class RecordingExecutionProvider:
 
         order.submit(now=datetime.now(UTC))
         order.fill(order.quantity, order.limit_price, cost.fee, cost.tax, realized_pnl, now=datetime.now(UTC))
-        account = await self.get_account()
+        account = self.account_now()
 
         if order.action == TradeAction.BUY and account.can_afford(-cost.net):
             account.buy(order.stock_id, order.quantity, price=order.limit_price, total_cost=-cost.net)
@@ -768,20 +769,26 @@ class RecordingExecutionProvider:
         self.cash, self.positions = account.cash, account.positions
         return order
 
-    async def get_account(self) -> Account:
+    def account_now(self) -> Account:
         return Account(cash=self.cash, positions=[replace(position) for position in self.positions], opening=self.opening)
 
+    async def get_account(self) -> Account:
+        self.requests.append("get_account")
+        return self.account_now()
+
     async def open_positions(self) -> list[Position]:
+        self.requests.append("open_positions")
         return [replace(position) for position in self.positions]
 
     async def statement(self, sales_from: date, today: date) -> BrokerageStatement:
         """A real broker's own report of the account: the positions as held, and the fills and sales a test set."""
+        self.requests.append("statement")
         return BrokerageStatement(
             read_at=datetime.now(UTC),
             simulation=bool(self.current_link.simulation),
             balance=self.cash,
             settlements=list(self.settlements),
-            positions=await self.open_positions(),
+            positions=self.account_now().positions,
             fills=[fill for fill in self.fills if fill.filled_on == today],
             sales=[sale for sale in self.sales if sales_from <= sale.filled_on <= today],
             sales_from=sales_from,
@@ -789,7 +796,7 @@ class RecordingExecutionProvider:
 
     async def reset(self, initial_cash: float, now: datetime) -> Account:
         self.cash, self.positions, self.opening = initial_cash, [], AccountOpening(initial_cash=initial_cash, opened_at=now)
-        return await self.get_account()
+        return self.account_now()
 
 
 class FakeBacktestRepository:
@@ -930,14 +937,16 @@ class FakeStockBriefRepository:
 class FakeTextEmbedder:
     """
     ITextEmbedder without a model: a text's vector counts its pairs of neighbouring characters in `SIZE` buckets, so
-    texts that share wording lie close. It keeps every text it embedded, so a test can see what was embedded again.
+    texts that share wording lie close, and is `vector_length` long, by default as long as the real model's, which the
+    article index's table holds. It keeps every text it embedded, so a test can see what was embedded again.
     """
 
     SIZE = 64
 
-    def __init__(self) -> None:
+    def __init__(self, vector_length: int = ARTICLE_VECTOR_LENGTH) -> None:
         self.embedded: list[str] = []
         self.failure: Exception | None = None
+        self.length = vector_length
 
     async def embed(self, texts: Sequence[str]) -> list[list[float]]:
         if self.failure is not None:
@@ -953,9 +962,12 @@ class FakeTextEmbedder:
                 counts[zlib.crc32("".join(pair).encode()) % self.SIZE] += 1
 
             length = math.sqrt(sum(count * count for count in counts)) or 1.0
-            vectors.append([count / length for count in counts])
+            vectors.append([count / length for count in counts] + [0.0] * (self.length - self.SIZE))
 
         return vectors
+
+    async def vector_length(self) -> int:
+        return self.length
 
 
 class FakeArticleStore:
@@ -1025,7 +1037,7 @@ class FakeArticleStore:
 
 
 class FakeArticleIndex:
-    """Like the Chroma index: a vector per stock and key with its day and its text, embedded only when the text is new."""
+    """Like the SQL index: a vector per stock and key with its day and its text, embedded only when the text is new."""
 
     def __init__(self, embedder: FakeTextEmbedder, text_length: int = 300) -> None:
         self.embedder = embedder
@@ -1239,9 +1251,7 @@ class FakeUserStore:
         if user.status != UserStatus.ACTIVE or changed:
             self.sessions = {token: session for token, session in self.sessions.items() if session.user_id != user.user_id}
 
-    async def save_ranking_follow_schedule(
-        self, user_id: UserId, follow_time: time | None, broker: ExecutionProvider, now: datetime
-    ) -> None:
+    async def save_ranking_follow(self, user_id: UserId, follow_time: time | None, broker: ExecutionProvider, now: datetime) -> None:
         if user_id in self.by_id:
             self.by_id[user_id] = replace(self.by_id[user_id], ranking_follow_time=follow_time, ranking_follow_broker=broker)
 
@@ -1270,13 +1280,17 @@ class SignedOut:
 
 
 class FakeOrderingSwitch:
-    """The ordering switch of a site whose settings files hold `features`: what the real one reads from disk at each ask."""
+    """
+    The ordering switch of a site whose settings files hold `features` and name `server` (shioaji.server): what the
+    real one reads from disk at each ask.
+    """
 
-    def __init__(self, features: FeaturesConfig) -> None:
+    def __init__(self, features: FeaturesConfig, server: ShioajiServer) -> None:
         self.features = features
+        self.server = server
 
-    async def visibility(self, broker: ExecutionProvider) -> FeatureVisibility:
-        return self.features.ordering()[broker]
+    async def read(self) -> SiteOrdering | None:
+        return SiteOrdering(ordering=self.features.ordering(), server=self.server)
 
 
 async def no_refusal() -> None:

@@ -4,7 +4,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import cast
 
-import chromadb
 from support.fake_shioaji import FakeShioaji
 from support.fakes import (
     FakeAiProvider,
@@ -36,7 +35,6 @@ from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
 from a_domain.model.system.stats import SystemStats
 from a_domain.model.system.user import User
-from a_domain.model.trading.signal import TradeSignal
 from a_domain.ports.trading.execution_provider import IExecutionProvider
 from a_domain.rules.trading.ranking import ListedHistory, ListedHistoryRule
 from a_domain.types.enums import ExecutionProvider, Workflow
@@ -113,14 +111,6 @@ class StockDirectory:
         return Stock(stock_id=stock_id)
 
 
-class ForgetfulKnowledge:
-    async def find_decision_history(self, stock_id: str, limit: int = 3) -> str:
-        return ""
-
-    async def save_decision(self, stock: Stock, signal: TradeSignal) -> None:
-        return None
-
-
 def bar(at: datetime, close: float) -> Ohlcv:
     return Ohlcv(ts=at, open=close, high=close, low=close, close=close, volume=5000)
 
@@ -181,14 +171,13 @@ async def open_stack(
     stocks = StockDirectory()
     watchlist = FakeWatchlistRepository(clock)
     ai, sentiment = FakeAiProvider(), FakeSentimentClassifier()
-    factory = create_owned_ports(config, db, chromadb.EphemeralClient(), {config.ai.active_model: ai}, clock, logger, asyncio.Lock())
+    factory = create_owned_ports(config, db, {config.ai.active_model: ai}, clock, logger, asyncio.Lock())
     real = factory(users.by_id[LEGACY_OWNER_ID])
     owned = replace(
         real,
         journal=journal or real.journal,
         watchlist_repository=watchlist,
         technical_settings_repository=FakeTechnicalSettingsRepository(harness_settings()),
-        knowledge_repository=ForgetfulKnowledge(),
         ai_provider=ai,
         sentiment_classifier=sentiment,
     )
@@ -234,11 +223,11 @@ async def open_stack(
         conversation_repository=FakeConversationRepository(),
         notification_provider=None,
         platform_provider=None,
-        settings_files=SettingsFiles(project_root=UNUSED_PROJECT_ROOT, max_bytes=1, backups_kept=1, logger=logger),
+        settings_files=SettingsFiles(project_root=UNUSED_PROJECT_ROOT, max_bytes=1, backups_kept=1, running=config, logger=logger),
         user_store=users,
         attempt_log=MemoryAttemptLog(),
         real_broker=real_broker,
-        ordering_switch=FakeOrderingSwitch(config.features),
+        ordering_switch=FakeOrderingSwitch(config.features, config.shioaji.server),
         owned_ports=owned_ports,
     )
     runtime = compose_runtime(config, logger, clock, dependencies)

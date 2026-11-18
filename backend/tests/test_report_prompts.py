@@ -12,6 +12,7 @@ from a_domain.model.fundamentals.quarter_financials import QuarterFinancials
 from a_domain.model.market.article import Article
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
+from a_domain.model.trading.signal import TradeSignal
 from a_domain.rules.fundamentals.filing import FilingDeadlineRule
 from a_domain.rules.valuation.valuation import AppraisalRule, StockValuationRule
 from a_domain.types.enums import AiAnalysisFocus, EpsBasis, EpsKind, InformationSource, MarketType, Workflow
@@ -45,8 +46,8 @@ class PromptRecorder:
 
 
 class NoHistory:
-    async def find_decision_history(self, stock_id: str, limit: int = 3) -> str:
-        return ""
+    async def decision_history(self, stock_id: str, limit: int = 3) -> list[TradeSignal]:
+        return []
 
 
 class NothingClassified:

@@ -2,10 +2,11 @@ from datetime import date, time
 from decimal import Decimal
 from functools import cached_property
 from math import ceil
-from typing import Annotated, Self
+from typing import Annotated, Any, Self, override
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic.fields import FieldInfo
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 from a_domain.model.trading.ranking_formula import RankingFormula
 from a_domain.rules.fundamentals.stock_analysis import RevenueTrendRule
@@ -14,7 +15,7 @@ from a_domain.rules.trading.account_value import AccountValueRule, PositionValue
 from a_domain.rules.trading.cost import TradingCostRule
 from a_domain.rules.trading.ranking import MonthlyRankingRule, RankingHistoryRule
 from a_domain.rules.trading.tick import LimitPriceRule, TickSizeRule
-from a_domain.types.enums import SettingUnit, ShioajiCredential, SystemEnvironment
+from a_domain.types.enums import SettingUnit, ShioajiCredential, ShioajiServer
 from a_domain.types.errors import UnknownRankingFormula
 from a_domain.types.values import FormulaId
 
@@ -319,12 +320,32 @@ class ShioajiLogin(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    simulation: bool
+    server: ShioajiServer
     api_key: SecretStr
     secret_key: SecretStr
     ca_path: str | None = None
     ca_password: SecretStr | None = None
     person_id: SecretStr | None = None
+
+
+class CredentialsOnly(PydanticBaseSettingsSource):
+    """
+    The environment or .env as ShioajiConfig reads them: its credentials alone, each by its ShioajiCredential variable.
+    Every other Shioaji setting comes from the settings files only, so no SHIOAJI_SERVER variable moves the login to
+    another server past the SinoPac page's switch and its checks.
+    """
+
+    def __init__(self, source: PydanticBaseSettingsSource) -> None:
+        super().__init__(source.settings_cls)
+        self.source = source
+
+    @override
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+        return self.source.get_field_value(field, field_name)
+
+    @override
+    def __call__(self) -> dict[str, Any]:
+        return {key: value for key, value in self.source().items() if key in set(ShioajiCredential)}
 
 
 class ShioajiConfig(BaseSettings):
@@ -333,18 +354,59 @@ class ShioajiConfig(BaseSettings):
     administrator starts on SinoPac.
 
     Credentials come from the environment or .env only, each field from its ShioajiCredential variable. Which ones a
-    login reads, and whether it is simulation, is SystemEnvironment's table: dev and test log in to Shioaji's
-    simulation server with the *_TEST key pair, prod to the real account with the production key pair and CA
-    certificate.
+    login reads is the table of `server`, ShioajiServer: the simulation server with the *_TEST key pair, the real
+    account with the production key pair and CA certificate. A machine may hold both sets, and a save switches
+    `server` without a restart (ServerSwitchRule). The environment and .env set nothing else (CredentialsOnly).
     """
 
     model_config = SettingsConfigDict(env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore", env_prefix="SHIOAJI_")
+
+    @classmethod
+    @override
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return init_settings, CredentialsOnly(env_settings), CredentialsOnly(dotenv_settings)
+
+    server: ShioajiServer = ShioajiServer.SIMULATION
+    """
+    The SinoPac server the login is made on. The SinoPac page switches it, behind the administrator's password, as
+    ServerSwitchRule allows.
+    """
 
     poll_interval_seconds: float = Field(ge=0, json_schema_extra={"steps": [0.2, 0.5, 1, 2], "unit": SettingUnit.SECONDS})
     """Wait between two reads of an order's status at the broker. It comes from config/appsetting.yaml, like max_polls."""
 
     max_polls: int = Field(gt=0, json_schema_extra={"steps": [5, 10, 20, 30]})
     """Reads of an order's status before the adapter cancels it, and again after the cancel request."""
+
+    status_timeout_seconds: float = Field(
+        default=30, ge=5, le=60, json_schema_extra={"steps": [10, 20, 30, 60], "unit": SettingUnit.SECONDS}
+    )
+    """
+    How long the broker may take to refresh the status of every order of the account today, which each read of its cash
+    and today's deals asks once. A day of many orders takes longer than the SDK's own 5 seconds. At most a minute, so a
+    page waits on it no longer than a proxy waits on the page.
+    """
+
+    odd_lot_matches: int = Field(default=3, gt=0, le=10, json_schema_extra={"operator_only": True})
+    """
+    The intraday odd-lot session's matches after its first one that an odd-lot part stays working through, its status
+    read after each, before the adapter cancels what is left. They run market_hours.odd_lot_match_seconds apart, so the
+    part works at most a couple of minutes past the first match; a board-lot part keeps max_polls. Only the file sets
+    it, beside the market hours it is counted in.
+    """
+
+    cancel_timeout_seconds: float = Field(default=15, gt=0, le=30, allow_inf_nan=False, json_schema_extra={"operator_only": True})
+    """
+    The longest the adapter waits for the broker to answer a cancel and the reads after it. Past it the order is
+    recorded FAILED with a reason that says to check the broker. compose.yml's stop_grace_period covers it.
+    """
 
     simulation_initial_cash: float = Field(
         default=1_000_000,
@@ -375,16 +437,21 @@ class ShioajiConfig(BaseSettings):
             if isinstance(field.validation_alias, str) and getattr(self, name) is not None
         )
 
-    def login(self, environment: SystemEnvironment) -> ShioajiLogin | None:
+    def missing(self, server: ShioajiServer) -> list[ShioajiCredential]:
+        """The variables a login on `server` reads that are not set, by name only."""
+        given = self.given()
+        return [credential for credential in server.credentials if credential not in given]
+
+    def login(self) -> ShioajiLogin | None:
         """
-        The login with the environment's own credentials, each by name, or None while its key pair is not set. The
-        realtime quotes need only the key pair; the SinoPac broker exists only with every credential the environment
-        reads (connect_shioaji).
+        The login on `server` with its own credentials, each by name, or None while its key pair is not set. The
+        realtime quotes need only the key pair; the SinoPac broker exists only with every credential the server reads
+        (connect_shioaji).
         """
-        match environment:
-            case SystemEnvironment.DEV | SystemEnvironment.TEST:
+        match self.server:
+            case ShioajiServer.SIMULATION:
                 credentials = {"api_key": self.api_key_test, "secret_key": self.secret_key_test}
-            case SystemEnvironment.PROD:
+            case ShioajiServer.PRODUCTION:
                 credentials = {
                     "api_key": self.api_key,
                     "secret_key": self.secret_key,
@@ -396,7 +463,7 @@ class ShioajiConfig(BaseSettings):
         if credentials["api_key"] is None or credentials["secret_key"] is None:
             return None
 
-        return ShioajiLogin.model_validate({"simulation": environment.shioaji_simulation, **credentials})
+        return ShioajiLogin.model_validate({"server": self.server, **credentials})
 
 
 class WatchlistConfig(BaseModel):

@@ -5,6 +5,7 @@ session while no session trades. A decision is followed once a follow order of i
 refused or skipped follow leaves it open, and a reset opens every decision again.
 """
 
+import asyncio
 from datetime import timedelta
 
 import pytest
@@ -291,7 +292,7 @@ class RealBroker:
     def link(self) -> BrokerLink:
         return BrokerLink(broker=ExecutionProvider.SHIOAJI, up=True, simulation=True)
 
-    async def place_order(self, order: Order, refusal_now: SendRefusal) -> Order:
+    async def place_order(self, order: Order, refusal_now: SendRefusal, stop: asyncio.Event) -> Order:
         self.calls.append("place_order")
         raise AssertionError("a follow sent an order to the real broker")
 

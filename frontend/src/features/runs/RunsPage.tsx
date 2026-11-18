@@ -126,7 +126,8 @@ function StartPanel({ kinds: shownKinds }: { kinds: readonly Kind[] }) {
   const question = useStartQuestion(kinds)
   const [confirming, setConfirming] = useState<RunKind | null>(null)
   const [chosen, setChosen] = useState<Broker>('mock')
-  const broker = chosenOffer(offers, chosen).broker
+  const offer = chosenOffer(offers, chosen)
+  const broker = offer.broker
   const [stockText, setStockText] = useState('')
   const stocks = parseStockIds(stockText)
   const confirmingOrders = KINDS.some((item) => item.kind === confirming && item.orders)
@@ -140,7 +141,7 @@ function StartPanel({ kinds: shownKinds }: { kinds: readonly Kind[] }) {
     const kind = confirming
     setConfirming(null)
     start.mutate(
-      { kind, stockIds: stocks.ids, broker },
+      { kind, stockIds: stocks.ids, offer },
       {
         onSuccess: (accepted) => {
           toast.success(t('started', { kind: t(`kind.${kind}.title`) }))

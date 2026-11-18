@@ -19,8 +19,11 @@ from a_domain.types.errors import (
     AlreadySetUpError,
     BacktestPeriodUnavailable,
     BriefLimitReached,
+    BrokerNotAnswering,
+    BrokerServerChanged,
     BrokerUnavailable,
     FeatureHidden,
+    FollowAccountChanged,
     FollowBrokerNotOffered,
     FollowTimeNotOffered,
     GoogleConfirmationRequired,
@@ -58,6 +61,7 @@ from d_presentation.web.session import (
     NotFound,
     NothingToFollow,
     NotSimulation,
+    OrderingOff,
     OutsideFollowWindow,
     SetupCodeRefused,
     UnknownHost,
@@ -87,10 +91,10 @@ in dev and test and on the real account in prod, each BUY within trading.max_ord
 trading.max_daily_buy_value (`GET /v1/account/brokers` names them). A follow (`POST /v1/runs/{run_id}/follow`) places a
 finished Full Cycle's open decisions in the user's mock account only, priced again: at a fresh realtime quote in
 continuous trading, or on a site without realtime quotes at the last session's official close while no session
-trades. A ranking follow (`POST /v1/rankings/follow`) brings that mock account to the monthly ranking's latest decision,
-priced the same way; with `broker=shioaji` an administrator the site lets order on SinoPac follows the ranking into
-SinoPac's simulation account instead, and only there: on a login that is not on SinoPac's simulation server it answers
-403 `not_simulation` and every order of a ranking follow is refused, whatever the settings.
+trades. A ranking follow (`POST /v1/rankings/follow`) brings the user's follow account to the monthly ranking's latest
+decision, priced the same way: the mock account, or SinoPac's simulation account for an administrator the site lets
+order on SinoPac who chose it on My settings, and only there: on a login that is not on SinoPac's simulation server it
+answers 403 `not_simulation` and every order of a ranking follow is refused, whatever the settings.
 No endpoint cancels or modifies an order.
 
 Open data. A public site (`audience: public`) uses only the TWSE and TPEX OpenAPI data the server archives: daily
@@ -114,15 +118,17 @@ decision session the site's daily history holds, and `GET /v1/rankings/backtest?
 against the ranking.benchmark_id held over the same sessions. `GET /v1/rankings/formulas?first=&last=` replays every
 formula over the same period and costs, and again at a liquidity floor, as the evidence beside the choice. All read only
 the held history and the archived monthly revenue, which `just backfill-history` brings back; they ask no AI, touch no
-account and never order. `GET /v1/rankings/follow` answers the user's mock account against that ranking, its return
-since it first followed it against the benchmark, and its follows with the account and the formula each used; `POST
-/v1/rankings/follow` brings the account its `broker` query names to the ranking, the user's mock account by default,
-as a run that orders on that account only and keeps the formula it used. `broker=shioaji` is SinoPac's simulation
-account, for an administrator the site lets order on SinoPac: a ranking follow is refused while the site's SinoPac
-login is not on the simulation server, so it never orders with real money. `PUT /v1/rankings/follow/schedule` lets the
-user schedule that follow and choose its account: from the time they choose, on the first session after each new
-decision, the server starts the same run by itself, once per decision, on the account the schedule names and on no
-other, and its record says the schedule started it. No other run starts without a request.
+account and never order. Each user follows the ranking on one follow account, chosen on My settings (`PUT
+/v1/rankings/follow/account`): the mock account, or SinoPac's simulation account for an administrator the site lets
+order on SinoPac. `GET /v1/rankings/follow` answers that account against the ranking, why a follow may not start there
+now, the mock account's return since it first followed against the benchmark, and the user's follows with the account
+and the formula each used; `POST /v1/rankings/follow` brings the follow account to the ranking, as a run that orders on
+that account only and keeps the formula it used. A ranking follow is refused while the site's SinoPac login is not on
+the simulation server, so it never orders with real money, and a follow account the site does not let the user follow
+on now is refused, never swapped for the mock account. `PUT /v1/rankings/follow/schedule` lets the user schedule that
+follow without changing the account: from the time they choose, on the first session after each new decision, the
+server starts the same run by itself, once per decision, on the follow account and on no other, and its record says the
+schedule started it. No other run starts without a request.
 
 The server replays `accounts.max_concurrent_backtests` strategy backtests and ranking backtests at once, and one more
 waits its turn. A user's request past `accounts.max_backtests_per_user` replaying or waiting answers 429
@@ -181,6 +187,7 @@ ERROR_ANSWERS: dict[type[Exception], tuple[int, ErrorCode]] = {
     RealBrokerRefused: (status.HTTP_403_FORBIDDEN, ErrorCode.REAL_BROKER_REFUSED),
     BrokerUnavailable: (status.HTTP_403_FORBIDDEN, ErrorCode.BROKER_UNAVAILABLE),
     NotSimulation: (status.HTTP_403_FORBIDDEN, ErrorCode.NOT_SIMULATION),
+    OrderingOff: (status.HTTP_403_FORBIDDEN, ErrorCode.ORDERING_OFF),
     FollowBrokerNotOffered: (status.HTTP_403_FORBIDDEN, ErrorCode.FOLLOW_BROKER_NOT_OFFERED),
     RealtimeQuotesUnavailable: (status.HTTP_403_FORBIDDEN, ErrorCode.REALTIME_QUOTES_UNAVAILABLE),
     MopsUnavailable: (status.HTTP_403_FORBIDDEN, ErrorCode.MOPS_UNAVAILABLE),
@@ -198,6 +205,8 @@ ERROR_ANSWERS: dict[type[Exception], tuple[int, ErrorCode]] = {
     RunInProgress: (status.HTTP_409_CONFLICT, ErrorCode.RUN_IN_PROGRESS),
     NothingToFollow: (status.HTTP_409_CONFLICT, ErrorCode.NOTHING_TO_FOLLOW),
     OutsideFollowWindow: (status.HTTP_409_CONFLICT, ErrorCode.OUTSIDE_FOLLOW_WINDOW),
+    FollowAccountChanged: (status.HTTP_409_CONFLICT, ErrorCode.FOLLOW_ACCOUNT_CHANGED),
+    BrokerServerChanged: (status.HTTP_409_CONFLICT, ErrorCode.BROKER_SERVER_CHANGED),
     SettingsEditError: (status.HTTP_422_UNPROCESSABLE_CONTENT, ErrorCode.SETTINGS_EDIT_REFUSED),
     AiModelNotOffered: (status.HTTP_422_UNPROCESSABLE_CONTENT, ErrorCode.AI_MODEL_NOT_OFFERED),
     FollowTimeNotOffered: (status.HTTP_422_UNPROCESSABLE_CONTENT, ErrorCode.FOLLOW_TIME_NOT_OFFERED),
@@ -210,11 +219,12 @@ ERROR_ANSWERS: dict[type[Exception], tuple[int, ErrorCode]] = {
     AiAllowanceSpentError: (status.HTTP_429_TOO_MANY_REQUESTS, ErrorCode.AI_ALLOWANCE_SPENT),
     BriefLimitReached: (status.HTTP_429_TOO_MANY_REQUESTS, ErrorCode.BRIEF_LIMIT_REACHED),
     ListingUnavailableError: (status.HTTP_503_SERVICE_UNAVAILABLE, ErrorCode.LISTING_UNAVAILABLE),
+    BrokerNotAnswering: (status.HTTP_503_SERVICE_UNAVAILABLE, ErrorCode.BROKER_NOT_ANSWERING),
 }
 """
 The status and the code each refusal a route lets through answers, with its message as the detail: each refusal
 names its code here, once. 401 is the only answer that signs the web app out; 403 says signed in, but not allowed;
-409 says read again or wait for the run; 429 says later.
+409 says read again or wait for the run; 429 says later; 503 says a source did not answer, so ask again.
 """
 
 

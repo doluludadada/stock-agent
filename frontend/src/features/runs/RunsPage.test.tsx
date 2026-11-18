@@ -55,8 +55,8 @@ describe('a run the server refuses to start', { timeout: 20_000 }, () => {
   })
 })
 
-const MOCK = { broker: 'mock', simulation: null, max_order_value: null, max_daily_buy_value: null }
-const SINOPAC = { broker: 'shioaji', simulation: true, max_order_value: 100_000, max_daily_buy_value: 300_000 }
+const MOCK = { broker: 'mock', server: null, max_order_value: null, max_daily_buy_value: null }
+const SINOPAC = { broker: 'shioaji', server: 'simulation', max_order_value: 100_000, max_daily_buy_value: 300_000 }
 
 /** The runs page against a server that offers these brokers and answers a start of Buzz with `answer`. */
 function serveBuzz(brokers: unknown[], answer: { status: number; body: unknown } = { status: 202, body: { run_id: '44444444-4444-4444-8444-444444444444' } }) {
@@ -124,25 +124,39 @@ describe('the account a Buzz run orders on', { timeout: 20_000 }, () => {
     expect(within(accounts).getByRole('radio', { name: 'Mock account' })).toHaveAttribute('aria-checked', 'true')
     expect(within(dialog).queryByText(/NT\$/)).not.toBeInTheDocument()
 
-    await user.click(within(accounts).getByRole('radio', { name: 'SinoPac' }))
-    expect(within(dialog).getByText('SinoPac: simulation, no real money')).toBeVisible()
+    await user.click(within(accounts).getByRole('radio', { name: 'SinoPac account · Simulation' }))
+    expect(within(dialog).getByText('SinoPac account: Simulation, no real money')).toBeVisible()
     expect(within(dialog).getByText('Each BUY up to NT$100,000, and BUYs up to NT$300,000 per Taiwan day. The server refuses a BUY past them.')).toBeVisible()
     await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
 
     dialog = await openBuzz(user)
     expect(within(dialog).getByRole('radio', { name: 'Mock account' })).toHaveAttribute('aria-checked', 'true')
-    await user.click(within(dialog).getByRole('radio', { name: 'SinoPac' }))
+    await user.click(within(dialog).getByRole('radio', { name: 'SinoPac account · Simulation' }))
     await user.click(within(dialog).getByRole('button', { name: 'Start the run' }))
-    await waitFor(() => expect(starts).toEqual(['/v1/runs/buzz-scan?broker=shioaji']))
+    await waitFor(() => expect(starts).toEqual(['/v1/runs/buzz-scan?broker=shioaji&server=simulation']))
   })
 
-  it('says plainly when SinoPac is the live account with real money', async () => {
-    serveBuzz([MOCK, { ...SINOPAC, simulation: false }])
+  it('says plainly when SinoPac is on production with real money', async () => {
+    serveBuzz([MOCK, { ...SINOPAC, server: 'production' }])
     const user = userEvent.setup()
 
     const dialog = await openBuzz(user)
-    await user.click(await within(dialog).findByRole('radio', { name: 'SinoPac' }))
-    expect(within(dialog).getByText('SinoPac: live account, real money')).toBeVisible()
+    await user.click(await within(dialog).findByRole('radio', { name: 'SinoPac account · Production' }))
+    expect(within(dialog).getByText('SinoPac account: Production, real money')).toBeVisible()
+  })
+
+  it('sends the server the dialog showed, and says nothing started when SinoPac was switched since', async () => {
+    const changed = { status: 409, body: { detail: 'SinoPac is on its simulation server now.', code: 'broker_server_changed' } }
+    const starts = serveBuzz([MOCK, { ...SINOPAC, server: 'production' }], changed)
+    const user = userEvent.setup()
+
+    const dialog = await openBuzz(user)
+    await user.click(await within(dialog).findByRole('radio', { name: 'SinoPac account · Production' }))
+    await user.click(within(dialog).getByRole('button', { name: 'Start the run' }))
+    await waitFor(() => expect(starts).toEqual(['/v1/runs/buzz-scan?broker=shioaji&server=production']))
+    expect(
+      await screen.findByText('SinoPac’s server changed after this page showed it, so nothing started. Check the server and confirm again.'),
+    ).toBeVisible()
   })
 
   it('says to use the mock account when the broker has no login now', async () => {
@@ -150,7 +164,7 @@ describe('the account a Buzz run orders on', { timeout: 20_000 }, () => {
     const user = userEvent.setup()
 
     const dialog = await openBuzz(user)
-    await user.click(await within(dialog).findByRole('radio', { name: 'SinoPac' }))
+    await user.click(await within(dialog).findByRole('radio', { name: 'SinoPac account · Simulation' }))
     await user.click(within(dialog).getByRole('button', { name: 'Start the run' }))
     expect(await screen.findByText('The broker has no login on this site now. Start on the mock account, or try again later.')).toBeVisible()
   })
@@ -161,13 +175,13 @@ describe('the account a Buzz run orders on', { timeout: 20_000 }, () => {
 
     expect(await within(await buzzCard()).findByText('Places orders')).toBeVisible()
     const dialog = await openBuzz(user)
-    expect(within(dialog).getByRole('radio', { name: 'SinoPac' })).toHaveAttribute('aria-checked', 'false')
+    expect(within(dialog).getByRole('radio', { name: 'SinoPac account · Simulation' })).toHaveAttribute('aria-checked', 'false')
     expect(within(dialog).queryByText(/Orders go to your mock account\./)).not.toBeInTheDocument()
-    await user.click(within(dialog).getByRole('radio', { name: 'SinoPac' }))
-    expect(within(dialog).getByText('SinoPac: simulation, no real money')).toBeVisible()
+    await user.click(within(dialog).getByRole('radio', { name: 'SinoPac account · Simulation' }))
+    expect(within(dialog).getByText('SinoPac account: Simulation, no real money')).toBeVisible()
 
     await user.click(within(dialog).getByRole('button', { name: 'Start the run' }))
-    await waitFor(() => expect(starts).toEqual(['/v1/runs/buzz-scan?broker=shioaji']))
+    await waitFor(() => expect(starts).toEqual(['/v1/runs/buzz-scan?broker=shioaji&server=simulation']))
   })
 
   it('offers no workflow that orders where the site shows the user no account to order on', async () => {

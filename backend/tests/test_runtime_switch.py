@@ -18,7 +18,7 @@ from trading_stack import run_stats
 
 import c_infrastructure.database.models.schema_version_dto as schema_version
 from a_domain.model.trading.account import Position
-from a_domain.types.enums import Audience, ExecutionProvider, OrderStatus, RejectReason, SettingsFile
+from a_domain.types.enums import Audience, ExecutionProvider, OrderStatus, RejectReason, SettingsFile, ShioajiServer
 from a_domain.types.ids import RunId
 from b_application.config.app_config import AppConfig
 from b_application.schemas.pipeline_status import PipelineStatus
@@ -296,11 +296,10 @@ async def test_a_runtime_that_fails_to_open_closes_what_it_opened_and_the_curren
 
 @pytest.fixture
 def real_project(project: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """The project copy started by the real opener: Chroma inside it, the session's database, placeholder keys, no .env."""
+    """The project copy started by the real opener: the session's database, placeholder keys, no .env."""
     monkeypatch.chdir(project)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "placeholder")
     monkeypatch.setenv("ACCOUNTS_KEY", "A" * 43)
-    edit(project, 'chroma_persist_path: "chroma_data"', f'chroma_persist_path: "{project / "chroma"}"')
     return project
 
 
@@ -337,6 +336,43 @@ async def test_a_reload_onto_a_database_of_an_older_schema_is_refused_and_the_ru
     assert refused is not None and temperature == 0.7
     [problem] = refused.problems
     assert f"The database is at schema version {SCHEMA_VERSION - 1}" in problem.message and "just db-migrate" in problem.message
+
+
+@pytest.mark.parametrize("moment", ["before-the-order", "between-the-order-and-its-send"])
+async def test_a_run_on_the_login_of_the_server_before_a_switch_orders_nothing_although_ordering_is_on_again(
+    project: Path, moment: str
+) -> None:
+    """
+    A run that started before a save switched shioaji.server keeps its runtime, whose login is on the old server. The
+    settings on disk then name the other server with ordering on, as once an administrator turned it on again after the
+    switch: the run's order is refused at its preparation, or right before its exchange order, never sent to the old login.
+    """
+    edit(project, 'sinopac_ordering: "off"', "sinopac_ordering: administrators")
+    harness = build_harness(sinopac=True)
+    harness.list_stock("2317", rising_history(100.0), realtime_price=80.0)
+    harness.real_broker.positions = [Position(stock_id="2317", quantity=1000, average_cost=100.0)]
+    config = harness.config.model_copy(update={"features": load_settings(project).features})
+    dependencies = replace(harness.dependencies, ordering_switch=SettingsFileOrderingSwitch(project))
+    pipeline = compose_runtime(config, harness.logger, harness.clock, dependencies).pipeline_for(
+        harness.administrator, ExecutionProvider.SHIOAJI
+    )
+
+    if moment == "before-the-order":
+        edit(project, "server: simulation", "server: production")
+    else:
+        harness.real_broker.before_send = lambda: edit(project, "server: simulation", "server: production")
+
+    status = await pipeline.run_intraday()
+
+    assert config.shioaji.server == ShioajiServer.SIMULATION and harness.real_broker.link().simulation is True
+    assert harness.real_broker.placed == []
+    assert [(order.status, order.reason) for order in status.orders] == [
+        (
+            OrderStatus.REJECTED,
+            f"{RejectReason.BROKER_SERVER_MISMATCH.name}: the shioaji login is not on the production server shioaji.server "
+            "names on disk now",
+        )
+    ]
 
 
 async def test_a_process_that_never_reloads_stops_ordering_once_the_settings_on_disk_turn_sinopac_ordering_off(project: Path) -> None:

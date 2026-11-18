@@ -24,7 +24,8 @@ from pydantic.json_schema import GenerateJsonSchema
 from pydantic_core import ErrorDetails, core_schema, to_jsonable_python
 
 from a_domain.ports.system.settings_files import SettingChange, SettingField, SettingsEdit, SettingsProblem
-from a_domain.types.enums import Audience, InstructionKey, SettingGroup, SettingKind, SettingsFile, SystemEnvironment
+from a_domain.rules.system.settings_change import ServerSwitchRule
+from a_domain.types.enums import InstructionKey, SettingGroup, SettingKind, SettingsFile
 from a_domain.types.errors import SettingsEditError
 from a_domain.types.values import FormulaId
 from b_application.config.app_config import AppConfig
@@ -936,28 +937,25 @@ class TradingSetupError(RuntimeError):
 
 
 def startup_settings(
-    project_root: Path,
-    candidates: Mapping[SettingsFile, str] | None = None,
-    environment: SystemEnvironment | None = None,
-    audience: Audience | None = None,
+    project_root: Path, candidates: Mapping[SettingsFile, str] | None = None, running: AppConfig | None = None
 ) -> AppConfig:
     """
     The settings a start, a reload or a Web save opens the app on, through every check startup runs before it opens
     anything: the load (each file parsed, every key the app would not read refused, every value validated), the trading
-    setup, the environment and the audience the process started in (`environment` and `audience`, None at its first
-    start), the accounts key, open registration beside the real account, sign-in with Google half set up or at an
-    address that is not safe, a scheduled follow's time outside continuous trading, the AI's web and X search on an audience
-    without news articles, and every offered AI provider's model id and key. Raises one InvalidSettingsError with every
-    refusal located once, never a value.
+    setup, the environment and the audience the running process started in and the SinoPac server it logs in to
+    (`running`, the settings it runs on now, None at its first start), the accounts key, sign-in with Google half set
+    up or at an address that is not safe, a scheduled follow's time outside continuous trading, the AI's web and X
+    search on an audience without news articles, and every offered AI provider's model id and key. Raises one
+    InvalidSettingsError with every refusal located once, never a value.
     """
     texts = settings_texts(project_root, candidates)
     config = load_settings(project_root, texts)
 
     try:
         validate_trading_environment(config)
-        validate_started_setup_unchanged(config, environment or config.environment, audience or config.audience)
+        validate_started_setup_unchanged(config, running)
+        validate_shioaji_server(config, running)
         validate_accounts_environment(config)
-        validate_registration(config)
         validate_google_sign_in(config)
         validate_follow_times(config)
     except (TradingSetupError, AccountsSetupError) as error:
@@ -965,6 +963,19 @@ def startup_settings(
 
     validate_ai_setup(config, texts)
     return config
+
+
+def production_notice(config: AppConfig) -> list[str]:
+    """
+    What a start says, without refusing it, when the site's SinoPac login is on the production server: the real
+    account, and whether features.sinopac_ordering lets anyone order on it. A switch and a deploy leave that state, so
+    it is said, never refused.
+    """
+    if config.shioaji.server.simulation:
+        return []
+
+    server, ordering = config.shioaji.server.value, config.features.sinopac_ordering.value
+    return [f"SinoPac's login is on the {server} server, real money: features.sinopac_ordering is {ordering}"]
 
 
 def validate_ai_setup(config: AppConfig, texts: Mapping[SettingsFile, str]) -> None:
@@ -995,40 +1006,50 @@ def validate_ai_setup(config: AppConfig, texts: Mapping[SettingsFile, str]) -> N
 
 def validate_trading_environment(config: AppConfig) -> None:
     """
-    Refuses a setup that could reach data or a credential the environment must not see, before any broker or database
-    is contacted. What each environment allows is SystemEnvironment's table:
-
-    dev and test refuse to start while a production Shioaji credential is set.
-    Which broker a run orders on is the run's own choice, and the order gates check at each order that a real broker's
-    login is on the server the environment trades on.
+    Refuses a setup that holds a credential the environment must not see, before any broker or database is contacted:
+    SystemEnvironment.refused_credentials. Which server the login is on is ServerSwitchRule's (validate_shioaji_server).
     """
     environment = config.environment
 
     if refused := [credential.value for credential in environment.refused_credentials if credential in config.shioaji.given()]:
-        raise TradingSetupError(
-            f"environment {environment.value} refuses to start while {', '.join(refused)} is set: the production Shioaji "
-            "credentials belong only in the production machine's environment or .env",
-            "environment",
-        )
+        raise TradingSetupError(f"environment {environment.value} refuses to start while {', '.join(refused)} is set", "environment")
 
 
-def validate_started_setup_unchanged(config: AppConfig, environment: SystemEnvironment, audience: Audience) -> None:
+def validate_shioaji_server(config: AppConfig, running: AppConfig | None) -> None:
+    """The server shioaji.server names, through ServerSwitchRule, from the one the running process logs in to, if any."""
+    rule = ServerSwitchRule(servers=config.environment.shioaji_servers)
+    refusal = rule.apply(
+        None if running is None else running.shioaji.server,
+        config.shioaji.server,
+        config.features.sinopac_ordering,
+        config.shioaji.given(),
+        config.accounts.registration_open,
+    )
+
+    if refusal is not None:
+        raise TradingSetupError(str(refusal), refusal.reason.setting)
+
+
+def validate_started_setup_unchanged(config: AppConfig, running: AppConfig | None) -> None:
     """
     A process keeps the environment and the audience it started in: the environment decides which credentials it reads,
     and the audience which sources it may reach and whom it may show them, so a public site never starts asking a news site or
     Shioaji because a save said so. A settings change on disk or from the Web that changes either is refused, and the
-    running settings keep serving.
+    running settings keep serving. A first start (`running` None) passes.
     """
-    if config.environment != environment:
+    if running is None:
+        return
+
+    if config.environment != running.environment:
         raise TradingSetupError(
-            f"environment is {config.environment.value} in the settings, but this process started as {environment.value}: "
+            f"environment is {config.environment.value} in the settings, but this process started as {running.environment.value}: "
             "the environment changes only when the app restarts",
             "environment",
         )
 
-    if config.audience != audience:
+    if config.audience != running.audience:
         raise TradingSetupError(
-            f"audience is {config.audience.value} in the settings, but this process started as {audience.value}: "
+            f"audience is {config.audience.value} in the settings, but this process started as {running.audience.value}: "
             "the audience changes only when the app restarts",
             "audience",
         )
@@ -1113,19 +1134,6 @@ def validate_follow_times(config: AppConfig) -> None:
             f"ranking.follow_times offers {', '.join(f'{offer:%H:%M}' for offer in outside)} outside continuous trading, which "
             f"market_hours sets from {hours.continuous_start:%H:%M} to before {hours.closing_auction_start:%H:%M}",
             "ranking.follow_times",
-        )
-
-
-def validate_registration(config: AppConfig) -> None:
-    """
-    Refuses open registration where the Shioaji login is the real account (prod): a stranger could register on the
-    installation that holds the production credentials.
-    """
-    if config.accounts.registration_open and not config.environment.shioaji_simulation:
-        raise AccountsSetupError(
-            f"environment {config.environment.value} refuses to start while accounts.registration_open is true: its "
-            "Shioaji login is the real account. Set accounts.registration_open to false in config/appsetting.yaml",
-            "accounts.registration_open",
         )
 
 

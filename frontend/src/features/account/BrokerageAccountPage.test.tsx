@@ -1,5 +1,6 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, within } from '@testing-library/react'
+import { focusManager, QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { act, render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { I18nextProvider } from 'react-i18next'
 import { MemoryRouter } from 'react-router'
 import { initI18n } from '@/i18n'
@@ -8,6 +9,7 @@ import { siteShowing } from '@/test/features'
 import { TEST_ADMIN, TEST_USER } from '@/test/users'
 import type { BrokerageAccount, BrokerageStatement } from './api'
 import { BrokerageAccountPage } from './BrokerageAccountPage'
+import type { SaveConfirmationProps } from '@/shared/api'
 
 const HOLDER: User = { ...TEST_ADMIN, permissions: [...TEST_ADMIN.permissions, 'use_real_broker'] }
 
@@ -27,7 +29,18 @@ const STATEMENT: BrokerageStatement = {
   unrealized_pnl: 100_500,
   realized_pnl: 7_250,
 }
-const SIMULATION: BrokerageAccount = { simulation: true, login_up: true, ordering: false, statement: { ...STATEMENT, simulation: true } }
+const SIMULATION: BrokerageAccount = {
+  server: 'simulation',
+  switch_refusal: null,
+  login_up: true,
+  login_down: false,
+  ordering: false,
+  simulation_initial_cash: 1_000_000,
+  statement: { ...STATEMENT, simulation: true },
+}
+const PRODUCTION: BrokerageAccount = { ...SIMULATION, server: 'production', simulation_initial_cash: null, statement: STATEMENT }
+
+const NOT_ANSWERING = { detail: 'Shioaji answered TimeoutError', code: 'broker_not_answering' }
 
 const LISTING: Record<string, string> = { '2330': '台積電', '2317': '鴻海' }
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -52,13 +65,40 @@ function serve(account: () => Response) {
   return asked
 }
 
-function open(user: User = HOLDER) {
+/**
+ * The settings save's confirmation as far as this page sees it: the dialog says the page's words and what it holds, and
+ * its confirm, held until the page's own field is filled, saves `changes` here. The settings feature's own dialog and
+ * save are tested on their page and in app/brokerage.test.tsx.
+ */
+function recordingConfirmation(saved: SaveConfirmationProps['changes'][]) {
+  return function Confirmation({ open, changes, onSaved, title, description, children, ready = true }: SaveConfirmationProps) {
+    if (!open) return null
+    return (
+      <dialog open aria-label={title}>
+        <p>{description}</p>
+        {children}
+        <button
+          type="button"
+          disabled={!ready}
+          onClick={() => {
+            saved.push(changes)
+            onSaved()
+          }}
+        >
+          Confirm
+        </button>
+      </dialog>
+    )
+  }
+}
+
+function open(user: User = HOLDER, saved: SaveConfirmationProps['changes'][] = []) {
   session.signIn(user)
   render(
     <I18nextProvider i18n={initI18n('en')}>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <MemoryRouter>
-          <BrokerageAccountPage />
+          <BrokerageAccountPage Confirmation={recordingConfirmation(saved)} />
         </MemoryRouter>
       </QueryClientProvider>
     </I18nextProvider>,
@@ -71,28 +111,32 @@ describe('the SinoPac account', () => {
   afterEach(() => {
     session.signOut()
     vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+    focusManager.setFocused(undefined)
   })
 
-  it('says at the top that it shows the simulation server, and that ordering is off', async () => {
+  it('says at the top that it is the SinoPac account on Simulation, logged in, and that ordering is off', async () => {
     serve(() => json(SIMULATION))
     open()
 
-    expect(await screen.findByText('Simulation server, no real money')).toBeVisible()
-    expect(screen.queryByText('Real account')).not.toBeInTheDocument()
-    expect(screen.getByText(ORDERING_OFF)).toBeVisible()
+    expect(await screen.findByText('SinoPac’s Simulation server: no real money.')).toBeVisible()
+    expect(screen.getAllByText('Simulation')[0], 'the server’s label').toBeVisible()
+    expect(screen.getByText('Logged in')).toBeVisible()
+    expect(screen.queryByText(/real account/)).not.toBeInTheDocument()
+    expect(screen.getAllByText(ORDERING_OFF)[0]).toBeVisible()
     expect(screen.getByText('The broker’s own figures, read 11/13/2026, 14:00.')).toBeVisible()
     expect(await screen.findByRole('link', { name: 'My holdings' })).toHaveAttribute('href', '/holdings')
   })
 
   it('says it shows the real account, and that a run started on SinoPac can order within the BUY limits', async () => {
-    serve(() => json({ ...SIMULATION, simulation: false, ordering: true, statement: STATEMENT }))
+    serve(() => json({ ...PRODUCTION, ordering: true }))
     open()
 
-    expect(await screen.findByText('Real account')).toBeVisible()
+    expect(await screen.findByText('SinoPac’s Production server: the real account, real money.')).toBeVisible()
     expect((await screen.findByText('Bank balance')).parentElement).toHaveTextContent('405,000')
     expect(screen.queryByText(/the cash here is the site’s figure/)).not.toBeInTheDocument()
-    expect(screen.queryByText('Simulation server, no real money')).not.toBeInTheDocument()
-    expect(screen.getByText('Ordering on')).toBeVisible()
+    expect(screen.queryByText('SinoPac’s Simulation server: no real money.')).not.toBeInTheDocument()
+    expect(screen.getAllByText('Ordering on')[0]).toBeVisible()
     expect(screen.queryByText(ORDERING_OFF)).not.toBeInTheDocument()
   })
 
@@ -104,7 +148,7 @@ describe('the SinoPac account', () => {
     expect(screen.queryByText('Bank balance')).not.toBeInTheDocument()
     expect(
       screen.getByText(
-        'SinoPac’s simulation server reports no cash balance, so the cash here is the site’s figure: the simulation account’s starting cash (a setting), less what the holdings and today’s purchases cost, plus the profit and loss of every sale SinoPac lists, taken as after fees and tax.',
+        'SinoPac’s Simulation reports no cash balance, so the cash here is the site’s figure: the account’s starting cash on Simulation (a setting), less what the holdings and today’s purchases cost, plus the profit and loss of every sale SinoPac lists, taken as after fees and tax.',
       ),
     ).toBeVisible()
     expect(screen.getByText('Realized P&L since 8/15').parentElement).toHaveTextContent('+7,250')
@@ -133,15 +177,27 @@ describe('the SinoPac account', () => {
   })
 
   it('with the login down, says so, says the site retries, and asks for nothing of the account', async () => {
-    const asked = serve(() => json({ ...SIMULATION, login_up: false, statement: null }))
+    const asked = serve(() => json({ ...SIMULATION, login_up: false, login_down: true, statement: null }))
     open()
 
     expect(await screen.findByText('The site’s SinoPac login is down')).toBeVisible()
     expect(screen.getByText('The site reconnects by itself.')).toBeVisible()
-    expect(screen.getByText('Simulation server, no real money'), 'the server still says which it is').toBeVisible()
-    expect(screen.getByText(ORDERING_OFF)).toBeVisible()
+    expect(screen.getByText('SinoPac’s Simulation server: no real money.'), 'the server still says which it is').toBeVisible()
+    expect(screen.getByText('Not logged in')).toBeVisible()
+    expect(screen.getAllByText(ORDERING_OFF)[0]).toBeVisible()
     expect(screen.queryByRole('table')).not.toBeInTheDocument()
     expect(asked.filter((url) => url.startsWith('/v1/account/trades'))).toEqual([])
+  })
+
+  it('with the login up but no SinoPac account on it, as after a CA certificate that would not activate, says ordering is unavailable and promises no reconnect', async () => {
+    serve(() => json({ ...PRODUCTION, login_up: false, login_down: false, statement: null }))
+    open()
+
+    expect(await screen.findByText('SinoPac ordering is unavailable on this login')).toBeVisible()
+    expect(screen.getByText(/The server’s log says why\./)).toBeVisible()
+    expect(screen.getByText('Unavailable')).toBeVisible()
+    expect(screen.queryByText('Not logged in')).not.toBeInTheDocument()
+    expect(screen.queryByText('The site reconnects by itself.')).not.toBeInTheDocument()
   })
 
   it('says each empty list in words', async () => {
@@ -167,6 +223,147 @@ describe('the SinoPac account', () => {
     open()
 
     expect(await screen.findByText('For administrators only')).toBeVisible()
+  })
+
+  it('switches to Production only once the server’s name is typed, sending the server and ordering off in one save', async () => {
+    const user = userEvent.setup({ delay: null })
+    const saved: SaveConfirmationProps['changes'][] = []
+    serve(() => json(SIMULATION))
+    open(HOLDER, saved)
+
+    await user.click(await screen.findByRole('button', { name: 'Switch to Production…' }))
+    const dialog = screen.getByRole('dialog', { name: 'Switch to Production?' })
+    expect(within(dialog).getByText('Every order on SinoPac from now on is real money.')).toBeVisible()
+    expect(within(dialog).getByText('Ordering on SinoPac turns off. Turn it on again here to order.')).toBeVisible()
+    expect(within(dialog).getByText('The SinoPac login restarts on the new server, and the quotes come from it too.')).toBeVisible()
+    expect(within(dialog).getByText('A ranking follow, by hand or by schedule, never orders on Production.')).toBeVisible()
+    const confirm = within(dialog).getByRole('button', { name: 'Confirm' })
+    expect(confirm, 'held until the name is typed').toBeDisabled()
+
+    await user.type(within(dialog).getByLabelText('Type Production to confirm'), 'Productio')
+    expect(confirm).toBeDisabled()
+    await user.type(within(dialog).getByLabelText('Type Production to confirm'), 'n')
+    await user.click(confirm)
+
+    expect(saved).toEqual([
+      [
+        { path: 'shioaji.server', value: 'production' },
+        { path: 'features.sinopac_ordering', value: 'off' },
+      ],
+    ])
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('keeps the switch to Production off and names the variables the server lacks, never asking for a value', async () => {
+    serve(() => json({ ...SIMULATION, switch_refusal: { reason: 'credentials_missing', server: 'production', missing: ['SHIOAJI_CA_PATH', 'SHIOAJI_PERSON_ID'] } }))
+    open()
+
+    expect(await screen.findByRole('button', { name: 'Switch to Production…' })).toBeDisabled()
+    expect(screen.getByText('Production needs these variables in the server’s .env, which are not set yet:')).toBeVisible()
+    expect(screen.getByText('SHIOAJI_CA_PATH')).toBeVisible()
+    expect(screen.getByText('SHIOAJI_PERSON_ID')).toBeVisible()
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+  })
+
+  it('on a developer’s machine offers no switch to Production', async () => {
+    serve(() => json({ ...SIMULATION, switch_refusal: { reason: 'environment', server: 'production', missing: [] } }))
+    open()
+
+    expect(await screen.findByRole('button', { name: 'Switch to Production…' })).toBeDisabled()
+    expect(screen.getByText('This machine’s environment does not log in to Production.')).toBeVisible()
+  })
+
+  it('switches back to Simulation without a typed name, turning ordering off too', async () => {
+    const user = userEvent.setup({ delay: null })
+    const saved: SaveConfirmationProps['changes'][] = []
+    serve(() => json({ ...PRODUCTION, ordering: true }))
+    open(HOLDER, saved)
+
+    await user.click(await screen.findByRole('button', { name: 'Switch to Simulation…' }))
+    await user.click(within(screen.getByRole('dialog', { name: 'Switch to Simulation?' })).getByRole('button', { name: 'Confirm' }))
+
+    expect(saved).toEqual([
+      [
+        { path: 'shioaji.server', value: 'simulation' },
+        { path: 'features.sinopac_ordering', value: 'off' },
+      ],
+    ])
+  })
+
+  it('turns ordering on for administrators and off again, saying on Production that it is real money', async () => {
+    const user = userEvent.setup({ delay: null })
+    const saved: SaveConfirmationProps['changes'][] = []
+    serve(() => json(PRODUCTION))
+    open(HOLDER, saved)
+
+    await user.click(await screen.findByRole('button', { name: 'Turn ordering on…' }))
+    const dialog = screen.getByRole('dialog', { name: 'Turn ordering on SinoPac on?' })
+    expect(within(dialog).getByText('This account is on Production: every order is real money.')).toBeVisible()
+    await user.click(within(dialog).getByRole('button', { name: 'Confirm' }))
+
+    expect(saved).toEqual([[{ path: 'features.sinopac_ordering', value: 'administrators' }]])
+  })
+
+  it('shows the starting cash on Simulation only, as all the money put in, and saves a raise', async () => {
+    const user = userEvent.setup({ delay: null })
+    const saved: SaveConfirmationProps['changes'][] = []
+    serve(() => json(SIMULATION))
+    open(HOLDER, saved)
+
+    expect(await screen.findByText('1,000,000')).toBeVisible()
+    expect(screen.getByText('All the money put into the Simulation account. To add money, raise it.')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Change…' }))
+    const field = within(screen.getByRole('dialog', { name: 'Change the starting cash?' })).getByLabelText('Starting cash (NT$)')
+    await user.clear(field)
+    await user.type(field, '1500000')
+    await user.click(screen.getByRole('button', { name: 'Confirm' }))
+
+    expect(saved).toEqual([[{ path: 'shioaji.simulation_initial_cash', value: 1_500_000 }]])
+  })
+
+  it('has no starting cash on Production, and nothing to manage for a holder who does not edit the settings', async () => {
+    serve(() => json(PRODUCTION))
+    open({ ...TEST_USER, permissions: ['use_real_broker'] })
+
+    expect(await screen.findByText('SinoPac’s Production server: the real account, real money.')).toBeVisible()
+    expect(screen.queryByRole('button', { name: /Switch to/ })).not.toBeInTheDocument()
+    expect(screen.queryByText('Starting cash')).not.toBeInTheDocument()
+  })
+
+  it('says in one sentence that SinoPac did not answer, and reads the account again on retry', async () => {
+    const answers = [json(NOT_ANSWERING, 503), json(SIMULATION)]
+    const asked = serve(() => answers.shift() ?? json(SIMULATION))
+    open()
+
+    expect(await screen.findByText('SinoPac did not answer in time. Try again in a moment.')).toBeVisible()
+    expect(screen.queryByText(NOT_ANSWERING.detail)).not.toBeInTheDocument()
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Try again' }))
+
+    expect(await screen.findByText('SinoPac’s Simulation server: no real money.')).toBeVisible()
+    expect(asked.filter((url) => url.startsWith('/v1/account/brokerage'))).toHaveLength(2)
+  })
+
+  it('keeps the server, ordering and switch controls through a later read SinoPac did not answer', async () => {
+    const answers = [json(SIMULATION), json(NOT_ANSWERING, 503), json(SIMULATION)]
+    const asked = serve(() => answers.shift() ?? json(SIMULATION))
+    open()
+    expect(await screen.findByText('Cash (the site’s figure)')).toBeVisible()
+
+    const later = Date.now() + 61_000
+    vi.spyOn(Date, 'now').mockReturnValue(later)
+    act(() => {
+      focusManager.setFocused(false)
+      focusManager.setFocused(true)
+    })
+
+    expect(await screen.findByText('SinoPac did not answer in time. Try again in a moment.')).toBeVisible()
+    expect(screen.queryByText('Cash (the site’s figure)'), 'the statement the failed read replaces').not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Switch to Production…' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Turn ordering on…' })).toBeEnabled()
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Try again' }))
+
+    expect(await screen.findByText('Cash (the site’s figure)')).toBeVisible()
+    expect(asked.filter((url) => url.startsWith('/v1/account/brokerage'))).toHaveLength(3)
   })
 
   it('shows any other failure as an error with a retry', async () => {

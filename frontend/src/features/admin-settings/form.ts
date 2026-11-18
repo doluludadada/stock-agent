@@ -1,4 +1,5 @@
 import type { Schemas } from '@/shared/api'
+import { paths } from '@/shared/config/paths'
 import type { SettingsProblem } from './model'
 
 export type SettingField = Schemas['SettingField']
@@ -6,6 +7,12 @@ export type SettingChange = Schemas['SettingChange']
 export type SettingGroup = Schemas['SettingGroup']
 export type SettingUnit = Schemas['SettingUnit']
 export type Value = SettingField['value']
+
+/**
+ * The settings another page switches behind its own confirmation, each shown on the form as text with a link to that
+ * page (`admin:form.managedAt.<path>`): SinoPac's server, which the SinoPac account page switches with ordering off.
+ */
+export const MANAGED_ELSEWHERE: Readonly<Record<string, string>> = { 'shioaji.server': paths.brokerage }
 
 /**
  * What a control holds while the administrator edits it. A chosen kind holds the value itself: a switch's state, the

@@ -171,8 +171,8 @@ def test_a_follow_of_a_formula_that_holds_cash_leaves_every_holding_and_one_that
     account = Account(cash=0, positions=[Position(stock_id=stock_id, quantity=1, average_cost=1) for stock_id in ("2603", "1101")])
     nothing = ranking_of()
 
-    to_cash = RankingHoldingsRule().apply(replace(nothing, holds_cash=True), account)
-    kept = RankingHoldingsRule().apply(nothing, account)
+    to_cash = RankingHoldingsRule().apply(replace(nothing, holds_cash=True), account.stock_ids)
+    kept = RankingHoldingsRule().apply(nothing, account.stock_ids)
 
     assert (to_cash.held, to_cash.lacking, to_cash.left, to_cash.open) == ([], [], ["1101", "2603"], ["1101", "2603"])
     assert (kept.left, kept.open) == ([], [])
@@ -538,7 +538,7 @@ async def test_a_follow_under_a_formula_that_holds_cash_sells_every_holding_on_t
     async with app_of(harness) as app, client_at(app) as client:
         assert (await sign_in(client, ADMINISTRATOR.username, ADMINISTRATOR_PASSWORD)).status_code == 200
         assert (await save(client, ("ranking.active_formula", "cash_under_two"))).status_code == 200
-        started = await write(client, "POST", "/v1/rankings/follow", {})
+        started = await write(client, "POST", "/v1/rankings/follow", {"broker": "mock"})
         follow = await ended(client, started.json()["run_id"])
         placed = [(order.stock_id, order.action) for order in harness.broker.placed]
         assert (await save(client, ("ranking.active_formula", "best_one"))).status_code == 200

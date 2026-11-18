@@ -25,9 +25,9 @@ COPY src /app/src
 COPY main.py /app/main.py
 
 # STOCK_AGENT_ROOT is the project root: the app reads config/ from it and saves everything under it (get_project_root).
-# The working directory is the same folder, because Chroma and Shioaji's log resolve their paths against it. HOME is
-# writable for whichever user compose.yml runs the container as. ONNX Runtime, which Chroma and the article store's
-# embedding model import, and the Hugging Face client that fetches that model once into /state/embedding_models, each
+# The working directory is the same folder, because Shioaji's log resolves its path against it. HOME is writable for
+# whichever user compose.yml runs the container as. ONNX Runtime, which the article store's embedding model imports,
+# and the Hugging Face client that fetches that model once into /state/embedding_models, each
 # upload usage telemetry unless told not to before they are imported; the site reports nothing about itself.
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONPATH=/app/src \
