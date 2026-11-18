@@ -388,9 +388,13 @@ async def test_a_users_backtests_past_their_limit_are_refused_and_the_ones_in_fl
         await sign_in(member, "member", MEMBER_PASSWORD)
         asked = [write(member, "POST", "/v1/backtests", body()), write(member, "POST", "/v1/backtests", body())]
         in_flight = [asyncio.create_task(request) for request in [*asked, write(administrator, "POST", "/v1/backtests", body())]]
-        await asyncio.sleep(0.05)
+        replays: BacktestReplays = app.state.backtest_replays
 
         async with asyncio.timeout(10):
+            # Each request signs in and reads the settings before the server counts it: longer than a fixed pause on a busy CI runner.
+            while sum(replays._in_flight.values()) < len(in_flight):
+                await asyncio.sleep(0.01)
+
             refused = [await write(member, "POST", "/v1/backtests", body()), await member.get(ranking)]
 
         release.set()
