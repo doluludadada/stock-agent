@@ -24,10 +24,22 @@ http://{$SITE_NAME:localhost}:8080, http://{$LAN_NAME:127.0.0.1}:8080 {
 		reverse_proxy backend:8800
 	}
 
+	# The build's files are named by their content, so they never change. One the build no longer has is a 404, not the
+	# page: a tab opened before a deploy then fails its import cleanly and loads the page again (stale-build.ts).
+	handle /assets/* {
+		root * /srv
+		file_server
+		@kept file
+		header @kept Cache-Control "public, max-age=31536000, immutable"
+		header X-Content-Type-Options nosniff
+	}
+
 	handle {
 		root * /srv
 		try_files {path} /index.html
 		file_server
+		# The page names the build's files, so the browser asks for it again on every load and gets the newest build.
+		header Cache-Control no-cache
 
 		# The same headers as appSecurityHeaders in vite.config.ts.
 		header {
