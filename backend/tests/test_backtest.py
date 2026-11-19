@@ -392,7 +392,9 @@ async def test_a_users_backtests_past_their_limit_are_refused_and_the_ones_in_fl
 
         async with asyncio.timeout(10):
             # Each request signs in and reads the settings before the server counts it: longer than a fixed pause on a busy CI runner.
+            # No caller sees a request wait its turn, so this waits on the server's own count; the assertions stay on the answers.
             while sum(replays._in_flight.values()) < len(in_flight):
+                assert not (answered_early := [task.result().status_code for task in in_flight if task.done()]), answered_early
                 await asyncio.sleep(0.01)
 
             refused = [await write(member, "POST", "/v1/backtests", body()), await member.get(ranking)]

@@ -535,12 +535,25 @@ cookie `Secure` only then. Both read the scheme from `X-Forwarded-Proto`, which 
    `allowed_hosts: [127.0.0.1, localhost, stocks.example.org]`. Set `environment: test`, so that the backend serves
    no API docs.
 3. Serve over TLS. Send the headers of the app, which are also in `vite.config.ts` (`appSecurityHeaders`). Fall back
-   to `index.html` for client routes such as `/runs/<id>` and `/admin/settings`. Forward only `/v1`. Limit request
-   bodies and request rates for `/v1`.
+   to `index.html` for client routes such as `/runs/<id>` and `/admin/settings`, but not under `/assets/`: a file the
+   build no longer has answers 404, so a tab opened before a deploy loads the page again instead of failing. Send
+   `/assets/` as immutable, since each name changes with its content, and everything else as `no-cache`. Forward
+   only `/v1`. Limit request bodies and request rates for `/v1`.
 
 Caddy:
 
 ```caddy
+(app_headers) {
+    header {
+        Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+        Referrer-Policy no-referrer
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        Strict-Transport-Security "max-age=31536000"
+    }
+}
+
 stocks.example.org {
     encode gzip
     request_body {
@@ -550,18 +563,19 @@ stocks.example.org {
         rate_limit {remote.ip} 30r/m    # with the caddy-ratelimit plugin; or limit in a firewall
         reverse_proxy 127.0.0.1:8800
     }
+    handle /assets/* {
+        root * /srv/stock-agent/frontend/dist
+        file_server
+        @kept file
+        header @kept Cache-Control "public, max-age=31536000, immutable"
+        import app_headers
+    }
     handle {
         root * /srv/stock-agent/frontend/dist
         try_files {path} /index.html
         file_server
-        header {
-            Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
-            Referrer-Policy no-referrer
-            X-Content-Type-Options nosniff
-            X-Frame-Options DENY
-            Permissions-Policy "camera=(), microphone=(), geolocation=()"
-            Strict-Transport-Security "max-age=31536000"
-        }
+        header Cache-Control no-cache
+        import app_headers
     }
 }
 ```
@@ -582,8 +596,20 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
+    location /assets/ {
+        try_files $uri =404;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
+        add_header Referrer-Policy no-referrer always;
+        add_header X-Content-Type-Options nosniff always;
+        add_header X-Frame-Options DENY always;
+        add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+        add_header Strict-Transport-Security "max-age=31536000" always;
+    }
+
     location / {
         try_files $uri /index.html;
+        add_header Cache-Control no-cache;
         add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
         add_header Referrer-Policy no-referrer always;
         add_header X-Content-Type-Options nosniff always;

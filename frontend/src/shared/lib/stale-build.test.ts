@@ -13,18 +13,25 @@ function tab(sessionStorage: Pick<Storage, 'getItem' | 'setItem'> = inMemory(), 
   return { target, reload }
 }
 
+/** A failed import as Vite reports it, then whatever the page has scheduled: whether the listener took the failure. */
 function failImport(target: EventTarget) {
   const event = new Event('vite:preloadError', { cancelable: true })
   target.dispatchEvent(event)
+  vi.runAllTimers()
   return event.defaultPrevented
 }
 
 describe('a tab left open across a deploy', () => {
-  it('loads the page again on the first failed import, so the new build loads', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  it('loads the page again on the first failed import, once the router has moved to the page the user clicked', () => {
     const { target, reload } = tab()
     reloadOnStaleBuild(target, () => 1_000_000)
 
-    expect(failImport(target)).toBe(true)
+    target.dispatchEvent(new Event('vite:preloadError', { cancelable: true }))
+    expect(reload).not.toHaveBeenCalled()
+    vi.runAllTimers()
     expect(reload).toHaveBeenCalledTimes(1)
   })
 
