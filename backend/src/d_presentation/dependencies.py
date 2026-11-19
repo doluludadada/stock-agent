@@ -70,7 +70,6 @@ from b_application.use_cases.backtest.backtest_run import BacktestRun
 from b_application.use_cases.chat.chat_reply import ChatReply
 from b_application.use_cases.chat.dispatcher import Dispatcher
 from b_application.use_cases.collect.annual_report_refresh import AnnualReportRefresh
-from b_application.use_cases.collect.archive_warm_up import ArchiveWarmUp
 from b_application.use_cases.collect.article_refresh_stocks import ArticleRefreshStocks
 from b_application.use_cases.collect.article_store_backfill import ArticleStoreBackfill
 from b_application.use_cases.collect.buzz_scanner import BuzzScanner
@@ -1015,7 +1014,7 @@ def build_pipeline(
         fundamentals_history_backfill=FundamentalsHistoryBackfill(
             dependencies.fundamentals_provider, dependencies.daily_close_archive, market_clock, config, logger
         ),
-        archive_warm_up=ArchiveWarmUp(dependencies.daily_close_archive, config),
+        daily_close_archive=dependencies.daily_close_archive,
         stock_analysis_lookup=StockAnalysisLookup(
             dependencies.daily_close_archive, dependencies.fundamentals_provider, market_clock, config
         ),

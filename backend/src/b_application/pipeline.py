@@ -5,8 +5,6 @@ from datetime import date, time
 from pydantic import PositiveInt, SecretStr
 
 from a_domain.model.analysis.stock_brief import BriefSource, StockBrief
-from a_domain.model.fundamentals.monthly_revenue import MonthlyRevenue
-from a_domain.model.fundamentals.quarter_financials import QuarterFinancials
 from a_domain.model.market.article import Article
 from a_domain.model.market.company_profile import CompanyProfile
 from a_domain.model.market.ohlcv import Ohlcv
@@ -19,7 +17,7 @@ from a_domain.model.trading.backtest import Backtest, BacktestInputs
 from a_domain.model.trading.order import Order
 from a_domain.model.valuation.scan import MarketValuation, ScanCriteria, ValuationScan
 from a_domain.model.valuation.valuation import ReportSection, StockValuation, ValuationReport
-from a_domain.ports.market.daily_close_archive import ArchivedMonth, ArchivedQuarter, ArchivedSession
+from a_domain.ports.market.daily_close_archive import ArchivedMonth, ArchivedQuarter, ArchivedSession, IDailyCloseArchive
 from a_domain.ports.system.settings_files import SettingChange, SettingField, SettingsEdit
 from a_domain.ports.trading.backtest_repository import IBacktestRepository
 from a_domain.rules.fundamentals.stock_analysis import StockAnalysis
@@ -51,6 +49,7 @@ from a_domain.types.enums import (
 from a_domain.types.ids import BacktestId, RunId, SessionToken, UserId
 from a_domain.types.values import EmailAddress, FormulaId, NewPassword, PositiveFiniteFloat, Username
 from b_application.schemas.backtest import BacktestSetup
+from b_application.schemas.collect import StockFinancials
 from b_application.schemas.pipeline_status import PipelineStatus
 from b_application.use_cases.admin.editor_access import EditorAccess
 from b_application.use_cases.admin.settings_confirmation import SettingsConfirmation
@@ -63,7 +62,6 @@ from b_application.use_cases.backtest.backtest_run import BacktestRun
 from b_application.use_cases.chat.chat_reply import ChatReply
 from b_application.use_cases.chat.dispatcher import Dispatcher
 from b_application.use_cases.collect.annual_report_refresh import AnnualReportRefresh
-from b_application.use_cases.collect.archive_warm_up import ArchiveWarmUp
 from b_application.use_cases.collect.article_refresh_stocks import ArticleRefreshStocks
 from b_application.use_cases.collect.article_store_backfill import ArticleStoreBackfill
 from b_application.use_cases.collect.buzz_scanner import BuzzScanner
@@ -205,7 +203,7 @@ class Pipeline:
     daily_close_archiver: DailyCloseArchiver
     daily_history_backfill: DailyHistoryBackfill
     fundamentals_history_backfill: FundamentalsHistoryBackfill
-    archive_warm_up: ArchiveWarmUp
+    daily_close_archive: IDailyCloseArchive
     stock_analysis_lookup: StockAnalysisLookup
     stock_news_lookup: StockNewsLookup
     article_indexer: ArticleIndexer
@@ -881,17 +879,15 @@ class Pipeline:
 
         return history, revenue, eps
 
-    async def load_financials(self, stock_id: str) -> tuple[list[QuarterFinancials], list[MonthlyRevenue]]:
+    async def load_financials(self, stock_id: str) -> StockFinancials:
         """A stock's page: its archived quarters' figures and monthly revenue, oldest first."""
-        quarters, revenues, _ = await self.stock_analysis_lookup.execute(stock_id, with_analysis=False)
+        quarters, revenues = await self.daily_close_archive.financials(stock_id)
 
-        return quarters, revenues
+        return StockFinancials(quarters, revenues)
 
     async def load_stock_analysis(self, stock_id: str) -> StockAnalysis:
         """A stock's page: its revenue trend, earnings trend and valuation against its own history, read by fixed rules."""
-        _, _, analysis = await self.stock_analysis_lookup.execute(stock_id)
-
-        return analysis
+        return await self.stock_analysis_lookup.execute(stock_id)
 
     async def load_stock_news(self, stock_id: str) -> list[Article] | None:
         """
@@ -1006,7 +1002,7 @@ class Pipeline:
         if not status.manual_stocks:
             return None
 
-        _, _, analysis = await self.stock_analysis_lookup.execute(stock_id)
+        analysis = await self.stock_analysis_lookup.execute(stock_id)
         profile, context = await self.company_background.execute(status.manual_stocks[0], analysis)
         card, kept_card, _ = await self.company_card.execute(stock_id)
 
@@ -1036,7 +1032,7 @@ class Pipeline:
         if not status.manual_stocks:
             return None
 
-        _, _, analysis = await self.stock_analysis_lookup.execute(stock_id)
+        analysis = await self.stock_analysis_lookup.execute(stock_id)
         articles = await self.stock_news_lookup.execute(stock_id) or []
         await self.main_business_refresh.execute([stock_id])
         await self.annual_report_refresh.execute([stock_id])
@@ -1048,12 +1044,12 @@ class Pipeline:
 
         return await self.daily_stock_brief.execute(stock_id, context)
 
-    async def load_archive_warm_up(self) -> tuple[int, int]:
+    async def count_archived_sessions(self) -> int:
         """
-        The market overview's open-data archive: the sessions of stock closes it holds, and the daily bars the built-in
-        strategies need, which an open-data deployment's runs wait for.
+        The market overview's open-data archive: the sessions of stock closes it holds, which an open-data deployment's
+        runs wait for until they reach the daily bars the built-in strategies need.
         """
-        return await self.archive_warm_up.execute()
+        return await self.daily_close_archive.session_count()
 
     async def load_market_breadth(self) -> MarketBreadth:
         """The market overview: the latest session's advancers and decliners in the exchange listing, overall and per industry."""

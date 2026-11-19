@@ -194,9 +194,10 @@ PRESENTATION_SETTINGS = {
     "d_presentation/web/scheduled_follows.py": frozenset({"api.follow_schedule_poll_seconds", "accounts.max_concurrent_runs"}),
     # The app serves the API docs only where the environment it started in allows them.
     "d_presentation/web/app.py": frozenset({"environment.api_docs"}),
-    # The open data's attribution, which the license requires next to whatever a page shows from it, and the audience,
-    # whose capabilities tell the web app what to offer.
-    "d_presentation/web/routers/market.py": frozenset({"sources.attribution", "audience"}),
+    # The open data's attribution, which the license requires next to whatever a page shows from it, the audience,
+    # whose capabilities tell the web app what to offer, and the daily bars the built-in strategies need, which the
+    # archive status shows beside the sessions the archive holds.
+    "d_presentation/web/routers/market.py": frozenset({"sources.attribution", "audience", "technical.required_bars"}),
     "d_presentation/web": frozenset(
         {
             # The LINE webhook checks each request's signature with the channel secret.

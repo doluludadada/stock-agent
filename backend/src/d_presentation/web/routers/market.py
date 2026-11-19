@@ -136,14 +136,12 @@ async def get_index_quotes(runtime: RuntimeDependency, pipeline: SignedOutPipeli
 
 
 @router.get("/archive-status")
-async def get_archive_status(pipeline: SignedOutPipeline) -> ArchiveStatusResponse:
+async def get_archive_status(runtime: RuntimeDependency, pipeline: SignedOutPipeline) -> ArchiveStatusResponse:
     """
     How many sessions of TWSE and TPEX closes the server's open-data archive holds, and how many the built-in strategies
     need. A public site's runs read their daily history from it, so they find no candidate until it holds enough. Public.
     """
-    sessions, needed = await pipeline.load_archive_warm_up()
-
-    return ArchiveStatusResponse(sessions=sessions, needed=needed)
+    return ArchiveStatusResponse(sessions=await pipeline.count_archived_sessions(), needed=runtime.config.technical.required_bars)
 
 
 @router.get("/audience")
@@ -203,9 +201,9 @@ async def get_stock_financials(stock_id: StockIdPath, pipeline: SignedOutPipelin
     thousands of TWD, per-share figures in TWD and changes in percent; a figure the company's industry format does not
     report is null. Both lists are empty for a stock the archive holds nothing of. Public.
     """
-    quarters, monthly_revenues = await pipeline.load_financials(stock_id)
+    financials = await pipeline.load_financials(stock_id)
 
-    return StockFinancialsResponse(stock_id=stock_id, quarters=quarters, monthly_revenues=monthly_revenues)
+    return StockFinancialsResponse(stock_id=stock_id, quarters=financials.quarters, monthly_revenues=financials.monthly_revenues)
 
 
 @router.get("/stocks/{stock_id}/analysis", dependencies=[shows(Feature.STOCK_PAGES)])
