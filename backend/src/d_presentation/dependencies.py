@@ -150,9 +150,8 @@ from b_application.use_cases.users.scheduled_followers import ScheduledFollowers
 from b_application.use_cases.users.session_start import SessionStart
 from b_application.use_cases.users.sign_in_attempt import SignInAttempt
 from b_application.use_cases.users.sign_in_options import SignInOptions
-from b_application.use_cases.users.sign_out import SignOut
+from b_application.use_cases.users.signed_in_user import SignedInUser
 from b_application.use_cases.users.user_change import UserChange
-from b_application.use_cases.users.user_directory import UserDirectory
 from b_application.use_cases.users.user_registration import UserRegistration
 from b_application.use_cases.valuation.market_valuation_loader import MarketValuationLoader
 from b_application.use_cases.valuation.valuation_appraiser import ValuationAppraiser
@@ -1171,8 +1170,8 @@ def build_pipeline(
         password_reset=PasswordReset(dependencies.user_store, market_clock, logger),
         user_registration=UserRegistration(dependencies.user_store, dependencies.attempt_log, market_clock, config, logger),
         session_start=SessionStart(dependencies.user_store, market_clock, config),
-        sign_out=SignOut(dependencies.user_store),
-        user_directory=UserDirectory(dependencies.user_store, market_clock),
+        signed_in_user=SignedInUser(dependencies.user_store, market_clock),
+        user_store=dependencies.user_store,
         user_change=UserChange(dependencies.user_store, market_clock, logger),
         ai_model_lookup=AiModelLookup(config),
         ai_model_choice=AiModelChoice(dependencies.user_store, market_clock, config, logger),

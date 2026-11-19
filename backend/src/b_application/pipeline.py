@@ -20,6 +20,7 @@ from a_domain.model.valuation.valuation import ReportSection, StockValuation, Va
 from a_domain.ports.analysis.technical_settings_repository import ITechnicalSettingsRepository
 from a_domain.ports.market.daily_close_archive import ArchivedMonth, ArchivedQuarter, ArchivedSession, IDailyCloseArchive
 from a_domain.ports.system.settings_files import SettingChange, SettingField, SettingsEdit
+from a_domain.ports.system.user_store import IUserStore
 from a_domain.ports.trading.backtest_repository import IBacktestRepository
 from a_domain.rules.fundamentals.stock_analysis import StockAnalysis
 from a_domain.rules.market.breadth import MarketBreadth
@@ -143,9 +144,8 @@ from b_application.use_cases.users.scheduled_followers import ScheduledFollowers
 from b_application.use_cases.users.session_start import SessionStart
 from b_application.use_cases.users.sign_in_attempt import SignInAttempt
 from b_application.use_cases.users.sign_in_options import SignInOptions
-from b_application.use_cases.users.sign_out import SignOut
+from b_application.use_cases.users.signed_in_user import SignedInUser
 from b_application.use_cases.users.user_change import UserChange
-from b_application.use_cases.users.user_directory import UserDirectory
 from b_application.use_cases.users.user_registration import UserRegistration
 from b_application.use_cases.valuation.market_valuation_loader import MarketValuationLoader
 from b_application.use_cases.valuation.valuation_appraiser import ValuationAppraiser
@@ -295,8 +295,8 @@ class Pipeline:
     password_reset: PasswordReset
     user_registration: UserRegistration
     session_start: SessionStart
-    sign_out: SignOut
-    user_directory: UserDirectory
+    signed_in_user: SignedInUser
+    user_store: IUserStore
     user_change: UserChange
     ai_model_lookup: AiModelLookup
     ai_model_choice: AiModelChoice
@@ -1185,7 +1185,7 @@ class Pipeline:
 
     async def load_user(self, user_id: UserId) -> User | None:
         """The user as saved now, for the CLI's check before each menu option. None when unknown or deactivated."""
-        return next(iter(await self.user_directory.execute(user_id=user_id)), None)
+        return await self.signed_in_user.execute(user_id=user_id)
 
     async def reset_password(self, identifier: str, password: NewPassword) -> User | None:
         """The operator's reset of a password on the machine: every session of the user ends. None for an unknown name."""
@@ -1226,15 +1226,15 @@ class Pipeline:
 
     async def find_signed_in_user(self, token: SessionToken) -> User | None:
         """Every signed-in Web request, before dependencies.py builds that user's Pipeline: the session's user, now."""
-        return next(iter(await self.user_directory.execute(session=token)), None)
+        return await self.signed_in_user.execute(session=token)
 
     async def end_session(self, token: SessionToken) -> None:
-        """The Web's sign-out."""
-        await self.sign_out.execute(token)
+        """The Web's sign-out. Ending a session that does not exist, or ended already, changes nothing."""
+        await self.user_store.close_session(token)
 
     async def load_users(self) -> list[User]:
-        """The administrator's list of users."""
-        return await self.user_directory.execute()
+        """The administrator's list of users, oldest first."""
+        return await self.user_store.users()
 
     async def change_user(
         self, user_id: UserId, role: Role | None, status: UserStatus | None, password: NewPassword | None
