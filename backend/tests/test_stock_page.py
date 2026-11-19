@@ -365,7 +365,7 @@ async def test_the_score_answers_ranking_unavailable_while_the_history_holds_no_
 async def test_a_backfill_holds_the_eps_pages_of_every_quarter_from_the_first_day() -> None:
     harness = build_harness()
 
-    _, _, eps = await harness.runtime.signed_out.backfill_history(date(2025, 7, 1))
+    eps = (await harness.runtime.signed_out.backfill_history(date(2025, 7, 1))).eps
 
     assert eps == (5, 5)
     assert harness.fundamentals.requested == [

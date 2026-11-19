@@ -1,10 +1,10 @@
 from datetime import timedelta
 
-from a_domain.model.analysis.stock_brief import StockBrief
 from a_domain.ports.ai.stock_brief_repository import IStockBriefRepository
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.types.enums import BriefKind
 from b_application.config.app_config import AppConfig
+from b_application.schemas.process import HeldBriefs
 
 
 class BriefLookup:
@@ -25,7 +25,7 @@ class BriefLookup:
         self._claim_time = timedelta(minutes=config.stock_page.brief.claim_minutes)
         _, _, self._daily_stocks, _ = config.brief_writing(kind)
 
-    async def execute(self, stock_id: str) -> tuple[StockBrief | None, StockBrief | None, int]:
+    async def execute(self, stock_id: str) -> HeldBriefs:
         now = self._market_clock.now()
         today = await self._briefs.find(stock_id, now.date())
         previous = await self._briefs.latest_written(stock_id, now.date())
@@ -34,4 +34,4 @@ class BriefLookup:
         if today is not None and today.abandoned(now - self._claim_time):
             today.fail()
 
-        return today, previous, left
+        return HeldBriefs(today, previous, left)

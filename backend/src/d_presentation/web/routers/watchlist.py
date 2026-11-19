@@ -31,7 +31,8 @@ async def add_to_manual_watchlist(body: StockIdsRequest, pipeline: UserPipeline)
     Adds listed stocks to the MANUAL watchlist, as menu 4 does after an analysis. An unlisted ID adds nothing at all and
     answers 422; an unavailable listing answers 503.
     """
-    stocks, addition = await pipeline.watch_manually(body.stock_ids)
+    watched = await pipeline.watch_manually(body.stock_ids)
+    stocks, addition = watched.stocks, watched.addition
 
     if addition is None:
         listed = {stock.stock_id for stock in stocks}

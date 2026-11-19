@@ -162,14 +162,16 @@ def test_the_return_counts_from_the_close_before_the_first_follow_to_the_last_se
 async def test_a_follow_from_an_empty_account_buys_each_ranked_stock_at_an_equal_weight_in_whole_shares(tmp_path) -> None:
     stack = await market(tmp_path)
 
-    _, _, before, refusal, _, _ = await stack.pipeline.load_ranking_follow(ADMINISTRATOR)
-    performance = (await stack.pipeline.load_ranking_follow(ADMINISTRATOR))[4:]
+    first = await stack.pipeline.load_ranking_follow(ADMINISTRATOR)
+    before, refusal, performance = first.holdings, first.refusal, (first.performance, first.settings.follows)
     status = await stack.pipeline.follow_ranking(ADMINISTRATOR)
-    _, schedule, _, _, _, follows = await stack.pipeline.load_ranking_follow(ADMINISTRATOR)
+    followed = (await stack.pipeline.load_ranking_follow(ADMINISTRATOR)).settings
+    schedule, follows = followed.schedule, followed.follows
 
     account = await stack.broker.get_account()
     decisions = await stack.journal.signals_of(status.stats.run_id)
-    _, _, after, again, _, _ = await stack.pipeline.load_ranking_follow(ADMINISTRATOR)
+    second = await stack.pipeline.load_ranking_follow(ADMINISTRATOR)
+    after, again = second.holdings, second.refusal
     assert (before.held, before.lacking, before.left, refusal, performance) == ([], ["2330", "2317"], [], None, (None, []))
     assert [(run.run_id, run.ranking_formula, run.ranking_open) for run in follows] == [(status.stats.run_id, FORMULA, 0)]
     assert (schedule.pending, schedule.unfinished) == (None, None)
@@ -240,7 +242,8 @@ async def test_an_account_without_the_cash_for_one_lot_buys_nothing_and_the_run_
 
     status = await stack.pipeline.follow_ranking(ADMINISTRATOR)
 
-    _, _, holdings, refusal, _, _ = await stack.pipeline.load_ranking_follow(ADMINISTRATOR)
+    follow = await stack.pipeline.load_ranking_follow(ADMINISTRATOR)
+    holdings, refusal = follow.holdings, follow.refusal
     assert (status.signals, status.orders) == ([], [])
     assert [line.split("] ")[1] for line in status.stats.execution_log] == [
         "Not followed now: 2330: its share of the account, 30, buys no lot of 1 at 100.0",
@@ -287,7 +290,8 @@ async def test_outside_continuous_trading_the_follow_is_refused_and_sends_nothin
     stack = await market(tmp_path)
     stack.clock.current = MONDAY_10_00 + timedelta(hours=4)
 
-    _, _, holdings, refusal, _, _ = await stack.pipeline.load_ranking_follow(ADMINISTRATOR)
+    follow = await stack.pipeline.load_ranking_follow(ADMINISTRATOR)
+    holdings, refusal = follow.holdings, follow.refusal
     status = await stack.pipeline.follow_ranking(ADMINISTRATOR)
 
     assert (holdings.lacking, refusal) == (["2330", "2317"], FollowRefusal.OUTSIDE_FOLLOW_WINDOW)
@@ -299,7 +303,8 @@ async def test_a_month_without_revenue_ranks_nothing_and_a_follow_of_it_keeps_ev
     stack.archive.monthly_revenues.clear()
     await holding(stack, ("1101", 1000, 30.0))
 
-    _, _, holdings, refusal, _, _ = await stack.pipeline.load_ranking_follow(ADMINISTRATOR)
+    follow = await stack.pipeline.load_ranking_follow(ADMINISTRATOR)
+    holdings, refusal = follow.holdings, follow.refusal
     status = await stack.pipeline.follow_ranking(ADMINISTRATOR)
 
     assert (holdings, refusal) == (RankingHoldings(decided_on=SESSIONS[3]), FollowRefusal.NOTHING_TO_FOLLOW)
@@ -310,7 +315,7 @@ async def test_the_return_since_the_first_follow_is_read_against_the_benchmark_o
     stack = await market(tmp_path)
     status = await stack.pipeline.follow_ranking(ADMINISTRATOR)
     monday, tuesday = date(2026, 10, 19), date(2026, 10, 20)
-    _, _, _, _, on_the_day, _ = await stack.pipeline.load_ranking_follow(ADMINISTRATOR)
+    on_the_day = (await stack.pipeline.load_ranking_follow(ADMINISTRATOR)).performance
     later = {"2330": (101.0, 110.0), "2317": (50.0, 51.0), "1101": (30.0, 30.0), "0050": (188.0, 190.0)}
 
     for stock_id, closes in later.items():
@@ -320,7 +325,7 @@ async def test_the_return_since_the_first_follow_is_read_against_the_benchmark_o
         ]
 
     stack.clock.current = datetime.combine(tuesday, time(15, 0), TAIWAN_TIMEZONE)
-    _, _, _, _, performance, _ = await stack.pipeline.load_ranking_follow(ADMINISTRATOR)
+    performance = (await stack.pipeline.load_ranking_follow(ADMINISTRATOR)).performance
 
     cash = (await stack.broker.get_account()).cash
     equity = cash + sum(order.filled_quantity * later[order.stock_id][1] for order in status.orders)
@@ -336,10 +341,12 @@ async def test_a_reset_account_has_never_followed(tmp_path) -> None:
     stack.clock.current = MONDAY_10_00 + timedelta(minutes=5)
     await stack.pipeline.reset_mock_account(500_000)
 
-    _, _, holdings, refusal, _, _ = await stack.pipeline.load_ranking_follow(ADMINISTRATOR)
+    follow = await stack.pipeline.load_ranking_follow(ADMINISTRATOR)
+    holdings, refusal = follow.holdings, follow.refusal
 
     assert (holdings.held, holdings.lacking, refusal) == ([], ["2330", "2317"], None)
-    assert (await stack.pipeline.load_ranking_follow(ADMINISTRATOR))[4:] == (None, [])
+    reset = await stack.pipeline.load_ranking_follow(ADMINISTRATOR)
+    assert (reset.performance, reset.settings.follows) == (None, [])
 
 
 # ------------------------------- Public site ---------------------------------- #
@@ -354,7 +361,7 @@ async def test_on_the_public_site_a_follow_fills_at_the_last_sessions_official_c
         raise RuntimeError("open data has no realtime quote")
 
     monkeypatch.setattr(stack.quotes, "fetch_realtime_bars", no_realtime_quotes)
-    _, _, _, in_session, _, _ = await stack.pipeline.load_ranking_follow(ADMINISTRATOR)
+    in_session = (await stack.pipeline.load_ranking_follow(ADMINISTRATOR)).refusal
     stack.clock.current = datetime(2026, 10, 17, 10, 0, tzinfo=TAIWAN_TIMEZONE)
 
     status = await stack.pipeline.follow_ranking(ADMINISTRATOR)

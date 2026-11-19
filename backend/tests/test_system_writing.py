@@ -222,7 +222,7 @@ async def test_a_request_on_the_signed_out_pipeline_never_spends_the_sites_budge
     answer = await harness.runtime.signed_out.write_stock_brief("2330")
 
     assert ai.asked == [], "only the timer's system writer holds the system's provider"
-    assert answer is not None and answer[0] is not None and answer[0].status == BriefStatus.FAILED
+    assert answer is not None and answer.today is not None and answer.today.status == BriefStatus.FAILED
     assert any("Stock brief failed for 2330: SignInRequired" in message for _, message in harness.logger.records)
 
 
@@ -234,12 +234,12 @@ async def test_the_sites_briefs_take_none_of_the_stocks_viewers_may_ask_for_a_da
     await step(harness)
 
     assert ai.asked == ["2330", "2317"], "no limit of stocks holds the site's own writing"
-    assert (await viewer.load_stock_brief("1101"))[2] == 1, "the day's one stock is still the viewers'"
+    assert (await viewer.load_stock_brief("1101")).stocks_left == 1, "the day's one stock is still the viewers'"
 
     answer = await viewer.write_stock_brief("1101")
 
-    assert answer is not None and answer[0] is not None
-    assert (answer[0].status, answer[2], viewers_ai.asked) == (BriefStatus.WRITTEN, 0, ["1101"])
+    assert answer is not None and answer.today is not None
+    assert (answer.today.status, answer.stocks_left, viewers_ai.asked) == (BriefStatus.WRITTEN, 0, ["1101"])
 
 
 async def test_a_viewer_who_spent_the_days_stocks_does_not_stop_the_sites_own_writing() -> None:

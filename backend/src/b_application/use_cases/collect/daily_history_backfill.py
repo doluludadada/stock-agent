@@ -4,6 +4,7 @@ from a_domain.ports.market.cached_price_provider import ICachedPriceProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.types.enums import MarketType
 from b_application.config.app_config import AppConfig
+from b_application.schemas.collect import HistoryCoverage
 
 
 class DailyHistoryBackfill:
@@ -25,7 +26,7 @@ class DailyHistoryBackfill:
         self._market_clock = market_clock
         self._history_days = config.analysis.history_days(config.market_data.history_backfill_bars)
 
-    async def execute(self, first: date | None = None) -> tuple[list[date], list[date], list[tuple[MarketType, date, date]]] | None:
+    async def execute(self, first: date | None = None) -> HistoryCoverage | None:
         if self._cache is None:
             return None
 
@@ -47,4 +48,4 @@ class DailyHistoryBackfill:
             ]
         ]
 
-        return sorted(held), sorted(sessions - held), list(dict.fromkeys(unread))
+        return HistoryCoverage(sorted(held), sorted(sessions - held), list(dict.fromkeys(unread)))

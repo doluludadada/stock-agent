@@ -15,7 +15,9 @@ from d_presentation.dependencies import open_archiver
 
 async def archive_closes() -> int:
     async with open_archiver(load_settings(get_project_root())) as archiver:
-        sessions, quarters, months = await archiver.execute()
+        archived = await archiver.execute()
+
+    sessions, quarters, months = archived.sessions, archived.quarters, archived.months
 
     columns = ("Date", "Stocks", "Indexes", "Valuation ratios", "Material information", "TWSE news")
     table = Table(*columns, title=f"The archive holds {len(sessions)} dates")

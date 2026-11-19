@@ -110,10 +110,14 @@ async def get_page_quotes(runtime: RuntimeDependency, pipeline: SignedOutPipelin
     Pipeline: it holds no account and prices no order.
     """
     available = runtime.realtime_quotes
-    quotes, _, refresh = await pipeline.load_page_quotes(ids, []) if available else ({}, {}, None)
+    answer = await pipeline.load_page_quotes(ids, []) if available else None
+    quotes = answer.quotes if answer is not None else {}
 
     return PageQuotesResponse(
-        realtime_quotes=available, refresh=refresh, quotes={stock_id: quotes.get(stock_id) for stock_id in ids}, indexes={}
+        realtime_quotes=available,
+        refresh=answer.refresh if answer is not None else None,
+        quotes={stock_id: quotes.get(stock_id) for stock_id in ids},
+        indexes={},
     )
 
 
@@ -128,10 +132,14 @@ async def get_index_quotes(runtime: RuntimeDependency, pipeline: SignedOutPipeli
     Pipeline.
     """
     available = runtime.realtime_quotes
-    _, quotes, refresh = await pipeline.load_page_quotes([], indexes) if available else ({}, {}, None)
+    answer = await pipeline.load_page_quotes([], indexes) if available else None
+    quotes = answer.indexes if answer is not None else {}
 
     return PageQuotesResponse(
-        realtime_quotes=available, refresh=refresh, quotes={}, indexes={index: quotes.get(index) for index in indexes}
+        realtime_quotes=available,
+        refresh=answer.refresh if answer is not None else None,
+        quotes={},
+        indexes={index: quotes.get(index) for index in indexes},
     )
 
 
@@ -253,14 +261,14 @@ async def get_stock_company(stock_id: StockIdPath, pipeline: SignedOutPipeline) 
     site for the monthly ranking's stocks, and again only when what it rests on changed. Every text is the AI's or a
     third party's: show it as text, never as markup. 404 for a code that is not listed. Public.
     """
-    answer = await pipeline.load_company(stock_id)
+    company = await pipeline.load_company(stock_id)
 
-    if answer is None:
+    if company is None:
         raise NotFound(f"{stock_id} is not a listed stock.")
 
-    profile, sources, today, previous = answer
-
-    return StockCompanyResponse(stock_id=stock_id, profile=profile, sources=sources, today=today, previous=previous)
+    return StockCompanyResponse(
+        stock_id=stock_id, profile=company.profile, sources=company.sources, today=company.today, previous=company.previous
+    )
 
 
 @router.get("/stocks/{stock_id}/brief", dependencies=[shows(Feature.STOCK_PAGES)])
@@ -275,9 +283,9 @@ async def get_stock_brief(stock_id: StockIdPath, pipeline: SignedOutPipeline) ->
     when, in which language, and the window of sessions with the close's change over it. Every text is the AI's or a
     third party's: show it as text, never as markup. It describes and gives no advice. Public.
     """
-    today, previous, stocks_left = await pipeline.load_stock_brief(stock_id)
+    briefs = await pipeline.load_stock_brief(stock_id)
 
-    return StockBriefResponse(stock_id=stock_id, today=today, previous=previous, stocks_left=stocks_left)
+    return StockBriefResponse(stock_id=stock_id, today=briefs.today, previous=briefs.previous, stocks_left=briefs.stocks_left)
 
 
 @router.post(
@@ -302,14 +310,12 @@ async def write_stock_brief(
     never orders. Private: a visitor never causes a call.
     """
     async with switch.brief_turns.of(stock_id):
-        answer = await pipeline.write_stock_brief(stock_id)
+        briefs = await pipeline.write_stock_brief(stock_id)
 
-    if answer is None:
+    if briefs is None:
         raise NotFound(f"{stock_id} is not a listed stock.")
 
-    today, previous, stocks_left = answer
-
-    return StockBriefResponse(stock_id=stock_id, today=today, previous=previous, stocks_left=stocks_left)
+    return StockBriefResponse(stock_id=stock_id, today=briefs.today, previous=briefs.previous, stocks_left=briefs.stocks_left)
 
 
 @router.get(
@@ -337,7 +343,8 @@ async def get_stock_technical(stock_id: StockIdPath, pipeline: UserPipeline) -> 
     The owner's active strategy applied to the stock exactly as a run applies it, with each indicator's value at every
     bar it read. Private: it reads the owner's saved strategy.
     """
-    strategy, result = await pipeline.evaluate_stock(stock_id)
+    evaluation = await pipeline.evaluate_stock(stock_id)
+    result = evaluation.status
 
     if not result.manual_stocks:
         raise NotFound(f"{stock_id} is not a listed stock, or the exchange listing is unavailable.")
@@ -346,8 +353,8 @@ async def get_stock_technical(stock_id: StockIdPath, pipeline: UserPipeline) -> 
 
     return StockTechnicalResponse(
         stock_id=stock.stock_id,
-        strategy=strategy,
-        required_bars=strategy.required_bars,
+        strategy=evaluation.strategy,
+        required_bars=evaluation.strategy.required_bars,
         bar_times=[bar.ts for bar in stock.ohlcv],
         latest_price=stock.current_price,
         report=stock.technical_report,

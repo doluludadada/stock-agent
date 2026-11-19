@@ -221,7 +221,8 @@ async def archive_run(
     clock = TaiwanMarketClock(MarketHoursConfig())
     provider = TaiwanStockProvider(SOURCES.exchange, clock, MarketDataConfig(), SilentLogger())
     profiles = SqlCompanyProfileRepository(connector)
-    return await DailyCloseArchiver(provider, sql_archive(connector, logger), profiles, SilentLogger()).execute()
+    archived = await DailyCloseArchiver(provider, sql_archive(connector, logger), profiles, SilentLogger()).execute()
+    return archived.sessions, archived.quarters, archived.months
 
 
 async def started_database(folder: Path) -> DatabaseConnector:

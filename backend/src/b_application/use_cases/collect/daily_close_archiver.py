@@ -1,14 +1,9 @@
 from a_domain.ports.market.company_profile_repository import ICompanyProfileRepository
-from a_domain.ports.market.daily_close_archive import (
-    ArchivedMonth,
-    ArchivedQuarter,
-    ArchivedSession,
-    IDailyCloseArchive,
-    OpenDataDownload,
-)
+from a_domain.ports.market.daily_close_archive import IDailyCloseArchive, OpenDataDownload
 from a_domain.ports.market.taiwan_stock_provider import ITaiwanStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.types.errors import ListingUnavailableError
+from b_application.schemas.collect import ArchivedPeriods
 
 
 class DailyCloseArchiver:
@@ -34,7 +29,7 @@ class DailyCloseArchiver:
         self._profiles = profiles
         self._logger = logger
 
-    async def execute(self) -> tuple[list[ArchivedSession], list[ArchivedQuarter], list[ArchivedMonth]]:
+    async def execute(self) -> ArchivedPeriods:
         closes = await self._stock_provider.get_latest_closes()
         stocks = [stock for stock in await self._stock_provider.get_all() if stock.stock_id in closes]
 
@@ -67,4 +62,4 @@ class DailyCloseArchiver:
         await self._profiles.save_listings(profiles)
         self._logger.info(f"Kept {len(profiles)} company profiles.")
 
-        return await self._archive.sessions(), await self._archive.quarters(), await self._archive.months()
+        return ArchivedPeriods(await self._archive.sessions(), await self._archive.quarters(), await self._archive.months())

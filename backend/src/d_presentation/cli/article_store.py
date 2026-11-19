@@ -15,11 +15,11 @@ async def backfill_articles() -> int:
     config = load_settings(get_project_root())
 
     async with open_runtime(config, create_process_state(config), broker_login=False) as runtime:
-        kept, stocks, embedded = await runtime.signed_out.backfill_article_store()
+        backfill = await runtime.signed_out.backfill_article_store()
 
     terminal.console.print(
-        f"The article store took {kept} new or changed articles from the archive and keeps articles of {stocks} stocks; "
-        f"{embedded} articles were embedded."
+        f"The article store took {backfill.kept} new or changed articles from the archive and keeps articles of "
+        f"{backfill.stocks} stocks; {backfill.embedded} articles were embedded."
     )
     return 0
 

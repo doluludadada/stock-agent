@@ -91,16 +91,16 @@ async def get_brokerage_account(runtime: RuntimeDependency, user: CurrentUser, p
     """
     config = runtime.config
     link = runtime.real_broker.link() if runtime.real_broker is not None else None
-    statement, switch_refusal = await pipeline.load_brokerage_statement()
+    account = await pipeline.load_brokerage_statement()
 
     return BrokerageAccountResponse(
         server=config.shioaji.server,
-        switch_refusal=switch_refusal,
+        switch_refusal=account.switch_refusal,
         login_up=link is not None and link.up,
         login_down=runtime.login_down,
         ordering=ExecutionProvider.SHIOAJI.ordering_feature in shown_features(runtime, user),
         simulation_initial_cash=config.shioaji.simulation_initial_cash if config.shioaji.server.simulation else None,
-        statement=None if statement is None else BrokerageStatementResponse.model_validate(statement),
+        statement=None if account.statement is None else BrokerageStatementResponse.model_validate(account.statement),
     )
 
 

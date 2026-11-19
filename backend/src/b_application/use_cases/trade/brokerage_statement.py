@@ -1,12 +1,12 @@
 from datetime import timedelta
 from typing import Any
 
-from a_domain.model.trading.account import BrokerageStatement
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.execution_provider import IBrokerExecutionProvider
-from a_domain.rules.system.settings_change import ServerSwitchRefusal, ServerSwitchRule
+from a_domain.rules.system.settings_change import ServerSwitchRule
 from a_domain.types.enums import FeatureVisibility
 from b_application.config.app_config import AppConfig
+from b_application.schemas.trade import BrokerageAccount
 
 
 class BrokerageStatementReader:
@@ -27,14 +27,14 @@ class BrokerageStatementReader:
         self._registration_open = config.accounts.registration_open
         self._switch_rule = ServerSwitchRule(servers=config.environment.shioaji_servers)
 
-    async def execute(self) -> tuple[BrokerageStatement | None, ServerSwitchRefusal | None]:
+    async def execute(self) -> BrokerageAccount:
         refusal = self._switch_rule.apply(
             self._server, self._server.other, FeatureVisibility.OFF, self._given, self._registration_open
         )
 
         if self._brokerage is None or not self._brokerage.link().up:
-            return None, refusal
+            return BrokerageAccount(None, refusal)
 
         today = self._market_clock.today()
 
-        return await self._brokerage.statement(today - timedelta(days=self._realized_days), today), refusal
+        return BrokerageAccount(await self._brokerage.statement(today - timedelta(days=self._realized_days), today), refusal)

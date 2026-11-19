@@ -38,7 +38,7 @@ class ValuationExplainer:
         )
         self._logger = logger
 
-    async def execute(self, report: ValuationReport) -> tuple[ReportSection, ...]:
+    async def execute(self, report: ValuationReport) -> list[ReportSection]:
         """Every section of the report, in order, with the AI's text where the AI gave it."""
         stock_id = report.stock.stock_id
         prompt = self._prompt_builder.apply(report)

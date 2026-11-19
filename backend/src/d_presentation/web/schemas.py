@@ -918,7 +918,7 @@ class ValuationScanResponse(BaseModel):
 
 class ValuationExplanationResponse(BaseModel):
     report: ValuationReportResponse
-    sections: tuple[ReportSection, ...]
+    sections: list[ReportSection]
 
 
 type ConfirmationId = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{16,64}$")]

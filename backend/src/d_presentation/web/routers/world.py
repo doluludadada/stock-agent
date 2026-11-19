@@ -19,7 +19,7 @@ async def get_world(pipeline: SignedOutPipeline) -> WorldResponse:
     the Taipei time from which the site writes the day's brief, null on a site that writes none. Every title and
     summary is a third party's: show it as text, never as markup. Private.
     """
-    indicators, briefs, news, write_at = await pipeline.load_world()
-    items = [StockNewsItemResponse.model_validate(item) for item in news]
+    world = await pipeline.load_world()
+    items = [StockNewsItemResponse.model_validate(item) for item in world.news]
 
-    return WorldResponse(indicators=indicators, briefs=briefs, news=items, write_at=write_at)
+    return WorldResponse(indicators=world.readings, briefs=world.briefs, news=items, write_at=world.write_at)

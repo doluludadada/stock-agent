@@ -23,13 +23,15 @@ async def backfill_history(arguments: Sequence[str]) -> int:
     config = load_settings(get_project_root())
 
     async with open_runtime(config, create_process_state(config), broker_login=False) as runtime:
-        history, revenue, eps = await runtime.signed_out.backfill_history(first)
+        backfill = await runtime.signed_out.backfill_history(first)
+
+    history, revenue, eps = backfill.history, backfill.revenue, backfill.eps
 
     if history is None or revenue is None or eps is None:
         terminal.console.print("This site reads its history from the open-data archive alone, which nothing backfills.")
         return 1
 
-    held, missing, unread = history
+    held, missing, unread = history.held, history.lacking, history.unread
     read, due = revenue
     span = f"from {held[0]} to {held[-1]}" if held else "none"
     terminal.console.print(f"Monthly revenue: {read} of the {due} months due read from MOPS.")
