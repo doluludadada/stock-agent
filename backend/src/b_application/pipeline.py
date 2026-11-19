@@ -17,6 +17,7 @@ from a_domain.model.trading.backtest import Backtest, BacktestInputs
 from a_domain.model.trading.order import Order
 from a_domain.model.valuation.scan import MarketValuation, ScanCriteria, ValuationScan
 from a_domain.model.valuation.valuation import ReportSection, StockValuation, ValuationReport
+from a_domain.ports.analysis.technical_settings_repository import ITechnicalSettingsRepository
 from a_domain.ports.market.daily_close_archive import ArchivedMonth, ArchivedQuarter, ArchivedSession, IDailyCloseArchive
 from a_domain.ports.system.settings_files import SettingChange, SettingField, SettingsEdit
 from a_domain.ports.trading.backtest_repository import IBacktestRepository
@@ -86,6 +87,7 @@ from b_application.use_cases.collect.world_lookup import WorldLookup
 from b_application.use_cases.collect.world_refresh import WorldRefresh
 from b_application.use_cases.process.ai_analyser import AiAnalyser
 from b_application.use_cases.process.article_indexer import ArticleIndexer
+from b_application.use_cases.process.brief_lookup import BriefLookup
 from b_application.use_cases.process.company_background import CompanyBackground
 from b_application.use_cases.process.daily_stock_brief import DailyStockBrief
 from b_application.use_cases.process.indicator_readings import IndicatorReadings
@@ -94,7 +96,7 @@ from b_application.use_cases.process.stock_brief_context import StockBriefContex
 from b_application.use_cases.process.strategy_loader import StrategyLoader
 from b_application.use_cases.process.system_writing_stocks import SystemWritingStocks
 from b_application.use_cases.process.technical_filter import TechnicalFilter
-from b_application.use_cases.process.technical_settings_editor import TechnicalSettingsEditor
+from b_application.use_cases.process.technical_settings_loader import TechnicalSettingsLoader
 from b_application.use_cases.process.world_brief_context import WorldBriefContext
 from b_application.use_cases.ranking.latest_ranking import LatestRanking
 from b_application.use_cases.ranking.ranking_evidence import RankingEvidence
@@ -188,7 +190,8 @@ class Pipeline:
     """
 
     strategy_loader: StrategyLoader
-    technical_settings_editor: TechnicalSettingsEditor
+    technical_settings_loader: TechnicalSettingsLoader
+    technical_settings_repository: ITechnicalSettingsRepository
     run_history: RunHistory
     account_loader: AccountLoader
     stock_lookup: StockLookup
@@ -216,10 +219,13 @@ class Pipeline:
     world_lookup: WorldLookup
     world_brief_context: WorldBriefContext
     world_brief: DailyStockBrief
+    world_brief_lookup: BriefLookup
     company_background: CompanyBackground
     company_card: DailyStockBrief
+    company_card_lookup: BriefLookup
     stock_brief_context: StockBriefContext
     daily_stock_brief: DailyStockBrief
+    stock_brief_lookup: BriefLookup
     realtime_quote_feed: RealtimeQuoteFeed
     technical_filter: TechnicalFilter
     indicator_readings: IndicatorReadings
@@ -975,7 +981,8 @@ class Pipeline:
         if context is None:
             return None
 
-        today, _, _ = await self.world_brief.execute(MarketScope.WORLD.value, context)
+        await self.world_brief.execute(MarketScope.WORLD.value, context)
+        today, _, _ = await self.world_brief_lookup.execute(MarketScope.WORLD.value)
 
         return today
 
@@ -1004,7 +1011,7 @@ class Pipeline:
 
         analysis = await self.stock_analysis_lookup.execute(stock_id)
         profile, context = await self.company_background.execute(status.manual_stocks[0], analysis)
-        card, kept_card, _ = await self.company_card.execute(stock_id)
+        card, kept_card, _ = await self.company_card_lookup.execute(stock_id)
 
         return profile, [fact.source for fact in context.facts], card, kept_card
 
@@ -1013,7 +1020,7 @@ class Pipeline:
         A stock's page: the AI brief the site holds of the stock today in Taipei, its newest written brief of an earlier
         day, and how many more stocks may get a new brief today.
         """
-        return await self.daily_stock_brief.execute(stock_id)
+        return await self.stock_brief_lookup.execute(stock_id)
 
     async def write_stock_brief(self, stock_id: str) -> tuple[StockBrief | None, StockBrief | None, int] | None:
         """
@@ -1038,11 +1045,14 @@ class Pipeline:
         await self.annual_report_refresh.execute([stock_id])
         await self.article_indexer.execute(stock_id)
         _, card_context = await self.company_background.execute(status.manual_stocks[0], analysis)
-        card, kept_card, _ = await self.company_card.execute(stock_id, card_context)
+        await self.company_card.execute(stock_id, card_context)
+        card, kept_card, _ = await self.company_card_lookup.execute(stock_id)
         history = await self.ranking_history_loader.execute()
         context = await self.stock_brief_context.execute(status.manual_stocks[0], analysis, articles, history, (card, kept_card))
 
-        return await self.daily_stock_brief.execute(stock_id, context)
+        await self.daily_stock_brief.execute(stock_id, context)
+
+        return await self.stock_brief_lookup.execute(stock_id)
 
     async def count_archived_sessions(self) -> int:
         """
@@ -1101,14 +1111,14 @@ class Pipeline:
 
     async def load_technical_settings(self) -> TechnicalSettings:
         """The settings editor's read: the owner's saved strategies and selections, the initial ones on a first read."""
-        return await self.technical_settings_editor.execute()
+        return await self.technical_settings_loader.execute()
 
     async def save_technical_settings(self, settings: TechnicalSettings) -> TechnicalSettings:
         """
         The settings editor's save. It raises TechnicalSettingsConflictError, saving nothing, when another save came
         after the revision `settings` carries. A run already loaded its strategy, so the next run uses these settings.
         """
-        return await self.technical_settings_editor.execute(settings)
+        return await self.technical_settings_repository.save(settings)
 
     async def load_settings_form(self) -> list[SettingField]:
         """

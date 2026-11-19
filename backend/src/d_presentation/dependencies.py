@@ -94,6 +94,7 @@ from b_application.use_cases.collect.world_lookup import WorldLookup
 from b_application.use_cases.collect.world_refresh import WorldRefresh
 from b_application.use_cases.process.ai_analyser import AiAnalyser
 from b_application.use_cases.process.article_indexer import ArticleIndexer
+from b_application.use_cases.process.brief_lookup import BriefLookup
 from b_application.use_cases.process.company_background import CompanyBackground
 from b_application.use_cases.process.daily_stock_brief import DailyStockBrief
 from b_application.use_cases.process.indicator_readings import IndicatorReadings
@@ -102,7 +103,7 @@ from b_application.use_cases.process.stock_brief_context import StockBriefContex
 from b_application.use_cases.process.strategy_loader import StrategyLoader
 from b_application.use_cases.process.system_writing_stocks import SystemWritingStocks
 from b_application.use_cases.process.technical_filter import TechnicalFilter
-from b_application.use_cases.process.technical_settings_editor import TechnicalSettingsEditor
+from b_application.use_cases.process.technical_settings_loader import TechnicalSettingsLoader
 from b_application.use_cases.process.world_brief_context import WorldBriefContext
 from b_application.use_cases.ranking.latest_ranking import LatestRanking
 from b_application.use_cases.ranking.ranking_evidence import RankingEvidence
@@ -993,7 +994,8 @@ def build_pipeline(
     ai_model = config.ai.offered_models[config.ai.model_for(user.ai_model if user is not None else None)]
     return Pipeline(
         strategy_loader=StrategyLoader(owned.technical_settings_repository, config, logger),
-        technical_settings_editor=TechnicalSettingsEditor(owned.technical_settings_repository, config),
+        technical_settings_loader=TechnicalSettingsLoader(owned.technical_settings_repository, config),
+        technical_settings_repository=owned.technical_settings_repository,
         run_history=RunHistory(
             journal, market_clock, config, logger, config.ai.model_for(user.ai_model if user is not None else None), chosen
         ),
@@ -1051,6 +1053,7 @@ def build_pipeline(
         company_card=DailyStockBrief(
             dependencies.company_card_repository, owned.ai_provider, market_clock, config, logger, ai_model, BriefKind.COMPANY
         ),
+        company_card_lookup=BriefLookup(dependencies.company_card_repository, market_clock, config, BriefKind.COMPANY),
         world_refresh=WorldRefresh(
             dependencies.world_feed,
             dependencies.article_store,
@@ -1075,12 +1078,14 @@ def build_pipeline(
         world_brief=DailyStockBrief(
             dependencies.world_brief_repository, owned.ai_provider, market_clock, config, logger, ai_model, BriefKind.WORLD
         ),
+        world_brief_lookup=BriefLookup(dependencies.world_brief_repository, market_clock, config, BriefKind.WORLD),
         stock_brief_context=StockBriefContext(
             stocks, prices, dependencies.article_store, dependencies.article_index, market_clock, config, logger
         ),
         daily_stock_brief=DailyStockBrief(
             dependencies.stock_brief_repository, owned.ai_provider, market_clock, config, logger, ai_model
         ),
+        stock_brief_lookup=BriefLookup(dependencies.stock_brief_repository, market_clock, config),
         realtime_quote_feed=RealtimeQuoteFeed(prices, market_clock, config, logger),
         technical_filter=TechnicalFilter(logger),
         indicator_readings=IndicatorReadings(),
