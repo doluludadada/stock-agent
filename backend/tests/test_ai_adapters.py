@@ -13,7 +13,7 @@ from openai import APIConnectionError, AsyncOpenAI
 from support.settings import shipped_config
 
 from a_domain.model.chat.message import Message
-from a_domain.model.chat.web_search_result import WebSearchResult
+from a_domain.ports.chat.web_search_provider import WebSearchResult
 from a_domain.types.enums import AiProvider, MessageRole
 from b_application.config.ai_config import TavilyConfig
 from b_application.config.app_config import AppConfig

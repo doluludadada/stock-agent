@@ -2,7 +2,6 @@ from pydantic.dataclasses import dataclass
 
 
 @dataclass(frozen=True)
-class WebSearchResult:
+class News:
+    stock_id: str
     title: str
-    url: str
-    content: str

@@ -17,12 +17,19 @@ from shioaji.order import Order as BrokerOrder, StockOrder, Trade
 from shioaji.position import SettlementV1, StockPosition, StockProfitLoss
 
 from a_domain.model.trading.account import Account, BrokerageStatement, BrokerFill, Mark, Position, Settlement
-from a_domain.model.trading.order import ExchangeOrder, Order
+from a_domain.model.trading.order import Order
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.execution_provider import IBrokerExecutionProvider, SendRefusal
 from a_domain.rules.trading.cost import TradingCostRule
-from a_domain.rules.trading.execution import BrokerOutcomeRule, FillRule, LotSplitRule, OrderAcceptanceRule, SimulationCashRule
+from a_domain.rules.trading.execution import (
+    BrokerOutcomeRule,
+    ExchangeOrder,
+    FillRule,
+    LotSplitRule,
+    OrderAcceptanceRule,
+    SimulationCashRule,
+)
 from a_domain.rules.trading.order_rule import BrokerLink
 from a_domain.types.enums import ExecutionProvider, LotKind, OrderStatus, RejectReason, TimeInForce, TradeAction
 from b_application.config.app_config import AppConfig

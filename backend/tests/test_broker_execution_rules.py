@@ -4,9 +4,16 @@ from datetime import UTC, date, datetime
 import pytest
 
 from a_domain.model.trading.account import Account, BrokerFill, Position
-from a_domain.model.trading.order import ExchangeOrder, Order
+from a_domain.model.trading.order import Order
 from a_domain.rules.trading.cost import TradingCostRule
-from a_domain.rules.trading.execution import BrokerOutcomeRule, FillRule, LotSplitRule, OrderAcceptanceRule, SimulationCashRule
+from a_domain.rules.trading.execution import (
+    BrokerOutcomeRule,
+    ExchangeOrder,
+    FillRule,
+    LotSplitRule,
+    OrderAcceptanceRule,
+    SimulationCashRule,
+)
 from a_domain.types.enums import LotKind, OrderStatus, OrderType, RejectReason, TimeInForce, TradeAction
 from a_domain.types.ids import new_decision_id, new_run_id
 

@@ -127,6 +127,9 @@ class Account:
   - A type that only one port and its adapters use lives in the port's file (3.4).
   - Information that only a table or an API needs, such as a row's position or a display copy,
     lives in the DTO (5) or the response (6).
+
+  The architecture check's MODEL-HOME reports a model class that only one rule, or only one port, uses: it moves
+  into that rule's file, or into that port's file.
 - Before adding a class, find the concept it belongs to and put it in that file. Before adding a
   file, check that no concept file fits.
 - One idea is one class. Two classes with the same fields or the same derived value (such as

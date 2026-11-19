@@ -4,7 +4,8 @@ from datetime import date, datetime
 from typing import Protocol
 
 from a_domain.model.trading.account import Account, BrokerageStatement, Position
-from a_domain.model.trading.order import ExchangeOrder, Order
+from a_domain.model.trading.order import Order
+from a_domain.rules.trading.execution import ExchangeOrder
 from a_domain.rules.trading.order_rule import BrokerLink
 from a_domain.types.enums import LotKind, RejectReason
 

@@ -82,11 +82,16 @@ How the rules measure:
   with every class in a_domain/model. When at least 80% of its field names are fields or properties of another
   model, it copies that model, for storage, transport or a screen. Store, send and show the model itself; a DTO in
   c_infrastructure or a response in d_presentation holds only what the model lacks or must hide. Classes in
-  a_domain/rules are not compared: sibling variants of one rule value share fields on purpose. COPY_EXEMPT names the
-  classes left as they are, each with its reason. In d_presentation/web/schemas.py it reports only exact copies: a
-  class whose field names are exactly those of a class in a_domain/model, a_domain/types or a_domain/ports, with no
-  field typed by a name the module defines (another response, which hides part of a model, or PublicText, which
-  redacts). A route answers with that domain class itself.
+  a_domain/rules are not compared: sibling variants of one rule value share fields on purpose. In
+  d_presentation/web/schemas.py it reports only exact copies: a class whose field names are exactly those of a class
+  in a_domain/model, a_domain/types or a_domain/ports, with no field typed by a name the module defines (another
+  response, which hides part of a model, or PublicText, which redacts). A route answers with that domain class itself.
+- MODEL-HOME takes every top-level class in a_domain/model whose name nothing else in its own file uses, so it is no
+  part of that file's concept, and the files of a_domain, b_application and d_presentation that import it by name. An
+  adapter in c_infrastructure imports a rule's values and a port's types too, so it does not count. When those files
+  are one rule file and any port files, which hand that rule's value over, the class is a value only that rule reads
+  and moves into the rule's file. When they are one port file and no rule file, it is a type only that port and its
+  adapters use and moves into the port's file. A class that no such file imports is not reported.
 - PYRIGHT (with --pyright) counts pyright errors, using `[tool.pyright]` from the current folder.
 """
 
@@ -235,8 +240,6 @@ COLLECTION_MUTATORS = frozenset(
 STRATEGY_CLASSES = frozenset({"TechnicalStrategy", "TechnicalRule"})
 COPY_SCOPE = ("a_domain/model", "b_application/schemas")
 COPY_SHARE = 0.8
-COPY_EXEMPT = frozenset({"WebSearchResult"})
-"""WebSearchResult belongs to the LINE chat, which stays unchanged until it is rebuilt as a customer-service bot."""
 PORT_CALLERS_EXEMPT = frozenset(
     {
         ("ITaiwanStockProvider", "cached_stocks"),
@@ -292,6 +295,7 @@ INFRASTRUCTURE_RULES = {
     ),
 }
 ANSWER_SOURCES = ("a_domain/model", "a_domain/types", "a_domain/ports")
+MODEL_USERS = ("a_domain", "b_application", "d_presentation")
 STORY_ID = re.compile(r"\bUS-\d+|\bTODO\b|(?<![\w&])#\d+\b")
 TYPE_IGNORE = re.compile(r"#\s*(?:type|pyright)\s*:\s*ignore\b")
 CJK = re.compile(
@@ -881,7 +885,7 @@ def check_model_copy(files: Sequence[SourceFile]) -> Iterator[Finding]:
     models = [(node, field_names(node) | property_names(node)) for source, node in classes if source.under("a_domain/model")]
     for source, node in classes:
         fields = field_names(node)
-        if len(fields) < 2 or node.name in COPY_EXEMPT:
+        if len(fields) < 2:
             continue
         if original := next(
             (other for other, names in models if other is not node and len(fields & names) >= COPY_SHARE * len(fields)), None
@@ -944,6 +948,50 @@ def property_names(node: ast.ClassDef) -> set[str]:
         for method in methods(node)
         if {name_of(decorator) for decorator in method.decorator_list} & {"property", "cached_property"}
     }
+
+
+def check_model_home(files: Sequence[SourceFile]) -> Iterator[Finding]:
+    importers = name_importers(files)
+    for source in files:
+        if not source.under("a_domain/model") or source.module is None:
+            continue
+        module = ".".join(source.module.with_suffix("").parts)
+        for node in top_level_classes(source.tree):
+            if node.name in names_outside(source.tree, node):
+                continue
+            if home := model_home(importers.get(f"{module}.{node.name}", set())):
+                yield source.path, node.lineno, f"{node.name} {home}"
+
+
+def name_importers(files: Sequence[SourceFile]) -> dict[str, set[PurePosixPath]]:
+    """Each name a file of MODEL_USERS imports with `from module import name`, as `module.name`, and those files."""
+    importers: dict[str, set[PurePosixPath]] = {}
+    for source in files:
+        if source.module is None or source.layer not in MODEL_USERS:
+            continue
+        for _, module, names in imports(source):
+            for name in names:
+                importers.setdefault(f"{module}.{name}", set()).add(source.module)
+    return importers
+
+
+def names_outside(tree: ast.Module, node: ast.ClassDef) -> set[str]:
+    """Every name the module reads or writes outside the class `node`, its decorators included."""
+    inside = {id(child) for child in ast.walk(node)}
+    return {name.id for name in ast.walk(tree) if isinstance(name, ast.Name) and id(name) not in inside}
+
+
+def model_home(importers: set[PurePosixPath]) -> str | None:
+    """Where a model class goes when one rule, or one port, is all that imports it; None while it is a shared model."""
+    rules = sorted(path for path in importers if path.is_relative_to("a_domain/rules"))
+    ports = sorted(path for path in importers if path.is_relative_to("a_domain/ports"))
+    if len(rules) + len(ports) < len(importers):
+        return None
+    if len(rules) == 1:
+        return f"is a value only the rule in {rules[0]} reads (a port may hand it over); move it into that rule's file"
+    if not rules and len(ports) == 1:
+        return f"is a type only the port in {ports[0]} and its adapters use; move it into that port's file"
+    return None
 
 
 def check_domain_style(files: Sequence[SourceFile]) -> Iterator[Finding]:
@@ -1181,6 +1229,7 @@ RULES: dict[str, Callable[[Sequence[SourceFile]], Iterator[Finding]]] = {
     "USECASE-STATUS": check_usecase_status,
     "PATH-COMMENT": check_path_comment,
     "MODEL-COPY": check_model_copy,
+    "MODEL-HOME": check_model_home,
 }
 
 
