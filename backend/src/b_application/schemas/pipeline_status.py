@@ -2,13 +2,13 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Self
 
-from a_domain.model.analysis.social_sentiment import SocialSentiment
 from a_domain.model.market.stock import Stock
 from a_domain.model.system.stats import SystemStats
 from a_domain.model.trading.account import Account, AccountSnapshot
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.model.trading.watchlist import WatchlistEntry
+from a_domain.rules.sentiment.social_sentiment import SocialSentiment
 from a_domain.types.enums import ExecutionProvider, FollowRefusal, IndicatorOutput, Workflow
 from a_domain.types.values import FormulaId
 

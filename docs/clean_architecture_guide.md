@@ -129,7 +129,9 @@ class Account:
     lives in the DTO (5) or the response (6).
 
   The architecture check's MODEL-HOME reports a model class that only one rule, or only one port, uses: it moves
-  into that rule's file, or into that port's file.
+  into that rule's file, or into that port's file. A class that only one rule builds moves into that rule's file
+  too, whatever other files read it, unless another model holds it or it has a method that callers call, since a
+  model never imports a rule and a rule's value has only fields and properties (3.5).
 - Before adding a class, find the concept it belongs to and put it in that file. Before adding a
   file, check that no concept file fits.
 - One idea is one class. Two classes with the same fields or the same derived value (such as
@@ -556,6 +558,11 @@ From the owner's review of 2026-11-14:
   became its own class: 19 use cases were one line and 40 of the Pipeline's 76 operations forwarded to one of
   them. The use cases were the defect, not the Pipeline. A use case is a substantial step, and a step that is one
   call of one port is the Pipeline's own call of that port (4.1).
+
+From the owner's ruling of 2026-11-19:
+
+- `ReportSection` and `SocialSentiment` sat in `a_domain/model`, although only one rule built each and every other
+  file only read them. MODEL-HOME now reports a class that only one rule builds, and the class moves into that rule's file.
 
 ---
 

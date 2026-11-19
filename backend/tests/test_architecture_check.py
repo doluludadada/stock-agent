@@ -106,7 +106,11 @@ EXPECTED_FAILURES: dict[str, list[tuple[str, int]]] = {
         ("b_application/schemas/account_screen.py", 5),
         ("d_presentation/web/schemas.py", 4),
     ],
-    "MODEL-HOME": [("a_domain/model/chat/web_search_result.py", 5), ("a_domain/model/trading/order.py", 11)],
+    "MODEL-HOME": [
+        ("a_domain/model/analysis/sentiment.py", 5),
+        ("a_domain/model/chat/web_search_result.py", 5),
+        ("a_domain/model/trading/order.py", 11),
+    ],
     "MODULE-CONSTANT": [
         ("a_domain/model/fiscal_quarter.py", 4),
         ("a_domain/model/fiscal_quarter.py", 5),

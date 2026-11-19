@@ -14,7 +14,7 @@ from a_domain.model.trading.account import Account, Position
 from a_domain.model.trading.backtest import Backtest, BacktestInputs
 from a_domain.model.trading.order import Order
 from a_domain.model.valuation.scan import MarketValuation, ScanCriteria, ValuationScan
-from a_domain.model.valuation.valuation import ReportSection, StockValuation, ValuationReport
+from a_domain.model.valuation.valuation import StockValuation, ValuationReport
 from a_domain.ports.analysis.technical_settings_repository import ITechnicalSettingsRepository
 from a_domain.ports.market.daily_close_archive import IDailyCloseArchive
 from a_domain.ports.system.settings_files import SettingChange, SettingField, SettingsEdit
@@ -30,6 +30,7 @@ from a_domain.rules.trading.holdings import PortfolioAnalysis
 from a_domain.rules.trading.ranking import Ranking
 from a_domain.rules.trading.ranking_backtest import RankingBacktest
 from a_domain.rules.trading.ranking_standing import RankingStanding
+from a_domain.rules.valuation.valuation import ReportSection
 from a_domain.types.enums import (
     AiAnalysisFocus,
     AiProvider,

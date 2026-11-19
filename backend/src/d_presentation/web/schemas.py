@@ -27,13 +27,14 @@ from a_domain.model.trading.backtest import BacktestInputs, BacktestTrade
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.ranking_formula import RankingFormula
 from a_domain.model.valuation.scan import ScanCriteria
-from a_domain.model.valuation.valuation import PeMedian, ReportSection
+from a_domain.model.valuation.valuation import PeMedian
 from a_domain.ports.system.settings_files import SettingChange, SettingsProblem
 from a_domain.rules.fundamentals.stock_analysis import RevenueMonth
 from a_domain.rules.market.quote_refresh import QuoteRefresh
 from a_domain.rules.system.settings_change import ServerSwitchRefusal
 from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
 from a_domain.rules.trading.ranking import RankedStock
+from a_domain.rules.valuation.valuation import ReportSection
 from a_domain.types.enums import (
     AiProvider,
     Audience,

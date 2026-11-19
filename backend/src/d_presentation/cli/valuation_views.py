@@ -12,7 +12,8 @@ from rich.table import Table
 
 from a_domain.model.fundamentals.eps import Eps
 from a_domain.model.valuation.scan import MarketValuation, ScanCriteria, ValuationScan
-from a_domain.model.valuation.valuation import ReportSection, StockValuation, ValuationReport
+from a_domain.model.valuation.valuation import StockValuation, ValuationReport
+from a_domain.rules.valuation.valuation import ReportSection
 from a_domain.types.enums import EliminationReason, ScanStep
 from a_domain.types.values import PositiveFiniteFloat
 from b_application.config.app_config import AppConfig

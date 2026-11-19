@@ -98,7 +98,13 @@ How the rules measure:
   adapter in c_infrastructure imports a rule's values and a port's types too, so it does not count. When those files
   are one rule file and any port files, which hand that rule's value over, the class is a value only that rule reads
   and moves into the rule's file. When they are one port file and no rule file, it is a type only that port and its
-  adapters use and moves into the port's file. A class that no such file imports is not reported.
+  adapters use and moves into the port's file. A class that no such file imports is not reported. A class that a file
+  of a_domain/model imports is a part of that file's model and stays, since a model never imports a rule. When one rule
+  file is the only file that builds the class, by calling it or by naming it in the type of a TypeAdapter, the class
+  is that rule's result, whatever other files read it, and moves into that rule's file too; a call in any layer counts,
+  an adapter's included. No class with a public method other than a property or a pydantic validator is sent to a
+  rule's file, where RULE-APPLY would take it for a rule; a class method is such a method, so a class that builds
+  itself stays.
 - PYRIGHT (with --pyright) counts pyright errors, using `[tool.pyright]` from the current folder.
 """
 
@@ -428,6 +434,15 @@ def methods(node: ast.ClassDef) -> list[FunctionNode]:
     return [item for item in node.body if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef)]
 
 
+def public_methods(node: ast.ClassDef) -> list[FunctionNode]:
+    """The methods a caller calls: no leading underscore, and neither a property nor a validator that pydantic calls."""
+    return [
+        method
+        for method in methods(node)
+        if not method.name.startswith("_") and not NOT_CALLED & {name_of(decorator) for decorator in method.decorator_list}
+    ]
+
+
 def functions(tree: ast.Module) -> list[FunctionNode]:
     return [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)]
 
@@ -595,11 +610,7 @@ def check_rule_apply(files: Sequence[SourceFile]) -> Iterator[Finding]:
         if not source.under("a_domain/rules"):
             continue
         for node in top_level_classes(source.tree):
-            public = [
-                method
-                for method in methods(node)
-                if not method.name.startswith("_") and not NOT_CALLED & {name_of(decorator) for decorator in method.decorator_list}
-            ]
+            public = public_methods(node)
             if not public:
                 continue
             if "apply" not in {method.name for method in public}:
@@ -979,7 +990,7 @@ def property_names(node: ast.ClassDef) -> set[str]:
 
 
 def check_model_home(files: Sequence[SourceFile]) -> Iterator[Finding]:
-    importers = name_importers(files)
+    importers, builders = name_importers(files), class_builders(files)
     for source in files:
         if not source.under("a_domain/model") or source.module is None:
             continue
@@ -987,7 +998,8 @@ def check_model_home(files: Sequence[SourceFile]) -> Iterator[Finding]:
         for node in top_level_classes(source.tree):
             if node.name in names_outside(source.tree, node):
                 continue
-            if home := model_home(importers.get(f"{module}.{node.name}", set())):
+            name = f"{module}.{node.name}"
+            if home := model_home(importers.get(name, set()), builders.get(name, set()), has_methods=bool(public_methods(node))):
                 yield source.path, node.lineno, f"{node.name} {home}"
 
 
@@ -1009,16 +1021,40 @@ def names_outside(tree: ast.Module, node: ast.ClassDef) -> set[str]:
     return {name.id for name in ast.walk(tree) if isinstance(name, ast.Name) and id(name) not in inside}
 
 
-def model_home(importers: set[PurePosixPath]) -> str | None:
-    """Where a model class goes when one rule, or one port, is all that imports it; None while it is a shared model."""
+def class_builders(files: Sequence[SourceFile]) -> dict[str, set[PurePosixPath]]:
+    """Each name a file calls, or names in the type of a TypeAdapter it makes, as `module.name`, and those files."""
+    builders: dict[str, set[PurePosixPath]] = {}
+    for source in files:
+        if source.module is None:
+            continue
+        bound = bound_imports(source)
+        for call in ast.walk(source.tree):
+            if not isinstance(call, ast.Call):
+                continue
+            adapted = [node for argument in call.args for node in ast.walk(argument)] if name_of(call.func) == "TypeAdapter" else []
+            for node in [call.func, *adapted]:
+                if isinstance(node, ast.Name | ast.Attribute) and (target := resolved(node, bound)):
+                    builders.setdefault(target, set()).add(source.module)
+    return builders
+
+
+def model_home(importers: set[PurePosixPath], builders: set[PurePosixPath], *, has_methods: bool) -> str | None:
+    """
+    Where a model class goes when one rule reads it or builds it, or one port is all that imports it; None while it is
+    a shared model or a part of one. A class with a method a caller calls never goes to a rule's file, which holds no
+    class with a public method but a rule's `apply`.
+    """
     rules = sorted(path for path in importers if path.is_relative_to("a_domain/rules"))
     ports = sorted(path for path in importers if path.is_relative_to("a_domain/ports"))
-    if len(rules) + len(ports) < len(importers):
-        return None
-    if len(rules) == 1:
-        return f"is a value only the rule in {rules[0]} reads (a port may hand it over); move it into that rule's file"
-    if not rules and len(ports) == 1:
+    rules_and_ports_only = len(rules) + len(ports) == len(importers)
+    if rules_and_ports_only and not rules and len(ports) == 1:
         return f"is a type only the port in {ports[0]} and its adapters use; move it into that port's file"
+    if has_methods or any(path.is_relative_to("a_domain/model") for path in importers):
+        return None
+    if rules_and_ports_only and len(rules) == 1:
+        return f"is a value only the rule in {rules[0]} reads (a port may hand it over); move it into that rule's file"
+    if len(builders) == 1 and (builder := next(iter(builders))).is_relative_to("a_domain/rules"):
+        return f"is built only by the rule in {builder}, and other files only read it; move it into that rule's file"
     return None
 
 

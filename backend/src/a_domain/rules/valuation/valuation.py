@@ -10,7 +10,6 @@ from a_domain.model.market.stock import Stock
 from a_domain.model.valuation.valuation import (
     FairPriceRange,
     PeRatio,
-    ReportSection,
     StockValuation,
     ValuationExplanation,
     ValuationReport,
@@ -173,6 +172,12 @@ def over_or_under(undervaluation: float) -> str:
         return f"overvalued by {-undervaluation:.1%}"
 
     return "the price equals the fair price"
+
+
+@dataclass(frozen=True)
+class ReportSection:
+    title: str
+    lines: tuple[str, ...]
 
 
 @dataclass(frozen=True)
