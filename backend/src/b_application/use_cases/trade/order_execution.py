@@ -60,7 +60,9 @@ class OrderExecution:
     answer, and records that answer before it stops the run, so the journal never says PENDING about an order the
     broker saw. From then on the broker sends nothing more (`refusal_now` answers RUN_CANCELLED) and ends any wait
     for what it sent: what still works is cancelled at the broker and what dealt is read. A second cancel stops the
-    broker call itself, and the order is recorded FAILED with a reason that says to check the broker.
+    broker call itself, so a part may have reached the broker and may still deal there: on a real broker the order is
+    recorded UNCONFIRMED, which the broker's record of the day settles (OrderSettlement), and a second BUY of the stock
+    waits for it (UnsettledBuyRule); on the mock account it is recorded FAILED with a reason that says to check it.
     """
 
     def __init__(
@@ -101,7 +103,12 @@ class OrderExecution:
                 await sending
 
         now = self._market_clock.now()
-        if sending.cancelled():
+        if sending.cancelled() and order.status.is_open and self._execution_provider.link().broker.real:
+            order.leave_unconfirmed(
+                "the run was cancelled during the broker call, so the broker may hold this order: its record of the day settles it",
+                now=now,
+            )
+        elif sending.cancelled():
             order.fail_if_open("the run was cancelled during the broker call, so the broker may hold this order: check it", now=now)
         elif (error := sending.exception()) is not None:
             order.fail_if_open(f"broker call failed: {type(error).__name__}: {error}", now=now)

@@ -3905,6 +3905,7 @@
         "enum": [
           "pending",
           "submitted",
+          "unconfirmed",
           "filled",
           "cancelled",
           "failed",
@@ -5662,7 +5663,7 @@
         "type": "integer"
       },
       "ServerSwitchRefusal": {
-        "description": "Why the site's SinoPac login may not be on `server`, with the variables its login reads that are not set, by name only.",
+        "description": "Why the site's SinoPac login may not be on `server`, with the variables its login reads that are not set, by name\nonly, and how many SinoPac orders await settlement.",
         "properties": {
           "missing": {
             "default": [],
@@ -5677,6 +5678,11 @@
           },
           "server": {
             "$ref": "#/components/schemas/ShioajiServer"
+          },
+          "unsettled": {
+            "default": 0,
+            "title": "Unsettled",
+            "type": "integer"
           }
         },
         "required": [
@@ -5692,7 +5698,8 @@
           "environment",
           "registration_open",
           "ordering_on",
-          "credentials_missing"
+          "credentials_missing",
+          "orders_unsettled"
         ],
         "title": "ServerSwitchRefusalReason",
         "type": "string"

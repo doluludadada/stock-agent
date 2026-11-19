@@ -391,7 +391,8 @@ class ShioajiConfig(BaseSettings):
     """
     How long the broker may take to refresh the status of every order of the account today, which each read of its cash
     and today's deals asks once. A day of many orders takes longer than the SDK's own 5 seconds. At most a minute, so a
-    page waits on it no longer than a proxy waits on the page.
+    page waits on it no longer than a proxy waits on the page. The lookups for an exchange order whose answer was lost
+    take at most this in all (listed_trade), within compose.yml's stop_grace_period.
     """
 
     odd_lot_matches: int = Field(default=3, gt=0, le=10, json_schema_extra={"operator_only": True})
@@ -405,7 +406,8 @@ class ShioajiConfig(BaseSettings):
     cancel_timeout_seconds: float = Field(default=15, gt=0, le=30, allow_inf_nan=False, json_schema_extra={"operator_only": True})
     """
     The longest the adapter waits for the broker to answer a cancel and the reads after it. Past it the order is
-    recorded FAILED with a reason that says to check the broker. compose.yml's stop_grace_period covers it.
+    recorded UNCONFIRMED, which the broker's record of the day settles later (OrderSettlement). compose.yml's
+    stop_grace_period covers it.
     """
 
     simulation_initial_cash: float = Field(

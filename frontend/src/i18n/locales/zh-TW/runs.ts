@@ -132,7 +132,7 @@ const runs: DictionaryShape<typeof en> = {
   noOrders: '這個任務沒有下任何訂單。',
   ordersFailed: '無法載入訂單。',
   action: { buy: '買進', sell: '賣出', hold: '持有' },
-  orderStatus: { pending: '待送出', submitted: '已送出', filled: '已成交', cancelled: '已取消', failed: '失敗', rejected: '已拒絕' },
+  orderStatus: { pending: '待送出', submitted: '已送出', unconfirmed: '未確認', filled: '已成交', cancelled: '已取消', failed: '失敗', rejected: '已拒絕' },
   logTitle: '執行紀錄',
   followOf: '這是跟單任務：把另一次任務的決策下到你的本站模擬帳戶。',
   followOfLink: '開啟原始任務',

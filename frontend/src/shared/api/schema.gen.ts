@@ -3081,7 +3081,7 @@ export interface components {
          * @description Order lifecycle. Each status lists the statuses that may follow it in next_statuses.
          * @enum {string}
          */
-        OrderStatus: "pending" | "submitted" | "filled" | "cancelled" | "failed" | "rejected";
+        OrderStatus: "pending" | "submitted" | "unconfirmed" | "filled" | "cancelled" | "failed" | "rejected";
         /**
          * OrderType
          * @enum {string}
@@ -3762,7 +3762,8 @@ export interface components {
         Score_int_: number;
         /**
          * ServerSwitchRefusal
-         * @description Why the site's SinoPac login may not be on `server`, with the variables its login reads that are not set, by name only.
+         * @description Why the site's SinoPac login may not be on `server`, with the variables its login reads that are not set, by name
+         *     only, and how many SinoPac orders await settlement.
          */
         ServerSwitchRefusal: {
             /**
@@ -3772,13 +3773,18 @@ export interface components {
             missing: components["schemas"]["ShioajiCredential"][];
             reason: components["schemas"]["ServerSwitchRefusalReason"];
             server: components["schemas"]["ShioajiServer"];
+            /**
+             * Unsettled
+             * @default 0
+             */
+            unsettled: number;
         };
         /**
          * ServerSwitchRefusalReason
          * @description Why the site's SinoPac login may not be on a server (ServerSwitchRule).
          * @enum {string}
          */
-        ServerSwitchRefusalReason: "environment" | "registration_open" | "ordering_on" | "credentials_missing";
+        ServerSwitchRefusalReason: "environment" | "registration_open" | "ordering_on" | "credentials_missing" | "orders_unsettled";
         /**
          * SettingChange
          * @description One setting the settings form changes: the path of its field, and its new value as JSON.

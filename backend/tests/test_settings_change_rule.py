@@ -36,24 +36,36 @@ def test_a_reload_needs_an_administrator_unless_the_running_settings_have_none_y
 
 
 def test_a_switch_of_the_server_needs_ordering_off_and_the_new_servers_variables() -> None:
-    assert EITHER.apply(SIMULATION, PRODUCTION, OFF, EVERY_CREDENTIAL, False) is None
-    assert EITHER.apply(SIMULATION, PRODUCTION, ADMINISTRATORS, EVERY_CREDENTIAL, False) == ServerSwitchRefusal(
+    assert EITHER.apply(SIMULATION, PRODUCTION, OFF, EVERY_CREDENTIAL, False, 0) is None
+    assert EITHER.apply(SIMULATION, PRODUCTION, ADMINISTRATORS, EVERY_CREDENTIAL, False, 0) == ServerSwitchRefusal(
         reason=ServerSwitchRefusalReason.ORDERING_ON, server=PRODUCTION
     )
-    assert EITHER.apply(PRODUCTION, SIMULATION, OFF, frozenset(PRODUCTION.credentials), False) == ServerSwitchRefusal(
+    assert EITHER.apply(PRODUCTION, SIMULATION, OFF, frozenset(PRODUCTION.credentials), False, 0) == ServerSwitchRefusal(
         reason=ServerSwitchRefusalReason.CREDENTIALS_MISSING, server=SIMULATION, missing=SIMULATION.credentials
     ), "a switch back to simulation names the simulation variables"
 
 
+def test_a_switch_of_the_server_waits_while_sinopac_orders_await_settlement_from_the_server_it_leaves() -> None:
+    one, two = (EITHER.apply(SIMULATION, PRODUCTION, OFF, EVERY_CREDENTIAL, False, unsettled) for unsettled in (1, 2))
+
+    assert two == ServerSwitchRefusal(reason=ServerSwitchRefusalReason.ORDERS_UNSETTLED, server=PRODUCTION, unsettled=2)
+    assert str(one) == (
+        "1 SinoPac order awaits settlement from the record of the server the site's login is on now: shioaji.server "
+        "switches to production once none is left, at the latest the next day"
+    )
+    assert str(two).startswith("2 SinoPac orders await settlement")
+    assert EITHER.apply(SIMULATION, SIMULATION, OFF, EVERY_CREDENTIAL, False, 2) is None, "a kept server settles them"
+
+
 def test_a_start_or_a_kept_server_needs_neither_ordering_off_nor_the_variables() -> None:
     for running in (None, PRODUCTION):
-        assert EITHER.apply(running, PRODUCTION, ADMINISTRATORS, frozenset(), False) is None
+        assert EITHER.apply(running, PRODUCTION, ADMINISTRATORS, frozenset(), False, 1) is None
 
 
 def test_the_environment_and_open_registration_refuse_a_server_even_at_a_start() -> None:
     environment = ServerSwitchRefusal(reason=ServerSwitchRefusalReason.ENVIRONMENT, server=PRODUCTION)
     registration = ServerSwitchRefusal(reason=ServerSwitchRefusalReason.REGISTRATION_OPEN, server=PRODUCTION)
 
-    assert DEVELOPER.apply(None, PRODUCTION, OFF, EVERY_CREDENTIAL, False) == environment
-    assert EITHER.apply(None, PRODUCTION, OFF, EVERY_CREDENTIAL, True) == registration
-    assert EITHER.apply(PRODUCTION, SIMULATION, OFF, EVERY_CREDENTIAL, True) is None, "simulation holds no real money"
+    assert DEVELOPER.apply(None, PRODUCTION, OFF, EVERY_CREDENTIAL, False, 0) == environment
+    assert EITHER.apply(None, PRODUCTION, OFF, EVERY_CREDENTIAL, True, 0) == registration
+    assert EITHER.apply(PRODUCTION, SIMULATION, OFF, EVERY_CREDENTIAL, True, 0) is None, "simulation holds no real money"

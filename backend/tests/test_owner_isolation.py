@@ -9,7 +9,7 @@ import asyncio
 import inspect
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, fields, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -551,6 +551,28 @@ async def buy_orders(owners: Owners) -> None:
     assert [order.id for order in await owners.alice.journal.buy_orders(ExecutionProvider.MOCK, AT)] == [recorded.order.id]
 
 
+async def unsettled_orders(owners: Owners) -> None:
+    stats = replace(run_stats(), end_time=AT)
+    signal = decision()
+    order = order_of(stats.run_id, signal)
+    order.leave_unconfirmed("the broker's answer was lost", now=AT)
+    await owners.alice.journal.save_run(stats)
+    await owners.alice.journal.save_signals(stats.run_id, [signal])
+    await owners.alice.journal.save_order(order)
+
+    assert await owners.bob.journal.unsettled_orders(ExecutionProvider.MOCK) == []
+    assert [unsettled.id for unsettled in await owners.alice.journal.unsettled_orders(ExecutionProvider.MOCK)] == [order.id]
+
+
+async def unfinished_runs(owners: Owners) -> None:
+    stats = run_stats()
+    await owners.alice.journal.save_run(stats)
+    later = stats.start_time + timedelta(minutes=1)
+
+    assert await owners.bob.journal.unfinished_runs(ExecutionProvider.MOCK, later) == []
+    assert [run.run_id for run in await owners.alice.journal.unfinished_runs(ExecutionProvider.MOCK, later)] == [stats.run_id]
+
+
 type Case = Callable[[Owners], Awaitable[None]]
 
 CASES: dict[str, dict[str, Case]] = {
@@ -572,6 +594,8 @@ CASES: dict[str, dict[str, Case]] = {
         "runs_of": runs_of,
         "first_fill": first_fill,
         "buy_orders": buy_orders,
+        "unfinished_runs": unfinished_runs,
+        "unsettled_orders": unsettled_orders,
     },
     "watchlist_repository": {"get_active": get_active, "save": save, "remove": remove},
     "technical_settings_repository": {"load": load, "save": save_settings},

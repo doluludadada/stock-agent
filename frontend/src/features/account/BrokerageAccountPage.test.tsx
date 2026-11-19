@@ -255,7 +255,9 @@ describe('the SinoPac account', () => {
   })
 
   it('keeps the switch to Production off and names the variables the server lacks, never asking for a value', async () => {
-    serve(() => json({ ...SIMULATION, switch_refusal: { reason: 'credentials_missing', server: 'production', missing: ['SHIOAJI_CA_PATH', 'SHIOAJI_PERSON_ID'] } }))
+    serve(() =>
+      json({ ...SIMULATION, switch_refusal: { reason: 'credentials_missing', server: 'production', missing: ['SHIOAJI_CA_PATH', 'SHIOAJI_PERSON_ID'], unsettled: 0 } }),
+    )
     open()
 
     expect(await screen.findByRole('button', { name: 'Switch to Production…' })).toBeDisabled()
@@ -266,11 +268,21 @@ describe('the SinoPac account', () => {
   })
 
   it('on a developer’s machine offers no switch to Production', async () => {
-    serve(() => json({ ...SIMULATION, switch_refusal: { reason: 'environment', server: 'production', missing: [] } }))
+    serve(() => json({ ...SIMULATION, switch_refusal: { reason: 'environment', server: 'production', missing: [], unsettled: 0 } }))
     open()
 
     expect(await screen.findByRole('button', { name: 'Switch to Production…' })).toBeDisabled()
     expect(screen.getByText('This machine’s environment does not log in to Production.')).toBeVisible()
+  })
+
+  it('keeps the switch off while SinoPac orders await settlement and says how many', async () => {
+    serve(() => json({ ...SIMULATION, switch_refusal: { reason: 'orders_unsettled', server: 'production', missing: [], unsettled: 2 } }))
+    open()
+
+    expect(await screen.findByRole('button', { name: 'Switch to Production…' })).toBeDisabled()
+    expect(
+      screen.getByText('SinoPac orders awaiting settlement from this server’s record of the day: 2. Switch once none is left, at the latest the next day.'),
+    ).toBeVisible()
   })
 
   it('switches back to Simulation without a typed name, turning ordering off too', async () => {

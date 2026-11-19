@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, date, datetime
 
 import pytest
@@ -17,14 +18,23 @@ COSTS = TradingCostRule(
 
 LEGAL = {
     (OrderStatus.PENDING, OrderStatus.SUBMITTED),
+    (OrderStatus.PENDING, OrderStatus.UNCONFIRMED),
     (OrderStatus.PENDING, OrderStatus.REJECTED),
     (OrderStatus.PENDING, OrderStatus.FAILED),
     (OrderStatus.PENDING, OrderStatus.CANCELLED),
     (OrderStatus.SUBMITTED, OrderStatus.SUBMITTED),
+    (OrderStatus.SUBMITTED, OrderStatus.UNCONFIRMED),
     (OrderStatus.SUBMITTED, OrderStatus.FILLED),
     (OrderStatus.SUBMITTED, OrderStatus.CANCELLED),
     (OrderStatus.SUBMITTED, OrderStatus.FAILED),
+    (OrderStatus.UNCONFIRMED, OrderStatus.SUBMITTED),
+    (OrderStatus.UNCONFIRMED, OrderStatus.UNCONFIRMED),
+    (OrderStatus.UNCONFIRMED, OrderStatus.FILLED),
+    (OrderStatus.UNCONFIRMED, OrderStatus.CANCELLED),
+    (OrderStatus.UNCONFIRMED, OrderStatus.REJECTED),
+    (OrderStatus.UNCONFIRMED, OrderStatus.FAILED),
 }
+"""An UNCONFIRMED order may end any way the broker's record says, or stay UNCONFIRMED; nothing that ended moves again."""
 
 
 def new_order(action: TradeAction = TradeAction.BUY, quantity: int = 1000) -> Order:
@@ -52,6 +62,7 @@ def order_in(status: OrderStatus) -> Order:
     setup: dict[OrderStatus, Callable[[], None]] = {
         OrderStatus.PENDING: lambda: None,
         OrderStatus.SUBMITTED: lambda: order.submit(now=NOW),
+        OrderStatus.UNCONFIRMED: lambda: order.leave_unconfirmed("the broker's answer was lost", now=NOW),
         OrderStatus.FILLED: lambda: (order.submit(now=NOW), fill(order, order.quantity)),
         OrderStatus.CANCELLED: lambda: order.cancel("user cancelled", now=NOW),
         OrderStatus.REJECTED: lambda: order.reject(RejectReason.INSUFFICIENT_CASH, "needs 100,142", now=NOW),
@@ -67,6 +78,8 @@ def move(order: Order, target: OrderStatus) -> None:
         fill(order, 1)
     elif target == OrderStatus.SUBMITTED:
         order.submit(now=NOW)
+    elif target == OrderStatus.UNCONFIRMED:
+        order.leave_unconfirmed("a part still works after a cancel request", now=NOW)
     elif target == OrderStatus.FILLED:
         fill(order, order.remaining_quantity or 1)
     elif target == OrderStatus.CANCELLED:
@@ -97,15 +110,26 @@ def test_every_status_change_is_legal_only_if_the_lifecycle_allows_it(source: Or
 
 
 @pytest.mark.parametrize("status", list(OrderStatus))
-def test_only_a_pending_or_submitted_order_is_open_and_only_an_open_order_fails_late(status: OrderStatus) -> None:
+def test_a_pending_submitted_or_unconfirmed_order_is_open_and_only_one_that_awaits_no_settlement_fails_late(
+    status: OrderStatus,
+) -> None:
     order = order_in(status)
-    is_open = status in {OrderStatus.PENDING, OrderStatus.SUBMITTED}
+    is_open = status in {OrderStatus.PENDING, OrderStatus.SUBMITTED, OrderStatus.UNCONFIRMED}
 
-    assert order.status.is_open is is_open
+    assert (order.status.is_open, order.status.fill_final) == (is_open, not is_open and status != OrderStatus.FAILED)
 
     order.fail_if_open("broker call failed", now=NOW)
 
-    assert order.status == (OrderStatus.FAILED if is_open else status)
+    assert order.status == (OrderStatus.FAILED if is_open and status != OrderStatus.UNCONFIRMED else status)
+
+
+def test_a_partial_fill_of_an_unconfirmed_order_the_broker_lists_submits_it_and_keeps_it_working() -> None:
+    order = order_in(OrderStatus.UNCONFIRMED)
+
+    order.submit(now=NOW)
+    fill(order, 400)
+
+    assert (order.status, order.filled_quantity, order.reason) == (OrderStatus.SUBMITTED, 400, None)
 
 
 def test_nothing_moves_an_order_back_to_pending() -> None:
@@ -136,6 +160,17 @@ def test_cancelling_a_partly_filled_order_keeps_what_was_filled() -> None:
     assert (order.status, order.filled_quantity, order.reason) == (OrderStatus.CANCELLED, 400, "IOC remainder cancelled")
 
 
+@pytest.mark.parametrize("fills", [[329], [100, 229], [1] * 329], ids=["one fill", "two fills", "a share at a time"])
+def test_fills_at_the_limit_average_exactly_the_limit(fills: list[int]) -> None:
+    order = replace(new_order(quantity=329), limit_price=12.45)
+    order.submit(now=NOW)
+
+    for shares in fills:
+        order.fill(shares, 12.45, 0, 0, now=NOW)
+
+    assert (order.status, order.average_filled_price) == (OrderStatus.FILLED, 12.45)
+
+
 def test_a_fill_beyond_the_limit_price_is_refused() -> None:
     order = order_in(OrderStatus.SUBMITTED)
 
@@ -146,10 +181,10 @@ def test_a_fill_beyond_the_limit_price_is_refused() -> None:
     assert (order.status, order.filled_quantity) == (OrderStatus.SUBMITTED, 0)
 
 
-@pytest.mark.parametrize("terminal", [OrderStatus.FAILED, OrderStatus.CANCELLED])
-def test_failures_and_cancels_need_a_reason(terminal: OrderStatus) -> None:
+@pytest.mark.parametrize("terminal", [OrderStatus.FAILED, OrderStatus.CANCELLED, OrderStatus.UNCONFIRMED])
+def test_failures_cancels_and_unconfirmed_orders_need_a_reason(terminal: OrderStatus) -> None:
     order = new_order()
-    events = {OrderStatus.FAILED: order.fail, OrderStatus.CANCELLED: order.cancel}
+    events = {OrderStatus.FAILED: order.fail, OrderStatus.CANCELLED: order.cancel, OrderStatus.UNCONFIRMED: order.leave_unconfirmed}
 
     with pytest.raises(ValueError, match="requires a reason"):
         events[terminal](" ", now=NOW)
@@ -168,3 +203,14 @@ def test_a_rejection_reads_as_its_reason_code_then_detail() -> None:
 def test_hold_cannot_be_an_order() -> None:
     with pytest.raises(ValueError):
         new_order(action=TradeAction.HOLD)
+
+
+@pytest.mark.parametrize(("filled", "said"), [(0, "@ 100.0"), (430, "@ 99.5")], ids=["nothing filled", "filled below the limit"])
+def test_the_summary_shows_the_average_filled_price_once_something_filled_and_the_limit_before(filled: int, said: str) -> None:
+    order = order_in(OrderStatus.SUBMITTED)
+
+    if filled:
+        cost = COSTS.apply(TradeAction.BUY, "2330", 99.5, filled, now=NOW)
+        order.fill(filled, 99.5, cost.fee, cost.tax, now=NOW)
+
+    assert f"filled {filled}/1000 {said}," in order.summary

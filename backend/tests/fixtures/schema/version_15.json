@@ -1161,6 +1161,7 @@
         "members": [
           "PENDING",
           "SUBMITTED",
+          "UNCONFIRMED",
           "FILLED",
           "CANCELLED",
           "FAILED",

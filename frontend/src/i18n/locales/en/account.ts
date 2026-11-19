@@ -89,6 +89,7 @@ const account = {
           registration_open: 'Production refuses open registration. Close registration on the settings page first.',
           ordering_on: 'A switch of the server turns ordering on SinoPac off in the same save.',
           credentials_missing: '{{server}} needs these variables in the server’s .env, which are not set yet:',
+          orders_unsettled: 'SinoPac orders awaiting settlement from this server’s record of the day: {{count}}. Switch once none is left, at the latest the next day.',
         },
         title: { simulation: 'Switch to Simulation?', production: 'Switch to Production?' },
         description: 'The site logs in to the other server at once. What changes:',

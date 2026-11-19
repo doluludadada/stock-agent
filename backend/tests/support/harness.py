@@ -86,6 +86,7 @@ from support.fakes import (
     FakeTechnicalSettingsRepository,
     FakeTextEmbedder,
     FakeTradingJournal,
+    FakeUsersOrders,
     FakeUsersStocks,
     FakeUserStore,
     FakeWatchlistRepository,
@@ -498,6 +499,7 @@ def build_harness(
         article_store=articles,
         article_index=article_index,
         users_stocks=users_stocks,
+        users_orders=FakeUsersOrders(lambda: [journal, *(owned.journal for owned in owners.values())]),
         broker_quotes=prices if login else None,
         shioaji=ShioajiConnection(client=FakeShioaji(), up=True) if login else None,
         daily_close_archive=archive,
@@ -516,6 +518,7 @@ def build_harness(
         real_broker=real_broker if sinopac else None,
         ordering_switch=FakeOrderingSwitch(config.features, config.shioaji.server),
         owned_ports=owned_ports,
+        process_started=now - timedelta(hours=1),
     )
     runtime = compose_runtime(config, logger, clock, dependencies)
     runtime.become_current()

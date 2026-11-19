@@ -692,7 +692,7 @@ async def test_startup_refuses_a_half_set_up_or_unsafe_google_sign_in_and_names_
         monkeypatch.setenv(name, value)
 
     with pytest.raises(InvalidSettingsError) as refused:
-        startup_settings(tmp_path)
+        startup_settings(tmp_path, unsettled=0)
 
     assert names in str(refused.value) and CLIENT_SECRET not in str(refused.value)
 
@@ -723,7 +723,7 @@ async def test_a_file_without_googles_addresses_starts_and_offers_no_sign_in_wit
     lines = settings.read_text(encoding="utf-8").splitlines(keepends=True)
     addresses = ("  google_issuer:", "  google_authorization_endpoint:", "  google_token_endpoint:")
     settings.write_text("".join(line for line in lines if not line.startswith(addresses)), encoding="utf-8")
-    config = startup_settings(project)
+    config = startup_settings(project, unsettled=0)
     harness = build_harness(config=config)
 
     async with app_of(harness) as app, client_at(app) as client:

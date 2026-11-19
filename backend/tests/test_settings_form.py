@@ -504,7 +504,7 @@ def test_a_deployments_older_file_starts_on_the_defaults_and_the_start_says_what
     monkeypatch.setenv("ACCOUNTS_KEY", "A" * 43)
     monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
     monkeypatch.delenv("GOOGLE_CLIENT_SECRET", raising=False)
-    older, shipped = startup_settings(project), load_settings(PROJECT)
+    older, shipped = startup_settings(project, unsettled=0), load_settings(PROJECT)
     writing, google = settings_notices(project)
     own_writing = shipped.stock_page.system_writing
 

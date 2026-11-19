@@ -54,6 +54,16 @@ Without pgvector the step fails with `extension "vector" is not available`, and 
 `permission denied to create extension "vector"`. Either way the upgrade rolls back and the database stays at 13. A
 new database's first start and a restore refuse in the same way, with the database's words and the remedy above.
 
+## The unconfirmed order status (version 15)
+
+From version 15 the type of the orders' status, `orderstatus`, has the value `UNCONFIRMED`, after `SUBMITTED`: an
+order SinoPac took whose outcome the site could not read when it was sent, which the site settles later from SinoPac's
+record of the day. The step from 14 to 15 adds the value (`ALTER TYPE orderstatus ADD VALUE IF NOT EXISTS 'UNCONFIRMED'
+AFTER 'SUBMITTED'`) and changes no row. PostgreSQL cannot drop a value from an enum type, so a database goes back to
+version 14 only by the restore of a backup taken before the step.
+[How to deploy the site](../frontend/docs/deployment.md#update-to-the-unconfirmed-orders-schema-version-15) has the
+steps.
+
 ## Restore a backup
 
 1. Stop the CLI and the Web API.

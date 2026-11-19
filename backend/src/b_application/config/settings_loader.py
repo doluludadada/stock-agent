@@ -937,16 +937,21 @@ class TradingSetupError(RuntimeError):
 
 
 def startup_settings(
-    project_root: Path, candidates: Mapping[SettingsFile, str] | None = None, running: AppConfig | None = None
+    project_root: Path, candidates: Mapping[SettingsFile, str] | None = None, running: AppConfig | None = None, *, unsettled: int
 ) -> AppConfig:
     """
     The settings a start, a reload or a Web save opens the app on, through every check startup runs before it opens
     anything: the load (each file parsed, every key the app would not read refused, every value validated), the trading
     setup, the environment and the audience the running process started in and the SinoPac server it logs in to
-    (`running`, the settings it runs on now, None at its first start), the accounts key, sign-in with Google half set
-    up or at an address that is not safe, a scheduled follow's time outside continuous trading, the AI's web and X
-    search on an audience without news articles, and every offered AI provider's model id and key. Raises one
-    InvalidSettingsError with every refusal located once, never a value.
+    (`running`, the settings it runs on now, None at its first start, which a switch leaves only while none of the
+    `unsettled` SinoPac orders of every user awaits settlement), the accounts key, sign-in with Google half set up or at
+    an address that is not safe, a scheduled follow's time outside continuous trading, the AI's web and X search on an
+    audience without news articles, and every offered AI provider's model id and key. Raises one InvalidSettingsError
+    with every refusal located once, never a value.
+
+    A reload and a save count `unsettled` on the running process's database. A start passes 0: it opens no database
+    before this, and it knows no server it would switch from, since the journal does not name the server an order went
+    to, so ServerSwitchRule weighs no switch at a start.
     """
     texts = settings_texts(project_root, candidates)
     config = load_settings(project_root, texts)
@@ -954,7 +959,7 @@ def startup_settings(
     try:
         validate_trading_environment(config)
         validate_started_setup_unchanged(config, running)
-        validate_shioaji_server(config, running)
+        validate_shioaji_server(config, running, unsettled)
         validate_accounts_environment(config)
         validate_google_sign_in(config)
         validate_follow_times(config)
@@ -1015,8 +1020,11 @@ def validate_trading_environment(config: AppConfig) -> None:
         raise TradingSetupError(f"environment {environment.value} refuses to start while {', '.join(refused)} is set", "environment")
 
 
-def validate_shioaji_server(config: AppConfig, running: AppConfig | None) -> None:
-    """The server shioaji.server names, through ServerSwitchRule, from the one the running process logs in to, if any."""
+def validate_shioaji_server(config: AppConfig, running: AppConfig | None, unsettled: int) -> None:
+    """
+    The server shioaji.server names, through ServerSwitchRule, from the one the running process logs in to, if any,
+    while `unsettled` SinoPac orders await settlement.
+    """
     rule = ServerSwitchRule(servers=config.environment.shioaji_servers)
     refusal = rule.apply(
         None if running is None else running.shioaji.server,
@@ -1024,6 +1032,7 @@ def validate_shioaji_server(config: AppConfig, running: AppConfig | None) -> Non
         config.features.sinopac_ordering,
         config.shioaji.given(),
         config.accounts.registration_open,
+        unsettled,
     )
 
     if refusal is not None:

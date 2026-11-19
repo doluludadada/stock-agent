@@ -11,7 +11,7 @@ from d_presentation.dependencies import create_process_state, open_runtime
 
 
 async def reset_password(identifier: str) -> int:
-    config = startup_settings(get_project_root())
+    config = startup_settings(get_project_root(), unsettled=0)
 
     async with open_runtime(config, create_process_state(config), broker_login=False) as runtime:
         password = user_views.ask_new_password()

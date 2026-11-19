@@ -247,21 +247,22 @@ async def sdk_request[**Arguments, Answer](
 def log_order_event(logger: ILoggingProvider, state: OrderState, event: Mapping[str, object]) -> None:
     """
     Shioaji's order callback, which the SDK calls from a thread of its own: one INFO line per event, the deal trail
-    of the production log, of the stock, the action, the lot, the quantity and the price, and for an order event its
-    operation's type and code; a deal event's quantity and price are the deal's. The event also holds the account, the
-    login's person id, the operation's message and the order's ids, so nothing else of it is read. It never raises
-    into the SDK: an event it cannot read is one WARNING line that names the error's type only.
+    of the production log, of the order's tag (custom_field, the first hex digits of the journal's order id and the
+    part's index, so a line names its journal row), the stock, the action, the lot, the quantity and the price, and for
+    an order event its operation's type and code; a deal event's quantity and price are the deal's. The event also
+    holds the account, the login's person id, the operation's message and the order's other ids, so nothing else of it
+    is read. It never raises into the SDK: an event it cannot read is one WARNING line that names the error's type only.
     """
     try:
         if state in (OrderState.StockDeal, OrderState.FuturesDeal):
             stock = f"{event.get('action')} {event.get('code')} {event.get('order_lot')}"
-            logger.info(f"Shioaji deal: {stock} {event.get('quantity')} at {event.get('price')}")
+            logger.info(f"Shioaji deal tagged {event.get('custom_field')}: {stock} {event.get('quantity')} at {event.get('price')}")
             return
 
         order, operation, contract = (event_section(event, key) for key in ("order", "operation", "contract"))
         stock = f"{order.get('action')} {contract.get('code')} {order.get('order_lot')}"
         logger.info(
-            f"Shioaji order event {operation.get('op_type')} {operation.get('op_code')}: "
+            f"Shioaji order event {operation.get('op_type')} {operation.get('op_code')} tagged {order.get('custom_field')}: "
             f"{stock} {order.get('quantity')} at {order.get('price')}"
         )
 

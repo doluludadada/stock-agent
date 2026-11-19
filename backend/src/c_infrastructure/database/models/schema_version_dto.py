@@ -77,6 +77,15 @@ async def add_the_vector_extension(connection: AsyncConnection) -> None:
     await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
 
 
+async def add_the_unconfirmed_order_status(connection: AsyncConnection) -> None:
+    """
+    Version 14 to 15: an order may be UNCONFIRMED, sent to SinoPac with an outcome the site could not read yet, which
+    the broker's record of the day settles later. No order before it is. The value takes its place after SUBMITTED, as
+    the type of a new database lists it.
+    """
+    await connection.execute(text("ALTER TYPE orderstatus ADD VALUE IF NOT EXISTS 'UNCONFIRMED' AFTER 'SUBMITTED'"))
+
+
 def vector_extension_refusal(error: DBAPIError) -> str:
     """Why the database could not get pgvector's extension, in the driver's own words, and how it gets the extension."""
     driver_error = error.orig.__cause__ if error.orig is not None else None
@@ -94,6 +103,7 @@ UPGRADES: tuple[UpgradeStep, ...] = (
     add_what_a_ranking_follow_left_open,
     add_the_account_of_the_scheduled_follow,
     add_the_vector_extension,
+    add_the_unconfirmed_order_status,
 )
 """
 The steps that upgrade an older database in place, oldest first: UPGRADES[n] turns version FIRST_SCHEMA_VERSION + n

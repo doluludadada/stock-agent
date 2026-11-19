@@ -117,7 +117,7 @@ describe('the SinoPac page’s switch, through the settings save', { timeout: 30
     const user = userEvent.setup({ delay: null })
     fakeServer(
       { message: 'refused', path: 'accounts.registration_open', file: null, line: null, column: null, code: null, params: {} },
-      { reason: 'registration_open', server: 'production', missing: [] },
+      { reason: 'registration_open', server: 'production', missing: [], unsettled: 0 },
     )
     open()
 
@@ -131,7 +131,7 @@ describe('the SinoPac page’s switch, through the settings save', { timeout: 30
     const user = userEvent.setup({ delay: null })
     fakeServer(
       { message: 'refused', path: 'shioaji.server', file: null, line: null, column: null, code: null, params: {} },
-      { reason: 'credentials_missing', server: 'production', missing: ['SHIOAJI_CA_PATH'] },
+      { reason: 'credentials_missing', server: 'production', missing: ['SHIOAJI_CA_PATH'], unsettled: 0 },
     )
     open()
     expect((await screen.findAllByText('Ordering on'))[0]).toBeVisible()

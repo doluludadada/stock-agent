@@ -13,11 +13,11 @@ from shioaji import Shioaji
 from shioaji.account import StockAccount
 from shioaji.constant import Action, OrderType as BrokerTimeInForce, Status, StockOrderCond, StockOrderLot, StockPriceType, Unit
 from shioaji.contracts import Stock as StockContract
-from shioaji.order import Order as BrokerOrder, StockOrder, Trade
+from shioaji.order import BaseOrder, Order as BrokerOrder, StockOrder, Trade
 from shioaji.position import SettlementV1, StockPosition, StockProfitLoss
 
 from a_domain.model.trading.account import Account, BrokerageStatement, BrokerFill, Mark, Position, Settlement
-from a_domain.model.trading.order import ExchangeOrder, Order
+from a_domain.model.trading.order import ExchangeOrder, Order, volume_weighted_price
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.execution_provider import IBrokerExecutionProvider, SendRefusal
@@ -107,10 +107,19 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockContract, Trade]):
     before the run sizes its next order. One still working after its reads, or once the run's stop is set, is
     cancelled and read again (cancelled), within shioaji.cancel_timeout_seconds; BrokerOutcomeRule then gives the
     domain order its final status. No part is sent twice, and none after the stop: the run's refusal_now then refuses.
-    If place_order itself raises (a timeout), the adapter looks for the order by its tag before giving up. Each broker
-    order carries the tag `custom_field = order.id.hex[:5] + part index`, so a human can match a broker order to its
-    journal row. After each update_status the adapter reads the order back from list_trades by that tag, so it does
-    not depend on update_status changing the Trade object place_order returned.
+    Each broker order carries the tag `custom_field = order.id.hex[:5] + part index` (Order.tag), so a human can match a
+    broker order to its journal row. The tag may repeat across the account's orders, every user's, so the adapter knows
+    a listed order as one of its parts only by its tag, stock, action, lot, quantity and price together
+    (is_exchange_order). After each update_status it reads the order back from list_trades so, never depending on
+    update_status changing the Trade object place_order returned.
+
+    If place_order itself raises (the SDK's wait for the answer timed out), the order may have reached SinoPac anyway:
+    the SDK publishes the request before it waits and drops an answer that comes later. The adapter then looks for it
+    at once and again after each of board_lot_waits (listed_trade), since SinoPac lists such an order a moment later
+    (about a second on 2026-11-19), within shioaji.status_timeout_seconds in all and until the run's stop. One it finds
+    goes on as if confirmed. One it does not find, and a part still working after its cancel, leave the order
+    UNCONFIRMED, with nothing sent after it; `settle` settles it later from SinoPac's record of the day
+    (OrderSettlement), which only reads and cancels.
 
     Executions come from the broker's deals: one Order.fill per broker order at its volume-weighted price.
     Fee and tax are TradingCostRule's, which may differ from the broker's discounted fee.
@@ -273,8 +282,8 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockContract, Trade]):
             if not order.status.is_open:
                 raise
 
-            order.fail(f"{type(error).__name__}: {error}", now=datetime.now(UTC))
-            self._logger.error(f"Shioaji order failed: {order.stock_id}: {order.reason}")
+            order.fail_if_open(f"{type(error).__name__}: {error}", now=datetime.now(UTC))
+            self._logger.error(f"Shioaji order {order.status.value}: {order.stock_id}: {type(error).__name__}: {error}")
 
         return order
 
@@ -288,7 +297,10 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockContract, Trade]):
             if (refusal := await refusal_now()) is not None:
                 return parts, refusal
 
-            trade = await self.place(contract, order, lot, shares, index)
+            if (trade := await self.place(contract, order, lot, shares, index, stop)) is None:
+                parts.append(unlisted_part(order, lot, shares, index))
+                break
+
             waits = (
                 board_lot_waits(self._config.shioaji) if lot == LotKind.BOARD_LOT else odd_lot_waits(self._market_clock, self._config)
             )
@@ -299,11 +311,7 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockContract, Trade]):
             self._logger.info(f"Shioaji order {trade.order.custom_field}: {part.description}")
 
             if part.fill_price is not None:
-                now = datetime.now(UTC)
-                cost, realized_pnl = self._fill_rule.apply(order, part.dealt_shares, part.fill_price, held, now=now)
-                # The first fill submits the order; a later part's fill finds it SUBMITTED, which may stay SUBMITTED.
-                order.submit(now=now)
-                order.fill(part.dealt_shares, part.fill_price, cost.fee, cost.tax, realized_pnl, now=now)
+                record_fill(order, part.dealt_shares, part.fill_price, held, self._fill_rule, datetime.now(UTC))
 
             if part.status.is_open:
                 break
@@ -311,40 +319,198 @@ class ShioajiExecutionProvider(IBrokerExecutionProvider[StockContract, Trade]):
         return parts, None
 
     @override
-    async def place(self, contract: StockContract, order: Order, lot: LotKind, shares: int, index: int) -> Trade:
+    async def place(self, contract: StockContract, order: Order, lot: LotKind, shares: int, index: int, stop: Event) -> Trade | None:
         """
-        One LIMIT exchange order for `shares` of `order` at its limit price, tagged `order.id.hex[:5] + index`: a board-lot
-        part with the order's time in force, an odd-lot part ROD. If place_order raises (a timeout), the order is looked up
-        by its tag before giving up.
+        One LIMIT exchange order for `shares` of `order` (exchange_order_for). If place_order raises (a timeout), the
+        order is looked for at once and after each of board_lot_waits (listed_trade), within
+        shioaji.status_timeout_seconds in all and until `stop` is set; None while SinoPac does not list it.
         """
-        if order.limit_price is None:
-            raise ValueError(f"order {order.id} has no limit price to send")
-
-        broker_order = BrokerOrder(
-            price=order.limit_price,
-            quantity=shares // self._shares_per_unit[BROKER_LOT[lot]],
-            action=BROKER_ACTION[order.action],
-            price_type=StockPriceType.LMT,
-            order_type=BROKER_TIME_IN_FORCE[order.time_in_force] if lot == LotKind.BOARD_LOT else ODD_LOT_TIME_IN_FORCE,
-            order_lot=BROKER_LOT[lot],
-            order_cond=StockOrderCond.Cash,
-            account=self._client.stock_account,
-            custom_field=f"{order.id.hex[:5]}{index}",
-        )
+        sent = exchange_order_for(order, lot, shares, index, self._client.stock_account, self._shares_per_unit)
 
         try:
-            return await sdk_request(self._client.place_order, contract, broker_order)
+            return await sdk_request(self._client.place_order, contract, sent)
 
         except Exception as error:
-            trade = await find_trade(broker_order.custom_field, self._client, self._status_timeout_milliseconds, self._logger)
+            self._logger.warning(
+                f"Shioaji did not confirm the order tagged {sent.custom_field} ({error}): it is looked for in the account's orders"
+            )
+            waits, timeout = board_lot_waits(self._config.shioaji), self._config.shioaji.status_timeout_seconds
+            return await listed_trade(order.stock_id, sent, waits, stop, self._client, timeout, self._logger)
 
-            if trade is None:
-                raise RuntimeError(
-                    f"Shioaji did not confirm the order tagged {broker_order.custom_field} ({error}). "
-                    "It may have reached the exchange: check the broker's order list"
-                ) from error
+    @override
+    async def settle(self, order: Order) -> None:
+        """
+        From SinoPac's record of today, the day the order was sent (settled_parts), since list_trades holds today's
+        orders alone and OrderSettlement fails an order of an earlier session itself: each of its parts SinoPac lists,
+        cancelled first while it still works, and each it does not list. A part the send never reached reads as one
+        SinoPac does not list yet, so such an order waits until its session's deals are final (market_hours.settled, as
+        IMarketClock.last_settled_session counts it). What the listed parts dealt beyond what the order holds is recorded
+        on it part by part, as a run records a part (unrecorded_fills), and BrokerOutcomeRule decides. A SELL's realized
+        PnL takes its cost from the position SinoPac lists after the sale, which a sale of every share leaves none of:
+        the order then keeps no realized PnL, an earlier part's included, and says it was not computed.
+        """
+        session, lots = self._market_clock.to_trading_date(order.created_at), self._lot_split_rule.apply(order.quantity)
+        trades = await todays_trades(self._client, self._status_timeout_milliseconds)
+        read, parts = await settled_parts(order, lots, trades, self._client, self._shares_per_unit, self._config.shioaji, self._logger)
+        fills, now, sale = (
+            unrecorded_fills(read, order.filled_quantity, self._shares_per_unit),
+            self._market_clock.now(),
+            order.action == TradeAction.SELL,
+        )
+        held = position_of(positions_of(await long_cash_rows(self._client, self._logger)), order.stock_id) if sale and fills else None
 
-            return trade
+        for shares, price in fills:
+            record_fill(order, shares, price, held, self._fill_rule, now)
+
+        self._outcome_rule.apply(order, parts, now, final=self._market_clock.last_settled_session() >= session)
+
+        if sale and fills and held is None:
+            order.drop_realized_pnl(
+                f"realized PnL not computed: {BROKER} lists no {order.stock_id} position after the sale to take its cost from"
+            )
+
+
+def exchange_order_for(
+    order: Order, lot: LotKind, shares: int, index: int, account: StockAccount | None, unit_shares: UnitShares
+) -> BrokerOrder:
+    """
+    The LIMIT exchange order of `order`'s part `index`: `shares` of it at its limit price, tagged Order.tag(index), a
+    board-lot part with the order's time in force, an odd-lot part ROD. `place` sends it, and the broker's record
+    holds it as the part (is_exchange_order).
+    """
+    if order.limit_price is None:
+        raise ValueError(f"order {order.id} has no limit price to send")
+
+    return BrokerOrder(
+        price=order.limit_price,
+        quantity=shares // unit_shares[BROKER_LOT[lot]],
+        action=BROKER_ACTION[order.action],
+        price_type=StockPriceType.LMT,
+        order_type=BROKER_TIME_IN_FORCE[order.time_in_force] if lot == LotKind.BOARD_LOT else ODD_LOT_TIME_IN_FORCE,
+        order_lot=BROKER_LOT[lot],
+        order_cond=StockOrderCond.Cash,
+        account=account,
+        custom_field=order.tag(index),
+    )
+
+
+def is_exchange_order(trade: Trade, stock_id: str, sent: BaseOrder, logger: ILoggingProvider) -> bool:
+    """
+    Whether the broker's `trade` is the exchange order `sent` for `stock_id`: the same tag, and the same stock, action,
+    lot, quantity and price, since a tag's five hex digits and part index may repeat across the account's orders of
+    every user, and settling another order's part would cancel it. One of the same tag and stock that differs in
+    another field is logged at WARNING with the fields: nobody verified yet that SinoPac keeps an order's quantity and
+    price as sent after a partial deal or a cancel, and a part it changed would read as one it does not list.
+    """
+    listed = trade.order
+
+    if not isinstance(listed, StockOrder) or not isinstance(sent, StockOrder):
+        return False
+
+    if listed.custom_field != sent.custom_field or trade.contract.code != stock_id:
+        return False
+
+    fields = [
+        ("action", listed.action == sent.action, listed.action.value, sent.action.value),
+        ("lot", listed.order_lot == sent.order_lot, listed.order_lot.value, sent.order_lot.value),
+        ("quantity", listed.quantity == sent.quantity, listed.quantity, sent.quantity),
+        ("price", math.isclose(listed.price, sent.price), listed.price, sent.price),
+    ]
+
+    if differing := [f"{name} is {held} where {given} was sent" for name, same, held, given in fields if not same]:
+        logger.warning(
+            f"{BROKER} lists an order tagged {sent.custom_field} of {stock_id} whose {', '.join(differing)}: it is not taken "
+            "as that part"
+        )
+
+    return not differing
+
+
+async def settled_parts(
+    order: Order,
+    lots: Sequence[tuple[LotKind, int]],
+    trades: Sequence[Trade],
+    client: Shioaji,
+    unit_shares: UnitShares,
+    shioaji: ShioajiConfig,
+    logger: ILoggingProvider,
+) -> tuple[list[Trade], list[ExchangeOrder]]:
+    """
+    Each part of `order` (`lots`, as LotSplitRule splits it) as `trades`, the broker's record of today, holds it:
+    cancelled first while it still works, then read; unlisted_part while the record holds none that is_exchange_order
+    of it. The trades read, in part order, and every part's ExchangeOrder.
+    """
+    read: list[Trade] = []
+    parts: list[ExchangeOrder] = []
+
+    for index, (lot, shares) in enumerate(lots):
+        sent = exchange_order_for(order, lot, shares, index, client.stock_account, unit_shares)
+
+        if (trade := next((listed for listed in trades if is_exchange_order(listed, order.stock_id, sent, logger)), None)) is None:
+            parts.append(unlisted_part(order, lot, shares, index))
+            continue
+
+        if exchange_order_of(trade, unit_shares).status.is_open:
+            trade = await cancelled(trade, client, unit_shares, shioaji, logger)
+
+        read.append(trade)
+        parts.append(exchange_order_of(trade, unit_shares))
+
+    return read, parts
+
+
+def unlisted_part(order: Order, lot: LotKind, shares: int, index: int) -> ExchangeOrder:
+    """A part of `order` the broker does not list by its tag, as UNCONFIRMED: sent or not, its outcome is not known."""
+    return ExchangeOrder(
+        stock_id=order.stock_id,
+        status=OrderStatus.UNCONFIRMED,
+        ordered_shares=shares,
+        dealt_shares=0,
+        reported_dealt_shares=0,
+        fill_price=None,
+        description=f"{BROKER_LOT[lot].value} {shares} shares tagged {order.tag(index)}, which {BROKER} does not list",
+    )
+
+
+def record_fill(order: Order, shares: int, price: float, held: Position | None, fill_rule: FillRule, now: datetime) -> None:
+    """
+    Records what one part dealt on the order, with FillRule's fee, tax and realized PnL. The first fill submits the
+    order; a later part's fill finds it SUBMITTED, which may stay SUBMITTED.
+    """
+    cost, realized_pnl = fill_rule.apply(order, shares, price, held, now=now)
+    order.submit(now=now)
+    order.fill(shares, price, cost.fee, cost.tax, realized_pnl, now=now)
+
+
+def unrecorded_fills(trades: Sequence[Trade], recorded: int, unit_shares: UnitShares) -> list[tuple[int, float]]:
+    """
+    What each of an order's parts (`trades`, in part order) dealt beyond the first `recorded` shares, which the order
+    holds already: (shares, price) at their volume_weighted_price, one per part that dealt more, as a run records a
+    part. A part's deals are recorded whole and in the broker's order, so the recorded ones are always the first.
+    """
+    skip, fills = recorded, list[tuple[int, float]]()
+
+    for trade in trades:
+        if not isinstance(trade.order, StockOrder):
+            continue
+
+        deals = list[tuple[float, int]]()
+
+        for deal in trade.status.deals or []:
+            dealt = deal.quantity * unit_shares[trade.order.order_lot]
+            taken = min(skip, dealt)
+            skip -= taken
+            deals.append((deal.price, dealt - taken))
+
+        if (price := volume_weighted_price(deals)) is not None:
+            fills.append((sum(shares for _, shares in deals), price))
+
+    return fills
+
+
+def position_of(positions: Sequence[Position], stock_id: str) -> Position | None:
+    """The position of `stock_id` among `positions`, or None while none holds it."""
+    return next((position for position in positions if position.stock_id == stock_id), None)
 
 
 def board_lot_waits(shioaji: ShioajiConfig) -> Waits:
@@ -582,8 +748,8 @@ async def stopped_within(stop: Event | None, seconds: float) -> bool:
 
 async def reread(trade: Trade, client: Shioaji, logger: ILoggingProvider) -> Trade:
     """
-    One read of the exchange order's status. Returns the freshest copy: the one list_trades holds under the same tag,
-    else `trade` itself, also when the read fails.
+    One read of the exchange order's status. Returns the freshest copy: the one list_trades holds as the same exchange
+    order (is_exchange_order), else `trade` itself, also when the read fails.
     """
     try:
         await sdk_request(client.update_status, trade=trade)
@@ -593,7 +759,7 @@ async def reread(trade: Trade, client: Shioaji, logger: ILoggingProvider) -> Tra
         logger.warning(f"Shioaji status refresh failed: {error}")
         return trade
 
-    return next((known for known in listed if known.order.custom_field == trade.order.custom_field), trade)
+    return next((known for known in listed if is_exchange_order(known, trade.contract.code, trade.order, logger)), trade)
 
 
 async def refreshed(
@@ -638,7 +804,8 @@ async def cancelled(trade: Trade, client: Shioaji, unit_shares: UnitShares, shio
     """
     Asks the broker to cancel a working exchange order, then reads it as a board-lot part is read, whatever the run's
     stop says, within shioaji.cancel_timeout_seconds in all. Past them, the copy read before the cancel stands, still
-    working, so the order says to check the broker, and shutdown stays within the server's stop grace (compose.yml).
+    working, so the order stays UNCONFIRMED for the broker's record of the day to settle, and shutdown stays within the
+    server's stop grace (compose.yml).
     """
     tag = trade.order.custom_field
 
@@ -657,10 +824,36 @@ async def cancelled(trade: Trade, client: Shioaji, unit_shares: UnitShares, shio
         return trade
 
 
-async def find_trade(tag: str, client: Shioaji, timeout_milliseconds: int, logger: ILoggingProvider) -> Trade | None:
+async def listed_trade(
+    stock_id: str, sent: StockOrder, waits: Waits, stop: Event, client: Shioaji, timeout_seconds: float, logger: ILoggingProvider
+) -> Trade | None:
     """
-    The exchange order with this tag, after re-reading the account's orders, which may take `timeout_milliseconds` on
-    a day of many orders (todays_trades). None when absent or the read fails.
+    The exchange order `sent` for `stock_id`, looked for at once and again after each of `waits` (find_trade): the
+    broker may list an order whose answer the SDK stopped waiting for a moment later. The looks take `timeout_seconds`
+    in all and end once `stop` is set, so a run cancelled at shutdown stops looking within the server's stop grace
+    (compose.yml). None while the broker does not list it then: the order stays UNCONFIRMED for its settlement.
+    """
+    try:
+        async with asyncio.timeout(timeout_seconds):
+            for index, seconds in enumerate([0.0, *waits]):
+                if index and await stopped_within(stop, seconds):
+                    return None
+
+                if (trade := await find_trade(stock_id, sent, client, round(timeout_seconds * 1000), logger)) is not None:
+                    return trade
+
+    except TimeoutError:
+        logger.warning(f"Shioaji did not list the order tagged {sent.custom_field} within {timeout_seconds:g} s")
+
+    return None
+
+
+async def find_trade(
+    stock_id: str, sent: StockOrder, client: Shioaji, timeout_milliseconds: int, logger: ILoggingProvider
+) -> Trade | None:
+    """
+    The exchange order `sent` for `stock_id` (is_exchange_order), after re-reading the account's orders, which may take
+    `timeout_milliseconds` on a day of many orders (todays_trades). None when absent or the read fails.
     """
     stock_account = client.stock_account
 
@@ -672,17 +865,18 @@ async def find_trade(tag: str, client: Shioaji, timeout_milliseconds: int, logge
         listed = await sdk_request(client.list_trades)
 
     except Exception as error:
-        logger.error(f"Shioaji lookup of the order tagged {tag} failed: {error}")
+        logger.error(f"Shioaji lookup of the order tagged {sent.custom_field} failed: {error}")
         return None
 
-    return next((trade for trade in listed if trade.order.custom_field == tag), None)
+    return next((trade for trade in listed if is_exchange_order(trade, stock_id, sent, logger)), None)
 
 
 def exchange_order_of(trade: Trade, unit_shares: UnitShares) -> ExchangeOrder:
     """
     The exchange order in the domain's terms.
 
-    Shares are the order's units times the shares in one unit of its lot. Deals at one price fill at exactly that price.
+    Shares are the order's units times the shares in one unit of its lot; the fill price is the deals'
+    volume_weighted_price, which a settlement records too (unrecorded_fills).
     """
     broker_order = trade.order
 
@@ -692,12 +886,6 @@ def exchange_order_of(trade: Trade, unit_shares: UnitShares) -> ExchangeOrder:
     shares_per_unit = unit_shares[broker_order.order_lot]
     deals = trade.status.deals or []
     dealt_units = sum(deal.quantity for deal in deals)
-    prices = {deal.price for deal in deals}
-    fill_price = None
-
-    if dealt_units:
-        fill_price = prices.pop() if len(prices) == 1 else math.fsum(deal.price * deal.quantity for deal in deals) / dealt_units
-
     unit = "lots" if broker_order.order_lot == StockOrderLot.Common else "shares"
     text = (
         f"{broker_order.order_lot.value} {broker_order.quantity} {unit} {broker_order.order_type.value} "
@@ -710,7 +898,7 @@ def exchange_order_of(trade: Trade, unit_shares: UnitShares) -> ExchangeOrder:
         ordered_shares=broker_order.quantity * shares_per_unit,
         dealt_shares=dealt_units * shares_per_unit,
         reported_dealt_shares=trade.status.deal_quantity * shares_per_unit,
-        fill_price=fill_price,
+        fill_price=volume_weighted_price([(deal.price, deal.quantity) for deal in deals]),
         description=f"{text} (status {trade.status.status_code})" if trade.status.msg else text,
     )
 

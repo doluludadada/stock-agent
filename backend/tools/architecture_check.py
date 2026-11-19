@@ -182,8 +182,11 @@ PRESENTATION_SETTINGS = {
         }
     ),
     # The Web API's timer of the scheduled ranking follows looks at the current settings' interval, and starts each
-    # follow under the cap of background runs of the runtime it starts on, as a request's run starts.
-    "d_presentation/web/scheduled_follows.py": frozenset({"api.follow_schedule_poll_seconds", "accounts.max_concurrent_runs"}),
+    # follow under the cap of background runs of the runtime it starts on, as a request's run starts. Its timer of the
+    # orders that await settlement looks at no user on an audience without a real broker.
+    "d_presentation/web/scheduled_follows.py": frozenset(
+        {"api.follow_schedule_poll_seconds", "accounts.max_concurrent_runs", "audience.real_broker"}
+    ),
     # The app serves the API docs only where the environment it started in allows them.
     "d_presentation/web/app.py": frozenset({"environment.api_docs"}),
     # The open data's attribution, which the license requires next to whatever a page shows from it, and the audience,

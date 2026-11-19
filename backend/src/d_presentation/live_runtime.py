@@ -289,8 +289,11 @@ class RuntimeSwitch:
         """
         A runtime a reload may make current: the settings loaded with the candidate texts, the whole startup within
         api.settings_build_timeout_seconds, and an editor an administrator can still sign in to: `administrator` for a
-        save, anyone for a reload from disk. Any failure is InvalidSettingsError, and a cancel propagates, both with
-        whatever opened already closed.
+        save, anyone for a reload from disk. SinoPac's server switches only while no SinoPac order of any user awaits
+        settlement, counted on the current runtime's database right before the check: a save's review counted them too,
+        but an order may have come to await settlement since, and an edit on disk, the CLI's reload and the timer's new
+        login have no review. Any failure is InvalidSettingsError, and a cancel propagates, both with whatever opened
+        already closed.
         """
         current = self.opened[-1].runtime
         timeout = current.config.api.settings_build_timeout_seconds
@@ -298,7 +301,8 @@ class RuntimeSwitch:
 
         try:
             async with asyncio.timeout(timeout):
-                config = startup_settings(self.project_root, candidates, current.config)
+                unsettled = await current.users_orders.awaiting_settlement(ExecutionProvider.SHIOAJI)
+                config = startup_settings(self.project_root, candidates, current.config, unsettled=unsettled)
                 runtime = await stack.enter_async_context(self.opener(config))
                 await runtime.signed_out.confirm_editor_access(await current.signed_out.load_sign_in_options(), administrator)
         except BaseException as error:
@@ -340,7 +344,7 @@ async def open_runtime_switch(project_root: Path | None = None) -> AsyncGenerato
     runtime still open closes when the caller is done.
     """
     root = project_root or get_project_root()
-    config = startup_settings(root)
+    config = startup_settings(root, unsettled=0)
     process = create_process_state(config)
 
     for notice in [*settings_notices(root), *production_notice(config)]:

@@ -51,7 +51,7 @@ from d_presentation.dependencies import Runtime
 from d_presentation.live_runtime import RuntimeSwitch, collect_daily_data, collect_world, watch_settings
 from d_presentation.web.backtest_replays import BacktestReplays, TooManyBacktests
 from d_presentation.web.routers.api_v1 import router as api_v1_router
-from d_presentation.web.scheduled_follows import follow_rankings_on_schedule
+from d_presentation.web.scheduled_follows import follow_rankings_on_schedule, settle_orders_on_schedule
 from d_presentation.web.session import (
     API_PATH,
     FLOW_PATH,
@@ -326,12 +326,16 @@ def error_handlers() -> dict[int | type[Exception], ErrorAnswer]:
 
 
 def start_timers(switch: RuntimeSwitch, workflow_runs: WorkflowRuns) -> list[asyncio.Task[None]]:
-    """The lifespan's timers, each started: the settings watch, the daily data, the world, and the scheduled ranking follows."""
+    """
+    The lifespan's timers, each started: the settings watch, the daily data, the world, the scheduled ranking follows,
+    and the settlement of the orders whose outcome a run could not read.
+    """
     timers = (
         watch_settings(switch),
         collect_daily_data(switch),
         collect_world(switch),
         follow_rankings_on_schedule(switch, workflow_runs),
+        settle_orders_on_schedule(switch),
     )
     return [asyncio.create_task(timer) for timer in timers]
 

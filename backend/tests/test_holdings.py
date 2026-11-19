@@ -578,7 +578,7 @@ async def test_the_sinopac_account_says_which_server_it_is_when_its_login_is_dow
 
     developers_machine = {
         "server": "simulation",
-        "switch_refusal": {"reason": "environment", "server": "production", "missing": []},
+        "switch_refusal": {"reason": "environment", "server": "production", "missing": [], "unsettled": 0},
         "simulation_initial_cash": 1_000_000,
         "statement": None,
     }
@@ -640,7 +640,12 @@ async def test_when_sinopac_does_not_answer_the_account_pages_answer_503_broker_
     [
         (
             ShioajiServer.SIMULATION,
-            {"reason": "credentials_missing", "server": "production", "missing": ["SHIOAJI_CA_PATH", "SHIOAJI_PERSON_ID"]},
+            {
+                "reason": "credentials_missing",
+                "server": "production",
+                "missing": ["SHIOAJI_CA_PATH", "SHIOAJI_PERSON_ID"],
+                "unsettled": 0,
+            },
             1_000_000,
         ),
         (ShioajiServer.PRODUCTION, None, None),

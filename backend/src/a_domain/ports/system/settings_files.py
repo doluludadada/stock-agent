@@ -181,12 +181,13 @@ class ISettingsFiles(Protocol):
         """The ids of the built-in strategies config/strategies/ holds, sorted: one <id>.json each."""
         ...
 
-    def check(self, candidates: Mapping[SettingsFile, str], host: str) -> tuple[SettingsProblem, ...]:
+    def check(self, candidates: Mapping[SettingsFile, str], host: str, unsettled: int) -> tuple[SettingsProblem, ...]:
         """
         The candidate texts, every other settings file as it is on disk, through the checks startup runs before it opens
         anything, against the settings the running process runs on: the settings load, the trading setup, the accounts
         key and the active AI provider's key, the environment and the audience it started in, which a save cannot
-        change, and a switch from the SinoPac server it logs in to (ServerSwitchRule). The new settings must also keep
+        change, and a switch from the SinoPac server it logs in to (ServerSwitchRule), refused while any of the
+        `unsettled` SinoPac orders awaits settlement. The new settings must also keep
         the editor open to the administrator saving them, who reached it at `host`. Why the app would refuse them, or
         no problem.
         """

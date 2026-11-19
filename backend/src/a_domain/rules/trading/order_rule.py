@@ -123,7 +123,7 @@ class BuyLimitRule:
     """
     Why a BUY on a real broker may not be sent, or None: its value, the limit price times the shares, above
     max_order_value, or with the day's earlier BUYs on that broker above max_daily_buy_value. An earlier BUY counts at
-    what it may have bought: all of it while its outcome is open or unknown (PENDING, SUBMITTED, FAILED), what filled
+    what it may have bought: all of it while its outcome is open or unknown (PENDING, SUBMITTED, UNCONFIRMED, FAILED), what filled
     once it ended, and nothing when refused. The journal holds each order before it is sent, so the earlier BUYs are
     every one that may have reached the broker. A BUY with no limit price, a MARKET order, has no value to hold to them,
     so it is refused. A SELL is never held to them: it sells only shares the account holds.
@@ -159,6 +159,38 @@ class BuyLimitRule:
             return RejectReason.DAILY_BUY_LIMIT, f"costs {value:,.0f} after {bought:,.0f} of BUYs today, above {limit}"
 
         return None
+
+
+@dataclass(frozen=True)
+class UnsettledBuyRule:
+    """
+    Why a BUY on a real broker may not be sent while an earlier BUY of the same stock on it today is still open, or
+    None: one that awaits settlement (UNCONFIRMED), one a process that stopped left PENDING or SUBMITTED, before the
+    Web API's timer ended its run (AbandonedRuns) or in a CLI session, and one another run sends at this moment. The
+    broker may still deal that one, so a second could buy the stock twice. Once it ended, or the broker's record of the
+    day settled it (OrderSettlement, which a run on the broker runs before it sends anything), the BUY may go. A SELL
+    is never held to it: it sells only shares the account holds. `earlier_buys` may hold `order` itself, which never
+    holds itself back.
+    """
+
+    def apply(self, order: Order, earlier_buys: Sequence[Order]) -> tuple[RejectReason, str] | None:
+        if order.action != TradeAction.BUY:
+            return None
+
+        held_back = [
+            earlier
+            for earlier in earlier_buys
+            if earlier.stock_id == order.stock_id and earlier.status.is_open and earlier.id != order.id
+        ]
+
+        if not held_back:
+            return None
+
+        return (
+            RejectReason.UNSETTLED_BUY,
+            f"order {held_back[0].id}, an earlier BUY of {order.stock_id} today, is {held_back[0].status.value} and may "
+            f"still deal: another BUY of {order.stock_id} waits until it ends or the broker's record of the day settles it",
+        )
 
 
 @dataclass(frozen=True)
@@ -264,11 +296,13 @@ class BrokerAccessRule:
     Why an order may not go to the broker it would reach now, or None, checked right before the send: it must be the
     broker its run chose when it started, and one the site's audience and order pricing offer (`brokers`). A real
     broker must then pass its gate (RealBrokerGateRule: the workflow on the login's server, who may order, the login
-    on the server the settings on disk name), and a BUY its limits (BuyLimitRule).
+    on the server the settings on disk name), and a BUY no earlier BUY of its stock still open (UnsettledBuyRule)
+    and its limits (BuyLimitRule).
     """
 
     brokers: frozenset[ExecutionProvider]
     gate_rule: RealBrokerGateRule
+    unsettled_rule: UnsettledBuyRule
     limit_rule: BuyLimitRule
 
     def apply(
@@ -292,7 +326,11 @@ class BrokerAccessRule:
         if not broker.real:
             return None
 
-        return self.gate_rule.apply(workflow, broker, link, user, ordering) or self.limit_rule.apply(order, earlier_buys)
+        return (
+            self.gate_rule.apply(workflow, broker, link, user, ordering)
+            or self.unsettled_rule.apply(order, earlier_buys)
+            or self.limit_rule.apply(order, earlier_buys)
+        )
 
 
 @dataclass(frozen=True)

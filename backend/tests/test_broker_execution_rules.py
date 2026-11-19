@@ -6,8 +6,15 @@ import pytest
 from a_domain.model.trading.account import Account, BrokerFill, Position
 from a_domain.model.trading.order import ExchangeOrder, Order
 from a_domain.rules.trading.cost import TradingCostRule
-from a_domain.rules.trading.execution import BrokerOutcomeRule, FillRule, LotSplitRule, OrderAcceptanceRule, SimulationCashRule
-from a_domain.types.enums import LotKind, OrderStatus, OrderType, RejectReason, TimeInForce, TradeAction
+from a_domain.rules.trading.execution import (
+    BrokerOutcomeRule,
+    FillRule,
+    LotSplitRule,
+    OrderAcceptanceRule,
+    PastSessionRule,
+    SimulationCashRule,
+)
+from a_domain.types.enums import ExecutionProvider, LotKind, OrderStatus, OrderType, RejectReason, TimeInForce, TradeAction
 from a_domain.types.ids import new_decision_id, new_run_id
 
 NOW = datetime(2026, 10, 19, 10, 0, tzinfo=UTC)
@@ -157,8 +164,13 @@ def test_a_filled_order_keeps_its_status() -> None:
     [
         (
             [part(OrderStatus.SUBMITTED)],
-            OrderStatus.FAILED,
-            "still working at the broker after a cancel request, check Shioaji: submitted 1000",
+            OrderStatus.UNCONFIRMED,
+            "unconfirmed at Shioaji, whose record of today settles it: submitted 1000",
+        ),
+        (
+            [part(OrderStatus.CANCELLED), part(OrderStatus.UNCONFIRMED, 500)],
+            OrderStatus.UNCONFIRMED,
+            "unconfirmed at Shioaji, whose record of today settles it: cancelled 1000; unconfirmed 500",
         ),
         (
             [part(OrderStatus.CANCELLED), part(OrderStatus.FAILED, 500)],
@@ -187,6 +199,57 @@ def test_the_parts_reports_give_an_unfilled_order_its_final_status(
     OUTCOME.apply(order, parts, NOW)
 
     assert (order.status, order.reason, order.updated_at) == (status, reason, NOW)
+
+
+@pytest.mark.parametrize(
+    ("parts", "final", "status", "reason"),
+    [
+        (
+            [part(OrderStatus.UNCONFIRMED)],
+            False,
+            OrderStatus.UNCONFIRMED,
+            "unconfirmed at Shioaji, whose record of today settles it: unconfirmed 1000",
+        ),
+        (
+            [part(OrderStatus.SUBMITTED)],
+            False,
+            OrderStatus.UNCONFIRMED,
+            "unconfirmed at Shioaji, whose record of today settles it: submitted 1000",
+        ),
+        ([part(OrderStatus.UNCONFIRMED)], True, OrderStatus.FAILED, "Shioaji never listed it by its session's end: unconfirmed 1000"),
+        (
+            [part(OrderStatus.SUBMITTED), part(OrderStatus.UNCONFIRMED, 500)],
+            True,
+            OrderStatus.CANCELLED,
+            "IOC unfilled: filled 0 of 1500; submitted 1000; unconfirmed 500",
+        ),
+    ],
+    ids=["unlisted", "still working", "never listed by the day's end", "once final a working part has ended"],
+)
+def test_once_its_days_record_is_final_an_order_none_of_whose_parts_the_broker_listed_fails_and_a_working_part_has_ended(
+    parts: list[ExchangeOrder], final: bool, status: OrderStatus, reason: str
+) -> None:
+    order = new_order()
+    order.leave_unconfirmed("the broker's answer was lost", now=NOW)
+
+    OUTCOME.apply(order, parts, NOW, final=final)
+
+    assert (order.status, order.reason) == (status, reason)
+
+
+def test_an_order_of_an_earlier_session_fails_with_what_it_recorded_and_the_tags_of_its_parts_to_look_for() -> None:
+    sent = new_order(quantity=1430)
+    sent.submit(now=NOW)
+    sent.fill(1000, 100.0, 143, 0, now=NOW)
+    sent.leave_unconfirmed("the odd-lot part's answer was lost", now=NOW)
+    rule, monday, friday = PastSessionRule(lot_split_rule=LotSplitRule(board_lot_shares=1000)), date(2026, 10, 19), date(2026, 10, 16)
+
+    tag = sent.id.hex[:5]
+    assert rule.apply(sent, ExecutionProvider.SHIOAJI, monday, monday) is None
+    assert rule.apply(sent, ExecutionProvider.SHIOAJI, friday, monday) == (
+        f"SinoPac no longer lists the orders of 2026-10-16, so what the parts tagged {tag}0, {tag}1 did there cannot be "
+        "read: check SinoPac's order history; 1000 of 1430 shares were recorded filled"
+    )
 
 
 def test_a_partly_filled_order_is_cancelled_with_what_filled() -> None:

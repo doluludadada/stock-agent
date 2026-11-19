@@ -2,7 +2,7 @@ import asyncio
 from collections.abc import AsyncGenerator, Callable, Mapping
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field, replace
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from pydantic import SecretStr
@@ -44,6 +44,7 @@ from a_domain.ports.trading.backtest_repository import IBacktestRepository
 from a_domain.ports.trading.execution_provider import IBrokerExecutionProvider, IExecutionProvider, ISimulatedExecutionProvider
 from a_domain.ports.trading.holding_repository import IHoldingRepository
 from a_domain.ports.trading.trading_journal import ITradingJournal
+from a_domain.ports.trading.users_orders import IUsersOrders
 from a_domain.ports.trading.users_stocks import IUsersStocks
 from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
 from a_domain.types.enums import AiProvider, BriefKind, ExecutionProvider, MarketScope, MarketType, Permission
@@ -118,6 +119,7 @@ from b_application.use_cases.ship.run_history import RunHistory
 from b_application.use_cases.ship.run_lookup import RunLookup
 from b_application.use_cases.ship.run_reports import RunReports
 from b_application.use_cases.ship.signals import Signals
+from b_application.use_cases.trade.abandoned_runs import AbandonedRuns
 from b_application.use_cases.trade.account_history import AccountHistory
 from b_application.use_cases.trade.account_loader import AccountLoader
 from b_application.use_cases.trade.account_risk_check import AccountRiskCheck
@@ -134,6 +136,7 @@ from b_application.use_cases.trade.mock_account_reset import MockAccountReset
 from b_application.use_cases.trade.order_execution import OrderExecution
 from b_application.use_cases.trade.order_outcome import OrderOutcome
 from b_application.use_cases.trade.order_preparation import OrderPreparation
+from b_application.use_cases.trade.order_settlement import OrderSettlement
 from b_application.use_cases.trade.ranking_follow_candidates import RankingFollowCandidates
 from b_application.use_cases.trade.ranking_follow_return import RankingFollowReturn
 from b_application.use_cases.trade.ranking_follow_schedule import RankingFollowSchedule
@@ -185,6 +188,7 @@ from c_infrastructure.database.repositories.stock_brief_repository import SqlSto
 from c_infrastructure.database.repositories.system_writing_log import SqlSystemWritingLog
 from c_infrastructure.database.repositories.trading_journal import TradingJournal
 from c_infrastructure.database.repositories.user_store import AccountsKeyError, SqlUserStore
+from c_infrastructure.database.repositories.users_orders import SqlUsersOrders
 from c_infrastructure.database.repositories.users_stocks import SqlUsersStocks
 from c_infrastructure.database.repositories.watchlist_repository import WatchlistRepository
 from c_infrastructure.database.repositories.world_indicator_repository import SqlWorldIndicatorRepository
@@ -264,6 +268,11 @@ class Runtime:
     """The process's Shioaji login of the site's key pair, up or not; None where the site makes none (ProviderDependencies)."""
     real_broker: RealBroker | None
     """SinoPac on the site's login, where the audience offers it and its account check passed (connect_shioaji); else None."""
+    users_orders: IUsersOrders
+    """
+    How many orders of every user await settlement, on this runtime's database: a reload or a save that would switch
+    SinoPac's server counts them right before it opens the new settings (RuntimeSwitch.open_candidate).
+    """
 
     def brokers_for(self, user: User) -> list[ExecutionProvider]:
         """What the CLI and the Web offer `user` for a run now (offered_brokers); pipeline_for refuses any other."""
@@ -327,6 +336,13 @@ class ProcessState:
     """
     The monthly ranking's history and the replays made of it, which every runtime's matrix provider shares: a settings
     save, such as a switch of the ranking's formula, opens a new runtime without reading every bar again.
+    """
+    settlement_locks: Mapping[ExecutionProvider, asyncio.Lock] = field(default_factory=lambda: settlement_locks())
+    """One settlement of each real broker's orders at a time (OrderSettlement), across every runtime of the process."""
+    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    """
+    When the process started: a run on a real broker without an end that started before it is one an earlier process
+    left when it stopped (AbandonedRuns).
     """
 
 
@@ -398,6 +414,8 @@ class ProviderDependencies:
     """The article store's vectors, in a table of their own, computed by the runtime's own embedding model."""
     users_stocks: IUsersStocks
     """The stocks any user holds or watches, as stock ids alone: the timer keeps their articles current."""
+    users_orders: IUsersOrders
+    """How many orders of every user await settlement, which a switch of SinoPac's server weighs (ServerSwitchRule)."""
     broker_quotes: IBrokerQuoteProvider | None
     """
     The broker login's market data, which the site's realtime quotes come from and the pages' quote board asks for the
@@ -432,7 +450,9 @@ class ProviderDependencies:
     real_broker: RealBroker | None
     """
     SinoPac, on the login connect_shioaji made, where the audience offers it and its account check passed; None
-    elsewhere. Only the Pipeline of a run an administrator started on it holds it.
+    elsewhere. Only the Pipeline of a run an administrator started on it orders on it or reads its account; every
+    user's Pipeline settles on it what that user's journal holds of it (OrderSettlement, AbandonedRuns), which only reads
+    and cancels.
     """
     ordering_switch: IOrderingSwitch
     """Whom the settings files on disk let order on each broker now, which every order of every runtime and process asks."""
@@ -442,6 +462,15 @@ class ProviderDependencies:
     """Google, on the client of the environment's GOOGLE_CLIENT_ID; None while the site offers no sign-in with Google."""
     settings_confirmations: ISettingsConfirmations = field(default_factory=MemorySettingsConfirmations)
     """The process's own (ProcessState), so the runtime a settings save opens still holds the grant that confirms it."""
+    settlement_locks: Mapping[ExecutionProvider, asyncio.Lock] = field(default_factory=lambda: settlement_locks())
+    """The process's own (ProcessState), so a runtime that a reload retired still settles one order at a time with the new one."""
+    process_started: datetime = field(default_factory=lambda: datetime.now(UTC))
+    """The process's own start (ProcessState.started_at), from which AbandonedRuns tells an earlier process's runs."""
+
+
+def settlement_locks() -> dict[ExecutionProvider, asyncio.Lock]:
+    """One lock per real broker, which OrderSettlement holds while it settles that broker's orders."""
+    return {broker: asyncio.Lock() for broker in ExecutionProvider if broker.real}
 
 
 def create_ai_provider(config: AppConfig, logger: ILoggingProvider, provider: AiProvider) -> IAiProvider:
@@ -841,6 +870,7 @@ async def build_provider_dependencies(
             config.stock_page.article_store.embedded_length,
         ),
         users_stocks=SqlUsersStocks(db, market_clock),
+        users_orders=SqlUsersOrders(db),
         broker_quotes=quotes,
         shioaji=process.shioaji_connections.get(login) if login is not None else None,
         daily_close_archive=archive,
@@ -869,6 +899,8 @@ async def build_provider_dependencies(
         real_broker=real_broker,
         identity_provider=create_identity_provider(config),
         settings_confirmations=process.settings_confirmations,
+        settlement_locks=process.settlement_locks,
+        process_started=process.started_at,
         ordering_switch=SettingsFileOrderingSwitch(config.project_root),
         owned_ports=create_owned_ports(config, db, ai_providers, market_clock, logger, process.cache_writes),
     )
@@ -1099,6 +1131,10 @@ def build_pipeline(
         order_preparation=OrderPreparation(journal, broker, users, ordering, user_id, market_clock, config, logger),
         order_execution=OrderExecution(broker, journal, users, ordering, user_id, market_clock, config, logger),
         order_outcome=OrderOutcome(broker, journal, market_clock, logger),
+        order_settlement=OrderSettlement(
+            dependencies.real_broker, journal, dependencies.settlement_locks, market_clock, config, logger
+        ),
+        abandoned_runs=AbandonedRuns(dependencies.real_broker, journal, market_clock, dependencies.process_started, logger),
         mock_account_loader=AccountLoader(owned.mock_broker, stocks, logger),
         mock_order_preparation=OrderPreparation(journal, owned.mock_broker, users, ordering, user_id, market_clock, config, logger),
         mock_order_execution=OrderExecution(owned.mock_broker, journal, users, ordering, user_id, market_clock, config, logger),
@@ -1118,7 +1154,7 @@ def build_pipeline(
         mock_account_history=AccountHistory(owned.mock_broker, journal, stocks, prices, quote_board, market_clock, config, logger),
         trade_history=TradeHistory(broker, journal),
         mock_account_reset=MockAccountReset(owned.mock_broker, market_clock),
-        brokerage_statement=BrokerageStatementReader(brokerage, market_clock, config),
+        brokerage_statement=BrokerageStatementReader(brokerage, dependencies.users_orders, market_clock, config),
         held_positions=HeldPositions(owned.holding_repository, accounts, logger),
         holdings_analysis=HoldingsAnalysis(stocks, dependencies.daily_close_archive, quote_board, market_clock, config, logger),
         holding_entry=HoldingEntry(owned.holding_repository, market_clock),
@@ -1148,7 +1184,7 @@ def build_pipeline(
         ),
         dispatcher=Dispatcher(dependencies.platform_provider, logger),
         settings_reader=SettingsReader(dependencies.settings_files),
-        settings_editor=SettingsEditor(dependencies.settings_files),
+        settings_editor=SettingsEditor(dependencies.settings_files, dependencies.users_orders),
         settings_confirmation=SettingsConfirmation(
             dependencies.user_store, dependencies.attempt_log, dependencies.settings_confirmations, market_clock, config, logger
         ),
@@ -1230,6 +1266,7 @@ def compose_runtime(
         broker_market_data=dependencies.broker_quotes is not None,
         shioaji=dependencies.shioaji,
         real_broker=dependencies.real_broker,
+        users_orders=dependencies.users_orders,
     )
 
 

@@ -98,3 +98,17 @@ class ITradingJournal(Protocol):
     async def buy_orders(self, broker: ExecutionProvider, since: datetime) -> list[Order]:
         """Every BUY order of the runs on `broker` created at or after `since`, whatever its status, oldest first."""
         ...
+
+    async def unfinished_runs(self, broker: ExecutionProvider, started_before: datetime) -> list[SystemStats]:
+        """
+        The runs on `broker` without an end that started before `started_before`, oldest first: with the start of the
+        process that asks, the runs an earlier process left when it stopped.
+        """
+        ...
+
+    async def unsettled_orders(self, broker: ExecutionProvider) -> list[Order]:
+        """
+        The orders that await settlement (OrderStatus.awaits_settlement) of every run on `broker` that ended, oldest
+        first: never of a run still under way, whose parts may be in flight.
+        """
+        ...

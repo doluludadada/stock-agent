@@ -53,11 +53,12 @@ def order(
     quantity: int = 100,
     action: Literal[TradeAction.BUY, TradeAction.SELL] = TradeAction.BUY,
     status: OrderStatus = OrderStatus.PENDING,
+    stock_id: str = "2330",
 ) -> Order:
     made = Order(
         run_id=new_run_id(),
         decision_id=new_decision_id(),
-        stock_id="2330",
+        stock_id=stock_id,
         action=action,
         order_type=OrderType.LIMIT,
         quantity=quantity,
@@ -186,7 +187,7 @@ def test_a_sinopac_buy_without_a_limit_price_is_refused_since_the_limits_cannot_
 
 def test_the_days_earlier_buys_count_what_each_may_have_bought() -> None:
     earlier = [
-        order(price=1000, quantity=100, status=OrderStatus.SUBMITTED),
+        order(price=1000, quantity=100, status=OrderStatus.SUBMITTED, stock_id="2317"),
         order(price=1000, quantity=100, status=OrderStatus.FAILED),
         order(price=1000, quantity=100, status=OrderStatus.REJECTED),
         replace(order(price=1000, quantity=100, status=OrderStatus.CANCELLED), filled_quantity=40),
@@ -195,6 +196,35 @@ def test_the_days_earlier_buys_count_what_each_may_have_bought() -> None:
 
     assert refusal(sent, ExecutionProvider.SHIOAJI, SINOPAC, ADMINISTRATOR, earlier) is None
     assert refusal(order(price=1000, quantity=61), ExecutionProvider.SHIOAJI, SINOPAC, ADMINISTRATOR, earlier) == "DAILY_BUY_LIMIT"
+
+
+def test_an_unconfirmed_earlier_buy_counts_in_full_whatever_it_recorded_filled() -> None:
+    unconfirmed = [
+        replace(order(price=1000, quantity=100, status=OrderStatus.UNCONFIRMED, stock_id="2317"), filled_quantity=40) for _ in range(2)
+    ]
+    earlier = [*unconfirmed, replace(order(price=1000, quantity=100, status=OrderStatus.CANCELLED), filled_quantity=1)]
+
+    assert refusal(order(price=1000, quantity=99), ExecutionProvider.SHIOAJI, SINOPAC, ADMINISTRATOR, earlier) is None
+    assert refusal(order(price=1000, quantity=100), ExecutionProvider.SHIOAJI, SINOPAC, ADMINISTRATOR, earlier) == "DAILY_BUY_LIMIT"
+
+
+@pytest.mark.parametrize("open_status", [OrderStatus.UNCONFIRMED, OrderStatus.SUBMITTED, OrderStatus.PENDING])
+def test_a_buy_of_a_stock_an_earlier_buy_of_which_is_still_open_is_refused_since_both_may_deal(open_status: OrderStatus) -> None:
+    """
+    An earlier BUY still PENDING or SUBMITTED is one a process that stopped left, before the Web API's timer ended its
+    run, or one another run sends at this moment: it may deal as much as one that awaits settlement.
+    """
+    earlier = order(price=100, quantity=100, status=open_status)
+    settled = replace(order(price=100, quantity=100, status=OrderStatus.CANCELLED), filled_quantity=40)
+
+    assert RULE.apply(order(), Workflow.MANUAL_BUY, ExecutionProvider.SHIOAJI, SINOPAC, ADMINISTRATOR, EVERYONE, [earlier]) == (
+        RejectReason.UNSETTLED_BUY,
+        f"order {earlier.id}, an earlier BUY of 2330 today, is {open_status.value} and may still deal: another BUY of 2330 "
+        "waits until it ends or the broker's record of the day settles it",
+    )
+    assert refusal(order(stock_id="2317"), ExecutionProvider.SHIOAJI, SINOPAC, ADMINISTRATOR, [earlier]) is None
+    assert refusal(order(), ExecutionProvider.SHIOAJI, SINOPAC, ADMINISTRATOR, [settled]) is None
+    assert refusal(order(action=TradeAction.SELL), ExecutionProvider.SHIOAJI, SINOPAC, ADMINISTRATOR, [earlier]) is None
 
 
 def test_the_order_being_sent_is_not_counted_twice_when_the_journal_already_holds_it() -> None:

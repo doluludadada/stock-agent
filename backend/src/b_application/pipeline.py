@@ -109,6 +109,7 @@ from b_application.use_cases.ship.run_history import RunHistory
 from b_application.use_cases.ship.run_lookup import RunLookup
 from b_application.use_cases.ship.run_reports import RunReports
 from b_application.use_cases.ship.signals import Signals
+from b_application.use_cases.trade.abandoned_runs import AbandonedRuns
 from b_application.use_cases.trade.account_history import AccountHistory
 from b_application.use_cases.trade.account_loader import AccountLoader
 from b_application.use_cases.trade.account_risk_check import AccountRiskCheck
@@ -125,6 +126,7 @@ from b_application.use_cases.trade.mock_account_reset import MockAccountReset
 from b_application.use_cases.trade.order_execution import OrderExecution
 from b_application.use_cases.trade.order_outcome import OrderOutcome
 from b_application.use_cases.trade.order_preparation import OrderPreparation
+from b_application.use_cases.trade.order_settlement import OrderSettlement
 from b_application.use_cases.trade.ranking_follow_candidates import RankingFollowCandidates
 from b_application.use_cases.trade.ranking_follow_return import RankingFollowReturn
 from b_application.use_cases.trade.ranking_follow_schedule import RankingFollowSchedule
@@ -172,6 +174,9 @@ class Pipeline:
     measures the quote's age at submission and BrokerAccessRule checks the broker the order would reach; OrderExecution
     sends it only when it is PENDING and records the broker's answer; OrderOutcome re-reads the account after a fill;
     and the order joins status.orders before the next decision is prepared, so a decision never gets a second order.
+    Before its first order, a run on a real broker settles the orders of ended runs whose outcome was not read when
+    they were sent (UNCONFIRMED), so its account and the day's BUY limit see what the broker did, and after its last
+    order it settles its own (OrderSettlement); on the mock account nothing awaits settlement.
     Buzz and Intraday send twice: right after the stop-loss check, while those quotes are fresh, and at the end. Full
     Cycle, specific-stock analysis and valuation never send; a follow sends a finished Full Cycle's decisions, priced
     again, into the user's mock account, and a ranking follow what brings the account of the run's broker to the
@@ -237,6 +242,8 @@ class Pipeline:
     order_preparation: OrderPreparation
     order_execution: OrderExecution
     order_outcome: OrderOutcome
+    order_settlement: OrderSettlement
+    abandoned_runs: AbandonedRuns
     mock_account_loader: AccountLoader
     mock_order_preparation: OrderPreparation
     mock_order_execution: OrderExecution
@@ -334,6 +341,7 @@ class Pipeline:
 
         async with self.run_history.execute(Workflow.BUZZ_SCAN, run_id) as stats:
             status = PipelineStatus(stats=stats)
+            await self.order_settlement.execute(status.stats)
             status.account, status.held_stocks = await self.account_loader.execute(status.stocks)
             status.stale_stock_ids = await self.realtime_quote_feed.execute(status.held_stocks, status.stale_stock_ids, status.stats)
             status.equity, status.risk_blocked_stock_ids, status.signals = await self.account_risk_check.execute(
@@ -360,6 +368,7 @@ class Pipeline:
                     order = await self.order_execution.execute(order, status.stats)
                     status.account = await self.order_outcome.execute(order, status.account, status.stocks, status.stats)
                     status.orders.append(order)
+            status.orders = await self.order_settlement.execute(status.stats, status.orders)
             status.sentiment_by_stock_id = await self.sentiment_analyser.execute(status.buzz_stocks, status.stats)
             await self.reporting.execute(status.signals, status.stats)
 
@@ -375,6 +384,7 @@ class Pipeline:
 
         async with self.run_history.execute(Workflow.INTRADAY, run_id) as stats:
             status = PipelineStatus(stats=stats)
+            await self.order_settlement.execute(status.stats)
             status.account, status.held_stocks = await self.account_loader.execute(status.stocks)
             status.candidates = await self.intraday_candidates.execute(status.held_stocks, status.stats)
             status.stale_stock_ids = await self.realtime_quote_feed.execute(status.candidates, status.stale_stock_ids, status.stats)
@@ -404,6 +414,7 @@ class Pipeline:
                     order = await self.order_execution.execute(order, status.stats)
                     status.account = await self.order_outcome.execute(order, status.account, status.stocks, status.stats)
                     status.orders.append(order)
+            status.orders = await self.order_settlement.execute(status.stats, status.orders)
             await self.reporting.execute(status.signals, status.stats)
 
         return status
@@ -446,6 +457,7 @@ class Pipeline:
         """
         async with self.run_history.execute(Workflow.MANUAL_BUY, run_id) as stats:
             status = PipelineStatus(stats=stats, manual_stocks=[stock])
+            await self.order_settlement.execute(status.stats)
             status.account, status.held_stocks = await self.account_loader.execute(status.stocks)
             status.stale_stock_ids = await self.realtime_quote_feed.execute(status.manual_stocks, status.stale_stock_ids, status.stats)
             status.signals, status.manual_buy_refusal = await self.manual_signal.execute(
@@ -456,6 +468,7 @@ class Pipeline:
                     order = await self.order_execution.execute(order, status.stats)
                     status.account = await self.order_outcome.execute(order, status.account, status.stocks, status.stats)
                     status.orders.append(order)
+            status.orders = await self.order_settlement.execute(status.stats, status.orders)
 
         return status
 
@@ -537,6 +550,7 @@ class Pipeline:
             if account.refusal is not None or status.follow_refusal is not None:
                 return status
 
+            await self.order_settlement.execute(status.stats)
             status.manual_stocks = await self.stock_lookup.execute(holdings.lacking, status.stats)
             status.account, status.held_stocks = await self.account_loader.execute(status.stocks)
             traded = [*status.held_stocks, *status.manual_stocks]
@@ -548,6 +562,7 @@ class Pipeline:
                     order = await self.order_execution.execute(order, status.stats)
                     status.account = await self.order_outcome.execute(order, status.account, status.stocks, status.stats)
                     status.orders.append(order)
+            status.orders = await self.order_settlement.execute(status.stats, status.orders)
             await self.ranking_follow_candidates.execute(account, ranking, status.stats)
 
         return status
@@ -608,6 +623,18 @@ class Pipeline:
         there (follow_ranking), on the user's follow account and no other.
         """
         return await self.scheduled_followers.execute()
+
+    async def settle_orders(self) -> list[Order]:
+        """
+        The Web API's timer: the runs on the site's real broker an earlier process left without an end, ended with
+        their open orders UNCONFIRMED (AbandonedRuns), then the orders of this user's ended runs on it whose outcome was
+        not read when they were sent, settled from the broker's own record of the day (OrderSettlement), each as it ends
+        now. Whatever this Pipeline's broker and the user's rights now: it only reads and cancels what the user's
+        journal holds of it. While the login is down or the site has no real broker, only the orders of an earlier
+        session are settled: they fail with what they recorded.
+        """
+        await self.abandoned_runs.execute()
+        return await self.order_settlement.execute(None)
 
     async def load_trades(self, limit: int, offset: int) -> list[tuple[Order, SystemStats]]:
         """The account page's trades since the mock account opened, newest first, each with the run whose decision it carried out."""

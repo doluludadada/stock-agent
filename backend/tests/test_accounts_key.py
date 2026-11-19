@@ -152,7 +152,7 @@ def test_prod_refuses_to_start_without_the_variable_where_it_is_set_and_never_cr
     appsetting.write_text(text, encoding="utf-8")
 
     with pytest.raises(InvalidSettingsError) as refused:
-        startup_settings(project)
+        startup_settings(project, unsettled=0)
 
     [problem] = refused.value.problems
     assert (problem.path, problem.line) == ("environment", text[: text.index("environment: prod")].count("\n") + 1)

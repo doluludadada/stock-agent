@@ -1,3 +1,5 @@
+import math
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Literal, Self
 
@@ -10,6 +12,23 @@ from a_domain.types.ids import DecisionId, OrderId, RunId, new_order_id
 from a_domain.types.values import NonEmptyText, PositiveFiniteFloat
 
 
+def volume_weighted_price(deals: Sequence[tuple[float, int]]) -> float | None:
+    """
+    The volume-weighted price of `deals`, each (price, quantity), or None while none of them dealt. It never leaves the
+    range of their own prices, which a float's rounding of the average can (12.45 x 329 / 329 is 12.450000000000001):
+    deals at one price fill at exactly it, so a BUY whose deals are at or under its limit never fills above it, nor a
+    SELL under it.
+    """
+    dealt = [(price, quantity) for price, quantity in deals if quantity]
+
+    if not dealt:
+        return None
+
+    prices = [price for price, _ in dealt]
+    average = math.fsum(price * quantity for price, quantity in dealt) / sum(quantity for _, quantity in dealt)
+    return min(max(average, min(prices)), max(prices))
+
+
 def check_move(order: Order, status: OrderStatus) -> None:
     if status not in order.status.next_statuses:
         raise IllegalOrderTransition(f"Cannot move order from {order.status} to {status}")
@@ -18,7 +37,9 @@ def check_move(order: Order, status: OrderStatus) -> None:
 def move_to(order: Order, status: OrderStatus, now: datetime, reason: str | None = None) -> None:
     check_move(order, status)
 
-    if status in {OrderStatus.CANCELLED, OrderStatus.REJECTED, OrderStatus.FAILED} and not (reason and reason.strip()):
+    if status in {OrderStatus.UNCONFIRMED, OrderStatus.CANCELLED, OrderStatus.REJECTED, OrderStatus.FAILED} and not (
+        reason and reason.strip()
+    ):
         raise ValueError(f"{status.value.capitalize()} order requires a reason")
 
     order.status = status
@@ -71,13 +92,25 @@ class Order:
 
     @property
     def summary(self) -> str:
-        """One log line: the status, what was ordered and filled at what limit, the costs, and the reason when there is one."""
+        """
+        One log line: the status, what was ordered and filled, at the average filled price once something filled and
+        at the limit before, the costs, and the reason when there is one.
+        """
+        price = self.average_filled_price if self.filled_quantity else self.limit_price
         text = (
             f"{self.status.value.upper()}: {self.action.value.upper()} {self.stock_id} "
-            f"filled {self.filled_quantity}/{self.quantity} @ {self.limit_price}, fee={self.fee}, tax={self.tax}"
+            f"filled {self.filled_quantity}/{self.quantity} @ {price}, fee={self.fee}, tax={self.tax}"
         )
 
         return f"{text}, reason={self.reason}" if self.reason else text
+
+    def tag(self, part: int) -> str:
+        """
+        The tag of the order's part `part` (its index among the parts LotSplitRule splits it into) at a real broker, a
+        broker order's custom field: the id's first five hex digits and the index, which a person finds in the
+        broker's order history.
+        """
+        return f"{self.id.hex[:5]}{part}"
 
     def submit(self, *, now: datetime) -> None:
         """The broker accepted the order."""
@@ -106,9 +139,9 @@ class Order:
         if self.limit_price is not None and self.action == TradeAction.SELL and price < self.limit_price:
             raise ValueError("SELL fill price cannot be below limit_price")
 
-        filled_quantity = self.filled_quantity + quantity
+        filled_quantity, held = self.filled_quantity + quantity, (self.average_filled_price or price, self.filled_quantity)
         move_to(self, OrderStatus.FILLED if filled_quantity == self.quantity else OrderStatus.SUBMITTED, now)
-        self.average_filled_price = ((self.average_filled_price or 0) * self.filled_quantity + price * quantity) / filled_quantity
+        self.average_filled_price = volume_weighted_price([held, (price, quantity)])
         self.filled_quantity = filled_quantity
         self.fee += fee
         self.tax += tax
@@ -125,9 +158,24 @@ class Order:
     def fail(self, reason: str, *, now: datetime) -> None:
         move_to(self, OrderStatus.FAILED, now, reason)
 
+    def leave_unconfirmed(self, reason: str, *, now: datetime) -> None:
+        """Sent to a real broker whose outcome the site could not read: the broker's own record of the day settles it."""
+        move_to(self, OrderStatus.UNCONFIRMED, now, reason)
+
+    def drop_realized_pnl(self, why: str) -> None:
+        """
+        A SELL whose realized PnL could not be computed for every share it sold keeps none, not even what an earlier
+        part realized, and its reason, which a FILLED order otherwise has none of, says why.
+        """
+        self.realized_pnl = None
+        self.reason = f"{self.reason}; {why}" if self.reason else why
+
     def fail_if_open(self, reason: str, *, now: datetime) -> None:
-        """FAILS an order that is still open; an order that already ended keeps its status."""
-        if self.status.is_open:
+        """
+        FAILS an order that is still open; an order that already ended keeps its status, and so does one that awaits
+        settlement, whose outcome the broker's record gives later.
+        """
+        if self.status.is_open and not self.status.awaits_settlement:
             self.fail(reason, now=now)
 
 
@@ -150,7 +198,7 @@ class ExchangeOrder:
     """The shares the broker's status counts as dealt. More than dealt_shares while deals are still on their way."""
 
     fill_price: float | None
-    """The deals' volume-weighted price. None while nothing is dealt."""
+    """The deals' volume_weighted_price. None while nothing is dealt."""
 
     description: str
     """The broker's own words for the exchange order, for logs and for the reason the order ends with."""

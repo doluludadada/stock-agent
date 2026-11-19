@@ -122,7 +122,7 @@ async def test_dev_refuses_the_production_server_even_without_its_credentials() 
     validate_trading_environment(config)
 
     with pytest.raises(TradingSetupError, match="does not log in to SinoPac's production server") as refused:
-        validate_shioaji_server(config, None)
+        validate_shioaji_server(config, None, 0)
 
     assert refused.value.path == "shioaji.server"
 

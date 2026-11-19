@@ -2,8 +2,8 @@
 The database commands (`just db-status`, `db-backup`, `db-migrate`, `db-restore`) on a real PostgreSQL database: what
 they print, the backups they write, an upgrade that keeps every row, a second migrate and a failed one that change
 nothing, and a restore that puts a backup back after backing the current database up. The tests that migrate give the
-code a step of their own, from one version below the code's, so they hold whatever steps the code has; two tests run
-the code's own steps, from version 9 and from version 13. Only a superuser may create pgvector's extension, so the
+code a step of their own, from one version below the code's, so they hold whatever steps the code has; three tests run
+the code's own steps, from version 9, from version 13 and from version 14. Only a superuser may create pgvector's extension, so the
 tests of a database without it run as the session's superuser (TestDatabase.superuser).
 """
 
@@ -26,10 +26,15 @@ from trading_stack import MovableClock
 
 import c_infrastructure.database.db_connector as db_connector
 import c_infrastructure.database.models.schema_version_dto as schema_version
-from a_domain.types.enums import InformationSource
+from a_domain.model.system.stats import SystemStats
+from a_domain.model.trading.order import Order
+from a_domain.types.enums import ExecutionProvider, InformationSource, OrderType, TimeInForce, TradeAction, Workflow
+from a_domain.types.ids import new_decision_id
 from c_infrastructure.database.db_connector import DatabaseCommandError, DatabaseConnector, OutdatedDatabaseError
 from c_infrastructure.database.models.schema_version_dto import FIRST_SCHEMA_VERSION, SCHEMA_VERSION
+from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
 from c_infrastructure.database.repositories.article_index import SqlArticleIndex
+from c_infrastructure.database.repositories.trading_journal import TradingJournal
 from d_presentation.cli import database as commands, terminal
 
 pytestmark = pytest.mark.asyncio
@@ -321,7 +326,8 @@ async def test_the_steps_from_version_9_give_a_run_its_ranking_follow_columns_an
     assert "11 -> 12 add_what_a_ranking_follow_left_open" in output.getvalue()
     assert "12 -> 13 add_the_account_of_the_scheduled_follow" in output.getvalue()
     assert "13 -> 14 add_the_vector_extension" in output.getvalue()
-    assert after["schema_version"][1] == [("14",)]
+    assert "14 -> 15 add_the_unconfirmed_order_status" in output.getvalue()
+    assert after["schema_version"][1] == [("15",)]
     assert {"ranking_formula", "ranking_decided_on", "scheduled", "ranking_open"} <= set(after["workflow_runs"][0])
     assert "ranking_follow_time" in after["users"][0]
     followed_on = {row[after["users"][0].index("ranking_follow_broker")] for row in after["users"][1]}
@@ -329,6 +335,75 @@ async def test_the_steps_from_version_9_give_a_run_its_ranking_follow_columns_an
     [run] = after["workflow_runs"][1]
     assert run[after["workflow_runs"][0].index("scheduled")] == "False"
     assert run[after["workflow_runs"][0].index("ranking_open")] == "None"
+
+
+AT_VERSION_14 = (
+    "ALTER TYPE orderstatus RENAME TO orderstatus_of_version_15",
+    "CREATE TYPE orderstatus AS ENUM ('PENDING', 'SUBMITTED', 'FILLED', 'CANCELLED', 'FAILED', 'REJECTED')",
+    "ALTER TABLE orders ALTER COLUMN status TYPE orderstatus USING status::text::orderstatus",
+    "DROP TYPE orderstatus_of_version_15",
+    "UPDATE schema_version SET version = 14",
+)
+"""A database of version 14, whose orders' status type has no UNCONFIRMED."""
+
+
+async def order_statuses() -> list[str]:
+    """The values the orders' status type takes, in its own order."""
+    engine = raw_engine()
+
+    async with engine.connect() as connection:
+        labels = await connection.execute(
+            text("SELECT enumlabel FROM pg_enum WHERE enumtypid = 'orderstatus'::regtype ORDER BY enumsortorder")
+        )
+        statuses = list(labels.scalars())
+
+    await engine.dispose()
+    return statuses
+
+
+async def test_the_step_from_version_14_lets_an_order_await_settlement_and_keeps_every_row(
+    tmp_path: Path, output: io.StringIO
+) -> None:
+    connector = await current_database(tmp_path)
+    await execute(*AT_VERSION_14)
+    before = await database_snapshot()
+
+    try:
+        with pytest.raises(OutdatedDatabaseError, match="just db-migrate"):
+            await connector.init_db()
+
+        assert await commands.migrate(connector) == 0
+        await connector.init_db()
+        after = await database_snapshot()
+        journal = TradingJournal(connector.for_owner(LEGACY_OWNER_ID))
+        run = SystemStats(workflow=Workflow.MANUAL_BUY, execution_provider=ExecutionProvider.SHIOAJI, start_time=MARKET_OPEN)
+        run.end_time = MARKET_OPEN
+        order = Order(
+            run_id=run.run_id,
+            decision_id=new_decision_id(),
+            stock_id="2330",
+            action=TradeAction.BUY,
+            order_type=OrderType.LIMIT,
+            quantity=1000,
+            limit_price=100.0,
+            time_in_force=TimeInForce.IOC,
+            created_at=MARKET_OPEN,
+            updated_at=MARKET_OPEN,
+        )
+        order.leave_unconfirmed("the broker's answer was lost", now=MARKET_OPEN)
+        await journal.save_run(run)
+        await journal.save_order(order)
+        unsettled = await journal.unsettled_orders(ExecutionProvider.SHIOAJI)
+    finally:
+        await connector.close()
+
+    assert "14 -> 15 add_the_unconfirmed_order_status" in output.getvalue()
+    assert after["schema_version"][1] == [(str(SCHEMA_VERSION),)]
+    assert {table: after[table] for table in before.keys() - {"schema_version"}} == {
+        table: rows for table, rows in before.items() if table != "schema_version"
+    }
+    assert await order_statuses() == ["PENDING", "SUBMITTED", "UNCONFIRMED", "FILLED", "CANCELLED", "FAILED", "REJECTED"]
+    assert unsettled == [order]
 
 
 REVENUE = "十月營收創新高 年增四成"

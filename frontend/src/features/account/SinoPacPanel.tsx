@@ -94,7 +94,12 @@ function Manage({ account, Confirmation }: { account: BrokerageAccount; Confirma
       </Row>
       {switchRefusal && (
         <div className="py-3 text-sm text-pretty text-muted-foreground">
-          <p>{t(`brokerage.manage.server.refusal.${switchRefusal.reason}`, { server: t(`brokerage.server.${switchRefusal.server}`) })}</p>
+          <p>
+            {t(`brokerage.manage.server.refusal.${switchRefusal.reason}`, {
+              server: t(`brokerage.server.${switchRefusal.server}`),
+              count: switchRefusal.unsettled,
+            })}
+          </p>
           {switchRefusal.missing.length > 0 && (
             <ul className="mt-1 flex flex-wrap gap-1.5">
               {switchRefusal.missing.map((variable) => (

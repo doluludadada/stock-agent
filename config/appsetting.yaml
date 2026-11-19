@@ -464,7 +464,7 @@ shioaji:
   max_polls: 10
   # Seconds SinoPac may take to refresh the status of every order of the account today, asked once by each read of
   # its cash or today's deals: the SinoPac page, a run's account and a ranking follow. A day of many orders takes
-  # longer than the SDK's own 5 seconds. 5 to 60.
+  # longer than the SDK's own 5 seconds. The lookups for an order whose answer was lost take at most this in all. 5 to 60.
   status_timeout_seconds: 30
   # The intraday odd-lot matches (market_hours.odd_lot_match_seconds apart, at most 10) an odd-lot ROD part stays working
   # through after the session's first match, its status read after each, before what is left is cancelled. A run
@@ -472,7 +472,7 @@ shioaji:
   # part keeps max_polls.
   odd_lot_matches: 3
   # Seconds, at most 30, the broker may take to settle a cancel and the reads after it. Past them the order is recorded
-  # failed with a reason to check SinoPac. compose.yml's stop_grace_period covers it.
+  # unconfirmed, and SinoPac's record of the day settles it later. compose.yml's stop_grace_period covers it.
   cancel_timeout_seconds: 15
   # The cash SinoPac's simulation account started with, all of it the owner has put in. That server reports no
   # balance, so the site figures the account's cash from this and SinoPac's records (SimulationCashRule): adding money

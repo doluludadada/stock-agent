@@ -142,6 +142,13 @@ class OrderStatus(StrEnum):
     SUBMITTED = auto()
     """Accepted and working; may hold a partial fill."""
 
+    UNCONFIRMED = auto()
+    """
+    Sent to a real broker, whose outcome the site could not read yet: its answer was lost and the broker did not list it
+    by its tag in time, or a part was still working after a cancel request. It may hold a partial fill. OrderSettlement
+    settles it from the broker's own record of the day.
+    """
+
     FILLED = auto()
     """The whole quantity executed."""
 
@@ -156,12 +163,30 @@ class OrderStatus(StrEnum):
 
     @property
     def next_statuses(self) -> frozenset[OrderStatus]:
-        """SUBMITTED to SUBMITTED is a partial fill that leaves the rest working."""
+        """
+        SUBMITTED to SUBMITTED is a partial fill that leaves the rest working. An UNCONFIRMED order may end any way the
+        broker's record says, or stay UNCONFIRMED while that record cannot tell yet; a fill it records submits it first.
+        """
         match self:
             case OrderStatus.PENDING:
-                return frozenset({OrderStatus.SUBMITTED, OrderStatus.REJECTED, OrderStatus.FAILED, OrderStatus.CANCELLED})
+                return frozenset(
+                    {OrderStatus.SUBMITTED, OrderStatus.UNCONFIRMED, OrderStatus.REJECTED, OrderStatus.FAILED, OrderStatus.CANCELLED}
+                )
             case OrderStatus.SUBMITTED:
-                return frozenset({OrderStatus.SUBMITTED, OrderStatus.FILLED, OrderStatus.CANCELLED, OrderStatus.FAILED})
+                return frozenset(
+                    {OrderStatus.SUBMITTED, OrderStatus.UNCONFIRMED, OrderStatus.FILLED, OrderStatus.CANCELLED, OrderStatus.FAILED}
+                )
+            case OrderStatus.UNCONFIRMED:
+                return frozenset(
+                    {
+                        OrderStatus.SUBMITTED,
+                        OrderStatus.UNCONFIRMED,
+                        OrderStatus.FILLED,
+                        OrderStatus.CANCELLED,
+                        OrderStatus.REJECTED,
+                        OrderStatus.FAILED,
+                    }
+                )
             case _:
                 return frozenset()
 
@@ -172,10 +197,18 @@ class OrderStatus(StrEnum):
     @property
     def fill_final(self) -> bool:
         """
-        Its filled quantity is all it will ever fill. An open order may still fill, and a FAILED one may have filled
-        at the broker whatever it recorded.
+        Its filled quantity is all it will ever fill. An open order may still fill, UNCONFIRMED included, and a FAILED
+        one may have filled at the broker whatever it recorded.
         """
         return not self.is_open and self != OrderStatus.FAILED
+
+    @property
+    def awaits_settlement(self) -> bool:
+        """
+        Its outcome is read later from the broker's own record of the day (OrderSettlement), so nothing fails it for
+        want of an answer: the end of its run leaves it as it is.
+        """
+        return self == OrderStatus.UNCONFIRMED
 
 
 class RejectReason(StrEnum):
@@ -210,6 +243,14 @@ class RejectReason(StrEnum):
 
     DAILY_BUY_LIMIT = auto()
     """A real broker's BUY would take the day's BUYs on it past trading.max_daily_buy_value."""
+
+    UNSETTLED_BUY = auto()
+    """
+    A real broker's BUY of a stock an earlier BUY of which on it today is still open: one that awaits settlement
+    (UNCONFIRMED), one a process that stopped left PENDING or SUBMITTED, or one another run sends now. The broker may
+    still deal that one, so a second could buy the stock twice. It may go once the first ended or the broker's record
+    settled it.
+    """
 
     RUN_CANCELLED = auto()
     """The run was cancelled (Ctrl-C, or the server stopping) before this exchange order was sent."""
@@ -1002,6 +1043,13 @@ class ServerSwitchRefusalReason(StrEnum):
     CREDENTIALS_MISSING = auto()
     """A switch to a server whose login reads variables that are not set."""
 
+    ORDERS_UNSETTLED = auto()
+    """
+    A switch while SinoPac orders await settlement (UNCONFIRMED): the journal does not name the server an order went to,
+    so after the switch the other server's record would settle them, and a part of the same tag there could be cancelled.
+    None is left the next day at the latest: an order of an earlier session fails without the login (PastSessionRule).
+    """
+
     @property
     def setting(self) -> str:
         """The setting a refusal of this kind is located at."""
@@ -1011,8 +1059,11 @@ class ServerSwitchRefusalReason(StrEnum):
             case _:
                 return "shioaji.server"
 
-    def sentence(self, server: ShioajiServer, missing: Sequence[ShioajiCredential]) -> str:
-        """A refusal of this kind of the login on `server`, as the settings check words it; `missing` by name only."""
+    def sentence(self, server: ShioajiServer, missing: Sequence[ShioajiCredential], unsettled: int) -> str:
+        """
+        A refusal of this kind of the login on `server`, as the settings check words it; `missing` by name only, and the
+        `unsettled` orders by how many.
+        """
         match self:
             case ServerSwitchRefusalReason.ENVIRONMENT:
                 return f"the environment this machine runs in does not log in to SinoPac's {server.value} server"
@@ -1029,6 +1080,12 @@ class ServerSwitchRefusalReason(StrEnum):
             case ServerSwitchRefusalReason.CREDENTIALS_MISSING:
                 variables = ", ".join(credential.value for credential in missing)
                 return f"shioaji.server {server.value} needs {variables} in the server's environment or .env"
+            case ServerSwitchRefusalReason.ORDERS_UNSETTLED:
+                orders = "1 SinoPac order awaits" if unsettled == 1 else f"{unsettled} SinoPac orders await"
+                return (
+                    f"{orders} settlement from the record of the server the site's login is on now: shioaji.server "
+                    f"switches to {server.value} once none is left, at the latest the next day"
+                )
 
 
 class SystemEnvironment(StrEnum):
@@ -1189,6 +1246,15 @@ class Audience(StrEnum):
                 return frozenset(ExecutionProvider)
             case Audience.PUBLIC:
                 return frozenset({ExecutionProvider.MOCK})
+
+    @property
+    def real_broker(self) -> ExecutionProvider | None:
+        """
+        The real broker among its brokers, on the site's own login, or None where it has none: a site has one login, so
+        at most one. The Web API's timer settles the orders that await settlement on it, and fails one of an earlier
+        session even while that login is down or missing (OrderSettlement).
+        """
+        return next((broker for broker in self.brokers if broker.real), None)
 
     @property
     def order_pricing(self) -> OrderPricing:

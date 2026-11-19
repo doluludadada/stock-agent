@@ -41,8 +41,8 @@ class ApiConfig(BaseSettings):
         ),
     ] = 60
     """
-    How often the Web API looks whether a user's scheduled ranking follow is due. Each look reads the users, so it is
-    never more often than every 5 seconds.
+    How often the Web API looks whether a user's scheduled ranking follow is due, and settles the SinoPac orders whose
+    outcome a run could not read. Each look reads the users, so it is never more often than every 5 seconds.
     """
 
     valuation_cache_minutes: Annotated[

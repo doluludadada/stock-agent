@@ -25,6 +25,7 @@ from a_domain.rules.trading.order_rule import (
     RealBrokerGateRule,
     RealBrokerOrdererRule,
     SimulationOnlyRule,
+    UnsettledBuyRule,
 )
 from a_domain.rules.trading.ranking import DecisionSessionsRule, MonthlyRankingRule
 from a_domain.rules.trading.ranking_backtest import RankingBacktestRule, RankingPortfolioRule
@@ -339,6 +340,7 @@ class AppConfig(BaseSettings):
             gate_rule=RealBrokerGateRule(
                 simulation_rule=SimulationOnlyRule(), orderer_rule=RealBrokerOrdererRule(), login_rule=BrokerLoginRule()
             ),
+            unsettled_rule=UnsettledBuyRule(),
             limit_rule=limit_rule,
         )
 

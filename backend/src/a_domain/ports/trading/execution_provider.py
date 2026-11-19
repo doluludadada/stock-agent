@@ -18,7 +18,9 @@ class IExecutionProvider(Protocol):
 
     place_order takes a PENDING order and returns it final: REJECTED (a pre-trade rule refused it),
     FILLED, CANCELLED (accepted, then not or not fully filled; any partial fill is recorded) or
-    FAILED (technical error). The app sends IOC orders and keeps no working orders.
+    FAILED (technical error), or, on a real broker whose answer it could not read, UNCONFIRMED, which the broker's own
+    record of the day settles later (IBrokerExecutionProvider.settle). The app sends IOC orders and keeps no working
+    orders.
     """
 
     async def connect(self) -> None:
@@ -97,6 +99,19 @@ class IBrokerExecutionProvider[Contract, Trade](IExecutionProvider, Protocol):
         """
         ...
 
-    async def place(self, contract: Contract, order: Order, lot: LotKind, shares: int, index: int) -> Trade:
-        """Places one exchange order. When the confirmation is lost, finds it by its tag, or raises saying to check the broker."""
+    async def place(self, contract: Contract, order: Order, lot: LotKind, shares: int, index: int, stop: Event) -> Trade | None:
+        """
+        Places one exchange order. When the confirmation is lost, looks for it in the account's orders, or answers None
+        while the broker does not list it within the time it allows the lookups or once `stop` is set: it may still
+        have reached the exchange.
+        """
+        ...
+
+    async def settle(self, order: Order) -> None:
+        """
+        Settles `order`, which awaits settlement (UNCONFIRMED) and was sent today, from the broker's own record of
+        today, which lists today's orders alone (an order of an earlier session is PastSessionRule's): what still works
+        of it is cancelled, what it dealt beyond what the order holds is recorded on it, and it ends with the status
+        that record gives it, or stays UNCONFIRMED while the record cannot tell yet. It sends no order.
+        """
         ...

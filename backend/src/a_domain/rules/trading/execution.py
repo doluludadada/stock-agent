@@ -1,6 +1,6 @@
 import math
 from collections.abc import Mapping, Sequence
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import PositiveInt, validate_call
 from pydantic.dataclasses import dataclass
@@ -8,7 +8,7 @@ from pydantic.dataclasses import dataclass
 from a_domain.model.trading.account import Account, BrokerFill, Position
 from a_domain.model.trading.order import ExchangeOrder, Order
 from a_domain.rules.trading.cost import TradeCost, TradingCostRule
-from a_domain.types.enums import LotKind, OrderStatus, OrderType, RejectReason, TimeInForce, TradeAction
+from a_domain.types.enums import ExecutionProvider, LotKind, OrderStatus, OrderType, RejectReason, TimeInForce, TradeAction
 from a_domain.types.values import PositiveFiniteFloat
 
 
@@ -141,9 +141,14 @@ class FillRule:
 class BrokerOutcomeRule:
     """
     The final status of an order a real broker took as one exchange order per lot part, once the parts it sent have
-    reported. A FILLED order stays FILLED. Otherwise:
-    - A part still working after a cancel request FAILS the order: the broker may still fill it, so `broker` is
-      named as the place to check.
+    reported. A part the broker does not list (UNCONFIRMED: its answer was lost and its tag not found) is reported too.
+    A FILLED order stays FILLED. Otherwise:
+    - Once the broker's record of the order's session is `final` (its deals are final from market_hours.settled, a
+      while after the close, so a closing-auction deal reported late is still read before it), a part can no longer
+      deal: an order none of whose parts the broker ever listed FAILS, since `broker` holds no record of it, and a part
+      still working counts as ended with what it dealt.
+    - Before it, a part still working after a cancel request, or not listed, leaves the order UNCONFIRMED with what
+      filled so far: the broker may still fill it, so the broker's own record of the day settles it.
     - A part the broker ended as FAILED, or whose deals cannot be the whole story, FAILS the order instead of guessing
       what executed.
     - Nothing filled and every part refused: REJECTED as BROKER_REFUSED.
@@ -153,15 +158,20 @@ class BrokerOutcomeRule:
 
     broker: str
 
-    def apply(self, order: Order, parts: Sequence[ExchangeOrder], now: datetime, unsent: str | None = None) -> None:
+    def apply(
+        self, order: Order, parts: Sequence[ExchangeOrder], now: datetime, unsent: str | None = None, final: bool = False
+    ) -> None:
         if order.status == OrderStatus.FILLED:
             return
 
-        rest = [f"the rest was not sent: {unsent}"] if unsent is not None else []
-        summary = "; ".join([*(part.description for part in parts), *rest])
+        summary = outcome_summary(parts, unsent)
 
-        if any(part.status.is_open for part in parts):
-            order.fail(f"still working at the broker after a cancel request, check {self.broker}: {summary}", now=now)
+        if final and all(part.status.awaits_settlement for part in parts):
+            order.fail(f"{self.broker} never listed it by its session's end: {summary}", now=now)
+            return
+
+        if not final and any(part.status.is_open for part in parts):
+            order.leave_unconfirmed(f"unconfirmed at {self.broker}, whose record of today settles it: {summary}", now=now)
             return
 
         if any(part.status == OrderStatus.FAILED or part.deals_missing for part in parts):
@@ -173,3 +183,32 @@ class BrokerOutcomeRule:
             return
 
         order.cancel(f"{order.time_in_force.name} unfilled: filled {order.filled_quantity} of {order.quantity}; {summary}", now=now)
+
+
+@dataclass(frozen=True)
+class PastSessionRule:
+    """
+    Why an order that awaits settlement can no longer be settled from its real broker's record of the day, or None: the
+    record lists the orders of today's session alone, so an order of an earlier `session` is never in it, whether the
+    login is up, down or missing. Such an order fails with what it recorded, and the reason names the tags of its parts
+    (Order.tag, one per part `lot_split_rule` splits it into) to look for in the broker's own order history.
+    """
+
+    lot_split_rule: LotSplitRule
+
+    def apply(self, order: Order, broker: ExecutionProvider, session: date, today: date) -> str | None:
+        if session >= today:
+            return None
+
+        tags = ", ".join(order.tag(part) for part in range(len(self.lot_split_rule.apply(order.quantity))))
+        return (
+            f"{broker.label} no longer lists the orders of {session}, so what the parts tagged {tags} did there cannot be "
+            f"read: check {broker.label}'s order history; {order.filled_quantity} of {order.quantity} shares were recorded "
+            "filled"
+        )
+
+
+def outcome_summary(parts: Sequence[ExchangeOrder], unsent: str | None) -> str:
+    """Each part's own words, then why the rest was not sent, for the reason an order ends with."""
+    rest = [f"the rest was not sent: {unsent}"] if unsent is not None else []
+    return "; ".join([*(part.description for part in parts), *rest])

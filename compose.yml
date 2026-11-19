@@ -83,8 +83,9 @@ services:
         condition: service_healthy
     restart: unless-stopped
     # A stop waits at most 5 s for open requests (backend/main.py), then cancels each run: a SinoPac call in flight
-    # ends (5 s, its lookup up to shioaji.status_timeout_seconds), then the order cancels its working odd-lot part and
-    # reads its deals within shioaji.cancel_timeout_seconds. 5 + 5 + 30 + 5 + 15 s with the shipped settings.
+    # ends (5 s; when its answer was lost, the lookups for it end at the cancel and take at most
+    # shioaji.status_timeout_seconds in all), then the order cancels its working odd-lot part and reads its deals
+    # within shioaji.cancel_timeout_seconds. 5 + 5 + 30 + 5 + 15 s with the shipped settings.
     stop_grace_period: 90s
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8800/v1/auth/status', timeout=5)"]

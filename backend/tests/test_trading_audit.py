@@ -14,7 +14,7 @@ from a_domain.model.trading.order import Order
 from a_domain.model.trading.watchlist import WatchlistEntry
 from a_domain.ports.trading.execution_provider import SendRefusal
 from a_domain.rules.trading.order_rule import BrokerLink
-from a_domain.types.enums import OrderStatus, RejectReason, SignalSource, TradeAction, WatchlistType, Workflow
+from a_domain.types.enums import ExecutionProvider, OrderStatus, RejectReason, SignalSource, TradeAction, WatchlistType, Workflow
 from b_application.use_cases.trade.order_execution import OrderExecution
 from c_infrastructure.database.models.trading_journal_dto import AccountSnapshotDTO, OrderDTO, TradeSignalDTO, WorkflowRunDTO
 from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
@@ -343,17 +343,26 @@ async def test_a_run_is_recorded_when_it_starts_and_when_it_aborts(tmp_path) -> 
     assert stats.failure == "RuntimeError: Yahoo hung"
 
 
+MOCK_LINK = BrokerLink(broker=ExecutionProvider.MOCK)
+"""What the mock account reports of itself: no login, always up."""
+
+
 class SlowBroker:
     """
     The mock broker behind a gate that the test opens: right after the broker asked `refusal_now`, as a slow send to
     the exchange does, or, with `before_the_ask`, before it asked, as a slow account read before any send does.
     """
 
-    def __init__(self, stack, before_the_ask: bool = False) -> None:
+    def __init__(self, stack, before_the_ask: bool = False, link: BrokerLink = MOCK_LINK) -> None:
         self.stack = stack
         self.before_the_ask = before_the_ask
+        self.reported = link
         self.called = asyncio.Event()
         self.gate = asyncio.Event()
+
+    def link(self) -> BrokerLink:
+        """What the broker reports of itself: the mock account unless the test makes it a real broker."""
+        return self.reported
 
     async def place_order(self, order: Order, refusal_now: SendRefusal, stop: asyncio.Event) -> Order:
         async def slow_send() -> tuple[RejectReason, str] | None:
@@ -373,8 +382,8 @@ class SlowBroker:
         return await self.stack.broker.get_account()
 
 
-async def cancel_during_the_broker_call(stack, cancels: int, before_the_ask: bool = False) -> None:
-    broker = SlowBroker(stack, before_the_ask)
+async def cancel_during_the_broker_call(stack, cancels: int, before_the_ask: bool = False, link: BrokerLink = MOCK_LINK) -> None:
+    broker = SlowBroker(stack, before_the_ask, link)
     stack.order_execution._execution_provider = broker
     run = asyncio.create_task(stack.pipeline.buy_manually(analysed_stock()))
     await broker.called.wait()
@@ -414,11 +423,22 @@ async def test_a_cancel_before_the_broker_asks_whether_it_may_send_sends_nothing
     assert (await stack.broker.get_account()).positions == []
 
 
-async def test_a_second_cancel_that_stops_the_broker_call_records_the_order_failed(tmp_path) -> None:
+async def test_a_second_cancel_that_stops_the_mock_accounts_call_records_the_order_failed(tmp_path) -> None:
     stack = await open_stack(tmp_path)
 
     await cancel_during_the_broker_call(stack, cancels=2)
 
     [(status, filled, reason)] = await recorded_orders(stack)
     assert (status, filled) == (OrderStatus.FAILED, 0)
+    assert reason is not None and "cancelled during the broker call" in reason
+
+
+async def test_a_second_cancel_that_stops_a_real_brokers_call_leaves_the_order_for_its_record_of_the_day_to_settle(tmp_path) -> None:
+    """The part may have reached SinoPac and may deal there, so the order awaits settlement instead of failing."""
+    stack = await open_stack(tmp_path)
+
+    await cancel_during_the_broker_call(stack, cancels=2, link=BrokerLink(broker=ExecutionProvider.SHIOAJI, simulation=True))
+
+    [(status, filled, reason)] = await recorded_orders(stack)
+    assert (status, filled) == (OrderStatus.UNCONFIRMED, 0)
     assert reason is not None and "cancelled during the broker call" in reason

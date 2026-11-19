@@ -47,6 +47,7 @@ from b_application.use_cases.trade.order_execution import OrderExecution
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.user_dto import LEGACY_OWNER_ID
 from c_infrastructure.database.repositories.trading_journal import TradingJournal
+from c_infrastructure.database.repositories.users_orders import SqlUsersOrders
 from c_infrastructure.market.daily_bar_matrix_provider import DailyBarMatrixProvider, KeptRankingHistory
 from c_infrastructure.market.shioaji_quote_provider import ShioajiConnection
 from c_infrastructure.system.attempt_log import MemoryAttemptLog
@@ -211,6 +212,7 @@ async def open_stack(
         ),
         article_index=FakeArticleIndex(FakeTextEmbedder()),
         users_stocks=FakeUsersStocks(),
+        users_orders=SqlUsersOrders(db),
         broker_quotes=quotes,
         shioaji=ShioajiConnection(client=FakeShioaji(), up=True),
         daily_close_archive=archive,

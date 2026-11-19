@@ -363,7 +363,7 @@ const admin: DictionaryShape<typeof en> = {
         valuation_cache_minutes: 'Web API 在多次估值請求之間，重複使用已載入的市場估值資料（上市櫃清單與公開資訊觀測站的 EPS）的時間。',
         archive_interval_hours: 'Web API 多久把證交所與櫃買中心開放資料的收盤資料存進存檔一次。OpenAPI 每個交易日的資料大約提供一天，所以伺服器運作期間，間隔幾小時不會漏掉任何一天。',
         world_interval_minutes: 'Web API 多久讀一次國際新聞來源與國際指標，並檢查當天的國際局勢摘要是否該寫了。通訊社的來源只列出最近幾小時的新聞。',
-        follow_schedule_poll_seconds: '網站多久檢查一次是否有使用者的排程跟單該執行了。跟單最晚會在使用者選的時間之後這麼久開始。',
+        follow_schedule_poll_seconds: '網站多久檢查一次是否有使用者的排程跟單該執行了，並依永豐當日的紀錄確認執行時未能讀到結果的永豐委託。跟單最晚會在使用者選的時間之後這麼久開始。',
       },
       tavily: {
         search_depth: 'Tavily 每次網路搜尋的深度。「基本」較快；「進階」讀得較多，費用也較高。',

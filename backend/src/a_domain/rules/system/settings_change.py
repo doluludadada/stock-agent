@@ -49,16 +49,20 @@ class EditorAccessRule:
 
 @dataclass(frozen=True)
 class ServerSwitchRefusal:
-    """Why the site's SinoPac login may not be on `server`, with the variables its login reads that are not set, by name only."""
+    """
+    Why the site's SinoPac login may not be on `server`, with the variables its login reads that are not set, by name
+    only, and how many SinoPac orders await settlement.
+    """
 
     reason: ServerSwitchRefusalReason
     server: ShioajiServer
     missing: tuple[ShioajiCredential, ...] = ()
+    unsettled: int = 0
 
     @override
     def __str__(self) -> str:
         """How the settings check words it, at the setting `reason` names."""
-        return self.reason.sentence(self.server, self.missing)
+        return self.reason.sentence(self.server, self.missing, self.unsettled)
 
 
 @dataclass(frozen=True)
@@ -67,9 +71,10 @@ class ServerSwitchRule:
     Which SinoPac server the site's login may be on, at a start and at a reload or a save that switches it without a
     restart. Only a server the machine's environment logs in to (`servers`), and never the real account while
     registration is open. A switch from the server the process runs on must also turn SinoPac ordering off in the same
-    files, so no order reaches the new server until an administrator turns ordering on again there, and every
-    variable the new server's login reads must be set. A start, and a save that keeps the server, need neither: a start
-    on production with ordering on is the state a switch and a deploy leave.
+    files, so no order reaches the new server until an administrator turns ordering on again there; no SinoPac order may
+    await settlement, since the journal does not name the server an order went to and the new server's record would
+    settle it; and every variable the new server's login reads must be set. A start, and a save that keeps the server,
+    need none of these: a start on production with ordering on is the state a switch and a deploy leave.
     """
 
     servers: frozenset[ShioajiServer]
@@ -81,11 +86,12 @@ class ServerSwitchRule:
         ordering: FeatureVisibility,
         given: frozenset[ShioajiCredential],
         registration_open: bool,
+        unsettled: int,
     ) -> ServerSwitchRefusal | None:
         """
         Why the login may not be on `target`, or None. `running` is the server the process logs in to now, None at its
         first start; `ordering` whom features.sinopac_ordering shows ordering to in the new settings; `given` the
-        Shioaji variables that are set.
+        Shioaji variables that are set; `unsettled` how many SinoPac orders of every user await settlement.
         """
         if target not in self.servers:
             return ServerSwitchRefusal(reason=ServerSwitchRefusalReason.ENVIRONMENT, server=target)
@@ -98,6 +104,9 @@ class ServerSwitchRule:
 
         if ordering.shown_to_anyone:
             return ServerSwitchRefusal(reason=ServerSwitchRefusalReason.ORDERING_ON, server=target)
+
+        if unsettled:
+            return ServerSwitchRefusal(reason=ServerSwitchRefusalReason.ORDERS_UNSETTLED, server=target, unsettled=unsettled)
 
         if missing := tuple(credential for credential in target.credentials if credential not in given):
             return ServerSwitchRefusal(reason=ServerSwitchRefusalReason.CREDENTIALS_MISSING, server=target, missing=missing)

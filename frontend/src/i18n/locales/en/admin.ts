@@ -362,7 +362,7 @@ const admin = {
         archive_interval_hours: 'How often the Web API saves the TWSE and TPEX open-data closes into the archive. The OpenAPI serves a session for about a day, so a few hours never miss one while the server runs.',
         world_interval_minutes:
           'How often the Web API reads the world news feeds and the world indicators, and looks whether the day’s world brief is due. A wire service’s feed lists only its last few hours.',
-        follow_schedule_poll_seconds: 'How often the site looks whether a user’s scheduled ranking follow is due. A follow starts at most this long after the time its user chose.',
+        follow_schedule_poll_seconds: 'How often the site looks whether a user’s scheduled ranking follow is due, and settles each SinoPac order whose outcome a run could not read from SinoPac’s record of the day. A follow starts at most this long after the time its user chose.',
       },
       tavily: {
         search_depth: 'How deep Tavily searches for each web search. Basic is quicker; Advanced reads more and costs more.',

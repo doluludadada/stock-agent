@@ -14,9 +14,11 @@ import httpx
 import pytest
 import support.harness
 from support.databases import ENVIRONMENT, SERVER, TestDatabase, as_superuser
+from support.fakes import FakeTradingJournal
 from support.harness import (
     ADMINISTRATOR,
     ADMINISTRATOR_PASSWORD,
+    MARKET_OPEN,
     MEMBER,
     MEMBER_PASSWORD,
     CliHarness,
@@ -27,15 +29,29 @@ from support.harness import (
 from support.settings import sinopac_setup
 from support.web import app_of, client_at, ended, hold_stock_list, serve, sign_in
 
+from a_domain.model.system.stats import SystemStats
+from a_domain.model.trading.order import Order
 from a_domain.ports.system.settings_files import SettingChange
-from a_domain.types.enums import ExecutionProvider, FeatureVisibility, SettingsFile, ShioajiServer, SystemEnvironment
+from a_domain.types.enums import (
+    ExecutionProvider,
+    FeatureVisibility,
+    OrderType,
+    SettingsFile,
+    ShioajiServer,
+    SystemEnvironment,
+    TimeInForce,
+    TradeAction,
+    Workflow,
+)
 from a_domain.types.errors import SettingsConflictError
+from a_domain.types.ids import new_decision_id
 from b_application.config.api_config import ApiConfig
 from b_application.config.app_config import AppConfig
 from b_application.config.settings_loader import settings_revision
+from b_application.pipeline import Pipeline
 from c_infrastructure.system.ordering_switch import SettingsFileOrderingSwitch
 from d_presentation.dependencies import Runtime
-from d_presentation.live_runtime import open_runtime_switch
+from d_presentation.live_runtime import ReloadRefused, open_runtime_switch
 from d_presentation.web.app import create_app
 
 pytestmark = pytest.mark.asyncio
@@ -862,8 +878,97 @@ async def test_a_refused_switch_of_the_server_shows_ordering_off_at_once(
     assert (before["ordering"], refused.status_code) == (True, 422)
     assert ORDERING_ON not in text_of(server_project)
     assert (after["ordering"], after["server"]) == (False, "simulation")
-    assert after["switch_refusal"] == {"reason": "credentials_missing", "server": "production", "missing": ["SHIOAJI_CA_PATH"]}
+    assert after["switch_refusal"] == {
+        "reason": "credentials_missing",
+        "server": "production",
+        "missing": ["SHIOAJI_CA_PATH"],
+        "unsettled": 0,
+    }
     assert [broker["broker"] for broker in brokers] == ["mock"]
+
+
+def awaiting_settlement(harness: CliHarness) -> None:
+    """A SinoPac BUY of an ended manual BUY run of the administrator whose answer was lost, so it awaits settlement."""
+    run = SystemStats(workflow=Workflow.MANUAL_BUY, execution_provider=ExecutionProvider.SHIOAJI, start_time=MARKET_OPEN)
+    run.finish(now=MARKET_OPEN)
+    order = Order(
+        run_id=run.run_id,
+        decision_id=new_decision_id(),
+        stock_id="2330",
+        action=TradeAction.BUY,
+        order_type=OrderType.LIMIT,
+        quantity=1000,
+        limit_price=100.0,
+        time_in_force=TimeInForce.IOC,
+        created_at=MARKET_OPEN,
+        updated_at=MARKET_OPEN,
+    )
+    order.leave_unconfirmed("the broker's answer was lost", now=MARKET_OPEN)
+    journal = harness.journal
+    assert isinstance(journal, FakeTradingJournal)
+    journal.runs[run.run_id], journal.orders[order.id] = run, order
+
+
+async def test_a_switch_of_the_server_while_a_sinopac_order_awaits_settlement_is_refused_and_the_page_says_how_many(
+    server_project: Path,
+) -> None:
+    config = sinopac_setup(harness_config(), ShioajiServer.SIMULATION, SystemEnvironment.TEST)
+    closed = config.model_copy(update={"accounts": config.accounts.model_copy(update={"registration_open": False})})
+    harness = build_harness(config=closed, settings_root=server_project)
+    awaiting_settlement(harness)
+
+    async with serve(harness) as client:
+        page = (await client.get("/v1/account/brokerage")).json()
+        refused = await save(client, ("shioaji.server", "production"), ("features.sinopac_ordering", "off"))
+
+    problems = {problem["path"]: problem["message"] for problem in refused.json()["problems"]}
+    assert page["switch_refusal"] == {"reason": "orders_unsettled", "server": "production", "missing": [], "unsettled": 1}
+    assert refused.status_code == 422
+    assert problems["shioaji.server"].startswith("1 SinoPac order awaits settlement from the record of the server")
+    assert problems["shioaji.server"].endswith("at the latest the next day"), "an order of an earlier day needs no login to fail"
+    assert await sinopac_switch(SettingsFileOrderingSwitch(server_project)) == (FeatureVisibility.OFF, ShioajiServer.SIMULATION)
+
+
+async def test_a_reload_from_disk_that_switches_the_server_while_a_sinopac_order_awaits_settlement_is_refused(
+    server_project: Path,
+) -> None:
+    """The settings watcher and the CLI's reload open the edited files as a save does, and count the orders as it does."""
+    harness = server_harness(server_project)
+    awaiting_settlement(harness)
+
+    async with app_of(harness) as app:
+        switch = app.state.runtime_switch
+        write_by_hand(server_project, ORDERING_ON, ORDERING_OFF)
+        write_by_hand(server_project, SIMULATION_SERVER, PRODUCTION_SERVER)
+        reloaded = await switch.reload()
+        running = switch.opened[-1].runtime.config.shioaji.server
+
+    assert isinstance(reloaded, ReloadRefused) and running == ShioajiServer.SIMULATION
+    assert [(problem.path, problem.message[:42]) for problem in reloaded.problems] == [
+        ("shioaji.server", "1 SinoPac order awaits settlement from the")
+    ]
+
+
+async def test_a_save_of_the_server_is_refused_at_its_publish_when_an_order_came_to_await_settlement_after_its_review(
+    server_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write_by_hand(server_project, ORDERING_ON, ORDERING_OFF)
+    harness = server_harness(server_project)
+    confirm = Pipeline.confirm_settings_save
+
+    async def confirmed_while_an_answer_is_lost(pipeline: Pipeline, *args: Any) -> None:
+        await confirm(pipeline, *args)
+        awaiting_settlement(harness)
+
+    monkeypatch.setattr(Pipeline, "confirm_settings_save", confirmed_while_an_answer_is_lost)
+    text = text_of(server_project)
+
+    async with serve(harness) as client:
+        refused = await save(client, ("shioaji.server", "production"))
+
+    assert refused.status_code == 422
+    assert [problem["path"] for problem in refused.json()["problems"]] == ["shioaji.server"]
+    assert text_of(server_project) == text
 
 
 async def test_a_switch_back_to_simulation_turns_ordering_off_too(server_project: Path) -> None:

@@ -92,6 +92,7 @@ const account: DictionaryShape<typeof en> = {
           registration_open: '正式環境不允許開放註冊。請先在設定頁面關閉註冊。',
           ordering_on: '切換環境時，同一次儲存必須關閉永豐金下單。',
           credentials_missing: '{{server}}還缺下列設定，請在伺服器的 .env 設定：',
+          orders_unsettled: '還有 {{count}} 筆永豐金委託等待依這個環境當日的紀錄結算。請等全部結算後再切換，最晚隔天就會結算完畢。',
         },
         title: { simulation: '切換到測試環境？', production: '切換到正式環境？' },
         description: '本站會立刻登入另一個環境。會改變的事：',

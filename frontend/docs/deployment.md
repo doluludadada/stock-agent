@@ -231,9 +231,9 @@ set.
    for an administrator without one), and asks you to type 「正式環境」. The save writes `features.sinopac_ordering` off
    first, then the server, and the site logs in to production at once: the realtime quotes come from the production
    login too, and the login on the simulation server stays open until the backend stops, for a switch back. The switch
-   is refused while a production variable is missing and while `accounts.registration_open` is on, and ordering then
-   stays off on the simulation server. A run that started on the simulation login never orders after the switch, even
-   once ordering is on again.
+   is refused while a production variable is missing, while `accounts.registration_open` is on and while a SinoPac
+   order awaits settlement, and ordering then stays off on the simulation server. A run that started on the simulation
+   login never orders after the switch, even once ordering is on again.
 
 6. Read the backend's log. `Logged in to Shioaji production for realtime quotes` and `SinoPac production connected`
    say the login and the account check passed, the certificate included. `SinoPac production orders unavailable`
@@ -439,6 +439,54 @@ the old version and rebuild only the backend with `docker compose up -d --no-dep
 When the site works, you can delete `chroma_data/` from the state folder. Nothing reads it any more, and the backup of
 step 2 does not need it.
 
+### Update to the unconfirmed orders (schema version 15)
+
+From schema version 15 an order may be `unconfirmed`: SinoPac took it, and the site could not read its outcome when
+it was sent, because SinoPac's answer came after the SDK stopped waiting or a part still worked after a cancel
+request. The site settles such an order from SinoPac's record of the day: a run on SinoPac does so before it sends
+anything and at its end, and the Web API does so every `api.follow_schedule_poll_seconds` through the session and
+after its close, until the day's deals are final at `market_hours.settled`. An order of an earlier day fails with
+what it recorded, on the Web API's timer also while the login is down, so none awaits settlement past the next day. A
+save of the settings, the SinoPac page's switch and a reload of `config/appsetting.yaml` edited on disk refuse to
+switch SinoPac's server while an order awaits settlement. A start of the backend is not refused, because the journal
+does not name the server an order went to. To switch anyway, set `shioaji.server` with `features.sinopac_ordering` off
+in the file and restart the backend; the new server's record then settles the waiting orders, and one of today fails
+at `market_hours.settled` as never listed, so look it up in the order history of the server before. At its start the
+backend ends every SinoPac run without an end that started before it, a CLI run still under way included, so start
+it while no CLI run on SinoPac is under way. The step adds the value to the type of the orders' status and changes no
+row.
+
+1. Get the new version and build the images. The site keeps running.
+
+   ```bash
+   git pull
+   docker compose build
+   ```
+
+2. Back up the database while the old backend still runs.
+
+   ```bash
+   docker compose exec backend python -m d_presentation.cli.database backup
+   ```
+
+3. Stop the backend and upgrade the database. The command dumps it first, then adds the value in one transaction,
+   and prints `14 -> 15 add_the_unconfirmed_order_status`.
+
+   ```bash
+   docker compose stop backend
+   docker compose run --rm backend python -m d_presentation.cli.database migrate
+   ```
+
+4. Start the site.
+
+   ```bash
+   docker compose up -d
+   ```
+
+PostgreSQL cannot remove a value from an enum type. To go back to the version before, restore the backup of step 2
+with `docker compose run --rm backend python -m d_presentation.cli.database restore backups/<file> --yes`, then check
+out the old version and rebuild only the backend with `docker compose up -d --no-deps --build backend`.
+
 ### Read the company background
 
 MOPS and the exchange's document site are sources of a personal site only. A public site reads neither, and these
@@ -623,7 +671,8 @@ server {
 The proxy must not add an `Authorization` header or a cookie. Each user signs in on the page, and the API sets its
 HttpOnly, SameSite=Strict session cookie on `/v1`. Forward the `Set-Cookie` and `Cookie` headers unchanged, and serve
 the app and `/v1` from the same host name. Run one backend worker: background runs, their one-at-a-time lock, and the
-settings revision the server started with live in that process.
+settings revision the server started with live in that process, and a backend ends every SinoPac run without an end
+that started before it, so a second worker would end the first's runs.
 
 ## The visitor's address and scheme behind the proxy
 

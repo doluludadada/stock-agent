@@ -129,7 +129,7 @@ const runs = {
   noOrders: 'The run placed no order.',
   ordersFailed: 'The orders could not be loaded.',
   action: { buy: 'BUY', sell: 'SELL', hold: 'HOLD' },
-  orderStatus: { pending: 'Pending', submitted: 'Submitted', filled: 'Filled', cancelled: 'Cancelled', failed: 'Failed', rejected: 'Rejected' },
+  orderStatus: { pending: 'Pending', submitted: 'Submitted', unconfirmed: 'Unconfirmed', filled: 'Filled', cancelled: 'Cancelled', failed: 'Failed', rejected: 'Rejected' },
   logTitle: 'Execution log',
   followOf: 'This run follows the decisions of another run into your mock account.',
   followOfLink: 'Open that run',

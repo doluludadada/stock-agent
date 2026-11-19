@@ -12,7 +12,7 @@ from a_domain.model.trading.account import AccountSnapshot
 from a_domain.model.trading.order import Order
 from a_domain.model.trading.signal import TradeSignal
 from a_domain.ports.trading.trading_journal import ITradingJournal
-from a_domain.types.enums import ExecutionProvider, SignalSource, TradeAction, Workflow
+from a_domain.types.enums import ExecutionProvider, OrderStatus, SignalSource, TradeAction, Workflow
 from a_domain.types.ids import RunId
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.database.models.trading_journal_dto import (
@@ -230,6 +230,41 @@ class TradingJournal(ITradingJournal):
                 col(WorkflowRunDTO.execution_provider) == broker,
                 col(OrderDTO.action) == TradeAction.BUY,
                 col(OrderDTO.created_at) >= since,
+            )
+            .order_by(col(OrderDTO.created_at))
+        )
+
+        async with self._db.owner_session() as session:
+            rows = (await session.execute(statement)).scalars().all()
+
+        return [Order(**row.model_dump()) for row in rows]
+
+    @override
+    async def unfinished_runs(self, broker: ExecutionProvider, started_before: datetime) -> list[SystemStats]:
+        statement = (
+            select(WorkflowRunDTO)
+            .where(
+                col(WorkflowRunDTO.execution_provider) == broker,
+                col(WorkflowRunDTO.end_time).is_(None),
+                col(WorkflowRunDTO.start_time) < started_before,
+            )
+            .order_by(col(WorkflowRunDTO.start_time))
+        )
+
+        async with self._db.owner_session() as session:
+            rows = (await session.execute(statement)).scalars().all()
+
+        return [SystemStats(**row.model_dump()) for row in rows]
+
+    @override
+    async def unsettled_orders(self, broker: ExecutionProvider) -> list[Order]:
+        statement = (
+            select(OrderDTO)
+            .join(WorkflowRunDTO, col(WorkflowRunDTO.run_id) == col(OrderDTO.run_id))
+            .where(
+                col(WorkflowRunDTO.execution_provider) == broker,
+                col(WorkflowRunDTO.end_time).is_not(None),
+                col(OrderDTO.status).in_([status for status in OrderStatus if status.awaits_settlement]),
             )
             .order_by(col(OrderDTO.created_at))
         )

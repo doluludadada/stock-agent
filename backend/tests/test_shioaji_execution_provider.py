@@ -1,6 +1,8 @@
 import asyncio
 import threading
+import time as time_module
 import traceback
+from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
 
 import pytest
@@ -17,8 +19,9 @@ from shioaji.constant import (
     Unit,
 )
 from shioaji.error import TimeoutError as ShioajiTimeoutError, TokenError
+from shioaji.order import Order as BrokerOrder
 from shioaji.position import AccountBalance
-from support.fake_shioaji import FakeShioaji, FakeStocks, OddLotMatches, Report, position, sale, stock
+from support.fake_shioaji import FakeContracts, FakeShioaji, FakeStocks, OddLotMatches, Report, position, sale, stock
 from support.fakes import FakeMarketClock, FakeOrderingSwitch, FakeTradingJournal, FakeUserStore, RecordingLogger, no_refusal
 from support.harness import harness_config
 from support.settings import shipped_config, sinopac_setup
@@ -311,13 +314,15 @@ async def test_a_partial_fill_is_recorded_before_the_ioc_remainder_is_cancelled(
     assert (placed.status, placed.filled_quantity, placed.fee, client.cancelled) == (OrderStatus.CANCELLED, 1000, cost.fee, [])
 
 
-async def test_an_order_still_working_after_the_cancel_fails_and_says_to_check_the_broker() -> None:
+async def test_an_order_still_working_after_the_cancel_is_left_unconfirmed_with_what_it_filled() -> None:
     client = FakeShioaji(scripts={StockOrderLot.Common: [Report(Status.PartFilled, ((100.0, 1),))]}, honours_cancel=False)
 
     placed = await provider(client).place_order(order(quantity=2000), no_refusal, asyncio.Event())
 
-    assert (placed.status, placed.filled_quantity, client.cancelled) == (OrderStatus.FAILED, 1000, client.placed)
-    assert placed.reason is not None and placed.reason.startswith("still working at the broker after a cancel request, check Shioaji")
+    assert (placed.status, placed.filled_quantity, client.cancelled) == (OrderStatus.UNCONFIRMED, 1000, client.placed)
+    assert placed.reason == (
+        "unconfirmed at Shioaji, whose record of today settles it: Common 2 lots IOC PartFilled, dealt 1000 shares"
+    )
 
 
 async def test_filled_without_deals_for_the_whole_quantity_fails_instead_of_guessing() -> None:
@@ -381,14 +386,14 @@ async def test_an_odd_lot_rod_part_partly_dealt_before_its_cancel_records_what_i
     assert placed.reason is not None and placed.reason.endswith("IntradayOdd 500 shares ROD Cancelled, dealt 200 shares")
 
 
-async def test_an_odd_lot_rod_part_the_broker_keeps_working_after_the_cancel_fails_the_order() -> None:
+async def test_an_odd_lot_rod_part_the_broker_keeps_working_after_the_cancel_leaves_the_order_unconfirmed() -> None:
     client = FakeShioaji(scripts={StockOrderLot.IntradayOdd: [Report(Status.Submitted)]}, honours_cancel=False)
 
     placed = await provider(client).place_order(order(quantity=500), no_refusal, asyncio.Event())
 
-    assert (placed.status, placed.filled_quantity, client.cancelled) == (OrderStatus.FAILED, 0, client.placed)
+    assert (placed.status, placed.filled_quantity, client.cancelled) == (OrderStatus.UNCONFIRMED, 0, client.placed)
     assert placed.reason == (
-        "still working at the broker after a cancel request, check Shioaji: IntradayOdd 500 shares ROD Submitted, dealt 0 shares"
+        "unconfirmed at Shioaji, whose record of today settles it: IntradayOdd 500 shares ROD Submitted, dealt 0 shares"
     )
 
 
@@ -569,7 +574,7 @@ async def test_a_run_cancelled_while_its_board_lot_part_is_sent_finishes_that_se
     )
 
 
-async def test_a_cancel_the_broker_does_not_settle_within_its_timeout_fails_the_order_and_says_to_check_the_broker() -> None:
+async def test_a_cancel_the_broker_does_not_settle_within_its_timeout_leaves_the_order_unconfirmed() -> None:
     client = FakeShioaji(scripts={StockOrderLot.IntradayOdd: [Report(Status.Submitted)]}, status_gate=threading.Event())
     config = CONFIG.model_copy(update={"shioaji": CONFIG.shioaji.model_copy(update={"cancel_timeout_seconds": 0.05})})
     broker = provider(client, config=config)
@@ -580,8 +585,8 @@ async def test_a_cancel_the_broker_does_not_settle_within_its_timeout_fails_the_
         assert client.status_gate is not None
         client.status_gate.set()
 
-    assert (placed.status, client.cancelled) == (OrderStatus.FAILED, client.placed)
-    assert placed.reason is not None and placed.reason.startswith("still working at the broker after a cancel request, check Shioaji")
+    assert (placed.status, client.cancelled) == (OrderStatus.UNCONFIRMED, client.placed)
+    assert placed.reason is not None and placed.reason.startswith("unconfirmed at Shioaji, whose record of today settles it")
 
 
 @pytest.mark.parametrize(
@@ -642,7 +647,8 @@ async def test_a_board_lot_part_still_working_is_cancelled_after_its_polls(clock
 
 
 PERSON_ID, ACCOUNT_ID, BROKER_ID = "A123456789", "9876543", "9A95"
-ORDER_IDS = ("97b63e2f", "267677", "IM394", "9c6ae2eb", "669915", "f00ba0", "web137")
+ORDER_IDS = ("97b63e2f", "267677", "IM394", "9c6ae2eb", "669915", "web137")
+"""The broker's own ids of the order and its deal. The tag (custom_field) is the app's: its journal row's id prefix."""
 ORDER_EVENT = {
     "operation": {"op_type": "New", "op_code": "00", "op_msg": f"accepted for {PERSON_ID}"},
     "order": {
@@ -697,7 +703,9 @@ def logged_in(logger: RecordingLogger) -> tuple[FakeShioaji, ShioajiQuoteProvide
     return client, quotes, connection
 
 
-async def test_the_login_logs_each_order_event_without_the_account_or_the_order_ids(capsys: pytest.CaptureFixture[str]) -> None:
+async def test_the_login_logs_each_order_event_with_its_tag_and_without_the_account_or_the_brokers_order_ids(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     logger = RecordingLogger()
     client, quotes, _ = logged_in(logger)
     await quotes.connect()
@@ -707,8 +715,8 @@ async def test_the_login_logs_each_order_event_without_the_account_or_the_order_
     client.order_callback(OrderState.StockDeal, DEAL_EVENT)
 
     assert [record for record in logger.records if record[1].startswith("Shioaji order event") or "deal" in record[1]] == [
-        ("info", "Shioaji order event New 00: Buy 5209 IntradayOdd 229 at 218.0"),
-        ("info", "Shioaji deal: Buy 5209 IntradayOdd 100 at 217.5"),
+        ("info", "Shioaji order event New 00 tagged f00ba0: Buy 5209 IntradayOdd 229 at 218.0"),
+        ("info", "Shioaji deal tagged f00ba0: Buy 5209 IntradayOdd 100 at 217.5"),
     ]
     printed = capsys.readouterr()
     shown = "\n".join([printed.out, printed.err, *said(logger)])
@@ -726,14 +734,15 @@ async def test_an_order_sent_on_the_login_logs_its_events_from_the_sdks_thread_w
         connection=connection, login=login_of(True), config=CONFIG, market_clock=FakeMarketClock(NOW), logger=SilentLogger()
     )
 
-    await broker.place_order(order(quantity=1500), no_refusal, asyncio.Event())
+    placed = await broker.place_order(order(quantity=1500), no_refusal, asyncio.Event())
 
     events = [message for level, message in logger.records if level == "info"]
+    tag = placed.id.hex[:5]
     assert events == [
-        "Shioaji order event New 00: Buy 2330 Common 1 at 100.0",
-        "Shioaji deal: Buy 2330 Common 1 at 100.0",
-        "Shioaji order event New 00: Buy 2330 IntradayOdd 500 at 100.0",
-        "Shioaji deal: Buy 2330 IntradayOdd 200 at 100.0",
+        f"Shioaji order event New 00 tagged {tag}0: Buy 2330 Common 1 at 100.0",
+        f"Shioaji deal tagged {tag}0: Buy 2330 Common 1 at 100.0",
+        f"Shioaji order event New 00 tagged {tag}1: Buy 2330 IntradayOdd 500 at 100.0",
+        f"Shioaji deal tagged {tag}1: Buy 2330 IntradayOdd 200 at 100.0",
     ]
     account = client.account_at_login
     assert account is not None
@@ -796,13 +805,226 @@ async def test_a_timed_out_place_order_on_a_busy_day_is_still_found_by_its_tag()
     assert set(client.account_refreshes) == {30_000}
 
 
-async def test_an_unconfirmed_order_fails_and_says_it_may_have_reached_the_exchange() -> None:
+LATE_DEALS = ((114.0, 150), (114.5, 280))
+"""An odd-lot BUY of 430 shares of 3029 at 114.5, dealt in two matches, as the one of 2026-11-19 dealt all of it."""
+
+
+def lost_answer(listed_after: int, scripts: dict[StockOrderLot, list[Report]] | None = None) -> FakeShioaji:
+    """
+    A broker whose answer to place_order comes after the SDK's wait, as pysolace's SolClient.request drops it: the
+    order went out, and the broker lists it only after `listed_after` more account-wide refreshes.
+    """
+    return FakeShioaji(
+        Contracts=FakeContracts(FakeStocks({"3029": stock("3029", 114.5), "2330": stock("2330")})),
+        scripts=scripts or {},
+        place_error=ShioajiTimeoutError("place_order", {}),
+        place_error_after_accepting=True,
+        unlisted_refreshes=listed_after,
+    )
+
+
+async def test_an_order_the_broker_lists_a_moment_after_its_answer_was_lost_is_read_and_recorded_as_if_confirmed() -> None:
+    client = lost_answer(
+        1, {StockOrderLot.IntradayOdd: [Report(Status.PartFilled, LATE_DEALS[:1]), Report(Status.Filled, LATE_DEALS)]}
+    )
+
+    placed = await provider(client).place_order(order(quantity=430, price=114.5, stock_id="3029"), no_refusal, asyncio.Event())
+
+    assert (placed.status, placed.filled_quantity) == (OrderStatus.FILLED, 430)
+    assert placed.average_filled_price == pytest.approx((114.0 * 150 + 114.5 * 280) / 430)
+    assert "@ 114.3" in placed.summary, "the summary shows the price it filled at, not the limit"
+
+
+async def test_a_part_the_broker_lists_late_and_still_working_after_its_reads_is_cancelled_so_nothing_is_left_working() -> None:
+    client = lost_answer(1, {StockOrderLot.IntradayOdd: [Report(Status.Submitted)] * 20})
+
+    placed = await provider(client).place_order(order(quantity=430, price=114.5, stock_id="3029"), no_refusal, asyncio.Event())
+
+    assert (placed.status, placed.filled_quantity) == (OrderStatus.CANCELLED, 0)
+    assert [trade.status.status for trade in client.placed] == [Status.Cancelled]
+
+
+async def test_settling_an_order_listed_after_the_first_look_cancels_what_still_works_and_records_what_dealt() -> None:
+    client = lost_answer(CONFIG.shioaji.max_polls, {StockOrderLot.IntradayOdd: [Report(Status.PartFilled, LATE_DEALS[:1])]})
+    broker = provider(client)
+    placed = await broker.place_order(order(quantity=430, price=114.5, stock_id="3029"), no_refusal, asyncio.Event())
+    assert (placed.status, placed.filled_quantity) == (OrderStatus.UNCONFIRMED, 0)
+
+    await broker.settle(placed)
+
+    assert (placed.status, placed.filled_quantity, placed.average_filled_price) == (OrderStatus.CANCELLED, 150, 114.0)
+    assert placed.reason == "IOC unfilled: filled 150 of 430; IntradayOdd 430 shares ROD Cancelled, dealt 150 shares"
+    assert [trade.status.status for trade in client.placed] == [Status.Cancelled]
+
+
+async def test_settling_records_only_the_deals_the_order_does_not_hold_yet_and_settling_again_changes_nothing() -> None:
+    client = lost_answer(CONFIG.shioaji.max_polls)
+    client.place_error_lot = StockOrderLot.IntradayOdd
+    broker = provider(client)
+    placed = await broker.place_order(order(quantity=1430), no_refusal, asyncio.Event())
+    assert (placed.status, placed.filled_quantity) == (OrderStatus.UNCONFIRMED, 1000), "the board lot filled, the odd lot unread"
+
+    await broker.settle(placed)
+    settled = replace(placed)
+    await broker.settle(placed)
+
+    lots, odd = COSTS.apply(TradeAction.BUY, "2330", 100.0, 1000, now=NOW), COSTS.apply(TradeAction.BUY, "2330", 100.0, 430, now=NOW)
+    assert (settled.status, settled.filled_quantity, settled.fee) == (OrderStatus.FILLED, 1430, lots.fee + odd.fee)
+    assert placed == settled
+
+
+@pytest.mark.parametrize(
+    ("settled_at", "status"),
+    [(time(13, 31), OrderStatus.UNCONFIRMED), (time(14, 59), OrderStatus.UNCONFIRMED), (time(15, 0), OrderStatus.FAILED)],
+)
+async def test_settling_an_order_the_broker_never_lists_waits_until_its_sessions_deals_are_final_and_then_fails_it(
+    clock: FakeMarketClock, settled_at: time, status: OrderStatus
+) -> None:
+    client = lost_answer(10**6)
+    broker = provider(client, clock)
+    placed = await broker.place_order(order(quantity=430, price=114.5, stock_id="3029"), no_refusal, asyncio.Event())
+
+    clock.current_time = taipei(settled_at)
+    await broker.settle(placed)
+
+    assert (placed.status, placed.filled_quantity) == (status, 0)
+    assert status == OrderStatus.UNCONFIRMED or (placed.reason or "").startswith("Shioaji never listed it by its session's end")
+
+
+@pytest.mark.parametrize(("settled_at", "status"), [(time(13, 30, 2), OrderStatus.UNCONFIRMED), (time(15, 0), OrderStatus.CANCELLED)])
+async def test_a_part_still_working_after_the_close_stays_unconfirmed_until_the_days_deals_are_final(
+    clock: FakeMarketClock, settled_at: time, status: OrderStatus
+) -> None:
+    client = lost_answer(CONFIG.shioaji.max_polls, {StockOrderLot.IntradayOdd: [Report(Status.Submitted)] * 50})
+    client.honours_cancel = False
+    broker = provider(client, clock)
+    placed = await broker.place_order(order(quantity=430, price=114.5, stock_id="3029"), no_refusal, asyncio.Event())
+
+    clock.current_time = taipei(settled_at)
+    await broker.settle(placed)
+
+    assert (placed.status, placed.filled_quantity) == (status, 0), "a closing-auction deal may still be reported before then"
+
+
+async def test_settling_a_part_that_dealt_at_its_limit_records_it_at_exactly_the_limit() -> None:
+    client = lost_answer(CONFIG.shioaji.max_polls, {StockOrderLot.IntradayOdd: [Report(Status.Filled, ((12.45, 329),))]})
+    broker = provider(client)
+    placed = await broker.place_order(order(quantity=329, price=12.45), no_refusal, asyncio.Event())
+    assert placed.status == OrderStatus.UNCONFIRMED
+
+    await broker.settle(placed)
+
+    assert 12.45 * 329 / 329 > 12.45, "the volume-weighted price of one deal at the limit lands past it in floats"
+    assert (placed.status, placed.filled_quantity, placed.average_filled_price) == (OrderStatus.FILLED, 329, 12.45)
+
+
+@pytest.mark.parametrize(
+    ("held_after", "realized_pnl"),
+    [([], None), ([position("2330", 500, 90.0)], COSTS.apply(TradeAction.SELL, "2330", 100.0, 1000, now=NOW).net - 1000 * 90.0)],
+    ids=["every share sold", "shares left"],
+)
+async def test_settling_a_sale_takes_its_cost_from_the_position_left_and_says_when_none_is_left(
+    held_after: list, realized_pnl: float | None
+) -> None:
+    client = lost_answer(CONFIG.shioaji.max_polls)
+    client.holdings = [position("2330", 1500, 90.0)]
+    broker = provider(client)
+    placed = await broker.place_order(order(TradeAction.SELL), no_refusal, asyncio.Event())
+    assert placed.status == OrderStatus.UNCONFIRMED
+    client.holdings = held_after
+
+    await broker.settle(placed)
+
+    assert (placed.status, placed.filled_quantity) == (OrderStatus.FILLED, 1000)
+    assert placed.realized_pnl == (None if realized_pnl is None else pytest.approx(realized_pnl))
+    assert placed.reason == (
+        None if held_after else "realized PnL not computed: Shioaji lists no 2330 position after the sale to take its cost from"
+    )
+
+
+async def test_settling_the_rest_of_a_sale_of_every_share_keeps_no_realized_pnl_of_the_part_sold_before() -> None:
+    """The board-lot part's PnL was computed in the run; the odd-lot part's, settled once nothing is held, cannot be."""
+    client = lost_answer(CONFIG.shioaji.max_polls)
+    client.place_error_lot = StockOrderLot.IntradayOdd
+    client.holdings = [position("2330", 1430, 90.0)]
+    broker = provider(client)
+    placed = await broker.place_order(order(TradeAction.SELL, quantity=1430), no_refusal, asyncio.Event())
+    assert (placed.status, placed.filled_quantity, placed.realized_pnl is not None) == (OrderStatus.UNCONFIRMED, 1000, True)
+    client.holdings = []
+
+    await broker.settle(placed)
+
+    assert (placed.status, placed.filled_quantity, placed.realized_pnl) == (OrderStatus.FILLED, 1430, None)
+    assert placed.reason == "realized PnL not computed: Shioaji lists no 2330 position after the sale to take its cost from"
+
+
+async def test_the_look_for_an_order_whose_answer_was_lost_ends_once_the_run_is_cancelled() -> None:
+    client = lost_answer(10**6)
+    stop = asyncio.Event()
+    stop.set()
+
+    placed = await provider(client).place_order(order(), no_refusal, stop)
+
+    assert placed.status == OrderStatus.UNCONFIRMED
+    assert len(client.account_refreshes) == 2, "the read before the send, then one lookup"
+
+
+async def test_the_look_for_an_order_whose_answer_was_lost_ends_within_the_status_timeout_in_all() -> None:
+    client = lost_answer(10**6)
+    client.account_refresh_seconds = 0.2
+    config = CONFIG.model_copy(update={"shioaji": CONFIG.shioaji.model_copy(update={"status_timeout_seconds": 0.5})})
+    started = time_module.monotonic()
+
+    placed = await provider(client, config=config).place_order(order(), no_refusal, asyncio.Event())
+
+    assert placed.status == OrderStatus.UNCONFIRMED
+    assert time_module.monotonic() - started < 1.5, "ten lookups of 0.2 s each would take 2 s"
+    assert len(client.account_refreshes) <= 5
+
+
+@pytest.mark.parametrize(
+    ("stock_id", "action", "lots", "price"),
+    [("3029", Action.Buy, 1, 100.0), ("2330", Action.Sell, 1, 100.0), ("2330", Action.Buy, 2, 100.0), ("2330", Action.Buy, 1, 101.0)],
+    ids=["another stock", "another action", "another quantity", "another price"],
+)
+async def test_another_order_listed_under_the_same_tag_is_never_taken_for_a_part_nor_cancelled(
+    stock_id: str, action: Action, lots: int, price: float
+) -> None:
+    client = lost_answer(10**6, {StockOrderLot.Common: [Report(Status.Submitted)] * 50})
+    client.place_error = None
+    placing = order()
+    other = BrokerOrder(
+        price=price,
+        quantity=lots,
+        action=action,
+        price_type=StockPriceType.LMT,
+        order_type=BrokerTimeInForce.ROD,
+        order_lot=StockOrderLot.Common,
+        order_cond=StockOrderCond.Cash,
+        account=client.stock_account or client.account_at_login,
+        custom_field=f"{placing.id.hex[:5]}0",
+    )
+    client.place_order(client.Contracts.Stocks[stock_id], other)
+    client.place_error = ShioajiTimeoutError("place_order", {})
+    broker = provider(client)
+
+    placed = await broker.place_order(placing, no_refusal, asyncio.Event())
+    await broker.settle(placed)
+
+    assert (placed.status, placed.filled_quantity, client.cancelled) == (OrderStatus.UNCONFIRMED, 0, [])
+
+
+async def test_an_order_whose_answer_was_lost_and_the_broker_does_not_list_is_left_unconfirmed_naming_its_tag() -> None:
     client = FakeShioaji(place_error=ShioajiTimeoutError("place_order", {}))
 
     placed = await provider(client).place_order(order(), no_refusal, asyncio.Event())
 
-    assert placed.status == OrderStatus.FAILED
-    assert placed.reason is not None and "may have reached the exchange" in placed.reason
+    assert (placed.status, placed.filled_quantity) == (OrderStatus.UNCONFIRMED, 0)
+    assert placed.reason == (
+        f"unconfirmed at Shioaji, whose record of today settles it: Common 1000 shares tagged {placed.id.hex[:5]}0, "
+        "which Shioaji does not list"
+    )
+    assert len(client.account_refreshes) == 1 + CONFIG.shioaji.max_polls, "the read before the send, then each lookup"
 
 
 async def test_get_account_reads_cash_less_payments_due_and_the_long_cash_positions_in_shares() -> None:
@@ -1133,7 +1355,7 @@ async def test_a_refused_account_read_raises_and_fails_the_order_saying_only_the
     assert private_parts(raised(refused.value), failed.reason, *said(logger)) == []
 
 
-async def test_an_unconfirmed_order_whose_lookup_failed_says_only_the_error_types_and_statuses(
+async def test_an_order_whose_answer_was_lost_and_whose_lookups_failed_says_only_the_error_types_and_statuses(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = FakeShioaji(
@@ -1148,10 +1370,12 @@ async def test_an_unconfirmed_order_whose_lookup_failed_says_only_the_error_type
         order(), no_refusal, asyncio.Event()
     )
 
-    assert failed.status == OrderStatus.FAILED
-    assert failed.reason is not None and "(Shioaji answered TokenError, status 401). It may have reached the exchange" in failed.reason
-    assert [message for message in said(logger) if "lookup" in message] == [
-        f"Shioaji lookup of the order tagged {failed.id.hex[:5]}0 failed: Shioaji answered TokenError, status 401"
+    tag = f"{failed.id.hex[:5]}0"
+    assert failed.status == OrderStatus.UNCONFIRMED
+    assert [message for message in said(logger) if "lookup" in message or "did not confirm" in message] == [
+        f"Shioaji did not confirm the order tagged {tag} (Shioaji answered TokenError, status 401): "
+        "it is looked for in the account's orders",
+        *[f"Shioaji lookup of the order tagged {tag} failed: Shioaji answered TokenError, status 401"] * 3,
     ]
     assert private_parts(failed.reason, *said(logger)) == []
 
@@ -1162,17 +1386,17 @@ async def test_refused_status_reads_and_cancel_are_logged_saying_only_the_error_
     client = FakeShioaji(refusals={"update_status": sdk_refusal(), "cancel_order": sdk_refusal()}, refuses_once_placed=True)
     logger = RecordingLogger()
 
-    failed = await (await broker_of(client, monkeypatch, logger, ShioajiServer.SIMULATION)).place_order(
+    unread = await (await broker_of(client, monkeypatch, logger, ShioajiServer.SIMULATION)).place_order(
         order(), no_refusal, asyncio.Event()
     )
 
-    assert failed.status == OrderStatus.FAILED
+    assert unread.status == OrderStatus.UNCONFIRMED
     assert [message for message in said(logger) if "failed:" in message] == [
         *["Shioaji status refresh failed: Shioaji answered TokenError, status 401"] * 3,
-        f"Shioaji cancel of the order tagged {failed.id.hex[:5]}0 failed: Shioaji answered TokenError, status 401",
+        f"Shioaji cancel of the order tagged {unread.id.hex[:5]}0 failed: Shioaji answered TokenError, status 401",
         *["Shioaji status refresh failed: Shioaji answered TokenError, status 401"] * 3,
     ]
-    assert private_parts(failed.reason, *said(logger)) == []
+    assert private_parts(unread.reason, *said(logger)) == []
 
 
 async def test_a_refused_exchange_order_gives_the_brokers_status_code_instead_of_its_message(monkeypatch: pytest.MonkeyPatch) -> None:

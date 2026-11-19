@@ -13,7 +13,8 @@ class MarketHoursConfig(BaseModel):
 
     Both exchanges take orders from `opening_auction_start`, match the opening call auction at `continuous_start`,
     trade continuously until `closing_auction_start` and run the closing call auction until `close`. A session's
-    daily bar is final in every price source from `settled`. Their intraday odd-lot session takes limit ROD orders from
+    daily bar is final in every price source from `settled`, and so are its deals at a broker, which settle an order
+    whose outcome was not read when it was sent (BrokerOutcomeRule). Their intraday odd-lot session takes limit ROD orders from
     09:00 and matches them by call auction, the first at `odd_lot_start` (about 09:10, 09:00 once TWSE moves it) and
     then every `odd_lot_match_seconds` until `close`.
     """

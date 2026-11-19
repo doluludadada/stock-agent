@@ -31,8 +31,9 @@ app = create_app(open_runtime_switch_or_exit)
 def main() -> None:
     """
     Starts the Web API on one worker process: background runs, their one-at-a-time lock and the runtimes the settings
-    files were loaded into live in that process. HOST defaults to the loopback address; serve another network only
-    behind a TLS reverse proxy that adds the host name to api.allowed_hosts.
+    files were loaded into live in that process, and the timer ends every SinoPac run without an end that started
+    before it (AbandonedRuns), which a second worker's would do to the first's. HOST defaults to the loopback address;
+    serve another network only behind a TLS reverse proxy that adds the host name to api.allowed_hosts.
     """
     uvicorn.run(
         "main:app",

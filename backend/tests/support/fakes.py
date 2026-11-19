@@ -11,7 +11,7 @@ import json
 import math
 import re
 import zlib
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, time, timedelta
@@ -59,6 +59,7 @@ from a_domain.ports.market.daily_close_archive import (
 )
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.ports.trading.execution_provider import SendRefusal
+from a_domain.ports.trading.trading_journal import ITradingJournal
 from a_domain.rules.fundamentals.trailing_eps import EpsFilings, QuarterEps
 from a_domain.rules.technical.strategy import TechnicalSettings
 from a_domain.rules.trading.cost import TradingCostRule
@@ -662,6 +663,22 @@ class FakeTradingJournal:
         ]
         return sorted(orders, key=lambda order: order.created_at)
 
+    async def unfinished_runs(self, broker: ExecutionProvider, started_before: datetime) -> list[SystemStats]:
+        runs = [
+            replace(run)
+            for run in self.runs.values()
+            if run.execution_provider == broker and run.end_time is None and run.start_time < started_before
+        ]
+        return sorted(runs, key=lambda run: run.start_time)
+
+    async def unsettled_orders(self, broker: ExecutionProvider) -> list[Order]:
+        orders = [
+            replace(order)
+            for order in self.orders.values()
+            if order.status.awaits_settlement and self.on(broker, order.run_id) and self.runs[order.run_id].end_time is not None
+        ]
+        return sorted(orders, key=lambda order: order.created_at)
+
 
 class FakeWatchlistRepository:
     """Holds one entry per (stock_id, type), like the watchlists table, and returns the entries not expired at the clock's time."""
@@ -1132,6 +1149,22 @@ class FakeUsersStocks:
 
     async def held_or_watched(self) -> set[str]:
         return set(self.stock_ids)
+
+
+class FakeUsersOrders:
+    """Counts the orders of every journal the harness built, one user's at a time, as SqlUsersOrders reads them."""
+
+    def __init__(self, journals: Callable[[], Iterable[ITradingJournal]]) -> None:
+        self._journals = journals
+
+    async def awaiting_settlement(self, broker: ExecutionProvider) -> int:
+        journals = [journal for journal in self._journals() if isinstance(journal, FakeTradingJournal)]
+        return sum(
+            1
+            for journal in journals
+            for order in journal.orders.values()
+            if order.status.awaits_settlement and journal.on(broker, order.run_id)
+        )
 
 
 class FakeTechnicalSettingsRepository:

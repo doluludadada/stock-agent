@@ -91,11 +91,11 @@ class SettingsFiles(ISettingsFiles):
         return sorted(path.stem for path in (self._project_root / "config" / "strategies").glob("*.json"))
 
     @override
-    def check(self, candidates: Mapping[SettingsFile, str], host: str) -> tuple[SettingsProblem, ...]:
+    def check(self, candidates: Mapping[SettingsFile, str], host: str, unsettled: int) -> tuple[SettingsProblem, ...]:
         texts = settings_texts(self._project_root, candidates)
 
         try:
-            validate_editor_reachable(startup_settings(self._project_root, texts, self._running), texts, host)
+            validate_editor_reachable(startup_settings(self._project_root, texts, self._running, unsettled=unsettled), texts, host)
         except InvalidSettingsError as error:
             return tuple(error.problems)
 

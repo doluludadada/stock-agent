@@ -8,6 +8,7 @@ adapter reads exactly the shapes the real client hands it. A test scripts what t
 
 import datetime
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -252,6 +253,13 @@ class FakeShioaji:
     """Set, with `clock`: an odd-lot order's script moves at the session's matches instead of at each status read."""
     place_error: Exception | None = None
     place_error_after_accepting: bool = False
+    place_error_lot: StockOrderLot | None = None
+    """Set: only an order of this lot raises place_error, as the odd-lot part's answer alone may be lost."""
+    unlisted_refreshes: int = 0
+    """
+    With place_error_after_accepting: how many account-wide update_status calls after the send leave the order out of
+    list_trades, as SinoPac listed 3029 about a second after the adapter's one lookup on 2026-11-19. It deals meanwhile.
+    """
     place_gate: threading.Event | None = None
     """When set, place_order waits in its thread, the order already at the broker, until the test sets the event."""
     status_gate: threading.Event | None = None
@@ -269,6 +277,8 @@ class FakeShioaji:
     """
     account_refreshes: list[int] = field(default_factory=list)
     """The timeout, in milliseconds, of each account-wide update_status the server answered or timed out."""
+    account_refresh_seconds: float = 0.0
+    """Real seconds each account-wide update_status keeps its thread waiting before it answers, as a slow server does."""
 
     market_data_error: Exception | None = None
     """What snapshots raises instead of answering, as the SDK does for a server's refusal."""
@@ -296,6 +306,7 @@ class FakeShioaji:
     """Each read of the bank balance and of the settlements, which only a production account has."""
     _queued: dict[str, list[Report]] = field(default_factory=dict)
     _matched: dict[str, int] = field(default_factory=dict)
+    _unlisted: dict[str, int] = field(default_factory=dict)
 
     def login(
         self,
@@ -356,8 +367,10 @@ class FakeShioaji:
         return self.ca_activates
 
     def place_order(self, contract: Contract, order: Order, timeout: int = 5000, cb=None) -> Trade:
-        if self.place_error is not None and not self.place_error_after_accepting:
-            raise self.place_error
+        error = self.place_error if self.place_error_lot in (None, order.order_lot) else None
+
+        if error is not None and not self.place_error_after_accepting:
+            raise error
 
         if not order.account:
             order.account = self.stock_account
@@ -374,8 +387,9 @@ class FakeShioaji:
         if self.place_gate is not None:
             self.place_gate.wait(timeout=5)
 
-        if self.place_error is not None:
-            raise self.place_error
+        if error is not None:
+            self._unlisted[order.seqno] = self.unlisted_refreshes
+            raise error
 
         return trade if self.updates_in_place else trade.model_copy(deep=True)
 
@@ -384,9 +398,12 @@ class FakeShioaji:
 
         if trade is None:
             self.account_refreshes.append(timeout)
+            time.sleep(self.account_refresh_seconds)
 
             if self.account_refresh_milliseconds > timeout:
                 raise TimeoutError("the server did not refresh the account's orders in time")
+
+            self._unlisted = {seqno: left - 1 for seqno, left in self._unlisted.items() if left}
 
         seqnos = {trade.order.seqno} if trade else {known.order.seqno for known in self.placed if known.order.account == account}
         cancel_requested = {cancelled.order.seqno for cancelled in self.cancelled}
@@ -414,7 +431,7 @@ class FakeShioaji:
 
     def list_trades(self) -> list[Trade]:
         self._fail_if_told("list_trades")
-        return list(self.placed)
+        return [trade for trade in self.placed if trade.order.seqno not in self._unlisted]
 
     def list_positions(self, account: Account = None, unit: Unit = Unit.Common, timeout: int = 5000, cb=None) -> list[StockPosition]:
         self._fail_if_told("list_positions")
