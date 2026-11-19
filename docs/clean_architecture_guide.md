@@ -310,7 +310,8 @@ The Pipeline holds every operation the outside world can start.
   asks: one page's data, or one command.
 - Two methods never read the same thing for different callers. One method returns the whole answer and each
   caller shows the part it needs.
-- A method returns one value, or a result type (4.3) when it returns more than one thing.
+- A method returns one value, or a result type (4.3) when it returns more than one thing. It never returns a tuple.
+  The architecture check's PIPELINE-RETURNS reports a method that does.
 - What many operations share is said once, in the class's docstring: an operation asks an AI, records a run or
   sends an order only where its lines call the step that does, so no operation's docstring says what it does not do.
 - An operation is a flat list of calls, in order: use cases and the ports it holds. The Pipeline stores each
@@ -570,7 +571,8 @@ Copy this list for a review.
       result, no port-only type and no table-only information.
 - [ ] Every use case is a step that decides something or calls several ports. None only wraps one rule call or
       forwards to one port method.
-- [ ] The Pipeline calls only use cases and the ports it holds, and returns one value or a result type.
+- [ ] The Pipeline calls only use cases and the ports it holds, and returns one value or a result type. It never
+      returns a tuple.
 - [ ] The diff is the smallest one that does the job, and it rebuilds nothing a library does.
 
 **Structure.**

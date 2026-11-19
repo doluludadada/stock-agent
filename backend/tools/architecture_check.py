@@ -67,6 +67,10 @@ How the rules measure:
   imported from b_application.use_cases, be the logging port, or be a Protocol imported from a_domain.ports, a port
   the Pipeline calls itself (guide 4.1). PIPELINE_FORBIDDEN_PORTS names the ports the Pipeline never holds, with the
   reason, and a port descending from one of them is never held either. It finds the ports among the files checked.
+- PIPELINE-RETURNS reads the return annotation of every method of the class `Pipeline` in b_application/pipeline.py. A
+  tuple is a finding, alone or as a member of a union such as `tuple[...] | None` or `Optional[tuple[...]]`, a
+  homogeneous `tuple[X, ...]` included: an operation that returns more than one thing returns a result type from
+  b_application/schemas/<area>.py (guide 4.2, 4.3). A tuple inside another type, such as a list of pairs, is not read.
 - RULE-CALLERS checks a_domain, b_application and dependencies.py: only a_domain/rules, a_domain/ports (a port may
   name a rule's input or result type), b_application/use_cases and b_application/config (a settings class builds
   each rule from its own values, so a rule is configured in one place) there may import a_domain.rules. The Pipeline
@@ -1116,6 +1120,35 @@ def pipeline_field_problem(field: ast.AnnAssign, bound: dict[str, str], ports: f
     )
 
 
+def check_pipeline_returns(files: Sequence[SourceFile]) -> Iterator[Finding]:
+    for source in files:
+        if source.module != PIPELINE_MODULE:
+            continue
+        for node in top_level_classes(source.tree):
+            if node.name != "Pipeline":
+                continue
+            for method in methods(node):
+                if method.returns is not None and is_tuple(method.returns):
+                    yield (
+                        source.path,
+                        method.lineno,
+                        f"Pipeline.{method.name} returns a tuple; an operation that returns more than one thing returns a "
+                        "result type from b_application/schemas/<area>.py",
+                    )
+
+
+def is_tuple(annotation: ast.expr) -> bool:
+    """A tuple, alone or as a member of a union: `tuple[...]`, `tuple`, `Tuple[...]`, `tuple[...] | None`, `Optional[...]`."""
+    match annotation:
+        case ast.BinOp(op=ast.BitOr(), left=left, right=right):
+            return is_tuple(left) or is_tuple(right)
+        case ast.Subscript(value=value, slice=ast.Tuple(elts=members)) if name_of(value) == "Union":
+            return any(is_tuple(member) for member in members)
+        case ast.Subscript(value=value, slice=member) if name_of(value) == "Optional":
+            return is_tuple(member)
+    return name_of(annotation) in {"tuple", "Tuple"}
+
+
 def check_rule_callers(files: Sequence[SourceFile]) -> Iterator[Finding]:
     for source in files:
         if source.under("c_infrastructure"):
@@ -1267,6 +1300,7 @@ RULES: dict[str, Callable[[Sequence[SourceFile]], Iterator[Finding]]] = {
     "DOMAIN-STYLE": check_domain_style,
     "MODULE-CONSTANT": check_module_constant,
     "PIPELINE-FIELDS": check_pipeline_fields,
+    "PIPELINE-RETURNS": check_pipeline_returns,
     "RULE-CALLERS": check_rule_callers,
     "USECASE-STATUS": check_usecase_status,
     "PATH-COMMENT": check_path_comment,

@@ -114,6 +114,7 @@ EXPECTED_FAILURES: dict[str, list[tuple[str, int]]] = {
         ("b_application/use_cases/scan.py", 1),
     ],
     "PIPELINE-FIELDS": [("b_application/pipeline.py", line) for line in (12, 18, 21, 22, 23, 24)],
+    "PIPELINE-RETURNS": [("b_application/pipeline.py", line) for line in (11, 14, 17, 20, 23, 26)],
     "RULE-CALLERS": [
         ("a_domain/model/account.py", 1),
         *(("b_application/pipeline.py", line) for line in (1, 2, 3, 4, 5, 6)),
