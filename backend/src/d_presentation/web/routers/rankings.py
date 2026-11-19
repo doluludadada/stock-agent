@@ -283,8 +283,8 @@ async def get_follow_schedule(pipeline: UserPipeline, user: CurrentUser) -> Foll
     and their schedule of the ranking follow as it stands, with the times the site offers. It answers on a site that
     can make no ranking yet, where nothing is pending. It reads no account, records nothing and never orders.
     """
-    account, schedule = await pipeline.load_follow_schedule(user)
-    return FollowSettingsResponse(account=account, schedule=FollowScheduleResponse.model_validate(schedule))
+    settings = await pipeline.load_follow_schedule(user)
+    return FollowSettingsResponse(account=settings.account, schedule=FollowScheduleResponse.model_validate(settings.schedule))
 
 
 class FollowAccountRequest(Confirmed):

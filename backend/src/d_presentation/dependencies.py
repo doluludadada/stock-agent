@@ -118,13 +118,11 @@ from b_application.use_cases.ship.signals import Signals
 from b_application.use_cases.trade.account_history import AccountHistory
 from b_application.use_cases.trade.account_loader import AccountLoader
 from b_application.use_cases.trade.account_risk_check import AccountRiskCheck
-from b_application.use_cases.trade.active_watchlist import ActiveWatchlist
 from b_application.use_cases.trade.brokerage_statement import BrokerageStatementReader
 from b_application.use_cases.trade.follow_candidates import FollowCandidates
 from b_application.use_cases.trade.follow_signals import FollowSignals
 from b_application.use_cases.trade.held_positions import HeldPositions
 from b_application.use_cases.trade.holding_entry import HoldingEntry
-from b_application.use_cases.trade.holding_removal import HoldingRemoval
 from b_application.use_cases.trade.holdings_analysis import HoldingsAnalysis
 from b_application.use_cases.trade.manual_signal import ManualSignal
 from b_application.use_cases.trade.mock_account_reset import MockAccountReset
@@ -136,7 +134,6 @@ from b_application.use_cases.trade.ranking_follow_return import RankingFollowRet
 from b_application.use_cases.trade.ranking_follow_schedule import RankingFollowSchedule
 from b_application.use_cases.trade.ranking_follow_signals import RankingFollowSignals
 from b_application.use_cases.trade.trade_history import TradeHistory
-from b_application.use_cases.trade.unwatch_stocks import UnwatchStocks
 from b_application.use_cases.trade.watch_stocks import WatchStocks
 from b_application.use_cases.users.ai_model_choice import AiModelChoice
 from b_application.use_cases.users.ai_model_lookup import AiModelLookup
@@ -1092,7 +1089,7 @@ def build_pipeline(
         ai_analyser=AiAnalyser(owned.ai_provider, owned.journal, dependencies.daily_close_archive, market_clock, config, logger),
         sentiment_analyser=SentimentAnalyser(owned.sentiment_classifier, config, logger),
         watch_stocks=WatchStocks(owned.watchlist_repository, market_clock, config, logger),
-        unwatch_stocks=UnwatchStocks(owned.watchlist_repository, logger),
+        watchlist_repository=owned.watchlist_repository,
         account_risk_check=AccountRiskCheck(journal, market_clock, config, logger),
         signals=Signals(journal, market_clock, config, logger),
         manual_signal=ManualSignal(journal, market_clock, config, logger),
@@ -1122,11 +1119,10 @@ def build_pipeline(
         held_positions=HeldPositions(owned.holding_repository, accounts, logger),
         holdings_analysis=HoldingsAnalysis(stocks, dependencies.daily_close_archive, quote_board, market_clock, config, logger),
         holding_entry=HoldingEntry(owned.holding_repository, market_clock),
-        holding_removal=HoldingRemoval(owned.holding_repository),
+        holding_repository=owned.holding_repository,
         reporting=Reporting(notifications, config, logger),
         run_reports=RunReports(journal, logger),
         run_lookup=RunLookup(journal),
-        active_watchlist=ActiveWatchlist(owned.watchlist_repository),
         account_history=AccountHistory(broker, journal, stocks, prices, quote_board, market_clock, config, logger),
         backtest_options=BacktestOptions(prices, config),
         backtest_run=BacktestRun(

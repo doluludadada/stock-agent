@@ -22,6 +22,8 @@ from a_domain.ports.market.daily_close_archive import ArchivedMonth, ArchivedQua
 from a_domain.ports.system.settings_files import SettingChange, SettingField, SettingsEdit
 from a_domain.ports.system.user_store import IUserStore
 from a_domain.ports.trading.backtest_repository import IBacktestRepository
+from a_domain.ports.trading.holding_repository import IHoldingRepository
+from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
 from a_domain.rules.fundamentals.stock_analysis import StockAnalysis
 from a_domain.rules.market.breadth import MarketBreadth
 from a_domain.rules.market.quote_refresh import QuoteRefresh
@@ -53,6 +55,7 @@ from a_domain.types.values import EmailAddress, FormulaId, NewPassword, Positive
 from b_application.schemas.backtest import BacktestSetup
 from b_application.schemas.collect import StockFinancials
 from b_application.schemas.pipeline_status import PipelineStatus
+from b_application.schemas.trade import RankingFollowSettings
 from b_application.use_cases.admin.editor_access import EditorAccess
 from b_application.use_cases.admin.settings_confirmation import SettingsConfirmation
 from b_application.use_cases.admin.settings_editor import SettingsEditor
@@ -112,13 +115,11 @@ from b_application.use_cases.ship.signals import Signals
 from b_application.use_cases.trade.account_history import AccountHistory
 from b_application.use_cases.trade.account_loader import AccountLoader
 from b_application.use_cases.trade.account_risk_check import AccountRiskCheck
-from b_application.use_cases.trade.active_watchlist import ActiveWatchlist
 from b_application.use_cases.trade.brokerage_statement import BrokerageStatementReader
 from b_application.use_cases.trade.follow_candidates import FollowCandidates
 from b_application.use_cases.trade.follow_signals import FollowSignals
 from b_application.use_cases.trade.held_positions import HeldPositions
 from b_application.use_cases.trade.holding_entry import HoldingEntry
-from b_application.use_cases.trade.holding_removal import HoldingRemoval
 from b_application.use_cases.trade.holdings_analysis import HoldingsAnalysis
 from b_application.use_cases.trade.manual_signal import ManualSignal
 from b_application.use_cases.trade.mock_account_reset import MockAccountReset
@@ -130,7 +131,6 @@ from b_application.use_cases.trade.ranking_follow_return import RankingFollowRet
 from b_application.use_cases.trade.ranking_follow_schedule import RankingFollowSchedule
 from b_application.use_cases.trade.ranking_follow_signals import RankingFollowSignals
 from b_application.use_cases.trade.trade_history import TradeHistory
-from b_application.use_cases.trade.unwatch_stocks import UnwatchStocks
 from b_application.use_cases.trade.watch_stocks import WatchStocks
 from b_application.use_cases.users.ai_model_choice import AiModelChoice
 from b_application.use_cases.users.ai_model_lookup import AiModelLookup
@@ -233,7 +233,7 @@ class Pipeline:
     ai_analyser: AiAnalyser
     sentiment_analyser: SentimentAnalyser
     watch_stocks: WatchStocks
-    unwatch_stocks: UnwatchStocks
+    watchlist_repository: IWatchlistRepository
     account_risk_check: AccountRiskCheck
     signals: Signals
     manual_signal: ManualSignal
@@ -259,11 +259,10 @@ class Pipeline:
     held_positions: HeldPositions
     holdings_analysis: HoldingsAnalysis
     holding_entry: HoldingEntry
-    holding_removal: HoldingRemoval
+    holding_repository: IHoldingRepository
     reporting: Reporting
     run_reports: RunReports
     run_lookup: RunLookup
-    active_watchlist: ActiveWatchlist
     account_history: AccountHistory
     backtest_options: BacktestOptions
     backtest_run: BacktestRun
@@ -579,16 +578,17 @@ class Pipeline:
 
         return account, schedule, holdings, refusal, performance, follows
 
-    async def load_follow_schedule(self, user: User) -> tuple[FollowAccount, FollowSchedule]:
+    async def load_follow_schedule(self, user: User) -> RankingFollowSettings:
         """
         My settings' ranking follow, and the timer's question for one user: the user's follow account and the accounts
         the site offers them as one now, the time the user scheduled the follow at and the times the site offers, the
         ranking's latest decision while no follow of that account finished it, and whether the schedule follows it
-        now. It answers on a site whose history holds no session yet: nothing is pending there.
+        now; and the user's ranking follows that took a decision. It answers on a site whose history holds no session
+        yet: nothing is pending there.
         """
-        account, schedule, _ = await self.ranking_follow_schedule.execute(user)
+        account, schedule, follows = await self.ranking_follow_schedule.execute(user)
 
-        return account, schedule
+        return RankingFollowSettings(account, schedule, follows)
 
     async def choose_ranking_follow(self, user: User, follow_time: time | None, broker: ExecutionProvider) -> User:
         """
@@ -656,7 +656,7 @@ class Pipeline:
 
     async def remove_holding(self, stock_id: str) -> bool:
         """The My holdings page's removal of a hand-entered holding. False when the stock had none."""
-        return await self.holding_removal.execute(stock_id)
+        return await self.holding_repository.remove(stock_id)
 
     async def watch_manually(self, stock_ids: list[str]) -> tuple[list[Stock], WatchlistAddition | None]:
         """
@@ -673,7 +673,7 @@ class Pipeline:
 
     async def unwatch_manually(self, stock_ids: list[str]) -> list[str]:
         """The watchlist endpoint's removal: only MANUAL entries go; it returns the stocks that had one."""
-        return await self.unwatch_stocks.execute(stock_ids)
+        return await self.watchlist_repository.remove(stock_ids, WatchlistType.MANUAL)
 
     async def load_watchlist(self) -> PipelineStatus:
         """
@@ -681,7 +681,7 @@ class Pipeline:
         watched stocks; a listing outage leaves them unnamed rather than failing the page.
         """
         status = PipelineStatus.read_only(Workflow.RESEARCH)
-        status.watchlist = await self.active_watchlist.execute()
+        status.watchlist = await self.watchlist_repository.get_active()
         status.universe_stocks = await self.stock_lookup.execute(None, status.stats)
 
         return status
