@@ -74,9 +74,9 @@ async def start_follow_if_due(opened: OpenedRuntime, runs: WorkflowRuns, user: U
 
     pipeline = runtime.pipeline_for(user, user.ranking_follow_broker)
 
-    _, schedule = await pipeline.load_follow_schedule(user)
+    settings = await pipeline.load_follow_schedule(user)
 
-    if not schedule.due:
+    if not settings.schedule.due:
         return None
 
     followers = await runtime.signed_out.load_scheduled_followers()

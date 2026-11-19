@@ -67,14 +67,10 @@ from b_application.use_cases.admin.settings_reader import SettingsReader
 from b_application.use_cases.admin.settings_reauthentication import SettingsReauthentication
 from b_application.use_cases.admin.settings_save import SettingsSave
 from b_application.use_cases.backtest.backtest_options import BacktestOptions
-from b_application.use_cases.backtest.backtest_removal import BacktestRemoval
-from b_application.use_cases.backtest.backtest_replay import BacktestReplay
-from b_application.use_cases.backtest.backtest_scores import BacktestScores
-from b_application.use_cases.backtest.saved_backtests import SavedBacktests
+from b_application.use_cases.backtest.backtest_run import BacktestRun
 from b_application.use_cases.chat.chat_reply import ChatReply
 from b_application.use_cases.chat.dispatcher import Dispatcher
 from b_application.use_cases.collect.annual_report_refresh import AnnualReportRefresh
-from b_application.use_cases.collect.archive_warm_up import ArchiveWarmUp
 from b_application.use_cases.collect.article_refresh_stocks import ArticleRefreshStocks
 from b_application.use_cases.collect.article_store_backfill import ArticleStoreBackfill
 from b_application.use_cases.collect.buzz_scanner import BuzzScanner
@@ -99,6 +95,7 @@ from b_application.use_cases.collect.world_lookup import WorldLookup
 from b_application.use_cases.collect.world_refresh import WorldRefresh
 from b_application.use_cases.process.ai_analyser import AiAnalyser
 from b_application.use_cases.process.article_indexer import ArticleIndexer
+from b_application.use_cases.process.brief_lookup import BriefLookup
 from b_application.use_cases.process.company_background import CompanyBackground
 from b_application.use_cases.process.daily_stock_brief import DailyStockBrief
 from b_application.use_cases.process.indicator_readings import IndicatorReadings
@@ -107,7 +104,7 @@ from b_application.use_cases.process.stock_brief_context import StockBriefContex
 from b_application.use_cases.process.strategy_loader import StrategyLoader
 from b_application.use_cases.process.system_writing_stocks import SystemWritingStocks
 from b_application.use_cases.process.technical_filter import TechnicalFilter
-from b_application.use_cases.process.technical_settings_editor import TechnicalSettingsEditor
+from b_application.use_cases.process.technical_settings_loader import TechnicalSettingsLoader
 from b_application.use_cases.process.world_brief_context import WorldBriefContext
 from b_application.use_cases.ranking.latest_ranking import LatestRanking
 from b_application.use_cases.ranking.ranking_evidence import RankingEvidence
@@ -123,13 +120,11 @@ from b_application.use_cases.trade.abandoned_runs import AbandonedRuns
 from b_application.use_cases.trade.account_history import AccountHistory
 from b_application.use_cases.trade.account_loader import AccountLoader
 from b_application.use_cases.trade.account_risk_check import AccountRiskCheck
-from b_application.use_cases.trade.active_watchlist import ActiveWatchlist
 from b_application.use_cases.trade.brokerage_statement import BrokerageStatementReader
 from b_application.use_cases.trade.follow_candidates import FollowCandidates
 from b_application.use_cases.trade.follow_signals import FollowSignals
 from b_application.use_cases.trade.held_positions import HeldPositions
 from b_application.use_cases.trade.holding_entry import HoldingEntry
-from b_application.use_cases.trade.holding_removal import HoldingRemoval
 from b_application.use_cases.trade.holdings_analysis import HoldingsAnalysis
 from b_application.use_cases.trade.manual_signal import ManualSignal
 from b_application.use_cases.trade.mock_account_reset import MockAccountReset
@@ -142,7 +137,6 @@ from b_application.use_cases.trade.ranking_follow_return import RankingFollowRet
 from b_application.use_cases.trade.ranking_follow_schedule import RankingFollowSchedule
 from b_application.use_cases.trade.ranking_follow_signals import RankingFollowSignals
 from b_application.use_cases.trade.trade_history import TradeHistory
-from b_application.use_cases.trade.unwatch_stocks import UnwatchStocks
 from b_application.use_cases.trade.watch_stocks import WatchStocks
 from b_application.use_cases.users.ai_model_choice import AiModelChoice
 from b_application.use_cases.users.ai_model_lookup import AiModelLookup
@@ -156,9 +150,8 @@ from b_application.use_cases.users.scheduled_followers import ScheduledFollowers
 from b_application.use_cases.users.session_start import SessionStart
 from b_application.use_cases.users.sign_in_attempt import SignInAttempt
 from b_application.use_cases.users.sign_in_options import SignInOptions
-from b_application.use_cases.users.sign_out import SignOut
+from b_application.use_cases.users.signed_in_user import SignedInUser
 from b_application.use_cases.users.user_change import UserChange
-from b_application.use_cases.users.user_directory import UserDirectory
 from b_application.use_cases.users.user_registration import UserRegistration
 from b_application.use_cases.valuation.market_valuation_loader import MarketValuationLoader
 from b_application.use_cases.valuation.valuation_appraiser import ValuationAppraiser
@@ -1029,7 +1022,8 @@ def build_pipeline(
     ai_model = config.ai.offered_models[config.ai.model_for(user.ai_model if user is not None else None)]
     return Pipeline(
         strategy_loader=StrategyLoader(owned.technical_settings_repository, config, logger),
-        technical_settings_editor=TechnicalSettingsEditor(owned.technical_settings_repository, config),
+        technical_settings_loader=TechnicalSettingsLoader(owned.technical_settings_repository, config),
+        technical_settings_repository=owned.technical_settings_repository,
         run_history=RunHistory(
             journal, market_clock, config, logger, config.ai.model_for(user.ai_model if user is not None else None), chosen
         ),
@@ -1050,7 +1044,7 @@ def build_pipeline(
         fundamentals_history_backfill=FundamentalsHistoryBackfill(
             dependencies.fundamentals_provider, dependencies.daily_close_archive, market_clock, config, logger
         ),
-        archive_warm_up=ArchiveWarmUp(dependencies.daily_close_archive, config),
+        daily_close_archive=dependencies.daily_close_archive,
         stock_analysis_lookup=StockAnalysisLookup(
             dependencies.daily_close_archive, dependencies.fundamentals_provider, market_clock, config
         ),
@@ -1087,6 +1081,7 @@ def build_pipeline(
         company_card=DailyStockBrief(
             dependencies.company_card_repository, owned.ai_provider, market_clock, config, logger, ai_model, BriefKind.COMPANY
         ),
+        company_card_lookup=BriefLookup(dependencies.company_card_repository, market_clock, config, BriefKind.COMPANY),
         world_refresh=WorldRefresh(
             dependencies.world_feed,
             dependencies.article_store,
@@ -1111,12 +1106,14 @@ def build_pipeline(
         world_brief=DailyStockBrief(
             dependencies.world_brief_repository, owned.ai_provider, market_clock, config, logger, ai_model, BriefKind.WORLD
         ),
+        world_brief_lookup=BriefLookup(dependencies.world_brief_repository, market_clock, config, BriefKind.WORLD),
         stock_brief_context=StockBriefContext(
             stocks, prices, dependencies.article_store, dependencies.article_index, market_clock, config, logger
         ),
         daily_stock_brief=DailyStockBrief(
             dependencies.stock_brief_repository, owned.ai_provider, market_clock, config, logger, ai_model
         ),
+        stock_brief_lookup=BriefLookup(dependencies.stock_brief_repository, market_clock, config),
         realtime_quote_feed=RealtimeQuoteFeed(prices, market_clock, config, logger),
         technical_filter=TechnicalFilter(logger),
         indicator_readings=IndicatorReadings(),
@@ -1124,7 +1121,7 @@ def build_pipeline(
         ai_analyser=AiAnalyser(owned.ai_provider, owned.journal, dependencies.daily_close_archive, market_clock, config, logger),
         sentiment_analyser=SentimentAnalyser(owned.sentiment_classifier, config, logger),
         watch_stocks=WatchStocks(owned.watchlist_repository, market_clock, config, logger),
-        unwatch_stocks=UnwatchStocks(owned.watchlist_repository, logger),
+        watchlist_repository=owned.watchlist_repository,
         account_risk_check=AccountRiskCheck(journal, market_clock, config, logger),
         signals=Signals(journal, market_clock, config, logger),
         manual_signal=ManualSignal(journal, market_clock, config, logger),
@@ -1158,17 +1155,16 @@ def build_pipeline(
         held_positions=HeldPositions(owned.holding_repository, accounts, logger),
         holdings_analysis=HoldingsAnalysis(stocks, dependencies.daily_close_archive, quote_board, market_clock, config, logger),
         holding_entry=HoldingEntry(owned.holding_repository, market_clock),
-        holding_removal=HoldingRemoval(owned.holding_repository),
+        holding_repository=owned.holding_repository,
         reporting=Reporting(notifications, config, logger),
         run_reports=RunReports(journal, logger),
         run_lookup=RunLookup(journal),
-        active_watchlist=ActiveWatchlist(owned.watchlist_repository),
         account_history=AccountHistory(broker, journal, stocks, prices, quote_board, market_clock, config, logger),
         backtest_options=BacktestOptions(prices, config),
-        backtest_scores=BacktestScores(dependencies.bar_matrix_provider, config, logger),
-        backtest_replay=BacktestReplay(stocks, prices, owned.backtest_repository, market_clock, config, logger),
-        saved_backtests=SavedBacktests(owned.backtest_repository),
-        backtest_removal=BacktestRemoval(owned.backtest_repository),
+        backtest_run=BacktestRun(
+            dependencies.bar_matrix_provider, stocks, prices, owned.backtest_repository, market_clock, config, logger
+        ),
+        backtest_repository=owned.backtest_repository,
         ranking_history_loader=RankingHistoryLoader(dependencies.bar_matrix_provider, logger),
         latest_ranking=LatestRanking(stocks, config),
         ranking_standing=StockRankingStanding(config),
@@ -1206,8 +1202,8 @@ def build_pipeline(
         password_reset=PasswordReset(dependencies.user_store, market_clock, logger),
         user_registration=UserRegistration(dependencies.user_store, dependencies.attempt_log, market_clock, config, logger),
         session_start=SessionStart(dependencies.user_store, market_clock, config),
-        sign_out=SignOut(dependencies.user_store),
-        user_directory=UserDirectory(dependencies.user_store, market_clock),
+        signed_in_user=SignedInUser(dependencies.user_store, market_clock),
+        user_store=dependencies.user_store,
         user_change=UserChange(dependencies.user_store, market_clock, logger),
         ai_model_lookup=AiModelLookup(config),
         ai_model_choice=AiModelChoice(dependencies.user_store, market_clock, config, logger),

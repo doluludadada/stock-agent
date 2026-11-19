@@ -11,11 +11,11 @@ from support.harness import build_harness, rising_history
 from support.settings import shipped_config
 from trading_stack import run_stats
 
-from a_domain.model.analysis.social_sentiment import SocialSentiment
 from a_domain.model.chat.message import Message
 from a_domain.model.market.article import Article
 from a_domain.model.market.stock import Stock
 from a_domain.rules.sentiment import SentimentConsensusRule, SocialSentimentRule
+from a_domain.rules.sentiment.social_sentiment import SocialSentiment
 from a_domain.types.enums import InformationSource, MessageRole, SentimentConsensus, SentimentLabel, TradeAction, Workflow
 from b_application.config.ai_config import PromptsConfig, SentimentConfig
 from b_application.use_cases.process.sentiment_analyser import SentimentAnalyser

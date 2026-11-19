@@ -1,9 +1,9 @@
-from a_domain.model.analysis.social_sentiment import SocialSentiment
 from a_domain.model.market.stock import Stock
 from a_domain.model.system.stats import SystemStats
 from a_domain.ports.ai.sentiment_classifier import ISentimentClassifier
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.rules.sentiment import SentimentConsensusRule, SocialSentimentRule
+from a_domain.rules.sentiment.social_sentiment import SocialSentiment
 from b_application.config.app_config import AppConfig
 
 

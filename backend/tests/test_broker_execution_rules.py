@@ -4,10 +4,11 @@ from datetime import UTC, date, datetime
 import pytest
 
 from a_domain.model.trading.account import Account, BrokerFill, Position
-from a_domain.model.trading.order import ExchangeOrder, Order
+from a_domain.model.trading.order import Order
 from a_domain.rules.trading.cost import TradingCostRule
 from a_domain.rules.trading.execution import (
     BrokerOutcomeRule,
+    ExchangeOrder,
     FillRule,
     LotSplitRule,
     OrderAcceptanceRule,

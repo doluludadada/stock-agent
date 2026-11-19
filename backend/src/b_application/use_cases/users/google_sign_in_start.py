@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from a_domain.model.system.user import GoogleConfirmation, SignInFlow
+from a_domain.model.system.user import GoogleConfirmation
 from a_domain.ports.system.attempt_log import AttemptKey, IAttemptLog
 from a_domain.ports.system.identity_provider import IIdentityProvider
 from a_domain.ports.system.market_clock import IMarketClock
@@ -9,6 +9,7 @@ from a_domain.types.enums import AttemptLimit, GoogleRefusal, Permission
 from a_domain.types.errors import GoogleSignInRefused, SignInThrottled
 from a_domain.types.ids import SessionToken
 from b_application.config.app_config import AppConfig
+from b_application.schemas.users import GoogleRedirect
 
 
 class GoogleSignInStart:
@@ -35,7 +36,7 @@ class GoogleSignInStart:
         self._redirect_uri = config.accounts.google_redirect_uri
         self._lifetime = timedelta(minutes=config.accounts.google_flow_minutes)
 
-    async def execute(self, confirmation_id: str | None, session: SessionToken | None, client: str) -> tuple[SignInFlow, str]:
+    async def execute(self, confirmation_id: str | None, session: SessionToken | None, client: str) -> GoogleRedirect:
         """
         The flow for the browser's flow cookie, and where the browser goes: a sign-in without a `confirmation_id`, else
         the confirmation of the save it names for `session`, the caller's.
@@ -57,4 +58,6 @@ class GoogleSignInStart:
         if retry_at := await self._attempt_log.admit(now, {AttemptKey(limit=AttemptLimit.GOOGLE_SIGN_IN, client=client): self._limit}):
             raise SignInThrottled(retry_at, now)
 
-        return self._identity_provider.start(self._redirect_uri, confirmation, now, now + self._lifetime)
+        flow, address = self._identity_provider.start(self._redirect_uri, confirmation, now, now + self._lifetime)
+
+        return GoogleRedirect(flow, address)

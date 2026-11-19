@@ -5,6 +5,7 @@ from a_domain.ports.market.world_indicator_repository import IWorldIndicatorRepo
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.types.enums import MarketScope
 from b_application.config.app_config import AppConfig
+from b_application.schemas.collect import WorldUpdate
 
 
 class WorldRefresh:
@@ -36,9 +37,9 @@ class WorldRefresh:
         self._max_items = config.world.max_items
         self._kept_rule = config.stock_page.article_store.kept_rule(config.audience.news_articles)
 
-    async def execute(self) -> tuple[int, int, int]:
+    async def execute(self) -> WorldUpdate:
         if self._feed is None:
-            return 0, 0, 0
+            return WorldUpdate(0, 0, 0)
 
         world = MarketScope.WORLD.value
         items = [self._kept_rule.apply(item) for item in await self._feed.fetch_news() if item.publication_known]
@@ -53,4 +54,4 @@ class WorldRefresh:
         readings = await self._indicators.save(await self._feed.fetch_indicators())
         self._logger.info(f"World: {kept} news items kept, {embedded} embedded, {readings} indicator readings new.")
 
-        return kept, embedded, readings
+        return WorldUpdate(kept, embedded, readings)

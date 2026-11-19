@@ -64,11 +64,18 @@ How the rules measure:
 - MODULE-CONSTANT checks a_domain, b_application/use_cases, b_application/schemas and the Pipeline. Every top-level
   assignment other than `__all__`, `NewType` and `TypeVar` is a finding, an old-style alias included.
 - PIPELINE-FIELDS allows only the class `Pipeline` in b_application/pipeline.py. Each annotated field's type must be
-  imported from b_application.use_cases, or be the logging port.
+  imported from b_application.use_cases, be the logging port, or be a Protocol imported from a_domain.ports, a port
+  the Pipeline calls itself (guide 4.1). PIPELINE_FORBIDDEN_PORTS names the ports the Pipeline never holds, with the
+  reason, and a port descending from one of them is never held either. It finds the ports among the files checked.
+- PIPELINE-RETURNS reads the return annotation of every method of the class `Pipeline` in b_application/pipeline.py. A
+  tuple is a finding, alone or as a member of a union such as `tuple[...] | None` or `Optional[tuple[...]]`, a
+  homogeneous `tuple[X, ...]` included: an operation that returns more than one thing returns a result type from
+  b_application/schemas/<area>.py (guide 4.2, 4.3). A tuple inside another type, such as a list of pairs, is not read.
 - RULE-CALLERS checks a_domain, b_application and dependencies.py: only a_domain/rules, a_domain/ports (a port may
   name a rule's input or result type), b_application/use_cases and b_application/config (a settings class builds
   each rule from its own values, so a rule is configured in one place) there may import a_domain.rules. The Pipeline
-  may also import it annotation-only, as PRESENTATION-DECIDES-NOTHING defines it. The rest of d_presentation is left
+  and the result types in b_application/schemas may also import it annotation-only, as PRESENTATION-DECIDES-NOTHING
+  defines it: both may name a rule's value, such as the strategy a backtest replays. The rest of d_presentation is left
   to PRESENTATION-DECIDES-NOTHING. In c_infrastructure it reads the rule file an import names, from the disk, and
   sorts each imported name. A value is a class without an `apply` method, a type alias or an assignment, and an
   adapter may import it, since a port may name a rule's input or result type. A decision is a class with `apply` or
@@ -82,11 +89,22 @@ How the rules measure:
   with every class in a_domain/model. When at least 80% of its field names are fields or properties of another
   model, it copies that model, for storage, transport or a screen. Store, send and show the model itself; a DTO in
   c_infrastructure or a response in d_presentation holds only what the model lacks or must hide. Classes in
-  a_domain/rules are not compared: sibling variants of one rule value share fields on purpose. COPY_EXEMPT names the
-  classes left as they are, each with its reason. In d_presentation/web/schemas.py it reports only exact copies: a
-  class whose field names are exactly those of a class in a_domain/model, a_domain/types or a_domain/ports, with no
-  field typed by a name the module defines (another response, which hides part of a model, or PublicText, which
-  redacts). A route answers with that domain class itself.
+  a_domain/rules are not compared: sibling variants of one rule value share fields on purpose. In
+  d_presentation/web/schemas.py it reports only exact copies: a class whose field names are exactly those of a class
+  in a_domain/model, a_domain/types or a_domain/ports, with no field typed by a name the module defines (another
+  response, which hides part of a model, or PublicText, which redacts). A route answers with that domain class itself.
+- MODEL-HOME takes every top-level class in a_domain/model whose name nothing else in its own file uses, so it is no
+  part of that file's concept, and the files of a_domain, b_application and d_presentation that import it by name. An
+  adapter in c_infrastructure imports a rule's values and a port's types too, so it does not count. When those files
+  are one rule file and any port files, which hand that rule's value over, the class is a value only that rule reads
+  and moves into the rule's file. When they are one port file and no rule file, it is a type only that port and its
+  adapters use and moves into the port's file. A class that no such file imports is not reported. A class that a file
+  of a_domain/model imports is a part of that file's model and stays, since a model never imports a rule. When one rule
+  file is the only file that builds the class, by calling it or by naming it in the type of a TypeAdapter, the class
+  is that rule's result, whatever other files read it, and moves into that rule's file too; a call in any layer counts,
+  an adapter's included. No class with a public method other than a property or a pydantic validator is sent to a
+  rule's file, where RULE-APPLY would take it for a rule; a class method is such a method, so a class that builds
+  itself stays.
 - PYRIGHT (with --pyright) counts pyright errors, using `[tool.pyright]` from the current folder.
 """
 
@@ -189,9 +207,10 @@ PRESENTATION_SETTINGS = {
     ),
     # The app serves the API docs only where the environment it started in allows them.
     "d_presentation/web/app.py": frozenset({"environment.api_docs"}),
-    # The open data's attribution, which the license requires next to whatever a page shows from it, and the audience,
-    # whose capabilities tell the web app what to offer.
-    "d_presentation/web/routers/market.py": frozenset({"sources.attribution", "audience"}),
+    # The open data's attribution, which the license requires next to whatever a page shows from it, the audience,
+    # whose capabilities tell the web app what to offer, and the daily bars the built-in strategies need, which the
+    # archive status shows beside the sessions the archive holds.
+    "d_presentation/web/routers/market.py": frozenset({"sources.attribution", "audience", "technical.required_bars"}),
     "d_presentation/web": frozenset(
         {
             # The LINE webhook checks each request's signature with the channel secret.
@@ -223,6 +242,26 @@ PRESENTATION_SETTINGS = {
 RESPONSE_MODULE = PurePosixPath("d_presentation/web/schemas.py")
 PIPELINE_MODULE = PurePosixPath("b_application/pipeline.py")
 LOGGING_PORT = "a_domain.ports.system.logging_provider.ILoggingProvider"
+PIPELINE_FORBIDDEN_PORTS = frozenset(
+    {
+        "IExecutionProvider",
+        "ISimulatedExecutionProvider",
+        "IBrokerExecutionProvider",
+        "IBrokerQuoteProvider",
+        "ITradingJournal",
+        "IAiProvider",
+        "ISentimentClassifier",
+        "ITextEmbedder",
+        "IArticleIndex",
+    }
+)
+"""
+The ports the Pipeline never holds, although it holds a port it calls once (guide 4.2). The execution providers and
+the broker's quotes reach a broker over its login, and the trading journal records every order and every run. The
+Pipeline reaches them only through use cases, so every path to an order stays inside the steps the order gate
+verifies. The AI provider, the sentiment classifier, the text embedder and the article index, which embeds through
+it, run a model, and every AI call goes through a use case too.
+"""
 PYDANTIC_DATACLASS = "pydantic.dataclasses.dataclass"
 DOMAIN_CLASS_FOLDERS = ("a_domain/model", "a_domain/rules")
 DOMAIN_FORBIDDEN_BASES = frozenset({"BaseModel", "RootModel", "SQLModel"})
@@ -238,8 +277,6 @@ COLLECTION_MUTATORS = frozenset(
 STRATEGY_CLASSES = frozenset({"TechnicalStrategy", "TechnicalRule"})
 COPY_SCOPE = ("a_domain/model", "b_application/schemas")
 COPY_SHARE = 0.8
-COPY_EXEMPT = frozenset({"WebSearchResult"})
-"""WebSearchResult belongs to the LINE chat, which stays unchanged until it is rebuilt as a customer-service bot."""
 PORT_CALLERS_EXEMPT = frozenset(
     {
         ("ITaiwanStockProvider", "cached_stocks"),
@@ -295,6 +332,7 @@ INFRASTRUCTURE_RULES = {
     ),
 }
 ANSWER_SOURCES = ("a_domain/model", "a_domain/types", "a_domain/ports")
+MODEL_USERS = ("a_domain", "b_application", "d_presentation")
 STORY_ID = re.compile(r"\bUS-\d+|\bTODO\b|(?<![\w&])#\d+\b")
 TYPE_IGNORE = re.compile(r"#\s*(?:type|pyright)\s*:\s*ignore\b")
 CJK = re.compile(
@@ -397,6 +435,15 @@ def all_classes(tree: ast.Module) -> list[ast.ClassDef]:
 
 def methods(node: ast.ClassDef) -> list[FunctionNode]:
     return [item for item in node.body if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef)]
+
+
+def public_methods(node: ast.ClassDef) -> list[FunctionNode]:
+    """The methods a caller calls: no leading underscore, and neither a property nor a validator that pydantic calls."""
+    return [
+        method
+        for method in methods(node)
+        if not method.name.startswith("_") and not NOT_CALLED & {name_of(decorator) for decorator in method.decorator_list}
+    ]
 
 
 def functions(tree: ast.Module) -> list[FunctionNode]:
@@ -566,11 +613,7 @@ def check_rule_apply(files: Sequence[SourceFile]) -> Iterator[Finding]:
         if not source.under("a_domain/rules"):
             continue
         for node in top_level_classes(source.tree):
-            public = [
-                method
-                for method in methods(node)
-                if not method.name.startswith("_") and not NOT_CALLED & {name_of(decorator) for decorator in method.decorator_list}
-            ]
+            public = public_methods(node)
             if not public:
                 continue
             if "apply" not in {method.name for method in public}:
@@ -884,7 +927,7 @@ def check_model_copy(files: Sequence[SourceFile]) -> Iterator[Finding]:
     models = [(node, field_names(node) | property_names(node)) for source, node in classes if source.under("a_domain/model")]
     for source, node in classes:
         fields = field_names(node)
-        if len(fields) < 2 or node.name in COPY_EXEMPT:
+        if len(fields) < 2:
             continue
         if original := next(
             (other for other, names in models if other is not node and len(fields & names) >= COPY_SHARE * len(fields)), None
@@ -949,6 +992,75 @@ def property_names(node: ast.ClassDef) -> set[str]:
     }
 
 
+def check_model_home(files: Sequence[SourceFile]) -> Iterator[Finding]:
+    importers, builders = name_importers(files), class_builders(files)
+    for source in files:
+        if not source.under("a_domain/model") or source.module is None:
+            continue
+        module = ".".join(source.module.with_suffix("").parts)
+        for node in top_level_classes(source.tree):
+            if node.name in names_outside(source.tree, node):
+                continue
+            name = f"{module}.{node.name}"
+            if home := model_home(importers.get(name, set()), builders.get(name, set()), has_methods=bool(public_methods(node))):
+                yield source.path, node.lineno, f"{node.name} {home}"
+
+
+def name_importers(files: Sequence[SourceFile]) -> dict[str, set[PurePosixPath]]:
+    """Each name a file of MODEL_USERS imports with `from module import name`, as `module.name`, and those files."""
+    importers: dict[str, set[PurePosixPath]] = {}
+    for source in files:
+        if source.module is None or source.layer not in MODEL_USERS:
+            continue
+        for _, module, names in imports(source):
+            for name in names:
+                importers.setdefault(f"{module}.{name}", set()).add(source.module)
+    return importers
+
+
+def names_outside(tree: ast.Module, node: ast.ClassDef) -> set[str]:
+    """Every name the module reads or writes outside the class `node`, its decorators included."""
+    inside = {id(child) for child in ast.walk(node)}
+    return {name.id for name in ast.walk(tree) if isinstance(name, ast.Name) and id(name) not in inside}
+
+
+def class_builders(files: Sequence[SourceFile]) -> dict[str, set[PurePosixPath]]:
+    """Each name a file calls, or names in the type of a TypeAdapter it makes, as `module.name`, and those files."""
+    builders: dict[str, set[PurePosixPath]] = {}
+    for source in files:
+        if source.module is None:
+            continue
+        bound = bound_imports(source)
+        for call in ast.walk(source.tree):
+            if not isinstance(call, ast.Call):
+                continue
+            adapted = [node for argument in call.args for node in ast.walk(argument)] if name_of(call.func) == "TypeAdapter" else []
+            for node in [call.func, *adapted]:
+                if isinstance(node, ast.Name | ast.Attribute) and (target := resolved(node, bound)):
+                    builders.setdefault(target, set()).add(source.module)
+    return builders
+
+
+def model_home(importers: set[PurePosixPath], builders: set[PurePosixPath], *, has_methods: bool) -> str | None:
+    """
+    Where a model class goes when one rule reads it or builds it, or one port is all that imports it; None while it is
+    a shared model or a part of one. A class with a method a caller calls never goes to a rule's file, which holds no
+    class with a public method but a rule's `apply`.
+    """
+    rules = sorted(path for path in importers if path.is_relative_to("a_domain/rules"))
+    ports = sorted(path for path in importers if path.is_relative_to("a_domain/ports"))
+    rules_and_ports_only = len(rules) + len(ports) == len(importers)
+    if rules_and_ports_only and not rules and len(ports) == 1:
+        return f"is a type only the port in {ports[0]} and its adapters use; move it into that port's file"
+    if has_methods or any(path.is_relative_to("a_domain/model") for path in importers):
+        return None
+    if rules_and_ports_only and len(rules) == 1:
+        return f"is a value only the rule in {rules[0]} reads (a port may hand it over); move it into that rule's file"
+    if len(builders) == 1 and (builder := next(iter(builders))).is_relative_to("a_domain/rules"):
+        return f"is built only by the rule in {builder}, and other files only read it; move it into that rule's file"
+    return None
+
+
 def check_domain_style(files: Sequence[SourceFile]) -> Iterator[Finding]:
     exceptions = exception_names(files)
     for source in files:
@@ -1009,6 +1121,7 @@ def check_module_constant(files: Sequence[SourceFile]) -> Iterator[Finding]:
 
 
 def check_pipeline_fields(files: Sequence[SourceFile]) -> Iterator[Finding]:
+    ports = pipeline_ports(files)
     for source in files:
         if source.module != PIPELINE_MODULE:
             continue
@@ -1018,16 +1131,61 @@ def check_pipeline_fields(files: Sequence[SourceFile]) -> Iterator[Finding]:
                 yield source.path, node.lineno, f"{node.name} sits beside the Pipeline; the Pipeline's fields are its use cases"
                 continue
             for field in node.body:
-                if isinstance(field, ast.AnnAssign) and (problem := pipeline_field_problem(field, bound)):
+                if isinstance(field, ast.AnnAssign) and (problem := pipeline_field_problem(field, bound, ports)):
                     yield source.path, field.lineno, problem
 
 
-def pipeline_field_problem(field: ast.AnnAssign, bound: dict[str, str]) -> str | None:
+def pipeline_ports(files: Sequence[SourceFile]) -> frozenset[str]:
+    """The Protocols of a_domain/ports the Pipeline may hold: all but PIPELINE_FORBIDDEN_PORTS and their descendants."""
+    forbidden = PIPELINE_FORBIDDEN_PORTS | subclass_names(files, lambda base: base in PIPELINE_FORBIDDEN_PORTS)
+    return frozenset(
+        node.name
+        for source in files
+        if source.under("a_domain/ports")
+        for node in top_level_classes(source.tree)
+        if "Protocol" in base_names(node) and node.name not in forbidden
+    )
+
+
+def pipeline_field_problem(field: ast.AnnAssign, bound: dict[str, str], ports: frozenset[str]) -> str | None:
     kind = resolved(field.annotation, bound) or ast.unparse(field.annotation)
-    if kind == LOGGING_PORT or is_within(kind, "b_application.use_cases"):
+    is_port = is_within(kind, "a_domain.ports") and kind.rsplit(".", 1)[-1] in ports
+    if kind == LOGGING_PORT or is_within(kind, "b_application.use_cases") or is_port:
         return None
     field_name, field_type = ast.unparse(field.target), ast.unparse(field.annotation)
-    return f"Pipeline field {field_name} is {field_type}; the Pipeline holds only use cases and the logger"
+    return (
+        f"Pipeline field {field_name} is {field_type}; the Pipeline holds only use cases, the logger and the ports it "
+        "calls once, never one that PIPELINE_FORBIDDEN_PORTS names"
+    )
+
+
+def check_pipeline_returns(files: Sequence[SourceFile]) -> Iterator[Finding]:
+    for source in files:
+        if source.module != PIPELINE_MODULE:
+            continue
+        for node in top_level_classes(source.tree):
+            if node.name != "Pipeline":
+                continue
+            for method in methods(node):
+                if method.returns is not None and is_tuple(method.returns):
+                    yield (
+                        source.path,
+                        method.lineno,
+                        f"Pipeline.{method.name} returns a tuple; an operation that returns more than one thing returns a "
+                        "result type from b_application/schemas/<area>.py",
+                    )
+
+
+def is_tuple(annotation: ast.expr) -> bool:
+    """A tuple, alone or as a member of a union: `tuple[...]`, `tuple`, `Tuple[...]`, `tuple[...] | None`, `Optional[...]`."""
+    match annotation:
+        case ast.BinOp(op=ast.BitOr(), left=left, right=right):
+            return is_tuple(left) or is_tuple(right)
+        case ast.Subscript(value=value, slice=ast.Tuple(elts=members)) if name_of(value) == "Union":
+            return any(is_tuple(member) for member in members)
+        case ast.Subscript(value=value, slice=member) if name_of(value) == "Optional":
+            return is_tuple(member)
+    return name_of(annotation) in {"tuple", "Tuple"}
 
 
 def check_rule_callers(files: Sequence[SourceFile]) -> Iterator[Finding]:
@@ -1036,7 +1194,8 @@ def check_rule_callers(files: Sequence[SourceFile]) -> Iterator[Finding]:
             yield from infrastructure_rule_findings(source)
         if not any(source.under(folder) for folder in RULE_CALLER_SCOPE) or any(source.under(folder) for folder in RULE_USERS):
             continue
-        for line, module in rule_imports(source, annotations_allowed=source.module == PIPELINE_MODULE):
+        annotations_allowed = source.module == PIPELINE_MODULE or source.under("b_application/schemas")
+        for line, module in rule_imports(source, annotations_allowed=annotations_allowed):
             yield source.path, line, f"imports {module}; only use cases and other rules use a rule"
 
 
@@ -1180,10 +1339,12 @@ RULES: dict[str, Callable[[Sequence[SourceFile]], Iterator[Finding]]] = {
     "DOMAIN-STYLE": check_domain_style,
     "MODULE-CONSTANT": check_module_constant,
     "PIPELINE-FIELDS": check_pipeline_fields,
+    "PIPELINE-RETURNS": check_pipeline_returns,
     "RULE-CALLERS": check_rule_callers,
     "USECASE-STATUS": check_usecase_status,
     "PATH-COMMENT": check_path_comment,
     "MODEL-COPY": check_model_copy,
+    "MODEL-HOME": check_model_home,
 }
 
 

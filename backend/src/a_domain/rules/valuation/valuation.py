@@ -10,7 +10,6 @@ from a_domain.model.market.stock import Stock
 from a_domain.model.valuation.valuation import (
     FairPriceRange,
     PeRatio,
-    ReportSection,
     StockValuation,
     ValuationExplanation,
     ValuationReport,
@@ -176,6 +175,12 @@ def over_or_under(undervaluation: float) -> str:
 
 
 @dataclass(frozen=True)
+class ReportSection:
+    title: str
+    lines: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class FactSectionsRule:
     """Price, EPS, current and target P/E, fair prices and gaps: the AI prompt's facts and the printed report alike."""
 
@@ -203,7 +208,7 @@ class ExplanationSectionsRule:
     ai_not_provided: NonEmptyText
     not_investment_advice: NonEmptyText
 
-    def apply(self, explanation: ValuationExplanation) -> tuple[ReportSection, ...]:
+    def apply(self, explanation: ValuationExplanation) -> list[ReportSection]:
         report = explanation.report
         risks = explanation.pe_derating_risks or (self.ai_not_provided,)
 
@@ -217,11 +222,11 @@ class ExplanationSectionsRule:
 
         warnings.extend(f"AI: {gap}" for gap in explanation.data_gaps)
 
-        return (
+        return [
             *self.fact_sections_rule.apply(report),
             ReportSection("Factors that may support a higher P/E", explanation.higher_pe_factors or (self.ai_not_provided,)),
             ReportSection("Risks that may lower the P/E", risks),
             ReportSection("Insufficient data warnings", tuple(warnings) or ("none",)),
             ReportSection("Not investment advice", (self.not_investment_advice,)),
             ReportSection("AI summary", (explanation.summary or self.ai_not_provided,)),
-        )
+        ]

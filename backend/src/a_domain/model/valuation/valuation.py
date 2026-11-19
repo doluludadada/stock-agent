@@ -104,12 +104,6 @@ class StockValuation:
 
 
 @dataclass(frozen=True)
-class ReportSection:
-    title: str
-    lines: tuple[str, ...]
-
-
-@dataclass(frozen=True)
 class ValuationReport:
     """A stock valued at the user's target P/E. Scenarios exist exactly when the current P/E is computable."""
 

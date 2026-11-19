@@ -109,16 +109,16 @@ async def get_ranking_formulas(first: date, last: date, pipeline: UserPipeline) 
     server's replay turns, and each is kept while the history stands. A formula that did best over a past period is not
     thereby the best over the next. It saves nothing, asks no AI and never orders.
     """
-    active, evidence = await pipeline.compare_ranking_formulas(first, last)
+    comparison = await pipeline.compare_ranking_formulas(first, last)
     return [
         FormulaEvidence(
             formula=record.formula,
-            active=record.formula.name == active,
+            active=record.formula.name == comparison.active,
             record=FormulaRecord.model_validate(record),
             liquid_floor=liquid.formula.min_traded_value,
             liquid_record=FormulaRecord.model_validate(liquid),
         )
-        for record, liquid in evidence
+        for record, liquid in comparison.evidence
     ]
 
 
@@ -264,15 +264,15 @@ async def get_ranking_follow(pipeline: UserPipeline, user: CurrentUser, runs: Wo
     formula each used and whether the schedule or the user started it, and the user's schedule. It reads the account,
     SinoPac's positions in one request, only while the site offers it to the user; it records nothing and never orders.
     """
-    account, schedule, holdings, refusal, performance, follows = await pipeline.load_ranking_follow(user)
+    follow = await pipeline.load_ranking_follow(user)
     return RankingFollowResponse(
-        account=account,
-        holdings=holdings,
-        refusal=refusal,
+        account=follow.settings.account,
+        holdings=follow.holdings,
+        refusal=follow.refusal,
         running=runs.running(user.user_id) is not None,
-        performance=performance,
-        follows=[RankingFollowRun.model_validate(run) for run in follows],
-        schedule=FollowScheduleResponse.model_validate(schedule),
+        performance=follow.performance,
+        follows=[RankingFollowRun.model_validate(run) for run in follow.settings.follows],
+        schedule=FollowScheduleResponse.model_validate(follow.settings.schedule),
     )
 
 
@@ -283,8 +283,8 @@ async def get_follow_schedule(pipeline: UserPipeline, user: CurrentUser) -> Foll
     and their schedule of the ranking follow as it stands, with the times the site offers. It answers on a site that
     can make no ranking yet, where nothing is pending. It reads no account, records nothing and never orders.
     """
-    account, schedule = await pipeline.load_follow_schedule(user)
-    return FollowSettingsResponse(account=account, schedule=FollowScheduleResponse.model_validate(schedule))
+    settings = await pipeline.load_follow_schedule(user)
+    return FollowSettingsResponse(account=settings.account, schedule=FollowScheduleResponse.model_validate(settings.schedule))
 
 
 class FollowAccountRequest(Confirmed):
@@ -396,8 +396,8 @@ async def follow_ranking(
     run's log names each BUY that waits for a later follow. The order gates refuse each order of a ranking follow on a
     login that is not on SinoPac's simulation server again. A ranking follow never orders with real money.
     """
-    account, _, _, refusal, _, _ = await pipeline.load_ranking_follow(user)
-    refuse_ranking_follow(account, refusal, body.broker)
+    ranking_follow = await pipeline.load_ranking_follow(user)
+    refuse_ranking_follow(ranking_follow.settings.account, ranking_follow.refusal, body.broker)
     follow = runtime.pipeline_for(user, body.broker)
 
     return RunAccepted(run_id=start(user, lambda follow_id: follow.follow_ranking(user, run_id=follow_id)))

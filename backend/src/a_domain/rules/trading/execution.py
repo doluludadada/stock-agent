@@ -6,7 +6,7 @@ from pydantic import PositiveInt, validate_call
 from pydantic.dataclasses import dataclass
 
 from a_domain.model.trading.account import Account, BrokerFill, Position
-from a_domain.model.trading.order import ExchangeOrder, Order
+from a_domain.model.trading.order import Order
 from a_domain.rules.trading.cost import TradeCost, TradingCostRule
 from a_domain.types.enums import ExecutionProvider, LotKind, OrderStatus, OrderType, RejectReason, TimeInForce, TradeAction
 from a_domain.types.values import PositiveFiniteFloat
@@ -135,6 +135,39 @@ class FillRule:
             return cost, held.profit_on_sale(quantity, cost.net)
 
         return cost, None
+
+
+@dataclass(frozen=True, kw_only=True)
+class ExchangeOrder:
+    """
+    One exchange order, a part of an Order: a domain order goes to the exchange as one exchange order per lot part
+    (round lots and an odd-lot remainder). It says where that part is in the order lifecycle and what executed so far,
+    in shares, as the broker reported it.
+    """
+
+    stock_id: str
+    status: OrderStatus
+    ordered_shares: int
+
+    dealt_shares: int
+    """The shares in the broker's list of deals, which is what an order records as filled."""
+
+    reported_dealt_shares: int
+    """The shares the broker's status counts as dealt. More than dealt_shares while deals are still on their way."""
+
+    fill_price: float | None
+    """The deals' volume_weighted_price. None while nothing is dealt."""
+
+    description: str
+    """The broker's own words for the exchange order, for logs and for the reason the order ends with."""
+
+    @property
+    def deals_missing(self) -> bool:
+        """The deals cannot be the whole story: fewer than the broker counts, or fewer than a FILLED order's quantity."""
+        if self.dealt_shares < self.reported_dealt_shares:
+            return True
+
+        return self.status == OrderStatus.FILLED and self.dealt_shares < self.ordered_shares
 
 
 @dataclass(frozen=True)

@@ -94,7 +94,7 @@ async def offer_manual_watchlist(stocks: list[Stock], pipeline: Pipeline) -> Non
     if not stocks or not terminal.confirm("Add these stocks to the manual watchlist?"):
         return
 
-    _, addition = await pipeline.watch_manually([stock.stock_id for stock in stocks])
+    addition = (await pipeline.watch_manually([stock.stock_id for stock in stocks])).addition
 
     if addition is None:
         terminal.console.print("[yellow]The listing no longer holds every analysed stock; nothing was added.[/yellow]")

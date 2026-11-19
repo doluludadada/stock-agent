@@ -1,6 +1,6 @@
 from a_domain.model.system.user import User
-from a_domain.types.enums import AiProvider
 from b_application.config.app_config import AppConfig
+from b_application.schemas.users import AiModels
 
 
 class AiModelLookup:
@@ -13,5 +13,5 @@ class AiModelLookup:
     def __init__(self, config: AppConfig) -> None:
         self._ai = config.ai
 
-    def execute(self, user: User) -> tuple[dict[AiProvider, str], AiProvider, AiProvider]:
-        return self._ai.offered_models, self._ai.active_model, self._ai.model_for(user.ai_model)
+    def execute(self, user: User) -> AiModels:
+        return AiModels(self._ai.offered_models, self._ai.active_model, self._ai.model_for(user.ai_model))

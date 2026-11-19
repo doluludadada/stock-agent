@@ -1,6 +1,13 @@
 from typing import Protocol
 
-from a_domain.model.chat.web_search_result import WebSearchResult
+from pydantic.dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class WebSearchResult:
+    title: str
+    url: str
+    content: str
 
 
 class IWebSearchProvider(Protocol):

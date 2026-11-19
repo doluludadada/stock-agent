@@ -83,10 +83,10 @@ async def register(body: RegistrationRequest, request: Request, pipeline: Signed
 @router.post("/sign-in")
 async def sign_in(body: SignInRequest, request: Request, response: Response, pipeline: SignedOutPipeline) -> User:
     """Sets the session cookie. 401 for a wrong name or password, one message for both; 429 past the attempt limits."""
-    user, session = await pipeline.sign_in_with_session(body.identifier, body.password, client_of(request))
-    set_session_cookie(request, response, session)
+    signed_in = await pipeline.sign_in_with_session(body.identifier, body.password, client_of(request))
+    set_session_cookie(request, response, signed_in.session)
 
-    return user
+    return signed_in.user
 
 
 @router.get("/google/start", status_code=status.HTTP_303_SEE_OTHER, response_class=RedirectResponse)
@@ -103,14 +103,14 @@ async def start_google_sign_in(
     """
     try:
         session = SessionToken(token) if token else None
-        flow, address = await pipeline.start_google_sign_in(confirmation, session, client_of(request))
+        redirect = await pipeline.start_google_sign_in(confirmation, session, client_of(request))
     except GoogleSignInRefused as error:
         return back_to_app(request, APP_SETTINGS if confirmation else APP_SIGN_IN, error.refusal)
     except SignInThrottled:
         return back_to_app(request, APP_SETTINGS if confirmation else APP_SIGN_IN, THROTTLED)
 
-    response = RedirectResponse(address, status_code=status.HTTP_303_SEE_OTHER)
-    set_flow_cookie(request, response, flow)
+    response = RedirectResponse(redirect.address, status_code=status.HTTP_303_SEE_OTHER)
+    set_flow_cookie(request, response, redirect.flow)
 
     return response
 
@@ -137,7 +137,7 @@ async def return_from_google(
             await pipeline.confirm_settings_with_google(flow, confirmation, state, code, client)
             return back_to_app(request, APP_SETTINGS, CONFIRMED)
 
-        _, session = await pipeline.sign_in_with_google(flow, state, code, client)
+        signed_in = await pipeline.sign_in_with_google(flow, state, code, client)
     except GoogleSignInRefused as error:
         return back_to_app(request, page, error.refusal)
     except SignInThrottled:
@@ -146,7 +146,7 @@ async def return_from_google(
         return back_to_app(request, page, GoogleRefusal.PROVIDER_FAILED)
 
     response = back_to_app(request, APP_HOME)
-    set_session_cookie(request, response, session)
+    set_session_cookie(request, response, signed_in.session)
 
     return response
 
@@ -169,8 +169,8 @@ async def get_me(user: CurrentUser) -> User:
 @router.get("/me/ai-model", dependencies=[PrivateAccess])
 async def get_ai_model(user: CurrentUser, pipeline: UserPipeline) -> AiModelResponse:
     """My settings: the AI models the site offers, its default, and the one the user's runs use. 401 when signed out."""
-    models, site_default, in_use = pipeline.load_ai_models(user)
-    return AiModelResponse(models=models, site_default=site_default, in_use=in_use)
+    models = pipeline.load_ai_models(user)
+    return AiModelResponse(models=models.models, site_default=models.site_default, in_use=models.in_use)
 
 
 @router.put(
@@ -183,5 +183,5 @@ async def choose_ai_model(body: AiModelRequest, user: CurrentUser, pipeline: Use
     Chooses the AI model of the user's next runs, or null for the site's default. A run already running keeps its model.
     A model the site stopped offering later leaves the choice saved, and the runs use the site's default meanwhile.
     """
-    models, site_default, in_use = await pipeline.choose_ai_model(user, body.ai_model)
-    return AiModelResponse(models=models, site_default=site_default, in_use=in_use)
+    models = await pipeline.choose_ai_model(user, body.ai_model)
+    return AiModelResponse(models=models.models, site_default=models.site_default, in_use=models.in_use)

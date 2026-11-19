@@ -18,6 +18,7 @@ from trading_stack import MovableClock
 
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.types.enums import Audience, MarketType
+from b_application.schemas.collect import HistoryBackfill, HistoryCoverage
 from b_application.use_cases.collect.daily_history_backfill import DailyHistoryBackfill
 from c_infrastructure.database.db_connector import DatabaseConnector
 from c_infrastructure.market.cached_price_provider import held_ex_right_references
@@ -51,17 +52,15 @@ async def test_a_backfill_holds_every_session_from_its_first_day_and_a_rerun_aft
     reports.references = {("2330", SESSIONS[3]): 99.0}
     reports.stop = SESSIONS[10]
 
-    held, missing, unread = await DailyHistoryBackfill(cache_over(reports, database, clock), clock, shipped_config()).execute(
-        SESSIONS[0]
-    ) or ([], [], [])
+    coverage = await DailyHistoryBackfill(cache_over(reports, database, clock), clock, shipped_config()).execute(SESSIONS[0])
 
-    assert (held, missing, unread) == (SESSIONS[11:], SESSIONS[:11], [])
+    assert coverage == HistoryCoverage(SESSIONS[11:], SESSIONS[:11], [])
     assert reports.references_asked == [(market, SESSIONS[0], MONDAY) for market in MarketType]
 
     reports.stop, reports.asked = None, []
     rerun = await DailyHistoryBackfill(cache_over(reports, database, clock), clock, shipped_config()).execute(SESSIONS[0])
 
-    assert rerun == (SESSIONS, [], [])
+    assert rerun == HistoryCoverage(SESSIONS, [], [])
     assert [question for question in reports.asked if question.startswith("quotes")] == [
         f"quotes {day}" for day in reversed(SESSIONS[:11])
     ]
@@ -75,11 +74,9 @@ async def test_a_backfill_goes_back_before_the_earliest_session_the_cache_holds(
     reports.sessions |= reported(earlier, 90.0)
     reports.index = {market: [*earlier, *SESSIONS] for market in MarketType}
 
-    held, missing, unread = await DailyHistoryBackfill(cache_over(reports, database, clock), clock, shipped_config()).execute(
-        earlier[0]
-    ) or ([], [], [])
+    coverage = await DailyHistoryBackfill(cache_over(reports, database, clock), clock, shipped_config()).execute(earlier[0])
 
-    assert (held, missing, unread) == ([*earlier, *SESSIONS], [], [])
+    assert coverage == HistoryCoverage([*earlier, *SESSIONS], [], [])
 
 
 async def test_without_a_first_day_the_backfill_covers_the_stock_pages_longest_chart_as_the_timer_runs_it(
@@ -93,7 +90,7 @@ async def test_without_a_first_day_the_backfill_covers_the_stock_pages_longest_c
     refreshed = await DailyHistoryBackfill(cache_over(reports, database, clock), clock, config).execute()
 
     assert refreshed is not None
-    assert (refreshed[0], refreshed[1]) == (SESSIONS, [])
+    assert (refreshed.held, refreshed.lacking) == (SESSIONS, [])
     assert reports.asked[0] == f"index {MarketType.TWSE.value} {window_first} {MONDAY}"
     assert await DailyHistoryBackfill(cache_over(reports, database, clock), clock, config).execute(window_first) == refreshed
 
@@ -108,13 +105,13 @@ async def test_a_backfill_names_the_ex_right_references_a_failed_request_left_un
 
     answer = await DailyHistoryBackfill(cache_over(reports, database, clock), clock, shipped_config()).execute(SESSIONS[0])
 
-    assert answer == ([], SESSIONS, [(MarketType.TPEX, SESSIONS[0], MONDAY)])
+    assert answer == HistoryCoverage([], SESSIONS, [(MarketType.TPEX, SESSIONS[0], MONDAY)])
 
     reports.references_failing = {}
     rerun_cache = cache_over(reports, database, clock)
     rerun = await DailyHistoryBackfill(rerun_cache, clock, shipped_config()).execute(SESSIONS[0])
 
-    assert rerun == (SESSIONS, [], [])
+    assert rerun == HistoryCoverage(SESSIONS, [], [])
     assert await held_ex_right_references(SESSIONS[0], MONDAY, database, clock) == {"6488": {at(SESSIONS[3], 13, 30): 99.0}}
 
 
@@ -131,10 +128,10 @@ async def test_the_operation_reads_the_revenue_of_every_month_from_the_first_day
         config=harness_config().model_copy(update={"audience": Audience.PUBLIC})
     ).runtime.signed_out.backfill_history(date(2025, 1, 1))
 
-    assert personal[:2] == (None, (2, 2))
-    assert personal[2] is not None
+    assert (personal.history, personal.revenue) == (None, (2, 2))
+    assert personal.eps is not None
     assert sorted(harness.archive.monthly_revenues) == [("2330", 2025, 1), ("6488", 2025, 1)]
-    assert public == (None, None, None)
+    assert public == HistoryBackfill(None, None, None)
 
 
 async def test_a_backfill_whose_reports_fail_names_each_exchanges_index_range_it_could_not_read(database: DatabaseConnector) -> None:
@@ -144,4 +141,4 @@ async def test_a_backfill_whose_reports_fail_names_each_exchanges_index_range_it
 
     answer = await DailyHistoryBackfill(cache_over(reports, database, clock), clock, shipped_config()).execute(SESSIONS[0])
 
-    assert answer == ([], [], [(MarketType.TWSE, SESSIONS[0], MONDAY), (MarketType.TPEX, SESSIONS[0], MONDAY)])
+    assert answer == HistoryCoverage([], [], [(MarketType.TWSE, SESSIONS[0], MONDAY), (MarketType.TPEX, SESSIONS[0], MONDAY)])

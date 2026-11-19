@@ -4,44 +4,40 @@ from datetime import date, time
 
 from pydantic import PositiveInt, SecretStr
 
-from a_domain.model.analysis.stock_brief import BriefSource, StockBrief
-from a_domain.model.fundamentals.monthly_revenue import MonthlyRevenue
-from a_domain.model.fundamentals.quarter_financials import QuarterFinancials
+from a_domain.model.analysis.stock_brief import StockBrief
 from a_domain.model.market.article import Article
-from a_domain.model.market.company_profile import CompanyProfile
 from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.model.market.stock import Stock
-from a_domain.model.market.world_indicator import IndicatorReading
 from a_domain.model.system.stats import SystemStats
-from a_domain.model.system.user import GoogleConfirmation, SignInFlow, User, UserSession
-from a_domain.model.trading.account import Account, BrokerageStatement, Position
+from a_domain.model.system.user import GoogleConfirmation, SignInFlow, User
+from a_domain.model.trading.account import Account, Position
 from a_domain.model.trading.backtest import Backtest, BacktestInputs
 from a_domain.model.trading.order import Order
 from a_domain.model.valuation.scan import MarketValuation, ScanCriteria, ValuationScan
-from a_domain.model.valuation.valuation import ReportSection, StockValuation, ValuationReport
-from a_domain.ports.market.daily_close_archive import ArchivedMonth, ArchivedQuarter, ArchivedSession
+from a_domain.model.valuation.valuation import StockValuation, ValuationReport
+from a_domain.ports.analysis.technical_settings_repository import ITechnicalSettingsRepository
+from a_domain.ports.market.daily_close_archive import IDailyCloseArchive
 from a_domain.ports.system.settings_files import SettingChange, SettingField, SettingsEdit
+from a_domain.ports.system.user_store import IUserStore
+from a_domain.ports.trading.backtest_repository import IBacktestRepository
+from a_domain.ports.trading.holding_repository import IHoldingRepository
+from a_domain.ports.trading.watchlist_repository import IWatchlistRepository
 from a_domain.rules.fundamentals.stock_analysis import StockAnalysis
 from a_domain.rules.market.breadth import MarketBreadth
-from a_domain.rules.market.quote_refresh import QuoteRefresh
 from a_domain.rules.system.registration import SignInOffer
-from a_domain.rules.system.settings_change import ServerSwitchRefusal
-from a_domain.rules.technical.strategy import TechnicalSettings, TechnicalStrategy
-from a_domain.rules.trading.follow import FollowAccount, FollowReturn, FollowSchedule, RankingHoldings
+from a_domain.rules.technical.strategy import TechnicalSettings
 from a_domain.rules.trading.holdings import PortfolioAnalysis
 from a_domain.rules.trading.ranking import Ranking
 from a_domain.rules.trading.ranking_backtest import RankingBacktest
 from a_domain.rules.trading.ranking_standing import RankingStanding
-from a_domain.rules.watchlist.membership import WatchlistAddition
+from a_domain.rules.valuation.valuation import ReportSection
 from a_domain.types.enums import (
     AiAnalysisFocus,
     AiProvider,
     ExecutionProvider,
-    FollowRefusal,
     HoldingSource,
     MarketIndex,
     MarketScope,
-    MarketType,
     Role,
     UserStatus,
     WatchlistType,
@@ -49,7 +45,24 @@ from a_domain.types.enums import (
 )
 from a_domain.types.ids import BacktestId, RunId, SessionToken, UserId
 from a_domain.types.values import EmailAddress, FormulaId, NewPassword, PositiveFiniteFloat, Username
+from b_application.schemas.backtest import BacktestSetup
+from b_application.schemas.collect import (
+    ArchivedPeriods,
+    ArticleBackfill,
+    ArticleRefresh,
+    CompanyBackfill,
+    HistoryBackfill,
+    HistoryCoverage,
+    RealtimeQuotes,
+    StockFinancials,
+    WorldOverview,
+    WorldUpdate,
+)
 from b_application.schemas.pipeline_status import PipelineStatus
+from b_application.schemas.process import CompanyFacts, HeldBriefs, StockEvaluation
+from b_application.schemas.ranking import FormulaComparison
+from b_application.schemas.trade import BrokerageAccount, ManualWatch, RankingFollow, RankingFollowSettings
+from b_application.schemas.users import AiModels, GoogleRedirect, SignedIn
 from b_application.use_cases.admin.editor_access import EditorAccess
 from b_application.use_cases.admin.settings_confirmation import SettingsConfirmation
 from b_application.use_cases.admin.settings_editor import SettingsEditor
@@ -57,14 +70,10 @@ from b_application.use_cases.admin.settings_reader import SettingsReader
 from b_application.use_cases.admin.settings_reauthentication import SettingsReauthentication
 from b_application.use_cases.admin.settings_save import SettingsSave
 from b_application.use_cases.backtest.backtest_options import BacktestOptions
-from b_application.use_cases.backtest.backtest_removal import BacktestRemoval
-from b_application.use_cases.backtest.backtest_replay import BacktestReplay
-from b_application.use_cases.backtest.backtest_scores import BacktestScores
-from b_application.use_cases.backtest.saved_backtests import SavedBacktests
+from b_application.use_cases.backtest.backtest_run import BacktestRun
 from b_application.use_cases.chat.chat_reply import ChatReply
 from b_application.use_cases.chat.dispatcher import Dispatcher
 from b_application.use_cases.collect.annual_report_refresh import AnnualReportRefresh
-from b_application.use_cases.collect.archive_warm_up import ArchiveWarmUp
 from b_application.use_cases.collect.article_refresh_stocks import ArticleRefreshStocks
 from b_application.use_cases.collect.article_store_backfill import ArticleStoreBackfill
 from b_application.use_cases.collect.buzz_scanner import BuzzScanner
@@ -89,6 +98,7 @@ from b_application.use_cases.collect.world_lookup import WorldLookup
 from b_application.use_cases.collect.world_refresh import WorldRefresh
 from b_application.use_cases.process.ai_analyser import AiAnalyser
 from b_application.use_cases.process.article_indexer import ArticleIndexer
+from b_application.use_cases.process.brief_lookup import BriefLookup
 from b_application.use_cases.process.company_background import CompanyBackground
 from b_application.use_cases.process.daily_stock_brief import DailyStockBrief
 from b_application.use_cases.process.indicator_readings import IndicatorReadings
@@ -97,7 +107,7 @@ from b_application.use_cases.process.stock_brief_context import StockBriefContex
 from b_application.use_cases.process.strategy_loader import StrategyLoader
 from b_application.use_cases.process.system_writing_stocks import SystemWritingStocks
 from b_application.use_cases.process.technical_filter import TechnicalFilter
-from b_application.use_cases.process.technical_settings_editor import TechnicalSettingsEditor
+from b_application.use_cases.process.technical_settings_loader import TechnicalSettingsLoader
 from b_application.use_cases.process.world_brief_context import WorldBriefContext
 from b_application.use_cases.ranking.latest_ranking import LatestRanking
 from b_application.use_cases.ranking.ranking_evidence import RankingEvidence
@@ -113,13 +123,11 @@ from b_application.use_cases.trade.abandoned_runs import AbandonedRuns
 from b_application.use_cases.trade.account_history import AccountHistory
 from b_application.use_cases.trade.account_loader import AccountLoader
 from b_application.use_cases.trade.account_risk_check import AccountRiskCheck
-from b_application.use_cases.trade.active_watchlist import ActiveWatchlist
 from b_application.use_cases.trade.brokerage_statement import BrokerageStatementReader
 from b_application.use_cases.trade.follow_candidates import FollowCandidates
 from b_application.use_cases.trade.follow_signals import FollowSignals
 from b_application.use_cases.trade.held_positions import HeldPositions
 from b_application.use_cases.trade.holding_entry import HoldingEntry
-from b_application.use_cases.trade.holding_removal import HoldingRemoval
 from b_application.use_cases.trade.holdings_analysis import HoldingsAnalysis
 from b_application.use_cases.trade.manual_signal import ManualSignal
 from b_application.use_cases.trade.mock_account_reset import MockAccountReset
@@ -132,7 +140,6 @@ from b_application.use_cases.trade.ranking_follow_return import RankingFollowRet
 from b_application.use_cases.trade.ranking_follow_schedule import RankingFollowSchedule
 from b_application.use_cases.trade.ranking_follow_signals import RankingFollowSignals
 from b_application.use_cases.trade.trade_history import TradeHistory
-from b_application.use_cases.trade.unwatch_stocks import UnwatchStocks
 from b_application.use_cases.trade.watch_stocks import WatchStocks
 from b_application.use_cases.users.ai_model_choice import AiModelChoice
 from b_application.use_cases.users.ai_model_lookup import AiModelLookup
@@ -146,9 +153,8 @@ from b_application.use_cases.users.scheduled_followers import ScheduledFollowers
 from b_application.use_cases.users.session_start import SessionStart
 from b_application.use_cases.users.sign_in_attempt import SignInAttempt
 from b_application.use_cases.users.sign_in_options import SignInOptions
-from b_application.use_cases.users.sign_out import SignOut
+from b_application.use_cases.users.signed_in_user import SignedInUser
 from b_application.use_cases.users.user_change import UserChange
-from b_application.use_cases.users.user_directory import UserDirectory
 from b_application.use_cases.users.user_registration import UserRegistration
 from b_application.use_cases.valuation.market_valuation_loader import MarketValuationLoader
 from b_application.use_cases.valuation.valuation_appraiser import ValuationAppraiser
@@ -196,7 +202,8 @@ class Pipeline:
     """
 
     strategy_loader: StrategyLoader
-    technical_settings_editor: TechnicalSettingsEditor
+    technical_settings_loader: TechnicalSettingsLoader
+    technical_settings_repository: ITechnicalSettingsRepository
     run_history: RunHistory
     account_loader: AccountLoader
     stock_lookup: StockLookup
@@ -211,7 +218,7 @@ class Pipeline:
     daily_close_archiver: DailyCloseArchiver
     daily_history_backfill: DailyHistoryBackfill
     fundamentals_history_backfill: FundamentalsHistoryBackfill
-    archive_warm_up: ArchiveWarmUp
+    daily_close_archive: IDailyCloseArchive
     stock_analysis_lookup: StockAnalysisLookup
     stock_news_lookup: StockNewsLookup
     article_indexer: ArticleIndexer
@@ -224,10 +231,13 @@ class Pipeline:
     world_lookup: WorldLookup
     world_brief_context: WorldBriefContext
     world_brief: DailyStockBrief
+    world_brief_lookup: BriefLookup
     company_background: CompanyBackground
     company_card: DailyStockBrief
+    company_card_lookup: BriefLookup
     stock_brief_context: StockBriefContext
     daily_stock_brief: DailyStockBrief
+    stock_brief_lookup: BriefLookup
     realtime_quote_feed: RealtimeQuoteFeed
     technical_filter: TechnicalFilter
     indicator_readings: IndicatorReadings
@@ -235,7 +245,7 @@ class Pipeline:
     ai_analyser: AiAnalyser
     sentiment_analyser: SentimentAnalyser
     watch_stocks: WatchStocks
-    unwatch_stocks: UnwatchStocks
+    watchlist_repository: IWatchlistRepository
     account_risk_check: AccountRiskCheck
     signals: Signals
     manual_signal: ManualSignal
@@ -263,17 +273,14 @@ class Pipeline:
     held_positions: HeldPositions
     holdings_analysis: HoldingsAnalysis
     holding_entry: HoldingEntry
-    holding_removal: HoldingRemoval
+    holding_repository: IHoldingRepository
     reporting: Reporting
     run_reports: RunReports
     run_lookup: RunLookup
-    active_watchlist: ActiveWatchlist
     account_history: AccountHistory
     backtest_options: BacktestOptions
-    backtest_scores: BacktestScores
-    backtest_replay: BacktestReplay
-    saved_backtests: SavedBacktests
-    backtest_removal: BacktestRemoval
+    backtest_run: BacktestRun
+    backtest_repository: IBacktestRepository
     ranking_history_loader: RankingHistoryLoader
     latest_ranking: LatestRanking
     ranking_standing: StockRankingStanding
@@ -301,8 +308,8 @@ class Pipeline:
     password_reset: PasswordReset
     user_registration: UserRegistration
     session_start: SessionStart
-    sign_out: SignOut
-    user_directory: UserDirectory
+    signed_in_user: SignedInUser
+    user_store: IUserStore
     user_change: UserChange
     ai_model_lookup: AiModelLookup
     ai_model_choice: AiModelChoice
@@ -567,9 +574,7 @@ class Pipeline:
 
         return status
 
-    async def load_ranking_follow(
-        self, user: User
-    ) -> tuple[FollowAccount, FollowSchedule, RankingHoldings, FollowRefusal | None, FollowReturn | None, list[SystemStats]]:
+    async def load_ranking_follow(self, user: User) -> RankingFollow:
         """
         The ranking page's follow block, and the check before a ranking follow starts: the user's follow account, the
         accounts the site offers them as one and where their schedule stands; which of the ranking's stocks that
@@ -584,25 +589,27 @@ class Pipeline:
         history = await self.ranking_history_loader.execute()
         ranking = await self.latest_ranking.execute(history)
         holdings, refusal = await self.ranking_follow_candidates.execute(account, ranking)
+        settings = RankingFollowSettings(account, schedule, follows)
 
         if not account.measured:
-            return account, schedule, holdings, refusal, None, follows
+            return RankingFollow(settings, holdings, refusal, None)
 
         mock_account, _, curve, _ = await self.mock_account_history.execute(None, None)
         performance = await self.ranking_follow_return.execute(history, mock_account, curve)
 
-        return account, schedule, holdings, refusal, performance, follows
+        return RankingFollow(settings, holdings, refusal, performance)
 
-    async def load_follow_schedule(self, user: User) -> tuple[FollowAccount, FollowSchedule]:
+    async def load_follow_schedule(self, user: User) -> RankingFollowSettings:
         """
         My settings' ranking follow, and the timer's question for one user: the user's follow account and the accounts
         the site offers them as one now, the time the user scheduled the follow at and the times the site offers, the
         ranking's latest decision while no follow of that account finished it, and whether the schedule follows it
-        now. It answers on a site whose history holds no session yet: nothing is pending there.
+        now; and the user's ranking follows that took a decision. It answers on a site whose history holds no session
+        yet: nothing is pending there.
         """
-        account, schedule, _ = await self.ranking_follow_schedule.execute(user)
+        account, schedule, follows = await self.ranking_follow_schedule.execute(user)
 
-        return account, schedule
+        return RankingFollowSettings(account, schedule, follows)
 
     async def choose_ranking_follow(self, user: User, follow_time: time | None, broker: ExecutionProvider) -> User:
         """
@@ -644,7 +651,7 @@ class Pipeline:
         """My settings' reset: the user's mock account opens again with `initial_cash` and no positions."""
         return await self.mock_account_reset.execute(initial_cash)
 
-    async def load_brokerage_statement(self) -> tuple[BrokerageStatement | None, ServerSwitchRefusal | None]:
+    async def load_brokerage_statement(self) -> BrokerageAccount:
         """
         The SinoPac account page: the real broker's account as the broker reports it now, None while the site has no
         real broker for the user or its login is down, and why the login could not switch to the other server, None
@@ -682,9 +689,9 @@ class Pipeline:
 
     async def remove_holding(self, stock_id: str) -> bool:
         """The My holdings page's removal of a hand-entered holding. False when the stock had none."""
-        return await self.holding_removal.execute(stock_id)
+        return await self.holding_repository.remove(stock_id)
 
-    async def watch_manually(self, stock_ids: list[str]) -> tuple[list[Stock], WatchlistAddition | None]:
+    async def watch_manually(self, stock_ids: list[str]) -> ManualWatch:
         """
         Menu 4 and the watchlist endpoint: the listed stocks join the MANUAL watchlist, which never expires. When the
         listing lacks one of the ids nothing is added: the addition is None, and the stocks found tell which ids.
@@ -693,13 +700,13 @@ class Pipeline:
         status.manual_stocks = await self.stock_lookup.execute(stock_ids, status.stats)
 
         if len(status.manual_stocks) < len(set(stock_ids)):
-            return status.manual_stocks, None
+            return ManualWatch(status.manual_stocks, None)
 
-        return status.manual_stocks, await self.watch_stocks.execute(status.manual_stocks, WatchlistType.MANUAL)
+        return ManualWatch(status.manual_stocks, await self.watch_stocks.execute(status.manual_stocks, WatchlistType.MANUAL))
 
     async def unwatch_manually(self, stock_ids: list[str]) -> list[str]:
         """The watchlist endpoint's removal: only MANUAL entries go; it returns the stocks that had one."""
-        return await self.unwatch_stocks.execute(stock_ids)
+        return await self.watchlist_repository.remove(stock_ids, WatchlistType.MANUAL)
 
     async def load_watchlist(self) -> PipelineStatus:
         """
@@ -707,7 +714,7 @@ class Pipeline:
         watched stocks; a listing outage leaves them unnamed rather than failing the page.
         """
         status = PipelineStatus.read_only(Workflow.RESEARCH)
-        status.watchlist = await self.active_watchlist.execute()
+        status.watchlist = await self.watchlist_repository.get_active()
         status.universe_stocks = await self.stock_lookup.execute(None, status.stats)
 
         return status
@@ -742,7 +749,7 @@ class Pipeline:
 
         return status
 
-    async def load_backtest_options(self, built_in_strategy_id: str | None = None) -> tuple[TechnicalStrategy, BacktestInputs | None]:
+    async def load_backtest_options(self, built_in_strategy_id: str | None = None) -> BacktestSetup:
         """
         The backtest page: the strategy a backtest would replay, the owner's active one or a built-in one, and the
         inputs of the longest backtest the held daily history allows at the live settings; None while it allows none. It
@@ -750,7 +757,7 @@ class Pipeline:
         """
         strategy = await self.strategy_loader.execute(Workflow.RESEARCH, built_in_strategy_id)
 
-        return strategy, await self.backtest_options.execute(strategy)
+        return BacktestSetup(strategy, await self.backtest_options.execute(strategy))
 
     async def run_backtest(self, inputs: BacktestInputs, built_in_strategy_id: str | None = None) -> Backtest:
         """
@@ -760,9 +767,8 @@ class Pipeline:
         replay.
         """
         strategy = await self.strategy_loader.execute(Workflow.RESEARCH, built_in_strategy_id)
-        bars, scores = await self.backtest_scores.execute(strategy, inputs)
 
-        return await self.backtest_replay.execute(strategy, inputs, bars, scores)
+        return await self.backtest_run.execute(strategy, inputs)
 
     async def load_ranking(self, formula_name: FormulaId | None = None) -> Ranking:
         """
@@ -799,9 +805,7 @@ class Pipeline:
 
         return await self.ranking_replay.execute(history, first, last, formula_name)
 
-    async def compare_ranking_formulas(
-        self, first: date, last: date
-    ) -> tuple[FormulaId, list[tuple[RankingBacktest, RankingBacktest]]]:
+    async def compare_ranking_formulas(self, first: date, last: date) -> FormulaComparison:
         """
         The ranking page's evidence beside the choice of a formula: the active formula's name, and every formula of the
         settings replayed over the same period on the same history and costs, and again at the comparison's liquidity
@@ -814,15 +818,15 @@ class Pipeline:
 
     async def load_backtests(self) -> list[Backtest]:
         """The user's saved backtests, newest first."""
-        return await self.saved_backtests.execute()
+        return await self.backtest_repository.saved()
 
     async def load_backtest(self, backtest_id: BacktestId) -> Backtest | None:
         """One of the user's saved backtests; None when the user has none of that id."""
-        return next(iter(await self.saved_backtests.execute(backtest_id)), None)
+        return await self.backtest_repository.get(backtest_id)
 
     async def delete_backtest(self, backtest_id: BacktestId) -> bool:
         """Deletes one of the user's saved backtests, and answers whether the user had one of that id."""
-        return await self.backtest_removal.execute(backtest_id)
+        return await self.backtest_repository.delete(backtest_id)
 
     async def load_market_valuation(self) -> MarketValuation:
         """
@@ -854,7 +858,7 @@ class Pipeline:
 
         return scan.after_technical_step(strategy.strategy_id)
 
-    async def explain_valuation(self, report: ValuationReport) -> tuple[ReportSection, ...]:
+    async def explain_valuation(self, report: ValuationReport) -> list[ReportSection]:
         """The domain computed every number; the AI explains them with the stock's news."""
         status = PipelineStatus.read_only(Workflow.VALUATION)
         await self.news_feed.execute([report.stock], status.stats)
@@ -869,16 +873,14 @@ class Pipeline:
         """The market overview: the latest session's most traded stocks in the exchange listing."""
         return await self.most_traded.execute()
 
-    async def load_page_quotes(
-        self, stock_ids: list[str], indexes: list[MarketIndex]
-    ) -> tuple[dict[str, Ohlcv], dict[MarketIndex, Ohlcv], QuoteRefresh]:
+    async def load_page_quotes(self, stock_ids: list[str], indexes: list[MarketIndex]) -> RealtimeQuotes:
         """
         The pages' realtime quotes: today's quote of each of these stocks and market indexes that has one, from the
         board every page shares, and when a page asks again. It reads quotes alone.
         """
         return await self.page_quotes.execute(stock_ids, indexes)
 
-    async def archive_daily_closes(self) -> tuple[list[ArchivedSession], list[ArchivedQuarter], list[ArchivedMonth]]:
+    async def archive_daily_closes(self) -> ArchivedPeriods:
         """
         The Web API's timer: the official closes, material information, EPS statistics, valuation ratios, balance
         sheets, income statements, monthly revenue and TWSE news the TWSE and TPEX OpenAPI serve now, saved into the
@@ -887,7 +889,7 @@ class Pipeline:
         """
         return await self.daily_close_archiver.execute()
 
-    async def refresh_daily_history(self) -> tuple[list[date], list[date], list[tuple[MarketType, date, date]]] | None:
+    async def refresh_daily_history(self) -> HistoryCoverage | None:
         """
         The Web API's timer on a personal site: the exchanges' daily reports of every session the history cache lacks
         over the stock page's longest chart, then what backfill_history answers of the daily history over that window;
@@ -895,11 +897,7 @@ class Pipeline:
         """
         return await self.daily_history_backfill.execute()
 
-    async def backfill_history(
-        self, first: date
-    ) -> tuple[
-        tuple[list[date], list[date], list[tuple[MarketType, date, date]]] | None, tuple[int, int] | None, tuple[int, int] | None
-    ]:
+    async def backfill_history(self, first: date) -> HistoryBackfill:
         """
         `just backfill-history`: what a ranking backtest and the stock pages' trends read, back to `first` on a personal
         site. It answers the daily history's sessions held, those still lacking and the index ranges it could not read,
@@ -910,19 +908,17 @@ class Pipeline:
         revenue, eps = await self.fundamentals_history_backfill.execute(first)
         history = await self.daily_history_backfill.execute(first)
 
-        return history, revenue, eps
+        return HistoryBackfill(history, revenue, eps)
 
-    async def load_financials(self, stock_id: str) -> tuple[list[QuarterFinancials], list[MonthlyRevenue]]:
+    async def load_financials(self, stock_id: str) -> StockFinancials:
         """A stock's page: its archived quarters' figures and monthly revenue, oldest first."""
-        quarters, revenues, _ = await self.stock_analysis_lookup.execute(stock_id, with_analysis=False)
+        quarters, revenues = await self.daily_close_archive.financials(stock_id)
 
-        return quarters, revenues
+        return StockFinancials(quarters, revenues)
 
     async def load_stock_analysis(self, stock_id: str) -> StockAnalysis:
         """A stock's page: its revenue trend, earnings trend and valuation against its own history, read by fixed rules."""
-        _, _, analysis = await self.stock_analysis_lookup.execute(stock_id)
-
-        return analysis
+        return await self.stock_analysis_lookup.execute(stock_id)
 
     async def load_stock_news(self, stock_id: str) -> list[Article] | None:
         """
@@ -933,7 +929,7 @@ class Pipeline:
         """
         return await self.stock_news_lookup.execute(stock_id)
 
-    async def refresh_article_store(self) -> tuple[int, int]:
+    async def refresh_article_store(self) -> ArticleRefresh:
         """
         The Web API's timer: the news of every stock a user holds or watches read into the article store as a stock page
         reads it, one stock after another at the stock feed's pace, each stock's vectors brought up to date after it. It
@@ -946,9 +942,9 @@ class Pipeline:
             await self.stock_news_lookup.execute(stock_id)
             embedded += await self.article_indexer.execute(stock_id)
 
-        return len(stock_ids), embedded
+        return ArticleRefresh(len(stock_ids), embedded)
 
-    async def backfill_article_store(self) -> tuple[int, int, int]:
+    async def backfill_article_store(self) -> ArticleBackfill:
         """
         `just backfill-articles`: the announcements and TWSE news the open-data archive holds kept in the article store,
         then the vectors of every stock the store keeps brought up to date, which also fills an index that was lost. It
@@ -961,9 +957,9 @@ class Pipeline:
         for stock_id in stock_ids:
             embedded += await self.article_indexer.execute(stock_id)
 
-        return kept, len(stock_ids), embedded
+        return ArticleBackfill(kept, len(stock_ids), embedded)
 
-    async def backfill_company_background(self, top: PositiveInt) -> tuple[int, tuple[int, int], tuple[int, int]]:
+    async def backfill_company_background(self, top: PositiveInt) -> CompanyBackfill:
         """
         `just backfill-company-background`: what a personal site reads about the companies of the monthly ranking at
         its latest decision session, the `top` best scores first: each one's main business from MOPS, then each one's
@@ -978,7 +974,7 @@ class Pipeline:
         businesses = await self.main_business_refresh.execute(stock_ids)
         reports = await self.annual_report_refresh.execute(stock_ids)
 
-        return len(stock_ids), businesses, reports
+        return CompanyBackfill(len(stock_ids), businesses, reports)
 
     async def load_system_writing(self) -> list[str]:
         """
@@ -990,7 +986,7 @@ class Pipeline:
         """
         return await self.system_writing_stocks.execute()
 
-    async def refresh_world(self) -> tuple[int, int, int]:
+    async def refresh_world(self) -> WorldUpdate:
         """
         The Web API's world timer: the items the world news feeds list now read into the article store, their vectors
         brought up to date, and the readings the world indicators' tables list kept. It answers the news items added or
@@ -1010,11 +1006,11 @@ class Pipeline:
         if context is None:
             return None
 
-        today, _, _ = await self.world_brief.execute(MarketScope.WORLD.value, context)
+        await self.world_brief.execute(MarketScope.WORLD.value, context)
 
-        return today
+        return (await self.world_brief_lookup.execute(MarketScope.WORLD.value)).today
 
-    async def load_world(self) -> tuple[list[IndicatorReading], list[StockBrief], list[Article], time | None]:
+    async def load_world(self) -> WorldOverview:
         """
         The world page and the home page's world block: each held world indicator's newest reading beside the one
         before it, the written world briefs of the latest days, newest first, the newest kept world news items, and
@@ -1022,9 +1018,7 @@ class Pipeline:
         """
         return await self.world_lookup.execute()
 
-    async def load_company(
-        self, stock_id: str
-    ) -> tuple[CompanyProfile | None, list[BriefSource], StockBrief | None, StockBrief | None] | None:
+    async def load_company(self, stock_id: str) -> CompanyFacts | None:
         """
         A stock's page: what the site holds about the company itself. Its profile, the held items a company card may
         cite, each with the page of MOPS or of the document site it is from, the company's card if one was claimed
@@ -1037,20 +1031,20 @@ class Pipeline:
         if not status.manual_stocks:
             return None
 
-        _, _, analysis = await self.stock_analysis_lookup.execute(stock_id)
+        analysis = await self.stock_analysis_lookup.execute(stock_id)
         profile, context = await self.company_background.execute(status.manual_stocks[0], analysis)
-        card, kept_card, _ = await self.company_card.execute(stock_id)
+        cards = await self.company_card_lookup.execute(stock_id)
 
-        return profile, [fact.source for fact in context.facts], card, kept_card
+        return CompanyFacts(profile, [fact.source for fact in context.facts], cards.today, cards.previous)
 
-    async def load_stock_brief(self, stock_id: str) -> tuple[StockBrief | None, StockBrief | None, int]:
+    async def load_stock_brief(self, stock_id: str) -> HeldBriefs:
         """
         A stock's page: the AI brief the site holds of the stock today in Taipei, its newest written brief of an earlier
         day, and how many more stocks may get a new brief today.
         """
-        return await self.daily_stock_brief.execute(stock_id)
+        return await self.stock_brief_lookup.execute(stock_id)
 
-    async def write_stock_brief(self, stock_id: str) -> tuple[StockBrief | None, StockBrief | None, int] | None:
+    async def write_stock_brief(self, stock_id: str) -> HeldBriefs | None:
         """
         A stock's AI brief of today in Taipei is asked for, by a signed-in viewer or by the site's own timer: how the
         held facts of a recent window relate to the stock's move. First a personal site reads the company's main
@@ -1067,24 +1061,29 @@ class Pipeline:
         if not status.manual_stocks:
             return None
 
-        _, _, analysis = await self.stock_analysis_lookup.execute(stock_id)
+        analysis = await self.stock_analysis_lookup.execute(stock_id)
         articles = await self.stock_news_lookup.execute(stock_id) or []
         await self.main_business_refresh.execute([stock_id])
         await self.annual_report_refresh.execute([stock_id])
         await self.article_indexer.execute(stock_id)
         _, card_context = await self.company_background.execute(status.manual_stocks[0], analysis)
-        card, kept_card, _ = await self.company_card.execute(stock_id, card_context)
+        await self.company_card.execute(stock_id, card_context)
+        cards = await self.company_card_lookup.execute(stock_id)
         history = await self.ranking_history_loader.execute()
-        context = await self.stock_brief_context.execute(status.manual_stocks[0], analysis, articles, history, (card, kept_card))
+        context = await self.stock_brief_context.execute(
+            status.manual_stocks[0], analysis, articles, history, (cards.today, cards.previous)
+        )
 
-        return await self.daily_stock_brief.execute(stock_id, context)
+        await self.daily_stock_brief.execute(stock_id, context)
 
-    async def load_archive_warm_up(self) -> tuple[int, int]:
+        return await self.stock_brief_lookup.execute(stock_id)
+
+    async def count_archived_sessions(self) -> int:
         """
-        The market overview's open-data archive: the sessions of stock closes it holds, and the daily bars the built-in
-        strategies need, which an open-data deployment's runs wait for.
+        The market overview's open-data archive: the sessions of stock closes it holds, which an open-data deployment's
+        runs wait for until they reach the daily bars the built-in strategies need.
         """
-        return await self.archive_warm_up.execute()
+        return await self.daily_close_archive.session_count()
 
     async def load_market_breadth(self) -> MarketBreadth:
         """The market overview: the latest session's advancers and decliners in the exchange listing, overall and per industry."""
@@ -1109,7 +1108,7 @@ class Pipeline:
 
         return status
 
-    async def evaluate_stock(self, stock_id: str) -> tuple[TechnicalStrategy, PipelineStatus]:
+    async def evaluate_stock(self, stock_id: str) -> StockEvaluation:
         """
         The stock page's technical evaluation: the owner's active strategy over the history window a run loads for it,
         and each of its indicators at every bar of that window. Without a realtime quote, the latest price is the last
@@ -1120,13 +1119,13 @@ class Pipeline:
         status.manual_stocks = await self.stock_lookup.execute([stock_id], status.stats)
 
         if not status.manual_stocks:
-            return strategy, status
+            return StockEvaluation(strategy, status)
 
         await self.data_collector.execute(status.manual_stocks, strategy.required_bars, status.stats)
         status.survivors = self.technical_filter.execute(status.manual_stocks, strategy, status.stats)
         status.indicator_readings = self.indicator_readings.execute(status.manual_stocks[0], strategy)
 
-        return strategy, status
+        return StockEvaluation(strategy, status)
 
     async def reply_to_chat(self, user_id: str, content: str) -> None:
         """Answers one chat message: a reset command clears the conversation, any other text gets the AI's reply."""
@@ -1136,14 +1135,14 @@ class Pipeline:
 
     async def load_technical_settings(self) -> TechnicalSettings:
         """The settings editor's read: the owner's saved strategies and selections, the initial ones on a first read."""
-        return await self.technical_settings_editor.execute()
+        return await self.technical_settings_loader.execute()
 
     async def save_technical_settings(self, settings: TechnicalSettings) -> TechnicalSettings:
         """
         The settings editor's save. It raises TechnicalSettingsConflictError, saving nothing, when another save came
         after the revision `settings` carries. A run already loaded its strategy, so the next run uses these settings.
         """
-        return await self.technical_settings_editor.execute(settings)
+        return await self.technical_settings_repository.save(settings)
 
     async def load_settings_form(self) -> list[SettingField]:
         """
@@ -1210,7 +1209,7 @@ class Pipeline:
 
     async def load_user(self, user_id: UserId) -> User | None:
         """The user as saved now, for the CLI's check before each menu option. None when unknown or deactivated."""
-        return next(iter(await self.user_directory.execute(user_id=user_id)), None)
+        return await self.signed_in_user.execute(user_id=user_id)
 
     async def reset_password(self, identifier: str, password: NewPassword) -> User | None:
         """The operator's reset of a password on the machine: every session of the user ends. None for an unknown name."""
@@ -1220,15 +1219,13 @@ class Pipeline:
         """Open registration: a new user with the role user. It raises RegistrationClosed or SignInThrottled."""
         return await self.user_registration.execute(username, email, password, client)
 
-    async def sign_in_with_session(self, identifier: str, password: SecretStr, client: str) -> tuple[User, UserSession]:
+    async def sign_in_with_session(self, identifier: str, password: SecretStr, client: str) -> SignedIn:
         """The Web's sign-in: the same check as the CLI's, then a session for the browser's cookie."""
         user = await self.sign_in_attempt.execute(identifier, password, client)
 
-        return user, await self.session_start.execute(user)
+        return SignedIn(user, await self.session_start.execute(user))
 
-    async def start_google_sign_in(
-        self, confirmation_id: str | None, session: SessionToken | None, client: str
-    ) -> tuple[SignInFlow, str]:
+    async def start_google_sign_in(self, confirmation_id: str | None, session: SessionToken | None, client: str) -> GoogleRedirect:
         """
         The start of a sign-in with Google, or with a `confirmation_id` of the fresh authentication that confirms one
         settings save from `session`, the caller's: the flow for the browser's cookie and Google's address for it. It
@@ -1237,9 +1234,7 @@ class Pipeline:
         """
         return await self.google_sign_in_start.execute(confirmation_id, session, client)
 
-    async def sign_in_with_google(
-        self, flow: SignInFlow | None, state: str | None, code: SecretStr | None, client: str
-    ) -> tuple[User, UserSession]:
+    async def sign_in_with_google(self, flow: SignInFlow | None, state: str | None, code: SecretStr | None, client: str) -> SignedIn:
         """
         The browser's return from Google: the email Google verified, its account as the settings admit it, created at
         the first sign-in, then a session for the browser's cookie. It raises GoogleSignInRefused or SignInThrottled.
@@ -1247,19 +1242,19 @@ class Pipeline:
         email = await self.google_identity_check.execute(flow, state, code, client)
         user = await self.google_account.execute(email)
 
-        return user, await self.session_start.execute(user)
+        return SignedIn(user, await self.session_start.execute(user))
 
     async def find_signed_in_user(self, token: SessionToken) -> User | None:
         """Every signed-in Web request, before dependencies.py builds that user's Pipeline: the session's user, now."""
-        return next(iter(await self.user_directory.execute(session=token)), None)
+        return await self.signed_in_user.execute(session=token)
 
     async def end_session(self, token: SessionToken) -> None:
-        """The Web's sign-out."""
-        await self.sign_out.execute(token)
+        """The Web's sign-out. Ending a session that does not exist, or ended already, changes nothing."""
+        await self.user_store.close_session(token)
 
     async def load_users(self) -> list[User]:
-        """The administrator's list of users."""
-        return await self.user_directory.execute()
+        """The administrator's list of users, oldest first."""
+        return await self.user_store.users()
 
     async def change_user(
         self, user_id: UserId, role: Role | None, status: UserStatus | None, password: NewPassword | None
@@ -1267,14 +1262,14 @@ class Pipeline:
         """The administrator's change of a user's role, status or password. None when no such user exists."""
         return await self.user_change.execute(user_id, role, status, password)
 
-    def load_ai_models(self, user: User) -> tuple[dict[AiProvider, str], AiProvider, AiProvider]:
+    def load_ai_models(self, user: User) -> AiModels:
         """
         My settings: each AI model the site offers with its model id, the site's default, and the model the user's runs
         use, their choice while the site offers it, else the default.
         """
         return self.ai_model_lookup.execute(user)
 
-    async def choose_ai_model(self, user: User, ai_model: AiProvider | None) -> tuple[dict[AiProvider, str], AiProvider, AiProvider]:
+    async def choose_ai_model(self, user: User, ai_model: AiProvider | None) -> AiModels:
         """
         My settings' save of the AI model for the user's next runs, one the site offers or None for the site's default,
         then what load_ai_models answers. It raises AiModelNotOffered, saving nothing, for a model the site does not offer.

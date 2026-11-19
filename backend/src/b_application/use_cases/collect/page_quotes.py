@@ -1,9 +1,8 @@
-from a_domain.model.market.ohlcv import Ohlcv
 from a_domain.ports.market.price_provider import IQuoteBoard
 from a_domain.ports.system.market_clock import IMarketClock
-from a_domain.rules.market.quote_refresh import QuoteRefresh
 from a_domain.types.enums import MarketIndex
 from b_application.config.app_config import AppConfig
+from b_application.schemas.collect import RealtimeQuotes
 
 
 class PageQuotes:
@@ -22,9 +21,7 @@ class PageQuotes:
         self._market_clock = market_clock
         self._refresh_rule = config.market_data.quote_refresh_rule()
 
-    async def execute(
-        self, stock_ids: list[str], indexes: list[MarketIndex]
-    ) -> tuple[dict[str, Ohlcv], dict[MarketIndex, Ohlcv], QuoteRefresh]:
+    async def execute(self, stock_ids: list[str], indexes: list[MarketIndex]) -> RealtimeQuotes:
         today = self._market_clock.today()
         refresh = self._refresh_rule.apply(
             self._market_clock.trading_phase(),
@@ -37,4 +34,4 @@ class PageQuotes:
         if refresh.changing:
             await self._quote_board.follow(stock_ids, indexes)
 
-        return self._quote_board.quotes(stock_ids, today), self._quote_board.index_quotes(indexes, today), refresh
+        return RealtimeQuotes(self._quote_board.quotes(stock_ids, today), self._quote_board.index_quotes(indexes, today), refresh)

@@ -7,8 +7,8 @@ from a_domain.ports.market.stock_provider import IStockProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.rules.trading.ranking import RankingHistory
 from a_domain.rules.trading.ranking_backtest import RankingBacktest
-from a_domain.types.values import FormulaId
 from b_application.config.app_config import AppConfig
+from b_application.schemas.ranking import FormulaComparison
 
 
 class RankingEvidence:
@@ -31,9 +31,7 @@ class RankingEvidence:
         self._replay_rule = config.ranking_backtest_rule
         self._logger = logger
 
-    async def execute(
-        self, history: RankingHistory, first: date, last: date
-    ) -> tuple[FormulaId, list[tuple[RankingBacktest, RankingBacktest]]]:
+    async def execute(self, history: RankingHistory, first: date, last: date) -> FormulaComparison:
         started = perf_counter()
         names = {stock.stock_id: stock.name for stock in await self._stock_provider.get_all()}
         evidence: list[tuple[RankingBacktest, RankingBacktest]] = []
@@ -52,4 +50,4 @@ class RankingEvidence:
             f"{self._liquid_floor:,.0f}, {perf_counter() - started:.1f}s"
         )
 
-        return self._active_formula, evidence
+        return FormulaComparison(self._active_formula, evidence)

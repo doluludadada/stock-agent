@@ -72,6 +72,6 @@ class WatchlistRepository(IWatchlistRepository):
             await session.execute(delete(WatchlistDTO).where(*matching))
             await session.commit()
 
-        self._logger.debug(f"Removed {len(present)} {watchlist_type.value} watchlist entries.")
+        self._logger.info(f"Removed {len(present)} {watchlist_type.value} watchlist entries of {len(stock_ids)} requested stocks.")
 
         return [stock_id for stock_id in stock_ids if stock_id in present]

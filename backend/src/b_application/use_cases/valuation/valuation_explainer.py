@@ -1,11 +1,11 @@
 from a_domain.model.chat.message import Message
-from a_domain.model.valuation.valuation import ReportSection, ValuationExplanation, ValuationReport
+from a_domain.model.valuation.valuation import ValuationExplanation, ValuationReport
 from a_domain.ports.ai.ai_provider import IAiProvider
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from a_domain.ports.system.market_clock import IMarketClock
 from a_domain.rules.ai.parser import parse_valuation_explanation
 from a_domain.rules.ai.prompt import ValuationPromptBuilder
-from a_domain.rules.valuation.valuation import ExplanationSectionsRule, FactSectionsRule
+from a_domain.rules.valuation.valuation import ExplanationSectionsRule, FactSectionsRule, ReportSection
 from a_domain.types.enums import MessageRole
 from b_application.config.app_config import AppConfig
 
@@ -38,7 +38,7 @@ class ValuationExplainer:
         )
         self._logger = logger
 
-    async def execute(self, report: ValuationReport) -> tuple[ReportSection, ...]:
+    async def execute(self, report: ValuationReport) -> list[ReportSection]:
         """Every section of the report, in order, with the AI's text where the AI gave it."""
         stock_id = report.stock.stock_id
         prompt = self._prompt_builder.apply(report)

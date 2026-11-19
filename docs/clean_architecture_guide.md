@@ -127,6 +127,11 @@ class Account:
   - A type that only one port and its adapters use lives in the port's file (3.4).
   - Information that only a table or an API needs, such as a row's position or a display copy,
     lives in the DTO (5) or the response (6).
+
+  The architecture check's MODEL-HOME reports a model class that only one rule, or only one port, uses: it moves
+  into that rule's file, or into that port's file. A class that only one rule builds moves into that rule's file
+  too, whatever other files read it, unless another model holds it or it has a method that callers call, since a
+  model never imports a rule and a rule's value has only fields and properties (3.5).
 - Before adding a class, find the concept it belongs to and put it in that file. Before adding a
   file, check that no concept file fits.
 - One idea is one class. Two classes with the same fields or the same derived value (such as
@@ -147,8 +152,8 @@ class Account:
 - Use the domain model everywhere you can, including as the API answer. Do not copy its fields
   into a second class (a DTO or "view") without a concrete reason, such as "the client may only
   send part of it" or "this reader must not see part of it".
-- What one screen shows, built from several models, is not a domain model. It belongs in
-  `PipelineStatus` and the presentation layer (4.3).
+- What one screen shows, built from several models, is not a domain model. It is a result type in
+  `b_application/schemas` (4.3).
 
 ### 3.3 Types and constants (`a_domain/types/`)
 
@@ -278,20 +283,18 @@ like reading a list of steps in plain English.
 
 ### 4.1 Use cases (`b_application/use_cases/<area>/`)
 
-- A use case is one step that a person would name: load the account, scan the market, send the orders. It is one
-  substantial function with one responsibility, and it calls every port and rule that the step needs.
-- One call of one port is not a step, and neither is one rule call. Each goes inside the use case whose step needs
-  its answer, for example a save inside the step that made what is saved.
-- Where an operation is nothing but a read, one use case owns the reads of that store, and its arguments say what
-  to read: one use case for the saved backtests, all of them or one, never one class per query.
-- An argument says what a use case reads, never which verb it performs: no flag turns a lookup into a deletion or a
-  save. A command that is a whole operation and one call of one port, such as deleting a saved backtest or ending a
-  session, stays its own use case when no step shares its responsibility.
+- A use case is one step that needs more than one call: it decides something with a rule, or it calls several
+  ports for one step a person would name (load the account, scan the market, send the orders, run a backtest).
+  It is one substantial function with one responsibility.
+- One call of one port is not a use case. The Pipeline makes that call itself (4.2): a read such as the saved
+  backtests, or a command that decides nothing, such as deleting a saved backtest or ending a session.
+- Every order, every run record and every AI call goes through a use case, however short.
+- An argument says what a use case reads, never which verb it performs: no flag turns a lookup into a save.
 - One use case class per file, grouped by area in sub folders.
 - Each use case has exactly one public method, always named `execute`.
 - `__init__` receives ports and settings, and builds its rules from the settings.
-- `execute` returns its result. It may read `PipelineStatus` for its inputs and add to
-  `status.stats` (counters and errors). It writes no other field of the status.
+- `execute` returns its result. It may read `PipelineStatus` for its inputs and add to `status.stats`
+  (counters and errors). It writes no other field of the status.
 - Use cases only orchestrate. No SQL, no data mapping, no business calculations inside them.
 - No private methods. A helper becomes a domain rule or a model method.
 - Use cases do not call each other. The Pipeline puts them in order.
@@ -300,19 +303,26 @@ like reading a list of steps in plain English.
 
 The Pipeline holds every operation the outside world can start.
 
-- There is exactly one class, `Pipeline`. Its fields are the use cases and the logger. It has no
-  ports, no rules, no settings and no classes that group its fields.
-- The presentation layer calls only `Pipeline` methods. Each public method is one operation,
-  including an operation with one step.
+- There is exactly one class, `Pipeline`. Its fields are the use cases, the ports it calls once (4.1) and the
+  logger. It has no rules, no settings and no classes that group its fields.
+- It never holds the execution provider, the trading journal, a broker or an AI provider. Those are reached only
+  through use cases, so every path to an order stays inside the steps the order gate verifies. The architecture
+  check's PIPELINE-FIELDS lists them.
+- The presentation layer calls only `Pipeline` methods. Each public method answers one thing the outside world
+  asks: one page's data, or one command.
+- Two methods never read the same thing for different callers. One method returns the whole answer and each
+  caller shows the part it needs.
+- A method returns one value, or a result type (4.3) when it returns more than one thing. It never returns a tuple.
+  The architecture check's PIPELINE-RETURNS reports a method that does.
 - What many operations share is said once, in the class's docstring: an operation asks an AI, records a run or
   sends an order only where its lines call the step that does, so no operation's docstring says what it does not do.
-- An operation is a flat list of use case calls, in order. The Pipeline stores each result in
-  `PipelineStatus`, so the Pipeline shows where every field of the status comes from:
+- An operation is a flat list of calls, in order: use cases and the ports it holds. The Pipeline stores each
+  result in `PipelineStatus`, so the Pipeline shows where every field of the status comes from:
 
 ```python
 async def checkout(self, cart_id: CartId) -> PipelineStatus:
     status = PipelineStatus()
-    status.cart = await self.load_cart.execute(cart_id)
+    status.cart = await self.cart_repository.get(cart_id)
     status.discounts = self.apply_discounts.execute(status)
     status.order = await self.place_order.execute(status)
     await self.send_receipt.execute(status)
@@ -326,17 +336,18 @@ async def checkout(self, cart_id: CartId) -> PipelineStatus:
   running, then success or failure, and the `finally` block always does the clean-up and the
   notification. On failure, record it and re-raise.
 
-### 4.3 Pipeline status (`b_application/schemas/pipeline_status.py`)
+### 4.3 Results (`b_application/schemas/`)
 
-- There is exactly one `PipelineStatus` class, a mutable `dataclasses.dataclass` that carries
-  everything between steps. It validates nothing, so it uses the standard library dataclass.
-- Only the Pipeline writes its fields. Use cases add to `status.stats`.
-- It may offer small checks such as `status.require_order()`, which raises if an earlier step did
-  not load the order.
-- What a screen shows is a set of fields on `PipelineStatus`, turned into a response class in
-  `d_presentation` (`OrderSummaryResponse.from_status(status)`), not a new domain model.
-- `b_application/schemas` holds only `PipelineStatus`. What an operation hands a screen is fields of
-  the status, never a report class.
+- `pipeline_status.py` holds `PipelineStatus`, the mutable `dataclasses.dataclass` that carries a run's state
+  between its steps. Only the Pipeline writes its fields. Use cases add to `status.stats`. It may offer small
+  checks such as `status.require_order()`.
+- `<area>.py` holds the result types of that area's operations: what a Pipeline method returns when it returns
+  more than one thing, such as `BacktestSetup` or `SignedIn`. A result type is a frozen standard-library dataclass
+  with no logic. Its fields are domain models, their parts, a rule's values and plain values, held as they are.
+- A result type never copies a model's fields (3.2). The architecture check's MODEL-COPY already reads this folder.
+- An operation that returns one model returns it. No result type wraps a single value.
+- The route builds its response class from the result's fields. A response class has no method, which the
+  architecture check's PRESENTATION-DECIDES-NOTHING reports.
 
 ### 4.4 Settings (`b_application/config/`)
 
@@ -545,8 +556,13 @@ From the owner's review of 2026-11-14:
   method inside is the one thing not wanted. The checker's PRIVATE-METHOD now reports every one.
 - The Pipeline may hold only use cases and the presentation may call only the Pipeline, so every one-call read
   became its own class: 19 use cases were one line and 40 of the Pipeline's 76 operations forwarded to one of
-  them. The use cases were the defect, not the Pipeline. A use case is a substantial step, and one use case owns a
-  store's reads.
+  them. The use cases were the defect, not the Pipeline. A use case is a substantial step, and a step that is one
+  call of one port is the Pipeline's own call of that port (4.1).
+
+From the owner's ruling of 2026-11-19:
+
+- `ReportSection` and `SocialSentiment` sat in `a_domain/model`, although only one rule built each and every other
+  file only read them. MODEL-HOME now reports a class that only one rule builds, and the class moves into that rule's file.
 
 ---
 
@@ -560,9 +576,10 @@ Copy this list for a review.
 - [ ] No two classes hold the same idea, and no class wraps a single field.
 - [ ] `a_domain/model` holds only standard models and their parts: no copy of a model, no rule
       result, no port-only type and no table-only information.
-- [ ] Every use case is a substantial step a person would name. None only wraps one rule call or forwards to one
-      port method.
-- [ ] The Pipeline only calls use cases and stores their results.
+- [ ] Every use case is a step that decides something or calls several ports. None only wraps one rule call or
+      forwards to one port method.
+- [ ] The Pipeline calls only use cases and the ports it holds, and returns one value or a result type. It never
+      returns a tuple.
 - [ ] The diff is the smallest one that does the job, and it rebuilds nothing a library does.
 
 **Structure.**
@@ -576,7 +593,9 @@ Copy this list for a review.
       passed the time.
 - [ ] Every use case has one `execute` method that returns its result, writes only
       `status.stats`, has no private methods, and calls no other use case.
-- [ ] One `Pipeline` whose fields are only use cases and the logger. One `PipelineStatus`.
+- [ ] One `Pipeline` whose fields are use cases, the ports it calls once and the logger, never the execution
+      provider, the journal, a broker or an AI provider. One `PipelineStatus`. Result types in
+      `b_application/schemas/<area>.py`.
 - [ ] Infrastructure classes implement a port and mark every method `@override`. A port has no method that only
       its adapters call; an adapter's helper is a module-level function.
 - [ ] An adapter removes ids, IP addresses, account numbers and tokens from a third party's text

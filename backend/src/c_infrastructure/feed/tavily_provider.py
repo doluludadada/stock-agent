@@ -2,8 +2,7 @@ from typing import Any, override
 
 import httpx
 
-from a_domain.model.chat.web_search_result import WebSearchResult
-from a_domain.ports.chat.web_search_provider import IWebSearchProvider
+from a_domain.ports.chat.web_search_provider import IWebSearchProvider, WebSearchResult
 from a_domain.ports.system.logging_provider import ILoggingProvider
 from b_application.config.app_config import AppConfig
 

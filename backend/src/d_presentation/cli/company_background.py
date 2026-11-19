@@ -25,13 +25,14 @@ async def backfill_company_background(arguments: Sequence[str]) -> int:
     config = load_settings(get_project_root())
 
     async with open_runtime(config, create_process_state(config), broker_login=False) as runtime:
-        stocks, businesses, reports = await runtime.signed_out.backfill_company_background(chosen.top)
+        backfill = await runtime.signed_out.backfill_company_background(chosen.top)
 
+    (businesses, businesses_due), (reports, reports_due) = backfill.businesses, backfill.reports
     terminal.console.print(
-        f"Company background of {stocks} ranked stocks: {businesses[0]} main businesses read from MOPS, {businesses[1]} left due; "
-        f"{reports[0]} annual reports read from the document site, {reports[1]} companies left due."
+        f"Company background of {backfill.companies} ranked stocks: {businesses} main businesses read from MOPS, "
+        f"{businesses_due} left due; {reports} annual reports read from the document site, {reports_due} companies left due."
     )
-    return 2 if businesses[1] or reports[1] else 0
+    return 2 if businesses_due or reports_due else 0
 
 
 if __name__ == "__main__":

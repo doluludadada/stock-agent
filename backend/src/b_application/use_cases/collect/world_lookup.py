@@ -1,13 +1,9 @@
-from datetime import time
-
-from a_domain.model.analysis.stock_brief import StockBrief
-from a_domain.model.market.article import Article
-from a_domain.model.market.world_indicator import IndicatorReading
 from a_domain.ports.ai.stock_brief_repository import IStockBriefRepository
 from a_domain.ports.market.article_store import IArticleStore
 from a_domain.ports.market.world_indicator_repository import IWorldIndicatorRepository
 from a_domain.types.enums import MarketScope
 from b_application.config.app_config import AppConfig
+from b_application.schemas.collect import WorldOverview
 
 
 class WorldLookup:
@@ -29,9 +25,9 @@ class WorldLookup:
         self._shown = config.world.shown
         self._due_rule = config.world_brief_due_rule()
 
-    async def execute(self) -> tuple[list[IndicatorReading], list[StockBrief], list[Article], time | None]:
+    async def execute(self) -> WorldOverview:
         readings = await self._indicators.latest()
         briefs = await self._briefs.recent(MarketScope.WORLD.value, self._shown_days)
         news = await self._store.latest(MarketScope.WORLD.value, self._shown)
 
-        return readings, briefs, news, self._due_rule.write_at if self._due_rule.on else None
+        return WorldOverview(readings, briefs, news, self._due_rule.write_at if self._due_rule.on else None)
