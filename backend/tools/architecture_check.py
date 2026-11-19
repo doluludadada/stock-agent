@@ -64,11 +64,14 @@ How the rules measure:
 - MODULE-CONSTANT checks a_domain, b_application/use_cases, b_application/schemas and the Pipeline. Every top-level
   assignment other than `__all__`, `NewType` and `TypeVar` is a finding, an old-style alias included.
 - PIPELINE-FIELDS allows only the class `Pipeline` in b_application/pipeline.py. Each annotated field's type must be
-  imported from b_application.use_cases, or be the logging port.
+  imported from b_application.use_cases, be the logging port, or be a Protocol imported from a_domain.ports, a port
+  the Pipeline calls itself (guide 4.1). PIPELINE_FORBIDDEN_PORTS names the ports the Pipeline never holds, with the
+  reason, and a port descending from one of them is never held either. It finds the ports among the files checked.
 - RULE-CALLERS checks a_domain, b_application and dependencies.py: only a_domain/rules, a_domain/ports (a port may
   name a rule's input or result type), b_application/use_cases and b_application/config (a settings class builds
   each rule from its own values, so a rule is configured in one place) there may import a_domain.rules. The Pipeline
-  may also import it annotation-only, as PRESENTATION-DECIDES-NOTHING defines it. The rest of d_presentation is left
+  and the result types in b_application/schemas may also import it annotation-only, as PRESENTATION-DECIDES-NOTHING
+  defines it: both may name a rule's value, such as the strategy a backtest replays. The rest of d_presentation is left
   to PRESENTATION-DECIDES-NOTHING. In c_infrastructure it reads the rule file an import names, from the disk, and
   sorts each imported name. A value is a class without an `apply` method, a type alias or an assignment, and an
   adapter may import it, since a port may name a rule's input or result type. A decision is a class with `apply` or
@@ -225,6 +228,26 @@ PRESENTATION_SETTINGS = {
 RESPONSE_MODULE = PurePosixPath("d_presentation/web/schemas.py")
 PIPELINE_MODULE = PurePosixPath("b_application/pipeline.py")
 LOGGING_PORT = "a_domain.ports.system.logging_provider.ILoggingProvider"
+PIPELINE_FORBIDDEN_PORTS = frozenset(
+    {
+        "IExecutionProvider",
+        "ISimulatedExecutionProvider",
+        "IBrokerExecutionProvider",
+        "IBrokerQuoteProvider",
+        "ITradingJournal",
+        "IAiProvider",
+        "ISentimentClassifier",
+        "ITextEmbedder",
+        "IArticleIndex",
+    }
+)
+"""
+The ports the Pipeline never holds, although it holds a port it calls once (guide 4.2). The execution providers and
+the broker's quotes reach a broker over its login, and the trading journal records every order and every run. The
+Pipeline reaches them only through use cases, so every path to an order stays inside the steps the order gate
+verifies. The AI provider, the sentiment classifier, the text embedder and the article index, which embeds through
+it, run a model, and every AI call goes through a use case too.
+"""
 PYDANTIC_DATACLASS = "pydantic.dataclasses.dataclass"
 DOMAIN_CLASS_FOLDERS = ("a_domain/model", "a_domain/rules")
 DOMAIN_FORBIDDEN_BASES = frozenset({"BaseModel", "RootModel", "SQLModel"})
@@ -1054,6 +1077,7 @@ def check_module_constant(files: Sequence[SourceFile]) -> Iterator[Finding]:
 
 
 def check_pipeline_fields(files: Sequence[SourceFile]) -> Iterator[Finding]:
+    ports = pipeline_ports(files)
     for source in files:
         if source.module != PIPELINE_MODULE:
             continue
@@ -1063,16 +1087,32 @@ def check_pipeline_fields(files: Sequence[SourceFile]) -> Iterator[Finding]:
                 yield source.path, node.lineno, f"{node.name} sits beside the Pipeline; the Pipeline's fields are its use cases"
                 continue
             for field in node.body:
-                if isinstance(field, ast.AnnAssign) and (problem := pipeline_field_problem(field, bound)):
+                if isinstance(field, ast.AnnAssign) and (problem := pipeline_field_problem(field, bound, ports)):
                     yield source.path, field.lineno, problem
 
 
-def pipeline_field_problem(field: ast.AnnAssign, bound: dict[str, str]) -> str | None:
+def pipeline_ports(files: Sequence[SourceFile]) -> frozenset[str]:
+    """The Protocols of a_domain/ports the Pipeline may hold: all but PIPELINE_FORBIDDEN_PORTS and their descendants."""
+    forbidden = PIPELINE_FORBIDDEN_PORTS | subclass_names(files, lambda base: base in PIPELINE_FORBIDDEN_PORTS)
+    return frozenset(
+        node.name
+        for source in files
+        if source.under("a_domain/ports")
+        for node in top_level_classes(source.tree)
+        if "Protocol" in base_names(node) and node.name not in forbidden
+    )
+
+
+def pipeline_field_problem(field: ast.AnnAssign, bound: dict[str, str], ports: frozenset[str]) -> str | None:
     kind = resolved(field.annotation, bound) or ast.unparse(field.annotation)
-    if kind == LOGGING_PORT or is_within(kind, "b_application.use_cases"):
+    is_port = is_within(kind, "a_domain.ports") and kind.rsplit(".", 1)[-1] in ports
+    if kind == LOGGING_PORT or is_within(kind, "b_application.use_cases") or is_port:
         return None
     field_name, field_type = ast.unparse(field.target), ast.unparse(field.annotation)
-    return f"Pipeline field {field_name} is {field_type}; the Pipeline holds only use cases and the logger"
+    return (
+        f"Pipeline field {field_name} is {field_type}; the Pipeline holds only use cases, the logger and the ports it "
+        "calls once, never one that PIPELINE_FORBIDDEN_PORTS names"
+    )
 
 
 def check_rule_callers(files: Sequence[SourceFile]) -> Iterator[Finding]:
@@ -1081,7 +1121,8 @@ def check_rule_callers(files: Sequence[SourceFile]) -> Iterator[Finding]:
             yield from infrastructure_rule_findings(source)
         if not any(source.under(folder) for folder in RULE_CALLER_SCOPE) or any(source.under(folder) for folder in RULE_USERS):
             continue
-        for line, module in rule_imports(source, annotations_allowed=source.module == PIPELINE_MODULE):
+        annotations_allowed = source.module == PIPELINE_MODULE or source.under("b_application/schemas")
+        for line, module in rule_imports(source, annotations_allowed=annotations_allowed):
             yield source.path, line, f"imports {module}; only use cases and other rules use a rule"
 
 

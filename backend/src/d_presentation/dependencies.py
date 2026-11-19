@@ -66,10 +66,7 @@ from b_application.use_cases.admin.settings_reader import SettingsReader
 from b_application.use_cases.admin.settings_reauthentication import SettingsReauthentication
 from b_application.use_cases.admin.settings_save import SettingsSave
 from b_application.use_cases.backtest.backtest_options import BacktestOptions
-from b_application.use_cases.backtest.backtest_removal import BacktestRemoval
-from b_application.use_cases.backtest.backtest_replay import BacktestReplay
-from b_application.use_cases.backtest.backtest_scores import BacktestScores
-from b_application.use_cases.backtest.saved_backtests import SavedBacktests
+from b_application.use_cases.backtest.backtest_run import BacktestRun
 from b_application.use_cases.chat.chat_reply import ChatReply
 from b_application.use_cases.chat.dispatcher import Dispatcher
 from b_application.use_cases.collect.annual_report_refresh import AnnualReportRefresh
@@ -1129,10 +1126,10 @@ def build_pipeline(
         active_watchlist=ActiveWatchlist(owned.watchlist_repository),
         account_history=AccountHistory(broker, journal, stocks, prices, quote_board, market_clock, config, logger),
         backtest_options=BacktestOptions(prices, config),
-        backtest_scores=BacktestScores(dependencies.bar_matrix_provider, config, logger),
-        backtest_replay=BacktestReplay(stocks, prices, owned.backtest_repository, market_clock, config, logger),
-        saved_backtests=SavedBacktests(owned.backtest_repository),
-        backtest_removal=BacktestRemoval(owned.backtest_repository),
+        backtest_run=BacktestRun(
+            dependencies.bar_matrix_provider, stocks, prices, owned.backtest_repository, market_clock, config, logger
+        ),
+        backtest_repository=owned.backtest_repository,
         ranking_history_loader=RankingHistoryLoader(dependencies.bar_matrix_provider, logger),
         latest_ranking=LatestRanking(stocks, config),
         ranking_standing=StockRankingStanding(config),

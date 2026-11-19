@@ -50,9 +50,9 @@ async def get_backtest_options(pipeline: UserPipeline) -> BacktestOptionsRespons
     What the user may ask a backtest for: the strategy it would replay, and the inputs of the longest one the site's
     daily history allows at the live settings. A backtest reads only sessions the site already holds.
     """
-    strategy, inputs = await pipeline.load_backtest_options()
+    setup = await pipeline.load_backtest_options()
 
-    return BacktestOptionsResponse(strategy_id=strategy.strategy_id, strategy_name=strategy.name, inputs=inputs)
+    return BacktestOptionsResponse(strategy_id=setup.strategy.strategy_id, strategy_name=setup.strategy.name, inputs=setup.inputs)
 
 
 @router.post("", responses=REFUSED | BUSY, dependencies=[BacktestTurn])

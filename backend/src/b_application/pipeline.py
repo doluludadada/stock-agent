@@ -21,6 +21,7 @@ from a_domain.model.valuation.scan import MarketValuation, ScanCriteria, Valuati
 from a_domain.model.valuation.valuation import ReportSection, StockValuation, ValuationReport
 from a_domain.ports.market.daily_close_archive import ArchivedMonth, ArchivedQuarter, ArchivedSession
 from a_domain.ports.system.settings_files import SettingChange, SettingField, SettingsEdit
+from a_domain.ports.trading.backtest_repository import IBacktestRepository
 from a_domain.rules.fundamentals.stock_analysis import StockAnalysis
 from a_domain.rules.market.breadth import MarketBreadth
 from a_domain.rules.market.quote_refresh import QuoteRefresh
@@ -49,6 +50,7 @@ from a_domain.types.enums import (
 )
 from a_domain.types.ids import BacktestId, RunId, SessionToken, UserId
 from a_domain.types.values import EmailAddress, FormulaId, NewPassword, PositiveFiniteFloat, Username
+from b_application.schemas.backtest import BacktestSetup
 from b_application.schemas.pipeline_status import PipelineStatus
 from b_application.use_cases.admin.editor_access import EditorAccess
 from b_application.use_cases.admin.settings_confirmation import SettingsConfirmation
@@ -57,10 +59,7 @@ from b_application.use_cases.admin.settings_reader import SettingsReader
 from b_application.use_cases.admin.settings_reauthentication import SettingsReauthentication
 from b_application.use_cases.admin.settings_save import SettingsSave
 from b_application.use_cases.backtest.backtest_options import BacktestOptions
-from b_application.use_cases.backtest.backtest_removal import BacktestRemoval
-from b_application.use_cases.backtest.backtest_replay import BacktestReplay
-from b_application.use_cases.backtest.backtest_scores import BacktestScores
-from b_application.use_cases.backtest.saved_backtests import SavedBacktests
+from b_application.use_cases.backtest.backtest_run import BacktestRun
 from b_application.use_cases.chat.chat_reply import ChatReply
 from b_application.use_cases.chat.dispatcher import Dispatcher
 from b_application.use_cases.collect.annual_report_refresh import AnnualReportRefresh
@@ -263,10 +262,8 @@ class Pipeline:
     active_watchlist: ActiveWatchlist
     account_history: AccountHistory
     backtest_options: BacktestOptions
-    backtest_scores: BacktestScores
-    backtest_replay: BacktestReplay
-    saved_backtests: SavedBacktests
-    backtest_removal: BacktestRemoval
+    backtest_run: BacktestRun
+    backtest_repository: IBacktestRepository
     ranking_history_loader: RankingHistoryLoader
     latest_ranking: LatestRanking
     ranking_standing: StockRankingStanding
@@ -715,7 +712,7 @@ class Pipeline:
 
         return status
 
-    async def load_backtest_options(self, built_in_strategy_id: str | None = None) -> tuple[TechnicalStrategy, BacktestInputs | None]:
+    async def load_backtest_options(self, built_in_strategy_id: str | None = None) -> BacktestSetup:
         """
         The backtest page: the strategy a backtest would replay, the owner's active one or a built-in one, and the
         inputs of the longest backtest the held daily history allows at the live settings; None while it allows none. It
@@ -723,7 +720,7 @@ class Pipeline:
         """
         strategy = await self.strategy_loader.execute(Workflow.RESEARCH, built_in_strategy_id)
 
-        return strategy, await self.backtest_options.execute(strategy)
+        return BacktestSetup(strategy, await self.backtest_options.execute(strategy))
 
     async def run_backtest(self, inputs: BacktestInputs, built_in_strategy_id: str | None = None) -> Backtest:
         """
@@ -733,9 +730,8 @@ class Pipeline:
         replay.
         """
         strategy = await self.strategy_loader.execute(Workflow.RESEARCH, built_in_strategy_id)
-        bars, scores = await self.backtest_scores.execute(strategy, inputs)
 
-        return await self.backtest_replay.execute(strategy, inputs, bars, scores)
+        return await self.backtest_run.execute(strategy, inputs)
 
     async def load_ranking(self, formula_name: FormulaId | None = None) -> Ranking:
         """
@@ -787,15 +783,15 @@ class Pipeline:
 
     async def load_backtests(self) -> list[Backtest]:
         """The user's saved backtests, newest first."""
-        return await self.saved_backtests.execute()
+        return await self.backtest_repository.saved()
 
     async def load_backtest(self, backtest_id: BacktestId) -> Backtest | None:
         """One of the user's saved backtests; None when the user has none of that id."""
-        return next(iter(await self.saved_backtests.execute(backtest_id)), None)
+        return await self.backtest_repository.get(backtest_id)
 
     async def delete_backtest(self, backtest_id: BacktestId) -> bool:
         """Deletes one of the user's saved backtests, and answers whether the user had one of that id."""
-        return await self.backtest_removal.execute(backtest_id)
+        return await self.backtest_repository.delete(backtest_id)
 
     async def load_market_valuation(self) -> MarketValuation:
         """

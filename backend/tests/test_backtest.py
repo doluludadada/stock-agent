@@ -131,10 +131,10 @@ async def test_the_scores_of_a_backtest_are_its_own_and_the_other_settings_are_t
 async def test_the_options_are_the_longest_backtest_the_history_allows_at_the_live_settings() -> None:
     harness = market()
 
-    strategy, longest = await harness.pipeline.load_backtest_options()
+    setup = await harness.pipeline.load_backtest_options()
 
-    assert strategy.strategy_id == "trend"
-    assert longest == inputs()
+    assert setup.strategy.strategy_id == "trend"
+    assert setup.inputs == inputs()
     assert harness.prices.history_requests == []
 
 
@@ -142,7 +142,7 @@ async def test_a_history_shorter_than_the_strategys_window_offers_no_backtest() 
     harness = build_harness()
     harness.list_stock("2330", bars([100.0 + day for day in range(100)]))
 
-    assert (await harness.pipeline.load_backtest_options())[1] is None
+    assert (await harness.pipeline.load_backtest_options()).inputs is None
 
     with pytest.raises(BacktestPeriodUnavailable, match="No backtest can run yet"):
         await harness.pipeline.run_backtest(inputs())
